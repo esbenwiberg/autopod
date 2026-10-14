@@ -1,0 +1,145 @@
+:root {
+  color-scheme: light dark;
+  font: 13px -apple-system, BlinkMacSystemFont, sans-serif;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: #f2f5f3;
+  color: #273c35;
+}
+.board {
+  padding: 22px;
+  display: grid;
+  gap: 22px;
+}
+.lane-title {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #60756c;
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+}
+.actor {
+  display: flex;
+  gap: 13px;
+  align-items: center;
+  width: 100%;
+  padding: 16px;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #dce5df;
+  border-radius: 12px;
+}
+.actor:hover {
+  border-color: #6d9c88;
+}
+.actor[aria-pressed="true"] {
+  outline: 2px solid #4a9a7c;
+  outline-offset: 1px;
+}
+.actor:focus-visible {
+  outline: 3px solid #4086d0;
+  outline-offset: 2px;
+}
+.character {
+  display: grid;
+  place-items: center;
+  flex: 0 0 38px;
+  height: 42px;
+  border-radius: 15px 15px 9px 9px;
+  background: #d9eadd;
+  color: #397452;
+  font-size: 23px;
+  box-shadow: inset 0 -5px #bad5c2;
+}
+.managed .character {
+  flex-basis: 28px;
+  height: 32px;
+  border-radius: 50% 50% 8px 8px;
+  font-size: 17px;
+  background: #e4dff3;
+  color: #756197;
+  box-shadow: inset 0 -4px #cec4e5;
+}
+.actor-text {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.actor-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meta,
+.activity {
+  font-size: 11px;
+  color: #6b7c73;
+  overflow-wrap: anywhere;
+}
+.status {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.stage-attention .character,
+.stage-review .character {
+  background: #fae5b9;
+  color: #956c24;
+  box-shadow: inset 0 -4px #e8cd94;
+}
+.stage-failed .character {
+  background: #f5d5d4;
+  color: #a14f4c;
+  box-shadow: inset 0 -4px #dfb9b7;
+}
+.stale .character {
+  opacity: 0.55;
+}
+.moving .character {
+  animation: breathe 2.4s ease-in-out infinite;
+}
+@keyframes breathe {
+  50% {
+    transform: translateY(-3px);
+  }
+}
+.reduced-motion .character {
+  animation: none;
+}
+.empty {
+  text-align: center;
+  padding: 80px 20px;
+  color: #6b7c73;
+}
+@media (prefers-reduced-motion: reduce) {
+  .character {
+    animation: none !important;
+  }
+}
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #1b2420;
+    color: #e0e9e4;
+  }
+  .actor {
+    background: #25312b;
+    border-color: #3a4b41;
+  }
+  .lane-title,
+  .meta,
+  .activity,
+  .empty {
+    color: #a7b9ad;
+  }
+}

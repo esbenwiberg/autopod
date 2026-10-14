@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "connected": true,
+  "activityStreamConnected": true,
+  "managedDataFresh": true,
+  "reducedMotion": true,
+  "selectedActorId": "native:pod-a",
+  "actors": [
+    {
+      "id": "native:pod-a",
+      "podId": "pod-a",
+      "source": "native",
+      "detailLevel": "activity",
+      "title": "Add the settings page",
+      "profile": "webapp",
+      "model": "codex",
+      "status": "running",
+      "stage": "working",
+      "statusUpdatedAt": 1791990000000,
+      "interactive": false,
+      "activity": {
+        "kind": "edit",
+        "label": "Editing",
+        "eventId": 42,
+        "observedAt": 1791990000000,
+        "isRecent": true
+      }
+    },
+    {
+      "id": "managed:pod-a",
+      "podId": "pod-a",
+      "source": "managed",
+      "detailLevel": "lifecycle",
+      "title": "Managed research",
+      "profile": "research",
+      "model": "codex",
+      "status": "running",
+      "stage": "working",
+      "statusUpdatedAt": 1791990000000,
+      "interactive": false
+    },
+    {
+      "id": "native:pod-b",
+      "podId": "pod-b",
+      "source": "native",
+      "detailLevel": "activity",
+      "title": "Review the migration",
+      "profile": "backend",
+      "model": "claude",
+      "status": "awaiting_input",
+      "stage": "attention",
+      "statusUpdatedAt": 1791990000000,
+      "interactive": false
+    }
+  ]
+}

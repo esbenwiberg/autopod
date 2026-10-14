@@ -32,6 +32,13 @@ jobs:
       - name: Test Swift package
         run: swift test --package-path packages/desktop --no-parallel
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Test village renderer contract
+        run: node --test packages/desktop/Tests/VillageHost/host.test.mjs
+
       - name: Build macOS app
         run: >-
           xcodebuild

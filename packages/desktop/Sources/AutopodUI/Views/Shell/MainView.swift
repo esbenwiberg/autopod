@@ -15,6 +15,7 @@ public struct MainView: View {
     public var isConnected: Bool
     public var connectionLabel: String
     public var connectionState: String
+    public var activityStreamConnected: Bool
     public var isLoading: Bool
     public var actions: PodActions
     public var profileNames: [String]
@@ -128,6 +129,7 @@ public struct MainView: View {
         isConnected: Bool = true,
         connectionLabel: String = "localhost:3000",
         connectionState: String = "Connected",
+        activityStreamConnected: Bool = false,
         isLoading: Bool = false,
         actions: PodActions = .preview,
         profileNames: [String] = ["my-app", "webapp", "backend"],
@@ -224,6 +226,7 @@ public struct MainView: View {
         self.isConnected = isConnected
         self.connectionLabel = connectionLabel
         self.connectionState = connectionState
+        self.activityStreamConnected = activityStreamConnected
         self.isLoading = isLoading
         self.actions = actions
         self.profileNames = profileNames
@@ -309,6 +312,7 @@ public struct MainView: View {
     }
 
     @State private var sidebarSelection: SidebarItem = .attention
+    @State private var villageSelectedSource: VillageActor.Source = .native
     @State private var showDeleteSeriesConfirmation = false
     @State private var showCreateSheet = false
     @State private var showCreateSeriesSheet = false
@@ -458,7 +462,7 @@ public struct MainView: View {
         case .workspaces:            pods.filter { $0.isWorkspace }
         case .completed:             pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
         case .all:                   pods
-        case .managedPods:           []
+        case .managedPods, .village: []
         case .analytics:             []
         case .history:               []
         case .memory:                []
@@ -497,7 +501,23 @@ public struct MainView: View {
                 onShowSettings: onShowSettings
             )
         } content: {
-            if sidebarSelection == .managedPods {
+            if sidebarSelection == .village {
+                VillageView(
+                    pods: pods, managedPods: managedPods,
+                    isConnected: isConnected, activityStreamConnected: activityStreamConnected,
+                    managedError: managedPodsError,
+                    selectedActorId: villageSelectedSource == .managed
+                        ? selectedManagedPodId.map { "managed:\($0)" }
+                        : selectedSessionId.map { "native:\($0)" },
+                    eventsForPod: eventsForPod, refreshManaged: onRefreshManagedPods,
+                    onSelect: { actor in
+                        villageSelectedSource = actor.source
+                        if actor.source == .managed { selectedManagedPodId = actor.podId }
+                        else { selectedSessionId = actor.podId }
+                    }
+                )
+                .frame(minWidth: 600)
+            } else if sidebarSelection == .managedPods {
                 ManagedPodsView(
                     pods: managedPods,
                     selection: $selectedManagedPodId,
@@ -620,7 +640,7 @@ public struct MainView: View {
                 .frame(minWidth: 500)
             }
         } detail: {
-            if sidebarSelection == .managedPods {
+            if sidebarSelection == .managedPods || (sidebarSelection == .village && villageSelectedSource == .managed) {
                 if let pod = managedPods.first(where: { $0.id == selectedManagedPodId }) {
                     ManagedPodDetailView(pod: pod, api: managedPodAPI)
                 } else {

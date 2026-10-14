@@ -94,6 +94,7 @@ public struct AppRootView: View {
       isConnected: connectionManager.isConnected,
       connectionLabel: connectionManager.connectionLabel,
       connectionState: connectionManager.state.label,
+      activityStreamConnected: eventStream?.connectionState == "Connected",
       isLoading: podStore.isLoading,
       actions: actionHandler?.actions ?? .preview,
       profileNames: profileStore.profileNames,
