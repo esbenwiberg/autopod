@@ -313,6 +313,10 @@ public struct MainView: View {
 
     @State private var sidebarSelection: SidebarItem = .attention
     @State private var villageSelectedSource: VillageActor.Source = .native
+    @State private var villageShowsDetails = false
+    @State private var villageSearch = ""
+    @State private var villageIncludesFinished = false
+    @Environment(\.accessibilityReduceMotion) private var villageReducedMotion
     @State private var showDeleteSeriesConfirmation = false
     @State private var showCreateSheet = false
     @State private var showCreateSeriesSheet = false
@@ -503,18 +507,12 @@ public struct MainView: View {
         } content: {
             if sidebarSelection == .village {
                 VillageView(
-                    pods: pods, managedPods: managedPods,
+                    snapshotForDate: villageSnapshot,
                     isConnected: isConnected, activityStreamConnected: activityStreamConnected,
                     managedError: managedPodsError,
-                    selectedActorId: villageSelectedSource == .managed
-                        ? selectedManagedPodId.map { "managed:\($0)" }
-                        : selectedSessionId.map { "native:\($0)" },
-                    eventsForPod: eventsForPod, refreshManaged: onRefreshManagedPods,
-                    onSelect: { actor in
-                        villageSelectedSource = actor.source
-                        if actor.source == .managed { selectedManagedPodId = actor.podId }
-                        else { selectedSessionId = actor.podId }
-                    }
+                    refreshManaged: onRefreshManagedPods,
+                    onSelect: selectVillageActor,
+                    search: $villageSearch, includeFinished: $villageIncludesFinished
                 )
                 .frame(minWidth: 600)
             } else if sidebarSelection == .managedPods {
@@ -640,141 +638,158 @@ public struct MainView: View {
                 .frame(minWidth: 500)
             }
         } detail: {
-            if sidebarSelection == .managedPods || (sidebarSelection == .village && villageSelectedSource == .managed) {
-                if let pod = managedPods.first(where: { $0.id == selectedManagedPodId }) {
-                    ManagedPodDetailView(pod: pod, api: managedPodAPI)
-                } else {
-                    VStack(spacing: 10) {
-                        Image(systemName: "shippingbox")
-                            .font(.system(size: 36))
-                            .foregroundStyle(.tertiary)
-                        Text("Select a managed pod")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                if sidebarSelection == .village && villageShowsDetails {
+                    HStack {
+                        Button { villageShowsDetails = false } label: {
+                            Label("Village pods", systemImage: "chevron.left")
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding()
+                    Divider()
                 }
-            } else if sidebarSelection == .analytics {
-                AnalyticsRightPaneView(
-                    card: selectedAnalyticsCard,
-                    pods: pods,
-                    loadScores: loadQualityScores,
-                    loadCost: loadCostAnalytics,
-                    loadReliability: loadReliabilityAnalytics,
-                    loadQuality: loadQualityAnalytics,
-                    loadSafety: loadSafetyAnalytics,
-                    loadThroughput: loadThroughputAnalytics,
-                    loadEscalations: loadEscalationsAnalytics,
-                    loadModels: loadModelsAnalytics,
-                    loadMemory: loadMemoryAnalytics,
-                    verifyAuditChain: verifyAuditChain,
-                    onSelectPod: { sessionId in
-                        let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                        selectedAnalyticsCard = result.card
-                        sidebarSelection = result.sidebar
-                        selectedSessionId = result.session
-                    },
-                    onQualitySelectPod: { sessionId in
-                        let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                        selectedAnalyticsCard = result.card
-                        sidebarSelection = result.sidebar
-                        selectedSessionId = result.session
-                        requestedDetailTab = .work
-                    },
-                    onSafetySelectPod: { sessionId in
-                        let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                        selectedAnalyticsCard = result.card
-                        sidebarSelection = result.sidebar
-                        selectedSessionId = result.session
-                        requestedDetailTab = .work
-                    },
-                    onThroughputSelectPod: { sessionId in
-                        let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                        selectedAnalyticsCard = result.card
-                        sidebarSelection = result.sidebar
-                        selectedSessionId = result.session
-                        requestedDetailTab = .work
-                    },
-                    onEscalationsSelectPod: { sessionId in
-                        let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                        selectedAnalyticsCard = result.card
-                        sidebarSelection = result.sidebar
-                        selectedSessionId = result.session
-                        requestedDetailTab = .work
+                if sidebarSelection == .village && !villageShowsDetails {
+                    TimelineView(.periodic(from: .now, by: 5)) { context in
+                        VillagePodListView(snapshot: villageSnapshot(context.date), onSelect: selectVillageActor)
                     }
-                )
-            } else if sidebarSelection == .salesPitch {
-                VStack(spacing: 10) {
-                    Image(systemName: "bolt.fill")
-                        .font(.system(size: 36))
-                        .foregroundStyle(
-                            .linearGradient(
-                                colors: [.blue, .purple],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                } else if sidebarSelection == .managedPods || (sidebarSelection == .village && villageSelectedSource == .managed) {
+                    if let pod = managedPods.first(where: { $0.id == selectedManagedPodId }) {
+                        ManagedPodDetailView(pod: pod, api: managedPodAPI)
+                    } else {
+                        VStack(spacing: 10) {
+                            Image(systemName: "shippingbox")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.tertiary)
+                            Text("Select a managed pod")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } else if sidebarSelection == .analytics {
+                    AnalyticsRightPaneView(
+                        card: selectedAnalyticsCard,
+                        pods: pods,
+                        loadScores: loadQualityScores,
+                        loadCost: loadCostAnalytics,
+                        loadReliability: loadReliabilityAnalytics,
+                        loadQuality: loadQualityAnalytics,
+                        loadSafety: loadSafetyAnalytics,
+                        loadThroughput: loadThroughputAnalytics,
+                        loadEscalations: loadEscalationsAnalytics,
+                        loadModels: loadModelsAnalytics,
+                        loadMemory: loadMemoryAnalytics,
+                        verifyAuditChain: verifyAuditChain,
+                        onSelectPod: { sessionId in
+                            let result = Self.analyticsSelectPodResult(sessionId: sessionId)
+                            selectedAnalyticsCard = result.card
+                            sidebarSelection = result.sidebar
+                            selectedSessionId = result.session
+                        },
+                        onQualitySelectPod: { sessionId in
+                            let result = Self.analyticsSelectPodResult(sessionId: sessionId)
+                            selectedAnalyticsCard = result.card
+                            sidebarSelection = result.sidebar
+                            selectedSessionId = result.session
+                            requestedDetailTab = .work
+                        },
+                        onSafetySelectPod: { sessionId in
+                            let result = Self.analyticsSelectPodResult(sessionId: sessionId)
+                            selectedAnalyticsCard = result.card
+                            sidebarSelection = result.sidebar
+                            selectedSessionId = result.session
+                            requestedDetailTab = .work
+                        },
+                        onThroughputSelectPod: { sessionId in
+                            let result = Self.analyticsSelectPodResult(sessionId: sessionId)
+                            selectedAnalyticsCard = result.card
+                            sidebarSelection = result.sidebar
+                            selectedSessionId = result.session
+                            requestedDetailTab = .work
+                        },
+                        onEscalationsSelectPod: { sessionId in
+                            let result = Self.analyticsSelectPodResult(sessionId: sessionId)
+                            selectedAnalyticsCard = result.card
+                            sidebarSelection = result.sidebar
+                            selectedSessionId = result.session
+                            requestedDetailTab = .work
+                        }
+                    )
+                } else if sidebarSelection == .salesPitch {
+                    VStack(spacing: 10) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 36))
+                            .foregroundStyle(
+                                .linearGradient(
+                                    colors: [.blue, .purple],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
                             )
-                        )
-                    Text("Autopod")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if sidebarSelection == .featureOverview {
-                if let feature = selectedFeature {
-                    FeatureDetailPanelView(feature: feature) { related in
-                        selectedFeature = related
-                    }
-                } else {
-                    VStack(spacing: 10) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 36))
-                            .foregroundStyle(.tertiary)
-                        Text("Select a feature")
+                        Text("Autopod")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if sidebarSelection == .featureOverview {
+                    if let feature = selectedFeature {
+                        FeatureDetailPanelView(feature: feature) { related in
+                            selectedFeature = related
+                        }
+                    } else {
+                        VStack(spacing: 10) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.tertiary)
+                            Text("Select a feature")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } else if let pod = selectedSession {
+                    DetailPanelView(
+                        pod: pod,
+                        events: selectedSessionEvents,
+                        actions: wiredActions,
+                        seriesPods: pod.seriesId.map { sid in pods.filter { $0.seriesId == sid } } ?? [],
+                        qualityScores: qualityScores,
+                        onSelectPod: { selectedSessionId = $0 },
+                        eventsForPod: eventsForPod,
+                        loadEventsForPod: loadEventsForPod,
+                        relatedEventLoadStateForPod: relatedEventLoadStateForPod,
+                        diffResponse: sessionDiffs[pod.id],
+                        terminalState: terminalState,
+                        terminalDataPipe: terminalDataPipe,
+                        onTerminalSendData: onTerminalSendData,
+                        onTerminalResize: onTerminalResize,
+                        onTerminalConnect: { onTerminalConnect?(pod.id) },
+                        onTerminalDisconnect: onTerminalDisconnect,
+                        onRefreshDiff: { onRefreshDiff?(pod.id) },
+                        loadFiles: loadFiles,
+                        loadArtifacts: loadArtifacts,
+                        loadContent: loadContent,
+                        loadQuality: loadQuality,
+                        loadCost: loadCost,
+                        loadPreviewStatus: loadPreviewStatus,
+                        loadValidationHistory: loadValidationHistory,
+                        loadFirewallDenials: loadFirewallDenials,
+                        loadActionAudit: loadActionAudit,
+                        isLoadingLogs: isLoadingLogs,
+                        logsLoadError: logsLoadError,
+                        limitedLogCount: limitedLogCount,
+                        onReloadLogs: onReloadLogs,
+                        onLoadAllLogs: onLoadAllLogs,
+                        onLaunchSeriesFromPod: { seriesFromPod = $0 },
+                        selectedTab: $selectedDetailTab,
+                        requestedTab: $requestedDetailTab
+                    )
+                    .id(pod.id)
+                } else {
+                    emptyDetail
                 }
-            } else if let pod = selectedSession {
-                DetailPanelView(
-                    pod: pod,
-                    events: selectedSessionEvents,
-                    actions: wiredActions,
-                    seriesPods: pod.seriesId.map { sid in pods.filter { $0.seriesId == sid } } ?? [],
-                    qualityScores: qualityScores,
-                    onSelectPod: { selectedSessionId = $0 },
-                    eventsForPod: eventsForPod,
-                    loadEventsForPod: loadEventsForPod,
-                    relatedEventLoadStateForPod: relatedEventLoadStateForPod,
-                    diffResponse: sessionDiffs[pod.id],
-                    terminalState: terminalState,
-                    terminalDataPipe: terminalDataPipe,
-                    onTerminalSendData: onTerminalSendData,
-                    onTerminalResize: onTerminalResize,
-                    onTerminalConnect: { onTerminalConnect?(pod.id) },
-                    onTerminalDisconnect: onTerminalDisconnect,
-                    onRefreshDiff: { onRefreshDiff?(pod.id) },
-                    loadFiles: loadFiles,
-                    loadArtifacts: loadArtifacts,
-                    loadContent: loadContent,
-                    loadQuality: loadQuality,
-                    loadCost: loadCost,
-                    loadPreviewStatus: loadPreviewStatus,
-                    loadValidationHistory: loadValidationHistory,
-                    loadFirewallDenials: loadFirewallDenials,
-                    loadActionAudit: loadActionAudit,
-                    isLoadingLogs: isLoadingLogs,
-                    logsLoadError: logsLoadError,
-                    limitedLogCount: limitedLogCount,
-                    onReloadLogs: onReloadLogs,
-                    onLoadAllLogs: onLoadAllLogs,
-                    onLaunchSeriesFromPod: { seriesFromPod = $0 },
-                    selectedTab: $selectedDetailTab,
-                    requestedTab: $requestedDetailTab
-                )
-                .id(pod.id)
-            } else {
-                emptyDetail
             }
         }
         .navigationSplitViewStyle(.balanced)
@@ -1254,6 +1269,32 @@ public struct MainView: View {
     /// Extracted for unit testing without constructing the full view.
     static func analyticsSelectPodResult(sessionId: String) -> (card: AnalyticsCardKind?, sidebar: SidebarItem, session: String) {
         (card: nil, sidebar: .all, session: sessionId)
+    }
+
+    private func selectVillageActor(_ actor: VillageActor) {
+        villageSelectedSource = actor.source
+        if actor.source == .managed { selectedManagedPodId = actor.podId }
+        else { selectedSessionId = actor.podId }
+        villageShowsDetails = true
+    }
+
+    private func villageSnapshot(_ now: Date) -> VillageSnapshot {
+        let actors = pods.map { VillageScene.native($0, events: eventsForPod?($0.id) ?? [], now: now) }
+            + managedPods.map(VillageScene.managed)
+        let query = villageSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let visible = actors.filter { actor in
+            (villageIncludesFinished || !actor.isFinished) && (query.isEmpty ||
+                [actor.title, actor.profile, actor.model, actor.podId].contains {
+                    $0.localizedCaseInsensitiveContains(query)
+                })
+        }.sorted { $0.id < $1.id }
+        return VillageSnapshot(
+            connected: isConnected, activityStreamConnected: activityStreamConnected,
+            managedDataFresh: isConnected && managedPodsError == nil, reducedMotion: villageReducedMotion,
+            selectedActorId: villageSelectedSource == .managed
+                ? selectedManagedPodId.map { "managed:\($0)" }
+                : selectedSessionId.map { "native:\($0)" }, actors: visible
+        )
     }
 
     // MARK: - Empty detail

@@ -98,3 +98,19 @@ body {
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   }
 }
+
+/* Desktop owns the accessible pod list in its native right pane. Keep the
+   adapter's list available for other hosts without constraining the map. */
+#village[data-pod-list="external"] .pod-list {
+  display: none;
+}
+#village[data-pod-list="external"] .village-layout {
+  display: block;
+}
+#village[data-pod-list="external"] .world {
+  position: static;
+}
+#village[data-pod-list="external"] .village-canvas {
+  width: min(100%, calc(100vh - 76px));
+  margin-inline: auto;
+}

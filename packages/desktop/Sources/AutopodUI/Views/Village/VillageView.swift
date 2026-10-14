@@ -3,19 +3,15 @@ import SwiftUI
 
 /// Owns fleet presentation and filtering. The replaceable renderer never talks to the daemon.
 public struct VillageView: View {
-    let pods: [Pod]
-    let managedPods: [ManagedPodSummary]
+    let snapshotForDate: (Date) -> VillageSnapshot
     let isConnected: Bool
     let activityStreamConnected: Bool
     let managedError: String?
-    let selectedActorId: String?
-    let eventsForPod: ((String) -> [AgentEvent])?
     let refreshManaged: (() async -> Void)?
     let onSelect: (VillageActor) -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reducedMotion
-    @State private var search = ""
-    @State private var includeFinished = false
+    @Binding var search: String
+    @Binding var includeFinished: Bool
     @State private var rendererError: String?
     @State private var rendererGeneration = 0
 
@@ -59,7 +55,7 @@ public struct VillageView: View {
             } else {
                 TimelineView(.periodic(from: .now, by: 5)) { context in
                     VillageWebView(
-                        snapshot: snapshot(now: context.date),
+                        snapshot: snapshotForDate(context.date),
                         onSelect: onSelect,
                         onFailure: { rendererError = $0 }
                     )
@@ -76,20 +72,4 @@ public struct VillageView: View {
         }
     }
 
-    private func snapshot(now: Date) -> VillageSnapshot {
-        let actors = pods.map { VillageScene.native($0, events: eventsForPod?($0.id) ?? [], now: now) }
-            + managedPods.map(VillageScene.managed)
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        let visible = actors.filter { actor in
-            (includeFinished || !actor.isFinished) && (query.isEmpty ||
-                [actor.title, actor.profile, actor.model, actor.podId].contains {
-                    $0.localizedCaseInsensitiveContains(query)
-                })
-        }.sorted { $0.id < $1.id }
-        return VillageSnapshot(
-            connected: isConnected, activityStreamConnected: activityStreamConnected,
-            managedDataFresh: isConnected && managedError == nil, reducedMotion: reducedMotion,
-            selectedActorId: selectedActorId, actors: visible
-        )
-    }
 }

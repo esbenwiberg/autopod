@@ -7,6 +7,11 @@ and work poses. Native pods use recent tool activity; managed pods use smaller
 characters and lifecycle state only. The renderer is a pinned snapshot, so work
 in the source repository cannot change a running desktop build.
 
+The map occupies the center pane and an accessible native pod list occupies the
+right pane. Search and **Include finished** filter both. Selecting a character or
+list row opens the existing details in the right pane; **Village pods** returns
+to the list without clearing the filters.
+
 ```text
 PodStore + EventStream ── native activity ─┐
                                         ├─ VillageSnapshot v1 ─ WKWebView ─ renderer
@@ -23,8 +28,10 @@ ManagedPodStore ─────── lifecycle only ───┘               
   a tool result never changes pod state. Recent activity expires after 30 seconds,
   while stage remains the daemon's last known state. No raw reasoning, commands,
   tool output, credentials or API clients are passed to JavaScript.
-- `VillageView.swift`: fleet filters, connection state, reduced motion, managed
-  inventory refresh every five seconds while visible, and selection callbacks.
+- `MainView.swift`: shared fleet snapshot/filter state, reduced motion and
+  list/detail navigation. `VillagePodListView.swift` renders the native right pane.
+- `VillageView.swift`: filter controls, connection state, managed inventory refresh
+  every five seconds while visible, and selection callbacks.
   Native activity uses the existing event stream/cache; opening pod details uses
   the existing historical log loader. Unloaded historical activity remains absent.
 - `VillageWebView.swift`: bundled document loader, version handshake, coalesced
@@ -70,6 +77,10 @@ assets are ready; the host then announces readiness to Swift. `render` is
 synchronous and receives immutable JSON values. Do not call native bridges
 from the renderer: use `onSelect` only. Unknown IDs are ignored in both JavaScript
 and Swift. The host owns error and ready messages.
+
+The desktop root sets `data-pod-list="external"` to hide the renderer's HTML list
+and give the map the available height. Other hosts can omit this attribute to
+keep the renderer's accessible list. Both paths use the same selection callback.
 
 Snapshot fields:
 
