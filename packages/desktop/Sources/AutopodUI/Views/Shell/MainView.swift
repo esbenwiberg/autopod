@@ -315,7 +315,6 @@ public struct MainView: View {
     @State private var villageSelectedSource: VillageActor.Source = .native
     @State private var villageShowsDetails = false
     @State private var villageSearch = ""
-    @State private var villageIncludesFinished = false
     @Environment(\.accessibilityReduceMotion) private var villageReducedMotion
     @State private var showDeleteSeriesConfirmation = false
     @State private var showCreateSheet = false
@@ -512,7 +511,7 @@ public struct MainView: View {
                     managedError: managedPodsError,
                     refreshManaged: onRefreshManagedPods,
                     onSelect: selectVillageActor,
-                    search: $villageSearch, includeFinished: $villageIncludesFinished
+                    search: $villageSearch
                 )
                 .frame(minWidth: 600)
             } else if sidebarSelection == .managedPods {
@@ -1283,7 +1282,7 @@ public struct MainView: View {
             + managedPods.map(VillageScene.managed)
         let query = villageSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         let visible = actors.filter { actor in
-            (villageIncludesFinished || !actor.isFinished) && (query.isEmpty ||
+            !actor.isFinished && (query.isEmpty ||
                 [actor.title, actor.profile, actor.model, actor.podId].contains {
                     $0.localizedCaseInsensitiveContains(query)
                 })

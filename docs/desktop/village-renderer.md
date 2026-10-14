@@ -8,9 +8,10 @@ characters and lifecycle state only. The renderer is a pinned snapshot, so work
 in the source repository cannot change a running desktop build.
 
 The map occupies the center pane and an accessible native pod list occupies the
-right pane. Search and **Include finished** filter both. Selecting a character or
-list row opens the existing details in the right pane; **Village pods** returns
-to the list without clearing the filters.
+right pane. Both show only unfinished pods: `complete` and `killed` are excluded,
+while failed pods and pods awaiting review remain visible. Search filters both.
+Selecting a character or list row opens the existing details in the right pane;
+**Village pods** returns to the list without clearing the search.
 
 ```text
 PodStore + EventStream ── native activity ─┐

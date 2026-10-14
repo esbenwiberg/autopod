@@ -11,7 +11,6 @@ public struct VillageView: View {
     let onSelect: (VillageActor) -> Void
 
     @Binding var search: String
-    @Binding var includeFinished: Bool
     @State private var rendererError: String?
     @State private var rendererGeneration = 0
 
@@ -20,7 +19,6 @@ public struct VillageView: View {
             HStack(spacing: 12) {
                 Label("Village", systemImage: "house.lodge.fill").font(.headline)
                 Spacer()
-                Toggle("Include finished", isOn: $includeFinished).toggleStyle(.checkbox)
                 Button {
                     Task { await refreshManaged?() }
                 } label: { Image(systemName: "arrow.clockwise") }
