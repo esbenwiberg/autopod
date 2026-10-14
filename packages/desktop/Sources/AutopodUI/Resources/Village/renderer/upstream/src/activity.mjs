@@ -1,5 +1,7 @@
 // Presentation vocabulary shared by browser playback and video export.
 export const ACTIVITIES = {
+  pr:       {station:'harbor', label:'Creating a PR', glyph:'flag', color:'#f3b3c5'},
+  retire:   {station:'inn', label:'Session ended · heading to Inn', glyph:'box', color:'#d6bbdb'},
   read:     {station:'archive', label:'Reading', glyph:'book', color:'#a4d8ef'},
   search:   {station:'archive', label:'Investigating', glyph:'search', color:'#a4d8ef'},
   edit:     {station:'workshop', label:'Editing', glyph:'hammer', color:'#ffd18b'},
@@ -21,7 +23,7 @@ export const ACTIVITIES = {
 
 export function presentation(event,byId=new Map()){
   const data=event.data;
-  let activity=data.activity;
+  let activity=event.kind==='session.end'?'retire':data.activity;
   if(event.kind==='agent.spawn')activity='delegate';
   if(event.kind==='agent.message')activity='handoff';
   if(event.kind==='action.result'||event.kind==='action.poll'){

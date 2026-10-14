@@ -90,7 +90,7 @@ export async function updateRenderer({ source, output = destination, check = fal
           throw new Error('Unsupported sprite path');
         await capture(`public/${relative}`);
       }
-      await capture('public/assets/village-v3.png');
+      await capture('public/assets/village-v4.png');
       await capture('public/assets/fonts/PixelifySans.ttf');
       // Preserve supplied per-character credits, source URLs and license notices verbatim.
       for (const filename of await filesBelow(path.join(source, 'public/assets'))) {

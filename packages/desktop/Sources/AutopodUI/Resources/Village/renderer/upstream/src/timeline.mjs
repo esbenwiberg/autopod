@@ -1,3 +1,5 @@
+import { createdPr } from './milestones.mjs';
+import { assignCast, matchesFocus, shareUserState } from './cast.mjs';
 import { dialogueCue, DIALOGUE_VERSION } from './dialogue.mjs';
 import { buildPresence, presenceAt } from './presence.mjs';
 import { buildInterludes, interludeAt } from './rest.mjs';
@@ -38,14 +40,16 @@ export function compileTimeline(conversation,{seed='village-1'}={}) {
   const sourceEvents=topological(conversation.events),byId=new Map(),actorEnd=new Map(),positions=new Map(),stations=new Map();
   const spawnEvents=new Map(sourceEvents.filter(e=>e.kind==='agent.spawn').map(e=>[e.data.childId,e.id]));
   const birth=new Map(conversation.actors.map(a=>[a.id,a.role==='helper'?Infinity:0]));
+  const seenPrs=new Set();
   let helperIndex=0;
-  const actors=conversation.actors.map(a=>{const slot=a.role==='helper'?helperIndex++:null;return {...a,skin:a.skin??(a.role==='user'?'user':a.role==='lead'?'lead':`helper${1+(slot%3)}`),slot};});
+  const actors=assignCast(conversation.actors,conversation.sessionId??sourceEvents[0]?.source?.sessionId??'session').map(a=>{const slot=a.role==='helper'?helperIndex++:null;return {...a,skin:a.skin??(a.role==='user'?'user':a.role==='lead'?'lead':`helper${1+(slot%3)}`),slot};});
   const actorMeta=new Map(actors.map(a=>[a.id,a]));
   // Only visitors to a destination reserve space there. Stable IDs break ties.
   const visitors=new Map(Object.keys(LOCATIONS).map(k=>[k,new Set()]));
   for(const e of sourceEvents){const p=presentation(e),station=e.kind==='message'?'square':e.kind==='agent.message'?'guild':p.station;visitors.get(station).add(e.actorId);}
   for(const a of actors)visitors.get(a.role==='helper'?'guild':'square').add(a.id);
-  const seats=new Map([...visitors].map(([k,set])=>[k,[...set].sort(order)]));
+  const seats=new Map([...visitors].map(([k,set])=>[k,[...set].sort((a,b)=>
+    (k==='square'?Number(actorMeta.get(b).role==='user')-Number(actorMeta.get(a).role==='user'):0)||order(a,b))]));
   const seat=(station,id)=>stationSeat(station,Math.max(0,seats.get(station).indexOf(id)),Math.max(1,seats.get(station).length));
   for(const a of actors){a.homeStation=a.role==='helper'?'guild':'square';a.startPosition=seat(a.homeStation,a.id);}
   const clocks=new Map(),scenes=[];
@@ -68,9 +72,10 @@ export function compileTimeline(conversation,{seed='village-1'}={}) {
     const length=path.slice(1).reduce((n,b,i)=>n+Math.hypot(b[0]-path[i][0],b[1]-path[i][1]),0);
     const travel=path.length>1?Math.max(.65,length*4.5):0;
     const text=e.data.text??e.data.summary??e.kind,cue=dialogueCue(text,e.kind);
-    const hold=tiny?(e.data.status==='failed'?2.8:e.data.evidence?.length?2.2:e.kind==='action.poll'?.65:1.1):Math.min(9,Math.max(e.data.waiting?6:cue?4.2:2.5,text.length/45));
+    let pullRequest=createdPr(e,byId);if(pullRequest){if(seenPrs.has(pullRequest.url))pullRequest=null;else seenPrs.add(pullRequest.url);}
+    const hold=pullRequest?9:tiny?(e.data.status==='failed'?2.8:e.data.evidence?.length?2.2:e.kind==='action.poll'?.65:1.1):Math.min(9,Math.max(e.data.waiting?6:cue?4.2:2.5,text.length/45));
     const end=start+travel+hold;
-    const scene={id:e.id,event:e,start,end,travel,path,station,activity:p.activity,activityLabel:p.label,text,status:e.data.status??'active',dialogueCue:cue};
+    const scene={id:e.id,event:e,start,end,travel,path,station,activity:p.activity,activityLabel:pullRequest?'PR created':p.label,text,status:e.data.status??'active',dialogueCue:cue,pullRequest};
     scenes.push(scene);byId.set(e.id,scene);actorEnd.set(e.actorId,end);positions.set(e.actorId,path.at(-1));stations.set(e.actorId,station);
     if(e.kind==='agent.spawn')birth.set(e.data.childId,start+travel+.15);
     if(!Number.isFinite(birth.get(e.actorId)))birth.set(e.actorId,start);
@@ -78,10 +83,23 @@ export function compileTimeline(conversation,{seed='village-1'}={}) {
   scenes.sort((a,b)=>a.start-b.start||order(a.id,b.id));
   for(const a of actors)a.appearsAt=Number.isFinite(birth.get(a.id))?birth.get(a.id):0;
   const eventDuration=Math.max(1,...scenes.map(s=>s.end));
-  const timeline={schemaVersion:1,compilerVersion:'village-5',performanceVersion:'acting-1',dialogueVersion:DIALOGUE_VERSION,assetVersion:'village-3',seed,title:conversation.title,provider:conversation.provider??null,sessionId:conversation.sessionId??null,teams:conversation.teams??[],sourceHash:conversation.contentHash,actors,scenes,eventDuration,duration:eventDuration+10,warnings:conversation.warnings,stats:conversation.stats};
+  const timeline={schemaVersion:1,compilerVersion:'village-8',performanceVersion:'acting-1',dialogueVersion:DIALOGUE_VERSION,assetVersion:'village-4',seed,title:conversation.title,provider:conversation.provider??null,sessionId:conversation.sessionId??null,teams:conversation.teams??[],sourceHash:conversation.contentHash,actors,scenes,eventDuration,duration:eventDuration+10,warnings:conversation.warnings,stats:conversation.stats};
   timeline.presence=buildPresence(timeline);
   timeline.interludes=buildInterludes(timeline);
-  timeline.departures=scenes.filter(s=>confirmedPublication(s,byId)).map(s=>({id:s.id,actorId:s.event.actorId,teamId:s.event.teamId??null,start:s.start+.3,end:s.start+7.3}));
+  timeline.celebrations=scenes.filter(s=>s.pullRequest).map(s=>({id:s.id,actorId:s.event.actorId,teamId:s.event.teamId??null,start:s.start+.3,end:s.end,pr:s.pullRequest}));
+  timeline.departures=scenes.filter(s=>confirmedPublication(s,byId)).map(s=>({id:s.id,actorId:s.event.actorId,teamId:s.event.teamId??null,start:s.start+.3,end:s.start+7.3})).concat(timeline.celebrations);
+  timeline.retirements=[];
+  for(const s of scenes.filter(s=>s.event.kind==='session.end')){
+    const owner=actorMeta.get(s.event.actorId),at=sceneAt(timeline,Math.max(0,s.start-.00001));
+    for(const a of at.actors.filter(a=>a.role!=='user'&&(owner.role==='lead'?a.teamId===owner.teamId:a.id===owner.id))){
+      const station=interludeAt(timeline,a.id,s.start)?.station??a.scene?.station??a.homeStation;
+      const path=[a.position,...stationRoute(station,'inn'),LOCATIONS.inn];
+      const travel=Math.max(.65,path.slice(1).reduce((n,p,i)=>n+Math.hypot(p[0]-path[i][0],p[1]-path[i][1]),0)*4.5);
+      const resume=scenes.find(next=>next.event.actorId===a.id&&next.start>s.start&&next.event.kind!=='session.end');
+      timeline.retirements.push({id:s.id,actorId:a.id,teamId:a.teamId??null,start:s.start,end:s.start+travel,travel,path,resumeAt:resume?.start??null});
+      timeline.duration=Math.max(timeline.duration,s.start+travel+3);
+    }
+  }
   return timeline;
 }
 
@@ -99,17 +117,21 @@ function along(path,p) {
 export function sceneAt(timeline,time,{focus=null,team=null}={}) {
   const t=Math.max(0,Math.min(timeline.duration,Number.isFinite(time)?time:0));
   const latest=new Map();let current=null;
-  for(const s of timeline.scenes){if(s.start>t)break;latest.set(s.event.actorId,s);if((!focus||s.event.actorId===focus)&&(!team||s.event.teamId===team))current=s;}
+  for(const s of timeline.scenes){if(s.start>t)break;latest.set(s.event.actorId,s);if((!focus||matchesFocus(timeline,s.event.actorId,focus))&&(!team||s.event.teamId===team))current=s;}
   const actors=timeline.actors.filter(a=>a.appearsAt<=t&&(!team||a.teamId===team)).map(a=>{
     const s=latest.get(a.id);let position=a.startPosition??(a.role==='user'?[0.50,0.86]:a.role==='helper'?[0.25,0.36]:[0.5,0.57]),direction=0,moving=false;
     if(s){const progress=s.travel?(t-s.start)/s.travel:1;({position,direction}=along(s.path,progress));moving=progress<1;}
-    const rest=interludeAt(timeline,a.id,t),presence=presenceAt(timeline,a.id,t);
+    const rest=interludeAt(timeline,a.id,t);let presence=presenceAt(timeline,a.id,t);
+    const retirement=(timeline.retirements??[]).findLast(r=>r.actorId===a.id&&r.start<=t&&(r.resumeAt===null||t<r.resumeAt));
     if(rest){const returning=rest.returnAt!==null&&t>=rest.returnAt,progress=rest.travel?(t-(returning?rest.returnAt:rest.start))/rest.travel:1;
       ({position,direction}=along(returning?[...rest.path].reverse():rest.path,progress));moving=progress<1;}
+    if(retirement){({position,direction}=along(retirement.path,(t-retirement.start)/retirement.travel));moving=t<retirement.end;presence={kind:'closed',label:moving?'Session ended · heading to Inn':'At the Inn · session ended',targetIds:[],sourceId:retirement.id,basis:'Explicit session-end record'};}
+    const celebration=(timeline.celebrations??[]).find(c=>c.start<=t&&c.end>t&&(c.teamId??null)===(a.teamId??null));
     const active=s&&t<s.end;
-    const special=['input','agents'].includes(presence.kind)||(!active&&presence.kind!=='idle')||s?.status==='running';
+    const cheering=!retirement&&a.role!=='user'&&!moving&&(a.id===celebration?.actorId||!active)?celebration:null;
+    const special=['input','agents','closed'].includes(presence.kind)||(!active&&presence.kind!=='idle')||s?.status==='running';
     const label=special?presence.label:active?s.activityLabel??'Working':a.role==='user'?'You':a.missingTranscript?'Transcript not supplied':presence.label;
-    return {...a,position,direction,moving,scene:s??null,presence,resting:!!rest,leisure:rest?.leisure??null,restStartedAt:rest?rest.start+rest.travel:null,activityLabel:moving&&!special?`Going to ${STATION_NAMES[rest?.station??s?.station]??'the village'}`:label,state:special?presence.kind:moving?'traveling':active?(s.status==='failed'?'failed':s.event.kind.includes('message')?'speaking':'working'):'idle',frame:Math.floor(t*8)};
+    return {...a,retired:!!retirement&&t>=retirement.end,celebration:cheering,position,direction,moving,scene:s??null,presence,resting:!!rest&&!retirement&&!cheering,leisure:retirement?null:rest?.leisure??null,restStartedAt:rest?rest.start+rest.travel:null,activityLabel:cheering?`Cheering · PR #${cheering.pr.number}`:moving&&!special?`Going to ${STATION_NAMES[rest?.station??s?.station]??'the village'}`:label,state:special?presence.kind:moving?'traveling':active?(s.status==='failed'?'failed':s.event.kind.includes('message')?'speaking':'working'):'idle',frame:Math.floor(t*8)};
   });
-  return {time:t,actors,current,active:timeline.scenes.filter(s=>s.start<=t&&s.end>t&&(!team||s.event.teamId===team))};
+  return {time:t,actors:shareUserState(timeline,actors,focus),current,active:timeline.scenes.filter(s=>s.start<=t&&s.end>t&&(!team||s.event.teamId===team))};
 }

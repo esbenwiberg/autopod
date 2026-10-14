@@ -77,8 +77,8 @@ export function pointOnRoute(path, distance) {
   return { position: path.at(-1), moving: false, direction: 0 };
 }
 
-export function skinFor(id) {
+export function skinFor(id, roster) {
   let hash = 0;
   for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return ['lead', 'helper1', 'helper2', 'helper3'][hash % 4];
+  return roster[hash % roster.length];
 }

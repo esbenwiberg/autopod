@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { ROSTER } from '../../Sources/AutopodUI/Resources/Village/renderer/upstream/src/cast.mjs';
 import { pointOnRoute, presentation, skinFor } from '../../VillageRenderer/live-scene.mjs';
 
 const snapshot = {
@@ -55,5 +56,13 @@ test('routes follow authored segments and finish at their seat', () => {
   assert.deepEqual(pointOnRoute(route, 1.5), { position: [1, 0.5], moving: true, direction: 0 });
   assert.deepEqual(pointOnRoute(route, 10), { position: [1, 1], moving: false, direction: 0 });
   assert.deepEqual(pointOnRoute([[0.5, 0.5]], 0).position, [0.5, 0.5]);
-  assert.equal(skinFor('native:a'), skinFor('native:a'));
+  assert.equal(skinFor('native:a', ROSTER), skinFor('native:a', ROSTER));
+});
+
+test('live pods use the complete upstream roster with stable identity', () => {
+  const species = new Set(
+    Array.from({ length: 120 }, (_, i) => skinFor(`native:pod-${i}`, ROSTER)),
+  );
+  assert.deepEqual([...species].sort(), [...ROSTER].sort());
+  assert.equal(ROSTER.length, 12);
 });

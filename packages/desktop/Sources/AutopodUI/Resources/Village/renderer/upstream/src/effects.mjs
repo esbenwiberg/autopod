@@ -2,7 +2,7 @@ import { ACTIVITIES } from './activity.mjs';
 import { PRESENCE_STYLES } from './presence.mjs';
 
 export function drawPresence(ctx,actor,time,{selected=false}={}){
-  if(actor.role==='user'||actor.missingTranscript)return;
+  if(actor.role==='user'||actor.missingTranscript||actor.celebration)return;
   const kind=actor.presence.kind,active=actor.scene&&time<actor.scene.end;
   if(!['input','agents','running'].includes(kind)&&active)return;
   const style=PRESENCE_STYLES[kind],x=Math.round(actor.position[0]*768-22),y=Math.round(actor.position[1]*768-48);
@@ -12,7 +12,7 @@ export function drawPresence(ctx,actor,time,{selected=false}={}){
   if(kind==='agents'){line(-5,-6,5,-6);line(-5,6,5,6);line(-4,-5,4,5);line(4,-5,-4,5);}
   else if(kind==='running'||kind==='result'){ctx.beginPath();ctx.arc(0,0,6,0,Math.PI*2);ctx.stroke();line(0,0,0,-4);line(0,0,4,2);}
   else if(kind==='finished'){line(-5,0,-1,4);line(-1,4,6,-4);}
-  else{ctx.font='bold 18px monospace';ctx.fillText(kind==='input'?'!':'z',-5,6);}
+  else{ctx.font='bold 18px monospace';ctx.fillText(kind==='input'?'!':kind==='closed'?'☾':'z',-5,6);}
   ctx.restore();
   if(selected&&['input','agents'].includes(kind)){
     const text=actor.presence.label.length>30?actor.presence.label.slice(0,29)+'…':actor.presence.label;
@@ -30,23 +30,23 @@ export function drawWaitingLinks(ctx,state,focus){
 
 // Fixed waterway coordinates and transcript time make seeking and export agree.
 export function drawHarbor(ctx,timeline,time,{team=null,motion=true}={}){
-  if(timeline.assetVersion!=='village-3')return;
+  if(!['village-3','village-4'].includes(timeline.assetVersion))return;
   const departures=(timeline.departures??[]).filter(d=>(!team||d.teamId===team)&&d.start<=time&&d.end>time);
-  const phases=departures.length?departures.map(d=>motion?(time-d.start)/(d.end-d.start):0):[0];
+  const boats=departures.length?departures.map(d=>({phase:motion?(time-d.start)/(d.end-d.start):0,color:timeline.actors.find(a=>a.id===d.actorId)?.teamColor??'#7cd9c0'})):[{phase:0,color:'#497b77'}];
   ctx.save();ctx.beginPath();ctx.rect(0,0,768,768);ctx.clip();
-  for(const phase of phases){
+  for(const {phase,color} of boats){
     // Leave the dock toward the south; turn east only after clearing the rock.
     const points=[[.25,.925],[.26,.965],[.29,1.02],[.43,1.05]],scaled=phase*3,i=Math.min(2,Math.floor(scaled)),f=scaled-i;
     const x=Math.round((points[i][0]+(points[i+1][0]-points[i][0])*f)*768),y=Math.round((points[i][1]+(points[i+1][1]-points[i][1])*f)*768);
     ctx.save();ctx.translate(x,y);ctx.fillStyle='#a8e7e6aa';if(phase>0){ctx.fillRect(-12,-19,24,2);ctx.fillRect(-9,-25,18,2);}
     ctx.fillStyle='#162b34';ctx.beginPath();ctx.moveTo(-14,-10);ctx.lineTo(14,-10);ctx.lineTo(14,5);ctx.lineTo(7,13);ctx.lineTo(0,17);ctx.lineTo(-7,13);ctx.lineTo(-14,5);ctx.closePath();ctx.fill();ctx.fillStyle='#946237';ctx.fillRect(-11,-7,22,12);ctx.fillRect(-7,5,14,5);ctx.fillStyle='#dba75d';ctx.fillRect(-8,-4,16,4);ctx.fillRect(-8,4,16,3);ctx.fillRect(-23,1,12,3);ctx.fillRect(11,1,12,3);
-    ctx.fillStyle='#f4e2ae';ctx.fillRect(0,-25,2,30);ctx.fillRect(3,-24,12,12);ctx.fillRect(3,-12,7,4);ctx.fillStyle='#497b77';ctx.fillRect(5,-21,7,4);ctx.restore();
+    ctx.fillStyle='#f4e2ae';ctx.fillRect(0,-25,2,30);ctx.fillRect(3,-24,12,12);ctx.fillRect(3,-12,7,4);ctx.fillStyle=color;ctx.fillRect(3,-24,12,12);ctx.restore();
   }
   ctx.restore();
 }
 // Small canvas-native pictograms stay sharp at either browser or export resolution.
 export function drawActivity(ctx,actor,time,{motion=true}={}){
-  const s=actor.scene;if(!s||time>=s.end||actor.moving||s.event.kind==='message'||s.event.kind==='agent.message')return;
+  const s=actor.scene;if(actor.celebration||!s||time>=s.end||actor.moving||s.event.kind==='message'||s.event.kind==='agent.message')return;
   if(['hammer','train','build','review','read','terminal','wave','bench'].includes(actor.performance?.mode)&&s.event.kind!=='action.result')return;
   const p=ACTIVITIES[s.activity]??ACTIVITIES.unknown;
   const elapsed=motion?Math.max(0,time-s.start-s.travel):0,beat=Math.floor(elapsed*4)%4;
@@ -89,11 +89,25 @@ export function drawHandoffs(ctx,state,{motion=true}={}){
   }
 }
 
-// Color plus a number stays recognizable in a crowded village and in grayscale.
-export function drawTeamPennant(ctx,actor){
-  if(!actor.teamNumber||!actor.teamColor)return;
-  const x=Math.round(actor.position[0]*768-30),y=Math.round(actor.position[1]*768);
-  ctx.save();ctx.translate(x,y);ctx.fillStyle='#20313a';ctx.fillRect(-2,-29,3,35);
-  ctx.fillStyle=actor.teamColor;ctx.beginPath();ctx.moveTo(1,-29);ctx.lineTo(21,-29);ctx.lineTo(17,-19);ctx.lineTo(21,-9);ctx.lineTo(1,-9);ctx.closePath();ctx.fill();
-  ctx.fillStyle='#172936';ctx.font='700 15px "Pixelify Sans", monospace';ctx.fillText(String(actor.teamNumber),5,-14);ctx.restore();
+// Pixel bursts use replay time only, so seeks and video frames are identical.
+export function drawCelebration(ctx,timeline,time,{team=null,motion=true}={}){
+  const active=(timeline.celebrations??[]).filter(c=>(!team||c.teamId===team)&&c.start<=time&&time<c.end);
+  if(!motion||!active.length)return;
+  for(const [index,c] of active.entries()){
+    const color=timeline.actors.find(a=>a.id===c.actorId)?.teamColor??'#7cd9c0';
+    for(let burst=0;burst<3;burst++){
+      const elapsed=time-c.start-burst*.32;if(elapsed<0)continue;
+      const phase=(elapsed%2.6)/2.6;if(phase>.8)continue;
+      const x=(.13+burst*.105)*768,y=(.82-(burst%2)*.08)*768,r=8+phase*60;
+      ctx.save();ctx.globalAlpha=1-phase*.45;
+      for(let ray=0;ray<12;ray++){
+        const angle=ray*Math.PI/6+index*.4;ctx.fillStyle=ray%3===0?'#fff1b6':ray%3===1?color:'#ffb3ce';
+        ctx.strokeStyle='#263244';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(Math.round(x+Math.cos(angle)*r*.65),Math.round(y+Math.sin(angle)*r*.65+phase*phase*22));ctx.lineTo(Math.round(x+Math.cos(angle)*r),Math.round(y+Math.sin(angle)*r+phase*phase*22));ctx.stroke();
+        ctx.strokeStyle=ctx.fillStyle;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(Math.round(x+Math.cos(angle)*r*.65),Math.round(y+Math.sin(angle)*r*.65+phase*phase*22));ctx.lineTo(Math.round(x+Math.cos(angle)*r),Math.round(y+Math.sin(angle)*r+phase*phase*22));ctx.stroke();
+        ctx.fillRect(Math.round(x+Math.cos(angle)*r),Math.round(y+Math.sin(angle)*r+phase*phase*22),4,4);
+        if(phase>.12){ctx.globalAlpha=(1-phase/.8)*.4;ctx.fillRect(Math.round(x+Math.cos(angle)*r*.7),Math.round(y+Math.sin(angle)*r*.7+phase*phase*22),3,3);ctx.globalAlpha=1-phase*.45;}
+      }
+      ctx.restore();
+    }
+  }
 }

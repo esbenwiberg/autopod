@@ -1,6 +1,7 @@
 // Recorded reasons for inactivity. Silence is never treated as an input request
 // or a finished task. These tracks contain derived UI state, not new log events.
 export const PRESENCE_STYLES={
+  closed:{label:'Session ended',color:'#d6bbdb',symbol:'☾',rank:6},
   input:{label:'Needs your input',color:'#ffd478',symbol:'!',rank:0},
   agents:{label:'Waiting for agents',color:'#93d5f5',symbol:'…',rank:1},
   running:{label:'Tool still running',color:'#99d8ce',symbol:'◷',rank:2},

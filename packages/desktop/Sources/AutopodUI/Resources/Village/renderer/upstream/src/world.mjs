@@ -1,10 +1,11 @@
 // Authored walkable waypoints. The renderer never infers paths from image pixels.
-export const LOCATIONS={guild:[.20,.325],archive:[.83,.495],workshop:[.18,.79],checks:[.83,.79],review:[.75,.225],depot:[.49,.94],harbor:[.24,.875],noticeboard:[.065,.305],courtyard:[.29,.315],camp:[.55,.60],fishing:[.435,.69],square:[.51,.55]};
-export const STATION_NAMES={guild:'Guild',archive:'Archive',workshop:'Workshop',checks:'Trial Arena',review:'Town Hall',depot:'Depot',harbor:'Harbor',noticeboard:'Guild noticeboard',courtyard:'Guild benches',camp:'Campfire',fishing:'Creek bank',square:'Town square'};
+export const LOCATIONS={inn:[.86,.935],guild:[.20,.325],archive:[.83,.495],workshop:[.18,.79],checks:[.83,.79],review:[.75,.225],depot:[.49,.94],harbor:[.24,.875],noticeboard:[.065,.305],courtyard:[.29,.315],camp:[.55,.60],fishing:[.435,.69],square:[.51,.55]};
+export const STATION_NAMES={inn:'Inn',guild:'Guild',archive:'Archive',workshop:'Workshop',checks:'Trial Arena',review:'Town Hall',depot:'Depot',harbor:'Harbor',noticeboard:'Guild noticeboard',courtyard:'Guild benches',camp:'Campfire',fishing:'Creek bank',square:'Town square'};
 export const NODES={...LOCATIONS};
 const EDGES=[];
 function lane(from,to,points){let previous=from;points.forEach((p,i)=>{const key=`${from}-${to}-${i}`;NODES[key]=p;EDGES.push([previous,key]);previous=key;});EDGES.push([previous,to]);}
 // Follow the crooked lanes, including the only bridge into the workshop island.
+lane('depot','inn',[[.56,.95],[.64,.92],[.73,.91],[.79,.93]]);
 lane('harbor','depot',[[.29,.875],[.33,.91],[.40,.94]]);
 lane('noticeboard','guild',[[.13,.34],[.17,.34]]);
 lane('courtyard','guild',[[.26,.35],[.23,.34]]);
@@ -30,8 +31,17 @@ export function stationRoute(from,to){
   const path=[to];while(path[0]!==from){const p=prev.get(path[0]);if(!p)throw new Error(`No village path from ${from} to ${to}`);path.unshift(p);}
   return path.map(k=>[...NODES[k]]);
 }
+// Authored gathering spots follow the clearings, benches and crooked lanes.
+// Waiting zones and the town-square visitors deliberately use separate areas.
+export const GATHERING_SPOTS={
+  noticeboard:[[.055,.305],[.10,.325],[.05,.35],[.095,.375],[.145,.35],[.15,.40],[.20,.385],[.245,.405],[.20,.43],[.25,.45],[.29,.41],[.30,.46]],
+  courtyard:[[.27,.29],[.31,.30],[.27,.34],[.32,.355],[.36,.32],[.36,.37],[.40,.34],[.40,.39]],
+  camp:[[.48,.495],[.61,.53],[.66,.465],[.50,.655],[.57,.575],[.63,.59],[.54,.63],[.68,.57],[.62,.675],[.72,.535],[.59,.71],[.68,.65]],
+  square:[[.455,.45],[.49,.425],[.44,.405],[.49,.38],[.44,.355],[.48,.325],[.44,.30],[.46,.26],[.44,.22],[.405,.19],[.39,.235],[.375,.275],[.50,.465],[.535,.435],[.57,.41],[.61,.385],[.65,.35],[.70,.32],[.74,.30],[.79,.275],[.83,.24],[.86,.21],[.85,.165],[.81,.135]],
+};
 export function stationSeat(station,index=0,count=1){
-  if(station==='camp'&&count<=8)return [...[[.48,.59],[.59,.60],[.65,.55],[.47,.51],[.65,.49],[.55,.64],[.69,.61],[.43,.61]][index]];
+  const spots=GATHERING_SPOTS[station];
+  if(spots&&index<spots.length)return [...spots[index]];
   const p=LOCATIONS[station],columns=Math.min(count,count>12?6:4),col=index%columns,row=Math.floor(index/columns),rows=Math.ceil(count/columns);
   const gap=Math.min(.042,.48/Math.max(1,rows-1)),top=Math.min(p[1],.97-(rows-1)*gap);
   const half=(columns-1)*.023,center=Math.max(.035+half,Math.min(.965-half,p[0]));

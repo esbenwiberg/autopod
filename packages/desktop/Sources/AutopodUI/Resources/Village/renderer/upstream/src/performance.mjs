@@ -6,6 +6,7 @@ export function performanceAt(actor,time,{motion=true}={}){
   if(actor.role==='user'||actor.missingTranscript)return base;
   const s=actor.scene,active=s&&time<s.end,elapsed=Math.max(0,time-(s?.start??0)-(s?.travel??0));
   const pose=(mode,animation,period=2,direction='down')=>({...base,mode,animation,direction,phase:motion?(elapsed%period)/period:0,clock:motion?elapsed:0});
+  if(actor.celebration){const cheerTime=Math.max(0,time-actor.celebration.start);return {...pose('celebrate','pose'),clock:motion?cheerTime:0,hop:motion?Math.max(0,Math.sin(cheerTime*5))*7:0};}
   if(active&&s.event.kind==='action.result'&&s.status==='failed')return {...pose('stumble',!motion||elapsed<.85?'hurt':'idle'),clock:motion?Math.min(elapsed,.18):.1,nudge:motion&&elapsed<.85?Math.sin(elapsed*22)*3*(1-elapsed/.85):0};
   if(active&&s.event.kind==='action.result'&&s.status==='completed'&&['check','build'].includes(s.activity))return {...pose('victory',!motion||elapsed<1.5?'pose':'idle'),hop:motion&&elapsed<1.5?Math.max(0,Math.sin(elapsed*Math.PI/ .75))*5:0};
   if(actor.presence?.kind==='input'&&(!active||s.event.data.waiting?.kind==='input')){
@@ -84,6 +85,6 @@ export function drawPerformance(ctx,actor,p,time,{layer='front',motion=true}={})
     ctx.fillStyle='#243741';ctx.fillRect(-18,-34,36,26);ctx.fillStyle='#76aa98';ctx.fillRect(-15,-31,30,19);ctx.fillStyle='#25464a';ctx.fillRect(-11,-26,3,3);ctx.fillRect(-8,-23,3,3);if(phase<.5)ctx.fillRect(0,-18,10,2);ctx.fillStyle='#a3aba0';ctx.fillRect(-19,-7,38,4);
   }
   if(p.mode==='wave'&&motion&&phase<.22){line(ctx,-22,-35,-28,-39,'#ffe0a0');line(ctx,22,-35,28,-39,'#ffe0a0');}
-  if(p.mode==='victory'&&motion&&p.hop>0){ctx.fillStyle='#dfedb1';ctx.fillRect(-20,-32-p.hop,3,3);ctx.fillRect(19,-41-p.hop,3,3);}
+  if(['victory','celebrate'].includes(p.mode)&&motion&&p.hop>0){ctx.fillStyle='#dfedb1';ctx.fillRect(-20,-32-p.hop,3,3);ctx.fillRect(19,-41-p.hop,3,3);}
   ctx.restore();
 }

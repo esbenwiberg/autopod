@@ -1,3 +1,4 @@
+import { ROSTER } from '@jsonl-village/cast.mjs';
 import { drawPerformance, performanceAt } from '@jsonl-village/performance.mjs';
 import { drawCharacter } from '@jsonl-village/render.mjs';
 import meta from '@jsonl-village/sprites.json';
@@ -33,7 +34,7 @@ window.AutoPodVillageRenderer = Object.freeze({
     ];
     const [images, map] = await Promise.all([
       Promise.all(paths.map(async (path) => [path, await loadImage(assetURL(path))])),
-      loadImage(assetURL('assets/village-v3.png')),
+      loadImage(assetURL('assets/village-v4.png')),
     ]);
     const font = new FontFace(
       'Pixelify Sans',
@@ -111,7 +112,7 @@ window.AutoPodVillageRenderer = Object.freeze({
         const time = view.motion ? seconds : 0;
         const upstreamActor = {
           id: actor.id,
-          skin: skinFor(actor.id),
+          skin: skinFor(actor.id, ROSTER),
           role: 'helper',
           position,
           moving: state.moving && view.motion,

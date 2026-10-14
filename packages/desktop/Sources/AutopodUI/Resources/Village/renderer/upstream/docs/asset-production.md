@@ -84,7 +84,7 @@ Even if generated successfully, this initial sheet would contain only one idle p
 The first playable build now has five real actor assets, downloaded from primary source repositories without modifying image bytes. The failed generated `characters.png` sheet is not needed by this pack.
 
 - Runtime metadata: `public/assets/sprites.json`.
-- Role mapping: user → Red, lead → Pikachu, helper 1 → Bulbasaur, helper 2 → Squirtle, helper 3 → Gengar.
+- Original role mapping, retained for legacy replay compatibility: user → Red, lead → Pikachu, helper 1 → Bulbasaur, helper 2 → Squirtle, helper 3 → Gengar.
 - Pokémon source: [PMDCollab/SpriteCollab](https://github.com/PMDCollab/SpriteCollab), observed commit `26710cbafd1df058d576e55fca80a2a73d64d356`.
 - Red source: [pret/pokefirered](https://github.com/pret/pokefirered), observed commit `037335f4c725d7c9aecdac87066f2002b4bd7e14`.
 - Download date: 14 October 2026.
@@ -169,4 +169,26 @@ For a native Canvas implementation, register the same TTF path with family name 
 
 ## Village v3: waiting and rest
 
-The current background is `public/assets/village-v3.png`, an edit made with the built-in Image Generation tool. It adds Guild waiting props, a campfire, Town Hall, Trial Arena, and Harbor. See [v3 prompt and provenance](village-v3-art.md). Older compiled replays retain their original map assets. The boat, status badges, and waiting links are canvas-native drawing code in `src/effects.mjs`.
+The v3 background is `public/assets/village-v3.png`, an edit made with the built-in Image Generation tool. It adds Guild waiting props, a campfire, Town Hall, Trial Arena, and Harbor. See [v3 prompt and provenance](village-v3-art.md). Older compiled replays retain their original map assets. The boat, status badges, and waiting links are canvas-native drawing code in `src/effects.mjs`.
+
+
+## Twelve-species cast
+
+The roster now adds Charmander (0004), Vulpix (0037), Jigglypuff (0039), Meowth (0052), Psyduck (0054), Growlithe (0058), Eevee (0133), and Snorlax (0143). All files come from the same pinned SpriteCollab revision `26710cbafd1df058d576e55fca80a2a73d64d356`; the manifest includes an exact source URL for each species. Original PNG bytes, XML timing, and shadow anchors are retained. No sprite images were generated or edited.
+
+Each new folder preserves its upstream credits. Downloaded animations are credited to CHUNSOFT except Jigglypuff's Pose, Nod, and Sit, credited to **JFain** under CC BY-NC 4.0. The bundled contributor mapping resolves `<@!702275233125630042>` to JFain. Existing source-condition notes above still apply.
+
+`node scripts/index-action-sprites.mjs` now indexes Walk, Idle, and available Sit, Attack, Swing, Pose, Hurt, and Nod for every Pokémon. There are 88 Pokémon animation entries across twelve species, plus Red's original two entries. Psyduck lacks Sit and Nod; Snorlax and Growlithe lack Sit, Nod, and Pose in this revision. The renderer uses their idle frames for those missing poses while keeping canvas-drawn activity props and status indicators. It does not invent replacement source animations.
+
+New timelines store species IDs directly. Legacy role aliases continue to render. Cast assignment uses stable actor/session keys, balances the available roster, and preserves assigned species when composing sessions. There is no random choice during playback. Reopening an unchanged replay reproduces its cast; adding actors to an uncompiled source can rebalance assignments.
+
+In a multi-session view, a single Red trainer is a display representative of the human. Original source user actors and events are retained separately. Selecting an original human event keeps its exact session attribution, while selecting the shared trainer can show human messages across the current session scope.
+
+
+## Village v4: the Inn
+
+`public/assets/village-v4.png` is an Image Generation edit of v3, saved unchanged from the generated PNG. It adds a small burgundy-roof Inn beside the southern road, below the Arena. Earlier landmarks and the crooked paths remain in place. The authored entry is at normalized coordinates (0.86, 0.935). Older timeline asset versions keep their original backgrounds. Fireworks and the colored boat flag are deterministic canvas drawing code, not additional raster assets.
+
+Generation prompt:
+
+> Edit this exact village background for a deterministic game. Preserve the square overhead pixel-art style, every existing building and its sign, all existing paths, camp, bridge, water and coastline in their exact positions. Make ONE small local addition: a cozy small INN in the lower-right corner, on the land to the right of the winding southern road and BELOW the Trial Arena. Replace only a patch of lower-right forest/rocks with the new inn. Place its front doorstep approximately at normalized x=.86 y=.91 (86% across, 91% down); keep the entire building between x=.79-.98 and y=.79-.93, away from the Arena above. Inn has a small burgundy crooked tiled roof, warm lit windows, a bed emblem, readable sign 'INN', and a short sandy footpath connecting its door to the existing southern road around x=.75 y=.92. It should be smaller than the Depot, cozy and clearly distinct. No characters, no UI, no fireworks, no extra boats. Keep every other area unchanged; maintain precise landmark locations and no rescaling/cropping. Production game background, opaque square PNG.

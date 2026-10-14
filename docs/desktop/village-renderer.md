@@ -130,7 +130,10 @@ server code, credentials, or source node_modules. Local uncommitted changes are
 supported: `upstream/provenance.json` records the Git revision, dirty flag and
 SHA-256 for every captured file. Files are checked again before accepting the
 snapshot; if the source changes during capture, rerun the command. The initial
-snapshot was captured from `92b9e0c` with local work in progress.
+snapshot was captured from `92b9e0c` with local work in progress. The current
+snapshot is the clean `e215d7a` revision, including the v4 Inn map, twelve-species
+roster and updated gathering spots. The live adapter chooses species from the
+upstream roster by pod ID, so filtering does not reassign characters.
 
 A staged build replaces the generated directory only after imports, metadata and
 assets are available. Failed updates preserve the previous working bundle. A
@@ -167,8 +170,10 @@ credits, source URLs, PMDCollab CC BY-NC conditions and font OFL notices are pre
 in `renderer/upstream/public/assets/`, including upstream's local-prototype note
 for its Red sprite. No new artwork reuse rights are asserted by this integration.
 
-Replay/rewind, helper-agent discovery, managed tool-log collection and the upstream
-replay-follow camera are not implemented in this slice. The live village is an
+Replay/rewind, helper-agent discovery, managed tool-log collection, the upstream
+replay-follow camera and recorded-PR celebrations are not implemented in this
+slice. Explicit session-end retirement belongs to the replay compiler; AutoPod
+instead removes completed/killed pods using daemon lifecycle state. The live village is an
 overview; selecting a pod highlights it and opens its existing details.
 
 ## Verification

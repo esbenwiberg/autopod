@@ -34,12 +34,12 @@ test('renderer rebuilds offline and a failed refresh preserves the last working 
       '-qm',
       'fixture',
     ]);
-    await fs.rm(path.join(source, 'public/assets/village-v3.png'));
+    await fs.rm(path.join(source, 'public/assets/village-v4.png'));
     await assert.rejects(updateRenderer({ source, output }), /ENOENT/);
     assert.equal(await fs.readFile(path.join(output, 'build.json'), 'utf8'), before);
     await fs.copyFile(
-      path.join(pinned, 'upstream/public/assets/village-v3.png'),
-      path.join(source, 'public/assets/village-v3.png'),
+      path.join(pinned, 'upstream/public/assets/village-v4.png'),
+      path.join(source, 'public/assets/village-v4.png'),
     );
     const result = await updateRenderer({ source, output });
     assert.equal(result.dirty, false);

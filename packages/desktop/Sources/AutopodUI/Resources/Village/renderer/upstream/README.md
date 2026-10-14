@@ -40,7 +40,7 @@ Choose **Follow agent** for a close camera that tracks the selected character an
 
 Choose **Highlights** to watch a deterministic shorter edit: helper arrivals, failures, edits, reviews, reports, explicit input requests, reactions, and completed checks. Short lead-ins keep some walking; the camera automatically follows each featured actor. The scrubber and arrow buttons use highlight time, while the caption shows the original replay time. **Full replay** returns to that source position. Selecting an actor, journal event, or story moment also returns to full replay. Team filtering rebuilds the edit for that session. Labels describe recorded events; an edit is not proof of a fix. Simultaneous events share a cut and are always available in full replay.
 
-In a shared village, numbered colored pennants identify each character's session. Matching banners above the map show session titles and toggle a team filter; numbers keep the teams distinguishable without relying on color alone. Try **2 teams in the village** in the adventure picker. Local exports preserve highlights and team selection. The private preview also includes a pre-rendered [highlight demo](https://chat-village-ewi.esbenw309505.chatgpt.site/highlights.html); its video links remain fixed demos, not new renders of arbitrary selections.
+In a shared village, small team-colored scarves identify each character's session. Selecting a character adds a team-colored ring and faint rings beneath teammates. The dialogue panel names the session; numbered chips above the map and badges in the party list keep teams distinguishable without relying on color alone. The chips toggle the team filter. Try **2 teams in the village** in the adventure picker. Local exports preserve highlights and team selection. The private preview also includes a pre-rendered [highlight demo](https://chat-village-ewi.esbenw309505.chatgpt.site/highlights.html); its video links remain fixed demos, not new renders of arbitrary selections.
 
 ## Import and export from the terminal
 
@@ -69,18 +69,28 @@ The CLI imports one Codex, Claude, or plain conversation at a time; the browser 
 | Reviewing changes and planning | Town Hall |
 | Supplies and external requests | Depot |
 | Publishing commands | Harbor |
+| Confirmed PR creation | Harbor · fireworks, cheering, and boat send-off |
+| Explicit session-end record | Inn |
 | Explicit input request | Guild noticeboard · amber ! |
 | Explicit helper wait | Guild benches · blue hourglass |
 | Recorded running tool | Its workstation · clock |
 | Finished turn or unknown idle gap | Campfire · green tick or muted z |
 
-Waiting reasons come from explicit tool calls and results. Input requests rise to the top of the party, with a focus button. Exact helper IDs produce named waits and a visible link when focused. An unmatched call shows “Awaiting tool result”; a running result shows “Tool still running.” Only recorded final/end-turn markers produce “Turn finished,” which does not assert task success. Unknown gaps use a muted idle badge. Long gaps allow a campfire visit and return; short pauses stay in place. The Harbor boat departs for successful, attributable publication commands, excluding failures, dry runs, and ambiguous batches.
+Waiting reasons come from explicit tool calls and results. Input requests rise to the top of the party. A sticky attention button counts all requesting sessions and cycles through their agents, even while one team is selected. The horizontal session strip shows working, waiting, input, idle, and finished-turn counts at the current replay time. Exact helper IDs produce named waits and a visible link when focused. An unmatched call shows “Awaiting tool result”; a running result shows “Tool still running.” Only recorded final/end-turn markers produce “Turn finished,” which does not assert task success. Unknown gaps use a muted idle badge. Long gaps allow a campfire visit and return; short pauses stay in place. The Harbor boat departs for successful, attributable publication commands, excluding failures, dry runs, and ambiguous batches.
+
+Newly compiled replays assign agents across twelve Pokémon species: Pikachu, Bulbasaur, Squirtle, Gengar, Charmander, Eevee, Psyduck, Meowth, Jigglypuff, Snorlax, Growlithe, and Vulpix. Assignments are deterministic for the same input, and already assigned species survive session composition. The party shows each species name. Multi-session views share one trainer representing you, while original human actor IDs, messages, and session attribution remain intact.
 
 Explicit subagents get stable characters and their own timelines. They can work alongside the lead. Missing helper transcripts produce a status character without invented dialogue. Tool results preserve recorded errors and uncertainty; a successful shell exit alone is not labeled “tests passed.”
 
 The importer preserves source order, call/result relationships, explicit dependencies, original message text, and source file/line references. It statically inspects nested tool orchestration without executing imported code. System/developer prompts, internal analysis, host context, and inherited helper history are excluded from dialogue. This is filtering, **not a general-purpose secret scrubber**: visible messages and tool output remain in the replay.
 
 The scene compiler chooses paths and condensed presentation times once. Rendering is a function of that timeline and playback time, so seeking reproduces scene state. Browser playback and MP4 export use the same renderer and assets. Timings are choreography, not measured work durations. Pixel reproducibility is tested in the pinned local renderer; cross-platform font/encoder output is not guaranteed byte-identical.
+
+Multi-session highlights require selecting a team; returning to All teams restores full replay. Selecting a session also follows its lead. Waiting and resting characters use authored spots around the Guild, camp, and paths, with places reserved by actual destination visitors.
+
+## Stress-test sandbox
+
+[Try the fictional ten-session test](https://chat-village-ewi.esbenw309505.chatgpt.site/stress.html): 29 Pokémon agents and one shared trainer in the current village. Normal imports retain the four-session / 24-character limits. The same fixture now exercises the compact session strip, global attention control, and improved gathering spots. The separate page includes browser timing diagnostics. See [observations and limitations](docs/stress-test.md); the phone check uses a desktop viewport override, not physical phone hardware.
 
 ## Current limits
 
@@ -105,3 +115,14 @@ The shared fixture is fictional and contains no private conversation data. A rea
 See [replay design](docs/replay-design.md), [art direction](docs/art-direction.md), and [asset production](docs/asset-production.md).
 
 Local discovery has been checked against 127 Codex logs grouped into 51 sessions. The hosted preview does not automatically publish newly discovered histories.
+
+
+## PR send-offs and the Inn
+
+Try `/?session=pr-demo`, then **PR send-off** or **Inn**. This is a fictional fixture, including its example PR URL. A failed attempt precedes the successful send-off.
+
+PR celebrations are derived entirely from imported records. A matching `gh pr create` call plus a completed result containing one GitHub PR URL triggers a nine-second celebration. Structured `create_pull_request` results require a matching PR URL and number. Codex shell polling and Claude Bash results are supported. The Harbor boat flies the team color, available teammates cheer in place, and pixel fireworks play above the dock. A title/number card retains the recorded link. Repeated identities celebrate once per replay, including across composed sessions. Failed results, mere mentions, merge commands, help/dry runs, and ambiguous command batches do not celebrate. Unsupported command wrappers can remain generic actions. No GitHub connection or merge lookup is used.
+
+All effects depend only on replay time. Backward seeking and MP4 rendering reproduce them. **Acting off** suppresses animated fireworks and cheering motion while retaining the PR caption/card.
+
+The Inn accepts explicit lifecycle records: Codex-shaped `{"type":"event_msg","payload":{"type":"session_end"}}`, or Claude-shaped `{"type":"system","subtype":"session_end","sessionId":"…"}` in its session log. These are supported input markers, not a claim that every provider currently writes them. A lead closure sends its team inside; a helper closure affects that helper. Later recorded activity makes that actor available again. Source file/line references remain inspectable. EOF, silence, Codex final messages, and Claude `end_turn` never imply session closure; those characters retain their recorded waiting/finished-turn state and ordinary leisure.
