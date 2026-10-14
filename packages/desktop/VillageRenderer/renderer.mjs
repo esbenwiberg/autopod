@@ -140,11 +140,17 @@ window.AutoPodVillageRenderer = Object.freeze({
             : performanceAt(upstreamActor, time, { motion: view.motion });
         const x = position[0] * 768;
         const y = position[1] * 768;
+        const actorScale = view.scale / 1.9;
         ctx.save();
+        // Scale the whole actor around its feet so props, badges and poses stay
+        // aligned with the sprite without changing upstream drawing code.
+        ctx.translate(x, y);
+        ctx.scale(actorScale, actorScale);
+        ctx.translate(-x, -y);
         if (!view.fresh) ctx.globalAlpha = 0.6;
         ctx.fillStyle = '#14232066';
         ctx.beginPath();
-        ctx.ellipse(x, y + 3, (14 * view.scale) / 1.9, 6, 0, 0, Math.PI * 2);
+        ctx.ellipse(x, y + 3, 14, 6, 0, 0, Math.PI * 2);
         ctx.fill();
         if (actor.id === snapshot.selectedActorId) {
           ctx.strokeStyle = '#fff0ac';
@@ -161,7 +167,7 @@ window.AutoPodVillageRenderer = Object.freeze({
           x + acting.nudge,
           y - acting.hop,
           time,
-          view.scale,
+          1.9,
           acting.direction,
         );
         drawPerformance(ctx, upstreamActor, acting, time, { motion: view.motion });
@@ -181,16 +187,16 @@ window.AutoPodVillageRenderer = Object.freeze({
           ctx.fillText(badge, x + 20, y - 31);
         }
         ctx.restore();
-        hits.push({ id: actor.id, x, y, radius: actor.source === 'managed' ? 22 : 32 });
+        hits.push({ id: actor.id, x, y, radius: 32 * actorScale, top: 54 * actorScale, bottom: 12 * actorScale });
         if (actor.id === snapshot.selectedActorId) {
           const title = actor.title.length > 32 ? `${actor.title.slice(0, 31)}…` : actor.title;
           ctx.font = '17px "Pixelify Sans", monospace';
           const width = ctx.measureText(title).width + 16;
           const left = Math.max(4, Math.min(764 - width, x - width / 2));
           ctx.fillStyle = '#152530ee';
-          ctx.fillRect(left, y + 14, width, 25);
+          ctx.fillRect(left, y + 14 * actorScale, width, 25);
           ctx.fillStyle = '#fff3cd';
-          ctx.fillText(title, left + 8, y + 32);
+          ctx.fillText(title, left + 8, y + 14 * actorScale + 18);
         }
       }
       canvas.dataset.renderedActors = String(hits.length);
@@ -210,7 +216,7 @@ window.AutoPodVillageRenderer = Object.freeze({
       const y = ((event.clientY - rect.top) * 768) / rect.height;
       const hit = [...hits]
         .reverse()
-        .find((item) => Math.abs(x - item.x) < item.radius && y > item.y - 54 && y < item.y + 12);
+        .find((item) => Math.abs(x - item.x) < item.radius && y > item.y - item.top && y < item.y + item.bottom);
       if (hit) onSelect(hit.id);
     }
     canvas.addEventListener('click', clicked);

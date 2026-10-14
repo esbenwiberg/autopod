@@ -140,6 +140,11 @@ snapshot is the clean `e215d7a` revision, including the v4 Inn map, twelve-speci
 roster and updated gathering spots. The live adapter chooses species from the
 upstream roster by pod ID, so filtering does not reassign characters.
 
+The live overview uses larger characters than the replay's unzoomed map: native
+sprite scale is 3.2 and managed scale is 2.1. Props, badges and click targets scale
+with each character around its feet. These settings belong to the AutoPod adapter
+and survive upstream renderer updates.
+
 A staged build replaces the generated directory only after imports, metadata and
 assets are available. Failed updates preserve the previous working bundle. A
 sibling `.lock` directory prevents concurrent updates. If a process is killed,

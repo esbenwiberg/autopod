@@ -40,7 +40,9 @@ export function presentation(actor, snapshot, now = Date.now()) {
     activity,
     station: activityStations[activity] ?? stations[actor.stage] ?? 'square',
     motion: fresh && !snapshot.reducedMotion && !actor.interactive,
-    scale: actor.source === 'managed' ? 1.25 : 1.9,
+    // The live overview has no replay follow-camera zoom. Keep actors legible
+    // across the full map, with managed workers still visibly smaller.
+    scale: actor.source === 'managed' ? 2.1 : 3.2,
     label: !fresh
       ? 'Last known state'
       : actor.interactive
