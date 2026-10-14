@@ -1,0 +1,8427 @@
+{
+  "version": 2,
+  "roles": {
+    "user": "red",
+    "lead": "pikachu",
+    "helper1": "bulbasaur",
+    "helper2": "squirtle",
+    "helper3": "gengar"
+  },
+  "directions": [
+    "down",
+    "downRight",
+    "right",
+    "upRight",
+    "up",
+    "upLeft",
+    "left",
+    "downLeft"
+  ],
+  "characters": {
+    "red": {
+      "name": "Red",
+      "sourceUrl": "https://github.com/pret/pokefirered/blob/037335f4c725d7c9aecdac87066f2002b4bd7e14/graphics/object_events/pics/people/red_normal.png",
+      "credit": "Game Freak / Nintendo / The Pokémon Company; hosted in pret/pokefirered",
+      "sourceConditions": "Original FireRed game asset in a decompilation repository, which supplies no root reuse license. Local prototype reference only.",
+      "animations": {
+        "idle": {
+          "image": "/assets/sprites/red/red_normal.png",
+          "imageWidth": 144,
+          "imageHeight": 32,
+          "frameWidth": 16,
+          "frameHeight": 32,
+          "frameCount": 9,
+          "durationMs": [
+            1000
+          ],
+          "anchor": [
+            8,
+            31
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0
+              ]
+            },
+            "up": {
+              "row": 0,
+              "frames": [
+                1
+              ]
+            },
+            "left": {
+              "row": 0,
+              "frames": [
+                2
+              ]
+            },
+            "right": {
+              "row": 0,
+              "frames": [
+                2
+              ],
+              "flipX": true
+            },
+            "downRight": {
+              "row": 0,
+              "frames": [
+                2
+              ],
+              "flipX": true
+            },
+            "upRight": {
+              "row": 0,
+              "frames": [
+                2
+              ],
+              "flipX": true
+            },
+            "upLeft": {
+              "row": 0,
+              "frames": [
+                2
+              ]
+            },
+            "downLeft": {
+              "row": 0,
+              "frames": [
+                2
+              ]
+            }
+          },
+          "sha256": "94eb37499a8bd663f47a0767c34b93569cf0c222a9906852943016e3a771054d"
+        },
+        "walk": {
+          "image": "/assets/sprites/red/red_normal.png",
+          "imageWidth": 144,
+          "imageHeight": 32,
+          "frameWidth": 16,
+          "frameHeight": 32,
+          "frameCount": 9,
+          "durationMs": [
+            133.33333333333334,
+            133.33333333333334,
+            133.33333333333334,
+            133.33333333333334
+          ],
+          "anchor": [
+            8,
+            31
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                3,
+                0,
+                4,
+                0
+              ]
+            },
+            "up": {
+              "row": 0,
+              "frames": [
+                5,
+                1,
+                6,
+                1
+              ]
+            },
+            "left": {
+              "row": 0,
+              "frames": [
+                7,
+                2,
+                8,
+                2
+              ]
+            },
+            "right": {
+              "row": 0,
+              "frames": [
+                7,
+                2,
+                8,
+                2
+              ],
+              "flipX": true
+            },
+            "downRight": {
+              "row": 0,
+              "frames": [
+                7,
+                2,
+                8,
+                2
+              ],
+              "flipX": true
+            },
+            "upRight": {
+              "row": 0,
+              "frames": [
+                7,
+                2,
+                8,
+                2
+              ],
+              "flipX": true
+            },
+            "upLeft": {
+              "row": 0,
+              "frames": [
+                7,
+                2,
+                8,
+                2
+              ]
+            },
+            "downLeft": {
+              "row": 0,
+              "frames": [
+                7,
+                2,
+                8,
+                2
+              ]
+            }
+          },
+          "sha256": "94eb37499a8bd663f47a0767c34b93569cf0c222a9906852943016e3a771054d"
+        }
+      }
+    },
+    "pikachu": {
+      "name": "Pikachu",
+      "sourceUrl": "https://github.com/PMDCollab/SpriteCollab/tree/26710cbafd1df058d576e55fca80a2a73d64d356/sprite/0025",
+      "credit": "CHUNSOFT",
+      "sourceConditions": "Original game sprites hosted by PMDCollab; see asset-production.md. Repository submission license does not establish rights to original game assets.",
+      "animations": {
+        "walk": {
+          "image": "/assets/sprites/pikachu/Walk-Anim.png",
+          "imageWidth": 128,
+          "imageHeight": 320,
+          "frameWidth": 32,
+          "frameHeight": 40,
+          "frameCount": 4,
+          "durationMs": [
+            160,
+            200,
+            160,
+            200
+          ],
+          "anchor": [
+            16,
+            24
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            }
+          },
+          "sha256": "5cfc2c775708c28c11f98e027e883261ab3ae4276e51621eec11c979598651f9"
+        },
+        "idle": {
+          "image": "/assets/sprites/pikachu/Idle-Anim.png",
+          "imageWidth": 240,
+          "imageHeight": 448,
+          "frameWidth": 40,
+          "frameHeight": 56,
+          "frameCount": 6,
+          "durationMs": [
+            800,
+            40,
+            60,
+            60,
+            60,
+            40
+          ],
+          "anchor": [
+            20,
+            32
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ]
+            }
+          },
+          "sha256": "f1021ac60879698076fdb80705f893d0646d2b9ddf2bdb8c81803fbb7e87ad86"
+        },
+        "sit": {
+          "image": "/assets/sprites/pikachu/Sit-Anim.png",
+          "imageWidth": 96,
+          "imageHeight": 40,
+          "frameWidth": 32,
+          "frameHeight": 40,
+          "frameCount": 3,
+          "durationMs": [
+            160,
+            160,
+            160
+          ],
+          "anchor": [
+            16,
+            24
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "right": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "up": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "left": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            }
+          },
+          "sha256": "ca7e65e112645402160faa07788342db1c8b687fc5b8bc6e8766ef8019b46308"
+        },
+        "attack": {
+          "image": "/assets/sprites/pikachu/Attack-Anim.png",
+          "imageWidth": 800,
+          "imageHeight": 640,
+          "frameWidth": 80,
+          "frameHeight": 80,
+          "frameCount": 10,
+          "durationMs": [
+            40,
+            80,
+            20,
+            20,
+            20,
+            40,
+            40,
+            40,
+            40,
+            80
+          ],
+          "anchor": [
+            40,
+            43
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  40,
+                  43
+                ],
+                [
+                  40,
+                  42
+                ],
+                [
+                  40,
+                  46
+                ],
+                [
+                  40,
+                  48
+                ],
+                [
+                  40,
+                  55
+                ],
+                [
+                  40,
+                  64
+                ],
+                [
+                  41,
+                  64
+                ],
+                [
+                  40,
+                  64
+                ],
+                [
+                  41,
+                  64
+                ],
+                [
+                  40,
+                  50
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  39,
+                  43
+                ],
+                [
+                  38,
+                  42
+                ],
+                [
+                  40,
+                  44
+                ],
+                [
+                  44,
+                  48
+                ],
+                [
+                  50,
+                  52
+                ],
+                [
+                  63,
+                  64
+                ],
+                [
+                  64,
+                  63
+                ],
+                [
+                  63,
+                  64
+                ],
+                [
+                  64,
+                  63
+                ],
+                [
+                  46,
+                  50
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  39,
+                  44
+                ],
+                [
+                  38,
+                  44
+                ],
+                [
+                  40,
+                  44
+                ],
+                [
+                  44,
+                  44
+                ],
+                [
+                  50,
+                  44
+                ],
+                [
+                  58,
+                  44
+                ],
+                [
+                  58,
+                  45
+                ],
+                [
+                  58,
+                  44
+                ],
+                [
+                  58,
+                  45
+                ],
+                [
+                  46,
+                  44
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  39,
+                  45
+                ],
+                [
+                  38,
+                  46
+                ],
+                [
+                  40,
+                  43
+                ],
+                [
+                  45,
+                  38
+                ],
+                [
+                  53,
+                  29
+                ],
+                [
+                  58,
+                  24
+                ],
+                [
+                  59,
+                  25
+                ],
+                [
+                  58,
+                  24
+                ],
+                [
+                  59,
+                  25
+                ],
+                [
+                  46,
+                  38
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  40,
+                  45
+                ],
+                [
+                  40,
+                  46
+                ],
+                [
+                  40,
+                  44
+                ],
+                [
+                  40,
+                  40
+                ],
+                [
+                  40,
+                  33
+                ],
+                [
+                  40,
+                  26
+                ],
+                [
+                  41,
+                  26
+                ],
+                [
+                  40,
+                  26
+                ],
+                [
+                  41,
+                  26
+                ],
+                [
+                  40,
+                  38
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  41,
+                  45
+                ],
+                [
+                  42,
+                  46
+                ],
+                [
+                  40,
+                  43
+                ],
+                [
+                  35,
+                  38
+                ],
+                [
+                  27,
+                  29
+                ],
+                [
+                  22,
+                  24
+                ],
+                [
+                  21,
+                  25
+                ],
+                [
+                  22,
+                  24
+                ],
+                [
+                  21,
+                  25
+                ],
+                [
+                  34,
+                  38
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  41,
+                  44
+                ],
+                [
+                  42,
+                  44
+                ],
+                [
+                  40,
+                  44
+                ],
+                [
+                  36,
+                  44
+                ],
+                [
+                  30,
+                  44
+                ],
+                [
+                  22,
+                  44
+                ],
+                [
+                  22,
+                  45
+                ],
+                [
+                  22,
+                  44
+                ],
+                [
+                  22,
+                  45
+                ],
+                [
+                  34,
+                  44
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  41,
+                  43
+                ],
+                [
+                  42,
+                  42
+                ],
+                [
+                  40,
+                  44
+                ],
+                [
+                  36,
+                  48
+                ],
+                [
+                  30,
+                  52
+                ],
+                [
+                  17,
+                  64
+                ],
+                [
+                  16,
+                  63
+                ],
+                [
+                  17,
+                  64
+                ],
+                [
+                  16,
+                  63
+                ],
+                [
+                  34,
+                  50
+                ]
+              ]
+            }
+          },
+          "sha256": "06822d01f15ebb2c4f2cff9e94bb4ee615b8d25b41527c9297b80d81576be857"
+        },
+        "swing": {
+          "image": "/assets/sprites/pikachu/Swing-Anim.png",
+          "imageWidth": 720,
+          "imageHeight": 768,
+          "frameWidth": 80,
+          "frameHeight": 96,
+          "frameCount": 9,
+          "durationMs": [
+            40,
+            20,
+            40,
+            40,
+            60,
+            40,
+            40,
+            20,
+            20
+          ],
+          "anchor": [
+            40,
+            52
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  52
+                ],
+                [
+                  46,
+                  56
+                ],
+                [
+                  48,
+                  61
+                ],
+                [
+                  47,
+                  70
+                ],
+                [
+                  40,
+                  73
+                ],
+                [
+                  33,
+                  70
+                ],
+                [
+                  32,
+                  61
+                ],
+                [
+                  34,
+                  56
+                ],
+                [
+                  40,
+                  52
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  52
+                ],
+                [
+                  46,
+                  52
+                ],
+                [
+                  57,
+                  55
+                ],
+                [
+                  64,
+                  61
+                ],
+                [
+                  63,
+                  73
+                ],
+                [
+                  51,
+                  73
+                ],
+                [
+                  42,
+                  64
+                ],
+                [
+                  40,
+                  59
+                ],
+                [
+                  40,
+                  52
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  52
+                ],
+                [
+                  43,
+                  48
+                ],
+                [
+                  51,
+                  46
+                ],
+                [
+                  57,
+                  48
+                ],
+                [
+                  62,
+                  53
+                ],
+                [
+                  58,
+                  57
+                ],
+                [
+                  52,
+                  59
+                ],
+                [
+                  44,
+                  57
+                ],
+                [
+                  40,
+                  52
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  52
+                ],
+                [
+                  39,
+                  46
+                ],
+                [
+                  42,
+                  36
+                ],
+                [
+                  51,
+                  30
+                ],
+                [
+                  60,
+                  30
+                ],
+                [
+                  61,
+                  40
+                ],
+                [
+                  56,
+                  46
+                ],
+                [
+                  47,
+                  51
+                ],
+                [
+                  40,
+                  52
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  52
+                ],
+                [
+                  34,
+                  48
+                ],
+                [
+                  32,
+                  42
+                ],
+                [
+                  33,
+                  33
+                ],
+                [
+                  40,
+                  28
+                ],
+                [
+                  47,
+                  33
+                ],
+                [
+                  48,
+                  44
+                ],
+                [
+                  46,
+                  48
+                ],
+                [
+                  40,
+                  52
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  52
+                ],
+                [
+                  41,
+                  46
+                ],
+                [
+                  38,
+                  36
+                ],
+                [
+                  29,
+                  30
+                ],
+                [
+                  20,
+                  30
+                ],
+                [
+                  19,
+                  40
+                ],
+                [
+                  24,
+                  46
+                ],
+                [
+                  33,
+                  51
+                ],
+                [
+                  40,
+                  52
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  52
+                ],
+                [
+                  37,
+                  48
+                ],
+                [
+                  29,
+                  46
+                ],
+                [
+                  22,
+                  48
+                ],
+                [
+                  18,
+                  53
+                ],
+                [
+                  22,
+                  57
+                ],
+                [
+                  28,
+                  59
+                ],
+                [
+                  36,
+                  57
+                ],
+                [
+                  40,
+                  52
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  52
+                ],
+                [
+                  34,
+                  52
+                ],
+                [
+                  23,
+                  55
+                ],
+                [
+                  16,
+                  61
+                ],
+                [
+                  17,
+                  68
+                ],
+                [
+                  29,
+                  68
+                ],
+                [
+                  36,
+                  64
+                ],
+                [
+                  37,
+                  59
+                ],
+                [
+                  40,
+                  52
+                ]
+              ]
+            }
+          },
+          "sha256": "dd76ec9c3749800e4c14f1de5b6e01310526f5833f317662328592bc8d38e7a0"
+        },
+        "pose": {
+          "image": "/assets/sprites/pikachu/Pose-Anim.png",
+          "imageWidth": 96,
+          "imageHeight": 320,
+          "frameWidth": 32,
+          "frameHeight": 40,
+          "frameCount": 3,
+          "durationMs": [
+            240,
+            40,
+            160
+          ],
+          "anchor": [
+            16,
+            24
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            }
+          },
+          "sha256": "efe90889a2c41b01acd4e3e302fd1d3e2ca4f244bf880accba116b65f25399d1"
+        },
+        "hurt": {
+          "image": "/assets/sprites/pikachu/Hurt-Anim.png",
+          "imageWidth": 96,
+          "imageHeight": 512,
+          "frameWidth": 48,
+          "frameHeight": 64,
+          "frameCount": 2,
+          "durationMs": [
+            40,
+            160
+          ],
+          "anchor": [
+            24,
+            33
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  24,
+                  33
+                ],
+                [
+                  24,
+                  32
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  21,
+                  33
+                ],
+                [
+                  20,
+                  32
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  21,
+                  36
+                ],
+                [
+                  20,
+                  36
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  21,
+                  39
+                ],
+                [
+                  20,
+                  40
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  24,
+                  39
+                ],
+                [
+                  24,
+                  40
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  27,
+                  39
+                ],
+                [
+                  28,
+                  40
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  27,
+                  36
+                ],
+                [
+                  28,
+                  36
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  27,
+                  33
+                ],
+                [
+                  28,
+                  32
+                ]
+              ]
+            }
+          },
+          "sha256": "4f096cee94aab6e2c444e6e5a9e77680858d81ad90ddaded05f7e2fea69e3776"
+        },
+        "nod": {
+          "image": "/assets/sprites/pikachu/Nod-Anim.png",
+          "imageWidth": 96,
+          "imageHeight": 384,
+          "frameWidth": 32,
+          "frameHeight": 48,
+          "frameCount": 3,
+          "durationMs": [
+            120,
+            160,
+            120
+          ],
+          "anchor": [
+            16,
+            28
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ],
+                [
+                  16,
+                  28
+                ]
+              ]
+            }
+          },
+          "sha256": "2d16f665db641de7d3f9d71de9f00b8a2d16560659fecff25e71d88a1e4ca043"
+        }
+      }
+    },
+    "bulbasaur": {
+      "name": "Bulbasaur",
+      "sourceUrl": "https://github.com/PMDCollab/SpriteCollab/tree/26710cbafd1df058d576e55fca80a2a73d64d356/sprite/0001",
+      "credit": "CHUNSOFT",
+      "sourceConditions": "Original game sprites hosted by PMDCollab; see asset-production.md. Repository submission license does not establish rights to original game assets.",
+      "animations": {
+        "walk": {
+          "image": "/assets/sprites/bulbasaur/Walk-Anim.png",
+          "imageWidth": 240,
+          "imageHeight": 320,
+          "frameWidth": 40,
+          "frameHeight": 40,
+          "frameCount": 6,
+          "durationMs": [
+            80,
+            80,
+            80,
+            80,
+            80,
+            80
+          ],
+          "anchor": [
+            20,
+            24
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "anchors": [
+                [
+                  20,
+                  24
+                ],
+                [
+                  20,
+                  23
+                ],
+                [
+                  20,
+                  26
+                ],
+                [
+                  20,
+                  27
+                ],
+                [
+                  20,
+                  28
+                ],
+                [
+                  20,
+                  26
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "anchors": [
+                [
+                  20,
+                  24
+                ],
+                [
+                  21,
+                  25
+                ],
+                [
+                  22,
+                  26
+                ],
+                [
+                  23,
+                  27
+                ],
+                [
+                  24,
+                  28
+                ],
+                [
+                  25,
+                  26
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "anchors": [
+                [
+                  20,
+                  24
+                ],
+                [
+                  20,
+                  24
+                ],
+                [
+                  21,
+                  24
+                ],
+                [
+                  22,
+                  24
+                ],
+                [
+                  23,
+                  24
+                ],
+                [
+                  24,
+                  24
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "anchors": [
+                [
+                  20,
+                  24
+                ],
+                [
+                  22,
+                  22
+                ],
+                [
+                  23,
+                  21
+                ],
+                [
+                  24,
+                  20
+                ],
+                [
+                  25,
+                  19
+                ],
+                [
+                  25,
+                  19
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "anchors": [
+                [
+                  20,
+                  24
+                ],
+                [
+                  20,
+                  23
+                ],
+                [
+                  20,
+                  22
+                ],
+                [
+                  20,
+                  21
+                ],
+                [
+                  20,
+                  20
+                ],
+                [
+                  20,
+                  21
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "anchors": [
+                [
+                  20,
+                  24
+                ],
+                [
+                  18,
+                  22
+                ],
+                [
+                  17,
+                  21
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  15,
+                  19
+                ],
+                [
+                  15,
+                  19
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "anchors": [
+                [
+                  20,
+                  24
+                ],
+                [
+                  20,
+                  24
+                ],
+                [
+                  19,
+                  24
+                ],
+                [
+                  18,
+                  24
+                ],
+                [
+                  17,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "anchors": [
+                [
+                  20,
+                  24
+                ],
+                [
+                  19,
+                  25
+                ],
+                [
+                  18,
+                  26
+                ],
+                [
+                  17,
+                  27
+                ],
+                [
+                  16,
+                  28
+                ],
+                [
+                  15,
+                  26
+                ]
+              ]
+            }
+          },
+          "sha256": "84e8e7a58f68204a47f990becc7e8c324e486e5127557261e8ccbe55e9e979b2"
+        },
+        "idle": {
+          "image": "/assets/sprites/bulbasaur/Idle-Anim.png",
+          "imageWidth": 96,
+          "imageHeight": 320,
+          "frameWidth": 32,
+          "frameHeight": 40,
+          "frameCount": 3,
+          "durationMs": [
+            800,
+            120,
+            120
+          ],
+          "anchor": [
+            16,
+            24
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2
+              ]
+            }
+          },
+          "sha256": "bae238b6ae50dc97781a03b2210dc3ee1954c9f6207826e49091227bb9c783d1"
+        },
+        "sit": {
+          "image": "/assets/sprites/bulbasaur/Sit-Anim.png",
+          "imageWidth": 72,
+          "imageHeight": 32,
+          "frameWidth": 24,
+          "frameHeight": 32,
+          "frameCount": 3,
+          "durationMs": [
+            160,
+            160,
+            160
+          ],
+          "anchor": [
+            12,
+            20
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "right": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "up": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "left": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            }
+          },
+          "sha256": "816978afc00c3791e675ce52191a8e80afe4a1802c4df4449e38f2ff92f809fc"
+        },
+        "attack": {
+          "image": "/assets/sprites/bulbasaur/Attack-Anim.png",
+          "imageWidth": 704,
+          "imageHeight": 576,
+          "frameWidth": 64,
+          "frameHeight": 72,
+          "frameCount": 11,
+          "durationMs": [
+            80,
+            40,
+            80,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            80
+          ],
+          "anchor": [
+            32,
+            40
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  32,
+                  40
+                ],
+                [
+                  32,
+                  39
+                ],
+                [
+                  32,
+                  38
+                ],
+                [
+                  32,
+                  40
+                ],
+                [
+                  32,
+                  44
+                ],
+                [
+                  32,
+                  50
+                ],
+                [
+                  32,
+                  58
+                ],
+                [
+                  33,
+                  58
+                ],
+                [
+                  32,
+                  58
+                ],
+                [
+                  33,
+                  58
+                ],
+                [
+                  32,
+                  46
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  32,
+                  40
+                ],
+                [
+                  31,
+                  39
+                ],
+                [
+                  30,
+                  38
+                ],
+                [
+                  32,
+                  40
+                ],
+                [
+                  36,
+                  44
+                ],
+                [
+                  42,
+                  50
+                ],
+                [
+                  50,
+                  58
+                ],
+                [
+                  51,
+                  57
+                ],
+                [
+                  50,
+                  58
+                ],
+                [
+                  51,
+                  57
+                ],
+                [
+                  38,
+                  46
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  32,
+                  40
+                ],
+                [
+                  31,
+                  40
+                ],
+                [
+                  30,
+                  40
+                ],
+                [
+                  32,
+                  40
+                ],
+                [
+                  36,
+                  40
+                ],
+                [
+                  42,
+                  40
+                ],
+                [
+                  50,
+                  40
+                ],
+                [
+                  50,
+                  40
+                ],
+                [
+                  50,
+                  40
+                ],
+                [
+                  50,
+                  40
+                ],
+                [
+                  38,
+                  40
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  32,
+                  40
+                ],
+                [
+                  31,
+                  41
+                ],
+                [
+                  30,
+                  42
+                ],
+                [
+                  32,
+                  39
+                ],
+                [
+                  36,
+                  36
+                ],
+                [
+                  42,
+                  30
+                ],
+                [
+                  50,
+                  22
+                ],
+                [
+                  51,
+                  23
+                ],
+                [
+                  50,
+                  22
+                ],
+                [
+                  51,
+                  23
+                ],
+                [
+                  38,
+                  34
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  32,
+                  40
+                ],
+                [
+                  32,
+                  41
+                ],
+                [
+                  32,
+                  42
+                ],
+                [
+                  32,
+                  40
+                ],
+                [
+                  32,
+                  36
+                ],
+                [
+                  32,
+                  30
+                ],
+                [
+                  32,
+                  22
+                ],
+                [
+                  33,
+                  22
+                ],
+                [
+                  32,
+                  22
+                ],
+                [
+                  33,
+                  22
+                ],
+                [
+                  32,
+                  34
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  32,
+                  40
+                ],
+                [
+                  33,
+                  41
+                ],
+                [
+                  34,
+                  42
+                ],
+                [
+                  32,
+                  39
+                ],
+                [
+                  28,
+                  36
+                ],
+                [
+                  22,
+                  30
+                ],
+                [
+                  14,
+                  22
+                ],
+                [
+                  13,
+                  23
+                ],
+                [
+                  14,
+                  22
+                ],
+                [
+                  13,
+                  23
+                ],
+                [
+                  26,
+                  34
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  32,
+                  40
+                ],
+                [
+                  33,
+                  40
+                ],
+                [
+                  34,
+                  40
+                ],
+                [
+                  32,
+                  40
+                ],
+                [
+                  28,
+                  40
+                ],
+                [
+                  22,
+                  40
+                ],
+                [
+                  14,
+                  40
+                ],
+                [
+                  14,
+                  41
+                ],
+                [
+                  14,
+                  40
+                ],
+                [
+                  14,
+                  41
+                ],
+                [
+                  26,
+                  40
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  32,
+                  40
+                ],
+                [
+                  33,
+                  39
+                ],
+                [
+                  34,
+                  38
+                ],
+                [
+                  32,
+                  40
+                ],
+                [
+                  28,
+                  44
+                ],
+                [
+                  22,
+                  50
+                ],
+                [
+                  14,
+                  58
+                ],
+                [
+                  15,
+                  59
+                ],
+                [
+                  14,
+                  58
+                ],
+                [
+                  15,
+                  59
+                ],
+                [
+                  26,
+                  46
+                ]
+              ]
+            }
+          },
+          "sha256": "f8b6b5fc9132d9fb701741086bacfc0e80d0a8d2b45473abb425d4c6b427a252"
+        },
+        "swing": {
+          "image": "/assets/sprites/bulbasaur/Swing-Anim.png",
+          "imageWidth": 648,
+          "imageHeight": 576,
+          "frameWidth": 72,
+          "frameHeight": 72,
+          "frameCount": 9,
+          "durationMs": [
+            40,
+            20,
+            40,
+            40,
+            60,
+            40,
+            40,
+            20,
+            20
+          ],
+          "anchor": [
+            36,
+            40
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  40
+                ],
+                [
+                  42,
+                  44
+                ],
+                [
+                  44,
+                  49
+                ],
+                [
+                  43,
+                  53
+                ],
+                [
+                  37,
+                  56
+                ],
+                [
+                  32,
+                  54
+                ],
+                [
+                  31,
+                  48
+                ],
+                [
+                  32,
+                  44
+                ],
+                [
+                  36,
+                  40
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  40
+                ],
+                [
+                  42,
+                  40
+                ],
+                [
+                  53,
+                  43
+                ],
+                [
+                  60,
+                  49
+                ],
+                [
+                  59,
+                  56
+                ],
+                [
+                  47,
+                  56
+                ],
+                [
+                  40,
+                  52
+                ],
+                [
+                  39,
+                  47
+                ],
+                [
+                  36,
+                  40
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  40
+                ],
+                [
+                  39,
+                  36
+                ],
+                [
+                  47,
+                  34
+                ],
+                [
+                  53,
+                  36
+                ],
+                [
+                  56,
+                  41
+                ],
+                [
+                  53,
+                  45
+                ],
+                [
+                  48,
+                  47
+                ],
+                [
+                  40,
+                  45
+                ],
+                [
+                  36,
+                  40
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  40
+                ],
+                [
+                  37,
+                  34
+                ],
+                [
+                  40,
+                  24
+                ],
+                [
+                  47,
+                  20
+                ],
+                [
+                  52,
+                  20
+                ],
+                [
+                  52,
+                  25
+                ],
+                [
+                  50,
+                  34
+                ],
+                [
+                  43,
+                  39
+                ],
+                [
+                  36,
+                  40
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  40
+                ],
+                [
+                  30,
+                  36
+                ],
+                [
+                  28,
+                  31
+                ],
+                [
+                  29,
+                  27
+                ],
+                [
+                  35,
+                  24
+                ],
+                [
+                  40,
+                  26
+                ],
+                [
+                  41,
+                  32
+                ],
+                [
+                  40,
+                  36
+                ],
+                [
+                  36,
+                  40
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  40
+                ],
+                [
+                  35,
+                  34
+                ],
+                [
+                  32,
+                  24
+                ],
+                [
+                  25,
+                  20
+                ],
+                [
+                  20,
+                  20
+                ],
+                [
+                  20,
+                  25
+                ],
+                [
+                  22,
+                  34
+                ],
+                [
+                  29,
+                  39
+                ],
+                [
+                  36,
+                  40
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  40
+                ],
+                [
+                  33,
+                  36
+                ],
+                [
+                  25,
+                  34
+                ],
+                [
+                  19,
+                  36
+                ],
+                [
+                  16,
+                  41
+                ],
+                [
+                  19,
+                  45
+                ],
+                [
+                  24,
+                  47
+                ],
+                [
+                  32,
+                  45
+                ],
+                [
+                  36,
+                  40
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  40
+                ],
+                [
+                  30,
+                  40
+                ],
+                [
+                  19,
+                  43
+                ],
+                [
+                  12,
+                  49
+                ],
+                [
+                  13,
+                  56
+                ],
+                [
+                  25,
+                  56
+                ],
+                [
+                  32,
+                  52
+                ],
+                [
+                  33,
+                  47
+                ],
+                [
+                  36,
+                  40
+                ]
+              ]
+            }
+          },
+          "sha256": "44d6d3ab67b22d383e72b87686c946ad37d868472c2356c20e000ab559c926d6"
+        },
+        "pose": {
+          "image": "/assets/sprites/bulbasaur/Pose-Anim.png",
+          "imageWidth": 120,
+          "imageHeight": 256,
+          "frameWidth": 24,
+          "frameHeight": 32,
+          "frameCount": 5,
+          "durationMs": [
+            160,
+            20,
+            60,
+            40,
+            160
+          ],
+          "anchor": [
+            12,
+            20
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            }
+          },
+          "sha256": "9f0712690a113d7af246c00de5681e8935589479b9176087d5c1eaba7af600a7"
+        },
+        "hurt": {
+          "image": "/assets/sprites/bulbasaur/Hurt-Anim.png",
+          "imageWidth": 80,
+          "imageHeight": 448,
+          "frameWidth": 40,
+          "frameHeight": 56,
+          "frameCount": 2,
+          "durationMs": [
+            40,
+            160
+          ],
+          "anchor": [
+            20,
+            30
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  20,
+                  30
+                ],
+                [
+                  20,
+                  29
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  18,
+                  30
+                ],
+                [
+                  17,
+                  29
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  18,
+                  32
+                ],
+                [
+                  17,
+                  32
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  18,
+                  34
+                ],
+                [
+                  17,
+                  35
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  20,
+                  34
+                ],
+                [
+                  20,
+                  35
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  22,
+                  34
+                ],
+                [
+                  23,
+                  35
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  22,
+                  32
+                ],
+                [
+                  23,
+                  32
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  22,
+                  30
+                ],
+                [
+                  23,
+                  29
+                ]
+              ]
+            }
+          },
+          "sha256": "cbafac2615cfa0023288e2b2d01ba8c180a54164aa49430a06acd83756880976"
+        },
+        "nod": {
+          "image": "/assets/sprites/bulbasaur/Nod-Anim.png",
+          "imageWidth": 96,
+          "imageHeight": 256,
+          "frameWidth": 32,
+          "frameHeight": 32,
+          "frameCount": 3,
+          "durationMs": [
+            120,
+            160,
+            120
+          ],
+          "anchor": [
+            16,
+            20
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            }
+          },
+          "sha256": "7d989c061490315f7f7efaa271f9671eedbe2df4c53703938602d0865e3844e2"
+        }
+      }
+    },
+    "squirtle": {
+      "name": "Squirtle",
+      "sourceUrl": "https://github.com/PMDCollab/SpriteCollab/tree/26710cbafd1df058d576e55fca80a2a73d64d356/sprite/0007",
+      "credit": "CHUNSOFT",
+      "sourceConditions": "Original game sprites hosted by PMDCollab; see asset-production.md. Repository submission license does not establish rights to original game assets.",
+      "animations": {
+        "walk": {
+          "image": "/assets/sprites/squirtle/Walk-Anim.png",
+          "imageWidth": 128,
+          "imageHeight": 256,
+          "frameWidth": 32,
+          "frameHeight": 32,
+          "frameCount": 4,
+          "durationMs": [
+            240,
+            160,
+            240,
+            160
+          ],
+          "anchor": [
+            16,
+            20
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            }
+          },
+          "sha256": "0e71a8bf34299cf73e59eccebc0b9fc16dfb9bd9554d8009b2323c8e3c00504f"
+        },
+        "idle": {
+          "image": "/assets/sprites/squirtle/Idle-Anim.png",
+          "imageWidth": 256,
+          "imageHeight": 256,
+          "frameWidth": 32,
+          "frameHeight": 32,
+          "frameCount": 8,
+          "durationMs": [
+            600,
+            40,
+            40,
+            80,
+            80,
+            80,
+            40,
+            40
+          ],
+          "anchor": [
+            16,
+            20
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ]
+            }
+          },
+          "sha256": "d796b3b94475e4e2a5089bf10f392559989d4104d29c2fe387cfe003bcba5447"
+        },
+        "sit": {
+          "image": "/assets/sprites/squirtle/Sit-Anim.png",
+          "imageWidth": 72,
+          "imageHeight": 32,
+          "frameWidth": 24,
+          "frameHeight": 32,
+          "frameCount": 3,
+          "durationMs": [
+            160,
+            160,
+            160
+          ],
+          "anchor": [
+            12,
+            20
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "right": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "up": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "left": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            }
+          },
+          "sha256": "bf8d2c6172518fb5e069ec9d701cd324c1789eb62d89cb294128f7d19b8a076d"
+        },
+        "attack": {
+          "image": "/assets/sprites/squirtle/Attack-Anim.png",
+          "imageWidth": 640,
+          "imageHeight": 576,
+          "frameWidth": 64,
+          "frameHeight": 72,
+          "frameCount": 10,
+          "durationMs": [
+            40,
+            80,
+            20,
+            20,
+            20,
+            40,
+            40,
+            40,
+            40,
+            40
+          ],
+          "anchor": [
+            32,
+            39
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  32,
+                  39
+                ],
+                [
+                  32,
+                  38
+                ],
+                [
+                  32,
+                  40
+                ],
+                [
+                  32,
+                  44
+                ],
+                [
+                  32,
+                  50
+                ],
+                [
+                  32,
+                  58
+                ],
+                [
+                  33,
+                  58
+                ],
+                [
+                  32,
+                  58
+                ],
+                [
+                  33,
+                  58
+                ],
+                [
+                  32,
+                  46
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  31,
+                  39
+                ],
+                [
+                  30,
+                  38
+                ],
+                [
+                  32,
+                  40
+                ],
+                [
+                  36,
+                  44
+                ],
+                [
+                  42,
+                  50
+                ],
+                [
+                  50,
+                  58
+                ],
+                [
+                  51,
+                  57
+                ],
+                [
+                  50,
+                  58
+                ],
+                [
+                  51,
+                  57
+                ],
+                [
+                  38,
+                  46
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  31,
+                  40
+                ],
+                [
+                  30,
+                  40
+                ],
+                [
+                  32,
+                  40
+                ],
+                [
+                  36,
+                  40
+                ],
+                [
+                  42,
+                  40
+                ],
+                [
+                  50,
+                  40
+                ],
+                [
+                  50,
+                  41
+                ],
+                [
+                  50,
+                  40
+                ],
+                [
+                  50,
+                  41
+                ],
+                [
+                  38,
+                  40
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  31,
+                  41
+                ],
+                [
+                  30,
+                  42
+                ],
+                [
+                  32,
+                  38
+                ],
+                [
+                  36,
+                  33
+                ],
+                [
+                  42,
+                  26
+                ],
+                [
+                  50,
+                  16
+                ],
+                [
+                  51,
+                  17
+                ],
+                [
+                  50,
+                  16
+                ],
+                [
+                  51,
+                  17
+                ],
+                [
+                  38,
+                  34
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  32,
+                  41
+                ],
+                [
+                  32,
+                  42
+                ],
+                [
+                  32,
+                  40
+                ],
+                [
+                  32,
+                  35
+                ],
+                [
+                  32,
+                  27
+                ],
+                [
+                  32,
+                  16
+                ],
+                [
+                  33,
+                  16
+                ],
+                [
+                  32,
+                  16
+                ],
+                [
+                  33,
+                  16
+                ],
+                [
+                  32,
+                  34
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  33,
+                  41
+                ],
+                [
+                  34,
+                  42
+                ],
+                [
+                  32,
+                  38
+                ],
+                [
+                  28,
+                  33
+                ],
+                [
+                  22,
+                  26
+                ],
+                [
+                  14,
+                  16
+                ],
+                [
+                  13,
+                  17
+                ],
+                [
+                  14,
+                  16
+                ],
+                [
+                  13,
+                  17
+                ],
+                [
+                  26,
+                  34
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  33,
+                  40
+                ],
+                [
+                  34,
+                  40
+                ],
+                [
+                  32,
+                  40
+                ],
+                [
+                  28,
+                  40
+                ],
+                [
+                  22,
+                  40
+                ],
+                [
+                  14,
+                  40
+                ],
+                [
+                  14,
+                  41
+                ],
+                [
+                  14,
+                  40
+                ],
+                [
+                  14,
+                  41
+                ],
+                [
+                  26,
+                  40
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "anchors": [
+                [
+                  33,
+                  39
+                ],
+                [
+                  34,
+                  38
+                ],
+                [
+                  32,
+                  40
+                ],
+                [
+                  28,
+                  44
+                ],
+                [
+                  22,
+                  50
+                ],
+                [
+                  15,
+                  59
+                ],
+                [
+                  14,
+                  58
+                ],
+                [
+                  15,
+                  59
+                ],
+                [
+                  15,
+                  59
+                ],
+                [
+                  26,
+                  46
+                ]
+              ]
+            }
+          },
+          "sha256": "30f303366cf48558bed41d2a65fce9c9bf25d1cef57b3020e317b881af655ddb"
+        },
+        "swing": {
+          "image": "/assets/sprites/squirtle/Swing-Anim.png",
+          "imageWidth": 720,
+          "imageHeight": 640,
+          "frameWidth": 80,
+          "frameHeight": 80,
+          "frameCount": 9,
+          "durationMs": [
+            40,
+            20,
+            40,
+            40,
+            60,
+            40,
+            40,
+            20,
+            20
+          ],
+          "anchor": [
+            40,
+            44
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  44
+                ],
+                [
+                  46,
+                  48
+                ],
+                [
+                  48,
+                  53
+                ],
+                [
+                  47,
+                  60
+                ],
+                [
+                  40,
+                  63
+                ],
+                [
+                  33,
+                  60
+                ],
+                [
+                  32,
+                  53
+                ],
+                [
+                  34,
+                  48
+                ],
+                [
+                  40,
+                  44
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  44
+                ],
+                [
+                  47,
+                  43
+                ],
+                [
+                  57,
+                  47
+                ],
+                [
+                  64,
+                  53
+                ],
+                [
+                  62,
+                  62
+                ],
+                [
+                  52,
+                  63
+                ],
+                [
+                  42,
+                  56
+                ],
+                [
+                  39,
+                  51
+                ],
+                [
+                  40,
+                  44
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  44
+                ],
+                [
+                  43,
+                  40
+                ],
+                [
+                  51,
+                  38
+                ],
+                [
+                  59,
+                  40
+                ],
+                [
+                  63,
+                  45
+                ],
+                [
+                  57,
+                  51
+                ],
+                [
+                  52,
+                  51
+                ],
+                [
+                  44,
+                  49
+                ],
+                [
+                  40,
+                  44
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  44
+                ],
+                [
+                  39,
+                  38
+                ],
+                [
+                  43,
+                  28
+                ],
+                [
+                  51,
+                  18
+                ],
+                [
+                  60,
+                  17
+                ],
+                [
+                  61,
+                  31
+                ],
+                [
+                  56,
+                  38
+                ],
+                [
+                  47,
+                  43
+                ],
+                [
+                  40,
+                  44
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  44
+                ],
+                [
+                  34,
+                  40
+                ],
+                [
+                  32,
+                  34
+                ],
+                [
+                  33,
+                  26
+                ],
+                [
+                  40,
+                  17
+                ],
+                [
+                  47,
+                  26
+                ],
+                [
+                  48,
+                  36
+                ],
+                [
+                  46,
+                  40
+                ],
+                [
+                  40,
+                  44
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  44
+                ],
+                [
+                  41,
+                  38
+                ],
+                [
+                  37,
+                  28
+                ],
+                [
+                  29,
+                  18
+                ],
+                [
+                  21,
+                  17
+                ],
+                [
+                  19,
+                  31
+                ],
+                [
+                  24,
+                  38
+                ],
+                [
+                  33,
+                  43
+                ],
+                [
+                  40,
+                  44
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  44
+                ],
+                [
+                  37,
+                  40
+                ],
+                [
+                  29,
+                  38
+                ],
+                [
+                  21,
+                  40
+                ],
+                [
+                  17,
+                  45
+                ],
+                [
+                  23,
+                  51
+                ],
+                [
+                  28,
+                  51
+                ],
+                [
+                  36,
+                  49
+                ],
+                [
+                  40,
+                  44
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  40,
+                  44
+                ],
+                [
+                  33,
+                  43
+                ],
+                [
+                  23,
+                  47
+                ],
+                [
+                  16,
+                  53
+                ],
+                [
+                  18,
+                  62
+                ],
+                [
+                  28,
+                  63
+                ],
+                [
+                  38,
+                  56
+                ],
+                [
+                  41,
+                  51
+                ],
+                [
+                  40,
+                  44
+                ]
+              ]
+            }
+          },
+          "sha256": "d288affb20f9338043db0d080e01ea09eab9a732e243169ca99e41868cf25e07"
+        },
+        "pose": {
+          "image": "/assets/sprites/squirtle/Pose-Anim.png",
+          "imageWidth": 72,
+          "imageHeight": 256,
+          "frameWidth": 24,
+          "frameHeight": 32,
+          "frameCount": 3,
+          "durationMs": [
+            240,
+            40,
+            160
+          ],
+          "anchor": [
+            12,
+            20
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ],
+                [
+                  12,
+                  20
+                ]
+              ]
+            }
+          },
+          "sha256": "20b929bc921677c8dc76109ce162bf609a84f08a9c44b4e880769e1500dfe5f1"
+        },
+        "hurt": {
+          "image": "/assets/sprites/squirtle/Hurt-Anim.png",
+          "imageWidth": 80,
+          "imageHeight": 448,
+          "frameWidth": 40,
+          "frameHeight": 56,
+          "frameCount": 2,
+          "durationMs": [
+            40,
+            160
+          ],
+          "anchor": [
+            20,
+            30
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  20,
+                  30
+                ],
+                [
+                  20,
+                  29
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  18,
+                  30
+                ],
+                [
+                  17,
+                  29
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  18,
+                  32
+                ],
+                [
+                  17,
+                  32
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  18,
+                  34
+                ],
+                [
+                  17,
+                  35
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  20,
+                  34
+                ],
+                [
+                  20,
+                  35
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  22,
+                  34
+                ],
+                [
+                  23,
+                  35
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  22,
+                  32
+                ],
+                [
+                  23,
+                  32
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  22,
+                  30
+                ],
+                [
+                  23,
+                  29
+                ]
+              ]
+            }
+          },
+          "sha256": "b08cd8679617df5ca9d1e87ed773a8b3265eae46ef945f4bec2c9153b645eceb"
+        },
+        "nod": {
+          "image": "/assets/sprites/squirtle/Nod-Anim.png",
+          "imageWidth": 96,
+          "imageHeight": 256,
+          "frameWidth": 32,
+          "frameHeight": 32,
+          "frameCount": 3,
+          "durationMs": [
+            120,
+            160,
+            120
+          ],
+          "anchor": [
+            16,
+            20
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            }
+          },
+          "sha256": "057d418ef37856bf70125cd7b38e484c1ddef5201f06fd5a596348e4ac86a8f7"
+        }
+      }
+    },
+    "gengar": {
+      "name": "Gengar",
+      "sourceUrl": "https://github.com/PMDCollab/SpriteCollab/tree/26710cbafd1df058d576e55fca80a2a73d64d356/sprite/0094",
+      "credit": "CHUNSOFT",
+      "sourceConditions": "Original game sprites hosted by PMDCollab; see asset-production.md. Repository submission license does not establish rights to original game assets.",
+      "animations": {
+        "walk": {
+          "image": "/assets/sprites/gengar/Walk-Anim.png",
+          "imageWidth": 128,
+          "imageHeight": 320,
+          "frameWidth": 32,
+          "frameHeight": 40,
+          "frameCount": 4,
+          "durationMs": [
+            160,
+            200,
+            160,
+            200
+          ],
+          "anchor": [
+            16,
+            24
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ]
+            }
+          },
+          "sha256": "be39dae12dae3715a3328628c4c6bc542fc9805d483e877d420d8dac31279a0d"
+        },
+        "idle": {
+          "image": "/assets/sprites/gengar/Idle-Anim.png",
+          "imageWidth": 256,
+          "imageHeight": 320,
+          "frameWidth": 32,
+          "frameHeight": 40,
+          "frameCount": 8,
+          "durationMs": [
+            800,
+            80,
+            60,
+            60,
+            60,
+            60,
+            60,
+            80
+          ],
+          "anchor": [
+            16,
+            24
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  17,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  17,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  17,
+                  23
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  17,
+                  23
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  23
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  23
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  15,
+                  23
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  15,
+                  23
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  15,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  15,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  17,
+                  23
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  17,
+                  23
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  23
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  23
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  15,
+                  23
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  15,
+                  23
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            }
+          },
+          "sha256": "b361da86327436f28508f8b0bb1c5cc59807cc75d1e586ab19f218f7db175169"
+        },
+        "sit": {
+          "image": "/assets/sprites/gengar/Sit-Anim.png",
+          "imageWidth": 96,
+          "imageHeight": 32,
+          "frameWidth": 32,
+          "frameHeight": 32,
+          "frameCount": 3,
+          "durationMs": [
+            160,
+            160,
+            160
+          ],
+          "anchor": [
+            16,
+            20
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "right": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "up": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "left": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ],
+                [
+                  16,
+                  20
+                ]
+              ]
+            }
+          },
+          "sha256": "c19177ea74066742e2f067fea0f104c88f81a1aec7bb56c6e7873fa330e9a525"
+        },
+        "attack": {
+          "image": "/assets/sprites/gengar/Attack-Anim.png",
+          "imageWidth": 792,
+          "imageHeight": 640,
+          "frameWidth": 72,
+          "frameHeight": 80,
+          "frameCount": 11,
+          "durationMs": [
+            80,
+            40,
+            80,
+            20,
+            20,
+            20,
+            40,
+            40,
+            40,
+            40,
+            80
+          ],
+          "anchor": [
+            36,
+            44
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  36,
+                  43
+                ],
+                [
+                  36,
+                  42
+                ],
+                [
+                  36,
+                  44
+                ],
+                [
+                  36,
+                  48
+                ],
+                [
+                  36,
+                  54
+                ],
+                [
+                  36,
+                  62
+                ],
+                [
+                  37,
+                  62
+                ],
+                [
+                  36,
+                  62
+                ],
+                [
+                  37,
+                  62
+                ],
+                [
+                  36,
+                  50
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  35,
+                  43
+                ],
+                [
+                  34,
+                  42
+                ],
+                [
+                  36,
+                  44
+                ],
+                [
+                  40,
+                  48
+                ],
+                [
+                  46,
+                  54
+                ],
+                [
+                  54,
+                  62
+                ],
+                [
+                  55,
+                  61
+                ],
+                [
+                  54,
+                  62
+                ],
+                [
+                  55,
+                  61
+                ],
+                [
+                  42,
+                  50
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  35,
+                  44
+                ],
+                [
+                  34,
+                  44
+                ],
+                [
+                  36,
+                  44
+                ],
+                [
+                  40,
+                  44
+                ],
+                [
+                  46,
+                  44
+                ],
+                [
+                  54,
+                  44
+                ],
+                [
+                  54,
+                  45
+                ],
+                [
+                  54,
+                  44
+                ],
+                [
+                  54,
+                  45
+                ],
+                [
+                  42,
+                  44
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  35,
+                  45
+                ],
+                [
+                  34,
+                  46
+                ],
+                [
+                  36,
+                  43
+                ],
+                [
+                  40,
+                  40
+                ],
+                [
+                  46,
+                  34
+                ],
+                [
+                  55,
+                  24
+                ],
+                [
+                  56,
+                  25
+                ],
+                [
+                  55,
+                  24
+                ],
+                [
+                  56,
+                  25
+                ],
+                [
+                  42,
+                  38
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  36,
+                  45
+                ],
+                [
+                  36,
+                  46
+                ],
+                [
+                  36,
+                  44
+                ],
+                [
+                  36,
+                  40
+                ],
+                [
+                  36,
+                  34
+                ],
+                [
+                  36,
+                  25
+                ],
+                [
+                  37,
+                  25
+                ],
+                [
+                  36,
+                  25
+                ],
+                [
+                  37,
+                  25
+                ],
+                [
+                  36,
+                  38
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  37,
+                  45
+                ],
+                [
+                  38,
+                  46
+                ],
+                [
+                  36,
+                  43
+                ],
+                [
+                  32,
+                  40
+                ],
+                [
+                  26,
+                  34
+                ],
+                [
+                  17,
+                  24
+                ],
+                [
+                  16,
+                  25
+                ],
+                [
+                  17,
+                  24
+                ],
+                [
+                  16,
+                  25
+                ],
+                [
+                  30,
+                  38
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  37,
+                  44
+                ],
+                [
+                  38,
+                  44
+                ],
+                [
+                  36,
+                  44
+                ],
+                [
+                  32,
+                  44
+                ],
+                [
+                  26,
+                  44
+                ],
+                [
+                  18,
+                  44
+                ],
+                [
+                  18,
+                  45
+                ],
+                [
+                  18,
+                  44
+                ],
+                [
+                  18,
+                  45
+                ],
+                [
+                  30,
+                  44
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  37,
+                  43
+                ],
+                [
+                  38,
+                  42
+                ],
+                [
+                  36,
+                  44
+                ],
+                [
+                  32,
+                  48
+                ],
+                [
+                  26,
+                  54
+                ],
+                [
+                  19,
+                  63
+                ],
+                [
+                  18,
+                  62
+                ],
+                [
+                  19,
+                  63
+                ],
+                [
+                  19,
+                  63
+                ],
+                [
+                  30,
+                  50
+                ]
+              ]
+            }
+          },
+          "sha256": "b2596f947660df1ea04a2b96768d06944ec61908a12d1c42b8d2a88d307259e2"
+        },
+        "swing": {
+          "image": "/assets/sprites/gengar/Swing-Anim.png",
+          "imageWidth": 648,
+          "imageHeight": 640,
+          "frameWidth": 72,
+          "frameHeight": 80,
+          "frameCount": 9,
+          "durationMs": [
+            40,
+            20,
+            40,
+            40,
+            60,
+            40,
+            40,
+            20,
+            20
+          ],
+          "anchor": [
+            36,
+            44
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  42,
+                  48
+                ],
+                [
+                  44,
+                  53
+                ],
+                [
+                  43,
+                  63
+                ],
+                [
+                  36,
+                  68
+                ],
+                [
+                  29,
+                  63
+                ],
+                [
+                  28,
+                  53
+                ],
+                [
+                  30,
+                  48
+                ],
+                [
+                  36,
+                  44
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  42,
+                  44
+                ],
+                [
+                  53,
+                  47
+                ],
+                [
+                  58,
+                  53
+                ],
+                [
+                  57,
+                  63
+                ],
+                [
+                  47,
+                  64
+                ],
+                [
+                  38,
+                  56
+                ],
+                [
+                  36,
+                  51
+                ],
+                [
+                  36,
+                  44
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  39,
+                  40
+                ],
+                [
+                  47,
+                  38
+                ],
+                [
+                  53,
+                  40
+                ],
+                [
+                  56,
+                  45
+                ],
+                [
+                  53,
+                  49
+                ],
+                [
+                  48,
+                  51
+                ],
+                [
+                  40,
+                  49
+                ],
+                [
+                  36,
+                  44
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  35,
+                  38
+                ],
+                [
+                  40,
+                  28
+                ],
+                [
+                  47,
+                  22
+                ],
+                [
+                  54,
+                  22
+                ],
+                [
+                  54,
+                  32
+                ],
+                [
+                  52,
+                  38
+                ],
+                [
+                  43,
+                  43
+                ],
+                [
+                  36,
+                  44
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  30,
+                  40
+                ],
+                [
+                  28,
+                  34
+                ],
+                [
+                  29,
+                  26
+                ],
+                [
+                  36,
+                  22
+                ],
+                [
+                  43,
+                  26
+                ],
+                [
+                  44,
+                  36
+                ],
+                [
+                  42,
+                  40
+                ],
+                [
+                  36,
+                  44
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  37,
+                  38
+                ],
+                [
+                  32,
+                  28
+                ],
+                [
+                  25,
+                  22
+                ],
+                [
+                  18,
+                  22
+                ],
+                [
+                  18,
+                  32
+                ],
+                [
+                  20,
+                  38
+                ],
+                [
+                  29,
+                  43
+                ],
+                [
+                  36,
+                  44
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  33,
+                  40
+                ],
+                [
+                  25,
+                  38
+                ],
+                [
+                  19,
+                  40
+                ],
+                [
+                  16,
+                  45
+                ],
+                [
+                  19,
+                  49
+                ],
+                [
+                  24,
+                  51
+                ],
+                [
+                  32,
+                  49
+                ],
+                [
+                  36,
+                  44
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "anchors": [
+                [
+                  36,
+                  44
+                ],
+                [
+                  30,
+                  44
+                ],
+                [
+                  19,
+                  47
+                ],
+                [
+                  14,
+                  53
+                ],
+                [
+                  15,
+                  65
+                ],
+                [
+                  25,
+                  64
+                ],
+                [
+                  34,
+                  56
+                ],
+                [
+                  36,
+                  51
+                ],
+                [
+                  36,
+                  44
+                ]
+              ]
+            }
+          },
+          "sha256": "e1d3c9271a1d4ca3139f901d07d149e9e870d6f8589df92f577375c870c78079"
+        },
+        "pose": {
+          "image": "/assets/sprites/gengar/Pose-Anim.png",
+          "imageWidth": 128,
+          "imageHeight": 320,
+          "frameWidth": 32,
+          "frameHeight": 40,
+          "frameCount": 4,
+          "durationMs": [
+            240,
+            40,
+            40,
+            160
+          ],
+          "anchor": [
+            16,
+            24
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            }
+          },
+          "sha256": "f1bc1618e008f499765cf039bd75e0fbc45b4f1c1958cbbd57688ce039cfa5f1"
+        },
+        "hurt": {
+          "image": "/assets/sprites/gengar/Hurt-Anim.png",
+          "imageWidth": 96,
+          "imageHeight": 448,
+          "frameWidth": 48,
+          "frameHeight": 56,
+          "frameCount": 2,
+          "durationMs": [
+            40,
+            160
+          ],
+          "anchor": [
+            24,
+            30
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  24,
+                  30
+                ],
+                [
+                  24,
+                  29
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  22,
+                  30
+                ],
+                [
+                  21,
+                  29
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  22,
+                  32
+                ],
+                [
+                  21,
+                  32
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  22,
+                  34
+                ],
+                [
+                  21,
+                  35
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  24,
+                  34
+                ],
+                [
+                  24,
+                  35
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  26,
+                  34
+                ],
+                [
+                  27,
+                  35
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  26,
+                  32
+                ],
+                [
+                  27,
+                  32
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1
+              ],
+              "anchors": [
+                [
+                  26,
+                  30
+                ],
+                [
+                  27,
+                  29
+                ]
+              ]
+            }
+          },
+          "sha256": "74e2457a2e7429a8417fc46ff39c48fae7fa04f2a19d01533cf4f5db8969e49a"
+        },
+        "nod": {
+          "image": "/assets/sprites/gengar/Nod-Anim.png",
+          "imageWidth": 96,
+          "imageHeight": 320,
+          "frameWidth": 32,
+          "frameHeight": 40,
+          "frameCount": 3,
+          "durationMs": [
+            120,
+            160,
+            120
+          ],
+          "anchor": [
+            16,
+            24
+          ],
+          "directions": {
+            "down": {
+              "row": 0,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "downRight": {
+              "row": 1,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "right": {
+              "row": 2,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "upRight": {
+              "row": 3,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "up": {
+              "row": 4,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "upLeft": {
+              "row": 5,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "left": {
+              "row": 6,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            },
+            "downLeft": {
+              "row": 7,
+              "frames": [
+                0,
+                1,
+                2
+              ],
+              "anchors": [
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ],
+                [
+                  16,
+                  24
+                ]
+              ]
+            }
+          },
+          "sha256": "bbe899ad225734f50c9c2fc2609a45f6e98a82a1c27794fd9017a1c84c94c387"
+        }
+      }
+    }
+  }
+}

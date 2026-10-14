@@ -2,9 +2,10 @@
 
 AutoPod owns fleet data and navigation. The renderer owns appearance and animation.
 The desktop's **Village** sidebar destination works with native and managed pods;
-it currently includes a small stage-board renderer to exercise the integration.
-The pixel village from `jsonl-animate` is intentionally **not vendored yet** while
-that repository is under active development.
+it embeds the local `jsonl-animate` village map, sprites, authored walking routes
+and work poses. Native pods use recent tool activity; managed pods use smaller
+characters and lifecycle state only. The renderer is a pinned snapshot, so work
+in the source repository cannot change a running desktop build.
 
 ```text
 PodStore + EventStream ── native activity ─┐
@@ -31,9 +32,10 @@ ManagedPodStore ─────── lifecycle only ───┘               
   error/retry behavior and cleanup. There is no local HTTP server in the app.
 - `Resources/Village/host.js`: stable JavaScript bridge. Full snapshots replace
   prior state, including removed actors. Renderer failures surface in native UI.
-- `Resources/Village/renderer/`: replaceable rendering implementation and assets.
-  Today this is a reference stage view, with smaller managed characters. It is not
-  a fork of `jsonl-animate` and does not prescribe its map, sprites or choreography.
+- `VillageRenderer/`: AutoPod adapter source, styles and live state interpretation.
+  This imports upstream drawing, poses and routes without modifying upstream files.
+- `Resources/Village/renderer/`: generated, self-contained browser bundle plus
+  `upstream/` sources, assets, credits and provenance. Do not edit generated files.
 
 The existing artifact HTML viewer remains separate and still disables JavaScript.
 The village permits its bundled scripts, blocks external navigation/network access,
@@ -101,26 +103,61 @@ Keep display coordinates, stations, sprites and animation clocks inside the rend
 
 ## Picking up jsonl-animate changes
 
-1. Select a reviewed renderer revision when ready. Do not symlink to or watch the
-   in-progress checkout and do not add it as a runtime dependency.
-2. In `renderer/`, add a small adapter implementing the interface above. Bundle
-   the renderer's browser modules to `renderer.js` and copy its required assets.
-   Keep source revision and build instructions with that bundle. The adapter maps
-   semantic pod state onto whatever renderer API that revision exposes.
-3. Leave Swift projections and `host.js` unchanged for renderer-only changes.
-   New optional scene fields can be additive; incompatible semantics require an
-   explicit contract version bump in both sides.
-4. Run the shared fixture and WebKit checks below. Validate asset paths in the
-   actual app bundle, which copies the entire `Village/` directory.
+From the AutoPod repository root (Node 22+):
 
-The current jsonl-animate replay compiler condenses time and ends activity after a
-scene's hold duration. A live renderer adapter must maintain current pod state
-independently of that replay clock. Live scene rendering and saved-session replay
-can share drawing code without sharing their scheduling assumptions.
+```sh
+npx pnpm install --frozen-lockfile
+npx pnpm village:update --source /Users/ewi/repos/jsonl-animate
+node --test packages/desktop/Tests/VillageHost/*.test.mjs scripts/update-village-renderer.test.mjs
+swift test --package-path packages/desktop --filter Village
+```
 
-This first slice does not implement replay/rewind, helper-agent discovery, managed
-tool-log collection, renderer hot reload, or the final pixel artwork. Those can be
-added without coupling the desktop to the active renderer checkout.
+Pass any local checkout path. The update reads the browser dependency graph and
+required assets; it does not modify the source checkout or copy session logs,
+server code, credentials, or source node_modules. Local uncommitted changes are
+supported: `upstream/provenance.json` records the Git revision, dirty flag and
+SHA-256 for every captured file. Files are checked again before accepting the
+snapshot; if the source changes during capture, rerun the command. The initial
+snapshot was captured from `92b9e0c` with local work in progress.
+
+A staged build replaces the generated directory only after imports, metadata and
+assets are available. Failed updates preserve the previous working bundle. A
+sibling `.lock` directory prevents concurrent updates. If a process is killed,
+inspect that directory before removing it; it may contain the previous bundle.
+Review the provenance/bundle diff, run the WebKit tests, then rebuild the desktop
+app to pick up the new bundle. Nothing is fetched at runtime, and there is no
+watcher or symlink to the active renderer checkout.
+
+To rebuild after changing only the AutoPod adapter, omit `--source`. To verify
+that checked-in output exactly matches the adapter and pinned upstream snapshot:
+
+```sh
+npx pnpm village:update
+npx pnpm village:check
+```
+
+Both commands work offline after dependencies are installed. esbuild is pinned
+in the root lockfile. CI verifies reproducibility, update failure recovery,
+semantic mapping and real WebKit asset loading. Upstream API changes fail the
+build or WebKit tests; adapt only `VillageRenderer/renderer.mjs` for drawing API
+changes and `live-scene.mjs` for AutoPod semantics. The Swift/JavaScript v1 contract
+stays separate from those imports.
+
+The live adapter deliberately does not use the upstream replay compiler: replay
+condenses time and ends activity after a scene hold, while a pod's lifecycle must
+remain authoritative until another daemon observation arrives. Recent activity
+expires after 30 seconds, failed/input/complete states interrupt travel, and
+stale sources and reduced motion stop the animation loop. Each pod has a stable
+character; the accessible list and canvas both select existing pod details.
+
+The bundled artwork is the current local prototype artwork. Supplied per-character
+credits, source URLs, PMDCollab CC BY-NC conditions and font OFL notices are preserved
+in `renderer/upstream/public/assets/`, including upstream's local-prototype note
+for its Red sprite. No new artwork reuse rights are asserted by this integration.
+
+Replay/rewind, helper-agent discovery, managed tool-log collection and the upstream
+replay-follow camera are not implemented in this slice. The live village is an
+overview; selecting a pod highlights it and opens its existing details.
 
 ## Verification
 
@@ -130,7 +167,7 @@ pods with the same underlying ID to exercise namespacing. Swift tests compare it
 native actor to the real projection; JavaScript tests feed it through the bridge.
 
 ```sh
-node --test packages/desktop/Tests/VillageHost/host.test.mjs
+node --test packages/desktop/Tests/VillageHost/*.test.mjs scripts/update-village-renderer.test.mjs
 swift test --package-path packages/desktop --filter Village
 swift test --package-path packages/desktop
 ```
@@ -139,3 +176,10 @@ Real WebKit tests load the bundled scripts under the page's CSP, exercise the
 ready handshake, full snapshot replacement, pre-ready coalescing, managed
 selection, stale IDs and text containing script syntax. Desktop CI runs the
 Swift suite, JavaScript contract tests and the macOS app build.
+
+For an optional screenshot from the actual WebKit test view:
+
+```sh
+AUTOPOD_VILLAGE_SCREENSHOT=/tmp/autopod-village.png \
+  swift test --package-path packages/desktop --filter VillageWebViewTests
+```

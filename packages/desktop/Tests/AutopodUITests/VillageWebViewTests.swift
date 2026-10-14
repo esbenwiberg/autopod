@@ -30,6 +30,23 @@ struct VillageWebViewTests {
         }
         #expect(failure == nil)
         try #require(count == 3, "Bundled scripts, CSP, handshake and initial snapshot must work in WebKit")
+        let rendered = try await webView.evaluateJavaScript("document.querySelector('canvas').dataset.renderedActors") as? String
+        #expect(rendered == "3")
+        if let screenshot = ProcessInfo.processInfo.environment["AUTOPOD_VILLAGE_SCREENSHOT"] {
+            let image = try await webView.takeSnapshot(configuration: nil)
+            let tiff = try #require(image.tiffRepresentation)
+            let png = try #require(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
+            try png.write(to: URL(fileURLWithPath: screenshot))
+        }
+        // The attention actor is at the upstream noticeboard; clicking its canvas hit target
+        // must use the same namespaced selection path as the accessible list.
+        _ = try await webView.evaluateJavaScript("{ const c=document.querySelector('canvas'), r=c.getBoundingClientRect(); c.dispatchEvent(new MouseEvent('click', {clientX:r.left+r.width*.065, clientY:r.top+r.height*.305-5})); }; true")
+        for _ in 0..<20 {
+            if selection != nil { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(selection?.id == "native:pod-b")
+        selection = nil
         _ = try await webView.evaluateJavaScript("document.querySelector('[data-actor-id=\"managed:pod-a\"]').click()")
         for _ in 0..<20 {
             if selection != nil { break }
@@ -37,6 +54,18 @@ struct VillageWebViewTests {
         }
         #expect(selection?.source == .managed)
         #expect(selection?.podId == "pod-a")
+        // Offscreen WebKit throttles RAF. Drive the requested frames deterministically
+        // while exercising the real bundled drawing code and its cancellation behavior.
+        _ = try await webView.evaluateJavaScript("{ window.villagePaints=0; window.requestAnimationFrame=cb=>{window.villageFrame=cb;return 1;}; window.cancelAnimationFrame=()=>{window.villageFrame=null;}; const c=document.querySelector('canvas').getContext('2d'), draw=c.drawImage; c.drawImage=function(...args){window.villagePaints++; return draw.apply(this,args);}; }; true")
+        coordinator.update(VillageSnapshot(connected: true, activityStreamConnected: true,
+            managedDataFresh: true, reducedMotion: false, selectedActorId: nil, actors: snapshot.actors))
+        for _ in 0..<30 {
+            if (try await webView.evaluateJavaScript("typeof window.villageFrame === 'function'") as? Bool) == true { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        _ = try await webView.evaluateJavaScript("window.villageFrame?.(performance.now()+1000); true")
+        let paints = try await webView.evaluateJavaScript("window.villagePaints") as? Int
+        #expect((paints ?? 0) > 4, "Live characters should animate between native snapshots")
         coordinator.update(VillageSnapshot(connected: false, activityStreamConnected: false,
             managedDataFresh: false, reducedMotion: true, selectedActorId: nil, actors: []))
         for _ in 0..<30 {
@@ -46,6 +75,12 @@ struct VillageWebViewTests {
         }
         #expect(count == 0)
         #expect(failure == nil)
+        let stoppedPaints = try await webView.evaluateJavaScript("window.villagePaints") as? Int
+        let pendingFrame = try await webView.evaluateJavaScript("typeof window.villageFrame === 'function'") as? Bool
+        #expect(pendingFrame == false)
+        try await Task.sleep(for: .milliseconds(150))
+        let laterPaints = try await webView.evaluateJavaScript("window.villagePaints") as? Int
+        #expect(laterPaints == stoppedPaints, "Empty, disconnected/reduced-motion views must stop repainting")
     }
 
     @Test func preReadyUpdatesCoalesceAndTitlesRemainText() async throws {

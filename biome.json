@@ -34,6 +34,7 @@
   },
   "files": {
     "ignore": [
+      "packages/desktop/Sources/AutopodUI/Resources/Village/renderer/**",
       "**/dist/**",
       "**/node_modules/**",
       "**/.turbo/**",

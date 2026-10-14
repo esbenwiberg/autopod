@@ -1,0 +1,100 @@
+:root {
+  color-scheme: dark;
+  font: 13px -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #ebece9;
+  background: #172629;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+.village-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) 240px;
+  gap: 16px;
+  padding: 16px;
+  align-items: start;
+}
+.world {
+  min-width: 0;
+  position: sticky;
+  top: 16px;
+}
+.village-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  border-radius: 8px;
+  border: 1px solid #4a615b;
+  cursor: pointer;
+}
+.caption {
+  color: #b5c6be;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.pod-list {
+  display: grid;
+  gap: 8px;
+}
+.actor {
+  appearance: none;
+  text-align: left;
+  display: grid;
+  gap: 7px;
+  width: 100%;
+  border: 1px solid #4a615b;
+  border-radius: 8px;
+  padding: 12px;
+  background: #243638;
+  color: inherit;
+  cursor: pointer;
+}
+.actor:hover {
+  background: #314749;
+}
+.actor[aria-pressed="true"] {
+  border-color: #e9cf82;
+  background: #35433c;
+}
+.actor:focus-visible {
+  outline: 3px solid #e9cf82;
+  outline-offset: 2px;
+}
+.actor-title {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.meta {
+  color: #b6cfc5;
+  font-size: 11px;
+}
+.activity {
+  color: #d7cba6;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.managed {
+  border-style: dashed;
+  padding: 9px 12px;
+}
+.stale {
+  opacity: 0.65;
+}
+.empty {
+  color: #b5c6be;
+}
+@media (max-width: 700px) {
+  .village-layout {
+    grid-template-columns: 1fr;
+  }
+  .world {
+    position: static;
+  }
+  .pod-list {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+}

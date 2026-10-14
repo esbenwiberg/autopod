@@ -3,6 +3,8 @@
   "private": true,
   "packageManager": "pnpm@9.15.4",
   "scripts": {
+    "village:update": "node scripts/update-village-renderer.mjs",
+    "village:check": "node scripts/update-village-renderer.mjs --check",
     "build": "turbo run build",
     "test": "turbo run test && node --test scripts/*.test.mjs && bash scripts/deploy-hosted-daemon.test.sh && bash scripts/cleanup-hosted-daemon.test.sh",
     "typecheck": "turbo run typecheck",
@@ -20,6 +22,7 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "dependency-cruiser": "^17.0.0",
+    "esbuild": "0.28.1",
     "knip": "^6.26.0",
     "turbo": "^2.10.4",
     "typescript": "^5.7.3",
