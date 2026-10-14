@@ -177,6 +177,32 @@ ready handshake, full snapshot replacement, pre-ready coalescing, managed
 selection, stale IDs and text containing script syntax. Desktop CI runs the
 Swift suite, JavaScript contract tests and the macOS app build.
 
+### Read-only live connection acceptance test
+
+The optional test below uses the existing CLI login in `~/.autopod/credentials.json`.
+Set the URL to your configured daemon. It does not create, launch or modify pods.
+If authentication has expired, use the CLI's normal login refresh first.
+
+```sh
+AUTOPOD_LIVE_VILLAGE_TEST=1 \
+AUTOPOD_LIVE_DAEMON_URL=https://your-configured-daemon \
+AUTOPOD_LIVE_VILLAGE_SCREENSHOT=/tmp/autopod-village-live.png \
+  swift test --package-path packages/desktop --filter LiveVillageConnectionTests
+```
+
+This exercises the actual `DaemonAPI`, paginated `PodStore`/`ManagedPodStore`,
+historical `EventStream` decoding, authenticated WebSocket subscription with a
+server acknowledgement, `VillageScene` projection, bundled WebKit rendering,
+native/managed selection and corresponding detail requests. It reports counts
+and stages, not tokens or log contents. The optional screenshot contains real
+fleet labels and stays local. Normal test runs skip this suite.
+
+A quiet fleet can prove connectivity and historical log decoding but cannot
+prove a newly arriving lifecycle/tool event. The output explicitly reports how
+many live events arrived during the observation window; zero is not evidence
+of a working live-event transition. This headless test also does not operate
+the standalone application's connection setup or sidebar UI.
+
 For an optional screenshot from the actual WebKit test view:
 
 ```sh
