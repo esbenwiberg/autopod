@@ -33,7 +33,16 @@ public struct VillageActor: Codable, Equatable, Identifiable, Sendable {
     public let interactive: Bool
     public let activity: VillageActivity?
 
-    public var isFinished: Bool { ["complete", "killed"].contains(status) }
+    /// Managed runtime exit is separate from review/source-delivery state.
+    /// Optional for compatibility with existing v1 renderer snapshots.
+    public var observedExit: Bool? = nil
+
+    public var isFinished: Bool {
+        if ["complete", "killed"].contains(status) { return true }
+        // Validation and handoff may still be active after the worker exits.
+        return source == .managed && observedExit == true
+            && !["validating", "handoff"].contains(status)
+    }
 }
 
 public enum VillageStage: String, Codable, Sendable {
@@ -96,7 +105,7 @@ public enum VillageScene {
             title: managedPodDisplayName(pod.id), profile: bounded(pod.profileId),
             model: bounded(pod.model), status: pod.state, stage: VillageStage(status: pod.state),
             statusUpdatedAt: Double(pod.lastEventAt) * 1_000,
-            interactive: false, activity: nil
+            interactive: false, activity: nil, observedExit: pod.observedExit
         )
     }
 

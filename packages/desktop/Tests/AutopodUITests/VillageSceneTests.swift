@@ -85,3 +85,26 @@ private func villageEvent(_ id: Int = 42, type: AgentEventType = .toolUse,
     #expect(MainView.filterPods([villagePod()], for: .village).isEmpty)
     #expect(VillageWebView.entryURL != nil)
 }
+
+@Test func villageHidesExitedManagedAttemptsWithoutHidingActiveValidation() throws {
+    let base = #"{"podId":"pod-a","dispatcherAttemptId":"attempt-a","state":"running","providerAccountId":"account","model":"codex","runtime":"codex","executionTarget":"sandbox","reasoning":"high","profileId":"research","profileVersion":1,"providerRequests":1,"consumedTokens":1,"tokenUsageKnown":true,"limitations":[],"artifacts":[],"revoked":false,"stopRequested":false,"observedExit":false,"cleanup":"not-requested","createdAt":1791990000,"lastEventAt":1791990000}"#
+    let cases: [(String, Bool, Bool)] = [
+        ("running", false, false), ("queued", false, false),
+        ("awaiting_input", false, false), ("killing", false, false),
+        ("review_required", false, false), ("review_required", true, true),
+        ("validated", true, true), ("failed", true, true),
+        ("complete", true, true), ("killed", true, true),
+        ("validating", true, false), ("handoff", true, false),
+    ]
+    for (status, exited, finished) in cases {
+        var json = try #require(JSONSerialization.jsonObject(with: Data(base.utf8)) as? [String: Any])
+        json["state"] = status
+        json["observedExit"] = exited
+        let pod = try JSONDecoder().decode(ManagedPodSummary.self, from: JSONSerialization.data(withJSONObject: json))
+        let actor = VillageScene.managed(pod)
+        #expect(actor.isFinished == finished, "Village visibility for \(status), observed exit: \(exited)")
+        #expect(actor.status == status) // Filtering must not rewrite lifecycle evidence.
+        let decoded = try JSONDecoder().decode(VillageActor.self, from: JSONEncoder().encode(actor))
+        #expect(decoded.isFinished == finished)
+    }
+}

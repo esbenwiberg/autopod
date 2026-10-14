@@ -76,9 +76,8 @@ struct LiveVillageConnectionTests {
         }
         let allActors = native.pods.map { VillageScene.native($0, events: stream.sessionEvents[$0.id] ?? [], now: .now) }
             + managed.pods.map(VillageScene.managed)
-        let visible = allActors.filter { !$0.isFinished }.sorted { $0.id < $1.id }
-        // Match the default Village filter; if the fleet is entirely finished, include history.
-        let actors = visible.isEmpty ? allActors : visible
+        // Match the Village filter even when the fleet is entirely finished.
+        let actors = allActors.filter { !$0.isFinished }.sorted { $0.id < $1.id }
         let snapshot = VillageSnapshot(connected: true, activityStreamConnected: true,
             managedDataFresh: true, reducedMotion: true, selectedActorId: nil, actors: actors)
 

@@ -9,7 +9,9 @@ in the source repository cannot change a running desktop build.
 
 The map occupies the center pane and an accessible native pod list occupies the
 right pane. Both show only unfinished pods: `complete` and `killed` are excluded,
-while failed pods and pods awaiting review remain visible. Search filters both.
+and managed attempts with an observed worker exit are excluded even if their
+state remains `review_required` or `validated`. Active validation and handoff
+stay visible after worker exit. Search filters both.
 Selecting a character or list row opens the existing details in the right pane;
 **Village pods** returns to the list without clearing the search.
 
@@ -100,6 +102,9 @@ Each actor has `id`, `podId`, `source` (`native` or `managed`), `detailLevel`
 a normalized `stage`, `statusUpdatedAt`, `interactive`, and optional `activity`.
 All timestamps are Unix **milliseconds**. IDs are opaque to renderers; the host
 currently constructs them as `native:<podId>` or `managed:<podId>`.
+
+Managed actors also carry optional `observedExit` evidence for native filtering;
+older v1 snapshots can omit it. This does not change the authoritative status.
 
 An activity contains `kind`, `label`, `eventId`, `observedAt`, and `isRecent`.
 It describes an observed tool category, not a claim that the tool is still running
