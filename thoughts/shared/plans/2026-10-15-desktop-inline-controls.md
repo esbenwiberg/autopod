@@ -150,7 +150,7 @@ question is required because this uses the selected Inline direction.
 - [x] Per-pod ownership joins duplicates, keeps other pods independent and gates delete.
 - [x] Inline notice/disabled controls observe real pending state with confirmed status intact.
 - [x] Required narrow/wide and card/series native captures inspected.
-- [ ] Independent pre-PR, hosted and integrated proof recorded.
+- [x] Independent pre-PR, hosted and integrated proof recorded.
 
 ## Compatibility and rollback
 
@@ -266,3 +266,21 @@ no OS permission changes were requested. Initial series snapshots raced animatio
 and are superseded by the settled final captures. Synthetic private transport
 qualifies client ownership, not a live daemon lifecycle. Reconnect-persistent
 unknown outcomes/drafts and full startup remain outside this slice.
+
+## Coordinator closure
+
+Root independently reviewed final source and the corrected proof at4e91054c.
+All31 focused native functions passed;47 independently regenerated PNGs were
+byte-identical to the worker's47 images that root inspected (39 initial plus8
+detail Delete regression captures). No unresolved actionable source findings.
+The sole integration conflict was the plan append; reviewed merge30278af1 kept
+the entire packages tree unchanged and passed32 functions including resync.
+
+PR431 passed general CI38800543540 and native38800543492 (Swift tests, village
+contract, Xcode app build), then merged into campaign at1ace904a. Integrated
+32 functions/4 suites passed and47 regenerated images matched reviewed evidence.
+The first integrated Swift invocation passed, but its shell wrapper attempted
+to assign zsh's read-only status variable; the corrected wrapper rerun exited0.
+Both logs remain. Evidence and hashes are in ignored r04d/root-proof.json, with
+worker/final/root/integrated captures retained. Existing live opt-in suite skipped
+in the worker full suite; no live/full-startup/human/compositor claim added.

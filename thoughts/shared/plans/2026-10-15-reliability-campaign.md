@@ -103,7 +103,7 @@ choice or missing authority that repository evidence cannot establish.
 | R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a complete (PR #417); R01b complete (PR #419, cf8c6663), integrated43tests passed; R01c complete (#429,f818a8b3), live proof and hosted/integrated checks passed |
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | R03a complete (#420); R03b complete (#422,913c0622); hosted+integrated proof passed |
-| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b complete (#425,173d3450); R04c complete (#427,80fc8158; integrated18tests at43a5fad2 after fixture PR430); R04d PR431 reviewed/native proof passed, final hosted app build pending; draft retention remains |
+| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b complete (#425,173d3450); R04c complete (#427,80fc8158; integrated18tests at43a5fad2 after fixture PR430); R04d complete (#431,1ace904a), hosted/integrated32 tests and47 capture matches; draft retention remains |
 | R05 | Shared response/event contract scenarios | R00, R01 | R05a complete (#426,98b9d912); R05b decision identity/fencing implementing from36566b48 after reviewed plan |
 | R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a complete: PR423 merged at5cc8fbc6;704 integrated tests passed |
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | Researching existing navigation defects; separate wireframes before visible changes |
@@ -338,3 +338,11 @@ proof after pod removal/reinsertion. Worker research_desktop reuses the complete
 R04c fixture checkout on codex/reliability-decision-identity; owns native identity
 and event-response fencing only. Draft storage/reply binding are not implemented.
 R07 navigation and server reply-admission research proceed read-only in parallel.
+
+R04d complete at1ace904a: PR431 general/native checks passed, integrated32
+functions/4 suites passed and47 native captures matched independently reviewed
+images. Scope remains one handler lifetime; no reconnect outcome/draft claim.
+R05b baseline at910586be reproduced three stale-decision scenarios (two test
+functions, six expected issues) before its production fix. Worker implementation
+continues. Reply acceptance research records post-commit HTTP failures and special
+branch differences; it does not authorize an API expansion by itself.
