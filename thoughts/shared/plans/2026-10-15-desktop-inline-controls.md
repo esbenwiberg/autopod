@@ -170,3 +170,14 @@ both: combined notice/disable lifetime, plain-delete join without self-recursion
 and initiating/joining cancellation cases. Resolved under standing authorization;
 ready for worker dispatch after R04c shared held transport is integrated. No
 unresolved product decisions.
+
+## Phase 0: validation prerequisite (root authorized)
+
+Expected: a clean Swift baseline executes the duplicate/delete reproductions.
+Found: fresh Swift 6.3.3 compilation repeatedly rejects the unchanged resync
+URLProtocol Task's implicit capture; hosted Swift 6.1.2 had passed.
+Why it matters: the test target cannot compile, blocking executable baseline proof.
+Adjustment: match the existing DaemonAPITests request snapshot plus explicit
+Sendable captures in EventStreamResyncTests only. Commit this prerequisite
+separately; compile and run resync + old-interface inline baseline before any
+product changes. Failed logs are preserved under `.autopod-data/reliability/r04d/`.
