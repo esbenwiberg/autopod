@@ -101,7 +101,7 @@ choice or missing authority that repository evidence cannot establish.
 |---|---|---|---|
 | R00 | Existing CI covers campaign PRs and contract paths | Baseline | Independently reviewed; PR #416 open against campaign branch; hosted checks running |
 | R01 | Verification harness feasibility and deterministic fixtures | R00 | Feasibility researched; R01a CLI executable plan independently reviewed and ready |
-| R02 | Desktop connection/action wireframes | Campaign research | Interactive proposals prepared and browser-checked; present before visible implementation |
+| R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | Task-specific research/plan; include actual executable exit/output and replay behavior |
 | R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | Task-specific research/plan; deterministic store tests plus actual app proof |
 | R05 | Shared response/event contract scenarios | R00, R01 | Extend established fixture pattern for selected R03/R04 boundaries |
@@ -110,7 +110,8 @@ choice or missing authority that repository evidence cannot establish.
 | R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | Measure baseline first; compare same data/toolchain and record thresholds before optimizing |
 
 R00 and the bounded R01a CLI executable harness have reviewed detailed plans.
-The remaining R01 harness slices and R02 stay bounded research/design work.
+The remaining R01 harness slices need detailed plans. R02's design direction is
+selected; R04 still needs its task-specific implementation plan and evidence.
 R03-R08 are deliberately unresolved at implementation-detail level and must not
 be handed to executors as approved detailed specifications. They represent the
 agreed outcomes, with scope selected from new evidence.
@@ -159,6 +160,15 @@ from mechanical movement. Compare observable behavior and run interrupted cases
 before and after. A reduced line count alone is not acceptance.
 
 ## UI checkpoint
+
+User decision: after viewing the published interactive wireframes, the user said
+"Inline is best i think." Use Inline status for R04: action controls near the pod
+heading, pending requests distinct from confirmed pod state, and drafts retained
+through reconnects. The wireframe-before-visible-change checkpoint is satisfied
+for this direction. This records a design preference, not completed implementation
+or native-app validation. Later navigation changes still need their own wireframes.
+
+Published preview: https://autopod-reliability-wireframes.esbenw309505.chatgpt.site
 
 R02 presents wireframes before any visible change, covering existing task state,
 pending command, lost connectivity, rejected action, confirmed recovery and
@@ -212,8 +222,8 @@ confirmed pause, pending resume and retained reply scenarios. Browser interactio
 confirmed pending actions preserve the last confirmed status and draft text
 survives switching layouts. Screenshots inspected at desktop and 360px widths;
 no browser console errors observed. This verifies the proposal only, not native
-app behavior. No visible product code has changed. Inline status is the current
-recommendation because the existing detail content retains more space.
+app behavior. No visible product code has changed. The user selected Inline status
+after viewing the published preview; it retains more space for existing details.
 
 Independent campaign-plan review confirmed the requirements and bounded first
 task, and corrected baseline wording to distinguish skipped live checks and
