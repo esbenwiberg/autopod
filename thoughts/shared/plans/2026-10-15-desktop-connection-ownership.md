@@ -186,7 +186,7 @@ affected checks must pass before closure.
 - [x] Source-key cache behavior and per-configuration invalidation proven.
 - [x] Handler admission, result publication and chained follow-ups fenced.
 - [x] Private journal and same-source reconnect compatibility proven.
-- [ ] Native states, independent review, hosted/integrated gates recorded.
+- [x] Native states, independent review, hosted/integrated gates recorded.
 
 No persistence migration, new daemon/API field or deployment. Existing saved UUID
 is not a verified daemon incarnation; replacement server at identical UUID/URL is
@@ -285,3 +285,22 @@ Receipt `proof.json` and `manifest.json` record exact code revision, commands,
 results and SHA-256 hashes of final logs/captures/source. Independent source/proof
 review, PR hosted checks and integrated checks remain root-owned pending gates.
 No worker PR was opened; no user manual result is inferred.
+
+## Completed integration
+
+Final worker ed02c8ed received independent source/evidence review with no actionable
+findings before PR435. Root independently ran64 functions/163 cases/10 suites
+and inspected all five root native captures. Both reviewers recomputed the32
+manifest hashes without mismatch. PR435 passed general build/test/secret checks
+(38809571399) and hosted Swift, renderer and unsigned Xcode build (38809571365),
+then merged only into codex/reliability at
+`d2a426a26cd038fd9c27dbd66c8e2e9a4ff4002e`.
+
+Root's fresh integrated Swift build and affected run passed64 functions/10 suites
+with zero skips (5.436s test execution). Command used --jobs2 --no-parallel and
+the complete connection/launch/wiring/lifetime/decision/control/reply/waiver/
+termination filter recorded in root-proof.json. Root inspected all five regenerated
+integrated PNGs; A retention and empty-then-B content match the scoped expectation.
+Sidebar/vibrancy and full account/application limits remain unchanged. All32
+worker source/evidence hashes still matched after integration. Verdict PROVEN
+for this bounded ownership contract. Evidence is retained in campaign r04e/.

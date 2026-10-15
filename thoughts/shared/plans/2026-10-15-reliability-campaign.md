@@ -103,17 +103,17 @@ choice or missing authority that repository evidence cannot establish.
 | R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a complete (PR #417); R01b complete (PR #419, cf8c6663), integrated43tests passed; R01c complete (#429,f818a8b3), live proof and hosted/integrated checks passed |
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | R03a complete (#420); R03b complete (#422,913c0622); hosted+integrated proof passed |
-| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b complete (#425,173d3450); R04c complete (#427,80fc8158; integrated18tests at43a5fad2 after fixture PR430); R04d complete (#431,1ace904a), hosted/integrated32 tests and47 capture matches; R04e connection ownership implementing reviewed planf8693f23; draft retention follows |
+| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a–d complete (#421/#425/#427/#430/#431); R04e complete (#435,d2a426a2), independent/hosted/integrated64functions and five inspected native states; R04f draft retention implementing reviewed plan after native failing baseline |
 | R05 | Shared response/event contract scenarios | R00, R01 | R05a complete (#426,98b9d912); R05b complete (#432,be22402d); independent47tests/six captures, hosted and integrated47tests passed |
 | R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a complete (#423,5cc8fbc6); R06b complete (#434,a1e048d1), independent/hosted and fresh-build integrated708tests passed |
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | R07a complete (#433,96783185); independent/hosted/integrated12functions and14 capture matches; literal mouse proof excluded |
 | R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | R08a complete (#424,c1faba3a), hosted+integrated roundtrip passed; R08b complete (#428,04dabd6a), independent reproduction and hosted/integrated checks passed |
+| R09 | Final combined qualification and evidence review | R04e/f; prior slices integrated | Reviewed finite plan74f55787; pinned uncached JS pipeline passed7170tests plus35script tests and shell checks; final native/source-continuity gates pending |
 
 The ledger above is current; execution checkpoints below preserve chronology.
-Implemented slices each have their own reviewed RPI plan and proof. Remaining
-reconnect outcomes, reply drafts, orchestration extraction and navigation work
-still require bounded plans from current source evidence. A workstream heading
-is not an executable specification or permission for a speculative rewrite.
+Implemented slices each have their own reviewed RPI plan and proof. R04f and the
+finite R09 qualification are the remaining selected work. Broader orchestration,
+navigation or recovery work is not implied by these workstream headings.
 
 ## Verification strategy
 
@@ -380,3 +380,19 @@ integrated daemon/dependency build and708affected tests passed with no skips.
 The first pod-manager extraction preserves artifact publication and ownership
 ordering through a typed module, with before/after characterization and real
 private-file copying. Decision draft research/plan follows while R04e implements.
+
+R04e complete atd2a426a2: PR435 independently reviewed before opening; hosted
+general/native/Xcode checks passed, then root cold integrated build and64functions
+passed. Root inspected all five final/integrated native states and verified all32
+worker hashes. R04f baselinebc846039 reproduced actual typed-text loss across
+Overview remount and held/failedPOST; root inspected six captures. Exact R04e API
+reconciliation is committedf21d61fc; worker47a6966d merges the integrated prerequisite
+and is authorized for all remaining bounded draft phases.
+
+R09 frozen install and all six pinned pipeline stages passed at tracked inputs
+recorded from74f55787:7170Vitest tests/486files,10tests/5files skipped;35Node script
+tests plus deployment/provenance/cleanup shell checks passed. Turbo executed all15
+tasks with zero cache hits; audit returned no known vulnerabilities. Earlier
+nested-npx EUSAGE and system-Node24 SQLite ABI failures are retained separately;
+the reviewed equivalent runner pins Node22/pnpm9.15.4. All4417 input hashes remain
+unchanged after R04e integration. Final native and final continuity review pending.

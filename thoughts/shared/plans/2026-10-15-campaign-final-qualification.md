@@ -78,7 +78,7 @@ full-app acceptance, exactly-once replies or production rollout.
 ## Success criteria
 
 - [ ] R04e/R04f reviewed, hosted and integrated gates closed.
-- [ ] Frozen install and uncached combined JavaScript checks accounted for.
+- [x] Frozen install and uncached combined JavaScript checks accounted for.
 - [ ] Final full Swift suite, executable and hosted Xcode proof accounted for.
 - [ ] Final source/digest continuity, skips, audit outcome and evidence reviewed.
 - [ ] Campaign report committed/pushed; main and original checkout preserved.
