@@ -90,10 +90,10 @@ focused checks must pass before closure. No human signoff is inferred from captu
 
 ## Acceptance / compatibility
 
-- [ ] Existing stale keyboard behavior reproduced through actual native delivery.
-- [ ] Rendered rows and current callbacks own keyboard execution.
-- [ ] Window scope and repeated lifecycle teardown proven.
-- [ ] Material native states captured and inspected.
+- [x] Existing stale keyboard behavior reproduced through actual native delivery.
+- [x] Rendered rows and current callbacks own keyboard execution.
+- [x] Window scope and repeated lifecycle teardown proven.
+- [x] Material native states captured and inspected (bounded palette; mouse exception below).
 - [ ] Independent pre-PR, hosted and integrated checks recorded.
 
 No API, schema, dependency or persistent-state changes. Existing public palette
@@ -137,3 +137,48 @@ Native mounted owner replacement invokes only the new recorder. SwiftUI can reta
 old view values independently of the keyboard bridge, so direct bridge ownership
 checks separately prove callback release on replacement/disposal; the mounted test
 checks old-owner non-invocation rather than claiming whole-SwiftUI deallocation.
+
+
+### Final worker verification
+
+Source/test revision `927f39ef99ef1b05421c4334819d0cc8cd0a9f72` includes the clean
+campaign merge `be22402d`. Only the palette, its internal native attachment, focused
+native tests and this plan differ from that campaign base. `updateNSView` replaces
+callbacks on every render. Native monitoring is scoped to the attached window;
+close, visibility/update, detach and dismantle manage its lifetime. A presentation
+guard also prevents a queued submit/second key from re-executing after dismissal.
+The existing row click closure, layout, matching rules and public initializer are
+unchanged.
+
+- Focused command `swift test --package-path packages/desktop --filter
+  'CommandPaletteKeyboardTests|commandPalette'`: 11 test functions passed (15 cases
+  including arguments). These cases also passed in the final full run after the
+  merge and the strengthened same-result-count query-reset assertion.
+- Final `swift test --package-path packages/desktop`: 454 Swift Testing functions
+  plus 13 XCTest cases passed. Existing opt-in `LiveVillageConnectionTests` and
+  `configuredDaemonReachesStoresEventsAndBundledVillage` were skipped. No live
+  daemon, account or provider action was exercised.
+- `swift build --package-path packages/desktop --product AutopodDesktopExe`: passed.
+- Node22/pnpm9.15.4 `pnpm secret-scan`: passed; `git diff --check`: passed.
+- Native application sendEvent proof covers replacement A/B→B/C, same-ID callback
+  replacement for pods/profiles/actions, current list size/wrapping, empty results,
+  query reset without ID/count changes, Return/keypad Enter/Escape, exact single
+  callback, unrelated text input, all supported keys in another window, retained
+  close/reopen, detach/re-attach, dismantle and idempotent disposal. A direct bridge
+  test proves replaced/disposed callback capture release.
+- Fourteen PNGs were generated from the final full run and inspected (seven unique
+  pixel states; matching SHA256s identify duplicate owner/activation images). The
+  native host is 520×400 with the existing 480px palette. Companion text records
+  contain callback targets and one-mount assertions. The fixture deliberately keeps
+  content mounted after presentation becomes false to test dispatch lifetime:
+  `*-activated.png` shows retained palette content; the companion callback evidence,
+  not a destination screen, proves activation. There is no full-app startup/layout,
+  key-window focus, literal mouse activation or real approve/kill claim.
+
+Ignored evidence: `.autopod-data/reliability/r07a/proof.json`,
+`baseline.log`, `baseline-captures/`, `baseline-fixture.swift`,
+`baseline-CommandPalette.swift`, `focused.log`, `final-full-swift-verified.log`,
+`build.log`, `secret-scan.log`, `final-captures/`, and retained unsuccessful native
+mouse/focus probes. Scope-adjusted local proof is PROVEN; literal mouse activation
+remains unproven under the explicit root adjustment. Independent pre-PR review,
+hosted CI and integrated focused checks remain root-owned and unchecked above.
