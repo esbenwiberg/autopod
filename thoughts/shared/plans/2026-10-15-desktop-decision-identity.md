@@ -186,7 +186,7 @@ fresh Swift cache were required; verification used Swift 6.3.3 and the existing 
 | Created/resolved callbacks preserve the matching decision and observed lifecycle | Actual EventStream factory callbacks, private DaemonAPI GET barriers and injected notification recorder | Passed |
 | Held detail/compact cannot replace or resurrect event decision fields | Older/equal/absent snapshots, resolution, removal/reinsert tokens, independent pods, selected hydration and epoch replacement | Passed |
 | Existing native question/options survive stale A and adopt authoritative C | Same-mounted production DetailPanel/Overview, 600 and 900px, six PNGs plus accessibility text/frame checks, one mount and three GETs per case | Passed; all six images inspected |
-| Broader native compatibility | Affected run 47 functions / 6 suites; full Swift run 447 functions / 19 suites | Passed, zero skipped |
+| Broader native compatibility | Affected run 47 Swift Testing functions / 6 suites; full run 447 Swift Testing functions / 19 suites plus 13 XCTest cases | Passed; affected run zero skips, full run skips the existing opt-in live test |
 | Executable and repository checks | AutopodDesktopExe build, Node22 secret scan, git diff check | All exit 0 |
 
 Exact reproducible commands (run from repository root):
@@ -202,7 +202,12 @@ git diff --check
 Ignored receipts are `proof.json` (source/image/log SHA-256 mapping),
 `baseline.log`, `focused-final.log`, `full-swift-final.log`, `build-final.log`,
 `secret-scan-final.log`, and `native/detail{600,900}-{current-B,after-stale-A,reconciled-C}.{png,ax.txt}`.
-The test runner reports function counts; parameterized cases are additional.
+The Swift Testing runner reports function counts; parameterized cases are additional.
+Full-run lines 449–450 explicitly skip `LiveVillageConnectionTests` and its
+`configuredDaemonReachesStoresEventsAndBundledVillage()` test (one existing opt-in
+live test, not two skipped tests). Lines 43–46 separately report 13 XCTest cases
+passed. The previous worker summary incorrectly said zero skips for the full run;
+this accounting correction does not change source, tests, captures or results.
 Known warnings include AppKit's deprecated enhanced-accessibility selectors in
 native fixture construction and the existing unused AppRootView capture.
 
