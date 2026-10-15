@@ -7,6 +7,7 @@ public enum DecisionReplyOutcome: Sendable, Equatable {
 }
 
 public struct DecisionReplySnapshot: Sendable {
+  public var recordID: UUID?
   public var text: String = ""
   public var canEdit = false
   public var canSubmit = false
@@ -28,6 +29,7 @@ public struct DecisionReplyActions: Sendable {
   public var contextID: UUID
   public var pod: @MainActor @Sendable (String) -> Pod?
   public var snapshot: @MainActor @Sendable (String, String?) -> DecisionReplySnapshot
+  public var isCurrent: @MainActor @Sendable (String, String, UUID) -> Bool
   public var edit: @MainActor @Sendable (String, String, String) -> Void
   public var discard: @MainActor @Sendable (String, String) -> Void
   public var prepare: @MainActor @Sendable (String) async -> DecisionReplyPreparation
@@ -37,6 +39,7 @@ public struct DecisionReplyActions: Sendable {
     contextID: UUID = UUID(),
     pod: @escaping @MainActor @Sendable (String) -> Pod? = { _ in nil },
     snapshot: @escaping @MainActor @Sendable (String, String?) -> DecisionReplySnapshot = { _, _ in .init() },
+    isCurrent: @escaping @MainActor @Sendable (String, String, UUID) -> Bool = { _, _, _ in false },
     edit: @escaping @MainActor @Sendable (String, String, String) -> Void = { _, _, _ in },
     discard: @escaping @MainActor @Sendable (String, String) -> Void = { _, _ in },
     prepare: @escaping @MainActor @Sendable (String) async -> DecisionReplyPreparation = { _ in .unavailable("Connect to load this question.") },
@@ -45,6 +48,7 @@ public struct DecisionReplyActions: Sendable {
     self.contextID = contextID
     self.pod = pod
     self.snapshot = snapshot
+    self.isCurrent = isCurrent
     self.edit = edit
     self.discard = discard
     self.prepare = prepare

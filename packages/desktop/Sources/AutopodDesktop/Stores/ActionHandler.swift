@@ -855,6 +855,11 @@ extension ActionHandler {
       contextID: replyContextID,
       pod: { [weak self] id in self?.replyPod(id) },
       snapshot: { [weak self] id, decision in self?.replySnapshot(id, decision) ?? .init() },
+      isCurrent: { [weak self] id, decision, recordID in
+        guard let self, self.podStore.isCurrent(self.ownership),
+              let key = self.replyKey(id, decision) else { return false }
+        return self.podStore.decisionReplies.read(key)?.id == recordID
+      },
       edit: { [weak self] id, decision, text in
         guard let self, let key = self.replyKey(id, decision) else { return }
         self.podStore.decisionReplies.get(key).edit(text)
@@ -890,6 +895,7 @@ extension ActionHandler {
     var result = DecisionReplySnapshot()
     guard let key = replyKey(id, decision) else { return result }
     let record = podStore.decisionReplies.read(key)
+    result.recordID = record?.id
     result.text = record?.text ?? ""
     result.canEdit = true
     result.pending = podStore.decisionReplies.pending(key) != nil

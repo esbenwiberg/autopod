@@ -69,7 +69,7 @@ struct DecisionReplyOwnershipTests {
       f.store.upsertSession(try decisionPod("A"))
       let handler = replyHandler(f); let actions = handler.actions.decisionReply
       actions.edit("decision", "A", "keep")
-      let task = actions.submit("decision", "A")
+      let task = f.track(actions.submit("decision", "A"))
       let get = try await f.next(f.a, "/pods/decision")
       if kind == "failed" { get.respond(status: 500, body: "{}") }
       else {
@@ -90,8 +90,8 @@ struct DecisionReplyOwnershipTests {
       f.store.upsertSession(try decisionPod("A"))
       let handler = replyHandler(f); let actions = handler.actions.decisionReply
       actions.edit("decision", "A", "first")
-      let task = actions.submit("decision", "A")
-      let duplicate = actions.submit("decision", "A")
+      let task = f.track(actions.submit("decision", "A"))
+      let duplicate = f.track(actions.submit("decision", "A"))
       #expect(actions.snapshot("decision", "A").pending)
       let post = try await replyPost(f)
       actions.edit("decision", "A", "newer edit")
@@ -119,7 +119,7 @@ struct DecisionReplyOwnershipTests {
       let handler = replyHandler(f); let actions = handler.actions.decisionReply
       actions.edit("decision", "A", "typed")
       actions.edit("decision", "A", "approved")
-      let task = actions.submit("decision", "A")
+      let task = f.track(actions.submit("decision", "A"))
       let post = try await replyPost(f)
       #expect(try JSONSerialization.jsonObject(with: replyRequestData(post.request)) as? [String: String] == ["message": "approved"])
       if kind == "500" { post.respond(status: 500, body: "{}") }
@@ -129,7 +129,7 @@ struct DecisionReplyOwnershipTests {
       refresh.respond(body: try decisionSnapshot("A"))
       #expect(await task.value == .unconfirmed)
       #expect(actions.snapshot("decision", "A").text == "approved")
-      let retry = actions.submit("decision", "A")
+      let retry = f.track(actions.submit("decision", "A"))
       let retryPost = try await replyPost(f)
       #expect(try JSONSerialization.jsonObject(with: replyRequestData(retryPost.request)) as? [String: String] == ["message": "approved"])
       #expect(try await settleReply(f, post: retryPost, task: retry) == .acknowledged)
@@ -143,11 +143,11 @@ struct DecisionReplyOwnershipTests {
       f.store.upsertSession(try decisionPod("A"))
       let handler = replyHandler(f); let old = handler.actions.decisionReply
       old.edit("decision", "A", "kept after reconnect")
-      let task = old.submit("decision", "A")
+      let task = f.track(old.submit("decision", "A"))
       let post = try await replyPost(f)
       f.store.disconnect(); f.store.configure(api: f.apiA)
       let current = replyHandler(f); let fresh = current.actions.decisionReply
-      let duplicate = fresh.submit("decision", "A")
+      let duplicate = f.track(fresh.submit("decision", "A"))
       #expect(fresh.snapshot("decision", "A").pending)
       post.respond(body: "{\"ok\":true}")
       #expect(await task.value == .unconfirmed)
@@ -163,7 +163,7 @@ struct DecisionReplyOwnershipTests {
       f.store.upsertSession(try decisionPod("A"))
       let handler = replyHandler(f); let actions = handler.actions.decisionReply
       actions.edit("decision", "A", "original")
-      let task = actions.submit("decision", "A")
+      let task = f.track(actions.submit("decision", "A"))
       let post = try await replyPost(f)
       if kind == "source" {
         f.store.configure(api: f.apiB); f.store.upsertSession(try decisionPod("A"))
@@ -173,13 +173,13 @@ struct DecisionReplyOwnershipTests {
       } else if kind == "removal" {
         f.store.removeSession("decision"); f.store.upsertSession(try decisionPod("A"))
         actions.edit("decision", "A", "replacement")
-        let joined = actions.submit("decision", "A")
+        let joined = f.track(actions.submit("decision", "A"))
         #expect(actions.snapshot("decision", "A").pending)
         post.respond(body: "{\"ok\":true}")
         #expect(await joined.value == .unconfirmed)
       } else {
         actions.discard("decision", "A")
-        let caller = Task { await actions.submit("decision", "A").value }
+        let caller = f.track(Task { await actions.submit("decision", "A").value })
         caller.cancel()
         #expect(actions.snapshot("decision", "A").pending)
         post.respond(body: "{\"ok\":true}")
@@ -199,11 +199,11 @@ struct DecisionReplyOwnershipTests {
       f.store.upsertSession(try decisionPod(nil))
       let handler = replyHandler(f.rest); let actions = handler.actions.decisionReply
       #expect(actions.snapshot("decision", nil).canSubmit == false)
-      let failed = Task { await actions.prepare("decision") }
+      let failed = f.rest.track(Task { await actions.prepare("decision") })
       try await f.rest.next(f.rest.a, "/pods/decision").respond(status: 500, body: "{}")
       if case .ready = await failed.value { Issue.record("Failed GET must not prepare a question") }
-      let first = Task { await actions.prepare("decision") }
-      let second = Task { await actions.prepare("decision") }
+      let first = f.rest.track(Task { await actions.prepare("decision") })
+      let second = f.rest.track(Task { await actions.prepare("decision") })
       let a = try await f.rest.next(f.rest.a, "/pods/decision")
       let b = try await f.rest.next(f.rest.a, "/pods/decision")
       try await f.created("B")
@@ -219,7 +219,7 @@ struct DecisionReplyOwnershipTests {
     try await withPodStoreLifetimeFixture { f in
       f.store.upsertSession(try decisionPod(nil))
       let handler = replyHandler(f); let actions = handler.actions.decisionReply
-      let pending = Task { await actions.prepare("decision") }
+      let pending = f.track(Task { await actions.prepare("decision") })
       let get = try await f.next(f.a, "/pods/decision")
       f.store.removeSession("decision")
       f.store.upsertSession(try decisionPod("B"))
@@ -228,6 +228,28 @@ struct DecisionReplyOwnershipTests {
       #expect(f.store.pods.first?.escalationId == "B")
       #expect(f.a.requests.count == 1)
     }
+  }
+
+  @Test(arguments: ["preflight", "post"])
+  func earlyFailureJoinsOwnedTasks(kind: String) async throws {
+    enum FixtureStop: Error { case expected }
+    var actions = DecisionReplyActions()
+    var retainedHandler: ActionHandler?
+    do {
+      try await withPodStoreLifetimeFixture { f in
+        f.store.upsertSession(try decisionPod("A"))
+        retainedHandler = replyHandler(f)
+        actions = try #require(retainedHandler).actions.decisionReply
+        actions.edit("decision", "A", "kept")
+        f.track(actions.submit("decision", "A"))
+        if kind == "post" { _ = try await replyPost(f) }
+        else { _ = try await f.next(f.a, "/pods/decision") }
+        throw FixtureStop.expected
+      }
+    } catch FixtureStop.expected {}
+    #expect(!actions.snapshot("decision", "A").pending)
+    #expect(actions.snapshot("decision", "A").text == "kept")
+    withExtendedLifetime(retainedHandler) {}
   }
 
   @Test func missingHandlerAndDefaultsNeverAcknowledge() async {
