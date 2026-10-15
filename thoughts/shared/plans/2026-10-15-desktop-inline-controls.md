@@ -227,8 +227,10 @@ Phase 3 verification on frozen final code:
   independent pods, conflicts, initiating/joining cancellation, combined/plain
   joining through held DELETE and actual native action entry points.
 - `AUTOPOD_INLINE_RENDER_DIR="$PWD/.autopod-data/reliability/r04d/final-captures"
-  swift test --package-path packages/desktop --no-parallel` passed 434 reported
-  tests in 17 suites, no skips (`full-swift.log`).
+  swift test --package-path packages/desktop --no-parallel` passed 434 Swift Testing tests in 17 suites plus 13 XCTest tests
+  (`full-swift.log`). The existing opt-in `LiveVillageConnectionTests` suite and
+  `configuredDaemonReachesStoresEventsAndBundledVillage()` test were skipped
+  (log lines 441–442); no live-daemon validation is claimed.
 - `swift build --package-path packages/desktop --product AutopodDesktopExe`
   passed (`build.log`). Node 22 `node scripts/secret-scan.mjs` and `git diff --check`
   passed (`secrets.log`).
