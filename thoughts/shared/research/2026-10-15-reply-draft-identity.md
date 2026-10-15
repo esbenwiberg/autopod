@@ -150,3 +150,47 @@ colliding IDs/timestamps. R05b native fixtures can render typed decisions across
 state changes but do not yet prove keyboard text retention or connection switching.
 Connection ownership and asynchronous handler writes need a bounded follow-up
 map before a shared draft is attached to the visible decision.
+
+## Follow-up Research: concrete reply surfaces after R05b/R07a
+
+At2a8c0dda, root reread complete OverviewTab, SessionCardFinal, PodActions,
+ActionHandler and PodStore, plus ReplyDecisionRetentionTests and the complete
+DecisionIdentity fixture/rendering tests. Desktop reviewer independently mapped
+the same submission paths. R04e is implementing fromf8693f23 and remains a plan
+prerequisite, not completed connection evidence.
+
+OverviewTab:456–574 renders typed, option and action-approval replies; all converge
+on sendReply:1225. It clears local text before an async Void callback. The view can
+unmount when its detail tab changes. SessionCardFinal:755–793 has direct approval
+buttons and a Reply button that presents its sheet; the sheet:1115–1200 has local
+text, direct option submission and immediate clear/dismiss for typed submission.
+Its explicit Cancel clears text. Card and Overview own independent State values.
+Card paused Resume:199–208 and Detail paused Resume:451 call the older reply action
+without escalation identity. Nudge, retry journals and validation approval use
+separate paths; their retention semantics are not decision-draft semantics.
+
+PodActions.reply has a default no-op and async Void return. Its existing weak
+handler wrapper also returns normally if the handler disappeared. Neither boundary
+establishes acknowledgement. Handler's ordinary POST/refresh semantics and daemon
+post-acceptance failures are documented in reply-acceptance-boundary research.
+An exact known escalation ID is present after detail decoding or created events;
+compact discovery alone supplies only a summary. Compact nil is not a stable
+decision identity, and equal question text does not establish one.
+
+The existing native identity fixture mounts actual DetailPanel/Overview in one
+NSHostingView, uses private defaults, real EventStream/PodStore and held URLSession
+responses, and inspects 600/900px captures. It does not type text. R07a's production
+palette tests establish real NSTextField field-editor input and NSApplication
+keyboard-event delivery in the same helper environment. Literal mouse activation
+of SwiftUI static rows was not established there. No existing fixture proves the
+card reply sheet opens/submits, shared text survives remount, or ambiguous delivery
+retains its captured text. These remain test targets, not passing evidence.
+
+CLI follow-up/root source check: the card .sheet modifier:790 is attached only
+to its non-action-approval Reply branch. A detail refresh can reveal approval type
+and remove that presenting branch. PodStore refreshSession catches errors and
+hydrateSessionIfNeeded can return immediately for an admitted hydration, so Void
+completion is not a successful detail-loading signal. Its existing merge carries
+decision revisions across the request; bypassing it with a raw DTO upsert would
+lose R05b ordering. MainView's action forwarding copies the whole PodActions value
+and replaces only attachTerminal, preserving additional action fields.
