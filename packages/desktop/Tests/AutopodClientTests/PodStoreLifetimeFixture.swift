@@ -10,7 +10,7 @@ import AutopodUI
   let b = ConfirmedActionPeer()
   let apiA: DaemonAPI
   let apiB: DaemonAPI
-  private let sessions: [URLSession]
+  private var sessions: [URLSession]
   private var tasks: [Task<String?, Never>] = []
 
   init() {
@@ -24,6 +24,19 @@ import AutopodUI
     ConfirmedActionRegistry.shared.add(a)
     ConfirmedActionRegistry.shared.add(b)
     store.configure(api: apiA)
+  }
+
+  func additionalAPI(for peer: ConfirmedActionPeer,
+    tokenProvider: DaemonAccessTokenProvider? = nil) -> DaemonAPI {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [ConfirmedActionProtocol.self]
+    let session = URLSession(configuration: config)
+    sessions.append(session)
+    let url = URL(string: "https://\(peer.host)")!
+    if let tokenProvider {
+      return DaemonAPI(baseURL: url, initialToken: "synthetic", session: session, tokenProvider: tokenProvider)
+    }
+    return DaemonAPI(baseURL: url, token: "synthetic", session: session)
   }
 
   func start(_ operation: @escaping @MainActor () async -> Void) -> Task<String?, Never> {

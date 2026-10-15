@@ -14,6 +14,7 @@ public struct AppRootView: View {
   public let eventStream: EventStream?
   public let terminalManager: TerminalManager?
   @Binding public var showSetup: Bool
+  private let onConnectionRecovered: @MainActor () -> Void
 
   public init(
     connectionManager: ConnectionManager,
@@ -25,7 +26,8 @@ public struct AppRootView: View {
     actionHandler: ActionHandler?,
     eventStream: EventStream?,
     terminalManager: TerminalManager?,
-    showSetup: Binding<Bool>
+    showSetup: Binding<Bool>,
+    onConnectionRecovered: @escaping @MainActor () -> Void
   ) {
     self.connectionManager = connectionManager
     self.podStore = podStore
@@ -37,6 +39,7 @@ public struct AppRootView: View {
     self.eventStream = eventStream
     self.terminalManager = terminalManager
     self._showSetup = showSetup
+    self.onConnectionRecovered = onConnectionRecovered
   }
 
   @State private var launchConfiguration = LaunchConfigurationStore()
@@ -456,13 +459,12 @@ public struct AppRootView: View {
   }
 
   private func recoverAuthenticationAndReload(fallbackMessage: String?) async {
-    let recovered = await connectionManager.recoverAuthentication()
+    let recovered = await recoverDesktopConnection(
+      recover: { await connectionManager.recoverAuthentication() },
+      onRecovered: onConnectionRecovered
+    )
     if recovered {
       if let api = connectionManager.api {
-        podStore.configure(api: api)
-        profileStore.configure(api: api)
-        memoryStore.configure(api: api)
-        scheduledJobStore.configure(api: api)
         launchConfiguration.configure(api: api)
       }
       await podStore.loadSessions()

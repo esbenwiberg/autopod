@@ -12,6 +12,7 @@ func factWaiverRefreshUsesServerStateWithoutWebSocket(status: String) async thro
   let api = DaemonAPI(baseURL: URL(string: "https://waiver-fixture.invalid")!, token: "synthetic",
     session: URLSession(configuration: configuration))
   let store = PodStore()
+  store.configure(api: api)
   let handler = ActionHandler(api: api, podStore: store, profileStore: ProfileStore())
   await handler.approveFactWaiver(status, factId: "fact", reason: "Inspected unavailable tool")
   #expect(handler.lastError == nil)
