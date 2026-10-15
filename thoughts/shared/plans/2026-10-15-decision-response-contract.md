@@ -113,7 +113,7 @@ full app startup, live provider or safe reply-replay claim is made by this task.
 - [x] Valid nested and legacy decisions display safely without storage mutation.
 - [x] Corruption/size bounds and healthy neighboring records remain protected.
 - [x] Same committed fixture is pinned to actual daemon output and consumed by CLI/Swift.
-- [ ] Independent pre-PR, hosted and integrated proof recorded.
+- [x] Independent pre-PR, hosted and integrated proof recorded.
 
 ## Compatibility, performance and rollback
 
@@ -197,3 +197,17 @@ Reproduction commands, from this worktree (Node commands use
 
 Next action: freeze the clean pushed worker head for independent final review;
 root owns the PR targeting codex/reliability and subsequent hosted/integrated proof.
+
+## Coordinator integration proof
+
+Root independently inspected the final diff, fixture derivation and all affected
+consumers at b99dab09fbcf047929cfed281cdadb465cb57698, and reran22 real
+SQLite/Fastify/helper tests, a fresh-built CLI's2 executable cases and Swift's2
+contract functions (including null/missing parameters) before PR426. No actionable
+findings. Hosted general run38792170178 and native run38792170112 passed.
+PR426 merged into codex/reliability at98b9d912c959349d6574771ba44b05fe59c83922.
+The same22 daemon tests, fresh build+2 CLI tests, and2 Swift contract functions
+passed again on that integrated head. Logs: ignored
+`.autopod-data/reliability/r05a-integrated-{node,swift}.log`; worker evidence retained
+in `r05a/`. Final scoped verdict **PROVEN**. Main was not changed. No rendered UI,
+live provider, or reply-replay guarantee is inferred from this wire contract.
