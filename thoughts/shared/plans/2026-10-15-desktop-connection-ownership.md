@@ -182,10 +182,10 @@ affected checks must pass before closure.
 
 ## Acceptance and limits
 
-- [ ] Baseline ownership failures reproduced with private transport.
-- [ ] Source-key cache behavior and per-configuration invalidation proven.
-- [ ] Handler admission, result publication and chained follow-ups fenced.
-- [ ] Private journal and same-source reconnect compatibility proven.
+- [x] Baseline ownership failures reproduced with private transport.
+- [x] Source-key cache behavior and per-configuration invalidation proven.
+- [x] Handler admission, result publication and chained follow-ups fenced.
+- [x] Private journal and same-source reconnect compatibility proven.
 - [ ] Native states, independent review, hosted/integrated gates recorded.
 
 No persistence migration, new daemon/API field or deployment. Existing saved UUID
@@ -214,3 +214,74 @@ cases) failed with nine expected assertions, no timeout acceptance. Command:
 `swift test --package-path packages/desktop --filter ConnectionOwnershipTests`.
 Log: ignored `.autopod-data/reliability/r04e/baseline.log`. Each fixture closes its
 private sessions/peers and joins tasks; no accounts or journals were accessed.
+
+## Implementation evidence — final worker proof
+
+Implementation and tests are frozen at `af40ce59ccd59f3d58db2b39e1209fb564a69366`,
+after merging campaign `88a739c5`. Later worker changes are this evidence only.
+The baseline is preserved in `ecb9fe9e`; no production code changed in that commit.
+
+PodStore now distinguishes stable `(saved UUID?, endpoint URL)` cache identity from
+its configuration epoch. `configure(api:connectionID:)` revokes every old handler;
+`disconnect()` retains readable source data while revoking API authority. Internal
+`ownership(for:)`/`isCurrent(_:)` carry an immutable store UUID/epoch lease. The
+handler captures that lease and checks it before and after API success/error and
+store follow-ups. Both app entrypoints use the shared active-identity gate; explicit
+recovery calls the same wiring path with a forced generation. No draft behavior,
+daemon API or other store ownership contract changed.
+
+Private transport tests prove same-UUID/same-URL retention, UUID or URL changes,
+A→B→A, unknown-UUID URL fallback, initial unowned data clearing, delayed REST and
+handler results, same-object API reconfigure, disconnect admission, late Goal404
+versus current404, direct create/rerun/waiver publication, fleet follow-ups, and
+held Kill→Delete. The controlled socket test retains A's EventStream, disconnects
+it before B, and delivers old and new callbacks. Old callbacks neither mutate B
+nor admit REST; B callbacks work. Gate tests use real stores/handlers with two API
+instances on the same URL, repeated observation, successful/failed recovery and
+explicit same-API recovery. No ConnectionManager/account initialization is used.
+
+Fork/worker tests hold configuration, resolve, launch and worker branch sync;
+replacement stops subsequent calls and pre-launch journal writes. Positive private
+launch/series paths check saved request identity, source/digest/branch and 0600
+files/0700 child directories. Series response arrays and returned IDs are fenced.
+A held token provider explicitly proves the admitted-operation limit: one request
+can still be sent after replacement, but no refresh/publication follows. Fixtures
+release held providers, close sessions/peers, cancel and join owned tasks, and
+remove private journals/defaults. No network accounts, home journals or Keychain.
+
+Commands and results (ignored evidence under `.autopod-data/reliability/r04e/`):
+
+- Initial affected: `swift test --package-path packages/desktop --no-parallel --filter
+  'ConnectionOwnership|ConnectionWiring|ConnectionLaunch|PodStoreLifetime|DecisionIdentity|ConfirmedAction|InlineControl|ReplyDecisionRetention|FactWaiver|UnverifiedTermination'`
+  with `AUTOPOD_CONNECTION_RENDER_DIR` set to the private evidence `native` folder:
+  64 functions, 163 expanded cases, 10 suites, zero skips; exit 0. This preceded the
+  campaign merge and final fixture wording/handler-construction adjustment.
+- Final frozen source: `AUTOPOD_CONNECTION_RENDER_DIR="$PWD/.autopod-data/reliability/r04e/native"
+  swift test --package-path packages/desktop --no-parallel`; exit 0. Swift Testing
+  reports **474 tests in 25 suites**, comprising **473 passed functions / 608
+  expanded executed cases and one skipped test**. The existing opt-in
+  `LiveVillageConnectionTests/configuredDaemonReachesStoresEventsAndBundledVillage`
+  was skipped. XCTest: **13 passed, zero failures**. No live-daemon claim.
+- `swift build --package-path packages/desktop --product AutopodDesktopExe`: exit 0.
+- `npx -y -p node@22 -p pnpm@9.15.4 -c 'pnpm secret-scan'`: exit 0.
+- `git diff --check f8693f23 HEAD`: exit 0.
+- Local toolchain: Apple Swift 6.3.3, Xcode 26.6 (17F113). Existing AppKit
+  accessibility deprecation warnings remain; no compile failures.
+
+The actual production MainView mounts its production DetailPanel in an owned
+NSHostingView window. Five raw PNG/AX captures show selected A; disconnected A;
+same-source reconnect A; different-source empty fleet/detail before B returns;
+and selected B with the same pod ID and different question/options. Each final
+image was inspected. Existing “No pods” and “Select a pod” placeholders replace A;
+B's card and detail contain no A question/options. Observed host bounds are
+1450×792 points. Native `cacheDisplay` omits the sidebar/list vibrancy in this
+helper (white sidebar); that region and full application/account switching are
+not visually qualified. Relevant fleet/detail data states are visible. There is
+no mouse/button activation or OS compositor claim. Production styling was not
+changed for the capture. New handlers are constructed on reconnect in the fixture;
+working action authority is proven separately by the held transport gate tests.
+
+Receipt `proof.json` and `manifest.json` record exact code revision, commands,
+results and SHA-256 hashes of final logs/captures/source. Independent source/proof
+review, PR hosted checks and integrated checks remain root-owned pending gates.
+No worker PR was opened; no user manual result is inferred.
