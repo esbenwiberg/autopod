@@ -164,7 +164,7 @@ callback payloads, connected-state definition, delays and heartbeat intervals ar
 unchanged. No PodStore, action, UI or full-app bootstrap edits.
 
 The same seven baseline cases pass after the repair. Two further cases prove:
-real automatic reconnect subscribes and replays observed event ID41, normal events
+real automatic reconnect subscribes and replays observed event ID 41, normal events
 and replay-truncation control callbacks still arrive, explicit reconnect remains
 usable, and fixture teardown releases a held token after a thrown test-body error.
 The controlled stream case verifies old event/state/resync callbacks are rejected,
@@ -181,7 +181,7 @@ No home/defaults/keychain reads or external network service is needed.
 
 ### Commands and results
 
-Run from the worker repository root with Swift6.3.3:
+Run from the worker repository root with Swift 6.3.3:
 
 - Baseline command above: **7 failed tests / 19 expected issues**, including two
   old-peer close deadlines; all accepted peers cancelled during failure teardown.
@@ -193,7 +193,7 @@ Run from the worker repository root with Swift6.3.3:
   **21 Swift Testing tests passed** (`focused.log`).
 - `swift package --package-path packages/desktop clean`, then
   `swift test --package-path packages/desktop --no-parallel`: clean rebuild and
-  **13 XCTest +411 Swift Testing tests in14 suites passed** (`swift-tests-final.log`).
+  **13 XCTest tests plus 411 Swift Testing tests in 14 suites passed** (`swift-tests-final.log`).
   The existing opt-in LiveVillageConnectionTests suite/test remained skipped.
 - `swift build --package-path packages/desktop --product AutopodDesktopExe`:
   passed (`swift-build.log`).
@@ -206,10 +206,10 @@ DaemonAPITests' unnecessary await. No new compiler warnings were introduced.
 Evidence lives under ignored `.autopod-data/reliability/r04b/`; `proof.json`
 records the final committed revision, source hashes, commands and log hashes.
 Worker verdict: **PROVEN for this isolated socket lifetime contract**. Native
-negative observation windows are250ms after deterministic setup and1300ms after
+negative observation windows are 250 ms after deterministic setup and 1300 ms after
 the first one-second reconnect backoff; these are bounded observations, supported
 by cancellation/generation guards, not assertions about an infinite future.
-Heartbeat policy is retained and its ownership checks inspected, but the45-second
+Heartbeat policy is retained and its ownership checks inspected, but the 45-second
 heartbeat-expiry path was not separately accelerated or timed in tests. Already-
 started REST work, complete daemon-switch isolation, actual app UI and provider
 accounts are outside this proof. Independent pre-PR review and hosted/integrated
