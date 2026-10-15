@@ -141,7 +141,11 @@ func withConfirmedActionFixture(
   }
 
   func start(_ action: ConfirmedAction) -> Task<Void, Never> {
-    let task = Task { await action.call(handler.actions, id: id) }
+    start { await action.call(self.handler.actions, id: self.id) }
+  }
+
+  func start(_ operation: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+    let task = Task { await operation() }
     tasks.append(task)
     return task
   }
@@ -184,6 +188,13 @@ func withConfirmedActionFixture(
     tasks.forEach { $0.cancel() }
     session.invalidateAndCancel()
     for task in tasks { await task.value }
+    // Native button actions create their own callers. Session cancellation must also
+    // release the handler-owned request before this fixture relinquishes its peer.
+    let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+    while handler.pendingControl(id) != nil && ContinuousClock.now < deadline {
+      try? await Task.sleep(for: .milliseconds(2))
+    }
+    #expect(handler.pendingControl(id) == nil)
     ConfirmedActionRegistry.shared.remove(peer)
     #expect(peer.activeCount == 0)
     #expect(peer.deadlines == 0)

@@ -146,10 +146,10 @@ question is required because this uses the selected Inline direction.
 
 ## Acceptance
 
-- [ ] Baseline duplicate/control-delete hazards reproduced.
-- [ ] Per-pod ownership joins duplicates, keeps other pods independent and gates delete.
-- [ ] Inline notice/disabled controls observe real pending state with confirmed status intact.
-- [ ] Required narrow/wide and card/series native captures inspected.
+- [x] Baseline duplicate/control-delete hazards reproduced.
+- [x] Per-pod ownership joins duplicates, keeps other pods independent and gates delete.
+- [x] Inline notice/disabled controls observe real pending state with confirmed status intact.
+- [x] Required narrow/wide and card/series native captures inspected.
 - [ ] Independent pre-PR, hosted and integrated proof recorded.
 
 ## Compatibility and rollback
@@ -181,3 +181,88 @@ Adjustment: match the existing DaemonAPITests request snapshot plus explicit
 Sendable captures in EventStreamResyncTests only. Commit this prerequisite
 separately; compile and run resync + old-interface inline baseline before any
 product changes. Failed logs are preserved under `.autopod-data/reliability/r04d/`.
+
+
+## Execution clarification: detail Delete controls
+
+Root review found that a combined workflow can still own a held DELETE after its
+Kill refresh makes the pod deletable; a newer killed event can likewise arrive
+while a plain Pause is held. Card Delete was disabled but the equivalent detail
+Delete controls were still enabled. Root authorized extending the same pending
+presentation guard and identifiers to the three detail Delete buttons and their
+confirmation. Handler semantics and unrelated controls remain unchanged.
+Before the extension, native same-mounted tests at 900 and 600 pixels reproduced
+four enabled-Delete failures across those two scenarios; see ignored evidence
+`r04d/detail-delete-before-fix.log`. This is a bounded phase 2 consistency repair.
+
+
+## Worker execution and proof (2026-10-15)
+
+All authorized implementation phases are complete at code/test revision
+`2a8f546559d5637549744eb63ab71dcaec554a05`; the following evidence update is
+prose only. Root retains independent review, PR, hosted checks and integration.
+No human visual signoff is claimed.
+
+Phase 0 prerequisite `653f7db5` compiled and ran the unchanged resync test and
+runnable old-interface baseline at `8d7ca645`: repeated Pause/Kill emitted two
+POSTs and the previous Void Kill-then-Delete path issued DELETE after rejected
+Kill. Three functions/four invocations passed their baseline assertions. The
+baseline source is preserved in that commit and ignored evidence, removed from
+the final target. Failed space/fresh-compiler logs are retained; only the approved
+test capture adjustment was made.
+
+Phases 1–2 use per-pod owned tasks, independent observable presentation, shared
+acknowledgement gating and full combined-workflow lifetime. Existing async Void
+Pause/Kill closures and confirmed-state refresh behavior are preserved. Native
+controls consume the real getter. Root's additional detail Delete consistency
+repair was reproduced before its presentation-only fix (four failures at both
+widths). No other action or persistent state was changed.
+
+Phase 3 verification on frozen final code:
+- Node 22 / pnpm 9.15.4 frozen installation passed (`install-rerun.log`).
+- `swift test --package-path packages/desktop --no-parallel --filter
+  'InlineControlRenderingTests|inlineControl|inlineCombined|confirmedAction|confirmedKill|PodStore'`
+  passed 31 reported tests in 3 suites (`focused-final.log`). This includes the
+  existing 20 confirmed-action invocations, one-error-publication observation,
+  independent pods, conflicts, initiating/joining cancellation, combined/plain
+  joining through held DELETE and actual native action entry points.
+- `AUTOPOD_INLINE_RENDER_DIR="$PWD/.autopod-data/reliability/r04d/final-captures"
+  swift test --package-path packages/desktop --no-parallel` passed 434 Swift Testing tests in 17 suites plus 13 XCTest tests
+  (`full-swift.log`). The existing opt-in `LiveVillageConnectionTests` suite and
+  `configuredDaemonReachesStoresEventsAndBundledVillage()` test were skipped
+  (log lines 441–442); no live-daemon validation is claimed.
+- `swift build --package-path packages/desktop --product AutopodDesktopExe`
+  passed (`build.log`). Node 22 `node scripts/secret-scan.mjs` and `git diff --check`
+  passed (`secrets.log`).
+
+Ignored evidence lives at `.autopod-data/reliability/r04d/`; `proof.json` contains
+claim verdicts, commands, source hashes and SHA256/dimensions for all 47 final
+PNGs. The worker opened and inspected all 47. Final images/AX sidecars are in
+`final-captures/`; earlier `captures/` images are preliminary and superseded.
+Detail captures are 900×760 and 600×760. Card content is 260px wide inside a
+276×180 compact or 276×320 detailed host. Series is 900×760. MainView's native
+host measured 1400×832 from a requested 1400×800; cause was not established.
+Its test asserts width and visible-notice bounds and records actual dimensions.
+The failed fixed-height run is retained in `full-before-main-bounds-adjustment.log`.
+
+The native hierarchy remains mounted through initial, held POST, held GET and
+completion/rejection. The host never reads the pending getter; production views
+must observe it. Native AX checks prove visible notices and disabled controls,
+and native menu/confirmation, series node/Pause and MainView Pause activations
+are followed by actual held transport requests. Fixture cleanup closes sheets,
+windows, private defaults suites and URLSession requests, and waits for handler
+ownership to clear. No personal preferences, Keychain or account bootstrap runs.
+
+Proof verdict: **PROVEN for the bounded ownership and changed inline components**.
+The captures show pending notices separately from retained Running/Killed states,
+cleared notices after response and disabled Delete throughout combined deletion.
+Limitations are explicit: test transactions disable animations; no animation
+or full-app visual fidelity claim. Native bitmap capture leaves compositor
+artifacts in the unchanged MainView sidebar/toolbar, series picker and confirmation
+Cancel button. These images establish the affected detail/panel content; dialog
+activation is established by the native request test, not full dialog pixels.
+An owned-window screencapture attempt returned `could not create image from window`;
+no OS permission changes were requested. Initial series snapshots raced animation
+and are superseded by the settled final captures. Synthetic private transport
+qualifies client ownership, not a live daemon lifecycle. Reconnect-persistent
+unknown outcomes/drafts and full startup remain outside this slice.
