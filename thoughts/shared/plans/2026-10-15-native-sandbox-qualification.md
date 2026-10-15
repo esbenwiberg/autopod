@@ -112,7 +112,7 @@ requires affected revalidation.
 - [x] Harness guard/deadline/cleanup tests pass; independent pre-live review complete.
 - [x] One actual sandbox exercises the listed real adapter boundaries.
 - [x] Exact ownership and deletion404 verified; immutable cache retained. Fresh live sandbox inventory was empty, so nonempty inventory preservation was not exercised.
-- [ ] Independent final review, hosted checks and integrated harness checks pass.
+- [x] Independent final review, hosted checks and integrated harness checks pass.
 
 ## Limitations and rollback
 
@@ -248,3 +248,9 @@ Only these sanitized plan notes change after the tested code head; no further li
 instance is needed for a documentation-only commit. The proof covers the campaign
 host adapter against one historical immutable worker image. It does not cover a
 new worker image, model execution, full daemon startup or complete pod lifecycle.
+
+## Coordinator integration proof
+
+Root reviewed the final documentation-only diff, checked harness/guard/live receipt hashes, reran all15 local guard tests and independently queried the provider for owned-ID404, empty inventory and retained immutable cache. Hosted general/secret checks passed (run38796613803); all15 local tests passed again after campaign mergef818a8b3. No further live create was performed; the tested adapter and harness sources are unchanged. Fresh empty initial inventory means nonempty unrelated-inventory preservation remains outside live proof.
+
+Integrated commands and results: `.autopod-data/reliability/qualification-integrated.log`. PR #429 targets the campaign branch.

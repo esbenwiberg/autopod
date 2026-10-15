@@ -113,7 +113,7 @@ solely because of a merge commit. No human visual/manual check is required.
 - [x] Real route traverses all three deterministic datasets correctly.
 - [x] Seven raw measurements per size and identity/memory/bytes metadata retained.
 - [x] Timing and fixture limitations explicitly reported; no unearned speed claim.
-- [ ] Independent pre-PR reproduction, hosted and integrated checks recorded.
+- [x] Independent pre-PR reproduction, hosted and integrated checks recorded.
 
 ## Compatibility and rollback
 
@@ -200,3 +200,9 @@ missing-file selection exited 1 as intended (`opt-in-required.log`,
 (`default-discovery.log`). Independent review/reproduction, hosted checks and
 integrated verification remain root-owned and unchecked. No human manual check
 is required for this nonvisual task.
+
+## Coordinator integration proof
+
+Root independently read all four qualification files and reproduced all21 measurements at final1e179dc1. Hosted general/secret checks passed (run38796536758). After campaign merge04dabd6a, both deterministic protocol checks passed; benchmark and relevant daemon/shared source and lock hashes are unchanged, so all21 measurements were not repeated solely for the merge. Worker and root raw receipts remain under ignored r08b/. No production latency or memory budget is asserted.
+
+Integrated commands and results: `.autopod-data/reliability/qualification-integrated.log`. PR #428 targets the campaign branch.

@@ -100,14 +100,14 @@ choice or missing authority that repository evidence cannot establish.
 | ID | Task | Dependencies | Status / next action |
 |---|---|---|---|
 | R00 | Existing CI covers campaign PRs and contract paths | Baseline | Complete: PR #416 passed hosted checks and merged into campaign at 980e0b86 |
-| R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a complete (PR #417); R01b complete (PR #419, cf8c6663), integrated43tests passed; R01c #429 live sandbox qualification passed and reviewed, hosted checks pending |
+| R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a complete (PR #417); R01b complete (PR #419, cf8c6663), integrated43tests passed; R01c complete (#429,f818a8b3), live proof and hosted/integrated checks passed |
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | R03a complete (#420); R03b complete (#422,913c0622); hosted+integrated proof passed |
 | R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b complete (#425,173d3450); R04c #427 merged at80fc8158, hosted passed, integrated rerun blocked by test-helper/toolchain compatibility; R04d Inline controls in baseline |
 | R05 | Shared response/event contract scenarios | R00, R01 | R05a complete (#426,98b9d912); hosted and integrated daemon/CLI/Swift proof passed |
 | R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a complete: PR423 merged at5cc8fbc6;704 integrated tests passed |
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | Separate wireframe batch and bounded task plans |
-| R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | R08a complete (#424,c1faba3a), hosted+integrated roundtrip passed; R08b #428 reviewed and independently reproduced, hosted checks pending |
+| R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | R08a complete (#424,c1faba3a), hosted+integrated roundtrip passed; R08b complete (#428,04dabd6a), independent reproduction and hosted/integrated checks passed |
 
 R00 and the bounded R01a CLI executable harness have reviewed detailed plans.
 The remaining R01 harness slices need detailed plans. R02's design direction is
