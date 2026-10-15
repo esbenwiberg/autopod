@@ -44,10 +44,15 @@ import AutopodUI
   init(_ fixture: DecisionIdentityFixture, width: CGFloat) {
     self.width = width
     handler = ActionHandler(api: fixture.rest.apiA, podStore: fixture.store, profileStore: ProfileStore())
+    var actions = handler.actions
+    let prepare = actions.decisionReply.prepare
+    actions.decisionReply.prepare = { id in
+      await fixture.rest.track(Task { await prepare(id) }).value
+    }
     NSApplication.shared.finishLaunching()
     oldEnhanced = NSApplication.shared.accessibilityAttributeValue(enhanced)
     NSApplication.shared.accessibilitySetValue(true, forAttribute: enhanced)
-    hosting = NSHostingView(rootView: AnyView(DecisionDetailHost(fixture: fixture, actions: handler.actions, probe: probe)
+    hosting = NSHostingView(rootView: AnyView(DecisionDetailHost(fixture: fixture, actions: actions, probe: probe)
       .defaultAppStorage(UserDefaults(suiteName: suite)!)
       .transaction { $0.disablesAnimations = true }))
     hosting.sizingOptions = []
@@ -128,13 +133,18 @@ import AutopodUI
       let reconciliation = try await f.resolved("B")
       try f.expectDecision(nil)
       #expect(f.store.selectedSession?.status == .awaitingInput)
+      // R04f's mounted unknown composer performs its own result-bearing detail
+      // preparation. Hold it independently of EventStream reconciliation.
+      let preparation = try await f.rest.next(f.rest.a, "/pods/decision")
       reconciliation.respond(body: try decisionSnapshot("C"))
       try await decisionWait { f.store.selectedSession?.escalationId == "C" }
       try await view.verifyAndCapture("C", stage: "reconciled-C")
-      #expect(f.rest.a.requests.count == 3)
+      preparation.fail(URLError(.cannotConnectToHost))
+      try f.expectDecision("C")
+      #expect(f.rest.a.requests.count == 4)
       #expect(f.rest.a.requests.allSatisfy { $0.httpMethod == "GET" && $0.url?.path == "/pods/decision" })
       #expect(f.notifications.values == ["decision:Question B?"])
-      print("DECISION_RENDER width=\(width) mounts=\(view.probe.appearances) GET=3 stages=B,retained-B,C")
+      print("DECISION_RENDER width=\(width) mounts=\(view.probe.appearances) GET=4 stages=B,retained-B,C")
     }
   }
 }
