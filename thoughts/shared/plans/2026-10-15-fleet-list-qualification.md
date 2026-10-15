@@ -131,3 +131,26 @@ Fastify resolution/static coverage must be explicit, and loaded shared output
 must be freshly built and hashed. Root incorporated those corrections plus
 resident-database accounting and nested cleanup. Resolved under standing campaign
 authorization; ready for implementation. No unresolved product choices.
+
+## Implementation progress
+
+The opt-in harness and explicit config are implemented under `scripts/benchmarks`.
+A separate protocol module checks the complete independent expected order and
+summary fields after timing; its two checks inject repeated/dropped/duplicated/
+reordered pages and verify descriptive statistics. The timed loop retains raw and
+decoded pages until verification, and includes byte/cursor bookkeeping and sampled
+memory calls; per-page timings cover injection plus JSON decoding only. Partial
+raw samples are preserved if correctness or the page cap fails.
+
+Frozen Node 22 / pnpm 9.15.4 install completed without lockfile changes. MJS syntax
+and scoped Biome checks passed. Protocol checks: two passed; benchmark explicitly
+filtered out. The explicit config without opt-in failed as intended before DB
+creation; empty file selection also exited 1. Ordinary Vitest discovery selected
+no files under `scripts/benchmarks`. Logs are in ignored
+`.autopod-data/reliability/r08b/`. Full qualification remains pending.
+
+Reproduce from repository root after frozen install:
+
+```bash
+npx -y -p node@22 -p pnpm@9.15.4 -c 'pnpm --filter @autopod/shared build && AUTOPOD_FLEET_BENCHMARK=1 pnpm exec vitest run --config scripts/benchmarks/fleet-list.config.mjs'
+```
