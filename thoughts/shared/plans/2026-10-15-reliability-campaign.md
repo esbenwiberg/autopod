@@ -354,3 +354,10 @@ live test skipped; inaccurate zero-skip wording corrected before PR432. Hosted
 checks pending. Evidence copied into campaign r05b/. R07a baseline through actual
 NSApplication.sendEvent reproduced Return opening removed A after B became the
 visible first row. Its approved keyboard bridge plan is implementing separately.
+
+Main advanced to9978fb5e (existing managed-catalog PR418). Checkpoint merge
+a6c0c565 had no conflicts and unique migration prefixes through209. Fresh daemon
+and dependency builds passed; managed/upgrade/restore checks397passed,4skipped
+(42filespassed,1skipped), shared417passed, secret scan/diffcheck passed. This
+incorporates existing main work; no live Docker/provider or deployment claim.
+Evidence: .autopod-data/reliability/main-checkpoint/.
