@@ -135,3 +135,27 @@ needed for this workflow-only change; existing job commands are unchanged.
 
 Next action: independent review of the worker commit, then coordinator PR creation
 targeting `codex/reliability` and hosted-check observation.
+
+### Coordinator verification and integration
+
+Independent final review of `9592eee6a416456a2ac59b7138177f37d6c3eb01` found no
+actionable tracked-diff issues. Its evidence-script finding was fixed: committed
+scope uses `2274e78c..HEAD` with empty paths filtered. Coordinator reran all 60
+routing cases/eight regression assertions on that exact head successfully.
+
+PR https://github.com/esbenwiberg/autopod/pull/416 ran both workflows:
+
+- CI build-and-test: success, run 38778850780.
+- CI secret-scan: success, same run.
+- Desktop test-and-build: success, run 38778850414, including Swift tests,
+  renderer contract and the macOS app build.
+
+Merged only into `codex/reliability` at
+`980e0b8663e8c7096e85826f88b819f325ddb18c`. Integrated workflow contents match the
+reviewed change. Evidence script/JSON retained in the integration worktree under
+`.autopod-data/reliability/r00/` before worker cleanup.
+
+Final task verdict: **PROVEN** for intended routing/configuration changes and
+actual execution of the campaign PR checks. No application/runtime change is
+claimed. Earlier unchecked items above describe the worker handoff; independent
+review and hosted observation are now complete.

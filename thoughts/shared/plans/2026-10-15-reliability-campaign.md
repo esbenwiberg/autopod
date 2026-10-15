@@ -99,8 +99,8 @@ choice or missing authority that repository evidence cannot establish.
 
 | ID | Task | Dependencies | Status / next action |
 |---|---|---|---|
-| R00 | Existing CI covers campaign PRs and contract paths | Baseline | Independently reviewed; PR #416 open against campaign branch; hosted checks running |
-| R01 | Verification harness feasibility and deterministic fixtures | R00 | Feasibility researched; R01a CLI executable plan independently reviewed and ready |
+| R00 | Existing CI covers campaign PRs and contract paths | Baseline | Complete: PR #416 passed hosted checks and merged into campaign at 980e0b86 |
+| R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a CLI executable worker implementing; process/native follow-up plans being narrowed |
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | Task-specific research/plan; include actual executable exit/output and replay behavior |
 | R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | Task-specific research/plan; deterministic store tests plus actual app proof |
