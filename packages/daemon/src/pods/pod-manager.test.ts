@@ -18967,6 +18967,295 @@ describe('PodManager', () => {
         expect(completed.status).toBe('complete');
       });
 
+      describe('artifact finalizer compatibility', () => {
+        async function bounded<T>(work: Promise<T>): Promise<T> {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            return await Promise.race([
+              work,
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(
+                  () => reject(new Error('Artifact boundary did not settle')),
+                  5_000,
+                );
+              }),
+            ]);
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        }
+
+        it.each(['explicit', 'profile-default', 'main-default', 'push-failure'] as const)(
+          'preserves legacy publication and durable cleanup ordering: %s',
+          async (variant) => {
+            const ctx = createTestContext(undefined, { defaultBranch: 'profile-base' });
+            const entered = deferred<void>();
+            const release = deferred<void>();
+            const previousExec = mockedExecFile.getMockImplementation();
+            const realProcess =
+              await vi.importActual<typeof import('node:child_process')>('node:child_process');
+            const { verifyArtifactSnapshot } = await import('./artifact-snapshot-receipt.js');
+            const worktree = fs.mkdtempSync(path.join(completionDataDir, 'legacy-worktree-'));
+            const report = 'Artifact bytes copied by the production cp invocation.\n';
+            let completion: Promise<void> | undefined;
+            let copySettled: Promise<void> | undefined;
+            const observations: Array<{
+              boundary: string;
+              status: string;
+              phase: string | undefined;
+              preserved: string | null | undefined;
+              terminalCount: number;
+              report: string;
+            }> = [];
+            let realCopies = 0;
+            try {
+              const manager = createPodManager(ctx.deps);
+              const pod = manager.createSession(
+                {
+                  profileName: 'test-profile',
+                  task: 'Research '.repeat(12),
+                  branch: variant === 'explicit' ? 'research/explicit' : undefined,
+                  options: {
+                    agentMode: 'auto',
+                    output: 'artifact',
+                    validate: false,
+                    promotable: false,
+                  },
+                },
+                'user-1',
+              );
+              ctx.podRepo.update(pod.id, {
+                status: 'running',
+                containerId: 'artifact-source',
+                baseBranch: variant === 'explicit' ? 'explicit-base' : null,
+              });
+              if (variant === 'main-default') {
+                const profile = ctx.profileStore.get('test-profile');
+                vi.mocked(ctx.profileStore.get).mockReturnValue({
+                  ...profile,
+                  defaultBranch: null,
+                });
+              }
+              ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'Report ready');
+              const branch = variant === 'explicit' ? 'research/explicit' : `research/${pod.id}`;
+              const base =
+                variant === 'explicit'
+                  ? 'explicit-base'
+                  : variant === 'main-default'
+                    ? 'main'
+                    : 'profile-base';
+              const terminalCount = () =>
+                ctx.eventRepo
+                  .getForSession(pod.id)
+                  .filter(
+                    (event) =>
+                      event.payload.type === 'pod.completed' ||
+                      (event.payload.type === 'pod.status_changed' &&
+                        event.payload.newStatus === 'complete'),
+                  ).length;
+              const observe = async (boundary: string) => {
+                const current = ctx.podRepo.getOrThrow(pod.id);
+                if (!current.artifactsPath)
+                  throw new Error('Snapshot not published before cleanup');
+                await verifyArtifactSnapshot(
+                  current.artifactsPath,
+                  path.join(completionDataDir, 'artifacts', pod.id),
+                  current.lifecycleGeneration,
+                  current.finalization?.cycle ?? 0,
+                );
+                observations.push({
+                  boundary,
+                  status: current.status,
+                  phase: current.finalization?.phase,
+                  preserved: current.finalization?.sourcePreservedAt,
+                  terminalCount: terminalCount(),
+                  report: fs.readFileSync(path.join(current.artifactsPath, 'report.md'), 'utf8'),
+                });
+              };
+              ctx.deps.beforeContainerCleanup = async () => {
+                await observe('hook');
+                entered.resolve();
+                await release.promise;
+              };
+              vi.mocked(ctx.containerManager.kill).mockImplementation(async () => {
+                await observe('kill');
+              });
+              vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementation(
+                async (_id, _source, target) => {
+                  fs.writeFileSync(path.join(target, 'report.md'), report);
+                },
+              );
+              vi.mocked(ctx.worktreeManager.create).mockResolvedValue({
+                worktreePath: worktree,
+                bareRepoPath: path.join(completionDataDir, 'unused-bare'),
+                startCommitSha: 'a'.repeat(40),
+              });
+              if (variant === 'push-failure')
+                vi.mocked(ctx.worktreeManager.pushBranch).mockRejectedValue(
+                  new Error('remote unavailable'),
+                );
+              mockedExecFile.mockImplementation((...args: unknown[]) => {
+                if (args[0] !== 'cp') {
+                  if (!previousExec) throw new Error('Missing original process mock');
+                  return Reflect.apply(previousExec, undefined, args);
+                }
+                const snapshot = ctx.podRepo.getOrThrow(pod.id).artifactsPath;
+                expect(args[1]).toEqual(['-a', `${snapshot}/.`, `${worktree}/`]);
+                expect(
+                  snapshot?.startsWith(path.join(completionDataDir, 'artifacts', pod.id)),
+                ).toBe(true);
+                const callback = args[args.length - 1] as (
+                  error: Error | null,
+                  stdout: string,
+                  stderr: string,
+                ) => void;
+                const settled = deferred<void>();
+                copySettled = settled.promise;
+                realCopies++;
+                return realProcess.execFile(
+                  'cp',
+                  args[1] as string[],
+                  { timeout: 3_000 },
+                  (error, stdout, stderr) => {
+                    try {
+                      callback(error, stdout, stderr);
+                    } finally {
+                      settled.resolve();
+                    }
+                  },
+                );
+              });
+              completion = manager.handleCompletion(pod.id);
+              void completion.catch(() => {});
+              await bounded(entered.promise);
+              expect(observations).toEqual([
+                expect.objectContaining({
+                  boundary: 'hook',
+                  status: 'running',
+                  phase: 'preserving',
+                  preserved: expect.any(String),
+                  terminalCount: 0,
+                  report,
+                }),
+              ]);
+              expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+              expect(fs.readFileSync(path.join(worktree, 'report.md'), 'utf8')).toBe(report);
+              expect(realCopies).toBe(1);
+              expect(ctx.worktreeManager.create).toHaveBeenCalledExactlyOnceWith({
+                repoUrl: 'https://github.com/org/repo',
+                branch,
+                baseBranch: base,
+                pat: 'daemon-gh-token',
+              });
+              expect(ctx.worktreeManager.commitPendingChanges).toHaveBeenCalledExactlyOnceWith(
+                worktree,
+                `research: ${pod.task.slice(0, 72)}`,
+                { maxDeletions: 1000 },
+              );
+              expect(ctx.worktreeManager.pushBranch).toHaveBeenCalledExactlyOnceWith(
+                worktree,
+                branch,
+              );
+              release.resolve();
+              await bounded(completion);
+              expect(observations).toEqual(
+                ['hook', 'kill'].map((boundary) =>
+                  expect.objectContaining({
+                    boundary,
+                    status: 'running',
+                    phase: 'preserving',
+                    preserved: expect.any(String),
+                    terminalCount: 0,
+                    report,
+                  }),
+                ),
+              );
+              expect(ctx.containerManager.kill).toHaveBeenCalledExactlyOnceWith('artifact-source');
+              expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+                status: 'complete',
+                finalization: { phase: 'finished' },
+              });
+              expect(terminalCount()).toBe(1);
+              const saved = ctx.podRepo.getOrThrow(pod.id);
+              await verifyArtifactSnapshot(
+                saved.artifactsPath as string,
+                path.join(completionDataDir, 'artifacts', pod.id),
+                saved.lifecycleGeneration,
+                saved.finalization?.cycle ?? 0,
+              );
+            } finally {
+              release.resolve();
+              try {
+                await bounded(Promise.allSettled([completion, copySettled]));
+              } finally {
+                if (previousExec) mockedExecFile.mockImplementation(previousExec);
+                ctx.db.close();
+                fs.rmSync(worktree, { recursive: true, force: true });
+              }
+            }
+          },
+          15_000,
+        );
+
+        it('releases joined rejected artifact finalization so a fresh completion can succeed', async () => {
+          const ctx = createTestContext();
+          let completions: Promise<unknown> | undefined;
+          const getProfile = vi.mocked(ctx.profileStore.get);
+          const previousGet = getProfile.getMockImplementation();
+          try {
+            const manager = createPodManager(ctx.deps);
+            const pod = manager.createSession(
+              {
+                profileName: 'test-profile',
+                task: 'Collect after resolver recovery',
+                options: {
+                  agentMode: 'auto',
+                  output: 'artifact',
+                  validate: false,
+                  promotable: false,
+                },
+              },
+              'user-1',
+            );
+            ctx.podRepo.update(pod.id, { status: 'running', containerId: 'artifact-source' });
+            ctx.podRepo.completionJournal?.settle(ctx.podRepo.getOrThrow(pod.id), 'Report ready');
+            const original = ctx.podRepo.getOrThrow(pod.id);
+            const failure = new Error('Execution settings unavailable');
+            getProfile.mockClear().mockImplementation(() => {
+              throw failure;
+            });
+            const first = manager.handleCompletion(pod.id);
+            const second = manager.handleCompletion(pod.id);
+            completions = Promise.allSettled([first, second]);
+            expect(await bounded(completions)).toEqual([
+              { status: 'rejected', reason: failure },
+              { status: 'rejected', reason: failure },
+            ]);
+            expect(getProfile).toHaveBeenCalledTimes(1);
+            expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+            expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+            expect(ctx.podRepo.getOrThrow(pod.id)).toEqual(original);
+            if (!previousGet) throw new Error('Missing original profile resolver');
+            getProfile.mockImplementation(previousGet);
+            completions = manager.handleCompletion(pod.id);
+            await bounded(completions);
+            expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+              status: 'complete',
+              finalization: { phase: 'finished' },
+            });
+            expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(1);
+            expect(ctx.containerManager.kill).toHaveBeenCalledTimes(1);
+          } finally {
+            try {
+              await bounded(Promise.allSettled([completions]));
+            } finally {
+              if (previousGet) getProfile.mockImplementation(previousGet);
+              ctx.db.close();
+            }
+          }
+        });
+      });
+
       it('extracts /workspace to artifactsPath for interactive-artifact pods, skipping branch push', async () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);

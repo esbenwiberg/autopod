@@ -118,10 +118,10 @@ closure. Existing gated live suites are skipped, not passing real-pod proof.
 
 ## Acceptance and limits
 
-- [ ] Added public characterization passes on unchanged source with recorded SHA.
-- [ ] Typed artifact boundary extracted without behavior or ownership changes.
-- [ ] Identical characterization and interruption races pass after movement.
-- [ ] Full daemon and supported build/typecheck/hygiene checks recorded.
+- [x] Added public characterization passes on unchanged source with recorded SHA.
+- [x] Typed artifact boundary extracted without behavior or ownership changes.
+- [x] Identical characterization and interruption races pass after movement.
+- [x] Full daemon and supported build/typecheck/hygiene checks recorded.
 - [ ] Independent pre-PR, hosted and integrated checks complete.
 
 No human manual judgment is required for this headless compatibility contract.
@@ -134,3 +134,70 @@ Independent plan review found no blocker. Root incorporated explicit real-cp
 forwarding beneath the existing global child-process mock and a single resolver
 invocation assertion for rejected coalescing. All phases are approved under the
 standing campaign authority; no unresolved product or technical choice remains.
+
+## Implementation evidence: Phase 1
+
+Production baseline d6a724df79af365764cac54b88e4fc6fb796ea65 remained unchanged.
+Five added public-manager cases plus the three existing cycle races passed:
+8 passed, 666 deselected/skipped by the name filter, one file. Node22.23.3,
+pnpm9.15.4, Vitest4.1.11; frozen install passed. Exact focused command:
+
+```sh
+npx -y -p node@22 -p pnpm@9.15.4 -c 'SKIP_DB_TESTS=0 pnpm --filter @autopod/daemon exec vitest run src/pods/pod-manager.test.ts -t "artifact finalizer compatibility|fences old artifact finalization"'
+```
+
+Private logs: .autopod-data/reliability/r06b/characterization-before.log and
+install.log. Earlier fixture-only failures are retained in characterization-
+fixture-adjustment.log (existing synthetic Git credential) and characterization-
+branch-fixture.log (branch not writable through PodUpdates).
+
+Expected: characterize explicit branch and branch/base fallback variants.
+Found: public creation binds branch; SQLite branch is NOT NULL and PodUpdates
+cannot change it. Adjustment approved by coordinator: exercise explicit branch
+through createSession and ordinary generated research/<id>, plus nullable
+base/profile fallbacks. Preserve defensive null-branch fallback verbatim but do
+not claim runtime coverage of its unreachable SQLite arm. No fake nullable
+repository view or production behavior change was introduced.
+
+The real cp subprocess is allowed only for exact private snapshot/worktree paths,
+with a 3-second timeout; tests await callback settlement and restore the mock.
+Hook and kill observations both verify receipt/content and durable publication
+before completion. The five cases close their SQLite DBs and use existing private
+completion DATA_DIR teardown. No provider request or real Git push occurs.
+
+## Implementation evidence: Phases 2–3
+
+Phase 1 was committed/pushed as72076f9f081d3ebe745167196afe33854e898a0a.
+The extracted195-line artifact-finalizer module has typed collaborators and
+returns the two existing functions. Manager wiring preserves shared policy,
+public admission, both promise registries, cleanup and transition ownership.
+Private verify-movement.py compares both moved guard/function blocks exactly
+against that characterization commit, allowing only the container-selection
+adapter rename; both comparisons pass. Existing manager imports remain needed
+by other callers. No production behavior fix was mixed into the move.
+
+Final source verification (all exit0):
+
+| Check | Observed result | Private evidence under .autopod-data/reliability/r06b/ |
+|---|---|---|
+| Same focused command as Phase 1 | 8 passed, 666 name-filtered skips, 1 file | characterization-after.log |
+| Planned seven affected suites | 708 passed, 7 files, zero skips | affected.log |
+| Full daemon test command | 6128 passed, 10 skipped; 394 passed files, 5 skipped | daemon-full.log |
+| Daemon and dependency build | ESM and declarations passed | build.log |
+| Supported daemon typecheck | Declaration build passed | typecheck-secrets.log |
+| Scoped Biome on all three TS files | Passed without changes | biome-final.log |
+| Secret scanner after staging new module | Passed (scanner enumerates tracked/index files) | secrets-final.log |
+| Diff whitespace check and exact movement comparison | Passed | diff-check.log, movement.json |
+
+The full daemon run took94.57s. The affected local sandbox-adapter test used18
+simulated client requests across three stages and real local archive/filesystem
+operations; it did not contact Azure. Gated container/live tests and platform
+skips remain unproven. Existing process-boundary tests in the broader daemon suite
+are not artifact-specific crash qualification. No standalone factory mock test
+was added: public tests exercise both new wiring and the real copied bytes.
+
+Source stayed unchanged throughout final checks. proof.json records exact source
+and evidence SHA256s, commands, versions, final revision and limitations. Private
+test roots were removed and DBs/child copies settled by teardown; no pod, service,
+cloud resource or deployment was created. Independent pre-PR review, hosted checks
+and post-merge integration remain coordinator-owned and unchecked above.
