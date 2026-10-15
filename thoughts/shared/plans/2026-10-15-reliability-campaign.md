@@ -104,9 +104,9 @@ choice or missing authority that repository evidence cannot establish.
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | R03a complete (#420); R03b complete (#422,913c0622); hosted+integrated proof passed |
 | R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b complete (#425,173d3450); R04c complete (#427,80fc8158; integrated18tests at43a5fad2 after fixture PR430); R04d complete (#431,1ace904a), hosted/integrated32 tests and47 capture matches; draft retention remains |
-| R05 | Shared response/event contract scenarios | R00, R01 | R05a complete (#426,98b9d912); R05b decision identity/fencing implementing from36566b48 after reviewed plan |
+| R05 | Shared response/event contract scenarios | R00, R01 | R05a complete (#426,98b9d912); R05b independently reviewed at a8ca3f51; PR432 awaits hosted checks after47 focused tests and six inspected native captures |
 | R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a complete: PR423 merged at5cc8fbc6;704 integrated tests passed |
-| R07 | Existing navigation/readability/keyboard polish | R02, R04 | Researching existing navigation defects; separate wireframes before visible changes |
+| R07 | Existing navigation/readability/keyboard polish | R02, R04 | R07a keyboard lifetime implementing reviewed plan21b50a2b; native baseline reproduced stale Return selection; inline wireframe shown |
 | R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | R08a complete (#424,c1faba3a), hosted+integrated roundtrip passed; R08b complete (#428,04dabd6a), independent reproduction and hosted/integrated checks passed |
 
 The ledger above is current; execution checkpoints below preserve chronology.
@@ -346,3 +346,11 @@ R05b baseline at910586be reproduced three stale-decision scenarios (two test
 functions, six expected issues) before its production fix. Worker implementation
 continues. Reply acceptance research records post-commit HTTP failures and special
 branch differences; it does not authorize an API expansion by itself.
+
+R05b independent review passed at a8ca3f51: root reran47 affected functions/6
+suites and inspected all six native question-retention captures. Full worker run
+passed447 Swift Testing functions plus13 XCTest cases, with one existing opt-in
+live test skipped; inaccurate zero-skip wording corrected before PR432. Hosted
+checks pending. Evidence copied into campaign r05b/. R07a baseline through actual
+NSApplication.sendEvent reproduced Return opening removed A after B became the
+visible first row. Its approved keyboard bridge plan is implementing separately.
