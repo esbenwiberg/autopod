@@ -78,7 +78,7 @@ import AutopodUI
     let text = rows.joined(separator: "\n")
     if decision != "A" { #expect(!text.contains("Question A?") && !text.contains("A first")) }
     #expect(hosting.bounds.width == 1450 && hosting.bounds.height >= 760)
-    // NavigationSplitView may extend the content by its native toolbar height.
+    // Record the observed host bounds; native layout may exceed the requested height.
     try await Task.sleep(for: .milliseconds(150))
     guard let directory = ProcessInfo.processInfo.environment["AUTOPOD_CONNECTION_RENDER_DIR"] else { return }
     let folder = URL(fileURLWithPath: directory, isDirectory: true)
