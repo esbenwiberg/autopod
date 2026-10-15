@@ -203,3 +203,14 @@ catch-path ownership checks, with private boundary tests. Review follow-up found
 this bounded design feasible. All technical phases are approved under standing
 authority. No human manual judgment is needed for these ownership contracts;
 native inspection is automated evidence, not user signoff.
+
+## Implementation evidence — baseline
+
+At unchanged production `f8693f23`, private transport characterization reproduced
+all five selected behaviors: cached source data survives replacement, delayed
+fix response overwrites B, delayed DELETE removes B, old acknowledgement starts
+B refresh, and obsolete handler still admits A work. Four test functions (five
+cases) failed with nine expected assertions, no timeout acceptance. Command:
+`swift test --package-path packages/desktop --filter ConnectionOwnershipTests`.
+Log: ignored `.autopod-data/reliability/r04e/baseline.log`. Each fixture closes its
+private sessions/peers and joins tasks; no accounts or journals were accessed.
