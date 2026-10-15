@@ -107,7 +107,7 @@ design checkpoint for later pending-state presentation.
 - [x] Failed/stale refresh behavior and no implicit POST resend proven.
 - [x] Actual native composition captures inspected with boundary stated.
 - [x] Full Swift/build/secret/whitespace checks pass.
-- [ ] Independent review before PR; hosted and integrated checks recorded.
+- [x] Independent review before PR; hosted and integrated checks recorded.
 
 ## Compatibility, performance and rollback
 
@@ -172,3 +172,15 @@ application startup, live HTTP/WebSocket behavior, daemon-side execution,
 pending-action presentation, duplicate suppression, retained drafts or recovery
 across connection switches. Event races use the production store's event mutation
 seam; the existing GET-start revision fence is exercised without changing it.
+
+## Final integration proof
+
+PROVEN for the bounded action/API/store/detail composition at worker
+3918b6dd6c4b1190d8946a8018cfbff0767981e4. Coordinator reviewed all changed
+files, independently ran all20 focused invocations, and inspected12 worker
+native captures plus4 independent rerenders before PR421. Hosted CI38786588214
+and Desktop38786588153 passed, including the Xcode app build. PR421 merged into
+codex/reliability at2ff947ea. The same six test functions/20 invocations passed
+on the integrated tree; evidence r04a-integrated.log. Native and local evidence
+retained in .autopod-data/reliability/r04a/. Limitations above still apply; this
+is automated proof, not human acceptance or full-app/live-daemon validation.

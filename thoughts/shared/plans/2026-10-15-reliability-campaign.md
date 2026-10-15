@@ -103,9 +103,9 @@ choice or missing authority that repository evidence cannot establish.
 | R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a complete (PR #417); R01b complete (PR #419, cf8c6663), integrated43tests passed |
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | R03a complete: PR #420 merged at20b7652b, hosted+integrated proof passed |
-| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a PR #421 reviewed, awaiting hosted checks; broader pending/draft research ongoing |
+| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete: PR #421 merged at2ff947ea, hosted+integrated proof passed; pending/draft research completed |
 | R05 | Shared response/event contract scenarios | R00, R01 | Extend established fixture pattern for selected R03/R04 boundaries |
-| R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a cycle-fence worker reproducing public Pause/Message race before repair |
+| R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a reproduced all3 public-control races; repair atf1b8fc9e in independent pre-PR review |
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | Separate wireframe batch and bounded task plans |
 | R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | Measure baseline first; compare same data/toolchain and record thresholds before optimizing |
 
@@ -254,3 +254,11 @@ and native captures inspected; PR421 awaits hosted checks. R06a artifact cycle
 fence has a reviewed implementation plan incorporating cleanup's internal
 ownership assertions. R03b selects rejected401 response disposal as a bounded
 CLI transport repair; a universal timeout policy remains deliberately unselected.
+
+R04a merged at2ff947ea after general CI and native test/Xcode build passed;
+20 focused invocations passed on integration. R03b independently reviewed at
+dbe28efa and fresh built CLI retry proof passed; PR422 awaits hosted checks.
+R06a full daemon suite passed6091tests plus703 targeted tests; independent final
+review is running. Desktop reply acceptance/connection lifetime research is
+complete and will inform the next bounded plan; safe replay cannot be inferred
+from a failed HTTP response.
