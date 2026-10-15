@@ -61,6 +61,9 @@ False/conflicting/failing Kill never sends DELETE. Successful POST plus failed G
 retains existing server-authoritative deletion eligibility; do not infer a killed
 snapshot. The daemon still authorizes deletion. Card uses this combined closure
 when it already offers Kill-and-delete, and plain delete when already deletable.
+Coalesce duplicate killAndDelete workflows themselves through their complete
+Kill-then-Delete lifetime: joining Kill alone would otherwise let two callers send
+two DELETEs. This separate owned workflow must not recursively await itself.
 No confirmation text or delete eligibility redesign.
 
 Establish baseline duplicate-POST and unconditional-delete behavior before the
@@ -100,7 +103,8 @@ barriers and complete cleanup. Required cases:
 - Pause vs Kill conflict on one pod sends only the first command; no queued replay.
 - Kill-and-delete failure or conflicting Pause never DELETEs; duplicate Kill joins
   and DELETE starts only after acknowledged Kill and its awaited refresh finish.
-  A held DELETE must not be reported as completed. Existing deletion errors remain.
+  Two combined-workflow callers produce one DELETE and both await a held DELETE;
+that held DELETE must not be reported as completed. Existing deletion errors remain.
 - Existing20 confirmed-action invocations continue passing, including newer events.
 - Getter preview defaults and actual MainView action-copy path stay compatible.
 
