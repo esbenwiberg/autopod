@@ -77,3 +77,32 @@ Resolve infrastructure availability and inspect exact existing bindings before
 any live dispatch. Do not call the campaign real-pod validated or silently test
 another deployed revision. Smoke-script ownership/auth findings require their
 own reproduction and plan before editing.
+
+## Follow-up research — native adapter, October15 21:10 CEST
+
+Atc1faba3a, bounded read-only Azure queries found an existing northern native
+sandbox group in Succeeded state. Its attached user-assigned identity exists and
+has AcrPull on the matching registry. Data-plane GET works. Exactly one Ready
+autopod-self disk image matches a literal immutable digest, sourceImageHash and
+sourceReference; no stale same-source images were found. One unrelated sandbox
+exists. The older runbook default is Deleting without an identity. Exact target
+identifiers and query receipts are private ignored artifacts under
+`.autopod-data/reliability/native-sandbox-availability/`; selected-target.json is0600.
+
+Coordinator read the complete AzureSandboxApiClient, SandboxContainerManager and
+SandboxApiClient sources. Native spawn uses ensureDiskImage and a PUT create with
+unique podId labels; ensureDiskImage can mutate/delete cache entries, even when
+a reusable image exists (azure-sandbox-api-client.ts:976–1091). A fetch seam can
+observe actual accepted create receipt before readiness polling (:1197–1246).
+Manager onCreated occurs only after client creation returns (:223–242), so it
+alone cannot retain ownership on readiness failure. Native destroy DELETEs the
+exact sandbox and polls GET until404; the cached disk image is intentionally
+retained. Production per-request deadlines do not cover every call/body and
+polling deadlines do not cancel a pending request. The generic smoke has no outer
+deadline and assigns its ID only after spawn returns.
+
+The exact image is historical and lacks a sourceCommit label. It can exercise a
+freshly built campaign host adapter using synthetic files and no model, but does
+not establish campaign worker-image or end-to-end pod execution. Read-only access
+has not yet established create/exec/stream/delete permission. No resource mutation
+or model invocation occurred during discovery.

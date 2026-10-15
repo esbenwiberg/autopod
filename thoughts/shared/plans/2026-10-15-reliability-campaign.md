@@ -107,7 +107,7 @@ choice or missing authority that repository evidence cannot establish.
 | R05 | Shared response/event contract scenarios | R00, R01 | R05a decision-response contract implementing reviewed plan; real baseline list/detail mismatch reproduced |
 | R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a complete: PR423 merged at5cc8fbc6;704 integrated tests passed |
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | Separate wireframe batch and bounded task plans |
-| R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | R08a upgrade/actual-backup/restore roundtrip at22f88734 in independent review; performance policy remains unselected |
+| R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | R08a complete (#424,c1faba3a), hosted+integrated roundtrip passed; performance policy remains unselected |
 
 R00 and the bounded R01a CLI executable harness have reviewed detailed plans.
 The remaining R01 harness slices need detailed plans. R02's design direction is
