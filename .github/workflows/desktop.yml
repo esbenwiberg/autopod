@@ -7,11 +7,15 @@ on:
     paths:
       - "packages/desktop/**"
       - ".github/workflows/desktop.yml"
+      - "scripts/update-village-renderer*"
+      - "pnpm-lock.yaml"
   pull_request:
     branches: [main]
     paths:
       - "packages/desktop/**"
       - ".github/workflows/desktop.yml"
+      - "scripts/update-village-renderer*"
+      - "pnpm-lock.yaml"
 
 concurrency:
   group: desktop-${{ github.workflow }}-${{ github.ref }}
@@ -31,6 +35,16 @@ jobs:
 
       - name: Test Swift package
         run: swift test --package-path packages/desktop --no-parallel
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Test village renderer contract
+        run: |
+          npx pnpm install --frozen-lockfile --filter autopod
+          node --test packages/desktop/Tests/VillageHost/*.test.mjs scripts/update-village-renderer.test.mjs
+          npx pnpm village:check
 
       - name: Build macOS app
         run: >-
