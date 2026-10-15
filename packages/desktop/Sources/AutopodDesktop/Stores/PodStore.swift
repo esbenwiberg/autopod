@@ -55,6 +55,16 @@ public final class PodStore {
   // MARK: - API
 
   private var api: DaemonAPI?
+  private struct Source: Equatable {
+    let connectionID: UUID?
+    let endpoint: URL
+  }
+  struct Ownership: Equatable {
+    fileprivate let storeID: UUID
+    fileprivate let epoch: UInt64
+  }
+  private let storeID = UUID()
+  private var source: Source?
   private var configurationEpoch: UInt64 = 0
   private var hydratedPodIds = Set<String>()
   private var hydratingPodIds = Set<String>()
@@ -65,10 +75,42 @@ public final class PodStore {
   private var fleetMembershipRevision = 0
   private var insertionRevisions: [String: Int] = [:]
 
-  public func configure(api: DaemonAPI) {
+  public func configure(api: DaemonAPI, connectionID: UUID? = nil) {
+    let next = Source(connectionID: connectionID, endpoint: api.baseURL)
+    if source != next {
+      pods.removeAll()
+      selectedSessionId = nil
+      sessionDiffs.removeAll()
+      qualityScores.removeAll()
+      seriesCache.removeAll()
+      statusRevisions.removeAll()
+      decisionRevisions.removeAll()
+      insertionRevisions.removeAll()
+    }
+    source = next
     configurationEpoch += 1
     self.api = api
-    // Preserve visible data, but no request or hydration admission crosses epochs.
+    resetRequestState()
+  }
+
+  /// Keep readable last-observed data, but revoke all request/action authority.
+  public func disconnect() {
+    configurationEpoch += 1
+    api = nil
+    resetRequestState()
+  }
+
+  func ownership(for api: DaemonAPI) -> Ownership? {
+    guard self.api === api else { return nil }
+    return Ownership(storeID: storeID, epoch: configurationEpoch)
+  }
+
+  func isCurrent(_ ownership: Ownership?) -> Bool {
+    guard let ownership, api != nil else { return false }
+    return ownership.storeID == storeID && ownership.epoch == configurationEpoch
+  }
+
+  private func resetRequestState() {
     hydratedPodIds.removeAll()
     hydratingPodIds.removeAll()
     isLoading = false
