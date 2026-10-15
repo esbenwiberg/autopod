@@ -20,6 +20,7 @@ import type { ActionAuditRepository } from '../../actions/audit-repository.js';
 import type { CompactPodSource } from '../../pods/compact-pod-projection.js';
 import { aggregateCost, parseDays } from '../../pods/cost-aggregation.js';
 import { dispatchRerunRequest } from '../../pods/dispatch-rerun-request.js';
+import { escalationDisplaySummary } from '../../pods/escalation-display.js';
 import type { EscalationRepository } from '../../pods/escalation-repository.js';
 import {
   type EscalationsAnalyticsScope,
@@ -178,7 +179,7 @@ function compactPod(
     mergeBlockReason: compactText(pod.mergeBlockReason),
     lastCorrectionMessage: compactText(pod.lastCorrectionMessage),
     lastRecoveryTrigger: pod.lastRecoveryTrigger,
-    pendingEscalationSummary: compactText(pod.pendingEscalation?.question),
+    pendingEscalationSummary: compactText(escalationDisplaySummary(pod.pendingEscalation)),
     progressSummary: reviewProgress
       ? reviewProgressSummary(reviewProgress)
       : pod.progress

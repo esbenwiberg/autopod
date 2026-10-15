@@ -46,6 +46,7 @@ import {
   type DispatchPreflightLedger,
   createDispatchPreflightLedger,
 } from './dispatch-preflight-ledger.js';
+import { isDisplayEscalation } from './escalation-display.js';
 import {
   type ExecutionProvenanceLedger,
   createExecutionProvenanceLedger,
@@ -620,10 +621,11 @@ function rowToDisplaySession(source: Record<string, unknown>): Pod {
       row.task_summary = null;
     }
   }
-  for (const [field, keys] of [
-    ['pending_escalation', ['question']],
-    ['progress', ['phase', 'description']],
-  ] as const) {
+  if (row.pending_escalation && !isDisplayEscalation(JSON.parse(String(row.pending_escalation)))) {
+    diagnostics.push({ field: 'pending_escalation', code: 'invalid_shape' });
+    row.pending_escalation = null;
+  }
+  for (const [field, keys] of [['progress', ['phase', 'description']]] as const) {
     if (!row[field]) continue;
     const value = JSON.parse(String(row[field])) as Record<string, unknown>;
     if (value && keys.some((key) => typeof value[key] !== 'string')) {
