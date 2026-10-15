@@ -104,7 +104,7 @@ choice or missing authority that repository evidence cannot establish.
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | R03a complete (#420); R03b complete (#422,913c0622); hosted+integrated proof passed |
 | R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b socket ownership worker implementing reviewed plan; pending/draft research completed |
-| R05 | Shared response/event contract scenarios | R00, R01 | R05a decision-response contract implementing reviewed plan; real baseline list/detail mismatch reproduced |
+| R05 | Shared response/event contract scenarios | R00, R01 | R05a independently reviewed atb99dab09; PR426 awaits hosted checks |
 | R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a complete: PR423 merged at5cc8fbc6;704 integrated tests passed |
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | Separate wireframe batch and bounded task plans |
 | R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | R08a complete (#424,c1faba3a), hosted+integrated roundtrip passed; performance policy remains unselected |
@@ -285,3 +285,11 @@ and reran15 native socket/control/resync/dedupe cases at3e97aed5 before PR425;
 all passed, with peer/session/listener teardown observed. R05a baseline reproduces
 list serialization dropping a valid escalation envelope that detail preserves;
 its bounded repair and cross-client contract fixtures are in implementation.
+
+R04b merged at173d3450 after hosted general/native checks;21 affected native test
+functions passed again on integration. R05a independently reviewed atb99dab09,
+with real SQLite/Fastify, fresh-built CLI and Swift contract proof rerun before
+PR426. R01c's no-model native qualification harness is being prepared, with a
+coordinator review gate before its single live create. R04c targets superseded
+PodStore REST responses; it explicitly does not claim complete daemon-data
+separation or immediate disconnect fencing.

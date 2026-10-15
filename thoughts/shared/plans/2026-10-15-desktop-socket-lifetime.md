@@ -114,7 +114,7 @@ needed for this isolated transport contract. Full-app behavior remains unproven.
 - [x] Active duplicate connect is harmless; current reconnect/replay still works.
 - [x] EventStream closes captured old socket and rejects its queued callbacks.
 - [x] Owned peer/session/tasks close on success and failure; full validation passes.
-- [ ] Independent pre-PR, hosted and integrated proof recorded.
+- [x] Independent pre-PR, hosted and integrated proof recorded.
 
 ## Compatibility, performance, rollback
 
@@ -214,3 +214,14 @@ heartbeat-expiry path was not separately accelerated or timed in tests. Already-
 started REST work, complete daemon-switch isolation, actual app UI and provider
 accounts are outside this proof. Independent pre-PR review and hosted/integrated
 verification remain coordinator-owned and unchecked above.
+
+## Coordinator review and integration
+
+Root independently read the complete final production diff and three test files
+at3e97aed5, found no actionable issue, and reran15 native socket/control/resync/
+dedupe cases before PR425. All passed; the evidence is `independent-review.log`.
+General CI38791285887 and native test/Xcode38791285781 passed. PR425 merged at
+173d3450;21 focused test functions (including confirmed actions and parameter
+cases) passed on integration, with real peer/session/listener teardown observed.
+Evidence is retained in `.autopod-data/reliability/r04b/` and
+`r04b-integrated.log`. PROVEN within the isolated transport lifetime scope above.
