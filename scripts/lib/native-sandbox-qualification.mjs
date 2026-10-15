@@ -19,7 +19,7 @@ export function validateTarget(target) {
   assert.match(target.image, /^[a-z0-9]+\.azurecr\.io\/[\w./-]+@sha256:[a-f0-9]{64}$/);
   assert.match(
     target.imagePullIdentityResourceId,
-    /^\/subscriptions\/[\w-]+\/resourceGroups\/[\w-]+\/providers\/Microsoft.ManagedIdentity\/userAssignedIdentities\/[\w-]+$/,
+    /^\/subscriptions\/[\w-]+\/resourceGroups\/[\w-]+\/providers\/Microsoft\.ManagedIdentity\/userAssignedIdentities\/[\w-]+$/i,
   );
   return target;
 }

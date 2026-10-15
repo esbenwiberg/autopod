@@ -82,6 +82,42 @@ test('target and immutable cache validation fail closed', () => {
   assert.throws(() => verifyCache(target, [{ ...disk, image: { base: 'mutable:latest' } }]));
 });
 
+test('Azure ARM identity syntax accepts provider-returned casing without rewriting the target', () => {
+  const original = {
+    ...target,
+    imagePullIdentityResourceId: target.imagePullIdentityResourceId.replace(
+      '/resourceGroups/',
+      '/resourcegroups/',
+    ),
+  };
+  assert.equal(validateTarget(original), original);
+  assert.equal(original.imagePullIdentityResourceId.includes('/resourcegroups/'), true);
+  assert.throws(() =>
+    validateTarget({
+      ...original,
+      imagePullIdentityResourceId: `${original.imagePullIdentityResourceId}/extra`,
+    }),
+  );
+  assert.throws(() =>
+    validateTarget({
+      ...original,
+      imagePullIdentityResourceId: original.imagePullIdentityResourceId.replace(
+        'Microsoft.ManagedIdentity',
+        'Microsoft.Other',
+      ),
+    }),
+  );
+  assert.throws(() =>
+    validateTarget({
+      ...original,
+      imagePullIdentityResourceId: original.imagePullIdentityResourceId.replace(
+        'Microsoft.ManagedIdentity',
+        'MicrosoftxManagedIdentity',
+      ),
+    }),
+  );
+});
+
 test('HTTP guard blocks forbidden targets, disk/group mutations and unrelated sandboxes before transport', async () => {
   const { guard, calls } = fixture();
   for (const [input, method] of [

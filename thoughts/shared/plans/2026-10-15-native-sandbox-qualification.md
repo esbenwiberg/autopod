@@ -153,7 +153,7 @@ Local proof command (Node22/pnpm9.15.4):
 npx -y -p node@22 -p pnpm@9.15.4 -c 'node --test scripts/qualify-native-sandbox.test.mjs'
 ```
 
-Fourteen tests pass: target/cache validation, forbidden HTTP mutation, durable
+Fifteen tests pass: target/cache validation, forbidden HTTP mutation, durable
 receipt/one-create ownership, header/body stalls, lost create response, WebSocket
 target/stall/frame constraints, wrong-label/preexisting cleanup refusal, exact
 discovery/deletion/preservation, unresolved absence, actual child death before
@@ -186,3 +186,18 @@ exposed an observation race where exitCode resolved before Readable data drained
 both harness and test now await stream completion before asserting content.
 No production behavior changed. The revised head remains paused for independent
 pre-live review; all Azure behavior is still unproven.
+
+### First invocation — local input rejection before cloud access
+
+The reviewed `1fccc187` invocation exited before creating a run receipt/directory
+or launching a child: the existing Azure identity resource ID uses the legal
+lowercase structural segment `resourcegroups`, while the harness required
+`resourceGroups` case-sensitively. Zero Azure requests and zero create attempts
+occurred. This is a harness preflight parser rejection, not a cloud qualification
+failure. Private evidence is `r01c/phase2-local-rejection.json`.
+
+The identity syntax check now accepts ARM structural casing without changing the
+original target string; the provider-name dot remains literal. A dedicated test
+reproduced the rejection before the fix and also rejects extra path segments and
+other provider names. All exact account/group/cache/ownership checks and budgets
+remain unchanged. Await renewed coordinator clearance before another invocation.
