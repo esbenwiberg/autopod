@@ -19,6 +19,12 @@ struct AutopodApp: App {
   @State private var eventStream: EventStream?
   @State private var terminalManager: TerminalManager?
   @State private var showSetup = false
+  @State private var wiringGate = DesktopConnectionWiringGate()
+
+  private var activeConnectionIdentity: DesktopConnectionIdentity? {
+    DesktopConnectionIdentity(isConnected: connectionManager.isConnected,
+      connectionID: connectionManager.connection?.id, api: connectionManager.api)
+  }
 
   var body: some Scene {
     Window("Autopod", id: "main") {
@@ -32,7 +38,8 @@ struct AutopodApp: App {
         actionHandler: actionHandler,
         eventStream: eventStream,
         terminalManager: terminalManager,
-        showSetup: $showSetup
+        showSetup: $showSetup,
+        onConnectionRecovered: { wireUpConnection(forceNewGeneration: true) }
       )
       .environment(\.controlActiveState, .key)
       .background(MainWindowPresenter())
@@ -50,12 +57,14 @@ struct AutopodApp: App {
           NotificationService.shared.registerCategories()
         }
       }
-      .onChange(of: connectionManager.isConnected) { _, connected in
-        if connected {
+      .onChange(of: activeConnectionIdentity) { _, identity in
+        if identity != nil {
           wireUpConnection()
         } else {
           eventStream?.disconnect()
           eventStream = nil
+          podStore.disconnect()
+          wiringGate.disconnect()
         }
       }
     }
@@ -84,11 +93,14 @@ struct AutopodApp: App {
   }
 
   /// Configure stores and start streaming once the daemon connection is live.
-  private func wireUpConnection() {
-    guard let api = connectionManager.api,
-          let conn = connectionManager.connection else { return }
+  private func wireUpConnection(forceNewGeneration: Bool = false) {
+    guard let identity = activeConnectionIdentity,
+          let api = connectionManager.api,
+          let conn = connectionManager.connection,
+          wiringGate.admit(identity, force: forceNewGeneration) else { return }
 
-    podStore.configure(api: api)
+    eventStream?.disconnect()
+    podStore.configure(api: api, connectionID: conn.id)
     managedPodStore.configure(api: api)
     profileStore.configure(api: api)
     memoryStore.configure(api: api)
