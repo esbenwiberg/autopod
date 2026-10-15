@@ -6,6 +6,7 @@ import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { WebSocketServer } from 'ws';
 
 const executable = fileURLToPath(new URL('../../dist/index.js', import.meta.url));
 const OUTPUT_LIMIT = 64 * 1024;
@@ -29,6 +30,7 @@ function startProcess(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
   let cancelled = false;
   let closed = false;
   let timer: NodeJS.Timeout | undefined;
+  const stdoutWaiters = new Set<() => void>();
 
   // Resolve only after both pipes close. Keep failures as data so request-barrier
   // tests cannot cause an unhandled rejection before they await the outcome.
@@ -56,8 +58,10 @@ function startProcess(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
         child.kill('SIGKILL');
         return;
       }
-      if (stream === 'stdout') stdout = Buffer.concat([previous, chunk]);
-      else stderr = Buffer.concat([previous, chunk]);
+      if (stream === 'stdout') {
+        stdout = Buffer.concat([previous, chunk]);
+        for (const check of stdoutWaiters) check();
+      } else stderr = Buffer.concat([previous, chunk]);
     };
     child.stdout.on('data', (chunk: Buffer) => collect('stdout', chunk));
     child.stderr.on('data', (chunk: Buffer) => collect('stderr', chunk));
@@ -69,6 +73,32 @@ function startProcess(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
 
   return {
     result,
+    signal(signal: NodeJS.Signals) {
+      assert(!closed, 'Cannot signal a closed child');
+      return child.kill(signal);
+    },
+    async waitForStdout(text: string) {
+      let check: () => void = () => {};
+      const received = new Promise<void>((resolve) => {
+        check = () => {
+          if (stdout.toString('utf8').includes(text)) resolve();
+        };
+        stdoutWaiters.add(check);
+        check();
+      });
+      try {
+        await Promise.race([
+          received,
+          result.then((outcome) => {
+            throw new Error(
+              `CLI closed before stdout contained ${text}: ${JSON.stringify(outcome)}`,
+            );
+          }),
+        ]);
+      } finally {
+        stdoutWaiters.delete(check);
+      }
+    },
     get pid() {
       return child.pid;
     },
@@ -101,6 +131,7 @@ export async function createCliFixture(reply: {
   status?: number;
   body?: unknown;
   hold?: boolean;
+  websocket?: 'accept' | 'hold' | 'reject';
 }) {
   await access(executable).catch(() => {
     throw new Error('Build @autopod/cli and its dependencies before executable tests');
@@ -112,6 +143,15 @@ export async function createCliFixture(reply: {
   const children = new Set<FixtureProcess>();
   const sockets = new Set<Socket>();
   const requests: RecordedRequest[] = [];
+  const subscriptions: unknown[] = [];
+  const websocketServer = new WebSocketServer({ noServer: true });
+  let resolveSubscription: (peer: {
+    socket: import('ws').WebSocket;
+    closed: Promise<void>;
+  }) => void = () => {};
+  const firstSubscription = new Promise<Parameters<typeof resolveSubscription>[0]>((resolve) => {
+    resolveSubscription = resolve;
+  });
   let resolveRequest: (request: RecordedRequest) => void = () => {};
   const firstRequest = new Promise<RecordedRequest>((resolve) => {
     resolveRequest = resolve;
@@ -133,12 +173,38 @@ export async function createCliFixture(reply: {
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
   });
+  server.on('upgrade', (request, socket, head) => {
+    const recorded = {
+      method: request.method,
+      url: request.url,
+      authorization: request.headers.authorization,
+    };
+    requests.push(recorded);
+    resolveRequest(recorded);
+    if (reply.websocket === 'hold') return;
+    if (reply.websocket !== 'accept') {
+      socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n');
+      return;
+    }
+    websocketServer.handleUpgrade(request, socket, head, (peer) => {
+      const closed = new Promise<void>((resolve) => peer.once('close', resolve));
+      peer.on('error', () => {}); // The fixture owns abrupt transport shutdowns.
+      peer.on('message', (data) => {
+        subscriptions.push(JSON.parse(data.toString()));
+        resolveSubscription({ socket: peer, closed });
+      });
+    });
+  });
   let disposal: Promise<void> | undefined;
   function dispose(): Promise<void> {
     disposal ??= (async () => {
       try {
         await Promise.all([...children].map((child) => child.dispose()));
       } finally {
+        for (const peer of websocketServer.clients) peer.terminate();
+        const websocketClosure = new Promise<void>((resolve, reject) => {
+          websocketServer.close((error) => (error ? reject(error) : resolve()));
+        });
         const socketClosures = [...sockets].map(
           (socket) => new Promise<void>((resolve) => socket.once('close', resolve)),
         );
@@ -150,6 +216,7 @@ export async function createCliFixture(reply: {
             });
           }
           await Promise.all(socketClosures);
+          await websocketClosure;
         } finally {
           await rm(root, { recursive: true, force: true });
         }
@@ -217,6 +284,7 @@ export async function createCliFixture(reply: {
       root,
       url,
       requests,
+      subscriptions,
       observed,
       dispose,
       start(args: string[]) {
@@ -232,6 +300,17 @@ export async function createCliFixture(reply: {
             throw new Error(`CLI closed before the request barrier: ${JSON.stringify(result)}`);
           }),
         ]);
+      },
+      waitForSubscription(child: FixtureProcess) {
+        return Promise.race([
+          firstSubscription,
+          child.result.then((result) => {
+            throw new Error(`CLI closed before subscribing: ${JSON.stringify(result)}`);
+          }),
+        ]);
+      },
+      get websocketCount() {
+        return websocketServer.clients.size;
       },
       get listening() {
         return server.listening;
