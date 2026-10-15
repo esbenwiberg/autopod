@@ -77,11 +77,11 @@ full-app acceptance, exactly-once replies or production rollout.
 
 ## Success criteria
 
-- [ ] R04e/R04f reviewed, hosted and integrated gates closed.
+- [x] R04e/R04f reviewed, hosted and integrated gates closed.
 - [x] Frozen install and uncached combined JavaScript checks accounted for.
-- [ ] Final full Swift suite, executable and hosted Xcode proof accounted for.
-- [ ] Final source/digest continuity, skips, audit outcome and evidence reviewed.
-- [ ] Campaign report committed/pushed; main and original checkout preserved.
+- [x] Final full Swift suite, executable and hosted Xcode proof accounted for.
+- [x] Final source/digest continuity, skips, audit outcome and evidence reviewed.
+- [x] Campaign report committed/pushed; main and original checkout preserved.
 
 No manual preference check is necessary to establish these technical contracts.
 If a new product choice or unsupported authority appears, root reports it instead
@@ -116,3 +116,35 @@ NODE_ENV=development SKIP_DB_TESTS=0 TURBO_FORCE=true \
 checks.json and separate stage logs record actual results. Final source continuity
 and final secret scan still apply; completed stages are not yet whole-campaign
 closure.
+
+## Final combined result — October 16
+
+Technical qualification is PROVEN at integrated source `f587fa075965245e53049b7367cb317eb8a0c55b`.
+R04f PR436 passed independent review, the corrected hosted Swift6.1.2/full Xcode
+workflow and general CI before integration. Root then ran the complete serialized
+Swift suite on integration:495 functions /651 executions /27 suites passed,
+13 XCTest cases passed separately, and one existing live-daemon function/suite
+was skipped. The executable build and final secret scan passed. Root inspected
+all43 freshly generated native captures; actual-sheet raster limitations remain
+qualified by identical-production-content captures and actual interaction tests.
+
+All4417 JavaScript inputs match the uncached passing pipeline, including exact
+tracked membership. All23 R04f correction source hashes matched before these
+closure-document edits. Main remains9978fb5e; original dirty checkout was not
+modified by this campaign. Final evidence is in final/proof.json, continuity.json,
+js-proof.json, swift.log, executable.log and native capture directories.
+
+Earlier sandbox and fleet experiments remain tied to their measured snapshots.
+Final audit found the sandbox broad-input manifest differs in one runtime Zod
+schema after main integration; the fleet broad manifest includes later managed
+changes and two new managed-only migrations. No final-head live-bundle identity
+or final-head timing claim is made. Current combined tests establish tested
+compatibility. See the final report for exact scope and retained failures.
+
+Final independent closure review found no actionable findings:94 evidence hashes,
+4417 JavaScript inputs/membership,23 R04f source hashes against tested HEAD, raw
+counts/skips, hosted-source equivalence, earlier task gates and branch containment
+all verified. Closure report is committed with this plan at
+`2026-10-16-reliability-final-report.md`. All selected gates are complete; no further
+product work or experiment is implied. Final document commit is pushed to the
+campaign branch only.

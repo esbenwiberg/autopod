@@ -103,16 +103,15 @@ choice or missing authority that repository evidence cannot establish.
 | R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a complete (PR #417); R01b complete (PR #419, cf8c6663), integrated43tests passed; R01c complete (#429,f818a8b3), live proof and hosted/integrated checks passed |
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | R03a complete (#420); R03b complete (#422,913c0622); hosted+integrated proof passed |
-| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a–d complete (#421/#425/#427/#430/#431); R04e complete (#435,d2a426a2), independent/hosted/integrated64functions and five inspected native states; R04f draft retention implementing reviewed plan after native failing baseline |
+| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a–d complete (#421/#425/#427/#430/#431); R04e complete (#435,d2a426a2), independent/hosted/integrated64functions and five inspected native states; R04f complete (#436,f587fa07), independent/hosted/full integrated native proof passed |
 | R05 | Shared response/event contract scenarios | R00, R01 | R05a complete (#426,98b9d912); R05b complete (#432,be22402d); independent47tests/six captures, hosted and integrated47tests passed |
 | R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a complete (#423,5cc8fbc6); R06b complete (#434,a1e048d1), independent/hosted and fresh-build integrated708tests passed |
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | R07a complete (#433,96783185); independent/hosted/integrated12functions and14 capture matches; literal mouse proof excluded |
 | R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | R08a complete (#424,c1faba3a), hosted+integrated roundtrip passed; R08b complete (#428,04dabd6a), independent reproduction and hosted/integrated checks passed |
-| R09 | Final combined qualification and evidence review | R04e/f; prior slices integrated | Reviewed finite plan74f55787; pinned uncached JS pipeline passed7170tests plus35script tests and shell checks; final native/source-continuity gates pending |
+| R09 | Final combined qualification and evidence review | R04e/f; prior slices integrated | Complete atf587fa07 product source:7170Vitest plus35script tests;651Swift executions plus13XCTest; independent final evidence review passed; final report committed |
 
 The ledger above is current; execution checkpoints below preserve chronology.
-Implemented slices each have their own reviewed RPI plan and proof. R04f and the
-finite R09 qualification are the remaining selected work. Broader orchestration,
+Implemented slices each have their own reviewed RPI plan and proof. All selected implementation slices and R09 qualification are complete. Broader orchestration,
 navigation or recovery work is not implied by these workstream headings.
 
 ## Verification strategy
@@ -396,3 +395,18 @@ tasks with zero cache hits; audit returned no known vulnerabilities. Earlier
 nested-npx EUSAGE and system-Node24 SQLite ABI failures are retained separately;
 the reviewed equivalent runner pins Node22/pnpm9.15.4. All4417 input hashes remain
 unchanged after R04e integration. Final native and final continuity review pending.
+
+R04f complete atf587fa07: PR436 exact reviewed correction headc7303915 passed
+hosted general CI and Desktop Swift6.1.2/renderer/Xcode. Root full integrated
+Swift passed495functions/651executions plus13XCTest, with one existing live skip;
+executable and secret scan passed. Root inspected43 fresh integrated captures and
+verified all4417 JavaScript inputs unchanged. Initial hosted compiler failure and
+all earlier diagnostic runs remain retained. Final R09 report/review closes the
+finite campaign; no main merge, deployment or further live resource was performed.
+
+R09 closed after independent final evidence review found no actionable findings.
+All20 task PRs are merged into the campaign branch. The committed
+[final report](2026-10-16-reliability-final-report.md) records the seven areas, exact
+proof, retained failures and material limitations. Closure edits are documentation
+only; tested product source remainsf587fa07. Main remains9978fb5e and the original
+dirty checkout was preserved. No outstanding selected work remains.

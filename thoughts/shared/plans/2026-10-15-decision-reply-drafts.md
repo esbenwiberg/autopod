@@ -246,7 +246,7 @@ must pass before closure. No new live cloud pod is needed for this local contrac
 - [x] Shared exact-decision draft ownership and isolated unknown handling proven.
 - [x] Attempt lifetime, acknowledgement and unconfirmed outcomes proven.
 - [x] Detail/card native text/input states inspected at final source.
-- [ ] Independent pre-PR, hosted and integrated checks recorded.
+- [x] Independent pre-PR, hosted and integrated checks recorded.
 
 This task improves process-lifetime decision drafts, not app-restart persistence,
 all message composers, authoritative answer receipts or server-side expected-ID
@@ -498,3 +498,24 @@ one-line correction with no findings; reviewed ActionHandler SHA256 is
 claim is made by this annotation correction; existing inspected captures remain
 prior-head evidence, and current focused native interactions pass. Hosted rerun
 and integrated proof remain coordinator-owned.
+
+## Coordinator closure — October 16
+
+PROVEN for the scoped decision-draft contracts. PR [436](https://github.com/esbenwiberg/autopod/pull/436)
+merged into codex/reliability at `f587fa075965245e53049b7367cb317eb8a0c55b`.
+The exact reviewed correction head `c73039150ad2a86d1e8d50ac1495f2e0a10771cd`
+passed hosted CI [38815098480](https://github.com/esbenwiberg/autopod/actions/runs/38815098480)
+and Desktop [38815098505](https://github.com/esbenwiberg/autopod/actions/runs/38815098505):
+Swift6.1.2 full tests, renderer contracts and unsigned Xcode app build all passed.
+The initial compiler failure remains retained; no skipped hosted build is counted.
+
+Root rebuilt and ran the full serialized Swift suite on merged source:495 passed
+functions /651 executions /27 suites,13 separate XCTest passes, one existing
+gated live function/suite skipped; elapsed19.909s. AutopodDesktopExe built in0.31s.
+Root regenerated and personally inspected all43 reply/decision PNGs at this head.
+The actual-sheet rasterization/component/full-app limits above remain explicit.
+All23 correction source hashes matched the merged source before closure-doc edits.
+Final Node22 secret scan passed; final source/JavaScript continuity is recorded in
+R09. Evidence: `.autopod-data/reliability/r04f/root-proof.json` and
+`.autopod-data/reliability/final/proof.json`, including raw hosted logs and captures.
+There is no remaining R04f implementation, review, hosted or integration gate.
