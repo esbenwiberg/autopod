@@ -18,6 +18,19 @@ public final class ActionHandler {
   /// so creation sheets can show submit failures inline.
   public private(set) var lastCreatePodError: String?
 
+  private struct OwnedControl {
+    let id: UUID
+    let kind: PendingPodControl
+    let task: Task<Bool, Never>
+  }
+  @ObservationIgnored private var controls: [String: OwnedControl] = [:]
+  @ObservationIgnored private var deletionWorkflows: [String: OwnedControl] = [:]
+  private var pendingControls: [String: PendingPodControl] = [:]
+
+  public func pendingControl(_ podId: String) -> PendingPodControl? {
+    pendingControls[podId]
+  }
+
   private let api: DaemonAPI
   private var pendingForkRequests: [String: ComposableLaunchRequest] = [:]
   private var pendingWorkerRequests: [String: (draft: Data, request: ComposableLaunchRequest)] = [:]
@@ -37,6 +50,8 @@ public final class ActionHandler {
       reject: { [weak self] id, feedback in await self?.reject(id, feedback: feedback) },
       reply: { [weak self] id, message in await self?.reply(id, message: message) },
       nudge: { [weak self] id, message in await self?.nudge(id, message: message) },
+      pendingControl: { [weak self] id in self?.pendingControl(id) },
+      killAndDelete: { [weak self] id in await self?.killAndDelete(id) },
       kill: { [weak self] id in await self?.kill(id) },
       complete: { [weak self] id in await self?.complete(id) },
       pause: { [weak self] id in await self?.pause(id) },
@@ -209,14 +224,68 @@ public final class ActionHandler {
   }
 
   public func kill(_ podId: String) async {
-    pendingAction = "kill-\(podId)"
-    do {
-      try await api.killPod(podId)
-      await podStore.refreshSession(podId)
-    } catch {
-      lastError = error.localizedDescription
+    _ = await controlTask(podId, kind: .kill)?.value
+  }
+
+  /// Admission is synchronous on MainActor. Caller cancellation does not cancel
+  /// an unstructured task that other callers are also awaiting.
+  private func controlTask(_ podId: String, kind: PendingPodControl) -> Task<Bool, Never>? {
+    if let workflow = deletionWorkflows[podId] {
+      return kind == .kill ? workflow.task : nil
     }
-    pendingAction = nil
+    if let current = controls[podId] {
+      return current.kind == kind ? current.task : nil
+    }
+    let id = UUID()
+    let marker = "\(kind == .pause ? "pause" : "kill")-\(podId)"
+    pendingAction = marker
+    pendingControls[podId] = kind
+    let task = Task { @MainActor in
+      defer {
+        if self.controls[podId]?.id == id {
+          self.controls.removeValue(forKey: podId)
+          if self.deletionWorkflows[podId] == nil {
+            self.pendingControls.removeValue(forKey: podId)
+          }
+          if self.pendingAction == marker { self.pendingAction = nil }
+        }
+      }
+      do {
+        if kind == .pause { try await self.api.pauseSession(podId) }
+        else { try await self.api.killPod(podId) }
+        await self.podStore.refreshSession(podId)
+        return true // POST acknowledgement only; refresh may fail or observe another state.
+      } catch {
+        self.lastError = error.localizedDescription
+        return false
+      }
+    }
+    controls[podId] = OwnedControl(id: id, kind: kind, task: task)
+    return task
+  }
+
+  public func killAndDelete(_ podId: String) async {
+    if let current = deletionWorkflows[podId] {
+      _ = await current.task.value
+      return
+    }
+    // Admit/join Kill before publishing the combined workflow, avoiding self-join.
+    guard let kill = controlTask(podId, kind: .kill) else { return }
+    let id = UUID()
+    let task = Task { @MainActor in
+      defer {
+        if self.deletionWorkflows[podId]?.id == id {
+          self.deletionWorkflows.removeValue(forKey: podId)
+          self.pendingControls.removeValue(forKey: podId)
+        }
+      }
+      guard await kill.value else { return false }
+      await self.deletePodRaw(podId)
+      return true
+    }
+    deletionWorkflows[podId] = OwnedControl(id: id, kind: .killAndDelete, task: task)
+    pendingControls[podId] = .killAndDelete
+    _ = await task.value
   }
 
   public func complete(_ podId: String) async {
@@ -230,14 +299,7 @@ public final class ActionHandler {
   }
 
   public func pause(_ podId: String) async {
-    pendingAction = "pause-\(podId)"
-    do {
-      try await api.pauseSession(podId)
-      await podStore.refreshSession(podId)
-    } catch {
-      lastError = error.localizedDescription
-    }
-    pendingAction = nil
+    _ = await controlTask(podId, kind: .pause)?.value
   }
 
   public func rework(_ podId: String) async {
@@ -505,6 +567,14 @@ public final class ActionHandler {
   }
 
   public func deletePod(_ podId: String) async {
+    if let workflow = deletionWorkflows[podId] {
+      _ = await workflow.task.value
+      return
+    }
+    await deletePodRaw(podId)
+  }
+
+  private func deletePodRaw(_ podId: String) async {
     pendingAction = "delete-\(podId)"
     do {
       try await api.deletePod(podId)
@@ -512,7 +582,7 @@ public final class ActionHandler {
     } catch {
       lastError = error.localizedDescription
     }
-    pendingAction = nil
+    if pendingAction == "delete-\(podId)" { pendingAction = nil }
   }
 
   public func deleteSeries(_ seriesId: String) async {
