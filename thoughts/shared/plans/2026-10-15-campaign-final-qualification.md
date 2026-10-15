@@ -86,3 +86,33 @@ full-app acceptance, exactly-once replies or production rollout.
 No manual preference check is necessary to establish these technical contracts.
 If a new product choice or unsupported authority appears, root reports it instead
 of quietly expanding the campaign.
+
+## Execution adjustment: pinned toolchain
+
+Expected: scripts/validate.sh --quick invoked inside the pinned npx environment
+executes its six stages with Node22/pnpm9.15.4. Found: inherited npm_config_call
+first caused nested npx EUSAGE before any checks. Removing that inherited option
+allowed the script to run, but its nested npx selected the system pnpm/Node24;
+the actual daemon run rejected Node22 SQLite ABI127 because Node24 requires137.
+The script exited1, with2522 failed daemon cases; this is retained as failed
+execution, not counted as passing validation. Rebuilding SQLite under the wrong
+runtime would obscure the required environment.
+
+Adjustment: execute the exact six stages in order through direct pinned pnpm
+subprocesses from an ignored Python runner, preserving each exit, failure
+aggregation and the original all-dependencies audit arguments. Frozen install
+already passed separately with the intended versions. The runner asserts Node22
+and pnpm9.15.4 before work. Independent reviewer checked its equivalence, all4417
+input hashes, failed logs and observed forced build execution; no blocking issue.
+No product/script source changed. Failed logs remain validate-wrapper-failure.*
+and validate-node24.*. The current valid invocation is:
+
+```sh
+NODE_ENV=development SKIP_DB_TESTS=0 TURBO_FORCE=true \
+  npx -y -p node@22 -p pnpm@9.15.4 \
+  -c 'python3 .autopod-data/reliability/final/validate-pinned.py'
+```
+
+checks.json and separate stage logs record actual results. Final source continuity
+and final secret scan still apply; completed stages are not yet whole-campaign
+closure.
