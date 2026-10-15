@@ -110,9 +110,9 @@ solely because of a merge commit. No human visual/manual check is required.
 
 ## Acceptance
 
-- [ ] Real route traverses all three deterministic datasets correctly.
-- [ ] Seven raw measurements per size and identity/memory/bytes metadata retained.
-- [ ] Timing and fixture limitations explicitly reported; no unearned speed claim.
+- [x] Real route traverses all three deterministic datasets correctly.
+- [x] Seven raw measurements per size and identity/memory/bytes metadata retained.
+- [x] Timing and fixture limitations explicitly reported; no unearned speed claim.
 - [ ] Independent pre-PR reproduction, hosted and integrated checks recorded.
 
 ## Compatibility and rollback
@@ -147,10 +147,56 @@ and scoped Biome checks passed. Protocol checks: two passed; benchmark explicitl
 filtered out. The explicit config without opt-in failed as intended before DB
 creation; empty file selection also exited 1. Ordinary Vitest discovery selected
 no files under `scripts/benchmarks`. Logs are in ignored
-`.autopod-data/reliability/r08b/`. Full qualification remains pending.
+`.autopod-data/reliability/r08b/`. The first complete qualification results follow below.
 
 Reproduce from repository root after frozen install:
 
 ```bash
 npx -y -p node@22 -p pnpm@9.15.4 -c 'pnpm --filter @autopod/shared build && AUTOPOD_FLEET_BENCHMARK=1 pnpm exec vitest run --config scripts/benchmarks/fleet-list.config.mjs'
 ```
+
+## Worker qualification result
+
+PROVEN for this bounded warm in-memory route qualification. The exact reproduction
+command above completed once on clean implementation commit
+`1581c68c10100547247d524b1cda5558ebb5f0bf`, using Node22.23.3, pnpm9.15.4,
+Vitest4.1.11, Fastify5.12.5 and better-sqlite3 11.10.0. All three priming traversals
+and all21 measured traversals passed every ordering/field assertion; the two
+protocol checks passed too (three Vitest tests total). All three DBs closed,
+with zero cleanup errors. No failed full measurement runs were discarded.
+
+Receipt: `.autopod-data/reliability/r08b/fleet-1581c68c1010-1792093047010.json`;
+command/build output: `qualification.log` alongside it. The receipt contains raw
+per-page/traversal timing, process-memory samples, bytes, fixture hashes, database
+page counts/sizes, host/runtime identity, source hashes and freshly built shared
+dist hashes. The subsequent commit changes this evidence documentation only;
+benchmark/product hashes remain the qualification target.
+
+| Pods | Pages | Traversal min / median / max ms | First-page median ms | Serialized bytes |
+| --- | --- | --- | --- | --- |
+| 100 | 1 | 2.804 / 3.008 / 9.806 | 2.976 | 355553 |
+| 1000 | 2 | 27.929 / 29.866 / 30.687 | 15.577 | 3555384 |
+| 10000 | 20 | 621.705 / 638.411 / 664.028 | 44.510 | 35554542 |
+
+Each row has seven raw samples; nearest-rank traversal p95 equals that row's max.
+The100-pod9.806ms sample is retained, not rerun away. The10000-pod median is about
+21.4times the1000-pod median for10times as many rows. This is an observation,
+not a diagnosis of query complexity or an optimization claim. Byte totals were
+identical across the seven traversals of each dataset.
+
+The largest sampled process RSS was1405632512bytes and heapUsed460906104bytes.
+These include Vitest, all three resident databases, fixture expectations, raw and
+decoded response retention, and other process state. They are not isolated route
+allocations, true peaks, leak proof, or production memory requirements. Measurements
+exclude source hashing/setup and post-traversal correctness comparisons; traversal
+timings include the documented per-page sampling and safety bookkeeping. Host
+contention remains uncontrolled. No product latency or native/UI claim follows.
+
+Static checks: `node --check` on all four MJS files, scoped `pnpm exec biome check
+scripts/benchmarks`, secret scan, and diff whitespace checks all exited0. Logs:
+`static.log`, `secret-scan.log`, `diff-check.log`. Explicit opt-in absence and
+missing-file selection exited1 as intended (`opt-in-required.log`,
+`empty-selection.log`); default Vitest file listing selected no benchmark files
+(`default-discovery.log`). Independent review/reproduction, hosted checks and
+integrated verification remain root-owned and unchecked. No human manual check
+is required for this nonvisual task.
