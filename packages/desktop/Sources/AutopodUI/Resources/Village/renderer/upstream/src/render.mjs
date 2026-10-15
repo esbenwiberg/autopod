@@ -2,12 +2,13 @@ import { recapSummary } from './recap.mjs';
 import { displayActorId } from './cast.mjs';
 import { sceneAt } from './timeline.mjs';
 import { cameraAt, worldToScreen } from './camera.mjs';
-import { reactionAt } from './dialogue.mjs';
+import { reactionAt, sceneDialogue, dialogueCue, dialogueExcerpt } from './dialogue.mjs';
 import { drawActivity, drawHandoffs, drawPresence, drawWaitingLinks, drawHarbor, drawCelebration } from './effects.mjs';
 import { performanceAt, drawPerformance } from './performance.mjs';
 import { STATION_NAMES } from './world.mjs';
 
 export const VIEW={width:768,height:928};
+export const RECAP_PANEL={x:16,y:652,width:736,height:268};
 function frameIndex(durations,time){const total=durations.reduce((a,b)=>a+b,0);let t=((time*1000)%total+total)%total;for(let i=0;i<durations.length;i++){if(t<durations[i])return i;t-=durations[i];}return 0;}
 
 export function drawCharacter(ctx,actor,assets,x,y,time,scale=2.25,direction=null){
@@ -92,13 +93,14 @@ export function renderFrame(ctx,timeline,time,assets,{focus=null,team=null,react
   const state=sceneAt(timeline,time,{focus,team}),w=ctx.canvas.width,h=ctx.canvas.height;
   focus=displayActorId(timeline,focus);
   ctx.save();ctx.scale(w/VIEW.width,h/VIEW.height);ctx.imageSmoothingEnabled=false;
+  ctx.fillStyle='#101c2c';ctx.fillRect(0,0,VIEW.width,VIEW.height);
   state.camera=cameraAt(timeline,state,{focus,team,mode:camera,motion:reactions});
   ctx.save();ctx.beginPath();ctx.rect(0,0,768,768);ctx.clip();
   ctx.scale(state.camera.scale,state.camera.scale);ctx.translate(-state.camera.x,-state.camera.y);
   ctx.drawImage(timeline.assetVersion==='village-4'?(assets.innMap??assets.restMap??assets.map):timeline.assetVersion==='village-3'?(assets.restMap??assets.cityMap??assets.map):timeline.assetVersion==='village-2'?(assets.cityMap??assets.map):assets.map,0,0,768,768);
   drawHarbor(ctx,timeline,state.time,{team,motion:reactions});
   const spoken=state.active.filter(s=>s.event.kind.includes('message')&&(!focus||displayActorId(timeline,s.event.actorId)===focus));
-  const active=focus?state.current:(state.active.findLast(s=>s.status==='failed')??spoken.findLast(s=>s.dialogueCue)??spoken.at(-1)??state.current),cue=active?.dialogueCue,theme=THEMES[cue?.type];
+  const active=focus?state.current:(state.active.findLast(s=>s.status==='failed')??spoken.findLast(s=>s.dialogueCue)??spoken.at(-1)??state.current),display=sceneDialogue(active),cue=dialogueCue(display.text,active?.event.kind),theme=THEMES[cue?.type];
   state.current=active;
   drawWaitingLinks(ctx,state,focus);
   drawHandoffs(ctx,state,{motion:reactions});
@@ -125,20 +127,21 @@ export function renderFrame(ctx,timeline,time,assets,{focus=null,team=null,react
   drawCelebration(ctx,timeline,state.time,{team,motion:reactions});
   ctx.restore();
   if(state.time>=timeline.recap?.start){
-    box(ctx,0,768,768,160);
-    ctx.fillStyle='#b6ecd2';ctx.font='26px "Pixelify Sans", monospace';ctx.fillText(state.time<timeline.recap.cardAt?'GATHERING IN THE SQUARE':'END OF RECORDED HISTORY',28,811);
-    ctx.fillStyle='#f3e6c3';ctx.font='21px "Pixelify Sans", monospace';
-    ctx.fillText('A little rest after the adventure.',28,847);
-    ctx.font='18px "Pixelify Sans", monospace';ctx.fillStyle='#b3bfcc';
-    ctx.fillText('Waiting agents keep their posts. Closed sessions rest at the Inn.',28,881);
-    ctx.fillText('This recap reflects the log, not overall task completion.',28,907);
     if(state.time>=timeline.recap.cardAt){
       const recap=recapSummary(timeline,team);
-      box(ctx,16,16,736,268,'#203b40');
-      ctx.fillStyle='#ffe1a0';ctx.font='28px "Pixelify Sans", monospace';ctx.fillText('QUEST RECAP',36,57);
+      const {x,y,width,height}=RECAP_PANEL;
+      box(ctx,x,y,width,height,'#203b40');
+      ctx.fillStyle='#ffe1a0';ctx.font='28px "Pixelify Sans", monospace';ctx.fillText('QUEST RECAP',36,y+41);
       const title=team?timeline.teams.find(t=>t.id===team)?.title:timeline.title;
-      ctx.fillStyle='#b6d5c9';ctx.font='16px "Pixelify Sans", monospace';ctx.fillText(short(title??'The village',74),36,82);
-      recap.lines.forEach((line,i)=>{ctx.fillStyle=i===1?'#bbccc5':'#f3e6c3';ctx.font='20px "Pixelify Sans", monospace';ctx.fillText(line,36,113+i*29);});
+      ctx.fillStyle='#b6d5c9';ctx.font='16px "Pixelify Sans", monospace';ctx.fillText(short(title??'The village',74),36,y+66);
+      recap.lines.forEach((line,i)=>{ctx.fillStyle=i===1?'#bbccc5':'#f3e6c3';ctx.font='20px "Pixelify Sans", monospace';ctx.fillText(line,36,y+97+i*29);});
+    }else{
+      box(ctx,0,768,768,160);
+      ctx.fillStyle='#b6ecd2';ctx.font='26px "Pixelify Sans", monospace';ctx.fillText('GATHERING IN THE SQUARE',28,811);
+      ctx.fillStyle='#f3e6c3';ctx.font='21px "Pixelify Sans", monospace';ctx.fillText('A little rest after the adventure.',28,847);
+      ctx.font='18px "Pixelify Sans", monospace';ctx.fillStyle='#b3bfcc';
+      ctx.fillText('Waiting agents keep their posts. Closed sessions rest at the Inn.',28,881);
+      ctx.fillText('This recap reflects the log, not overall task completion.',28,907);
     }
     ctx.restore();return state;
   }
@@ -148,7 +151,7 @@ export function renderFrame(ctx,timeline,time,assets,{focus=null,team=null,react
   const status=speaker?.role!=='user'&&speaker?.presence&&(!active||state.time>=active.end||['input','agents','closed'].includes(speaker.presence.kind))?speaker.presence:null;
   if(status?.sourceId)state.current=timeline.scenes.find(s=>s.id===status.sourceId)??active;
   if(active&&speaker&&!speaker.retired&&!celebration&&state.time<active.end){
-    const data=active.event.data,bubble=active.event.kind.includes('message')?short(active.text,90):data.evidence?.length?short(data.evidence[0],72):short(active.text,58);
+    const data=active.event.data,bubble=dialogueExcerpt(display.text,{limit:90}).text;
     const close=state.camera.mode==='follow',limit=close?340:250;
     const lines=styledLines(ctx,bubble,limit,close?24:theme?21:18,cue).slice(0,4),bw=Math.min(limit+28,Math.max(120,...lines.map(l=>l.width+24))),bh=lines.length*24+20;
     const reaction=reactionAt(active,state.time,{enabled:reactions}),pop=reaction?Math.sin(Math.min(1,reaction.phase*8)*Math.PI)*3:0;
@@ -166,7 +169,7 @@ export function renderFrame(ctx,timeline,time,assets,{focus=null,team=null,react
   ctx.fillText(`${short(who,24).toUpperCase()}  ·  ${kind}`,100,801);
   if(status||active&&!cue){ctx.font='13px "Pixelify Sans", monospace';ctx.fillStyle='#b3bfcc';ctx.fillText(status?speaker.activityLabel+(speaker.resting&&!speaker.moving&&speaker.leisure?` · ${{sit:'Sitting',read:'Reading',fish:'Fishing'}[speaker.leisure]}`:''):STATION_NAMES[active.station]??'',100,819);}
   if(cue&&!status){ctx.font='13px "Pixelify Sans", monospace';ctx.fillStyle=theme.accent;ctx.fillText(cue.label.toUpperCase(),100,819);}
-  const text=status?`${status.label}. ${status.kind==='closed'?'Resting at the Inn after an explicit session-end record.':status.kind==='finished'?'The green tick marks a completed turn.':status.kind==='idle'?'No new action recorded. The waiting reason is unknown.':status.kind==='input'?'At the Guild noticeboard. An input request is open.':status.kind==='agents'?'At the Guild benches until a report arrives.':status.basis+'.'}`:active?.pullRequest?`PR #${active.pullRequest.number} created${active.pullRequest.title?': '+active.pullRequest.title:'.'}`:active?active.text+(active.event.data.evidence?.length?' · '+active.event.data.evidence.join(' · '):''):'Press Play to follow the conversation.';
+  const text=status?`${status.label}. ${status.kind==='closed'?'Resting at the Inn after an explicit session-end record.':status.kind==='finished'?'The green tick marks a completed turn.':status.kind==='idle'?'No new action recorded. The waiting reason is unknown.':status.kind==='input'?'At the Guild noticeboard. An input request is open.':status.kind==='agents'?'At the Guild benches until a report arrives.':status.basis+'.'}`:display.text;
   const lines=styledLines(ctx,text,635,24,status?null:cue),pages=Math.max(1,Math.ceil(lines.length/3));
   const phase=active?Math.max(0,Math.min(.999,(state.time-active.start-active.travel)/(active.end-active.start-active.travel))):0,page=Math.floor(phase*pages);
   lines.slice(page*3,page*3+3).forEach((line,i)=>drawLine(ctx,line,100,(847)+i*26,'#f5eddb',theme?.accent??'#f5eddb'));
@@ -179,5 +182,6 @@ export function renderFrame(ctx,timeline,time,assets,{focus=null,team=null,react
   }
   ctx.fillStyle='#b3bfcc';ctx.font='12px "Pixelify Sans", monospace';
   if(pages>1)ctx.fillText(`${page+1}/${pages}`,719,916);
+  if(!status&&display.shortened&&!speakerTeam){ctx.fillStyle='#b3bfcc';ctx.fillText('Excerpt · full message in journal',100,916);}
   ctx.restore();return state;
 }

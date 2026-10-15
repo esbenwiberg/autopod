@@ -1,4 +1,64 @@
-export const DIALOGUE_VERSION = 'dialogue-1';
+export const DIALOGUE_VERSION = 'dialogue-3';
+
+const imageFile=/\.(?:png|jpe?g|webp|gif|avif|heic|heif|bmp|tiff?)(?:[?#][^\s]*)?$/i;
+function imagePath(line){
+  const path=line.trim().replace(/^["'`<]|["'`>]$/g,'');
+  return imageFile.test(path)&&(/^(?:\/|\.\.?\/|~\/|[a-z]:[\\/]|https?:\/\/|file:\/\/)/i.test(path)||!/[\s]/.test(path));
+}
+
+// Presentation only: the complete source text stays on the event and in the
+// journal. Bounded, mechanical excerpts are not generated summaries.
+export function dialogueExcerpt(value,{limit=240}={}) {
+  const original=typeof value==='string'?value:'';
+  let text=original.slice(0,12000),attachment=false,technical=false,image=false,screenshot=false;
+  const request=text.match(/^#{1,3}\s*My request(?: for Codex)?:\s*$/m);
+  if(/^\s*# Files mentioned by the user:/.test(text)){
+    image=text.slice(0,request?.index??text.length).split(/\r?\n/).some(line=>/^##\s/.test(line)&&imageFile.test(line.trim()));
+    attachment=true;text=request?text.slice(request.index+request[0].length):'';
+  }
+  text=text.replace(/<image\b[^>]*>[\s\S]*?<\/image>|<image\b[^>]*\/?>|!\[[^\]]*\]\([^\n]*?\)/gi,tag=>{
+      image=true;attachment=true;
+      // Only an explicit attachment label/type identifies a screenshot. A
+      // filename containing "screenshot" is still just an image path.
+      screenshot||=/^<image\b[^>]*\b(?:type|kind|alt|name)\s*=\s*["']screenshot["']/i.test(tag)||/^!\[screenshot\]/i.test(tag);
+      return '';
+    })
+    .replace(/<in-app-browser-context\b[^>]*>[\s\S]*?<\/in-app-browser-context>/gi,'')
+    .replace(/^Message Type: (?:MESSAGE|FINAL_ANSWER)[\s\S]*?\bPayload:\s*/,'')
+    .replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`/g,()=>{technical=true;return '';});
+  const structured=s=>{try{const v=JSON.parse(s);return v!==null&&typeof v==='object';}catch{return false;}};
+  if(structured(text.trim())){text='';technical=true;}
+  const kept=[],lines=text.split(/\r?\n/);
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i].trim();
+    if(imagePath(line)){image=true;attachment=true;continue;}
+    // Omit complete embedded JSON blocks without interpreting their values.
+    if(/^[{[]/.test(line)){
+      let block=line,found=false;
+      for(let j=i;j<Math.min(lines.length,i+80);j++){
+        if(j>i)block+='\n'+lines[j];
+        if(structured(block)){i=j;found=true;technical=true;break;}
+      }
+      if(found)continue;
+    }
+    if(/^\s*(?:at\s+\S.*(?:\(|:\d)|File "|Traceback \(|\^+$|\d+\s*\||\{"|"[^"]+"\s*:|[}\]][,;]?$)/.test(line)){technical=true;continue;}
+    kept.push(line);
+  }
+  text=kept.join(' ').replace(/\[([^\]]+)\]\([^)]*\)/g,'$1')
+    .replace(/(?:https?:\/\/|(?:\/|[A-Za-z]:\\)(?:[^\s<>"']+[\/\\]))[^\s<>"']+/g,()=>{technical=true;return '[link or file]';})
+    .replace(/\S{90,}/g,()=>{technical=true;return '[long value]';})
+    .replace(/(?:^|\s)#{1,6}\s+|\*\*|__|`/g,' ').replace(/\s+/g,' ').trim();
+  if(!text)text=screenshot?'Shared a screenshot.':image?'Shared an image.':attachment?'Shared an attachment.':technical?'Shared code or diagnostic data.':'Message recorded.';
+  if(text.length>limit){const part=text.slice(0,limit-1),space=part.lastIndexOf(' ');text=part.slice(0,space>limit*.6?space:part.length).trimEnd()+'…';}
+  return {text,shortened:text!==original.trim()};
+}
+
+export function sceneDialogue(scene){
+  if(!scene)return {text:'Press Play to follow the conversation.',shortened:false};
+  if(scene.pullRequest)return dialogueExcerpt(`PR #${scene.pullRequest.number} created${scene.pullRequest.title?': '+scene.pullRequest.title:'.'}`);
+  const text=scene.text+(scene.event.kind.includes('message')?'':scene.event.data.evidence?.length?' · '+scene.event.data.evidence.join(' · '):'');
+  return dialogueExcerpt(text);
+}
 export const CUE_LABELS = {cheer:'Cheering',frustration:'Frustration',relief:'Relief',confusion:'Confusion',emphasis:'Emphasis'};
 
 // These are presentation cues, not sentiment scores or evidence of task success.
