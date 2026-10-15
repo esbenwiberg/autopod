@@ -958,7 +958,7 @@ extension ActionHandler {
           record.task = nil
         }
       }
-      @MainActor func stillOwnsDecision() -> Bool {
+      let stillOwnsDecision: @MainActor @Sendable () -> Bool = { [self] in
         podStore.isCurrent(ownership) && drafts.owns(key, record) && replyKey(id, decision) == key
       }
       var postAdmitted = false

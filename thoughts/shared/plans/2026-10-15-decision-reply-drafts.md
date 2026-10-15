@@ -463,7 +463,7 @@ the production and lifetime changes; final independent reproduction, hosted chec
 and integrated qualification remain coordinator-owned before closure/PR.
 
 Final independent pre-PR proof: root reproduced the affected selection plus
-DecisionResponse at4d117372:86 functions /206 executions /13 suites, zero skips,9.929s. Root read
+confirmedKillAcceptsTerminalSnapshot() at4d117372:86 functions /206 executions /13 suites, zero skips,9.929s. Root read
 the final source and inspected all43 independent captures (37 root-native plus6
 root-decision); legible production-sheet supplements passed inspection, while
 raw AppKit sheet rasterization retains the stated limitation. Independent desktop
@@ -472,3 +472,29 @@ test-only preparation fixture adjustment. Root independently records87 hashed
 files and43 inspected PNGs in root-proof.json. Root proof is retained at
 `.autopod-data/reliability/r04f/root-focused.log`, `root-native/`, `root-decision/`.
 Hosted and integrated qualification remain pending coordinator PR/integration.
+
+
+### Hosted Swift 6.1 compatibility correction
+
+Hosted PR436 compilation on Swift6.1.2 rejected conversion of the local
+MainActor function `stillOwnsDecision` to the Sendable acceptance closure at
+three readSession calls. Local Swift6.3.3 accepted it. The predicate is now an
+explicit `@MainActor @Sendable () -> Bool` closure, retaining the same handler
+capture and exact ownership/record/decision checks. No behavior or test assertion
+changes are included. Prior proof/manifest remain preserved under
+`implementation/prior-cb8384b2/`; the hosted failure log is retained. Fresh focused,
+full-suite and executable checks and independent source review follow this change;
+Swift6.1.2 compatibility requires the hosted rerun, not inference from local Swift.
+
+Correction verification on local Swift6.3.3 passed: focused86 functions /206
+executions /13 suites, zero skips,9.587s; full495 passed functions /651 executions
+/27 passed suites plus the existing one live-daemon skipped function/suite,
+XCTest13 passed separately,19.427s; executable build0.30s and diffcheck passed.
+Logs are `implementation/focused-swift61-correction.log`,
+`full-swift61-correction.log`, `executable-swift61-correction.log` and
+`diff-swift61-correction.log`. Root and independent desktop reviewer read the
+one-line correction with no findings; reviewed ActionHandler SHA256 is
+8b2f792ca2e780758ad7b2d6a8188749bca0e5e5c7dd13ebc73a9d0e1717df90. No new visual
+claim is made by this annotation correction; existing inspected captures remain
+prior-head evidence, and current focused native interactions pass. Hosted rerun
+and integrated proof remain coordinator-owned.
