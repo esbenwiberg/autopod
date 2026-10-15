@@ -96,15 +96,16 @@ import Testing
     }
   }
 
-  func wait(_ condition: () -> Bool) async throws {
+  func wait(_ label: String = #function, _ condition: () -> Bool) async throws {
     let deadline = ContinuousClock.now.advanced(by: .seconds(5))
     while !condition() {
-      guard ContinuousClock.now < deadline else { throw URLError(.timedOut) }
+      guard ContinuousClock.now < deadline else { print("Timed out: \(label)"); throw URLError(.timedOut) }
       try await Task.sleep(for: .milliseconds(10))
     }
   }
 
   func query(_ text: String) async throws {
+    window.makeKeyAndOrderFront(nil)
     try await wait { paletteSubviews(self.hosting).contains { $0 is NSTextField } }
     let field = try #require(paletteSubviews(hosting).compactMap { $0 as? NSTextField }.first)
     #expect(window.makeFirstResponder(field))
@@ -114,12 +115,21 @@ import Testing
     #expect(window.firstResponder === editor)
   }
 
-  func key(_ code: UInt16, characters: String = "\r") throws {
+  func key(_ code: UInt16, characters: String = "\r", in target: NSWindow? = nil) throws {
     let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero,
       modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-      windowNumber: window.windowNumber, context: nil, characters: characters,
+      windowNumber: (target ?? window).windowNumber, context: nil, characters: characters,
       charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
     NSApplication.shared.sendEvent(event)
+  }
+
+  func refresh() async throws {
+    inputs.revision += 1
+    try await wait { _ = self.texts; return self.inputs.renderedRevision == self.inputs.revision }
+  }
+
+  func bridge() throws -> CommandPaletteKeyboardView {
+    try #require(paletteSubviews(hosting).compactMap { $0 as? CommandPaletteKeyboardView }.first)
   }
 
   func capture(_ name: String) throws {
@@ -151,5 +161,191 @@ import Testing
     #expect(view.inputs.appearances == 1)
     print("Native Return callback: \(view.inputs.owner.calls)")
     try view.capture("rows-activated")
+  }
+}
+
+
+@MainActor private final class PaletteKeySink: NSView {
+  var keys: [UInt16] = []
+  override var acceptsFirstResponder: Bool { true }
+  override func keyDown(with event: NSEvent) { keys.append(event.keyCode) }
+}
+
+extension CommandPaletteKeyboardTests {
+  @Test(arguments: ["pod", "profile", "approve"])
+  func nativeSameRowsUseCurrentOwner(kind: String) async throws {
+    let view = PaletteWindow()
+    defer { view.close() }
+    view.inputs.profiles = [Profile(name: "team", repoUrl: "https://example.invalid/old")]
+    let query = kind == "pod" ? "recovery" : kind == "profile" ? "team" : "Approve All"
+    try await view.query(query)
+    let title = kind == "pod" ? "fix/recovery-a" : kind == "profile" ? "Show Pods for team" : "Approve All Validated"
+    try await view.wait { view.texts.contains(title) }
+    try view.capture("owner-" + kind + "-before")
+    let oldOwner = view.inputs.owner
+    view.inputs.owner = PaletteOwner()
+    // Keep profile IDs and titles fixed while replacing the complete input value.
+    view.inputs.profiles = [Profile(name: "team", repoUrl: "https://example.invalid/current")]
+    try await view.refresh()
+    if kind == "profile" {
+      try await view.wait { view.texts.contains("https://example.invalid/current") }
+    }
+    try view.capture("owner-" + kind + "-after")
+    try view.key(36)
+    try await view.wait { !view.inputs.owner.calls.isEmpty }
+    let expected = kind == "pod" ? "pod:recovery-a" : kind == "profile" ? "profile:team" : "approve"
+    #expect(view.inputs.owner.calls == [expected])
+    #expect(oldOwner.calls.isEmpty)
+    #expect(view.inputs.appearances == 1)
+    try view.capture("owner-" + kind + "-activated")
+  }
+
+  @Test func nativeArrowsUseCurrentCountAndQueryReset() async throws {
+    let view = PaletteWindow()
+    defer { view.close() }
+    try await view.query("recovery")
+    try await view.wait { view.texts.contains("fix/recovery-b") }
+    try view.key(125, characters: "\u{F701}") // Select B.
+    view.inputs.pods = [palettePod("b")]
+    try await view.wait { !view.texts.contains("fix/recovery-a") }
+    view.inputs.pods = [palettePod("b"), palettePod("c"), palettePod("d")]
+    try await view.wait { view.texts.contains("fix/recovery-d") }
+    try view.key(126, characters: "\u{F700}") // Wrap from B to current last row D.
+    try await view.refresh()
+    try view.capture("arrows-current-last")
+    try view.key(76, characters: "\u{3}")
+    try await view.wait { !view.inputs.presented }
+    #expect(view.inputs.owner.calls == ["pod:recovery-d"])
+
+    view.inputs.presented = true
+    view.inputs.pods = []
+    try await view.wait { view.texts.contains("No results") }
+    try view.key(125, characters: "\u{F701}")
+    try view.key(126, characters: "\u{F700}")
+    try view.key(36)
+    #expect(view.inputs.presented)
+    #expect(view.inputs.owner.calls == ["pod:recovery-d"])
+    try view.capture("empty-results")
+
+    view.inputs.pods = [palettePod("b"), palettePod("c"), palettePod("d")]
+    try await view.wait { view.texts.contains("fix/recovery-d") }
+    try view.key(125, characters: "\u{F701}") // Select C, then change query.
+    try await view.query("recovery-b")
+    try await view.wait { !view.texts.contains("fix/recovery-c") }
+    try view.key(36)
+    try await view.wait { !view.inputs.presented }
+    #expect(view.inputs.owner.calls == ["pod:recovery-d", "pod:recovery-b"])
+    #expect(view.inputs.appearances == 1)
+  }
+
+  @Test(arguments: [UInt16(36), 76, 53])
+  func nativeSupportedKeysExecuteOnce(code: UInt16) async throws {
+    let view = PaletteWindow()
+    defer { view.close() }
+    try await view.query("recovery")
+    try await view.wait { view.texts.contains("fix/recovery-a") }
+    try view.key(code, characters: code == 53 ? "\u{1b}" : code == 76 ? "\u{3}" : "\r")
+    try view.key(36) // A second event before SwiftUI detaches must not re-execute.
+    try await view.wait { !view.inputs.presented }
+    #expect(view.inputs.owner.calls == (code == 53 ? [] : ["pod:recovery-a"]))
+    try await view.wait { (try? view.bridge().isMonitoring) == false }
+  }
+
+  @Test func nativeWindowScopeAndRetainedClose() async throws {
+    let view = PaletteWindow()
+    defer { view.close() }
+    try await view.query("recovery")
+    try await view.wait { view.texts.contains("fix/recovery-a") }
+    let bridge = try view.bridge()
+    #expect(bridge.isMonitoring)
+    let sink = PaletteKeySink()
+    let other = NSWindow(contentRect: NSRect(x: 600, y: 0, width: 160, height: 100),
+      styleMask: [.titled], backing: .buffered, defer: false)
+    other.isReleasedWhenClosed = false
+    other.contentView = sink
+    defer { other.contentView = nil; other.close() }
+    other.makeKeyAndOrderFront(nil)
+    #expect(other.makeFirstResponder(sink))
+    for code: UInt16 in [125, 126, 36, 76, 53] { try view.key(code, in: other) }
+    #expect(sink.keys == [125, 126, 36, 76, 53])
+    #expect(view.inputs.owner.calls.isEmpty)
+    #expect(view.inputs.presented)
+
+    view.window.makeKeyAndOrderFront(nil)
+    try await view.query("recovery")
+    try view.key(6, characters: "z") // Unsupported key reaches the actual field editor.
+    try await view.wait { view.texts.contains("No results") }
+    #expect(view.inputs.owner.calls.isEmpty)
+    try await view.query("recovery")
+    try await view.wait { view.texts.contains("fix/recovery-a") }
+    view.window.close() // Content deliberately retained: this is not a detach test.
+    #expect(view.window.contentView === view.hosting)
+    #expect(!bridge.isMonitoring)
+    other.makeKeyAndOrderFront(nil)
+    #expect(other.makeFirstResponder(sink))
+    try view.key(36, in: other)
+    #expect(sink.keys == [125, 126, 36, 76, 53, 36])
+    #expect(view.inputs.owner.calls.isEmpty)
+    #expect(view.inputs.presented)
+    view.window.makeKeyAndOrderFront(nil)
+    view.window.update()
+    try await view.wait("reopened monitor visible=\(view.window.isVisible) key=\(view.window.isKeyWindow)") { bridge.isMonitoring }
+    try await view.query("recovery")
+    try view.key(125, characters: "\u{F701}")
+    try view.key(36)
+    try await view.wait { !view.inputs.presented }
+    #expect(view.inputs.owner.calls == ["pod:recovery-b"])
+  }
+
+  @Test func nativeDetachDismantleAndReopen() async throws {
+    let view = PaletteWindow()
+    defer { view.close() }
+    try await view.query("recovery")
+    try await view.wait { view.texts.contains("fix/recovery-a") }
+    let bridge = try view.bridge()
+    view.window.contentView = nil
+    #expect(!bridge.isMonitoring)
+    #expect(bridge.window == nil)
+    view.window.contentView = view.hosting
+    try await view.wait("reopened monitor visible=\(view.window.isVisible) key=\(view.window.isKeyWindow)") { bridge.isMonitoring }
+    try await view.query("recovery")
+    try view.key(125, characters: "\u{F701}")
+    try view.key(36)
+    try await view.wait("mouse activation") { !view.inputs.presented }
+    #expect(view.inputs.owner.calls == ["pod:recovery-b"])
+    view.inputs.presented = true
+    try await view.refresh()
+    try await view.wait { bridge.isMonitoring }
+    view.hosting.rootView = AnyView(EmptyView())
+    try await view.wait { _ = view.texts; return !bridge.isMonitoring }
+    bridge.dispose()
+    bridge.dispose() // Explicit teardown is idempotent after native dismantling.
+    #expect(!bridge.isMonitoring)
+  }
+}
+
+
+extension CommandPaletteKeyboardTests {
+  @Test func bridgeReleasesReplacedAndDisposedCallbacks() {
+    let bridge = CommandPaletteKeyboardView()
+    var owner: PaletteOwner? = PaletteOwner()
+    weak var oldOwner = owner
+    bridge.update(isPresented: true) { [captured = owner!] _ in
+      captured.calls.append("old"); return true
+    }
+    owner = nil
+    #expect(oldOwner != nil)
+    bridge.update(isPresented: true) { _ in true }
+    #expect(oldOwner == nil)
+    var current: PaletteOwner? = PaletteOwner()
+    weak var releasedOnDispose = current
+    bridge.update(isPresented: true) { [captured = current!] _ in
+      captured.calls.append("current"); return true
+    }
+    current = nil
+    #expect(releasedOnDispose != nil)
+    bridge.dispose()
+    bridge.dispose()
+    #expect(releasedOnDispose == nil)
   }
 }

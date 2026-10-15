@@ -34,7 +34,6 @@ public struct CommandPalette: View {
 
   @State private var query = ""
   @State private var selectedIndex = 0
-  @State private var keyMonitor: Any?
   @FocusState private var queryFocused: Bool
 
   private var results: [CommandPaletteResult] {
@@ -91,9 +90,21 @@ public struct CommandPalette: View {
     .shadow(color: .black.opacity(0.2), radius: 20, y: 10)
     .onAppear {
       DispatchQueue.main.async { queryFocused = true }
-      installKeyboardMonitor()
     }
-    .onDisappear { removeKeyboardMonitor() }
+    .background {
+      CommandPaletteKeyboardBridge(isPresented: isPresented) { keyCode in
+        guard isPresented else { return false }
+        switch keyCode {
+        case 125: moveSelection(1)
+        case 126: moveSelection(-1)
+        case 36, 76: executeSelected()
+        case 53: isPresented = false
+        default: return false
+        }
+        return true
+      }
+      .accessibilityHidden(true)
+    }
     .onChange(of: results.map(\.id)) { _, ids in
       if ids.isEmpty {
         selectedIndex = 0
@@ -149,7 +160,7 @@ public struct CommandPalette: View {
   // MARK: - Execute
 
   private func executeSelected() {
-    guard selectedIndex < results.count else { return }
+    guard isPresented, results.indices.contains(selectedIndex) else { return }
     executeItem(results[selectedIndex])
   }
 
@@ -182,35 +193,6 @@ public struct CommandPalette: View {
       return
     }
     selectedIndex = (selectedIndex + offset + results.count) % results.count
-  }
-
-  private func installKeyboardMonitor() {
-    guard keyMonitor == nil else { return }
-    keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-      guard isPresented else { return event }
-      switch event.keyCode {
-      case 125:
-        moveSelection(1)
-        return nil
-      case 126:
-        moveSelection(-1)
-        return nil
-      case 36, 76:
-        executeSelected()
-        return nil
-      case 53:
-        isPresented = false
-        return nil
-      default:
-        return event
-      }
-    }
-  }
-
-  private func removeKeyboardMonitor() {
-    guard let keyMonitor else { return }
-    NSEvent.removeMonitor(keyMonitor)
-    self.keyMonitor = nil
   }
 
   private func iconColor(for kind: CommandPaletteResult.Kind) -> Color {

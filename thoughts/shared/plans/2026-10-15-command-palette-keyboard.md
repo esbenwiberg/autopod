@@ -117,3 +117,23 @@ before delivery. `swift test --package-path packages/desktop --filter
 CommandPaletteKeyboardTests` failed at that behavioral assertion as intended.
 Baseline fixture, unchanged production source, logs and captures are preserved in
 ignored `.autopod-data/reliability/r07a/`. All callbacks are synthetic recorders.
+
+
+Phase 3 proof adjustment (root authorized):
+- Expected: literal native mouse activation and Return select the same updated row.
+- Found: the SwiftPM helper's visible windows accept the actual query field editor
+  as first responder, but do not become key windows. Synthetic mouse down/up via
+  NSApplication and NSWindow, including separated run-loop turns, did not invoke
+  the unchanged SwiftUI onTapGesture. Its static-text AX press returned false.
+  A bounded test-process activation attempt did not change this; the previous
+  process activation policy was restored, and that attempt is not in final tests.
+- Why it matters: a source-level argument or AX labels cannot prove mouse activation.
+- Adjustment: root explicitly permits the narrow mouse proof gap. Preserve failed
+  logs and fixture under ignored r07a, do not alter product click UI, and do not
+  claim mouse activation or full-app focus. Core acceptance stays real application
+  sendEvent keyboard execution against updated rows/owners and window lifecycle.
+
+Native mounted owner replacement invokes only the new recorder. SwiftUI can retain
+old view values independently of the keyboard bridge, so direct bridge ownership
+checks separately prove callback release on replacement/disposal; the mounted test
+checks old-owner non-invocation rather than claiming whole-SwiftUI deallocation.
