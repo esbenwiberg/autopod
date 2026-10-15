@@ -463,11 +463,12 @@ the production and lifetime changes; final independent reproduction, hosted chec
 and integrated qualification remain coordinator-owned before closure/PR.
 
 Final independent pre-PR proof: root reproduced the affected selection plus
-DecisionResponse at4d117372:86 functions /13 suites, zero skips,9.929s. Root read
+DecisionResponse at4d117372:86 functions /206 executions /13 suites, zero skips,9.929s. Root read
 the final source and inspected all43 independent captures (37 root-native plus6
 root-decision); legible production-sheet supplements passed inspection, while
 raw AppKit sheet rasterization retains the stated limitation. Independent desktop
-reviewer reported no remaining actionable findings at5e6675a6; root reviewed the
-subsequent test-only preparation fixture adjustment. Root proof is retained at
+reviewer reported no remaining actionable findings at4d117372, including the
+test-only preparation fixture adjustment. Root independently records87 hashed
+files and43 inspected PNGs in root-proof.json. Root proof is retained at
 `.autopod-data/reliability/r04f/root-focused.log`, `root-native/`, `root-decision/`.
 Hosted and integrated qualification remain pending coordinator PR/integration.
