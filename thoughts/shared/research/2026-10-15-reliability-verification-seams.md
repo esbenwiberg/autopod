@@ -89,6 +89,33 @@ its AGENTS instructions reserve that package for genuinely cross-package flows.
 Thus deterministic model tests and native rendering are established, while a
 private full-app bootstrap remains unimplemented in the inspected sources.
 
+### Follow-up: action ownership and bootstrap side effects
+
+Rechecked against `980e0b86`: desktop source is unchanged. Actual app startup
+requests notification permission (`Autopod/AutopodXcodeApp.swift:48`), and a bundle
+identifier enables NotificationService. EventStream can issue native notifications.
+A differently named disposable app alone therefore does not suppress these effects.
+
+The app recreates ActionHandler/EventStream on healthy connection changes
+(`AutopodXcodeApp.swift:87`). Pending command/draft state held only by ActionHandler
+would not survive that replacement. A future storage design needs a lifetime
+outside that recreation and keys including connection and pod identity.
+
+PodActions exposes reply/kill/pause as async Void; views cannot distinguish
+acknowledgement from failure through that return. ActionHandler has one pending
+string, unconsumed by views. PodStore.refreshSession returns Void and suppresses
+fetch failure; awaiting it is not proof of refreshed state. A lost POST response
+does not establish rejection; there is no inspected reply idempotency receipt.
+An automatic retransmission cannot be justified from matching lifecycle state.
+
+Additional standard-defaults uses in ScanInbox/TaskRetryCard/DispatchPreflightCard
+make full-app isolation broader than the pause/kill/reply journey alone. Existing
+LaunchRequestJournal directory injection is not supplied by its four normal
+callers (LaunchConfigurationStore and ActionHandler). A future transient fixture
+bootstrap would need to bypass persistence, token recovery and connection/auth
+switching, suppress notifications and own journal storage. No such bootstrap or
+new production behavior was implemented in this research pass.
+
 ## Daemon process and persistence boundaries
 
 - `packages/daemon/src/runtimes/run-claude-cli.test.ts:201` already owns a real

@@ -100,9 +100,9 @@ choice or missing authority that repository evidence cannot establish.
 | ID | Task | Dependencies | Status / next action |
 |---|---|---|---|
 | R00 | Existing CI covers campaign PRs and contract paths | Baseline | Complete: PR #416 passed hosted checks and merged into campaign at 980e0b86 |
-| R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a CLI executable worker implementing; process/native follow-up plans being narrowed |
+| R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a complete (PR #417, ace8de29); R01b actual crash proof validating; native follow-up being narrowed |
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
-| R03 | CLI transport and log-follow reliability | R01 | Task-specific research/plan; include actual executable exit/output and replay behavior |
+| R03 | CLI transport and log-follow reliability | R01 | R03a log-follow repair reviewed and ready for worker; reconnect/replay excluded |
 | R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | Task-specific research/plan; deterministic store tests plus actual app proof |
 | R05 | Shared response/event contract scenarios | R00, R01 | Extend established fixture pattern for selected R03/R04 boundaries |
 | R06 | Lifecycle interruption scenarios and first extraction | R01 | Characterize one ownership boundary before moving it; serialize changes |
@@ -228,3 +228,15 @@ after viewing the published preview; it retains more space for existing details.
 Independent campaign-plan review confirmed the requirements and bounded first
 task, and corrected baseline wording to distinguish skipped live checks and
 unexecuted Xcode/full-app proof from passing local test suites.
+
+## Execution checkpoint — October 15
+
+R00 and R01a are merged into codex/reliability after independent pre-PR review
+and successful hosted checks. R01a also passed a fresh integrated build and its
+three executable tests. Evidence lives in `.autopod-data/reliability/r01a/` and
+`r01a-integrated.log`. R01b actual SIGKILL/reopen proof is in worker validation.
+R03a log-follow research and independently reviewed plan are ready for execution
+on a new worker forked from the campaign branch. The Inline status selection
+remains the desktop direction; its native isolation and action-state plan is
+still being narrowed before visible product edits. Earlier progress entries
+are historical snapshots, superseded by this checkpoint.
