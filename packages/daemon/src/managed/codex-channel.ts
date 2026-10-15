@@ -17,6 +17,8 @@ if worker.is_symlink() or (worker.exists() and worker.read_text()!=sys.argv[4]):
 worker.write_text(sys.argv[4]);os.chmod(worker,0o555)
 if len(sys.argv)>5 and sys.argv[5]:
  gh=worker_root/'gh';gh.write_text(sys.argv[5]);os.chmod(gh,0o555);(root/'github-enabled').touch()
+if len(sys.argv)>7 and sys.argv[7]:
+ public=worker_root/'public-read';public.write_text(sys.argv[7]);os.chmod(public,0o555);(root/'public-enabled').touch()
 (root/'channel-closed').unlink(missing_ok=True)
 with open(os.devnull,'wb') as sink: subprocess.Popen(['python3',str(file),str(root),'4187',sys.argv[3],sys.argv[6]],stdin=subprocess.DEVNULL,stdout=sink,stderr=sink,start_new_session=True)
 `;
@@ -89,6 +91,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
   private readonly source: string;
   private readonly worker: string;
   private readonly githubCli: string;
+  private readonly publicCli: string;
   private readonly maximumRequestBytes: number;
   private readonly execTails = new Map<string, Promise<void>>();
   constructor(
@@ -97,6 +100,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     private readonly maximumTokens: number,
     private readonly options: {
       mode?: 'report' | 'agent';
+      publicRead?: boolean;
       maximumDurationSeconds?: number;
       githubRead?: { alias: string; bindingDigest: string };
     } = {},
@@ -113,6 +117,9 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     );
     this.githubCli = options.githubRead
       ? readFileSync(new URL('./runtime/github_cli.py', import.meta.url), 'utf8')
+      : '';
+    this.publicCli = options.publicRead
+      ? readFileSync(new URL('./runtime/public_read.py', import.meta.url), 'utf8')
       : '';
     if (!Number.isSafeInteger(maximumTokens) || (maximumTokens !== 0 && maximumTokens < 2))
       throw new Error('managed-codex-budget-invalid');
@@ -158,7 +165,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
   private async publishResponse(
     runtimeRef: string,
     stateRoot: string,
-    prefix: 'channel-' | 'github-',
+    prefix: 'channel-' | 'github-' | 'public-',
     digest: string,
     ok: boolean,
     body: string,
@@ -218,6 +225,11 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
         : this.maximumTokens !== 0)
     )
       throw new Error('managed-codex-boundary-unavailable');
+    if (
+      this.options.publicRead &&
+      !request.effectiveGrant.scope.allowedEffects.includes('web.public-read')
+    )
+      throw new Error('managed-public-read-boundary-unavailable');
     const identities = request.effectiveGrant.scope.identityBindings;
     if (
       (identities.length > 0 || this.options.githubRead) &&
@@ -320,6 +332,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
       this.worker,
       this.githubCli,
       String(this.maximumRequestBytes),
+      this.publicCli,
     );
     for (let attempt = 0; attempt < 30; attempt++) {
       const ready = await exec(
@@ -332,6 +345,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
     let stopped = false;
     let activeProvider = false;
     let activeGitHub = false;
+    let activePublic = false;
     const poll = async () => {
       if (stopped || activeProvider) return;
       activeProvider = true;
@@ -403,10 +417,43 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
         activeGitHub = false;
       }
     };
+    const pollPublic = async () => {
+      if (stopped || activePublic || !this.options.publicRead || !binding.invokePublic) return;
+      activePublic = true;
+      try {
+        const raw = await exec(READ, 'public-', '4096');
+        if (!raw.trim() || stopped) return;
+        const request = JSON.parse(raw) as { digest: string; body: string; ticket: string };
+        if (
+          request.digest !== sha256(request.body).slice(7) ||
+          Buffer.byteLength(request.body) > 4096
+        )
+          throw new Error('managed-public-request-invalid');
+        let value: string;
+        try {
+          value = await binding.invokePublic(`public-${request.digest}`, request.body);
+        } catch {
+          value = JSON.stringify({ error: 'public-source-unavailable' });
+        }
+        if (stopped) return;
+        await this.publishResponse(
+          binding.runtimeRef,
+          binding.stateRoot,
+          'public-',
+          request.digest,
+          true,
+          value,
+          request.ticket,
+        );
+      } finally {
+        activePublic = false;
+      }
+    };
     const timer = setInterval(
       () => {
         void poll();
         void pollGitHub();
+        void pollPublic().catch(() => {});
       },
       this.route.executionTarget === 'sandbox' ? 1000 : 100,
     );
@@ -424,7 +471,7 @@ export class ContainerCodexChannel implements ManagedWorkerProviderChannel {
 /** Reviewed full-agent command; mounts and grant determine read/write authority. */
 export function codexAgentCommand(
   route: Route,
-  enrollmentId: string,
+  enrollmentId: string | null,
   artifactPath: string,
   writable: boolean,
   inputNames: readonly string[] = [],
@@ -432,7 +479,7 @@ export function codexAgentCommand(
 ): readonly string[] {
   if (
     route.runtime !== 'codex' ||
-    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(enrollmentId) ||
+    (enrollmentId !== null && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(enrollmentId)) ||
     !/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/.test(artifactPath) ||
     inputNames.some((name) => !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(name)) ||
     (githubRepository !== undefined && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(githubRepository))
@@ -446,7 +493,7 @@ export function codexAgentCommand(
     '--reasoning',
     route.reasoning,
     '--repository',
-    `/repositories/${enrollmentId}`,
+    enrollmentId === null ? '/output' : `/repositories/${enrollmentId}`,
     '--output',
     `/output/${artifactPath}`,
     '--sandbox',

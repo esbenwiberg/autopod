@@ -46,7 +46,7 @@ export interface ManagedAcceptanceRuntime {
   components: ReturnType<typeof managedComponents>;
   config: { db: Database.Database; store: ArtifactStore };
   bindings: readonly ManagedUserBinding[];
-  resume(): Promise<void>;
+  resume(profileIds?: ReadonlySet<string>): Promise<void>;
   close(): void;
 }
 

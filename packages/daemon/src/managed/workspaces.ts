@@ -9,6 +9,7 @@ import {
   rename,
   rm,
   symlink,
+  writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
 import type { ManagedPodRequest } from '@autopod/shared';
@@ -178,6 +179,18 @@ export class ManagedWorkspaces {
       const output = path.join(directory, 'output');
       await mkdir(output, { recursive: true, mode: 0o700 });
       volumes.push({ host: output, container: '/output', readOnly: false });
+    }
+    if (request.task.contextFiles?.length) {
+      const input = path.join(directory, 'context');
+      await mkdir(input, { recursive: true, mode: 0o700 });
+      for (const file of request.task.contextFiles) {
+        const target = path.join(input, file.path);
+        if (file.path.split('/').includes('..') || !target.startsWith(`${input}/`))
+          throw new Error('managed-context-path-invalid');
+        await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+        await writeFile(target, file.content, { mode: 0o400 });
+      }
+      volumes.push({ host: input, container: '/inputs/context', readOnly: true });
     }
     return volumes;
   }
