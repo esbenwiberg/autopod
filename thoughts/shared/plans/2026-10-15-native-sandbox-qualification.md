@@ -128,3 +128,42 @@ Review caught streaming bypassing the fetch seam; root added an independently
 guarded forwarding WebSocket and wrong-target/stall tests. Explicit AzureCliCredential
 keeps account preflight and runtime identity on the same existing credential source.
 No unresolved plan decisions remain.
+
+## Phase1 implementation and local proof
+
+Implemented the opt-in `scripts/qualify-native-sandbox.mjs`, its transport/process
+guard in `scripts/lib/native-sandbox-qualification.mjs`, and co-located local
+Node tests. No production adapter, package dependency or UI changes. The script
+bundles current adapter source with esbuild, records input/bundle/lockfile/harness
+hashes, and uses AzureCliCredential pinned to the selected subscription and the
+data-plane token scope. It never uses the default credential chain.
+
+The parent supervises a ten-minute work child, waits for that process to exit,
+then starts a separate six-minute cleanup child. Atomic private receipts persist
+create intent before forwarding and the accepted ID before readiness polling.
+HTTP guards enforce exact create payload, one create, selected target, fresh
+ownership, deny-all egress, and forbid disk/group/registry/port mutations.
+WebSocket guards forward the production protocol while bounding target, duration
+and payload size. Cleanup refuses unrelated/preexisting objects and leaves an
+unknown create unresolved rather than declaring success from an empty list.
+
+Local proof command (Node22/pnpm9.15.4):
+
+```sh
+npx -y -p node@22 -p pnpm@9.15.4 -c 'node --test scripts/qualify-native-sandbox.test.mjs'
+```
+
+Thirteen tests pass: target/cache validation, forbidden HTTP mutation, durable
+receipt/one-create ownership, header/body stalls, lost create response, WebSocket
+target/stall/frame constraints, wrong-label/preexisting cleanup refusal, exact
+discovery/deletion/preservation, unresolved absence, actual child death before
+cleanup, separate cleanup deadline, and real bundled production create/readiness/
+destroy through a synthetic transport. These tests prove local harness control;
+they are not live Azure evidence. Syntax, targeted Biome, tracked secret scan
+and diff checks are recorded in ignored `.autopod-data/reliability/r01c/`.
+
+Phase1 stops for coordinator pre-live review. No Azure request, sandbox creation,
+model invocation or hosted mutation was performed by this worker. Phase2/live
+behavior and all cloud teardown assertions remain unproven. A host/parent SIGKILL
+or host outage still requires coordinator recovery from the private receipt;
+the supervised child deadline does not claim resilience to losing the supervisor.
