@@ -110,10 +110,10 @@ needed for this isolated transport contract. Full-app behavior remains unproven.
 ## Acceptance
 
 - [x] Baseline ownership failures reproduced without external services.
-- [ ] Disconnect cancels/fences pending connect and reconnect work.
-- [ ] Active duplicate connect is harmless; current reconnect/replay still works.
-- [ ] EventStream closes captured old socket and rejects its queued callbacks.
-- [ ] Owned peer/session/tasks close on success and failure; full validation passes.
+- [x] Disconnect cancels/fences pending connect and reconnect work.
+- [x] Active duplicate connect is harmless; current reconnect/replay still works.
+- [x] EventStream closes captured old socket and rejects its queued callbacks.
+- [x] Owned peer/session/tasks close on success and failure; full validation passes.
 - [ ] Independent pre-PR, hosted and integrated proof recorded.
 
 ## Compatibility, performance, rollback
@@ -150,3 +150,67 @@ Native teardown observed cancellation of every accepted peer, session invalidati
 and listener cancellation even after the expected close-barrier failures. Initial
 fresh build hit one test closure Sendable compiler error, corrected before the
 baseline run; the ownership production implementation remained unchanged.
+
+## Worker implementation and proof
+
+The baseline is preserved in commit `84a45278` (factory/session seams plus failing
+regressions). EventSocket now owns its initial/backoff task and uses a monotonically
+advancing attempt generation together with websocket identity. Disconnect cancels
+owned work; guards after token/receive/backoff and at public connect entry reject
+cancelled or superseded work. Repeated connect admits only disconnected state.
+EventStream captures the old actor, cancels its queued start, and gates queued
+callbacks/subscriptions with its own synchronous connection generation. Public
+callback payloads, connected-state definition, delays and heartbeat intervals are
+unchanged. No PodStore, action, UI or full-app bootstrap edits.
+
+The same seven baseline cases pass after the repair. Two further cases prove:
+real automatic reconnect subscribes and replays observed event ID41, normal events
+and replay-truncation control callbacks still arrive, explicit reconnect remains
+usable, and fixture teardown releases a held token after a thrown test-body error.
+The controlled stream case verifies old event/state/resync callbacks are rejected,
+old subscriptions never reach the replacement, and current callbacks/subscriptions
+still operate. The real peer observes normal close frames on explicit disconnect.
+
+Native fixture state is confined to a serial queue; test recorders are locked.
+Barriers have five-second failure deadlines. Teardown releases a cancellation-
+insensitive token provider, cancels every recorded socket, invalidates its private
+URLSession, and awaits delegate invalidation plus listener/peer cancellation.
+Every teardown attempt runs even if an earlier barrier fails. The fixture also
+clears its connection state callback at cancellation to avoid a retain cycle.
+No home/defaults/keychain reads or external network service is needed.
+
+### Commands and results
+
+Run from the worker repository root with Swift6.3.3:
+
+- Baseline command above: **7 failed tests / 19 expected issues**, including two
+  old-peer close deadlines; all accepted peers cancelled during failure teardown.
+- `swift test --package-path packages/desktop --no-parallel --filter
+  'EventSocketLifetimeTests|EventStreamLifetimeTests'`: **7 passed** immediately
+  after the ownership repair (`fixed-regression.log`).
+- `swift test --package-path packages/desktop --no-parallel --filter
+  'EventSocketLifetimeTests|EventStreamLifetimeTests|EventSocketControlMessageTests|EventStreamResyncTests|EventStreamDedupeTests|confirmedAction|confirmedKill'`:
+  **21 Swift Testing tests passed** (`focused.log`).
+- `swift package --package-path packages/desktop clean`, then
+  `swift test --package-path packages/desktop --no-parallel`: clean rebuild and
+  **13 XCTest +411 Swift Testing tests in14 suites passed** (`swift-tests-final.log`).
+  The existing opt-in LiveVillageConnectionTests suite/test remained skipped.
+- `swift build --package-path packages/desktop --product AutopodDesktopExe`:
+  passed (`swift-build.log`).
+- `node scripts/secret-scan.mjs`: passed (`secret-scan.log`).
+- `git diff --check 3426702dc3bb17d41456ea95829e460046dbe4fc`: passed (`diff-check.log`).
+
+Existing warnings remain: AppRootView's unused profileStore capture and
+DaemonAPITests' unnecessary await. No new compiler warnings were introduced.
+
+Evidence lives under ignored `.autopod-data/reliability/r04b/`; `proof.json`
+records the final committed revision, source hashes, commands and log hashes.
+Worker verdict: **PROVEN for this isolated socket lifetime contract**. Native
+negative observation windows are250ms after deterministic setup and1300ms after
+the first one-second reconnect backoff; these are bounded observations, supported
+by cancellation/generation guards, not assertions about an infinite future.
+Heartbeat policy is retained and its ownership checks inspected, but the45-second
+heartbeat-expiry path was not separately accelerated or timed in tests. Already-
+started REST work, complete daemon-switch isolation, actual app UI and provider
+accounts are outside this proof. Independent pre-PR review and hosted/integrated
+verification remain coordinator-owned and unchecked above.

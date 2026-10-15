@@ -59,6 +59,8 @@ public final class EventStream {
   public private(set) var historicalEventScope: [String: HistoricalEventScope] = [:]
 
   private var eventSocket: (any EventStreamSocket)?
+  private var connectionGeneration: UInt64 = 0
+  private var connectionStartTask: Task<Void, Never>?
   private let socketFactory: EventStreamSocketFactory
   private let podStore: PodStore
   private weak var memoryStore: MemoryStore?
@@ -110,37 +112,46 @@ public final class EventStream {
     tokenProvider: DaemonAccessTokenProvider? = nil
   ) {
     disconnect()
+    let generation = connectionGeneration
 
     let callbacks = EventStreamSocketCallbacks(
       event: { [weak self] raw in
         Task { @MainActor [weak self] in
-          self?.handleRawEvent(raw)
+          guard let self, self.connectionGeneration == generation else { return }
+          self.handleRawEvent(raw)
         }
       },
       state: { [weak self] state in
         Task { @MainActor [weak self] in
-          self?.handleStateChange(state)
+          guard let self, self.connectionGeneration == generation else { return }
+          self.handleStateChange(state)
         }
       },
       resync: { [weak self] in
         Task { @MainActor [weak self] in
-          await self?.handleResyncRequired(api: api)
+          guard let self, self.connectionGeneration == generation else { return }
+          await self.handleResyncRequired(api: api)
         }
       }
     )
     let socket = socketFactory(baseURL, token, tokenProvider, callbacks)
     eventSocket = socket
 
-    Task {
+    connectionStartTask = Task { [weak self] in
+      guard !Task.isCancelled, self?.connectionGeneration == generation else { return }
       await socket.connect()
     }
   }
 
   public func disconnect() {
-    Task {
-      await eventSocket?.disconnect()
-    }
+    connectionGeneration &+= 1
+    connectionStartTask?.cancel()
+    connectionStartTask = nil
+    let oldSocket = eventSocket
     eventSocket = nil
+    if let oldSocket {
+      Task { await oldSocket.disconnect() }
+    }
     flushTask?.cancel()
     flushTask = nil
     flushPendingEvents()
@@ -149,15 +160,21 @@ public final class EventStream {
 
   /// Subscribe to a specific pod's events (when detail panel opens)
   public func subscribeToSession(_ podId: String) {
-    Task {
-      await eventSocket?.subscribe(podId: podId)
+    guard let socket = eventSocket else { return }
+    let generation = connectionGeneration
+    Task { [weak self] in
+      guard self?.connectionGeneration == generation else { return }
+      await socket.subscribe(podId: podId)
     }
   }
 
   /// Unsubscribe from a pod (when navigating away)
   public func unsubscribeFromSession(_ podId: String) {
-    Task {
-      await eventSocket?.unsubscribe(podId: podId)
+    guard let socket = eventSocket else { return }
+    let generation = connectionGeneration
+    Task { [weak self] in
+      guard self?.connectionGeneration == generation else { return }
+      await socket.unsubscribe(podId: podId)
     }
   }
 

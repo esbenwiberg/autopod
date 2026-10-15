@@ -39,6 +39,7 @@ struct EventStreamLifetimeTests {
     stream.connect(baseURL: api.baseURL, token: "synthetic", api: api)
     let old = sockets[0]
     try await old.log.waitFor("connect")
+    #expect(!old.log.values.contains("disconnect"))
     let raw = try JSONDecoder().decode(RawSystemEvent.self, from: Data(
       #"{"type":"pod.validation_started","timestamp":"2026-10-15T00:00:00Z","podId":"socket-fixture","attempt":1}"#.utf8))
 

@@ -115,7 +115,10 @@ final class NativeSocketPeer: @unchecked Sendable {
       connection.stateUpdateHandler = { [weak self] state in
         guard let self else { return }
         switch state {
-        case .cancelled: peers.removeValue(forKey: id); log.add("cancelled:\(id)")
+        case .cancelled:
+          connection.stateUpdateHandler = nil
+          peers.removeValue(forKey: id)
+          log.add("cancelled:\(id)")
         case .failed: connection.cancel()
         default: break
         }
@@ -162,10 +165,11 @@ final class NativeSocketPeer: @unchecked Sendable {
         guard let peer = peers[id], !stopping else {
           continuation.resume(throwing: SocketLifetimeFailure.missingPeer); return
         }
+        let completion = SocketSendCompletion(continuation)
+        completion.arm(on: queue, peer: peer)
         let context = NWConnection.ContentContext(identifier: "fixture-text", metadata: [NWProtocolWebSocket.Metadata(opcode: .text)])
         peer.send(content: Data(text.utf8), contentContext: context, completion: .contentProcessed { error in
-          if let error { continuation.resume(throwing: error) }
-          else { continuation.resume() }
+          completion.finish(error)
         })
       }
     }
@@ -229,15 +233,23 @@ private final class SocketSessionDelegate: NSObject, URLSessionDelegate, Sendabl
   }
 
   func dispose() async throws {
-    gate.release()
+    // Attempt every release even when an earlier teardown barrier fails.
+    var failure: Error?
     for socket in sockets { await socket.disconnect() }
+    gate.release()
+    if gate.log.values.contains("entered") {
+      do { try await gate.log.waitFor("returned") }
+      catch { failure = error }
+    }
     session.invalidateAndCancel()
-    // Cancel peer/listener even if the session invalidation barrier fails.
     do { try await delegate.log.waitFor("invalidated") }
-    catch { try await peer.dispose(); throw error }
-    try await peer.dispose()
+    catch { if failure == nil { failure = error } }
+    do { try await peer.dispose() }
+    catch { if failure == nil { failure = error } }
+    if let failure { throw failure }
     print("SOCKET_TEARDOWN accepted=\(peer.log.values.filter { $0.hasPrefix("accepted:") }.count) cancelled=\(peer.log.values.filter { $0.hasPrefix("cancelled:") }.count) session=invalidated listener=cancelled")
   }
+
 }
 
 @MainActor func withSocketLifetimeFixture(_ body: (SocketLifetimeFixture) async throws -> Void) async throws {
@@ -245,9 +257,35 @@ private final class SocketSessionDelegate: NSObject, URLSessionDelegate, Sendabl
   do {
     try await fixture.start()
     try await body(fixture)
-    try await fixture.dispose()
   } catch {
     try await fixture.dispose()
     throw error
+  }
+  try await fixture.dispose()
+}
+
+// A failed send cannot strand a checked continuation or its deadline timer.
+private final class SocketSendCompletion: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<Void, Error>?
+  private var timer: DispatchWorkItem?
+  init(_ continuation: CheckedContinuation<Void, Error>) { self.continuation = continuation }
+  func arm(on queue: DispatchQueue, peer: NWConnection) {
+    let timer = DispatchWorkItem { [self] in
+      peer.cancel()
+      finish(SocketLifetimeFailure.deadline("native peer send"))
+    }
+    lock.withLock { self.timer = timer }
+    queue.asyncAfter(deadline: .now() + 5, execute: timer)
+  }
+  func finish(_ error: Error?) {
+    let pending = lock.withLock {
+      let pending = continuation
+      continuation = nil
+      timer?.cancel(); timer = nil
+      return pending
+    }
+    if let error { pending?.resume(throwing: error) }
+    else { pending?.resume() }
   }
 }
