@@ -1,0 +1,192 @@
+# Autopod reliability campaign
+
+## Overview
+
+Improve the seven agreed areas without expanding product capabilities:
+trustworthy desktop state, readable existing workflows, interruption recovery,
+predictable CLI behavior, shared contracts, testable orchestration boundaries,
+and performance/release confidence.
+
+This is the campaign coordination plan. Individual tasks receive their own RPI
+research and implementation plans. Only tasks with resolved scope and explicit
+checks are ready for execution; later workstreams are a prioritized backlog,
+not permission to perform speculative rewrites.
+
+## User requirements and standing authorization
+
+Recorded from the October 15 conversation:
+
+- Codex and subagents drive the entire campaign and minimize user involvement.
+- Use RPI for every task and review the work before opening its PR.
+- Use one long-lived branch; workers branch out from it.
+- Show wireframes before changing any visible UI.
+- Large restructuring, particularly pod-manager, must be testable.
+- Independently verify and validate completed work.
+- Work within the branch is preapproved, including real pods for testing.
+
+The user's authorization governs routine technical phase progression,
+delegation, commits, pushes, task PRs, fixes, and integration into the campaign
+branch. The RPI research/plan/implementation separation and artifacts remain.
+No repeated technical approval question is needed. Product/design choices stay
+with the user; render proposed wireframes before their UI implementation. An
+agent-operated UI check is automated evidence, never a claim of human signoff.
+
+Real-pod validation is separate from the RPI skill's development workflow. It
+uses the existing reviewed provider/account/repository configuration, bounded
+resources, isolated test data, and recorded teardown; missing bindings are
+resolved from existing configuration without guessing secrets or switching
+providers. Main/production rollout is outside this branch-contained campaign.
+
+## Current State Analysis
+
+Baseline: `1a089d1b83f660e7bef49089d458ead0f49c0553`, current committed main when
+the campaign worktree was created. See
+`thoughts/shared/research/2026-10-15-reliability-campaign.md`.
+
+The code already includes durable completion/merge/retry ledgers, generation
+fences, event replay, REST merge protection, and selected cross-language
+fixtures. Tests exercise repository restart and mocked boundary failures.
+The initial full baseline passed; Docker server probing timed out. Default
+workflow branch filters do not include the requested integration branch.
+
+## Desired End State
+
+Three representative operator journeys anchor acceptance:
+
+1. Leave work running: it progresses or stops with a durable, intelligible
+   reason, preserving work and unresolved decisions.
+2. Investigate a failure: existing clients show confirmed state, preserved
+   work, relevant evidence and an appropriate existing recovery action.
+3. Lose a connection during an action: the outcome is reconciled, uncertain
+   mutations are not repeated blindly, and clients do not invent success.
+
+For each changed behavior, evidence identifies the tested revision, command,
+asserted outcome, and limitations. The integration branch is considered ready
+only after affected tests and cross-component scenarios pass together.
+
+## Branch and worker protocol
+
+- Integration: `codex/reliability` in its own managed worktree.
+- Workers: `codex/reliability-<task>` from a recorded integration commit,
+  each in a separate managed worktree. PR base is always `codex/reliability`.
+- Coordinator owns scope, integration, conflict resolution, test results,
+  durable task status, and final evidence. Implementers do not self-certify.
+- One implementation owner at a time for pod-manager, migrations, shared
+  schemas, and other overlapping files. Parallelize independent seams.
+- Before PR: independent review of intended behavior, actual diff, acceptance
+  evidence, regressions and remaining risks. Fix valid findings and re-review
+  affected changes. Open PR only after this review.
+- Before integration: inspect hosted checks; distinguish missing/skipped/failed
+  checks. Merge into the campaign branch, then verify affected integrated flows.
+- Fetch main periodically and integrate at checkpoint boundaries, with checks
+  after conflict resolution. No force pushes to the integration branch.
+- Preserve unrelated working changes. Archive worker worktrees only after
+  integration/evidence retention. No direct main merges or hosted deployment.
+
+## RPI task lifecycle
+
+Research artifact -> resolved plan -> implementation on worker branch ->
+prove-work evidence -> independent review -> PR -> integration checks.
+
+Every worker receives the user requirements, exact base SHA, task research/plan,
+applicable AGENTS instructions, allowed file scope, exact checks, and ownership.
+If evidence contradicts the plan, record Expected / Found / Why it matters /
+Proposed adjustment. The coordinator resolves routine in-scope technical
+adjustments and updates artifacts. Ask the user only for an unresolved product
+choice or missing authority that repository evidence cannot establish.
+
+## Waves and task ledger
+
+| ID | Task | Dependencies | Status / next action |
+|---|---|---|---|
+| R00 | Existing CI covers campaign PRs and contract paths | Baseline | Detailed plan under independent review |
+| R01 | Verification harness feasibility and deterministic fixtures | R00 | Research existing loopback, native UI, process and container seams; prove cleanup and isolation before live tests |
+| R02 | Desktop connection/action wireframes | Campaign research | Prepare and show normal, pending, disconnected, rejected and reconciled states before visible changes |
+| R03 | CLI transport and log-follow reliability | R01 | Task-specific research/plan; include actual executable exit/output and replay behavior |
+| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | Task-specific research/plan; deterministic store tests plus actual app proof |
+| R05 | Shared response/event contract scenarios | R00, R01 | Extend established fixture pattern for selected R03/R04 boundaries |
+| R06 | Lifecycle interruption scenarios and first extraction | R01 | Characterize one ownership boundary before moving it; serialize changes |
+| R07 | Existing navigation/readability/keyboard polish | R02, R04 | Separate wireframe batch and bounded task plans |
+| R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | Measure baseline first; compare same data/toolchain and record thresholds before optimizing |
+
+Only R00 is implementation-ready now. R01/R02 are bounded research/design work.
+R03-R08 are deliberately unresolved at implementation-detail level and must not
+be handed to executors as approved detailed specifications. They represent the
+agreed outcomes, with scope selected from new evidence.
+
+## Verification strategy
+
+### Baseline and regression
+
+Use Node 22/pnpm 9.15.4, frozen installation and `SKIP_DB_TESTS=0`. Record native
+SQLite availability, real exits, skipped suites and existing warnings. Run
+targeted checks per task and appropriate broader checks at integration. Avoid
+unrelated repeated full-suite runs when no affected code changed.
+
+### Boundary evidence
+
+- CLI: built binary in a subprocess with private config, ephemeral loopback
+  server, controlled responses/socket disconnects, output and exit assertions.
+- Desktop: injectable server/session tests, actual app/NSHostingView/WebKit
+  rendering as appropriate; inspect screenshots for each materially changed
+  state. Full-app claims require actual integrated app interaction.
+- Daemon: real SQLite and temporary Git repositories, deterministic event/time
+  controls, cancellation/late-result/duplicate/restart scenarios. OS-process
+  crash claims require process termination and restart, not manager recreation.
+- Real pods: only when Docker or reviewed sandbox routing is proven available;
+  record image/source identities, provider request bounds, artifact/source
+  results and actual resource teardown. A skip or timeout is not proof.
+- Contracts: shared fixtures decoded/interpreted by both clients and checked
+  against daemon outputs. Keep lifecycle eligibility authoritative on daemon.
+- Performance: reproducible fixture size, hardware/toolchain, warm/cold state,
+  repeated timings and memory/idle observations before and after.
+- Upgrade: disposable historical database fixtures, migration/data invariants,
+  sampled restore and supported client compatibility; never mutate live data
+  to obtain failure evidence.
+
+Every task's prove-work verdict is PROVEN, PARTIALLY PROVEN, or FAILED. Attach
+observable evidence for each material claim. Human preference/signoff remains
+separate; do not convert automated screenshots into human acceptance.
+
+## Large-refactor rules
+
+Before an extraction, specify current inputs, outputs, owned resources, durable
+records, cancellation/ownership fences and error behavior. Establish behavioral
+tests at the boundary. Extract one responsibility in a reviewable diff, retaining
+existing identity checks and receipts. Keep intentional behavior changes apart
+from mechanical movement. Compare observable behavior and run interrupted cases
+before and after. A reduced line count alone is not acceptance.
+
+## UI checkpoint
+
+R02 presents wireframes before any visible change, covering existing task state,
+pending command, lost connectivity, rejected action, confirmed recovery and
+preserved reply draft. Later navigation changes receive their own batch. Show
+evidence already available in the model; do not fabricate certainty about source,
+validation or action completion. Broader product choices require user direction.
+
+## Performance Considerations
+
+No optimization is authorized solely by intuition. Initial representative sizes
+and thresholds are chosen during R08 research and recorded before implementation.
+The macOS CI path expansion in R00 intentionally increases contract coverage.
+
+## Migration Notes
+
+No migration in the foundation task. Future persistence changes require unique
+migration prefixes, historical fixture verification and explicit rollback/source
+preservation notes in the task plan. Keep production deployment separate.
+
+## References
+
+- Campaign research: `thoughts/shared/research/2026-10-15-reliability-campaign.md`
+- First executable plan: `thoughts/shared/plans/2026-10-15-reliability-ci-routing.md`
+- Workflow skills: `/Users/ewi/.codex/skills/rpi/SKILL.md` and
+  `/Users/ewi/.codex/skills/prove-work/SKILL.md`.
+
+## Progress and exact next action
+
+Campaign branch created; research synthesized; baseline tests/lint passed.
+Collect typecheck/secret-scan outcome, complete independent R00 plan review,
+commit/push research and plans, then dispatch R00 to its own branch. Develop
+R01/R02 after the foundation without altering visible product UI beforehand.
