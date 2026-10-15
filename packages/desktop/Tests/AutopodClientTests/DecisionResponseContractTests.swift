@@ -23,6 +23,8 @@ import Testing
     #expect(detail.pendingEscalation?.response == nil)
     #expect(detail.finalization?.pendingDecisionId == "decision-contract-question")
     #expect(compact.finalization?.pendingDecisionId == detail.finalization?.pendingDecisionId)
+    #expect(pod.escalationId == "decision-contract-question")
+    #expect(summary.escalationId == nil)
     #expect(pod.status == .awaitingInput)
     #expect(summary.status == .awaitingInput)
     #expect(pod.escalationQuestion == "Which implementation should be preserved?")
@@ -50,6 +52,8 @@ import Testing
     #expect(response.pod == nil)
     #expect(summary.finalization == nil)
     #expect(summary.recordDiagnostics == nil)
+    #expect(PodMapper.map(response).escalationId == nil)
+    #expect(PodMapper.map(summary).escalationId == nil)
     #expect(PodMapper.map(response).escalationQuestion == nil)
     #expect(PodMapper.map(summary).escalationQuestion == nil)
   }
