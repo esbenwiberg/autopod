@@ -94,7 +94,7 @@ focused checks must pass before closure. No human signoff is inferred from captu
 - [x] Rendered rows and current callbacks own keyboard execution.
 - [x] Window scope and repeated lifecycle teardown proven.
 - [x] Material native states captured and inspected (bounded palette; mouse exception below).
-- [ ] Independent pre-PR, hosted and integrated checks recorded.
+- [x] Independent pre-PR, hosted and integrated checks recorded.
 
 No API, schema, dependency or persistent-state changes. Existing public palette
 initializer and commands remain compatible. Revert the keyboard bridge/dispatch
@@ -186,3 +186,16 @@ hosted CI and integrated focused checks remain root-owned and unchecked above.
 Final review cleanup: the retained-content test's timeout label now says "keyboard
 activation" (it delivers Return). This is a diagnostic string correction only;
 full-run assertions and production source remain those verified at `927f39ef`.
+
+## Independent review and campaign closure
+
+Root and desktop reviewer found no actionable issue at2d926e6a. Root reran12
+functions/1suite through actual NSApplication event delivery and inspected all
+seven distinct pixel states; all14 independently generated PNGs matched worker
+captures. PR433 passed general38805448234 and native38805448081 checks, including
+the macOS app build, then merged into campaign at96783185. Integrated12functions/
+1suite passed; all14 PNGs matched the reviewed root captures byte for byte.
+Evidence is retained in campaign .autopod-data/reliability/r07a/root-proof.json.
+Scope-adjusted keyboard proof is PROVEN; the literal mouse/full-app focus limits
+above remain. Completed worker Swift build cache was cleaned using swift package
+clean after evidence retention; source, baseline and proof artifacts remain.
