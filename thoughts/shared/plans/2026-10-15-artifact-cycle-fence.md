@@ -114,11 +114,11 @@ not OS-process crash, real provider or actual Docker execution.
 
 ## Acceptance
 
-- [ ] Public Pause/Message sequence advances cycle during old copy and reproduces bug.
-- [ ] Old copy success and failure cannot mutate/clean up the new cycle.
-- [ ] New worker can finish and publish its own artifact normally.
-- [ ] Existing artifact/interactive/no-journal/retry/pause/decision regressions pass.
-- [ ] Full daemon and supported validation checks pass.
+- [x] Public Pause/Message sequence advances cycle during old copy and reproduces bug.
+- [x] Old copy success and failure cannot mutate/clean up the new cycle.
+- [x] New worker can finish and publish its own artifact normally.
+- [x] Existing artifact/interactive/no-journal/retry/pause/decision regressions pass.
+- [x] Full daemon and supported validation checks pass.
 - [ ] Independent pre-PR review, hosted and integrated proof recorded.
 
 ## Compatibility and rollback
@@ -132,5 +132,73 @@ previous behavior but also restores the race. No performance optimization claim.
 Prepared by root and reviewed by research_cli. Review identified an internal
 cleanup-await gap; root selected the existing cleanup assertion callback and
 added a public-control pre-cleanup regression, rather than narrowing the safety
-claim. No other blocking findings. Ready for worker implementation under the
-standing campaign authorization.
+claim. No other blocking findings. Worker implementation and automated proof completed
+under the standing campaign authorization; independent pre-PR review is next.
+
+
+## Worker evidence (R06a)
+
+Worker branch: `codex/reliability-artifact-cycle`, based on
+`526820cfbe5fd8ff3f0eff74836a761e9aa7fc41`. Runtime: Node 22.23.3,
+pnpm 9.15.4, via `npx -y -p node@22 -p pnpm@9.15.4 -c '<command>'`.
+Logs are local, ignored artifacts under `.autopod-data/reliability/r06a/`.
+
+Before any production edit, the three new regression cases failed against the
+base implementation (`prefix-regression.log`): old copy success and the
+pre-cleanup barrier completed cycle 2 while its worker was still active; old
+copy failure failed the running pod. Both cycles were admitted by the actual
+event consumer; the second used public Pause and Message controls, with no
+replacement journal fixture writes.
+
+After the bounded guard, the same three cases passed (`regression.log`), including
+unchanged durable journal rows and active task run after stale completion,
+unchanged cleanup/publication counts, staging removal, and subsequent successful
+artifact publication and exactly one completion by the resumed worker. The
+pre-cleanup case retains the snapshot legitimately published before supersession.
+
+The artifact-specific predicate leaves the shared guidance predicate unchanged.
+It checks captured cycle at preservation entry, copy/reuse/error boundaries,
+legacy publication awaits and finalization. The existing cleanup callback checks
+again after internal awaits; its recognized stale error returns locally while
+unrelated cleanup errors keep their existing propagation behavior.
+
+Reproduce the focused proof from the repository root:
+
+```sh
+npx -y -p node@22 -p pnpm@9.15.4 -c 'SKIP_DB_TESTS=0 pnpm --filter @autopod/daemon exec vitest run src/pods/pod-manager.test.ts -t "fences old artifact finalization"'
+```
+
+No external pods, provider calls, Docker execution or UI changes are involved.
+The proof uses production manager/collector code, real SQLite/filesystem and
+controlled runtime/container adapters. It does not claim cancellation of an
+already-issued external side effect. Test-owned streams/barriers are released
+and awaited; SQLite is closed, temporary artifact trees removed and DATA_DIR
+restored in teardown. Independent pre-PR review and hosted/integrated proof
+remain coordinator-owned and are not checked off by this implementation.
+
+
+Validation commands executed inside the wrapper above:
+
+- `pnpm install --frozen-lockfile && pnpm --filter @autopod/daemon... build`
+  passed before the regression run, including native SQLite installation.
+- `pnpm exec biome check packages/daemon/src/pods/pod-manager.ts packages/daemon/src/pods/pod-manager.test.ts`
+  passed.
+- `SKIP_DB_TESTS=0 pnpm --filter @autopod/daemon exec vitest run src/pods/pod-manager.test.ts src/pods/artifact-preservation.test.ts src/pods/artifact-preservation.sandbox.test.ts src/pods/artifact-snapshot-receipt.test.ts src/pods/artifact-snapshot-inventory.test.ts src/pods/artifact-resume-observation.test.ts src/pods/completion-journal.test.ts`
+  passed: 7 files, 703 tests (`targeted.log`). This includes existing interactive,
+  no-journal, duplicate completion, snapshot retry, decision and pause cases.
+- `pnpm --filter @autopod/daemon build && pnpm --filter @autopod/daemon typecheck && pnpm secret-scan`
+  passed on the final source (`build-typecheck-secrets.log`). Typecheck means the
+  repository-supported tsup declaration check, not an additional raw whole-tree
+  TypeScript check.
+- `git diff --check` passed.
+
+- `SKIP_DB_TESTS=0 pnpm --filter @autopod/daemon test` passed: 388 files passed,
+  5 skipped; 6,091 tests passed, 10 skipped (`full-daemon.log`, 95.59 seconds).
+  DB inclusion was forced; the pre-existing gated suites remain skipped.
+
+Worker verdict: **PROVEN** for the bounded stale-cycle behavior and local
+compatibility contract. All three tests failed before the production change and
+passed after it; the full daemon suite passed on the same final source. The
+independent review/integration acceptance item remains open. The immutable
+committed revision and source hashes are recorded in the worker handoff and
+local `proof.json` to avoid a self-referential commit identifier in this plan.

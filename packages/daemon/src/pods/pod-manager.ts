@@ -7111,6 +7111,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     );
   }
 
+  // Pause then Message can start a new worker cycle in the same generation/container.
+  function ownsArtifactFinalization(pod: Pod, allowRemovedContainer = false): boolean {
+    return (
+      ownsArtifactCompletion(pod, allowRemovedContainer) &&
+      (podRepo.getOrThrow(pod.id).finalization?.cycle ?? 0) === (pod.finalization?.cycle ?? 0)
+    );
+  }
+
+  function assertArtifactFinalizationCurrent(pod: Pod): void {
+    if (!ownsArtifactFinalization(pod))
+      throw new AutopodError(
+        'Artifact finalization was superseded; current resources retained.',
+        'STALE_ARTIFACT_COLLECTION',
+        409,
+      );
+  }
+
   function failInteractivePreservation(pod: Pod, reason: string): never {
     const failureReason = `Workspace preservation failed. ${reason} Original resources retained; repair synchronization and retry completion.`;
     if (ownsArtifactCompletion(pod)) {
@@ -7194,6 +7211,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   }
 
   async function preserveArtifacts(pod: Pod): Promise<string> {
+    assertArtifactFinalizationCurrent(pod);
     const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
     const artifactRoot = path.join(dataDir, 'artifacts', pod.id);
     if (
@@ -7207,7 +7225,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         pod.lifecycleGeneration,
         pod.finalization.cycle,
       );
-      if (!ownsArtifactCompletion(pod))
+      if (!ownsArtifactFinalization(pod))
         throw new AutopodError(
           'Artifact finalization was superseded.',
           'STALE_ARTIFACT_COLLECTION',
@@ -7224,9 +7242,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         artifactRoot,
         generation: pod.lifecycleGeneration,
         cycle: pod.finalization?.cycle ?? 0,
-        isCurrent: () => ownsArtifactCompletion(pod),
+        isCurrent: () => ownsArtifactFinalization(pod),
       });
-      if (!ownsArtifactCompletion(pod))
+      if (!ownsArtifactFinalization(pod))
         throw new AutopodError(
           'Artifact collection belongs to an older lifecycle; current resources retained.',
           'STALE_ARTIFACT_COLLECTION',
@@ -7237,7 +7255,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return artifactsPath;
     } catch (err) {
       logger.error({ err, podId: pod.id }, 'Artifact preservation failed; source retained');
-      if (ownsArtifactCompletion(pod)) {
+      if (ownsArtifactFinalization(pod)) {
         const failureReason =
           'Artifact preservation failed. Original container retained; retry collection before completing.';
         podRepo.update(pod.id, { failureReason });
@@ -7249,15 +7267,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   async function finalizeArtifactPod(pod: Pod): Promise<void> {
     const podId = pod.id;
-    if (!ownsArtifactCompletion(pod)) return;
+    if (!ownsArtifactFinalization(pod)) return;
     await syncSandboxSeriesHandover(podId);
+    if (!ownsArtifactFinalization(pod)) return;
     const profile = executionForPod(pod);
     const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
     let artifactsPath: string;
     try {
       artifactsPath = await preserveArtifacts(pod);
     } catch {
-      if (ownsArtifactCompletion(pod)) {
+      if (ownsArtifactFinalization(pod)) {
         transition(podRepo.getOrThrow(podId), 'failed');
       }
       return;
@@ -7272,21 +7291,25 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         emitActivityStatus(podId, 'Pushing artifact branch…');
         const tempWorktreeParent = path.join(dataDir, 'artifact-worktrees');
         await mkdir(tempWorktreeParent, { recursive: true });
+        if (!ownsArtifactFinalization(pod)) return;
         const pat = await resolveGitCredential(profile);
+        if (!ownsArtifactFinalization(pod)) return;
         const worktreeResult = await worktreeManager.create({
           repoUrl: profile.repoUrl,
           branch: repoBranch,
           baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
           pat,
         });
+        if (!ownsArtifactFinalization(pod)) return;
         // Copy artifacts into the worktree (cp -a copies contents, trailing /. required)
         await execFileAsync('cp', ['-a', `${artifactsPath}/.`, `${worktreeResult.worktreePath}/`]);
+        if (!ownsArtifactFinalization(pod)) return;
         await worktreeManager.commitPendingChanges(
           worktreeResult.worktreePath,
           `research: ${pod.task.slice(0, 72)}`,
           { maxDeletions: 1000 },
         );
-        if (!ownsArtifactCompletion(pod)) return;
+        if (!ownsArtifactFinalization(pod)) return;
         await worktreeManager.pushBranch(worktreeResult.worktreePath, repoBranch);
         logger.info({ podId, branch: repoBranch }, 'Artifact branch pushed');
       } catch (err) {
@@ -7295,9 +7318,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
 
     // Transition to complete — skip validation entirely
-    if (!ownsArtifactCompletion(pod)) return;
-    await cleanupContainer(pod, 'artifact-complete');
-    if (!ownsArtifactCompletion(pod, true)) return;
+    if (!ownsArtifactFinalization(pod)) return;
+    try {
+      await cleanupContainer(pod, 'artifact-complete', 'kill', () =>
+        assertArtifactFinalizationCurrent(pod),
+      );
+    } catch (err) {
+      if (err instanceof AutopodError && err.code === 'STALE_ARTIFACT_COLLECTION') return;
+      throw err;
+    }
+    if (!ownsArtifactFinalization(pod, true)) return;
     transition(podRepo.getOrThrow(podId), 'complete');
   }
 
