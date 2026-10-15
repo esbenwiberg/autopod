@@ -93,6 +93,7 @@ public struct SidebarView: View {
             List(selection: $selection) {
                 Section("Pods") {
                     sidebarRow(.attention, icon: "exclamationmark.circle.fill", color: .orange, badge: attentionCount)
+                    sidebarRow(.village, icon: "house.lodge.fill", color: .teal, badge: 0)
                     sidebarRow(.active, icon: "bolt.circle.fill", color: .blue, badge: activeCount)
                     sidebarRow(.running, icon: "play.circle.fill", color: .secondary, badge: runningCount)
                     sidebarRow(.workspaces, icon: "terminal.fill", color: .secondary, badge: workspaceCount)
@@ -247,6 +248,7 @@ public enum SidebarItem: Hashable {
     case completed
     case all
     case managedPods
+    case village
     case analytics
     case history
     case memory
@@ -268,6 +270,7 @@ public enum SidebarItem: Hashable {
         case .completed: "Completed"
         case .all: "Browse"
         case .managedPods: "Managed Pods"
+        case .village: "Village"
         case .analytics: "Analytics"
         case .history: "History"
         case .memory: "Memory"
