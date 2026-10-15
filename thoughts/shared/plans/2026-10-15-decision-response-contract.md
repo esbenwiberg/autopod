@@ -15,7 +15,7 @@ Research: ../research/2026-10-15-decision-response-contract.md.
 EscalationRequest stores payload.question. Direct detail preserves that envelope,
 but both list display paths require a top-level question and compactPod reads it.
 Normal envelopes are consequently classified as invalid display shape in source.
-SQL already caps compact JSON at64KiB and compact summary text at240 characters.
+SQL already caps compact JSON at64KiB and pending summary text at500 characters (progress text separately uses240).
 Corrupt rows must remain individually diagnosed without dropping healthy pods.
 
 ## Desired result
@@ -109,10 +109,10 @@ full app startup, live provider or safe reply-replay claim is made by this task.
 
 ## Acceptance
 
-- [ ] Production list/detail regression reproduces nested-envelope mismatch.
-- [ ] Valid nested and legacy decisions display safely without storage mutation.
-- [ ] Corruption/size bounds and healthy neighboring records remain protected.
-- [ ] Same committed fixture is pinned to actual daemon output and consumed by CLI/Swift.
+- [x] Production list/detail regression reproduces nested-envelope mismatch.
+- [x] Valid nested and legacy decisions display safely without storage mutation.
+- [x] Corruption/size bounds and healthy neighboring records remain protected.
+- [x] Same committed fixture is pinned to actual daemon output and consumed by CLI/Swift.
 - [ ] Independent pre-PR, hosted and integrated proof recorded.
 
 ## Compatibility, performance and rollback
@@ -125,6 +125,75 @@ contract. Do not broaden to reply idempotency or desktop connection-scoped state
 
 ## Status
 
-Resolved root plan, ready for independent technical review. No open product
-questions. All paths and load-bearing behavior checked against current sources;
-worker must report a contradictory baseline before production changes.
+Implementation and local validation complete. Independent pre-PR review,
+hosted checks and integration remain pending. No manual UI verification is claimed.
+
+
+## Execution evidence (R05a)
+
+- Worker branch: `codex/reliability-decision-contract`; base
+  `35072a80e05a88d95391fd948b6cd9b6b11076c1`.
+- Baseline route regression ran before production edits: normal list discarded the
+  typed nested envelope, compact summary was null, and both added invalid_shape;
+  detail and durable pendingDecisionId survived. Four failing assertions captured
+  in ignored `.autopod-data/reliability/r05a/baseline.log`.
+- Bounded helper now qualifies nested envelopes and legacy flat questions for
+  display only. All six current escalation variants, missing/null decisions,
+  unknown fields, malformed payload/text and priority/fallback rules are covered.
+  Route proof includes a healthy neighbor, unchanged raw SQLite bytes, malformed
+  JSON/shape diagnostics, existing64KiB selection bound and summary truncation.
+- Source correction confirmed with root: pending summary already uses500 chars,
+  not240 as the initial plan stated. The test now exercises600→500 truncation;
+  neither existing production cap was changed.
+- Fixture was captured from actual fixed detail/compact route responses using a
+  temporary write in the route test, then selected into the committed JSON. That
+  write was removed; the permanent test compares every committed response field
+  and full nested objects. Raw capture is ignored `route-responses.json`, and the
+  first fixed run is `repaired-route.log`. Fixture `_contract` documents omitted
+  unrelated optional fields; no normalization or expected-value generation occurs
+  during tests or native CI.
+- Real built CLI tests serve these bytes from private loopback fixtures. Status
+  explicitly receives404 for optional task-execution; exact requests, JSON, exit0,
+  no deadline/cancellation, closed children/timers/sockets and deleted private
+  directories are asserted. Compact list is a second executable case.
+- Swift reads the same checked-in file with #filePath; tests DTO decision identity,
+  durable pendingID, mapped question/options/status, missing/null optional fields
+  and unknown response keys. No desktop production file changed.
+- Frozen Node22/pnpm9.15.4 install, fresh daemon/shared/CLI dependency builds and
+  supported daemon/CLI typechecks passed (`setup.log`, `build-typecheck.log`).
+- Focused daemon helper/route:22 tests; built CLI fixture:2 tests (`focused.log`).
+- Full CLI suite:40 files/335 tests passed (`full-tests.log`). Full daemon:391 files passed/5 skipped,6114 tests passed/10 skipped;
+  no changed/new test is skipped.
+- Swift affected set:40 test functions (plus parameter cases) passed, including all
+  PodMapper tests, decision retention, confirmed actions/rendering and new contract
+  suite. Exact generated filter is first line of `swift-affected.log`. `swift build`
+  passed (`swift-build.log`). This is local Swift, not hosted Xcode qualification.
+- Scoped Biome passed7 files, and diff whitespace check passed. Final repository secret scan passed after staging all new files.
+  Runtime:Node22.23.3/pnpm9.15.4. Final commit identity is recorded in the ignored
+  proof receipt and worker handoff (avoids a self-referencing commit hash).
+
+
+Local prove-work verdict: **PROVEN** for the scoped wire/DTO contract and display
+repair. The baseline and fixed route tests establish the regression; helper tests
+qualify all existing payload variants; private built-process tests and Swift tests
+exercise the actual client boundaries. Fixture derivation hashes and recursive
+comparison receipt are in ignored `fixture-derivation.json`. No live provider,
+rendered UI, reply replay, hosted checks or integration approval is inferred.
+
+Reproduction commands, from this worktree (Node commands use
+`npx -y -p node@22 -p pnpm@9.15.4 -c '<command>'`):
+
+- `pnpm install --frozen-lockfile`
+- `pnpm --filter @autopod/daemon... --filter @autopod/cli... build`
+- `pnpm --filter @autopod/daemon --filter @autopod/cli typecheck`
+- `pnpm --filter @autopod/daemon exec vitest run src/api/routes/pod-decision-contract.test.ts src/pods/escalation-display.test.ts`
+- `pnpm --filter @autopod/cli exec vitest run src/decision-response-contract.test.ts`
+- `pnpm --filter @autopod/daemon --filter @autopod/cli test`
+- `pnpm exec biome check` with the7 changed TS/JSON files, and `pnpm secret-scan`.
+- In packages/desktop: `swift test --filter '<filter in swift-affected.log>'`
+  and `swift build`. A smaller independent fixture rerun can use
+  `swift test --filter DecisionResponseContractTests`.
+- `git diff --cached --check`.
+
+Next action: freeze the clean pushed worker head for independent final review;
+root owns the PR targeting codex/reliability and subsequent hosted/integrated proof.
