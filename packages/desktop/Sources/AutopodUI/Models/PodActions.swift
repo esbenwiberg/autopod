@@ -37,6 +37,7 @@ public struct PodActions: Sendable {
   public var approve: @MainActor @Sendable (String, String?) async -> Void
   public var reject: @MainActor @Sendable (String, String?) async -> Void
   public var reply: @MainActor @Sendable (String, String) async -> Void
+  public var decisionReply: DecisionReplyActions
   public var nudge: @MainActor @Sendable (String, String) async -> Void
   public var pendingControl: @MainActor @Sendable (String) -> PendingPodControl?
   public var killAndDelete: @MainActor @Sendable (String) async -> Void
@@ -139,6 +140,7 @@ public struct PodActions: Sendable {
     approve: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     reject: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     reply: @escaping @MainActor @Sendable (String, String) async -> Void = { _, _ in },
+    decisionReply: DecisionReplyActions = .init(),
     nudge: @escaping @MainActor @Sendable (String, String) async -> Void = { _, _ in },
     pendingControl: @escaping @MainActor @Sendable (String) -> PendingPodControl? = { _ in nil },
     killAndDelete: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
@@ -195,6 +197,7 @@ public struct PodActions: Sendable {
     self.approve = approve
     self.reject = reject
     self.reply = reply
+    self.decisionReply = decisionReply
     self.nudge = nudge
     self.pendingControl = pendingControl
     self.killAndDelete = killAndDelete

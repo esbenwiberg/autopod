@@ -55,7 +55,7 @@ public final class PodStore {
   // MARK: - API
 
   private var api: DaemonAPI?
-  private struct Source: Equatable {
+  struct Source: Hashable {
     let connectionID: UUID?
     let endpoint: URL
   }
@@ -65,6 +65,8 @@ public final class PodStore {
   }
   private let storeID = UUID()
   private var source: Source?
+  var retainedSource: Source? { source }
+  let decisionReplies = DecisionReplyStore()
   private var configurationEpoch: UInt64 = 0
   private var hydratedPodIds = Set<String>()
   private var hydratingPodIds = Set<String>()
@@ -123,6 +125,7 @@ public final class PodStore {
   }
 
   private func forgetPodState(_ podId: String) {
+    decisionReplies.forget(source: source, podID: podId)
     hydratedPodIds.remove(podId)
     hydratingPodIds.remove(podId)
     statusRevisions.removeValue(forKey: podId)
@@ -315,34 +318,43 @@ public final class PodStore {
   }
 
   public func refreshSession(_ id: String) async {
-    guard let api else { return }
+    _ = try? await readSession(id)
+  }
+
+  struct SessionRead {
+    let returned: Pod
+    let current: Pod
+  }
+
+  /// The same revision-aware refresh, with a real result for admission/preparation.
+  /// The optional guard lets a caller retire its own work before this merge.
+  func readSession(_ id: String, accepting: @MainActor () -> Bool = { true }) async throws -> SessionRead {
+    guard let api else { throw URLError(.notConnectedToInternet) }
     let epoch = configurationEpoch
     let statusRevision = statusRevisions[id, default: 0]
     let decisionRevision = decisionRevisions[id, default: 0]
-    do {
-      let response = try await api.getPod(id)
-      guard epoch == configurationEpoch else { return }
-      var updated = PodMapper.map(response, baseURL: api.baseURL)
-      if let index = pods.firstIndex(where: { $0.id == id }) {
-        updated = mergeRestPod(
-          updated,
-          with: pods[index],
-          preferIncomingOnEqual: true,
-          preserveCurrentStatus: statusRevisions[id, default: 0] > statusRevision,
-          preserveCurrentDecision: decisionRevisions[id, default: 0] != decisionRevision
-        )
-        if updated.validationProgress == nil && updated.status == .validating {
-          updated.validationProgress = ValidationProgress.initial(attempt: updated.attempts?.current ?? 1)
-        }
-        pods[index] = updated
-      } else {
-        recordInsertion(id)
-        pods.append(updated)
+    let response = try await api.getPod(id)
+    guard epoch == configurationEpoch, accepting() else { throw CancellationError() }
+    let returned = PodMapper.map(response, baseURL: api.baseURL)
+    var updated = returned
+    if let index = pods.firstIndex(where: { $0.id == id }) {
+      updated = mergeRestPod(
+        updated,
+        with: pods[index],
+        preferIncomingOnEqual: true,
+        preserveCurrentStatus: statusRevisions[id, default: 0] > statusRevision,
+        preserveCurrentDecision: decisionRevisions[id, default: 0] != decisionRevision
+      )
+      if updated.validationProgress == nil && updated.status == .validating {
+        updated.validationProgress = ValidationProgress.initial(attempt: updated.attempts?.current ?? 1)
       }
-      hydratedPodIds.insert(id)
-    } catch {
-      // Silent refresh failure — don't overwrite existing data
+      pods[index] = updated
+    } else {
+      recordInsertion(id)
+      pods.append(updated)
     }
+    hydratedPodIds.insert(id)
+    return SessionRead(returned: returned, current: updated)
   }
 
   public func hydrateSessionIfNeeded(_ id: String) async {

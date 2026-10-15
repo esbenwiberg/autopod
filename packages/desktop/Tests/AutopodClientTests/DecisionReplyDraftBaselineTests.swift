@@ -120,7 +120,7 @@ import AutopodUI
   }
 }
 
-private func replyRequestData(_ request: URLRequest) throws -> Data {
+func replyRequestData(_ request: URLRequest) throws -> Data {
   if let body = request.httpBody { return body }
   let stream = try #require(request.httpBodyStream)
   stream.open()
