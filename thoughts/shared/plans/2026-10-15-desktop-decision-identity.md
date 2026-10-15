@@ -144,11 +144,11 @@ assertion. These are technical corrections within standing campaign authority.
 
 ## Acceptance and limitations
 
-- [ ] Pre-fix observable races reproduced with preserved logs.
-- [ ] Known identity retained and wrong resolution cannot clear another decision.
-- [ ] Held pre-event REST cannot replace or resurrect the decision group.
-- [ ] Unknown identity and later authoritative reconciliation covered.
-- [ ] Native question/option retention captures inspected.
+- [x] Pre-fix observable races reproduced with preserved logs.
+- [x] Known identity retained and wrong resolution cannot clear another decision.
+- [x] Held pre-event REST cannot replace or resurrect the decision group.
+- [x] Unknown identity and later authoritative reconciliation covered.
+- [x] Native question/option retention captures inspected.
 - [ ] Independent pre-PR, hosted and integrated verification passed.
 
 This local event/request fence is not universal cross-stream linearizability.
@@ -159,3 +159,59 @@ binding on reply submission remain subsequent plans. No changes to reply API,
 response acceptance, persistence schemas, automatic retries or draft clearing.
 Human preference/signoff is not an automated acceptance item. Reverting this
 bounded client change restores prior mapping/event behavior; no data migration.
+
+
+## Worker implementation and proof (2026-10-15)
+
+Production changes are limited to the four planned files. Pod stores optional
+unanswered escalation identity; EventStream passes created identity/type and only
+clears a matching resolution, then requests read-only refresh without inventing
+Running. PodStore uses monotonic decision tokens and preserves the four decision
+fields together across held REST and strictly older detail responses. Existing
+configuration epochs and lifecycle merge policy remain unchanged.
+
+Pre-fix regression source is preserved in commit `910586be` (production baseline
+`36566b48`). The executable old-interface baseline failed both held detail/compact
+cases and stale resolution: 2 test functions / 3 cases / 6 assertion failures.
+The source and full log are retained under ignored `.autopod-data/reliability/r05b/`.
+
+Final production/test source was frozen at
+`6854b61c24beabafafb2273e7cf5f8f25c4ddba4`, after merging campaign `7565b084` including
+R04d. Later changes to this plan only record evidence. No dependency changes or
+fresh Swift cache were required; verification used Swift 6.3.3 and the existing cache.
+
+| Material claim | Executed evidence | Result |
+|---|---|---|
+| Unanswered detail identity retained, compact/legacy identity unknown | DecisionIdentityTests and shared DecisionResponseContractTests | Passed |
+| Created/resolved callbacks preserve the matching decision and observed lifecycle | Actual EventStream factory callbacks, private DaemonAPI GET barriers and injected notification recorder | Passed |
+| Held detail/compact cannot replace or resurrect event decision fields | Older/equal/absent snapshots, resolution, removal/reinsert tokens, independent pods, selected hydration and epoch replacement | Passed |
+| Existing native question/options survive stale A and adopt authoritative C | Same-mounted production DetailPanel/Overview, 600 and 900px, six PNGs plus accessibility text/frame checks, one mount and three GETs per case | Passed; all six images inspected |
+| Broader native compatibility | Affected run 47 functions / 6 suites; full Swift run 447 functions / 19 suites | Passed, zero skipped |
+| Executable and repository checks | AutopodDesktopExe build, Node22 secret scan, git diff check | All exit 0 |
+
+Exact reproducible commands (run from repository root):
+
+```sh
+AUTOPOD_DECISION_RENDER_DIR="$PWD/.autopod-data/reliability/r05b/native" swift test --package-path packages/desktop --no-parallel --filter 'DecisionIdentity|DecisionResponseContract|ReplyDecisionRetention|PodStoreFleet|PodStoreLifetime|confirmedAction|confirmedKill|InlineControl'
+swift test --package-path packages/desktop --no-parallel
+swift build --package-path packages/desktop --product AutopodDesktopExe
+npx -y -p node@22 -p pnpm@9.15.4 -c 'pnpm secret-scan'
+git diff --check
+```
+
+Ignored receipts are `proof.json` (source/image/log SHA-256 mapping),
+`baseline.log`, `focused-final.log`, `full-swift-final.log`, `build-final.log`,
+`secret-scan-final.log`, and `native/detail{600,900}-{current-B,after-stale-A,reconciled-C}.{png,ax.txt}`.
+The test runner reports function counts; parameterized cases are additional.
+Known warnings include AppKit's deprecated enhanced-accessibility selectors in
+native fixture construction and the existing unused AppRootView capture.
+
+This is component-composition proof using production SwiftUI views, mapped store
+state and real DaemonAPI decoding against a private held transport. It does not
+start the production account/bootstrap, post OS notifications, navigate Work/Logs,
+activate reply controls, prove full compositor fidelity, or establish draft
+retention/reply acceptance. The existing EventStream event-refresh Task is not
+joinable by the fixture; successful assertions await its state, and teardown
+invalidates the store epoch, disconnects the controlled socket and releases all
+private requests/sessions. Independent pre-PR review, hosted checks and integrated
+verification remain root-owned pending gates.
