@@ -123,13 +123,13 @@ the host Node24/native-ABI mismatch.
 
 ## Acceptance checklist
 
-- [ ] Real writer SIGKILL and fresh reader process observed.
-- [ ] Production disk SQLite/migrations/repositories/reconciler exercised.
-- [ ] Pending decision/report/source/resource identities retained.
-- [ ] Reconciliation twice produces no duplicate work or cleanup.
-- [ ] Database integrity and foreign-key checks pass.
-- [ ] Owned process/filesystem teardown verified.
-- [ ] Relevant regression/build/type/lint/secret checks passed.
+- [x] Real writer SIGKILL and fresh reader process observed.
+- [x] Production disk SQLite/migrations/repositories/reconciler exercised.
+- [x] Pending decision/report/source/resource identities retained.
+- [x] Reconciliation twice produces no duplicate work or cleanup.
+- [x] Database integrity and foreign-key checks pass.
+- [x] Owned process/filesystem teardown verified.
+- [x] Relevant regression/build/type/lint/secret checks passed.
 - [ ] Independent final review and hosted PR checks recorded.
 
 ## Performance, migration and rollback
@@ -141,7 +141,57 @@ permission to weaken assertions or substitute graceful close for SIGKILL.
 
 ## Status
 
-Prepared by coordinator from source and delegated research. Independent technical
-plan review by research_lifecycle found no architecture blockers; its three guard
-clarifications and explicit open/uncommitted barrier checks are incorporated above.
-Ready for implementation under standing authorization and the user's Go.
+Implemented in `codex/reliability-crash-proof` from base `28ed9a0f` under the
+standing authorization. The worker implemented phases 1 and 2 and ran the local
+phase 3 checks below. Independent final-commit review, PR checks and integration
+remain coordinator-owned; no PR has been created by this worker.
+
+## Execution evidence (2026-10-15)
+
+The test bundles the plain-Node fixture from current TypeScript sources, seeds
+through production disk SQLite/migrations and repositories, observes the writer's
+`close` with null exit code and SIGKILL, then observes a different reader PID and
+normal exit zero. It compares the full journal and explicit durable fields before
+death and after each of two reconciliation passes and duplicate settle/finish.
+The exact pending-decision diagnostic rules out the separate ownership guard.
+The source-file sentinel, empty side-effect record, integrity checks and directory
+removal assertions all passed.
+
+The only platform adjustment during implementation was canonicalizing the owned
+temporary directory with realpath: macOS resolves `/var` to `/private/var` for cwd.
+No production behavior, dependency, migration, UI or daemon startup changed.
+
+All pnpm invocations used this explicit wrapper (observed Node v22.23.3,
+pnpm 9.15.4):
+
+```sh
+npx -y -p node@22 -p pnpm@9.15.4 -c '<command>'
+```
+
+Commands and evidence in ignored `.autopod-data/reliability/r01b/`:
+
+| Check | Command inside wrapper | Result / evidence |
+|---|---|---|
+| Install and shared build | `pnpm install --frozen-lockfile && pnpm --filter @autopod/shared build` | Passed; frozen lockfile unchanged |
+| Targeted regression | `SKIP_DB_TESTS=0 pnpm --filter @autopod/daemon exec vitest run src/pods/local-reconciler.process.test.ts src/pods/local-reconciler.test.ts src/pods/completion-journal.test.ts --reporter=verbose` | 3 files, 43 tests passed; `targeted.log` |
+| Full daemon suite (final implementation) | `SKIP_DB_TESTS=0 pnpm --filter @autopod/daemon test` | 389 files / 6,089 tests passed, 5 files / 10 tests skipped; `daemon-tests.log` |
+| Build and supported typecheck | `pnpm --filter @autopod/daemon... build && pnpm --filter @autopod/daemon typecheck` | Passed; `build-typecheck.log` |
+| Changed TypeScript lint | `pnpm exec biome check packages/daemon/src/pods/local-reconciler.process.test.ts packages/daemon/src/test-utils/local-reconciler-process-fixture.ts packages/daemon/src/test-utils/owned-fixture-process.ts` | Passed; `lint-secret.log` |
+| Secrets | `pnpm secret-scan` | Passed; `lint-secret.log` |
+| Patch whitespace | `git diff --check` (outside wrapper) | Passed |
+| Harness failure proof | `node .autopod-data/reliability/r01b/verify-harness.mjs` | Intentional startup exit rejected/reaped at code 1; missing-ready watchdog rejected/reaped with SIGKILL; both owned directories removed; `harness-proof.log` |
+
+Supplemental raw `tsc --noEmit` is **not clean**. The whole-source probe reports
+many existing test diagnostics (`extra-whole-source-tsc.log`). A focused config
+including the three new files reports six diagnostics in unchanged production
+files: local-reconciler.ts:126, pod-repository.ts:501/1208/1210 and
+task-execution-ledger.ts:577/578. Compiling only the unchanged reconciler and
+repository entry graph produces byte-identical diagnostics (`new-files-typecheck.log`
+and `unchanged-production-typecheck.log`; config files are beside these logs).
+There are no diagnostics in the new files. The repository-supported daemon
+typecheck passes; this evidence does not claim a clean raw whole-source typecheck.
+
+Scope of proof: POSIX process death and real on-disk SQLite reopen through the
+production repository/reconciler boundary. It does not establish host power-loss
+durability, full daemon startup, provider behavior or Docker/real-container behavior.
+Windows explicitly skips the signal-specific case. No pods were started.
