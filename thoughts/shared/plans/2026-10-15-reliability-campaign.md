@@ -103,11 +103,11 @@ choice or missing authority that repository evidence cannot establish.
 | R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a complete (PR #417); R01b complete (PR #419, cf8c6663), integrated43tests passed |
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | R03a complete (#420); R03b complete (#422,913c0622); hosted+integrated proof passed |
-| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete: PR #421 merged at2ff947ea, hosted+integrated proof passed; pending/draft research completed |
+| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b socket ownership worker implementing reviewed plan; pending/draft research completed |
 | R05 | Shared response/event contract scenarios | R00, R01 | Extend established fixture pattern for selected R03/R04 boundaries |
-| R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a independently reviewed atf1b8fc9e; PR423 awaits hosted checks |
+| R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a complete: PR423 merged at5cc8fbc6;704 integrated tests passed |
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | Separate wireframe batch and bounded task plans |
-| R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | Measure baseline first; compare same data/toolchain and record thresholds before optimizing |
+| R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | R08a upgrade/actual-backup/restore roundtrip at22f88734 in independent review; performance policy remains unselected |
 
 R00 and the bounded R01a CLI executable harness have reviewed detailed plans.
 The remaining R01 harness slices need detailed plans. R02's design direction is
@@ -268,3 +268,12 @@ fresh integrated build. R06a independent review found no actionable issues and
 reran all3 public-control regressions plus703 affected tests before PR423.
 Socket ownership research now precedes pending-action UI work: reconnect and
 disconnect must have reliable lifetimes before presenting their outcomes.
+
+R06a merged at5cc8fbc6 with hosted general/native checks and704 integrated tests
+passing. R04b socket-lifetime worker branches from3426702d; independent plan review
+added overlapping old/new token-provider lifetime proof and connect actor-entry
+cancellation. R08a worker at22f88734 passed67 qualification tests and is in
+independent final review. Live validation availability research records Docker
+timeout and hosted revision mismatch; no real-pod proof is claimed. Worker
+archival attempts for R00/R01a were refused because the worktrees are protected
+by a pinned task/workspace; source and evidence are retained, no forced deletion.

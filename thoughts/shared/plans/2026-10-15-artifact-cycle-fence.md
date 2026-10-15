@@ -119,7 +119,7 @@ not OS-process crash, real provider or actual Docker execution.
 - [x] New worker can finish and publish its own artifact normally.
 - [x] Existing artifact/interactive/no-journal/retry/pause/decision regressions pass.
 - [x] Full daemon and supported validation checks pass.
-- [ ] Independent pre-PR review, hosted and integrated proof recorded.
+- [x] Independent pre-PR review, hosted and integrated proof recorded.
 
 ## Compatibility and rollback
 
@@ -202,3 +202,15 @@ passed after it; the full daemon suite passed on the same final source. The
 independent review/integration acceptance item remains open. The immutable
 committed revision and source hashes are recorded in the worker handoff and
 local `proof.json` to avoid a self-referential commit identifier in this plan.
+
+## Final integration proof
+
+PROVEN for the bounded stale-cycle contract at worker
+f1b8fc9ee0a3aabfbf1c319b8859a60501bcbf26. Independent reviewer read the
+production/test diff and ownership context, reran3 public-control regressions
+and703 affected tests, and found no actionable issue before PR423. Coordinator
+also reviewed the final diff and proof. Hosted CI38788118870 and
+Desktop38788119020 passed. PR423 merged at5cc8fbc6; eight affected suites704tests
+passed on integration, including the real process-death recovery proof. Evidence
+is retained in .autopod-data/reliability/r06a/ and r06a-integrated.log. Controlled
+runtime/container and non-atomic external-operation limitations above still apply.
