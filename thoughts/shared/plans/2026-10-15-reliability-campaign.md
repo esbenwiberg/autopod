@@ -103,7 +103,7 @@ choice or missing authority that repository evidence cannot establish.
 | R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a complete (PR #417); R01b complete (PR #419, cf8c6663), integrated43tests passed; R01c complete (#429,f818a8b3), live proof and hosted/integrated checks passed |
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | R03a complete (#420); R03b complete (#422,913c0622); hosted+integrated proof passed |
-| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b complete (#425,173d3450); R04c #427 merged at80fc8158, hosted passed, integrated rerun blocked by test-helper/toolchain compatibility; R04d Inline controls in baseline |
+| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b complete (#425,173d3450); R04c complete (#427,80fc8158; integrated18tests at43a5fad2 after fixture PR430); R04d Inline controls in rendered proof |
 | R05 | Shared response/event contract scenarios | R00, R01 | R05a complete (#426,98b9d912); hosted and integrated daemon/CLI/Swift proof passed |
 | R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a complete: PR423 merged at5cc8fbc6;704 integrated tests passed |
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | Separate wireframe batch and bounded task plans |
@@ -316,3 +316,10 @@ checks and15 local guard tests rerun at final330fc51e before PR429. Fresh initia
 inventory was empty; no claim of live nonempty-inventory preservation, model
 execution, full daemon lifecycle or firewall enforcement. Both PRs target only
 codex/reliability. R04d applies the chosen Inline direction after its baseline.
+
+R04c integrated proof is now complete:18 native test functions passed at43a5fad2
+after the separately reviewed fixture compatibility PR430 passed hosted
+Swift/Xcode checks. Earlier compile/disk failures remain recorded. R04d preserved
+the duplicate POST/unconditional DELETE baseline, implemented owned controls at
+7530db73 and passed42focused invocations; independent source review found no
+actionable issues. Rendering and final frozen-head proof remain incomplete.
