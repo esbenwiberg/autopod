@@ -69,6 +69,7 @@ export default defineConfig({
     cpSync('src/managed/runtime/codex_worker.py', 'dist/runtime/codex_worker.py');
     cpSync('src/managed/runtime/codex_agent_worker.py', 'dist/runtime/codex_agent_worker.py');
     cpSync('src/managed/runtime/github_cli.py', 'dist/runtime/github_cli.py');
+    cpSync('src/managed/runtime/public_read.py', 'dist/runtime/public_read.py');
     mkdirSync('dist/containers', { recursive: true });
     cpSync('src/containers/seccomp-profile.json', 'dist/containers/seccomp-profile.json');
     mkdirSync('dist/images', { recursive: true });

@@ -519,6 +519,60 @@ export const ManagedPodRequestSchema = z
               ),
             'secret-material-forbidden',
           ),
+        contextFiles: z
+          .array(
+            z
+              .object({
+                path: z
+                  .string()
+                  .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+                  .refine(
+                    (value) =>
+                      !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+                        value,
+                      ),
+                    'secret-material-forbidden',
+                  ),
+                content: z
+                  .string()
+                  .max(1000000)
+                  .refine(
+                    (value) =>
+                      !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+                        value,
+                      ),
+                    'secret-material-forbidden',
+                  ),
+                sha256: z
+                  .string()
+                  .regex(/^sha256:[a-f0-9]{64}$/)
+                  .refine(
+                    (value) =>
+                      !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+                        value,
+                      ),
+                    'secret-material-forbidden',
+                  ),
+                sourceJobId: z
+                  .string()
+                  .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+                  .refine(
+                    (value) =>
+                      !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+                        value,
+                      ),
+                    'secret-material-forbidden',
+                  ),
+                evidenceLevel: z.enum([
+                  'artifact-contract-verified',
+                  'backend-observed',
+                  'dispatcher-observed',
+                ]),
+              })
+              .strict(),
+          )
+          .max(64)
+          .optional(),
       })
       .strict(),
     route: RouteSchema,

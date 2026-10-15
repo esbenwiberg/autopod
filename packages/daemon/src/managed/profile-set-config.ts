@@ -74,6 +74,7 @@ const schema = z
   .object({
     mode: z.literal('reviewed-profile-set-v1'),
     installationId: id,
+    catalogArtifacts: z.boolean().optional(),
     profiles: z.array(stageSchema).min(1).max(8),
     mirror: mirrorSchema,
     image: z
@@ -227,6 +228,7 @@ export function profileSetRequestPolicy(
     const names = request.inputArtifacts.map((input) => input.name);
     const validation = request.validation.autopod;
     if (
+      (request.task.contextFiles?.length ?? 0) > 0 ||
       !stage ||
       stages.length !== 1 ||
       request.task.kind !== stage.taskKind ||
@@ -414,7 +416,7 @@ export function composeManagedProfileSet(
     components,
     config: { db: dependencies.db, store },
     bindings: cli.bindings,
-    resume: () => components.resume(),
+    resume: (profileIds) => components.resume(profileIds),
     close: () => components.close(),
   };
 }

@@ -61,6 +61,7 @@ public final class EventStream {
   private var eventSocket: (any EventStreamSocket)?
   private var connectionGeneration: UInt64 = 0
   private var connectionStartTask: Task<Void, Never>?
+  private let notifyEscalation: (Pod, String) -> Void
   private let socketFactory: EventStreamSocketFactory
   private let podStore: PodStore
   private weak var memoryStore: MemoryStore?
@@ -95,12 +96,16 @@ public final class EventStream {
     podStore: PodStore,
     memoryStore: MemoryStore? = nil,
     scheduledJobStore: ScheduledJobStore? = nil,
-    socketFactory: @escaping EventStreamSocketFactory
+    socketFactory: @escaping EventStreamSocketFactory,
+    notifyEscalation: @escaping (Pod, String) -> Void = { pod, question in
+      NotificationService.shared.notifyEscalation(pod: pod, question: question)
+    }
   ) {
     self.podStore = podStore
     self.memoryStore = memoryStore
     self.scheduledJobStore = scheduledJobStore
     self.socketFactory = socketFactory
+    self.notifyEscalation = notifyEscalation
   }
 
   // MARK: - Lifecycle
@@ -339,16 +344,17 @@ public final class EventStream {
         guard let opts = escalation.payload.options, !opts.isEmpty else { return nil }
         return opts
       }()
-      podStore.setEscalation(podId, question: question, options: options)
+      podStore.setEscalation(podId, question: question, options: options,
+        id: escalation.id, type: escalation.type)
       podStore.updateStatus(podId, to: .awaitingInput)
       // Notification
       if let pod = podStore.pods.first(where: { $0.id == podId }) {
-        NotificationService.shared.notifyEscalation(pod: pod, question: question)
+        notifyEscalation(pod, question)
       }
 
-    case .escalationResolved(let podId, _):
-      podStore.setEscalation(podId, question: nil)
-      podStore.updateStatus(podId, to: .running)
+    case .escalationResolved(let podId, let escalationId):
+      podStore.resolveEscalation(podId, id: escalationId)
+      Task { await podStore.refreshSession(podId) }
 
     case .sessionCompleted(let podId, let finalStatus, _):
       if let status = PodStatus(rawValue: finalStatus) {

@@ -139,7 +139,7 @@ it('installs an agent helper that routes final output through the reviewed Codex
       "'sandbox_workspace_write.network_access': args.network_enabled or bool(args.github_repository)",
     );
     expect(install?.[1][6]).toContain(
-      "codex_sandbox = 'workspace-write' if args.network_enabled or args.github_repository else args.sandbox",
+      "codex_sandbox = 'workspace-write' if args.network_enabled or args.github_repository or args.public_read else args.sandbox",
     );
     expect(install?.[1][6]).toContain(
       "'Continue the same assigned work inside the same managed worker. '",

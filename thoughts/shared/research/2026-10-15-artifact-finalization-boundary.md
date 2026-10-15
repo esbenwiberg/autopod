@@ -96,3 +96,58 @@ is needed before calling this a reproduced defect. The shared ownership helper
 also serves uncollected-guidance paths, where settle may create a journal after
 the Pod snapshot was captured. Artifact cycle checks therefore must not be
 blindly imposed on those unrelated uses.
+
+## Follow-up: extraction boundary after R06a (2026-10-15)
+
+Source ddd3c492c9e410ecf26afb7c417b8738e6a3a32e, incorporating main9978fb5e.
+Agent research_lifecycle traced current callers/dependencies; root reread ownership,
+preservation/finalization, collector, cleanup, transition, interactive/coalescing
+paths and artifact manager test block. No new tests or product changes in this
+research; the earlier R06a704-test result remains historical evidence.
+
+R06a now adds artifact-specific cycle equality at pod-manager.ts7115–7130.
+Preservation at7213–7266 is54lines plus16artifact guard lines; automatic
+finalization7268–7332 makes120function lines total. Preservation uses repository/
+journal, container selection, shared ownership, status/error emitters and logger.
+The larger boundary additionally uses handover, execution settings, Git credentials,
+worktree operations, cleanup and lifecycle transition, plus filesystem/copy.
+
+Shared ownsArtifactCompletion7098–7112 also serves workspace failure and queued
+guidance; it is not artifact-only. Completion/resume maps4006–4007 remain owned
+by admission, observation and retry code. Automatic callers12300–12312 coalesce
+by pod/generation/cycle, defer execution until registration, and delete only the
+identical promise. Observable coalescing is shared work, not public Promise identity.
+Interactive completeSession14437 calls preservation only; its source-retention
+and failure behavior differs from automatic completion. Approval has a separate
+snapshot path and is not part of this artifact-output boundary.
+
+Preservation resolves DATA_DIR at invocation. Retained snapshot verification occurs
+before the collection try/catch and rechecks captured ownership. New collection
+marks preserving, emits Collecting artifacts…, publishes filesystem/receipt, then
+updates artifactsPath and marks sourcePreservedAt. These are ordered operations,
+not a transaction. Failures log and set reason/nonfatal activity only while owner,
+then rethrow. CompletionJournal.mark targets the latest cycle, so the captured
+cycle fence remains material. No-journal compatibility uses cycle zero.
+
+Automatic completion checks ownership, awaits handover, checks again and resolves
+settings before its preservation catch. Handover/settings failures may reject.
+Preservation failures transition failed only while owner. Legacy publication runs
+only for repoUrl without launchConfigDigest. It fences after mkdir, credential,
+worktree creation, copy and commit; push errors warn and are swallowed. Cleanup
+uses the existing shared assertion callback across internal awaits; only the
+recognized stale-artifact error is swallowed there. Final ownership allows the
+removed container, then calls the existing transition carrying journal finishing,
+readiness/memory and events. Already-issued external operations are not cancelled.
+
+Existing tests19035–19220 establish three public Pause/Message cycle races;
+19222–19430 cover native no-push, duplicate automatic completion, snapshot reuse/
+corruption, retry, and automatic versus interactive failure. Interactive duplicate
+completion18565–18604 also exists. Collector/receipt/adapter tests cover actual
+filesystem work with controlled infrastructure. Manager recreation is not process
+death and adapter simulation is not a cloud resource.
+
+No explicit legacy artifact publication success/failure contract or complete
+snapshot-publication→cleanup→terminal ordering assertion was located in that
+block. Duplicate success is covered; registry release after rejected finalization
+and ownership change during retained verification are additional unqualified
+scenarios. This describes coverage; it is not evidence of new defects.

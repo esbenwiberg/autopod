@@ -99,6 +99,22 @@ export function managedPodRoutes(app: FastifyInstance, deps: ManagedPodApiDeps):
       return reply.code(401).send({ code: 'managed-auth-required' });
     return deps.service.health();
   });
+  app.get('/managed/catalog/options', async (request, reply) => {
+    if (!(await deps.authenticate(request)))
+      return reply.code(401).send({ code: 'managed-auth-required' });
+    if (!deps.service.catalog) return reply.code(409).send({ code: 'managed-catalog-disabled' });
+    return deps.service.catalog.options();
+  });
+  app.post('/managed/catalog/prepare', async (request, reply) => {
+    const installation = await deps.authenticate(request);
+    if (!installation) return reply.code(401).send({ code: 'managed-auth-required' });
+    if (!deps.service.catalog) return reply.code(409).send({ code: 'managed-catalog-disabled' });
+    try {
+      return await deps.service.catalog.prepare(installation, request.body);
+    } catch {
+      return reply.code(409).send({ code: 'managed-catalog-preparation-refused' });
+    }
+  });
   app.get<{ Querystring: { cursor?: string; limit?: string } }>(
     '/managed/pods',
     async (request, reply) => {
