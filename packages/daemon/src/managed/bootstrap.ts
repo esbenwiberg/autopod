@@ -25,7 +25,13 @@ export interface ManagedComponentsConfig {
   /** Explicit reviewed enablement; omitting it always keeps starts dark. */
   enabled?: boolean;
   /** Capabilities proven by the selected reviewed runtime composition. */
-  runtimeCapabilities?: readonly ('managed-agent-session-v1' | 'managed-github-read-v1')[];
+  runtimeCapabilities?: readonly (
+    | 'managed-agent-session-v1'
+    | 'managed-github-read-v1'
+    | 'managed-catalog-v1'
+    | 'managed-context-files-v1'
+    | 'managed-public-read-v1'
+  )[];
   source?: {
     git: ManagedGitBroker;
     drafts?: DraftBroker;

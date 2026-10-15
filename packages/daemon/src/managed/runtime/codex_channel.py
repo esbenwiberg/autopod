@@ -163,7 +163,7 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
                 self.reply(501)
                 return
             github = self.path == '/github'
-            if self.path not in ('/v1/responses', '/github') or self.headers.get('Authorization') or self.headers.get('Transfer-Encoding'):
+            if self.path not in ('/v1/responses', '/github', '/public-read') or self.headers.get('Authorization') or self.headers.get('Transfer-Encoding'):
                 self.reply(403)
                 return
             try:
@@ -183,7 +183,11 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
                 if len(data) != length:
                     raise ValueError('truncated')
                 raw = data.decode('utf8')
-                prefix = 'github-' if github else 'channel-'
+                public = self.path == '/public-read'
+                prefix = 'public-' if public else 'github-' if github else 'channel-'
+                if public and (length > 4096 or not (root / 'public-enabled').exists()):
+                    self.reply(403)
+                    return
                 if github and not (root / 'github-enabled').exists():
                     self.reply(403)
                     return
