@@ -98,4 +98,40 @@ Independent technical plan review by `research_cli` completed on October 15:
 ready for bounded execution, no blocking issues. Reviewer checked live filters,
 GitHub branch/path semantics, unchanged job scope, rollback and proof boundaries.
 This is technical review under the user's standing authorization, not an invented
-human signoff. Implementation has not started.
+human signoff.
+
+Implemented in worker branch `codex/reliability-ci-routing`, based on campaign
+commit `2274e78c7760f319a997851cece863f91b22ff81`. Both workflows now include
+`codex/reliability` for push and PR targets. Desktop additionally includes
+`packages/shared/**` and `packages/daemon/**` for both events.
+
+Local verification on October 15, 2026:
+
+- [x] `node .autopod-data/reliability/verify-ci-routing.mjs` passed with Node
+  v24.21.0, loading the existing YAML parser from the integration checkout.
+- [x] Both YAML documents parsed and matched an exact expected copy of the parent
+  definitions with only the four branch filters and two desktop path lists
+  changed. All job bodies, permissions, concurrency and dispatch settings match.
+- [x] 60 representative routing assertions passed across both workflows and both
+  events, including main/reliability, worker/unrelated branches, shared/daemon,
+  original desktop paths, mixed paths, and docs/CLI-only exclusions for desktop.
+- [x] Eight before/after assertions establish that the parent excluded the
+  reliability branch and shared/daemon-only desktop cases now included.
+- [x] `git diff --check` and the tracked changed-path allowlist passed.
+- [ ] Independent final diff review remains with the coordinator before PR.
+- [ ] Hosted checks have not been requested or observed by this worker.
+
+Proof verdict: **PARTIALLY PROVEN**. The local configuration and preservation
+claims passed; actual GitHub workflow execution is unproven until the coordinator
+creates the PR and records checks for its final head SHA. The local matcher models
+the existing literal, `*`, and `**` patterns; it is not GitHub's event dispatcher.
+No human verification or hosted success is claimed.
+
+Local evidence is retained under ignored `.autopod-data/reliability/` in the worker
+checkout: `verify-ci-routing.mjs` contains reproducible assertions and
+`ci-routing-proof.json` records all cases, before/after checks, workflow hashes,
+runtime and timestamp. No dependency installation or application tests were
+needed for this workflow-only change; existing job commands are unchanged.
+
+Next action: independent review of the worker commit, then coordinator PR creation
+targeting `codex/reliability` and hosted-check observation.
