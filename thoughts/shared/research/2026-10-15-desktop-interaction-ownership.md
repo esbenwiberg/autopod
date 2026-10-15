@@ -149,3 +149,19 @@ reviewed in PR427; they preserve caches and do not fence an old handler's new
 follow-up call after configure. Pending request and draft ownership remain a
 separate plan. No new UI, request coordinator or retry policy is implemented by
 this research.
+
+## R04d validation prerequisite — Swift 6.3.3 fixture capture
+
+At baseline 80fc81589fa8e6da493fc96a7ca7909dde4e4e20, a fresh local Swift
+6.3.3 build rejects EventStreamResyncTests.swift:72: the Task closure implicitly
+captures URLProtocol self while transferring the closure. The failure persisted
+after `swift package --package-path packages/desktop clean`; no production edit
+had been applied. Logs are under ignored `.autopod-data/reliability/r04d/`
+(`baseline-rerun.log`, `baseline-clean.log`). Earlier disk exhaustion is separate.
+The coordinator's desktop reviewer checked that hosted R04c used Swift 6.1.2;
+local passing incremental runs had reused this test's object.
+
+DaemonAPITests.swift:463–464 already snapshots `self.request` and uses explicit
+`@Sendable [self, request, handler]` captures for the equivalent URLProtocol task.
+Root authorized exactly that test-only alignment, with no assertion, handler or
+production behavior change, followed by resync runtime and baseline action tests.
