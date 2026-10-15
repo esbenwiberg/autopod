@@ -87,7 +87,9 @@ import AutopodUI
 
   @Test func olderFullDetailPreservesDecisionWhileHydratingOtherFields() async throws {
     try await withDecisionIdentityFixture { f in
-      f.store.upsertSession(try decisionPod("B", date: "2026-10-16T00:00:00Z"))
+      var current = try decisionPod("B", date: "2026-10-16T00:00:00Z")
+      current.task = "Old task field"
+      f.store.upsertSession(current)
       let task = f.rest.start { await f.store.refreshSession(f.id) }
       let request = try await f.rest.next(f.rest.a, "/pods/decision")
       request.respond(body: try decisionSnapshot("A", status: "running"))
@@ -157,6 +159,19 @@ import AutopodUI
       try f.expectDecision("B")
       try f.expectDecision("Y", podId: "other")
       #expect(f.store.selectedSessionId == nil)
+    }
+  }
+
+  @Test func anotherPodsEventDoesNotFenceFreshDetail() async throws {
+    try await withDecisionIdentityFixture { f in
+      let task = f.rest.start { await f.store.refreshSession(f.id) }
+      let held = try await f.rest.next(f.rest.a, "/pods/decision")
+      f.store.upsertSession(try decisionPod("X", podId: "other"))
+      try await f.created("Y", podId: "other")
+      held.respond(body: try decisionSnapshot("C"))
+      _ = await task.value
+      try f.expectDecision("C")
+      try f.expectDecision("Y", podId: "other")
     }
   }
 

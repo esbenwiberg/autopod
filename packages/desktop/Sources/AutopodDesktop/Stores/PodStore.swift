@@ -225,8 +225,8 @@ public final class PodStore {
           preserveCurrentStatus:
             statusRevisions[pod.id, default: 0]
               > statusRevisionSnapshot[pod.id, default: 0],
-            preserveCurrentDecision: decisionRevisions[pod.id, default: 0]
-              != decisionRevisionSnapshot[pod.id, default: 0]
+          preserveCurrentDecision: decisionRevisions[pod.id, default: 0]
+            != decisionRevisionSnapshot[pod.id, default: 0]
         )
       }
       // Pods created over WebSocket after page one sit outside the keyset snapshot.
