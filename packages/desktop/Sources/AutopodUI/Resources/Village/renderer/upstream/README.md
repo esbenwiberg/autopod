@@ -10,7 +10,23 @@ A larger woodland village now has winding paths, water and a bridge, six distinc
 
 Characters now act out their routines with original sitting, swinging, attack, hurt, nodding, and victory frames. Work adds a hammer and anvil, arena target, reading material, or terminal. Long idle gaps include log seats, reading, and an authored creek-side fishing spot. Input requests get an occasional attention gesture. Try **Workshop**, **Arena**, **Town Hall**, **Campfire**, and **Fishing break** in the story shortcuts. Leisure and work poses are presentation; recorded status and source evidence remain separate.
 
-## Phone preview
+## Browser app · GitHub Pages
+
+[Open Chat Village](https://esbenwiberg.github.io/jsonl-animate/). Choose several Codex or Claude JSONL files, including their helper logs, or simple conversation JSON. The importer groups sessions, then **Sessions → Watch together** brings up to 10 teams / 40 visible characters into the village. Use **Follow a team** or select a character to focus.
+
+Parsing runs in a browser worker. Files are never uploaded, and imported histories live only in the current tab's memory; reloading clears them. Choose up to 200 files / 100 MB per batch. Include parent and helper files in the same batch. Unsupported or malformed files produce an import error without replacing previous sessions. Live folder watching and MP4 rendering still require the local app.
+
+`npm run build:pages` produces `dist-pages/`, using only public assets and three fictional demos. It never reads `.local/` or the private phone preview. For local static testing, serve `dist-pages/` with any HTTP server. Asset paths also work under the repository's `/jsonl-animate/` prefix.
+
+Publish from a clean, committed checkout with `npm run deploy:pages`. It tests and builds locally, then pushes only static output to `gh-pages` without rewriting branch history. GitHub Pages is configured to serve that branch's root; `.nojekyll` skips Jekyll. GitHub still needs to finish its Pages deployment after the push. Main remains the source branch, and pushing main alone does not publish. This setup uses local builds because the custom GitHub Actions build was blocked by the account's billing/spending limit. The repository remains private; the Pages app is public.
+
+### Download the local app
+
+[Run live locally](https://esbenwiberg.github.io/jsonl-animate/local.html) offers a public ZIP with the local app, fictional fixtures, artwork and credits, setup instructions, and macOS/Windows/Linux launchers. No repository access is required. Install Node.js 22+, extract the ZIP, and launch it; dependencies install on first launch. Then open the printed local address and choose **Sessions → Watch folders → Watch selected live**.
+
+Every Pages build refreshes this download. `scripts/build-download.mjs` packages explicit application directories and distribution files, excluding `.local`, dependencies, Git history, and private histories. The ZIP's `START-HERE.md` describes first launch, folder selection, the simulator, and stopping the local server.
+
+## Private phone preview
 
 [Open the private player](https://chat-village-ewi.esbenw309505.chatgpt.site) or [watch the clip](https://chat-village-ewi.esbenw309505.chatgpt.site/watch.html). Sign in with the owning ChatGPT account. The hosted snapshot supports playback and filtering its saved sessions; discovery, importing files, and rendering new exports remain local. Rebuild its static files with `node scripts/build-phone-preview.mjs`; source and hosting identity live in ignored `.local/phone-site/`.
 
@@ -23,7 +39,7 @@ npm ci
 npm start
 ```
 
-Open **http://127.0.0.1:4173**. Use **Sessions** to browse discovered local Codex and Claude histories, search by project/session, or filter by provider. Choose a team, then focus a character in the party. **Refresh** checks for changed files. Select **Import chat** to import multiple sessions together, including their linked helper logs; sessions retain separate identities. In **Sessions**, check 2–4 sessions and select **Watch together** to combine up to 24 characters in one village. The teams start together in condensed presentation time, not synchronized historical time. Use **Follow a team**, a party button, or tap a character to focus. **Helpers arrive**, **First error**, **Needs you**, **Waiting for helpers**, **Town Hall**, **Cheering**, **Set sail**, and **Campfire** jump to recorded story moments when present. Files are processed by the local server; there are no external API calls during replay or export. Imported sessions remain in memory until the server stops.
+Open **http://127.0.0.1:4173**. Use **Sessions** to browse discovered local Codex and Claude histories, search by project/session, or filter by provider. Choose a team, then focus a character in the party. **Refresh** checks for changed files. Select **Import chat** to import multiple sessions together, including their linked helper logs; sessions retain separate identities. In **Sessions**, check 2–10 sessions and select **Watch together** to combine up to 40 visible characters (including one shared trainer) in one village. The teams start together in condensed presentation time, not synchronized historical time. Use **Follow a team**, a party button, or tap a character to focus. **Helpers arrive**, **First error**, **Needs you**, **Waiting for helpers**, **Town Hall**, **Cheering**, **Set sail**, and **Campfire** jump to recorded story moments when present. Files are processed by the local server; there are no external API calls during replay or export. Imported sessions remain in memory until the server stops.
 
 For ordinary conversations, import a JSON array:
 
@@ -34,9 +50,9 @@ For ordinary conversations, import a JSON array:
 ]
 ```
 
-**Export next 30s as MP4** renders from the current playhead. Export uses a bundled FFmpeg binary installed by `ffmpeg-static`; its install script must be enabled.
+**Make movie** exports the chosen adventure from the beginning. Export uses a bundled FFmpeg binary installed by `ffmpeg-static`; its install script must be enabled.
 
-Choose **Follow agent** for a close camera that tracks the selected character and eases closer when they stop. **Whole village** keeps your character selected while showing everyone. Selecting **Follow everyone** clears the character focus. Scrubbing reproduces the same camera path; local MP4 exports preserve the current camera, character, and team selection. Acting off uses a steady zoom without camera easing.
+Choose **Follow agent** for a close camera that tracks the selected character and eases closer when they stop. **Whole village** keeps your character selected while showing everyone. Selecting **Follow everyone** clears the character focus. Scrubbing reproduces the same camera path; movies follow the selected session automatically or show the whole village when exporting all sessions. Acting off uses a steady zoom without camera easing.
 
 Choose **Highlights** to watch a deterministic shorter edit: helper arrivals, failures, edits, reviews, reports, explicit input requests, reactions, and completed checks. Repeated adjacent edits/reviews from the same actor become one counted highlight. Routine work moves briskly; failures, reports, and confirmed PR creation receive more screen time. Short lead-ins keep some walking; the camera automatically follows each featured actor. The scrubber and arrow buttons use highlight time, while the caption shows the original replay time. **Full replay** returns to that source position. Selecting an actor, journal event, or story moment also returns to full replay. Team filtering rebuilds the edit for that session. Labels describe recorded events; an edit is not proof of a fix. Simultaneous milestones each retain a readable shot, including held frames when their source windows are crowded. Full replay and original events remain unchanged. Enable **Show polling events** in the journal to inspect polling calls too.
 
@@ -58,6 +74,12 @@ npm run export -- --input .local/replay.json --start 30 --duration 45 --fps 12 -
 The CLI imports one Codex, Claude, or plain conversation at a time; the browser also groups multiple sessions in a single import. Run `npm run discover` to list local session metadata. Configure source folders and read provider limits in [session discovery](docs/session-discovery.md). Local selection manifests can choose an excerpt from large histories using `npm run import -- --selection .local/input-selection.json`. When that manifest exists, `npm start` also loads it as the default adventure and writes its compiled timeline to `.local/replay.json`. Private input references, compiled histories, and exports belong in ignored `.local/`.
 
 ## How the village works
+
+The **Village journal** has **Important / All** views, an independent team filter, and **Needs you** for explicit unanswered input requests. Important cards use fixed rules: recorded tool failures, successful exact check reruns, confirmed PR creation, helper reports, and final response markers. Swearing and cheering get text emphasis but do not raise priority. Expand a card to read the message and why it was highlighted, or jump to its original event and character.
+
+Repeated failures of the same check (same actor, command, and working directory) group together, retaining each result and any successful rerun link. A different check breaks the group. Input requests appear first until their matching response or explicit session-end record; an async acknowledgement or unrelated human message is not assumed to answer a request. “Final response” does not mean task success. These rules are versioned in `src/moment-feed.mjs` and make no AI calls.
+
+The pane shows the full received history, independently of the animation playhead. In live mode, new records continue arriving while playback is paused. It follows arrivals only when you are at the bottom. Scrolling up or expanding a message holds the displayed cards until you return to the bottom or click **New moments ↓**; updates to existing cards are announced too. Team and journal filters do not change the village's camera filter. Large lists initially show the newest 200 unpinned cards plus all unanswered requests, with **Show earlier** to load more. The same pane works in the local app, public browser player, and downloadable app.
 
 | Recorded activity | Destination |
 | --- | --- |
@@ -82,7 +104,11 @@ Newly compiled replays assign agents across twelve Pokémon species: Pikachu, Bu
 
 Explicit subagents get stable characters and their own timelines. They can work alongside the lead. Missing helper transcripts produce a status character without invented dialogue. Tool results preserve recorded errors and uncertainty; a successful shell exit alone is not labeled “tests passed.”
 
-The importer preserves source order, call/result relationships, explicit dependencies, original message text, and source file/line references. It statically inspects nested tool orchestration without executing imported code. System/developer prompts, internal analysis, host context, and inherited helper history are excluded from dialogue. This is filtering, **not a general-purpose secret scrubber**: visible messages and tool output remain in the replay.
+The importer preserves source order, call/result relationships, explicit dependencies, original message text, and source file/line references. It statically inspects nested tool orchestration without executing imported code. System/developer prompts, internal analysis, host context, and inherited helper history are excluded from dialogue. Codex logs explicitly marked `source.subagent.other: guardian` are internal approval reviewers: they are excluded from session helper counts and replay dialogue. Ordinary helpers are retained even when they speak JSON. This is filtering, **not a general-purpose secret scrubber**: visible messages and tool output remain in the replay.
+
+Speech bubbles, dialogue captions, and collapsed journal previews use deterministic excerpts. Attachment wrappers yield the actual request; code/JSON blocks, stack frames, and long paths are omitted or replaced with a neutral label. Captions are capped at 240 characters, with full ordinary message text still available by expanding its journal card or inspecting the event. Cheering comes from the displayed prose, not omitted code or JSON. Excerpt length also controls dialogue timing, so pasted logs do not lengthen the animation.
+
+Image-only attachments and paths show “Shared an image.” An explicit screenshot attachment type or label shows “Shared a screenshot.” Filenames alone do not establish that an image is a screenshot. When an image accompanies prose, the prose takes precedence; original paths remain in the expanded journal.
 
 The scene compiler chooses paths and condensed presentation times once. Rendering is a function of that timeline and playback time, so seeking reproduces scene state. Browser playback and MP4 export use the same renderer and assets. Timings are choreography, not measured work durations. Pixel reproducibility is tested in the pinned local renderer; cross-platform font/encoder output is not guaranteed byte-identical.
 
@@ -90,7 +116,7 @@ Multi-session highlights require selecting a team; returning to All teams restor
 
 ## Stress-test sandbox
 
-[Try the fictional ten-session test](https://chat-village-ewi.esbenw309505.chatgpt.site/stress.html): 29 Pokémon agents and one shared trainer in the current village. Normal imports retain the four-session / 24-character limits. The same fixture now exercises the compact session strip, global attention control, and improved gathering spots. The separate page includes browser timing diagnostics. See [observations and limitations](docs/stress-test.md); the phone check uses a desktop viewport override, not physical phone hardware.
+[Try the fictional ten-session test](https://chat-village-ewi.esbenw309505.chatgpt.site/stress.html): 29 Pokémon agents and one shared trainer in the current village. Normal imports retain the ten-session / 40-visible-character limits. The same fixture now exercises the compact session strip, global attention control, and improved gathering spots. The separate page includes browser timing diagnostics. See [observations and limitations](docs/stress-test.md); the phone check uses a desktop viewport override, not physical phone hardware.
 
 ## Current limits
 
@@ -138,6 +164,8 @@ Try `/?session=pacing-demo&mode=highlights` for the fictional pacing example. Hi
 
 Each newly compiled replay ends with available agents gathering in the square and a quest card. Waiting agents keep their posts; explicitly closed sessions stay at the Inn. The card lists recorded check runs, failed attempts with later successful reruns, confirmed PR creation, and outstanding input/tool/helper requests. It does not infer task completion from the end of a file.
 
+The recap card sits below the gathering area. Small parties line up along the square, larger groups retain separate gathering spots, and settled characters face the viewer. Waiting agents remain at their posts.
+
 Use **Quest recap** in the story shortcuts or watch to the end in full replay or Highlights. **Inspect recap evidence** jumps back to the original event. Team filtering scopes the evidence to that session. The same card and gathering appear in MP4 exports. Try [the fictional recap](https://chat-village-ewi.esbenw309505.chatgpt.site/?session=pacing-demo&moment=recap).
 
 Check counts mean tool invocations, not individual tests; polling does not add runs. Missing or ambiguous results are unconfirmed. A successful rerun requires the same actor, exact command, and recorded working directory, with a success result later than the failure. Plain dialogue and PR mentions do not become achievements.
@@ -145,3 +173,17 @@ Check counts mean tool invocations, not individual tests; polling does not add r
 The recap also shows **recorded token usage**: total input/output and an expandable per-agent breakdown for cache reads, cache writes, and reasoning where available. Session filters apply to token totals too. Unknown usage stays unknown; incomplete team or message coverage is labeled partial. No prices or token estimates are inferred from chat text.
 
 Codex imports prefer explicitly scoped `token_usage_record.thread_token_usage` counters and otherwise use `event_msg/token_count` cumulative snapshots once per session. Excerpts subtract an earlier baseline; a selection beginning at the recorded session start needs none. Resets and ambiguous inherited baselines stay unavailable. Claude imports combine each API message ID once, retaining the largest recorded field values across repeated snapshots; its separate cache fields are included in total input. See [token accounting](docs/replay-design.md#recorded-token-usage).
+
+## Make movie
+
+Choose **Make movie** to export the entire adventure from the beginning. Pick full replay or highlights, the whole village or one session, and whether to include the ending recap. The dialog previews the encoded duration, shows render progress, supports cancellation, and keeps a playable/downloadable MP4 when ready. Closing the dialog lets rendering continue; reopening it shows the current job or finished movie. Acting follows the player's setting.
+
+Whole-village highlights use a chronological edit across teams with one combined recap. A single-session movie is compiled independently, so it does not wait for another team's longer history; its actors, outcomes, and tokens stay scoped. Ordinary player highlights still require a selected team. The new full-movie endpoint has no 30/60-second clipping; the older clip endpoint remains available.
+
+The owner-private phone site offers saved movies matching the available options for the pacing, village, and two-team demos, including separate team movies. Other combinations clearly direct you to the local app. The saved demo films are 512 pixels wide; local movies render at 768 pixels wide, both at 12 fps. [Open the movie maker](https://chat-village-ewi.esbenw309505.chatgpt.site/?session=pacing-demo&movie=1).
+
+## Live village (local)
+
+Run `npm start`, open **Sessions**, and choose **Watch folders**. All discovered supported sessions keep collecting in the background. Select 1–10 local Codex/Claude sessions to display and click **Watch selected live**. New records and helpers appear without restarting the village. Pause or rewind while collection continues; **Follow live** catches up and **Open as replay** restores highlights and movie export. Quiet logs do not imply completion.
+
+For a safe first try, run `npm run simulate:live` and watch the folder it prints. It streams fictional parent/helper logs with partial writes. Folder watching stays on your computer; the hosted phone preview cannot read your logs. See [live collection details](docs/session-discovery.md#live-collection) for limits and behavior.

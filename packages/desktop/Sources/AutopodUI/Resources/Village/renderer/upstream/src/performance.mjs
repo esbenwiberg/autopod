@@ -3,6 +3,7 @@ export const PERFORMANCE_VERSION='acting-1';
 export function performanceAt(actor,time,{motion=true}={}){
   const base={mode:'idle',animation:'idle',clock:motion?time:0,direction:null,phase:0,hop:0,nudge:0};
   if(actor.moving)return {...base,animation:'walk',mode:'travel'};
+  if(actor.gathering)return {...base,direction:'down'};
   if(actor.role==='user'||actor.missingTranscript)return base;
   const s=actor.scene,active=s&&time<s.end,elapsed=Math.max(0,time-(s?.start??0)-(s?.travel??0));
   const pose=(mode,animation,period=2,direction='down')=>({...base,mode,animation,direction,phase:motion?(elapsed%period)/period:0,clock:motion?elapsed:0});

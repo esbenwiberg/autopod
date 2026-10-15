@@ -143,10 +143,13 @@ supported: `upstream/provenance.json` records the Git revision, dirty flag and
 SHA-256 for every captured file. Files are checked again before accepting the
 snapshot; if the source changes during capture, rerun the command. The initial
 snapshot was captured from `92b9e0c` with local work in progress. The current
-snapshot is the clean `32c9483` revision, fetched from the upstream default branch,
-including the v4 Inn map, twelve-species roster, follow camera, activity effects
-and status panel. The live adapter chooses species from the
-upstream roster by pod ID, so filtering does not reassign characters.
+snapshot is the clean `f539f75` revision, fetched from the upstream default branch,
+including the v4 Inn map, twelve-species roster, follow camera, activity effects,
+improved dialogue excerpts and updated recap staging. AutoPod continues to
+provide live lifecycle observations. The standalone app's JSONL folder watcher,
+movie export and journal are outside this embedded renderer. The live adapter
+chooses species from the upstream roster by pod ID, so filtering does not
+reassign characters.
 
 The former adapter-specific sprite enlargement is removed. Native and managed
 pods use upstream's original sprite scale; the follow camera supplies the same

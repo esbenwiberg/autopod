@@ -47,3 +47,12 @@ export function stationSeat(station,index=0,count=1){
   const half=(columns-1)*.023,center=Math.max(.035+half,Math.min(.965-half,p[0]));
   return [center+(col-(columns-1)/2)*.046,top+row*gap];
 }
+
+// Final gathering stays above the recap panel, including a full multi-team
+// village. Ordinary station seating and waiting actors keep their own places.
+export function recapSeat(index,count){
+  if(count<=5&&index>0)return [.45+(index-1)*.10,.55];
+  if(index<GATHERING_SPOTS.square.length)return stationSeat('square',index,count);
+  const slot=index-GATHERING_SPOTS.square.length;
+  return [.34+(slot%6)*.06,.52+Math.floor(slot/6)*.045];
+}

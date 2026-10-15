@@ -1,12 +1,12 @@
 import { buildRecapEvidence } from './recap.mjs';
 import { createdPr } from './milestones.mjs';
 import { assignCast, matchesFocus, shareUserState } from './cast.mjs';
-import { dialogueCue, DIALOGUE_VERSION } from './dialogue.mjs';
+import { dialogueCue, dialogueExcerpt, DIALOGUE_VERSION } from './dialogue.mjs';
 import { buildPresence, presenceAt } from './presence.mjs';
 import { buildInterludes, interludeAt } from './rest.mjs';
 import { STATION_NAMES } from './world.mjs';
 import { presentation } from './activity.mjs';
-import { LOCATIONS, stationRoute, stationSeat } from './world.mjs';
+import { LOCATIONS, stationRoute, stationSeat, recapSeat } from './world.mjs';
 export { LOCATIONS } from './world.mjs';
 
 const order=(a,b)=>a<b?-1:a>b?1:0;
@@ -37,13 +37,14 @@ function topological(events) {
   return output;
 }
 
-export function compileTimeline(conversation,{seed='village-1'}={}) {
+export function compileTimeline(conversation,{seed='village-1',previous=null,appendAt=0,live=false}={}) {
   const sourceEvents=topological(conversation.events),byId=new Map(),actorEnd=new Map(),positions=new Map(),stations=new Map();
   const spawnEvents=new Map(sourceEvents.filter(e=>e.kind==='agent.spawn').map(e=>[e.data.childId,e.id]));
   const birth=new Map(conversation.actors.map(a=>[a.id,a.role==='helper'?Infinity:0]));
-  const seenPrs=new Set();
+  const seenPrs=new Set((previous?.celebrations??[]).map(c=>c.pr.url));
+  const previousActors=new Map((previous?.actors??[]).map(a=>[a.id,a])),previousIds=new Set((previous?.scenes??[]).map(s=>s.id));
   let helperIndex=0;
-  const actors=assignCast(conversation.actors,conversation.sessionId??sourceEvents[0]?.source?.sessionId??'session').map(a=>{const slot=a.role==='helper'?helperIndex++:null;return {...a,skin:a.skin??(a.role==='user'?'user':a.role==='lead'?'lead':`helper${1+(slot%3)}`),slot};});
+  const actors=assignCast(conversation.actors.map(a=>({...a,...(previousActors.has(a.id)?{skin:previousActors.get(a.id).skin}:{})})),conversation.sessionId??sourceEvents[0]?.source?.sessionId??'session').map(a=>{const slot=a.role==='helper'?helperIndex++:null;return {...a,skin:a.skin??(a.role==='user'?'user':a.role==='lead'?'lead':`helper${1+(slot%3)}`),slot};});
   const actorMeta=new Map(actors.map(a=>[a.id,a]));
   // Only visitors to a destination reserve space there. Stable IDs break ties.
   const visitors=new Map(Object.keys(LOCATIONS).map(k=>[k,new Set()]));
@@ -51,10 +52,14 @@ export function compileTimeline(conversation,{seed='village-1'}={}) {
   for(const a of actors)visitors.get(a.role==='helper'?'guild':'square').add(a.id);
   const seats=new Map([...visitors].map(([k,set])=>[k,[...set].sort((a,b)=>
     (k==='square'?Number(actorMeta.get(b).role==='user')-Number(actorMeta.get(a).role==='user'):0)||order(a,b))]));
-  const seat=(station,id)=>stationSeat(station,Math.max(0,seats.get(station).indexOf(id)),Math.max(1,seats.get(station).length));
+  const reserved=new Map();for(const a of previous?.actors??[])reserved.set(`${a.homeStation}:${a.id}`,a.startPosition);for(const s of previous?.scenes??[])reserved.set(`${s.station}:${s.event.actorId}`,s.path.at(-1));
+  const seat=(station,id)=>reserved.get(`${station}:${id}`)??stationSeat(station,Math.max(0,seats.get(station).indexOf(id)),Math.max(1,seats.get(station).length));
   for(const a of actors){a.homeStation=a.role==='helper'?'guild':'square';a.startPosition=seat(a.homeStation,a.id);}
-  const clocks=new Map(),scenes=[];
+  const clocks=new Map(),scenes=[...(previous?.scenes??[])],resumed=new Set();
+  for(const s of scenes){byId.set(s.id,s);actorEnd.set(s.event.actorId,s.end);positions.set(s.event.actorId,s.path.at(-1));stations.set(s.event.actorId,s.station);}
+  for(const a of previous?.actors??[])birth.set(a.id,a.appearsAt);
   for(const e of sourceEvents){
+    if(byId.has(e.id))continue;
     const meta=actorMeta.get(e.actorId),team=meta?.teamId??'session';
     const clock=clocks.get(team)??{base:0,lastRecorded:null};clocks.set(team,clock);
     const recorded=e.timestamp?Date.parse(e.timestamp):null;
@@ -63,7 +68,8 @@ export function compileTimeline(conversation,{seed='village-1'}={}) {
     const tiny=e.kind==='action.poll'||e.kind==='action.result',p=presentation(e,byId);
     const spawn=byId.get(spawnEvents.get(e.actorId));
     const dependencyTime=Math.max(0,...e.causes.map(id=>byId.get(id)?.start??0),...(e.after??[]).map(id=>byId.get(id)?.end??0),spawn?.end??0);
-    const start=Math.max(clock.base,actorEnd.get(e.actorId)??0,dependencyTime+.02);
+    const start=Math.max(appendAt,clock.base,actorEnd.get(e.actorId)??0,dependencyTime+.02);
+    if(previous&&!resumed.has(e.actorId)){const prior=sceneAt(previous,start).actors.find(a=>a.id===e.actorId);if(prior){positions.set(e.actorId,prior.position);stations.set(e.actorId,interludeAt(previous,e.actorId,start)?.station??prior.scene?.station??meta.homeStation);}resumed.add(e.actorId);}
     const fromStation=stations.get(e.actorId)??meta.homeStation,from=positions.get(e.actorId)??meta.startPosition;
     const station=tiny?fromStation:e.kind==='message'?'square':p.station;
     const target=seat(station,e.actorId);
@@ -72,9 +78,9 @@ export function compileTimeline(conversation,{seed='village-1'}={}) {
     else path=[copy(from),...stationRoute(fromStation,station),copy(target)].filter((v,i,all)=>!i||Math.hypot(v[0]-all[i-1][0],v[1]-all[i-1][1])>.002);
     const length=path.slice(1).reduce((n,b,i)=>n+Math.hypot(b[0]-path[i][0],b[1]-path[i][1]),0);
     const travel=path.length>1?Math.max(.65,length*4.5):0;
-    const text=e.data.text??e.data.summary??e.kind,cue=dialogueCue(text,e.kind);
+    const text=e.data.text??e.data.summary??e.kind,spoken=dialogueExcerpt(text).text,cue=dialogueCue(spoken,e.kind);
     let pullRequest=createdPr(e,byId);if(pullRequest){if(seenPrs.has(pullRequest.url))pullRequest=null;else seenPrs.add(pullRequest.url);}
-    const hold=pullRequest?9:tiny?(e.data.status==='failed'?2.8:e.data.evidence?.length?2.2:e.kind==='action.poll'?.65:1.1):Math.min(9,Math.max(e.data.waiting?6:cue?4.2:2.5,text.length/45));
+    const hold=pullRequest?9:tiny?(e.data.status==='failed'?2.8:e.data.evidence?.length?2.2:e.kind==='action.poll'?.65:1.1):Math.min(9,Math.max(e.data.waiting?6:cue?4.2:2.5,spoken.length/45));
     const end=start+travel+hold;
     const scene={id:e.id,event:e,start,end,travel,path,station,activity:p.activity,activityLabel:pullRequest?'PR created':p.label,text,status:e.data.status??'active',dialogueCue:cue,pullRequest};
     scenes.push(scene);byId.set(e.id,scene);actorEnd.set(e.actorId,end);positions.set(e.actorId,path.at(-1));stations.set(e.actorId,station);
@@ -82,11 +88,21 @@ export function compileTimeline(conversation,{seed='village-1'}={}) {
     if(!Number.isFinite(birth.get(e.actorId)))birth.set(e.actorId,start);
   }
   scenes.sort((a,b)=>a.start-b.start||order(a.id,b.id));
-  for(const a of actors)a.appearsAt=Number.isFinite(birth.get(a.id))?birth.get(a.id):0;
+  for(const a of actors)a.appearsAt=Number.isFinite(birth.get(a.id))?birth.get(a.id):appendAt;
   const eventDuration=Math.max(1,...scenes.map(s=>s.end));
   const timeline={schemaVersion:1,compilerVersion:'village-11',performanceVersion:'acting-1',dialogueVersion:DIALOGUE_VERSION,assetVersion:'village-4',seed,title:conversation.title,provider:conversation.provider??null,sessionId:conversation.sessionId??null,teams:conversation.teams??[],sourceHash:conversation.contentHash,usage:conversation.usage??[],actors,scenes,eventDuration,duration:eventDuration+10,warnings:conversation.warnings,stats:conversation.stats};
   timeline.presence=buildPresence(timeline);
+  timeline.live=live;
   timeline.interludes=buildInterludes(timeline);
+  if(live){
+    const fresh=timeline.interludes;
+    timeline.interludes=Object.fromEntries(actors.map(a=>{
+      const firstNew=scenes.find(s=>s.event.actorId===a.id&&!previousIds.has(s.id));
+      const old=(previous?.interludes?.[a.id]??[]).map(r=>({...r,end:firstNew&&r.returnAt===null?Math.min(r.end,firstNew.start):r.end}));
+      const added=(fresh[a.id]??[]).filter(r=>!previous||firstNew&&r.start>=appendAt).map(r=>({...r,end:r.returnAt===null?Number.MAX_SAFE_INTEGER:r.end}));
+      return [a.id,old.concat(added)];
+    }));
+  }
   timeline.celebrations=scenes.filter(s=>s.pullRequest).map(s=>({id:s.id,actorId:s.event.actorId,teamId:s.event.teamId??null,start:s.start+.3,end:s.end,pr:s.pullRequest}));
   timeline.departures=scenes.filter(s=>confirmedPublication(s,byId)).map(s=>({id:s.id,actorId:s.event.actorId,teamId:s.event.teamId??null,start:s.start+.3,end:s.start+7.3})).concat(timeline.celebrations);
   timeline.retirements=[];
@@ -101,14 +117,14 @@ export function compileTimeline(conversation,{seed='village-1'}={}) {
       timeline.duration=Math.max(timeline.duration,s.start+travel+3);
     }
   }
-  if(scenes.length){
+  if(scenes.length&&!live){
     const start=timeline.duration,snapshot=sceneAt(timeline,start);
     const available=snapshot.actors.filter(a=>a.role!=='user'&&!a.retired&&!a.missingTranscript&&['idle','finished'].includes(a.presence.kind)).sort((a,b)=>order(a.id,b.id));
     // Reserve existing trainer seats, then assign stable gathering spots.
     const offset=actors.filter(a=>a.role==='user').length;
     const walks=available.map((a,i)=>{
       const station=interludeAt(timeline,a.id,start)?.station??a.scene?.station??a.homeStation;
-      const path=[a.position,...stationRoute(station,'square'),stationSeat('square',i+offset,available.length+offset)];
+      const path=[a.position,...stationRoute(station,'square'),recapSeat(i+offset,available.length+offset)];
       const travel=path.slice(1).reduce((n,p,j)=>n+Math.hypot(p[0]-path[j][0],p[1]-path[j][1]),0)*4.5;
       return {actorId:a.id,path,travel};
     });
@@ -144,13 +160,16 @@ export function sceneAt(timeline,time,{focus=null,team=null}={}) {
       ({position,direction}=along(returning?[...rest.path].reverse():rest.path,progress));moving=progress<1;}
     if(retirement){({position,direction}=along(retirement.path,(t-retirement.start)/retirement.travel));moving=t<retirement.end;presence={kind:'closed',label:moving?'Session ended · heading to Inn':'At the Inn · session ended',targetIds:[],sourceId:retirement.id,basis:'Explicit session-end record'};}
     const gathering=t>=timeline.recap?.start?timeline.recap.walks.find(w=>w.actorId===a.id):null;
-    if(gathering){({position,direction}=along(gathering.path,gathering.travel?(t-timeline.recap.start)/gathering.travel:1));moving=t<timeline.recap.start+gathering.travel;}
+    if(gathering){({position,direction}=along(gathering.path,gathering.travel?(t-timeline.recap.start)/gathering.travel:1));moving=t<timeline.recap.start+gathering.travel;if(!moving)direction=0;}
     const celebration=(timeline.celebrations??[]).find(c=>c.start<=t&&c.end>t&&(c.teamId??null)===(a.teamId??null));
     const active=s&&t<s.end;
     const cheering=!retirement&&a.role!=='user'&&!moving&&(a.id===celebration?.actorId||!active)?celebration:null;
     const special=['input','agents','closed'].includes(presence.kind)||(!active&&presence.kind!=='idle')||s?.status==='running';
+    if(liveIdle(timeline,presence,s,t))presence={...presence,label:'No recent activity'};
     const label=special?presence.label:active?s.activityLabel??'Working':a.role==='user'?'You':a.missingTranscript?'Transcript not supplied':presence.label;
     return {...a,gathering:!!gathering,retired:!!retirement&&t>=retirement.end,celebration:cheering,position,direction,moving,scene:s??null,presence,resting:!!rest&&!retirement&&!cheering&&!gathering,leisure:retirement||gathering?null:rest?.leisure??null,restStartedAt:rest?rest.start+rest.travel:null,activityLabel:gathering?(moving?'Gathering in the square':'At the quest recap'):cheering?`Cheering · PR #${cheering.pr.number}`:moving&&!special?`Going to ${STATION_NAMES[rest?.station??s?.station]??'the village'}`:label,state:special?presence.kind:moving?'traveling':active?(s.status==='failed'?'failed':s.event.kind.includes('message')?'speaking':'working'):'idle',frame:Math.floor(t*8)};
   });
   return {time:t,actors:shareUserState(timeline,actors,focus),current,active:timeline.scenes.filter(s=>s.start<=t&&s.end>t&&(!team||s.event.teamId===team))};
 }
+
+function liveIdle(timeline,presence,scene,time){return timeline.live&&presence.kind==='idle'&&(!scene||time>=scene.end);}
