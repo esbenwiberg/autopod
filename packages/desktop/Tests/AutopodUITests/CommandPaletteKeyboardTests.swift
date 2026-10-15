@@ -230,8 +230,10 @@ extension CommandPaletteKeyboardTests {
     view.inputs.pods = [palettePod("b"), palettePod("c"), palettePod("d")]
     try await view.wait { view.texts.contains("fix/recovery-d") }
     try view.key(125, characters: "\u{F701}") // Select C, then change query.
-    try await view.query("recovery-b")
-    try await view.wait { !view.texts.contains("fix/recovery-c") }
+    // All three IDs remain: this requires query reset, not result-count clamping.
+    try await view.query("interrupted")
+    try await view.refresh()
+    #expect(view.texts.contains("fix/recovery-c"))
     try view.key(36)
     try await view.wait { !view.inputs.presented }
     #expect(view.inputs.owner.calls == ["pod:recovery-d", "pod:recovery-b"])
