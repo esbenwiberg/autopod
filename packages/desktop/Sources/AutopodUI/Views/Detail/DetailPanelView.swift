@@ -1088,6 +1088,8 @@ public struct DetailPanelView: View {
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-delete-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
@@ -1110,6 +1112,8 @@ public struct DetailPanelView: View {
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-delete-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
@@ -1170,6 +1174,8 @@ public struct DetailPanelView: View {
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
+                    .disabled(pendingControl != nil)
+                    .accessibilityIdentifier("pod-control-delete-\(pod.id)")
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
@@ -1190,6 +1196,8 @@ public struct DetailPanelView: View {
             Button("Delete", role: .destructive) {
                 Task { await actions.delete(pod.id) }
             }
+            .disabled(pendingControl != nil)
+            .accessibilityIdentifier("pod-control-delete-confirm-\(pod.id)")
         } message: {
             Text("This will permanently remove the pod record.")
         }

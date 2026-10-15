@@ -181,3 +181,16 @@ Adjustment: match the existing DaemonAPITests request snapshot plus explicit
 Sendable captures in EventStreamResyncTests only. Commit this prerequisite
 separately; compile and run resync + old-interface inline baseline before any
 product changes. Failed logs are preserved under `.autopod-data/reliability/r04d/`.
+
+
+## Execution clarification: detail Delete controls
+
+Root review found that a combined workflow can still own a held DELETE after its
+Kill refresh makes the pod deletable; a newer killed event can likewise arrive
+while a plain Pause is held. Card Delete was disabled but the equivalent detail
+Delete controls were still enabled. Root authorized extending the same pending
+presentation guard and identifiers to the three detail Delete buttons and their
+confirmation. Handler semantics and unrelated controls remain unchanged.
+Before the extension, native same-mounted tests at 900 and 600 pixels reproduced
+four enabled-Delete failures across those two scenarios; see ignored evidence
+`r04d/detail-delete-before-fix.log`. This is a bounded phase 2 consistency repair.

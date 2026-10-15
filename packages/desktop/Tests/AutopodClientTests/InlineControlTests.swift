@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import Testing
 import AutopodUI
+import AutopodDesktop
 
 @MainActor final class InlineCallerState {
   var started = false
@@ -12,7 +13,7 @@ import AutopodUI
   let deadline = ContinuousClock.now.advanced(by: .seconds(5))
   while !predicate() {
     guard ContinuousClock.now < deadline else { throw URLError(.timedOut) }
-    await Task.yield()
+    try await Task.sleep(for: .milliseconds(2))
   }
 }
 
@@ -95,7 +96,7 @@ func inlineCombinedJoinsExistingKillAndEntireDelete(refreshFails: Bool) async th
   try await withConfirmedActionFixture { f in
     let kill = f.start(.kill)
     let post = try await f.next("POST", action: .kill)
-    let first = InlineCallerState(), second = InlineCallerState(), plain = InlineCallerState()
+    let first = InlineCallerState(), second = InlineCallerState(), plain = InlineCallerState(), laterKill = InlineCallerState()
     let one = f.start { first.started = true; await f.handler.actions.killAndDelete(f.id); first.completed = true }
     try await inlineWait { first.started }
     let two = f.start { second.started = true; await f.handler.actions.killAndDelete(f.id); second.completed = true }
@@ -113,12 +114,14 @@ func inlineCombinedJoinsExistingKillAndEntireDelete(refreshFails: Bool) async th
     f.expectState(refreshFails ? .running : .killed)
     let three = f.start { plain.started = true; await f.handler.actions.delete(f.id); plain.completed = true }
     try await inlineWait { plain.started }
+    let four = f.start { laterKill.started = true; await f.handler.actions.kill(f.id); laterKill.completed = true }
+    try await inlineWait { laterKill.started }
     await f.handler.actions.pause(f.id)
-    #expect(!first.completed && !second.completed && !plain.completed)
+    #expect(!first.completed && !second.completed && !plain.completed && !laterKill.completed)
     #expect(f.peer.requests.count == 3)
     deletion.respond(body: #"{"ok":true}"#)
-    await one.value; await two.value; await three.value
-    #expect(first.completed && second.completed && plain.completed)
+    await one.value; await two.value; await three.value; await four.value
+    #expect(first.completed && second.completed && plain.completed && laterKill.completed)
     #expect(f.store.pods.isEmpty)
     #expect(f.handler.actions.pendingControl(f.id) == nil)
     #expect(f.peer.requests.count == 3)
@@ -185,4 +188,39 @@ func inlineCombinedCallerCancellationKeepsHeldDelete(cancelInitiator: Bool) asyn
 @MainActor @Test func inlineControlPreviewDefaults() async {
   #expect(PodActions.preview.pendingControl("pod") == nil)
   await PodActions.preview.killAndDelete("pod")
+}
+
+@MainActor private final class InlineErrorObserver {
+  var publications = 0
+  func observe(_ handler: ActionHandler) {
+    withObservationTracking { _ = handler.lastError } onChange: {
+      MainActor.assumeIsolated {
+        self.publications += 1
+        self.observe(handler)
+      }
+    }
+  }
+}
+
+@MainActor @Test func inlineControlPublishesOneErrorForJoinedCallers() async throws {
+  try await withConfirmedActionFixture { f in
+    let observer = InlineErrorObserver()
+    observer.observe(f.handler)
+    let first = f.start(.kill)
+    let post = try await f.next("POST", action: .kill)
+    let joining = InlineCallerState()
+    let second = f.start { joining.started = true; await f.handler.actions.kill(f.id) }
+    try await inlineWait { joining.started }
+    await f.handler.actions.pause(f.id)
+    #expect(f.peer.requests.count == 1)
+    post.respond(status: 409, body: #"{"error":"one shared error"}"#)
+    await first.value; await second.value
+    #expect(observer.publications == 1)
+    #expect(f.handler.lastError?.contains("one shared error") == true)
+    // Prove the observer remains armed for a subsequent independent publication.
+    let third = f.start(.pause)
+    try await f.next("POST", action: .pause).respond(status: 409, body: #"{"error":"second operation"}"#)
+    await third.value
+    #expect(observer.publications == 2)
+  }
 }
