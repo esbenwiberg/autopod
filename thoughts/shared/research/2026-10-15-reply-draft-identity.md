@@ -39,8 +39,11 @@ and detail payloads; detail additionally exposes pendingEscalation.id at432.
 PodMapper.swift:67,154 maps question/type/options but does not carry either ID
 into UI Pod. EventTypes.swift:198 preserves created/resolved escalation IDs;
 EventStream.swift:336 drops the created ID/type and ignores resolved ID at350.
-PodStore.swift:147 replaces hydrated question from compact data while preserving
-hydrated type/options; its configured request epoch does not identify decisions.
+PodStore.swift:181 removes stale hydrated IDs before selecting its merge helper.
+Consequently newer compact rows take mergeRestPod and lose unavailable detail
+fields; equal/older hydrated rows remain unchanged. The apparent field-preserving
+newer mergeCompactPod path is unreachable through loadSessions. The configured
+request epoch does not identify decisions.
 
 The compact finalization ID is not a universal identity for a live waiting
 escalation. completion-journal.ts:96 settle writes pendingDecisionId from
@@ -74,3 +77,35 @@ does not currently exist.
 None for these current-source facts. Draft ownership, persistence, retirement and
 ambiguous-response presentation belong in a subsequent bounded plan. Research
 does not imply that a saved draft may safely be resent to a newer decision.
+
+## Follow-up trace: decision identity and ordering
+
+Root fully read native Pod, PodMapper, PodResponse, PodStore, EventStream,
+EventTypes and relevant existing decision/fleet/lifetime tests at14475fce. Agent
+research_desktop independently traced compact serialization and ordering.
+
+Detail pendingEscalation.id and escalation-created/resolved events identify the
+decision, but UI Pod currently discards that ID. Compact SQL selects bounded
+escalation JSON internally; compactPod in api/routes/pods.ts serializes only its
+500-character summary. Shared CompactPod and Swift CompactPodResponse have no
+live escalation ID. This is not an existing wire field ignored by Swift.
+Finalization.pendingDecisionId covers settlement only and cannot identify every
+live question. Equal summaries can belong to distinct decisions.
+
+refreshSession accepts equal and older detail payloads through
+preferIncomingOnEqual=true. Existing merge protection retains lifecycle status
+when an event arrives during a request, but incoming question/options/type can
+still replace a newer decision. Event-driven status revisions do not advance
+updatedAt; the repository timestamp is neither a unique decision revision nor
+a cross-stream ordering token. Resolved events currently ignore escalationId
+and clear any current question, setting Running regardless of the current ID.
+Socket generation fencing rejects old connection callbacks, not old decisions
+within one current connection. EventSocket replay-watermark tracking also does
+not suppress every equal/older event before delivery.
+
+These are source-level findings, not newly executed race reproductions. Stable
+draft association requires preserving identity and defining unknown identity;
+question text and settlement metadata cannot substitute for an active ID.
+Server-side expected-decision binding and complete cross-stream ordering are
+separate from merely retaining client text. No mutation/API/storage changes are
+authorized by this research artifact alone.
