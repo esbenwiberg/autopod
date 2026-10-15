@@ -93,12 +93,12 @@ PR with base `codex/reliability`; observe hosted checks before integration.
 
 ## Acceptance checklist
 
-- [ ] Fresh bundle executed under Node 22, with independent child process.
-- [ ] Synthetic home/temp/config/token and loopback-only fixture observed.
-- [ ] Expected request, JSON-only stdout and normal zero exit proven.
-- [ ] Real top-level error/nonzero exit behavior proven.
-- [ ] Failure cleanup reaps children and removes owned resources.
-- [ ] Existing CLI tests, relevant lint/typecheck and secret checks pass.
+- [x] Fresh bundle executed under Node 22, with independent child process.
+- [x] Synthetic home/temp/config/token and loopback-only fixture observed.
+- [x] Expected request, JSON-only stdout and normal zero exit proven.
+- [x] Real top-level error/nonzero exit behavior proven.
+- [x] Failure cleanup reaps children and removes owned resources.
+- [x] Existing CLI tests, relevant lint/typecheck and secret checks pass.
 - [ ] Independent plan review and final diff/proof review recorded.
 - [ ] Hosted checks observed for the final PR revision.
 
@@ -114,6 +114,52 @@ construction, bounded ownership and immediate listener registration address them
 Prepared from delegated research. Independent technical plan review by
 research_cli completed on October 15. Its three clarifications (exact 403/exit 2
 contract, platform-aware private environment probe, and close barrier before
-output assertions) are incorporated above. Ready for bounded execution;
-implementation has not started. No user approval is required for routine
+output assertions) are incorporated above. Implementation and local verification
+completed on October 15 in `codex/reliability-cli-proof`, based on
+`980e0b8663e8c7096e85826f88b819f325ddb18c`. No user approval is required for routine
 technical decisions under standing authorization.
+
+## Execution and proof evidence
+
+Changed only `packages/cli/src/index.test.ts`, its package-local helper
+`packages/cli/src/test-utils/cli-executable.ts`, and this plan. The helper launches
+the actual built entry point with `process.execPath`, privately probes the child
+home/temp/cwd/runtime paths, owns its loopback peer and children, bounds captured
+output, records watchdog failures separately from application exits, and waits
+for child/pipe closure before returning results. Teardown is idempotent and
+removes the fixture tree only after children and sockets are closed.
+
+All commands below ran with the prefix
+`npx -y -p node@22 -p pnpm@9.15.4 -c` in the worker checkout. The observed runtime
+was Node `v22.23.3` and the package manager was pinned to pnpm `9.15.4`.
+
+| Check | Command inside the pinned environment | Outcome |
+|---|---|---|
+| Frozen dependency setup | `pnpm install --frozen-lockfile` | Passed; lockfile unchanged |
+| Fresh dependency and binary build | `pnpm --filter @autopod/cli... build` | Shared and CLI builds passed |
+| Targeted executable proof | `pnpm --filter @autopod/cli exec vitest run src/index.test.ts` | 3 tests passed |
+| Existing CLI regression suite | `pnpm --filter @autopod/cli test` | 36 files, 311 tests passed, including the new tests |
+| Scoped lint/format | `pnpm exec biome check packages/cli/src/index.test.ts packages/cli/src/test-utils/cli-executable.ts` | Passed |
+| Package typecheck | `pnpm --filter @autopod/cli typecheck` | Passed |
+| Test-source typecheck | `pnpm --filter @autopod/cli exec tsc --noEmit --target ES2022 --module ESNext --moduleResolution bundler --strict --noUncheckedIndexedAccess --noUnusedLocals --noUnusedParameters --skipLibCheck src/index.test.ts` | Passed; explicitly includes the test excluded by normal package typecheck |
+| Secret scan with new helper staged | `pnpm secret-scan` | Passed |
+
+`git diff --check` also passed. The new tests observed exactly one authenticated
+compact-list request in the success and 403 cases. Success returned the exact JSON
+array on stdout, exit 0 and no signal. Denial returned empty stdout, the specified
+stderr message/suggestion, exit 2 and no signal. The held-response case reached
+its request barrier before explicit cleanup, observed cancellation separately
+from success, and verified child closure, cleared watchdog, zero sockets, closed
+server and removed temporary directory. Cleanup was exercised twice to verify
+idempotence. No provider, Docker, real daemon or operator configuration was used.
+
+Local implementation claims are **PROVEN** on macOS with Node 22. Overall task
+status is **PARTIALLY PROVEN** pending independent final diff/proof review and
+hosted checks for the final PR revision. Windows environment paths are supported
+by the helper but were not exercised here; no cross-platform run is claimed.
+The watchdog is test containment, not evidence of an application request timeout.
+Log-follow recovery and other CLI commands remain outside this proof's scope.
+
+Next action: the coordinator obtains independent review of the worker commit and
+reruns the executable proof, then creates the PR targeting `codex/reliability`
+and observes hosted checks before integration. This worker does not open the PR.
