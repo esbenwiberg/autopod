@@ -242,7 +242,7 @@ must pass before closure. No new live cloud pod is needed for this local contrac
 
 ## Acceptance and limits
 
-- [ ] Native original text-loss/early-clear behavior reproduced.
+- [x] Native original text-loss/early-clear behavior reproduced.
 - [ ] Shared exact-decision draft ownership and isolated unknown handling proven.
 - [ ] Attempt lifetime, acknowledgement and unconfirmed outcomes proven.
 - [ ] Detail/card native text/input states inspected at final source.
@@ -267,3 +267,50 @@ Final independent plan review found no remaining blocker. Baseline is two native
 cases on unchanged production: field-editor text across Overview unmount/remount,
 and text during held POST then500 after native Return. Production overlap waits
 R04e integration; all phases are authorized together after that prerequisite.
+
+## Phase 1 baseline evidence (2026-10-15)
+
+Unchanged production baseline:88a739c5ec52425e85d1d6e70da11ea9e3eb01a4.
+Worker branch codex/reliability-decision-drafts uses the completed
+reliability-inline-controls checkout. Only the opt-in baseline test and this plan
+are changed; overlapping production work remains held for R04e integration and
+coordinator API reconciliation.
+
+`DecisionReplyDraftBaselineTests` mounts actual DetailPanel/Overview at900×760,
+types through NSTextField's real field editor and sends Return through this test
+process's NSApplication. The remount case changes the real detail-tab binding to
+Logs and back, verifies the field disappeared and was recreated for decisionA,
+and observes the typed text replaced by an empty string. The submission case
+observes exactly one private held POST /pods/decision/message containing the exact
+synthetic draft; its field/editor are already empty while the request is held and
+remain empty after an HTTP500. The handler records an error, the pod remains on
+questionA/awaiting-input, and no second request or refresh is admitted.
+
+Compilation passed (`swift build --package-path packages/desktop --build-tests`,
+64.09s; Swift6.3.3). Strict baseline command from the worktree root:
+
+```sh
+AUTOPOD_REPLY_DRAFT_BASELINE=1 AUTOPOD_REPLY_DRAFT_RENDER_DIR="$PWD/.autopod-data/reliability/r04f/baseline/captures" swift test --package-path packages/desktop --skip-build --no-parallel --filter DecisionReplyDraftBaselineTests
+```
+
+Observed exit1:2 Swift Testing functions in1 suite,3 expected desired-retention
+assertion failures (remount, held POST, after500), zero skipped cases or unrelated
+fixture failures. XCTest's preceding0-test report is not the Swift Testing result.
+This is a reproduced baseline defect, not a passing implementation. Opt-in gating
+keeps the strict failing checkpoint from running in unrelated default suites.
+
+Private evidence `.autopod-data/reliability/r04f/baseline/` contains build.log,
+native-baseline.log, source-before.json, the exact copied test source, proof.json
+and six captures/text observations: remount-before/away/after and
+post-before-return/held/after-500. All six screenshots were opened and inspected;
+actual text, questionA and empty field states are legible. No replacement renderer,
+account startup, system keystrokes, home-data or external daemon access was used.
+The reply callback wrapper only retains/joins the existing production action task;
+production submission and text logic remain intact. Private transport fails closed.
+
+Both cases close windows, restore process accessibility/private defaults, join
+owned tasks, invalidate sessions and assert no active or deadline-expired requests.
+Native slot was released after this run. Baseline proves only the selected900px
+Overview behavior, not card,600px, reconnect, final retention or acceptance logic.
+Next step remains coordinator-owned R04e integration/API reconciliation, followed
+by separately dispatched production phases and independent final review.
