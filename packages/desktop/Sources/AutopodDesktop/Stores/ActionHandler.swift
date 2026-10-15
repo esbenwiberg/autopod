@@ -210,9 +210,9 @@ public final class ActionHandler {
 
   public func kill(_ podId: String) async {
     pendingAction = "kill-\(podId)"
-    podStore.updateStatus(podId, to: .killing)
     do {
       try await api.killPod(podId)
+      await podStore.refreshSession(podId)
     } catch {
       lastError = error.localizedDescription
     }
@@ -231,11 +231,10 @@ public final class ActionHandler {
 
   public func pause(_ podId: String) async {
     pendingAction = "pause-\(podId)"
-    podStore.updateStatus(podId, to: .paused)
     do {
       try await api.pauseSession(podId)
+      await podStore.refreshSession(podId)
     } catch {
-      podStore.updateStatus(podId, to: .running)
       lastError = error.localizedDescription
     }
     pendingAction = nil

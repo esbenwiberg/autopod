@@ -101,12 +101,12 @@ design checkpoint for later pending-state presentation.
 
 ## Acceptance
 
-- [ ] Old optimistic/rollback behavior reproduced as a failing regression.
-- [ ] Pending, rejected, lost-response and newer-event state retention proven.
-- [ ] Acknowledgement alone does not change status; successful GET/event does.
-- [ ] Failed/stale refresh behavior and no implicit POST resend proven.
-- [ ] Actual native composition captures inspected with boundary stated.
-- [ ] Full Swift/build/secret/whitespace checks pass.
+- [x] Old optimistic/rollback behavior reproduced as a failing regression.
+- [x] Pending, rejected, lost-response and newer-event state retention proven.
+- [x] Acknowledgement alone does not change status; successful GET/event does.
+- [x] Failed/stale refresh behavior and no implicit POST resend proven.
+- [x] Actual native composition captures inspected with boundary stated.
+- [x] Full Swift/build/secret/whitespace checks pass.
 - [ ] Independent review before PR; hosted and integrated checks recorded.
 
 ## Compatibility, performance and rollback
@@ -118,7 +118,57 @@ Revert the bounded handler edits to restore prior behavior if required.
 
 ## Status
 
-Root-prepared task plan independently reviewed by research_desktop with no
-blocking findings. Fixture cleanup, revision-boundary and error-alert claim
-clarifications incorporated above. Ready for worker execution under standing
-authorization and the user's Go.
+Implemented in `codex/reliability-desktop-actions` from
+`afbaa5dd8dac46e7a2a424ad452f968865700c5c`. Independent final review, PR checks
+and integration remain coordinator-owned. No PR has been opened by the worker.
+
+## Execution evidence (2026-10-15)
+
+Only `ActionHandler.pause` and `kill` changed in production: three optimistic or
+rollback assignments were removed, and each successful POST now awaits the
+existing `refreshSession`. No view source, model lifetime, action signature,
+connection/bootstrap or storage code changed.
+
+The worker started without a Swift build directory, built the package from source,
+and ran the rejection regression before editing ActionHandler. Four parameter
+cases produced seven assertion failures: held pause was paused, rejected pause
+was running (including after a complete event), and held/rejected kill was killing.
+The successful native build preceded this intentional behavioral failure.
+
+The final fixture uses unique `.invalid` hosts and an ephemeral URLSession with
+an intercept-all, fail-closed URLProtocol. Every request has a ten-second failure
+deadline; receipt barriers have a five-second deadline. Normal evidence asserts
+that no deadline fired. Response/cancellation callbacks share a lifecycle lock;
+teardown closes the peer, cancels and awaits action tasks, invalidates the session,
+and unregisters the peer. A separate test cancels a held request and verifies a
+late success response cannot cause a GET or status change. Native windows are
+detached and closed on every path.
+
+Evidence is retained locally in ignored `.autopod-data/reliability/r04a/`:
+
+| Check | Command | Result / evidence |
+|---|---|---|
+| Baseline regression | `swift test --package-path packages/desktop --no-parallel --filter confirmedActionRetainsStateOnRejection` | Expected exit 1, four cases / seven state failures; `baseline.log` |
+| Final focused behavior and rendering | `AUTOPOD_ACTION_RENDER_DIR="$PWD/.autopod-data/reliability/r04a/native" swift test --package-path packages/desktop --no-parallel --filter 'confirmedAction\|confirmedKill'` | Exit 0; six Swift Testing functions, 20 total parameter/single invocations; `focused.log` |
+| Full native suite | `swift test --package-path packages/desktop --no-parallel` | Exit 0; 13 XCTest tests plus 402 Swift Testing tests in 12 suites; opt-in LiveVillageConnectionTests suite/test skipped; `swift-tests.log` |
+| Executable build | `swift build --package-path packages/desktop --product AutopodDesktopExe` | Passed; `swift-build.log` |
+| Secrets | `npx -y -p node@22 -p pnpm@9.15.4 -c 'pnpm secret-scan'` | Passed; `secret-scan.log` |
+| Whitespace | `git diff --check` | Passed |
+
+The initial build reported existing warnings about an unused AppRootView
+profileStore capture and an unnecessary await in DaemonAPITests; neither file
+changed. A dependency cache maintenance-lock warning was followed by successful
+dependency resolution/build. Final focused and full-suite runs passed.
+
+The worker inspected all 12 native PNGs under `native/`: for each of pause/kill,
+initial, held and rejected show running; confirmed shows paused/killed respectively;
+newer-event and late-failure both show complete. The production header actions and
+Overview status badge are visible at 900×760 with no observed clipping. Tests
+await the view's lifecycle status observation before capturing its actual pixels.
+
+This establishes the narrow production action → API → store → DetailPanelView
+composition. It does not prove button activation, AppRootView's error alert,
+application startup, live HTTP/WebSocket behavior, daemon-side execution,
+pending-action presentation, duplicate suppression, retained drafts or recovery
+across connection switches. Event races use the production store's event mutation
+seam; the existing GET-start revision fence is exercised without changing it.
