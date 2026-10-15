@@ -3,8 +3,8 @@
 AutoPod owns fleet data and navigation. The renderer owns appearance and animation.
 The desktop's **Village** sidebar destination works with native and managed pods;
 it embeds the local `jsonl-animate` village map, sprites, authored walking routes
-and work poses. Native pods use recent tool activity; managed pods use smaller
-characters and lifecycle state only. The renderer is a pinned snapshot, so work
+and work poses. Native pods use recent tool activity; managed pods use simpler
+lifecycle-only characters. Both use upstream sprite sizing. The renderer is a pinned snapshot, so work
 in the source repository cannot change a running desktop build.
 
 The map occupies the center pane and an accessible native pod list occupies the
@@ -43,7 +43,10 @@ ManagedPodStore ─────── lifecycle only ───┘               
 - `Resources/Village/host.js`: stable JavaScript bridge. Full snapshots replace
   prior state, including removed actors. Renderer failures surface in native UI.
 - `VillageRenderer/`: AutoPod adapter source, styles and live state interpretation.
-  This imports upstream drawing, poses and routes without modifying upstream files.
+  `live-timeline.mjs` translates current observations and travel paths into the
+  upstream scene contract. `renderer.mjs` calls the unmodified upstream
+  `renderFrame`, `VIEW` and camera hit testing. Upstream owns the full drawing
+  path: map, actors, work props, presence badges, speech bubbles and status panel.
 - `Resources/Village/renderer/`: generated, self-contained browser bundle plus
   `upstream/` sources, assets, credits and provenance. Do not edit generated files.
 
@@ -84,6 +87,10 @@ and Swift. The host owns error and ready messages.
 The desktop root sets `data-pod-list="external"` to hide the renderer's HTML list
 and give the map the available height. Other hosts can omit this attribute to
 keep the renderer's accessible list. Both paths use the same selection callback.
+The canvas uses upstream's 768×928 viewport, including its status panel. Follow
+is the default camera, as in jsonl-animate. The pod picker chooses a camera
+subject without opening details; Whole village shows the fleet overview.
+Canvas selection uses upstream camera-aware hit testing.
 
 Snapshot fields:
 
@@ -136,14 +143,15 @@ supported: `upstream/provenance.json` records the Git revision, dirty flag and
 SHA-256 for every captured file. Files are checked again before accepting the
 snapshot; if the source changes during capture, rerun the command. The initial
 snapshot was captured from `92b9e0c` with local work in progress. The current
-snapshot is the clean `e215d7a` revision, including the v4 Inn map, twelve-species
-roster and updated gathering spots. The live adapter chooses species from the
+snapshot is the clean `32c9483` revision, fetched from the upstream default branch,
+including the v4 Inn map, twelve-species roster, follow camera, activity effects
+and status panel. The live adapter chooses species from the
 upstream roster by pod ID, so filtering does not reassign characters.
 
-The live overview uses larger characters than the replay's unzoomed map: native
-sprite scale is 3.2 and managed scale is 2.1. Props, badges and click targets scale
-with each character around its feet. These settings belong to the AutoPod adapter
-and survive upstream renderer updates.
+The former adapter-specific sprite enlargement is removed. Native and managed
+pods use upstream's original sprite scale; the follow camera supplies the same
+1.65–2.15× zoom as jsonl-animate (2× with reduced motion). Managed pods have no
+inferred tool work. No upstream source files are patched for AutoPod.
 
 A staged build replaces the generated directory only after imports, metadata and
 assets are available. Failed updates preserve the previous working bundle. A
@@ -164,8 +172,9 @@ npx pnpm village:check
 Both commands work offline after dependencies are installed. esbuild is pinned
 in the root lockfile. CI verifies reproducibility, update failure recovery,
 semantic mapping and real WebKit asset loading. Upstream API changes fail the
-build or WebKit tests; adapt only `VillageRenderer/renderer.mjs` for drawing API
-changes and `live-scene.mjs` for AutoPod semantics. The Swift/JavaScript v1 contract
+build or WebKit tests; adapt `VillageRenderer/renderer.mjs` for drawing API
+changes, `live-timeline.mjs` for the scene contract, and `live-scene.mjs` for
+AutoPod semantics. The Swift/JavaScript v1 contract
 stays separate from those imports.
 
 The live adapter deliberately does not use the upstream replay compiler: replay
@@ -180,9 +189,10 @@ credits, source URLs, PMDCollab CC BY-NC conditions and font OFL notices are pre
 in `renderer/upstream/public/assets/`, including upstream's local-prototype note
 for its Red sprite. No new artwork reuse rights are asserted by this integration.
 
-Replay/rewind, helper-agent discovery, managed tool-log collection, the upstream
-replay-follow camera and recorded-PR celebrations are not implemented in this
-slice. Explicit session-end retirement belongs to the replay compiler; AutoPod
+Replay/rewind, helper-agent discovery, managed tool-log collection and recorded-PR
+celebrations are not implemented in this slice. The latest upstream recap and
+token-usage code is pinned with the renderer, but is not activated for live pods:
+a replay ending is not evidence that an AutoPod task finished. Explicit session-end retirement belongs to the replay compiler; AutoPod
 instead removes completed/killed pods using daemon lifecycle state. The live village is an
 overview; selecting a pod highlights it and opens its existing details.
 

@@ -111,6 +111,28 @@ body {
   position: static;
 }
 #village[data-pod-list="external"] .village-canvas {
-  width: min(100%, calc(100vh - 76px));
+  width: min(100%, calc((100vh - 126px) * 768 / 928));
   margin-inline: auto;
 }
+.camera-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.camera-controls button, .camera-controls select {
+  min-height: 32px;
+  border: 1px solid #4a615b;
+  border-radius: 6px;
+  padding: 5px 10px;
+  background: #243638;
+  color: inherit;
+  font: inherit;
+}
+.camera-controls button[aria-pressed="true"] {
+  border-color: #9bc195;
+  background: #3c574b;
+  color: #fff0cc;
+}
+.camera-controls select { max-width: 100%; }

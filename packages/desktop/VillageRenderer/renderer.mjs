@@ -1,9 +1,10 @@
+import { actorAtScreen } from '@jsonl-village/camera.mjs';
 import { ROSTER } from '@jsonl-village/cast.mjs';
-import { drawPerformance, performanceAt } from '@jsonl-village/performance.mjs';
-import { drawCharacter } from '@jsonl-village/render.mjs';
+import { VIEW, renderFrame } from '@jsonl-village/render.mjs';
 import meta from '@jsonl-village/sprites.json';
 import { STATION_NAMES, stationRoute, stationSeat } from '@jsonl-village/world.mjs';
-import { pointOnRoute, presentation, skinFor } from './live-scene.mjs';
+import { presentation } from './live-scene.mjs';
+import { createLiveTimeline } from './live-timeline.mjs';
 
 const baseURL = new URL('renderer/upstream/public/', document.baseURI);
 const assetURL = (path) => new URL(path.replace(/^\//, ''), baseURL).href;
@@ -42,14 +43,22 @@ window.AutoPodVillageRenderer = Object.freeze({
     );
     await font.load();
     document.fonts.add(font);
-    const assets = { meta, images: Object.fromEntries(images) };
+    const assets = { meta, images: Object.fromEntries(images), map, innMap: map };
     const layout = element('div', 'village-layout');
     const world = element('section', 'world');
     const canvas = element('canvas', 'village-canvas');
-    canvas.width = canvas.height = 768;
+    canvas.width = VIEW.width;
+    canvas.height = VIEW.height;
     canvas.setAttribute('aria-label', 'Pod village. Select a pod using the list beside the map.');
     const caption = element('p', 'caption', 'Select a character or pod to open its details.');
-    world.append(canvas, caption);
+    const controls = element('div', 'camera-controls');
+    const follow = element('button', 'camera-follow', 'Follow pod');
+    const overview = element('button', 'camera-village', 'Whole village');
+    const focusPicker = element('select', 'camera-pod');
+    focusPicker.setAttribute('aria-label', 'Pod to follow');
+    follow.type = overview.type = 'button';
+    controls.append(follow, overview, focusPicker);
+    world.append(controls, canvas, caption);
     const list = element('div', 'pod-list');
     list.setAttribute('aria-label', 'Pods in the village');
     layout.append(world, list);
@@ -59,148 +68,48 @@ window.AutoPodVillageRenderer = Object.freeze({
     let snapshot;
     let frame;
     let disposed = false;
-    let states = new Map();
-    let hits = [];
+    const live = createLiveTimeline({ roster: ROSTER, stationRoute, stationSeat });
+    let renderedState;
+    let focus = null;
+    let camera = 'follow';
     let lastFrame = 0;
-
-    function updateStates(now) {
-      const seconds = performance.now() / 1000;
-      const groups = new Map();
-      const ordered = [...snapshot.actors].sort((a, b) => a.id.localeCompare(b.id));
-      for (const actor of ordered) {
-        const view = presentation(actor, snapshot, now);
-        if (!groups.has(view.station)) groups.set(view.station, []);
-        groups.get(view.station).push({ actor, view });
-      }
-      const next = new Map();
-      for (const [station, actors] of groups)
-        actors.forEach(({ actor, view }, index) => {
-          const seat = stationSeat(station, index, actors.length);
-          const old = states.get(actor.id);
-          let state = old ?? { start: seconds, path: [seat], station, seat };
-          if (old && (old.station !== station || String(old.seat) !== String(seat))) {
-            // A new observation replaces a route; it never queues behind old activity.
-            const current = pointOnRoute(old.path, (seconds - old.start) * 0.17).position;
-            const route = old.station === station ? [] : stationRoute(old.station, station);
-            state = { start: seconds, path: [current, ...route, seat], station, seat };
-          }
-          if (
-            !view.motion ||
-            ['attention', 'failed', 'complete', 'stopped', 'stopping'].includes(actor.stage)
-          ) {
-            state = { ...state, path: [seat] };
-          }
-          next.set(actor.id, { ...state, actor, view });
-        });
-      states = next;
-    }
 
     function draw() {
       if (disposed || !snapshot) return;
-      updateStates(Date.now()); // Expire tool activity even between native snapshots.
       const seconds = performance.now() / 1000;
-      ctx.clearRect(0, 0, 768, 768);
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(map, 0, 0, 768, 768);
-      hits = [];
-      const positioned = [...states.values()].map((state) => ({
-        ...state,
-        ...pointOnRoute(state.path, (seconds - state.start) * 0.17),
-      }));
-      for (const state of positioned.sort((a, b) => a.position[1] - b.position[1])) {
-        const { actor, view, position } = state;
-        const time = view.motion ? seconds : 0;
-        const upstreamActor = {
-          id: actor.id,
-          skin: skinFor(actor.id, ROSTER),
-          role: 'helper',
-          position,
-          moving: state.moving && view.motion,
-          direction: state.direction,
-          presence: view.activity
-            ? { kind: 'running', activity: view.activity }
-            : actor.stage === 'attention' && view.fresh
-              ? { kind: 'input' }
-              : null,
-          resting: ['waiting', 'complete', 'stopped'].includes(actor.stage),
-          leisure: 'sit',
-          restStartedAt: 0,
-        };
-        // Managed pods remain simple; only native recent tool evidence gets work props.
-        const acting =
-          actor.source === 'managed' || !view.fresh || actor.interactive
-            ? {
-                mode: 'idle',
-                animation: upstreamActor.moving ? 'walk' : 'idle',
-                clock: time,
-                nudge: 0,
-                hop: 0,
-                direction: null,
-              }
-            : performanceAt(upstreamActor, time, { motion: view.motion });
-        const x = position[0] * 768;
-        const y = position[1] * 768;
-        const actorScale = view.scale / 1.9;
-        ctx.save();
-        // Scale the whole actor around its feet so props, badges and poses stay
-        // aligned with the sprite without changing upstream drawing code.
-        ctx.translate(x, y);
-        ctx.scale(actorScale, actorScale);
-        ctx.translate(-x, -y);
-        if (!view.fresh) ctx.globalAlpha = 0.6;
-        ctx.fillStyle = '#14232066';
-        ctx.beginPath();
-        ctx.ellipse(x, y + 3, 14, 6, 0, 0, Math.PI * 2);
-        ctx.fill();
-        if (actor.id === snapshot.selectedActorId) {
-          ctx.strokeStyle = '#fff0ac';
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.ellipse(x, y + 2, 24, 10, 0, 0, Math.PI * 2);
-          ctx.stroke();
-        }
-        drawPerformance(ctx, upstreamActor, acting, time, { layer: 'back', motion: view.motion });
-        drawCharacter(
-          ctx,
-          { ...upstreamActor, animation: acting.animation, animationTime: acting.clock },
-          assets,
-          x + acting.nudge,
-          y - acting.hop,
-          time,
-          1.9,
-          acting.direction,
-        );
-        drawPerformance(ctx, upstreamActor, acting, time, { motion: view.motion });
-        const badge = {
-          attention: '?',
-          failed: '!',
-          complete: '✓',
-          review: 'R',
-          validating: '…',
-          unknown: '?',
-        }[actor.stage];
-        if (badge) {
-          ctx.fillStyle = actor.stage === 'failed' ? '#983f43' : '#253d49';
-          ctx.fillRect(x + 15, y - 48, 20, 21);
-          ctx.fillStyle = '#fff3cd';
-          ctx.font = '18px "Pixelify Sans", monospace';
-          ctx.fillText(badge, x + 20, y - 31);
-        }
-        ctx.restore();
-        hits.push({ id: actor.id, x, y, radius: 32 * actorScale, top: 54 * actorScale, bottom: 12 * actorScale });
-        if (actor.id === snapshot.selectedActorId) {
-          const title = actor.title.length > 32 ? `${actor.title.slice(0, 31)}…` : actor.title;
-          ctx.font = '17px "Pixelify Sans", monospace';
-          const width = ctx.measureText(title).width + 16;
-          const left = Math.max(4, Math.min(764 - width, x - width / 2));
-          ctx.fillStyle = '#152530ee';
-          ctx.fillRect(left, y + 14 * actorScale, width, 25);
-          ctx.fillStyle = '#fff3cd';
-          ctx.fillText(title, left + 8, y + 14 * actorScale + 18);
-        }
-      }
-      canvas.dataset.renderedActors = String(hits.length);
+      const timeline = live.update(snapshot, Date.now(), seconds);
+      const motion = snapshot.actors.some((actor) => presentation(actor, snapshot).motion);
+      ctx.clearRect(0, 0, VIEW.width, VIEW.height);
+      renderedState = renderFrame(ctx, timeline, seconds, assets, {
+        focus,
+        camera,
+        reactions: motion,
+      });
+      canvas.dataset.renderedActors = String(renderedState.actors.length);
+      canvas.dataset.camera = renderedState.camera.mode;
+      canvas.dataset.cameraScale = String(renderedState.camera.scale);
+      canvas.dataset.focus = focus ?? '';
+      follow.setAttribute('aria-pressed', String(camera === 'follow'));
+      overview.setAttribute('aria-pressed', String(camera === 'village'));
+      follow.disabled = focusPicker.disabled = !snapshot.actors.length;
+      caption.textContent = !snapshot.connected
+        ? 'Disconnected · showing last known pod states.'
+        : !snapshot.actors.length
+          ? 'No unfinished pods. New pods appear here automatically.'
+          : camera === 'follow'
+            ? `Following ${snapshot.actors.find((actor) => actor.id === focus)?.podId ?? 'pod'} · select a character to open its details.`
+            : 'Whole village · select a character to open its details.';
     }
+    function setCamera(mode) {
+      camera = mode;
+      draw();
+    }
+    follow.addEventListener('click', () => setCamera('follow'));
+    overview.addEventListener('click', () => setCamera('village'));
+    focusPicker.addEventListener('change', () => {
+      focus = focusPicker.value;
+      setCamera('follow');
+    });
 
     function tick(timestamp) {
       if (disposed) return;
@@ -212,18 +121,40 @@ window.AutoPodVillageRenderer = Object.freeze({
     }
     function clicked(event) {
       const rect = canvas.getBoundingClientRect();
-      const x = ((event.clientX - rect.left) * 768) / rect.width;
-      const y = ((event.clientY - rect.top) * 768) / rect.height;
-      const hit = [...hits]
-        .reverse()
-        .find((item) => Math.abs(x - item.x) < item.radius && y > item.y - item.top && y < item.y + item.bottom);
-      if (hit) onSelect(hit.id);
+      const x = ((event.clientX - rect.left) * VIEW.width) / rect.width;
+      const y = ((event.clientY - rect.top) * VIEW.height) / rect.height;
+      const hit = renderedState && actorAtScreen(renderedState, x, y);
+      if (hit) {
+        focus = hit.id;
+        focusPicker.value = focus;
+        draw();
+        onSelect(hit.id);
+      }
     }
     canvas.addEventListener('click', clicked);
     return {
       render(next) {
+        const changedSelection = next.selectedActorId !== snapshot?.selectedActorId;
         snapshot = next;
-        updateStates(Date.now());
+        if (changedSelection && next.actors.some((actor) => actor.id === next.selectedActorId))
+          focus = next.selectedActorId;
+        if (!next.actors.some((actor) => actor.id === focus))
+          focus =
+            next.actors.find((actor) => actor.source === 'native')?.id ??
+            next.actors[0]?.id ??
+            null;
+        focusPicker.replaceChildren(
+          ...next.actors.map((actor) => {
+            const option = element(
+              'option',
+              '',
+              `${actor.podId} · ${actor.source === 'managed' ? 'Managed' : 'Native'}`,
+            );
+            option.value = actor.id;
+            return option;
+          }),
+        );
+        focusPicker.value = focus ?? '';
         const focused = document.activeElement?.dataset.actorId;
         const buttons = next.actors.map((actor) => {
           const view = presentation(actor, next);
@@ -250,9 +181,6 @@ window.AutoPodVillageRenderer = Object.freeze({
         buttons
           .find((button) => button.dataset.actorId === focused)
           ?.focus({ preventScroll: true });
-        caption.textContent = next.connected
-          ? 'Select a character or pod to open its details.'
-          : 'Disconnected · showing last known pod states.';
         draw();
         cancelAnimationFrame(frame);
         if (next.actors.some((actor) => presentation(actor, next).motion))
@@ -263,8 +191,8 @@ window.AutoPodVillageRenderer = Object.freeze({
         cancelAnimationFrame(frame);
         canvas.removeEventListener('click', clicked);
         document.fonts.delete(font);
-        states.clear();
-        hits = [];
+        live.clear();
+        renderedState = null;
         root.replaceChildren();
       },
     };

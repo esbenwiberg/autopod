@@ -32,6 +32,10 @@ struct VillageWebViewTests {
         try #require(count == 3, "Bundled scripts, CSP, handshake and initial snapshot must work in WebKit")
         let rendered = try await webView.evaluateJavaScript("document.querySelector('canvas').dataset.renderedActors") as? String
         #expect(rendered == "3")
+        let camera = try await webView.evaluateJavaScript("document.querySelector('canvas').dataset.camera") as? String
+        let cameraScale = try await webView.evaluateJavaScript("Number(document.querySelector('canvas').dataset.cameraScale)") as? Double
+        #expect(camera == "follow")
+        #expect(cameraScale == 2, "Reduced-motion follow uses upstream's two-times camera")
         if let screenshot = ProcessInfo.processInfo.environment["AUTOPOD_VILLAGE_SCREENSHOT"] {
             let image = try await webView.takeSnapshot(configuration: nil)
             let tiff = try #require(image.tiffRepresentation)
@@ -40,7 +44,20 @@ struct VillageWebViewTests {
         }
         // The attention actor is at the upstream noticeboard; clicking its canvas hit target
         // must use the same namespaced selection path as the accessible list.
-        _ = try await webView.evaluateJavaScript("{ const c=document.querySelector('canvas'), r=c.getBoundingClientRect(); c.dispatchEvent(new MouseEvent('click', {clientX:r.left+r.width*.065, clientY:r.top+r.height*.305-5})); }; true")
+        _ = try await webView.evaluateJavaScript("document.querySelector('.camera-village').click(); true")
+        _ = try await webView.evaluateJavaScript("{ const c=document.querySelector('canvas'), r=c.getBoundingClientRect(); c.dispatchEvent(new MouseEvent('click', {clientX:r.left+r.width*.065, clientY:r.top+r.height*(.305*768-20)/928})); }; true")
+        for _ in 0..<20 {
+            if selection != nil { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(selection?.id == "native:pod-b")
+        _ = try await webView.evaluateJavaScript("document.querySelector('.camera-follow').click(); true")
+        let followed = try await webView.evaluateJavaScript("document.querySelector('canvas').dataset.focus") as? String
+        #expect(followed == "native:pod-b")
+        // The noticeboard is clamped to the camera's top-left, so its rendered
+        // position doubles. Hit testing must apply the same upstream transform.
+        selection = nil
+        _ = try await webView.evaluateJavaScript("{ const c=document.querySelector('canvas'), r=c.getBoundingClientRect(); c.dispatchEvent(new MouseEvent('click', {clientX:r.left+r.width*.065*2, clientY:r.top+r.height*(.305*768-20)*2/928})); }; true")
         for _ in 0..<20 {
             if selection != nil { break }
             try await Task.sleep(for: .milliseconds(50))

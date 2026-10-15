@@ -1,3 +1,4 @@
+import { buildRecapEvidence } from './recap.mjs';
 import { createdPr } from './milestones.mjs';
 import { assignCast, matchesFocus, shareUserState } from './cast.mjs';
 import { dialogueCue, DIALOGUE_VERSION } from './dialogue.mjs';
@@ -83,7 +84,7 @@ export function compileTimeline(conversation,{seed='village-1'}={}) {
   scenes.sort((a,b)=>a.start-b.start||order(a.id,b.id));
   for(const a of actors)a.appearsAt=Number.isFinite(birth.get(a.id))?birth.get(a.id):0;
   const eventDuration=Math.max(1,...scenes.map(s=>s.end));
-  const timeline={schemaVersion:1,compilerVersion:'village-8',performanceVersion:'acting-1',dialogueVersion:DIALOGUE_VERSION,assetVersion:'village-4',seed,title:conversation.title,provider:conversation.provider??null,sessionId:conversation.sessionId??null,teams:conversation.teams??[],sourceHash:conversation.contentHash,actors,scenes,eventDuration,duration:eventDuration+10,warnings:conversation.warnings,stats:conversation.stats};
+  const timeline={schemaVersion:1,compilerVersion:'village-11',performanceVersion:'acting-1',dialogueVersion:DIALOGUE_VERSION,assetVersion:'village-4',seed,title:conversation.title,provider:conversation.provider??null,sessionId:conversation.sessionId??null,teams:conversation.teams??[],sourceHash:conversation.contentHash,usage:conversation.usage??[],actors,scenes,eventDuration,duration:eventDuration+10,warnings:conversation.warnings,stats:conversation.stats};
   timeline.presence=buildPresence(timeline);
   timeline.interludes=buildInterludes(timeline);
   timeline.celebrations=scenes.filter(s=>s.pullRequest).map(s=>({id:s.id,actorId:s.event.actorId,teamId:s.event.teamId??null,start:s.start+.3,end:s.end,pr:s.pullRequest}));
@@ -99,6 +100,22 @@ export function compileTimeline(conversation,{seed='village-1'}={}) {
       timeline.retirements.push({id:s.id,actorId:a.id,teamId:a.teamId??null,start:s.start,end:s.start+travel,travel,path,resumeAt:resume?.start??null});
       timeline.duration=Math.max(timeline.duration,s.start+travel+3);
     }
+  }
+  if(scenes.length){
+    const start=timeline.duration,snapshot=sceneAt(timeline,start);
+    const available=snapshot.actors.filter(a=>a.role!=='user'&&!a.retired&&!a.missingTranscript&&['idle','finished'].includes(a.presence.kind)).sort((a,b)=>order(a.id,b.id));
+    // Reserve existing trainer seats, then assign stable gathering spots.
+    const offset=actors.filter(a=>a.role==='user').length;
+    const walks=available.map((a,i)=>{
+      const station=interludeAt(timeline,a.id,start)?.station??a.scene?.station??a.homeStation;
+      const path=[a.position,...stationRoute(station,'square'),stationSeat('square',i+offset,available.length+offset)];
+      const travel=path.slice(1).reduce((n,p,j)=>n+Math.hypot(p[0]-path[j][0],p[1]-path[j][1]),0)*4.5;
+      return {actorId:a.id,path,travel};
+    });
+    const cardAt=start+Math.max(0,...walks.map(w=>w.travel)),end=cardAt+10;
+    timeline.recap={start,cardAt,end,walks,evidence:buildRecapEvidence(timeline,snapshot.actors)};
+    timeline.duration=end;
+    for(const track of Object.values(timeline.interludes))for(const rest of track)if(rest.returnAt===null)rest.end=end;
   }
   return timeline;
 }
@@ -126,12 +143,14 @@ export function sceneAt(timeline,time,{focus=null,team=null}={}) {
     if(rest){const returning=rest.returnAt!==null&&t>=rest.returnAt,progress=rest.travel?(t-(returning?rest.returnAt:rest.start))/rest.travel:1;
       ({position,direction}=along(returning?[...rest.path].reverse():rest.path,progress));moving=progress<1;}
     if(retirement){({position,direction}=along(retirement.path,(t-retirement.start)/retirement.travel));moving=t<retirement.end;presence={kind:'closed',label:moving?'Session ended · heading to Inn':'At the Inn · session ended',targetIds:[],sourceId:retirement.id,basis:'Explicit session-end record'};}
+    const gathering=t>=timeline.recap?.start?timeline.recap.walks.find(w=>w.actorId===a.id):null;
+    if(gathering){({position,direction}=along(gathering.path,gathering.travel?(t-timeline.recap.start)/gathering.travel:1));moving=t<timeline.recap.start+gathering.travel;}
     const celebration=(timeline.celebrations??[]).find(c=>c.start<=t&&c.end>t&&(c.teamId??null)===(a.teamId??null));
     const active=s&&t<s.end;
     const cheering=!retirement&&a.role!=='user'&&!moving&&(a.id===celebration?.actorId||!active)?celebration:null;
     const special=['input','agents','closed'].includes(presence.kind)||(!active&&presence.kind!=='idle')||s?.status==='running';
     const label=special?presence.label:active?s.activityLabel??'Working':a.role==='user'?'You':a.missingTranscript?'Transcript not supplied':presence.label;
-    return {...a,retired:!!retirement&&t>=retirement.end,celebration:cheering,position,direction,moving,scene:s??null,presence,resting:!!rest&&!retirement&&!cheering,leisure:retirement?null:rest?.leisure??null,restStartedAt:rest?rest.start+rest.travel:null,activityLabel:cheering?`Cheering · PR #${cheering.pr.number}`:moving&&!special?`Going to ${STATION_NAMES[rest?.station??s?.station]??'the village'}`:label,state:special?presence.kind:moving?'traveling':active?(s.status==='failed'?'failed':s.event.kind.includes('message')?'speaking':'working'):'idle',frame:Math.floor(t*8)};
+    return {...a,gathering:!!gathering,retired:!!retirement&&t>=retirement.end,celebration:cheering,position,direction,moving,scene:s??null,presence,resting:!!rest&&!retirement&&!cheering&&!gathering,leisure:retirement||gathering?null:rest?.leisure??null,restStartedAt:rest?rest.start+rest.travel:null,activityLabel:gathering?(moving?'Gathering in the square':'At the quest recap'):cheering?`Cheering · PR #${cheering.pr.number}`:moving&&!special?`Going to ${STATION_NAMES[rest?.station??s?.station]??'the village'}`:label,state:special?presence.kind:moving?'traveling':active?(s.status==='failed'?'failed':s.event.kind.includes('message')?'speaking':'working'):'idle',frame:Math.floor(t*8)};
   });
   return {time:t,actors:shareUserState(timeline,actors,focus),current,active:timeline.scenes.filter(s=>s.start<=t&&s.end>t&&(!team||s.event.teamId===team))};
 }

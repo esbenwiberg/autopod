@@ -1,5 +1,6 @@
 // Presentation vocabulary shared by browser playback and video export.
 export const ACTIVITIES = {
+  browser:  {station:'archive', label:'Using browser', glyph:'search', color:'#a4d8ef'},
   pr:       {station:'harbor', label:'Creating a PR', glyph:'flag', color:'#f3b3c5'},
   retire:   {station:'inn', label:'Session ended · heading to Inn', glyph:'box', color:'#d6bbdb'},
   read:     {station:'archive', label:'Reading', glyph:'book', color:'#a4d8ef'},

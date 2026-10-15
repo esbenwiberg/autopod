@@ -1,3 +1,4 @@
+import { recapSummary } from './recap.mjs';
 import { displayActorId } from './cast.mjs';
 import { sceneAt } from './timeline.mjs';
 import { cameraAt, worldToScreen } from './camera.mjs';
@@ -123,6 +124,24 @@ export function renderFrame(ctx,timeline,time,assets,{focus=null,team=null,react
   }
   drawCelebration(ctx,timeline,state.time,{team,motion:reactions});
   ctx.restore();
+  if(state.time>=timeline.recap?.start){
+    box(ctx,0,768,768,160);
+    ctx.fillStyle='#b6ecd2';ctx.font='26px "Pixelify Sans", monospace';ctx.fillText(state.time<timeline.recap.cardAt?'GATHERING IN THE SQUARE':'END OF RECORDED HISTORY',28,811);
+    ctx.fillStyle='#f3e6c3';ctx.font='21px "Pixelify Sans", monospace';
+    ctx.fillText('A little rest after the adventure.',28,847);
+    ctx.font='18px "Pixelify Sans", monospace';ctx.fillStyle='#b3bfcc';
+    ctx.fillText('Waiting agents keep their posts. Closed sessions rest at the Inn.',28,881);
+    ctx.fillText('This recap reflects the log, not overall task completion.',28,907);
+    if(state.time>=timeline.recap.cardAt){
+      const recap=recapSummary(timeline,team);
+      box(ctx,16,16,736,268,'#203b40');
+      ctx.fillStyle='#ffe1a0';ctx.font='28px "Pixelify Sans", monospace';ctx.fillText('QUEST RECAP',36,57);
+      const title=team?timeline.teams.find(t=>t.id===team)?.title:timeline.title;
+      ctx.fillStyle='#b6d5c9';ctx.font='16px "Pixelify Sans", monospace';ctx.fillText(short(title??'The village',74),36,82);
+      recap.lines.forEach((line,i)=>{ctx.fillStyle=i===1?'#bbccc5':'#f3e6c3';ctx.font='20px "Pixelify Sans", monospace';ctx.fillText(line,36,113+i*29);});
+    }
+    ctx.restore();return state;
+  }
   const celebration=(timeline.celebrations??[]).findLast(c=>(!team||c.teamId===team)&&c.start<=state.time&&state.time<c.end);
   if(celebration){ctx.fillStyle='#142531ed';ctx.fillRect(16,16,736,64);ctx.fillStyle='#b6ecd2';ctx.font='22px \"Pixelify Sans\", monospace';ctx.fillText(`PR #${celebration.pr.number} CREATED`,30,43);ctx.fillStyle='#f3e6c3';ctx.font='18px \"Pixelify Sans\", monospace';ctx.fillText(short(celebration.pr.title??'A new adventure sets sail',62),30,67);}
   const speaker=state.actors.find(a=>a.id===(focus??displayActorId(timeline,active?.event.actorId)));

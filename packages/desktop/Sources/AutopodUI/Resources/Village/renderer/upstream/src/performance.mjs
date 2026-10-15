@@ -26,7 +26,7 @@ export function performanceAt(actor,time,{motion=true}={}){
   if(['edit','create'].includes(activity))return {...pose('hammer',beat<.65?'swing':'idle',1.6,'right'),clock};
   if(activity==='check')return {...pose('train',beat<.65?'attack':'idle',1.6,'right'),clock};
   if(activity==='build')return {...pose('build','nod',2),clock:motion?elapsed*.5:0};
-  if(['read','search','review','plan'].includes(activity))return pose(activity==='review'||activity==='plan'?'review':'read','nod',3);
+  if(['read','search','browser','review','plan'].includes(activity))return pose(activity==='review'||activity==='plan'?'review':'read','nod',3);
   if(activity==='command')return pose('terminal','nod',2);
   return base;
 }

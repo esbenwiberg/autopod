@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/Esbenwiberg/jsonl-animate",
-  "revision": "e215d7a381ff8a16fea0e43891d0fbf9c2e8a5a1",
+  "revision": "32c94831a1a6cfcde4010ae73fe77534622664af",
   "dirty": false,
   "files": {
     "docs/asset-production.md": "2dc4311068efa6701efaace808ec12513d5e6e4a6a4152ec01656b373ab47cc8",
@@ -115,18 +115,21 @@
     "public/assets/sprites/vulpix/Swing-Anim.png": "461600fa74caf6465130694f18f6a78b4d12f7909a60487e1af730427ff3b841",
     "public/assets/sprites/vulpix/Walk-Anim.png": "e2d911614423ffa3675f60d653d947394d5a587cf53a688cd13ab3322c157925",
     "public/assets/village-v4.png": "5af428249c7df243600a1a3eee7e08dd56b145206b4844e276b90bcb140b5b96",
-    "README.md": "09df934377f3b207c7eea309ef590143a9067d0f536b72472e271427db3aab8d",
-    "src/activity.mjs": "f95aa80594712dc5ab4e9ad4c1b3872d1a749ccd6696fb49401cf11cc6ec5741",
-    "src/camera.mjs": "e4454b0934187e894ad1eccb5d3047f884eadb83319c535688afdfa7063e4376",
+    "README.md": "31874f397ed57da76a0b17dfaa9f49258626eef0e7ee14bfcd9b2721a8db5efb",
+    "src/activity.mjs": "16f612f13a87d08e662d812b1e7f9342cf72ea93a115c2bdeaa7c92128ceaae6",
+    "src/camera.mjs": "80ac4f37629d64555d66a3fef61ba4120b526431656fffca8e06fa8fc075eeed",
     "src/cast.mjs": "e77682378fba37dc826d6df9501e3785e511d7ed00da93ec8bb594d3915b8451",
+    "src/checks.mjs": "06f29e3fde32c0464547f43cc2b0a8a4faa30a40823f11382b80ee86352e035f",
     "src/dialogue.mjs": "473d6ecf6248184c007b1555a5340541695675fbe5091f3b0ba09b00f93a44f1",
     "src/effects.mjs": "b157bb722bf051ba29b8b96df9f0d4abbf0ada9cf54a8563c05c26e558ec1f8f",
     "src/milestones.mjs": "b2938495530892a0866086c78a6948ef6a1a72dfcbe2d0c42a5ed6bd2df5547e",
-    "src/performance.mjs": "d57268cc628c2dab2967c6c81f335f86b9c9ad513eadf7cdc4394945131ee294",
-    "src/presence.mjs": "b5034072a476152d6c350d67f2740162da7b9632129e3ce56cff2adaae40e739",
-    "src/render.mjs": "de27c57190c4bc399ea765c0250e4440f25d12c9fc75ead89cc7121e0fc6f5d1",
+    "src/performance.mjs": "d481956bff66b782185d9eea84c408410f55645ad437a49ff6bb78ce03d533f8",
+    "src/presence.mjs": "3de33a1a6ff47e8463108dfd69b870df572af88414c26ff0d2b3713b2a8691f6",
+    "src/recap.mjs": "e3c80fd638c8813880574ebf5b4bcb47f47fd0936348a3b91b6ede3950a8e9de",
+    "src/render.mjs": "1a358032b35d1edacc538a4071f9624491404535eec7a16b8f64157ce761254b",
     "src/rest.mjs": "3a16dff5fe0a336b884724e86477467e571f22c1fb37b899df44487179d523b3",
-    "src/timeline.mjs": "dabdf95a80bc0924d65afebce4ac32544db5c41e4670162d4aa33e7a93c37cf7",
+    "src/timeline.mjs": "e6f85fdc9e937e8f21888c01b0d69a20f54160469821424899904783e93f3122",
+    "src/usage.mjs": "b87df61b06bc3010bedeeb27e8d3c31f9478078d402c1229e1827384970bb2c5",
     "src/world.mjs": "91f2b734b7f23bd97bd15a1821fac75d07128eab7093c0ce877968265123da62"
   }
 }

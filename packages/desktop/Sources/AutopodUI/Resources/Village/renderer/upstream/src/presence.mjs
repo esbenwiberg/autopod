@@ -10,7 +10,7 @@ export const PRESENCE_STYLES={
   idle:{label:'Idle · reason unrecorded',color:'#b8bac5',symbol:'z',rank:5},
 };
 const idle=()=>({kind:'idle',label:PRESENCE_STYLES.idle.label,targetIds:[],sourceId:null,basis:'No explicit waiting or completion event'});
-export function buildPresence(timeline){
+export function buildPresence(timeline,{includePending=false}={}){
   const actors=new Map(timeline.actors.map(a=>[a.id,a])),pending=new Map(timeline.actors.map(a=>[a.id,new Map()])),finished=new Map(),tracks=Object.fromEntries(timeline.actors.map(a=>[a.id,[]]));
   const markers=timeline.scenes.flatMap(s=>[{at:s.start,scene:s,end:false},...((s.event.data.phase==='final'||s.event.data.turnEnd)?[{at:s.end,scene:s,end:true}]:[])]).sort((a,b)=>a.at-b.at||Number(a.end)-Number(b.end)||a.scene.id.localeCompare(b.scene.id));
   function snapshot(id,at){
@@ -43,7 +43,7 @@ export function buildPresence(timeline){
     }
     snapshot(a.id,at);
   }
-  return tracks;
+  return includePending?{tracks,pending:[...pending].flatMap(([actorId,map])=>[...map.values()].map(wait=>({...wait,actorId})))}:tracks;
 }
 export function presenceAt(timeline,actorId,time){
   const track=timeline.presence?.[actorId]??[];

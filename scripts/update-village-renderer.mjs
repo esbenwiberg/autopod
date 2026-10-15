@@ -57,7 +57,7 @@ export async function updateRenderer({ source, output = destination, check = fal
       await build({
         stdin: {
           contents:
-            "export {drawCharacter} from './src/render.mjs'; export {performanceAt,drawPerformance} from './src/performance.mjs'; export {LOCATIONS,STATION_NAMES,stationRoute,stationSeat} from './src/world.mjs';",
+            "export {renderFrame,VIEW} from './src/render.mjs'; export {actorAtScreen} from './src/camera.mjs'; export {LOCATIONS,STATION_NAMES,stationRoute,stationSeat} from './src/world.mjs';",
           resolveDir: source,
         },
         bundle: true,
