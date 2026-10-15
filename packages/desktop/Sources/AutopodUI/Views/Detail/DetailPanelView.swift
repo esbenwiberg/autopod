@@ -141,6 +141,8 @@ public struct DetailPanelView: View {
     @State private var didCopyName: Bool = false
     @State private var showRelatedEventsDebug: Bool = false
 
+    private var pendingControl: PendingPodControl? { actions.pendingControl(pod.id) }
+
     private var isTerminalAvailable: Bool { pod.pod.agentMode == .interactive }
     private var activeTab: DetailTab { selectedTab ?? Self.defaultTab(for: pod) }
     private var isEvidenceAvailable: Bool {
@@ -495,6 +497,10 @@ public struct DetailPanelView: View {
                 }
             }
 
+            if let pendingControl {
+                PendingControlNotice(kind: pendingControl, podId: pod.id)
+                    .padding(.top, 6)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -702,8 +708,10 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -723,8 +731,10 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -785,8 +795,10 @@ public struct DetailPanelView: View {
                     Button {
                         Task { await actions.pause(pod.id) }
                     } label: {
-                        Label("Pause", systemImage: "pause.circle")
+                        Label(pendingControl == .pause ? "Pausing…" : "Pause", systemImage: "pause.circle")
                     }
+                    .disabled(pendingControl != nil)
+                    .accessibilityIdentifier("pod-control-pause-\(pod.id)")
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .tint(.yellow)
@@ -794,8 +806,10 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -814,8 +828,10 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -842,8 +858,10 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -954,8 +972,10 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -974,8 +994,10 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)

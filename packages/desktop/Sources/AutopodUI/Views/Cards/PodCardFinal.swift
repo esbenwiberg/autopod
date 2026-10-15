@@ -58,6 +58,8 @@ public struct SessionCardFinal: View {
     @State private var isHovered = false
     @State private var isInfrastructureResumePending = false
 
+    private var pendingControl: PendingPodControl? { actions.pendingControl(pod.id) }
+
     private var isAdvisoryQaRunning: Bool {
         pod.validationProgress?.advisory.status == .running
     }
@@ -160,14 +162,18 @@ public struct SessionCardFinal: View {
                 Button(role: .destructive) {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
             }
             Button(role: .destructive) {
                 showDeleteConfirmation = true
             } label: {
                 Label("Delete", systemImage: "trash")
             }
+            .disabled(pendingControl != nil)
+            .accessibilityIdentifier("pod-control-delete-menu-\(pod.id)")
         }
         .sheet(isPresented: $showRejectFeedback) { rejectFeedbackSheet }
         .sheet(isPresented: $showNudgeInput) { nudgeSheet }
@@ -177,12 +183,15 @@ public struct SessionCardFinal: View {
         ) {
             Button(deleteButtonTitle, role: .destructive) {
                 Task {
-                    if !isDeletableNow {
-                        await actions.kill(pod.id)
+                    if isDeletableNow {
+                        await actions.delete(pod.id)
+                    } else {
+                        await actions.killAndDelete(pod.id)
                     }
-                    await actions.delete(pod.id)
                 }
             }
+            .disabled(pendingControl != nil)
+            .accessibilityIdentifier("pod-control-delete-confirm-\(pod.id)")
         } message: {
             Text(deleteDialogMessage)
         }
@@ -264,6 +273,10 @@ public struct SessionCardFinal: View {
                 }
                 modeBadge
                 statusBadge
+            }
+
+            if let pendingControl {
+                PendingControlNotice(kind: pendingControl, podId: pod.id)
             }
 
             // Summary row — one line per state
@@ -684,9 +697,11 @@ public struct SessionCardFinal: View {
                 Button {
                     Task { await actions.pause(pod.id) }
                 } label: {
-                    Label("Pause", systemImage: "pause.circle")
+                    Label(pendingControl == .pause ? "Pausing…" : "Pause", systemImage: "pause.circle")
                         .frame(maxWidth: .infinity)
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-pause-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.yellow)
@@ -905,9 +920,11 @@ public struct SessionCardFinal: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                         .frame(maxWidth: .infinity)
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -1263,6 +1280,8 @@ public struct SessionCardFinal: View {
             Label("Delete", systemImage: "trash")
                 .frame(maxWidth: .infinity)
         }
+        .disabled(pendingControl != nil)
+        .accessibilityIdentifier("pod-control-delete-\(pod.id)")
         .buttonStyle(.bordered)
         .controlSize(.small)
     }
