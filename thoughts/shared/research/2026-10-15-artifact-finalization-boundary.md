@@ -65,3 +65,34 @@ This is a descriptive boundary map. A subsequent plan must select exact
 characterization and extraction scope before code moves; this research is not
 an implementation authorization or a claim that missing-cycle comparison is
 reachable as a production defect.
+
+## Follow-up: same-generation cycle reachability
+
+Source tracing found an ordinary non-Goal public-control sequence, still
+unexecuted at research time:
+
+1. consumeAgentEvents settles the journal, ends the durable run/admission and
+   clears activeAgentRuns; processPod then calls handleCompletion.
+2. Artifact extraction waits while pod status remains running.
+3. pauseSession (13975) suspends the runtime and waits only for activeAgentRuns;
+   the prior worker already settled, so pause completes without joining the copy.
+4. sendMessage (12961-13032) accepts paused, transitions running and resumes the
+   same container. It does not consult artifact promise maps.
+5. consumeAgentEvents calls journal.begin (11629), creating cycle N+1 in the same
+   generation. Journal begin checks unanswered decisions/generation, not a
+   preserving phase.
+6. Old extraction can pass ownsArtifactCompletion, which compares no cycle.
+   Journal mark selects the latest cycle, so old publication may mark the new
+   cycle and proceed to container cleanup and complete.
+
+The sequence needs healthy continuation preflight/budget and a non-Goal pod.
+Message while running or pause-settling is rejected; a retained worker queues
+input; native Goal gates prevent this path. Artifact resumePod retries collection
+without a new cycle; fresh-provision rework increments generation.
+
+Root rechecked pause, normal message continuation, worker admission, journal
+begin/mark and preservation against source. A public-method deferred-copy test
+is needed before calling this a reproduced defect. The shared ownership helper
+also serves uncollected-guidance paths, where settle may create a journal after
+the Pod snapshot was captured. Artifact cycle checks therefore must not be
+blindly imposed on those unrelated uses.
