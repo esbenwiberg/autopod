@@ -118,7 +118,7 @@ closure. Existing gated live suites are skipped, not passing real-pod proof.
 
 ## Acceptance and limits
 
-- [ ] Added public characterization passes on unchanged source with recorded SHA.
+- [x] Added public characterization passes on unchanged source with recorded SHA.
 - [ ] Typed artifact boundary extracted without behavior or ownership changes.
 - [ ] Identical characterization and interruption races pass after movement.
 - [ ] Full daemon and supported build/typecheck/hygiene checks recorded.
@@ -134,3 +134,33 @@ Independent plan review found no blocker. Root incorporated explicit real-cp
 forwarding beneath the existing global child-process mock and a single resolver
 invocation assertion for rejected coalescing. All phases are approved under the
 standing campaign authority; no unresolved product or technical choice remains.
+
+## Implementation evidence: Phase 1
+
+Production baseline d6a724df79af365764cac54b88e4fc6fb796ea65 remained unchanged.
+Five added public-manager cases plus the three existing cycle races passed:
+8 passed, 666 deselected/skipped by the name filter, one file. Node22.23.3,
+pnpm9.15.4, Vitest4.1.11; frozen install passed. Exact focused command:
+
+```sh
+npx -y -p node@22 -p pnpm@9.15.4 -c 'SKIP_DB_TESTS=0 pnpm --filter @autopod/daemon exec vitest run src/pods/pod-manager.test.ts -t "artifact finalizer compatibility|fences old artifact finalization"'
+```
+
+Private logs: .autopod-data/reliability/r06b/characterization-before.log and
+install.log. Earlier fixture-only failures are retained in characterization-
+fixture-adjustment.log (existing synthetic Git credential) and characterization-
+branch-fixture.log (branch not writable through PodUpdates).
+
+Expected: characterize explicit branch and branch/base fallback variants.
+Found: public creation binds branch; SQLite branch is NOT NULL and PodUpdates
+cannot change it. Adjustment approved by coordinator: exercise explicit branch
+through createSession and ordinary generated research/<id>, plus nullable
+base/profile fallbacks. Preserve defensive null-branch fallback verbatim but do
+not claim runtime coverage of its unreachable SQLite arm. No fake nullable
+repository view or production behavior change was introduced.
+
+The real cp subprocess is allowed only for exact private snapshot/worktree paths,
+with a 3-second timeout; tests await callback settlement and restore the mock.
+Hook and kill observations both verify receipt/content and durable publication
+before completion. The five cases close their SQLite DBs and use existing private
+completion DATA_DIR teardown. No provider request or real Git push occurs.
