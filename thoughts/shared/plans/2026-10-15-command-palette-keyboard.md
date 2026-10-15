@@ -106,3 +106,14 @@ resolves in-scope implementation choices under standing user authority.
 Independent plan review: lifecycle reviewer found no architecture blocker. Native
 sendEvent delivery, one callback per event, and close-with-retained-content proof
 are explicit requirements above. Root approves all phases under standing authority.
+
+## Execution evidence
+
+Phase 1: on source base `21b50a2b`, the real mounted production palette rendered
+A/B then B/C. With its actual NSTextField editor focused, a Return NSEvent delivered
+through `NSApplication.shared.sendEvent` invoked `pod:recovery-a` once instead of
+`pod:recovery-b`. The fixture asserts one mount and observes current native labels
+before delivery. `swift test --package-path packages/desktop --filter
+CommandPaletteKeyboardTests` failed at that behavioral assertion as intended.
+Baseline fixture, unchanged production source, logs and captures are preserved in
+ignored `.autopod-data/reliability/r07a/`. All callbacks are synthetic recorders.
