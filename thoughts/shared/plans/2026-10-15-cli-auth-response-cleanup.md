@@ -71,8 +71,8 @@ proof. Record pre-fix and final revision evidence and cleanup outcomes.
 - [x] Real retry releases first stream and completes normally without watchdog.
 - [x] Retry count, request/auth semantics and final errors remain unchanged.
 - [x] Refresh failure and body cancellation edge cases retain correct ownership.
-- [ ] Full CLI/relevant checks pass and independent pre-PR review completed.
-- [ ] Hosted and integrated result recorded.
+- [x] Full CLI/relevant checks pass and independent pre-PR review completed.
+- [x] Hosted and integrated result recorded.
 
 ## Compatibility and rollback
 
@@ -138,3 +138,15 @@ Ignored evidence lives under this worker's `.autopod-data/reliability/`:
 `auth-cleanup-validation-final.log` (all scoped checks passed).
 The committed revision and final focused rerun are recorded after commit in
 `auth-cleanup-revision.txt`, `auth-cleanup-final.json`, `auth-cleanup-final.log`.
+
+## Final integration proof
+
+PROVEN for the bounded response-ownership contract at worker
+dbe28efaed65c3a8350125d5b34410cc1c3fe844. Coordinator independently reviewed
+the full production change, new tests and executable fixture, then freshly built
+and ran18 focused retry/HTTP/lifetime cases before opening PR422. An additional
+seven log-follow executable cases passed on the same source. Hosted CI38787912870
+passed. PR422 merged at913c0622; fresh integrated CLI build and all25 affected
+cases passed (r03b-integrated.log). Original before/after/full-suite and independent
+evidence retained in .autopod-data/reliability/r03b/. No new timeout or live-daemon
+claim; the existing unrelated test-source type error remains documented above.
