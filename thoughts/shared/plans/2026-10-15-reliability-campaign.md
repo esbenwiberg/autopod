@@ -100,14 +100,14 @@ choice or missing authority that repository evidence cannot establish.
 | ID | Task | Dependencies | Status / next action |
 |---|---|---|---|
 | R00 | Existing CI covers campaign PRs and contract paths | Baseline | Complete: PR #416 passed hosted checks and merged into campaign at 980e0b86 |
-| R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a complete (PR #417); R01b complete (PR #419, cf8c6663), integrated43tests passed |
+| R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a complete (PR #417); R01b complete (PR #419, cf8c6663), integrated43tests passed; R01c complete (#429,f818a8b3), live proof and hosted/integrated checks passed |
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | R03a complete (#420); R03b complete (#422,913c0622); hosted+integrated proof passed |
-| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b complete (#425,173d3450); R04c REST epoch worker implementing; pending/draft research completed |
+| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b complete (#425,173d3450); R04c complete (#427,80fc8158; integrated18tests at43a5fad2 after fixture PR430); R04d Inline controls in rendered proof |
 | R05 | Shared response/event contract scenarios | R00, R01 | R05a complete (#426,98b9d912); hosted and integrated daemon/CLI/Swift proof passed |
 | R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a complete: PR423 merged at5cc8fbc6;704 integrated tests passed |
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | Separate wireframe batch and bounded task plans |
-| R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | R08a complete (#424,c1faba3a), hosted+integrated roundtrip passed; performance policy remains unselected |
+| R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | R08a complete (#424,c1faba3a), hosted+integrated roundtrip passed; R08b complete (#428,04dabd6a), independent reproduction and hosted/integrated checks passed |
 
 R00 and the bounded R01a CLI executable harness have reviewed detailed plans.
 The remaining R01 harness slices need detailed plans. R02's design direction is
@@ -298,3 +298,28 @@ R05a merged at98b9d912 after hosted general/native checks. Integrated real route
 and helper22tests, fresh-built CLI2cases and Swift2contract functions passed.
 R04c preserved its failing connection-switch baseline before the epoch guards.
 R01c harness remains local-only pending independent pre-live review.
+
+R04c merged at80fc8158 after independent final-head proof and hosted general/native
+checks. The integrated incremental build failed in the unchanged resync fixture;
+a clean retry hit local disk exhaustion. Completed campaign build caches were
+cleaned using Swift package commands, preserving source/evidence. R04d also
+reproduced the fixture diagnostic after a clean Swift6.3.3 compile; hosted used
+Swift6.1.2. A narrow explicit-capture alignment with the existing DaemonAPITests
+fixture is approved as a separately committed R04d validation prerequisite.
+Integrated R04c proof remains open until rerun succeeds.
+
+R08b independently reviewed and fully reproduced at1e179dc1: all21 traversals
+correct, independent medians2.881/28.890/625.311ms for100/1000/10000 pods. PR428
+awaits hosted checks; no optimization or latency SLA claim. R01c one real native
+sandbox qualification passed at44e4f39f, with independent provider GET404/cache
+checks and15 local guard tests rerun at final330fc51e before PR429. Fresh initial
+inventory was empty; no claim of live nonempty-inventory preservation, model
+execution, full daemon lifecycle or firewall enforcement. Both PRs target only
+codex/reliability. R04d applies the chosen Inline direction after its baseline.
+
+R04c integrated proof is now complete:18 native test functions passed at43a5fad2
+after the separately reviewed fixture compatibility PR430 passed hosted
+Swift/Xcode checks. Earlier compile/disk failures remain recorded. R04d preserved
+the duplicate POST/unconditional DELETE baseline, implemented owned controls at
+7530db73 and passed42focused invocations; independent source review found no
+actionable issues. Rendering and final frozen-head proof remain incomplete.

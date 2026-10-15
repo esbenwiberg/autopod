@@ -82,7 +82,7 @@ new store and affected confirmed-action tests on integration.
 - [x] All six async entry points reject superseded results/follow-up work.
 - [x] Hydration admission and loading/error cleanup retain current ownership.
 - [x] Current behavior and existing event merge tests pass.
-- [ ] Independent pre-PR, hosted and integrated proof complete.
+- [x] Independent pre-PR, hosted and integrated proof complete.
 
 ## Limits and rollback
 
@@ -148,3 +148,24 @@ there is no full-app, visual, live-daemon, immediate-disconnect, transport
 cancellation, cached-daemon separation or old-action admission claim. Final
 revision and source/log hashes are recorded in ignored `proof.json`. Independent
 review, hosted checks and integrated rerun remain root-owned and unchecked.
+
+## Coordinator integration proof
+
+Independent pre-PR review atde47339b inspected all response/cleanup guards and
+reproduced17 focused test functions. PR427 passed general and native hosted checks
+(runs38794284199/38794284345), then merged at80fc8158.
+
+The first integrated rebuild failed in unchanged EventStreamResyncTests; the
+clean retry separately ran out of disk. R04d reproduced the fixture diagnostic
+after a clean Swift6.3.3 build. Hosted builds use Swift6.1.2. Earlier local passes
+were valid runtime evidence but reused the resync object; cleaning alone was not
+a reproducible fix. A separately reviewed two-line explicit-capture alignment
+with the adjacent fixture passed local resync/baseline proof and hosted native
+Swift/Xcode checks in PR430 (runs38797040079/38797039954), merging at43a5fad2.
+
+At43a5fad2 the integrated command below recompiled the resync fixture and passed
+18 test functions in3suites, including parameterized confirmed-action scenarios:
+`swift test --package-path packages/desktop --no-parallel --filter
+'EventStreamResyncTests|PodStoreLifetimeTests|PodStoreFleetTests|confirmedAction|confirmedKill'`.
+Evidence: `.autopod-data/reliability/r04c-integrated-final.log`; earlier failed logs
+are retained. The store contract is proven with the original scope limitations.
