@@ -107,3 +107,45 @@ claimed by this report.
 None for the described current-state boundaries. Socket runtime behavior is being
 investigated separately. Pending-state and retained-draft implementation choices
 belong in a subsequent resolved plan; this report does not authorize a new API.
+
+## Follow-up research — Inline control composition
+
+At121a667a, research_cli traced every Pause/Kill surface; root read full
+DetailPanelView, PodCardFinal, PodActivityPanel, PodActions and AppRootView, plus
+ActionHandler/app wiring. PodActions already exposes MainActor Sendable getter
+closures for existing error state. MainView.wiredActions copies the complete
+struct and replaces attachTerminal; detail/cards receive that copy. The enabled
+series activity panel is in DetailPanelView and also receives actions. MainView
+and SeriesListView DAGs omit actions but disable their panel, so no Pause wiring
+defect was established there. Observation through an additional getter would
+still need rendered runtime proof; source transport alone does not establish it.
+
+Detail's responsive header shares headerActions across wide/wrapped layouts.
+Cards expose Pause, several Kill surfaces and Kill-and-delete. Kill-and-delete
+awaits an async Void kill closure and then deletes; current kill catches failures.
+A duplicate guard that simply returns early would let this caller continue before
+an original request settles. Joining duplicates preserves wait semantics but
+would not itself prove successful kill. Daemon deletion has its own authoritative
+status/resource ownership checks; the client must not infer success from Void.
+
+Pause/Kill success awaits refreshSession, but that method swallows GET errors.
+An HTTP success therefore does not establish that a fresh state was observed.
+Cached PodStore rows retained across reconnect are not fresh observations either.
+AppRoot's global error listener drives both alert presentation and authentication
+recovery, whose successful path directly calls PodStore.configure. Any new request
+ownership must account for those lifetimes and both app entry points.
+
+Root inspected manager.pauseSession/killSession. Pause registers an in-memory
+pause intent, suspends the runtime, then awaits quiescence. A409 can mean the
+runtime was already suspended but did not settle in time; it does not universally
+mean no side effects. Concurrent Pause is rejected while its intent remains.
+Kill publishes killing before cleanup, which can last30seconds, matching the
+client's default timeout. Network/decode/HTTP failure cannot generally establish
+non-acceptance. Observed REST/event status can establish current state, not causal
+attribution to a particular request. No automatic replay contract is present.
+
+R04b socket ownership is now integrated. R04c REST response epochs are independently
+reviewed in PR427; they preserve caches and do not fence an old handler's new
+follow-up call after configure. Pending request and draft ownership remain a
+separate plan. No new UI, request coordinator or retry policy is implemented by
+this research.
