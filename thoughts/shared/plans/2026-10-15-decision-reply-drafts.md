@@ -267,3 +267,41 @@ Final independent plan review found no remaining blocker. Baseline is two native
 cases on unchanged production: field-editor text across Overview unmount/remount,
 and text during held POST then500 after native Return. Production overlap waits
 R04e integration; all phases are authorized together after that prerequisite.
+
+## R04e API reconciliation and baseline checkpoint
+
+Root read the final R04e PodStore at ed02c8ed completely. Its exact existing APIs
+are `configure(api:connectionID: UUID? = nil)`, `disconnect()`, internal
+`ownership(for: DaemonAPI) -> Ownership?`, and `isCurrent(Ownership?) -> Bool`.
+`Source` is currently a private Equatable value containing `connectionID: UUID?`
+and `endpoint: URL`; `source` survives disconnect, while `configurationEpoch`
+advances on every configure/disconnect. There is no existing `stableSource` API.
+
+The implementation may promote this same source value to an internal Hashable
+type with a narrowly scoped read accessor, so draft keys use exactly the same
+UUID/URL comparison as cache ownership. Do not introduce a second normalization
+or infer source from an API object. Keep the epoch ownership token separate:
+retained-source reads/edits may work disconnected, but all HTTP admission and
+completion publication still require `isCurrent`. An obsolete source callback
+cannot choose the new current source implicitly. The retained app-level PodStore
+can own the dedicated draft helper; it is already shared across ActionHandler
+replacement and needs no new global singleton or persistence.
+
+`refreshSession` is currently Void and catches errors. Preserve that external
+wrapper for its existing callers while factoring the same status/decision merge
+into a result-bearing internal read used by preparation/preflight. Return enough
+information to distinguish the actual returned decision from the reconciled
+current decision; neither alone satisfies the preflight contract. Do not replace
+it with `hydrateSessionIfNeeded`, whose early-return admission is not a result.
+Existing store removal paths converge on `forgetPodState`; integrate draft
+retirement there without resetting global identity sequences or releasing an
+active attempt early.
+
+Baseline bc846039 on unchanged production 88a739c5 reproduced two native cases
+with three expected retention assertions: after Overview unmount/remount, during
+held POST, and after500. Actual field-editor typing and native Return sent one
+captured payload. Root read the full tests/log and inspected all six captures.
+The baseline is retained in Git and ignored evidence; convert/replace its opt-in
+test into ordinary final regression coverage with the new preflight semantics.
+No permanent skipped baseline is needed. R04e hosted/integration completion
+remains the production-start prerequisite; root will record its exact merged base.
