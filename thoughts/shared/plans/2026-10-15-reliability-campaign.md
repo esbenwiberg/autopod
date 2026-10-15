@@ -102,10 +102,10 @@ choice or missing authority that repository evidence cannot establish.
 | R00 | Existing CI covers campaign PRs and contract paths | Baseline | Complete: PR #416 passed hosted checks and merged into campaign at 980e0b86 |
 | R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a complete (PR #417, ace8de29); R01b actual crash proof validating; native follow-up being narrowed |
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
-| R03 | CLI transport and log-follow reliability | R01 | R03a log-follow repair reviewed and ready for worker; reconnect/replay excluded |
-| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | Task-specific research/plan; deterministic store tests plus actual app proof |
+| R03 | CLI transport and log-follow reliability | R01 | R03a complete: PR #420 merged at20b7652b, hosted+integrated proof passed |
+| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a confirmed pause/kill worker implementing; broader pending/draft slices remain |
 | R05 | Shared response/event contract scenarios | R00, R01 | Extend established fixture pattern for selected R03/R04 boundaries |
-| R06 | Lifecycle interruption scenarios and first extraction | R01 | Characterize one ownership boundary before moving it; serialize changes |
+| R06 | Lifecycle interruption scenarios and first extraction | R01 | Artifact finalization boundary researched; checking cycle reachability before characterization |
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | Separate wireframe batch and bounded task plans |
 | R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | Measure baseline first; compare same data/toolchain and record thresholds before optimizing |
 
@@ -240,3 +240,10 @@ on a new worker forked from the campaign branch. The Inline status selection
 remains the desktop direction; its native isolation and action-state plan is
 still being narrowed before visible product edits. Earlier progress entries
 are historical snapshots, superseded by this checkpoint.
+
+R03a is complete: PR420 passed independent pre-PR review and hosted CI, merged
+at20b7652b; fresh integrated build plus17 executable/lifecycle cases passed.
+R01b PR419 awaits hosted daemon/desktop checks after independent process proof.
+R04a worker implements the reviewed confirmed pause/kill plan with native
+component-composition evidence. Artifact-finalization ownership research is
+recorded separately; no manager extraction is authorized by that map alone.

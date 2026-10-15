@@ -121,8 +121,8 @@ contracts; the actual terminal output is captured by the executable tests.
 - [x] Ctrl+C works while connecting and after subscribing.
 - [x] Aliases, normal log errors and reasoning formatting preserved.
 - [x] No duplicate diagnostics, leaked signal handlers or socket resources.
-- [ ] Full CLI/relevant checks pass; independent review completed before PR.
-- [ ] Hosted checks and integrated result recorded.
+- [x] Full CLI/relevant checks pass; independent review completed before PR.
+- [x] Hosted checks and integrated result recorded.
 
 ## Compatibility and rollback
 
@@ -197,3 +197,21 @@ No material plan mismatch. One validation invocation initially put reporter
 options directly on `pnpm test`, which pnpm rejected before executing any tests;
 the corrected `pnpm exec vitest run` command above completed successfully. No
 manual user verification is asserted or required by this bounded plan.
+
+## Independent review and integration
+
+Coordinator reviewed the complete final source/test diff at
+a5b46b981f0dea423ae73657fa9e586808abb60a with no actionable findings, then
+rebuilt shared+CLI and independently reran all17 focused/executable tests.
+`log-follow-independent.log` records that pass. Review completed before PR420.
+
+https://github.com/esbenwiberg/autopod/pull/420 passed hosted build-and-test and
+secret-scan (CI run38785361525), then merged only into codex/reliability at
+20b7652b9a4984cd777ce7d1694d4add7d9716aa. Coordinator freshly rebuilt the
+integrated branch and reran all17 cases successfully; evidence is
+`.autopod-data/reliability/r03a-integrated.log`. Worker evidence is retained in
+`.autopod-data/reliability/r03a/`.
+
+Final verdict: PROVEN for the bounded behavior on local macOS and hosted Linux.
+Windows signal cases remain explicitly skipped; no live daemon/provider or
+reconnection claim.
