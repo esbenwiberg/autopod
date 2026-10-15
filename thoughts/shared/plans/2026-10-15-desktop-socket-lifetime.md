@@ -50,10 +50,13 @@ Run baseline regressions before ownership edits:
 2. Establish real subscription, close the peer to enter reconnect/backoff, then
    explicitly disconnect; no replacement connection after the backoff deadline.
 3. Connect twice while active; only one peer/subscription should exist.
-4. EventStream replacement disconnects the captured old socket and preserves new
+4. On the same EventSocket actor, hold token request A, disconnect, establish a
+   new lifetime B, then release A. B must retain its peer and event delivery; no
+   third peer or stale connected callback may appear.
+5. EventStream replacement disconnects the captured old socket and preserves new
    socket; queued old event/state/resync callbacks must be ignored after replacement.
 
-For case4 use a minimal internal Sendable socket protocol plus factory injectable
+For case5 use a minimal internal Sendable socket protocol plus factory injectable
 in an internal initializer, with EventSocket as the default adapter. Keep the
 existing public initializer behavior/API. The controlled actor records exact
 connect/disconnect/subscription operations and holds/delivers callbacks to expose
@@ -69,6 +72,8 @@ Check cancellation and current generation after token acquisition, receive and
 backoff awaits, before publishing callbacks, scheduling reconnect or creating a
 socket. A receive/heartbeat callback from an old socket must not cancel/replace
 the current one. Existing subscribe/replay and lastEventId behavior are preserved.
+Public connect also checks cancellation at its actor entry: a cancelled
+EventStream start Task must not spawn fresh unstructured work after its actor hop.
 Public connect is idempotent while connecting/connected/reconnecting; an explicit
 connect after disconnect remains supported. Do not rely on cancellation alone:
 token providers may finish late even after their task is cancelled.
@@ -123,3 +128,11 @@ ownership defects; no production deployment is part of this task.
 Resolved coordinator plan based on full source inspection and native peer probe.
 Independent technical review precedes worker implementation. No open product
 choices; report a scope mismatch before changing unrelated connection semantics.
+
+## Independent plan review
+
+research_cli identified a missing overlapping-lifetime proof: late token requestA
+after new lifetimeB is established on the same actor. Added case4 above, and
+explicit cancellation at public connect actor entry. Existing resync work already
+inside REST remains outside the task's cancellation claim. These technical
+clarifications preserve scope; root resolved them before worker execution.
