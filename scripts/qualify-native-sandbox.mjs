@@ -8,6 +8,7 @@ import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { finished } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -221,7 +222,12 @@ async function boundaries(receipt, { manager, client, guard, get, save }) {
   // No remote error text is printed or persisted.
   stream.stdout.on('error', () => {});
   stream.stderr.on('error', () => {});
-  assert.equal(await stream.exitCode, 7);
+  const [streamExit] = await Promise.all([
+    stream.exitCode,
+    finished(stream.stdout),
+    finished(stream.stderr),
+  ]);
+  assert.equal(streamExit, 7);
   assert.equal(stdout, 'FIRST\nSECOND\nTHIRD\n');
   assert.equal(stderr, 'ERR\n');
   const spreadMs = (arrivals.at(-1) ?? 0) - (arrivals[0] ?? 0);

@@ -132,8 +132,11 @@ export function createGuard({
         (!cleanup &&
           ((method === 'PUT' && suffix === '/files') ||
             (method === 'POST' &&
-              ['/executeShellCommand', '/files/mkdir', '/egresspolicy'].includes(suffix))));
+              ['/executeShellCommand', '/files/mkdir', '/egresspolicy', '/resume'].includes(
+                suffix,
+              ))));
       if (!allowed) return deny('mutation-path-denied');
+      if (suffix === '/resume' && init.body !== undefined) return deny('resume-body-denied');
       if (suffix === '/egresspolicy')
         assert.deepEqual(JSON.parse(init.body), { defaultAction: 'Deny' });
     }

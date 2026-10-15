@@ -153,12 +153,13 @@ Local proof command (Node22/pnpm9.15.4):
 npx -y -p node@22 -p pnpm@9.15.4 -c 'node --test scripts/qualify-native-sandbox.test.mjs'
 ```
 
-Thirteen tests pass: target/cache validation, forbidden HTTP mutation, durable
+Fourteen tests pass: target/cache validation, forbidden HTTP mutation, durable
 receipt/one-create ownership, header/body stalls, lost create response, WebSocket
 target/stall/frame constraints, wrong-label/preexisting cleanup refusal, exact
 discovery/deletion/preservation, unresolved absence, actual child death before
 cleanup, separate cleanup deadline, and real bundled production create/readiness/
-destroy through a synthetic transport. These tests prove local harness control;
+destroy through a synthetic transport, and exact owned-only resume constraints.
+These tests prove local harness control;
 they are not live Azure evidence. Syntax, targeted Biome, tracked secret scan
 and diff checks are recorded in ignored `.autopod-data/reliability/r01c/`.
 
@@ -167,3 +168,21 @@ model invocation or hosted mutation was performed by this worker. Phase2/live
 behavior and all cloud teardown assertions remain unproven. A host/parent SIGKILL
 or host outage still requires coordinator recovery from the private receipt;
 the supervised child deadline does not claim resilience to losing the supervisor.
+
+### Pre-live review correction
+
+Coordinator/reviewer identified the missing resume allowance used by extraction
+when a fresh sandbox GET is non-Running (or that GET fails). Running sandboxes
+return early and do not POST resume, so this was a suspended/transient path gap.
+The expanded fresh-source test forced Suspended and failed at the real client's
+resume request with `mutation-path-denied`; the receipt is
+`r01c/resume-before-fix.log`. The guard now permits only the owned sandbox's
+empty-body POST resume during work, with explicit unrelated/body/cleanup denials.
+
+The source-composition test also exercises archive upload, image/allocation reads,
+buffered exec, native stream script staging/frames, file roundtrip, suspended
+extraction, egress update and repeated destroy. Immediate synthetic stream frames
+exposed an observation race where exitCode resolved before Readable data drained;
+both harness and test now await stream completion before asserting content.
+No production behavior changed. The revised head remains paused for independent
+pre-live review; all Azure behavior is still unproven.

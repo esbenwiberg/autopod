@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { finished } from 'node:stream/promises';
 import test from 'node:test';
+import { gunzipSync } from 'node:zlib';
 import {
   API_VERSION,
   createGuard,
@@ -138,6 +140,28 @@ test('HTTP deadline covers stalled headers and stalled body and aborts transport
     await assert.rejects(guard.fetch(url('/sandboxes')));
     assert.equal(observedAbort, true);
   }
+});
+
+test('resume permits only the owned empty request during work, never unrelated or cleanup resume', async () => {
+  const { guard, calls } = fixture();
+  guard.adopt(object);
+  await guard.fetch(url(`/sandboxes/${object.id}/resume`), { method: 'POST' });
+  await assert.rejects(
+    guard.fetch(url(`/sandboxes/${object.id}/resume`), { method: 'POST', body: '{}' }),
+    /resume-body-denied/,
+  );
+  await assert.rejects(
+    guard.fetch(url('/sandboxes/unrelated-id/resume'), { method: 'POST' }),
+    /unowned-mutation-denied/,
+  );
+  assert.equal(calls.length, 1);
+  const cleanup = fixture({ cleanup: true });
+  cleanup.guard.adopt(object);
+  await assert.rejects(
+    cleanup.guard.fetch(url(`/sandboxes/${object.id}/resume`), { method: 'POST' }),
+    /mutation-path-denied/,
+  );
+  assert.equal(cleanup.calls.length, 0);
 });
 
 test('lost create response keeps durable intent and cannot cause a second wire request', async () => {
@@ -344,7 +368,7 @@ test('cleanup has its own hard deadline when its child never finishes', async ()
   }
 });
 
-test('fresh production source bundle uses the guarded native create/readiness/destroy path', async () => {
+test('fresh production source bundle exercises guarded adapter paths including suspended extraction', async () => {
   const dir = mkdtempSync(
     new URL('../packages/daemon/.turbo-r01c-test-', import.meta.url).pathname,
   );
@@ -354,15 +378,103 @@ test('fresh production source bundle uses the guarded native create/readiness/de
     const { AzureSandboxApiClient, SandboxContainerManager } = require(built.outfile);
     let deleted = false;
     let createCalls = 0;
+    let resumeCalls = 0;
+    let state = 'Running';
+    let policy = { defaultAction: 'Deny' };
+    let uploaded = false;
+    let streamFrames = 0;
+    const files = new Map();
     const { guard, receipt } = fixture({
       transport: async (input, init) => {
-        if (String(input).includes('/diskimages')) return response([disk]);
-        if (init.method === 'PUT') {
+        const request = new URL(input);
+        const path = request.pathname.slice(new URL(base).pathname.length);
+        if (path === '/diskimages') return response([disk]);
+        if (path === `/diskimages/${disk.id}`) return response(disk);
+        if (path === '/sandboxes' && init.method === 'PUT') {
           createCalls++;
           return response({ id: object.id }, 202);
         }
-        if (init.method === 'DELETE') deleted = true;
-        return deleted ? response({}, 404) : response(object);
+        if (path === `/sandboxes/${object.id}`) {
+          if (init.method === 'DELETE') deleted = true;
+          return deleted
+            ? response({}, 404)
+            : response({
+                ...object,
+                state,
+                resources: { memory: '1024Mi', cpu: '500m' },
+                egressPolicy: policy,
+                sourcesRef: { diskImage: { id: disk.id } },
+              });
+        }
+        if (path.endsWith('/resume') && init.method === 'POST') {
+          assert.equal(init.body, undefined);
+          resumeCalls++;
+          state = 'Running';
+          return new Response(null, { status: 204 });
+        }
+        if (path.endsWith('/egresspolicy') && init.method === 'POST') {
+          policy = JSON.parse(init.body);
+          return new Response(null, { status: 204 });
+        }
+        if (path.endsWith('/files')) {
+          const file = request.searchParams.get('path');
+          if (init.method === 'PUT') {
+            files.set(file, Buffer.from(init.body));
+            return new Response(null, { status: 204 });
+          }
+          assert(files.has(file));
+          return new Response(files.get(file));
+        }
+        if (path.endsWith('/files/list')) {
+          const folder = request.searchParams.get('path');
+          return response({
+            path: folder,
+            entries: [...files.keys()]
+              .filter((file) => file.startsWith(`${folder}/`))
+              .map((file) => ({
+                name: file.slice(folder.length + 1),
+                path: file,
+                isDirectory: false,
+              })),
+          });
+        }
+        if (path.endsWith('/executeShellCommand') && init.method === 'POST') {
+          const { command } = JSON.parse(init.body);
+          if (command.includes('autopod-volume-extract')) {
+            const archives = [...files].filter(([file]) => file.endsWith('.tar.gz'));
+            assert.equal(archives.length, 1);
+            assert(gunzipSync(archives[0][1]).includes(Buffer.from('from-host\n')));
+            uploaded = true;
+            return response({ stdout: '', stderr: '', exitCode: 0 });
+          }
+          if (command.startsWith('chmod '))
+            return response({ stdout: '', stderr: '', exitCode: 0 });
+          assert(command.includes('BUFFERED'));
+          return response({ stdout: 'BUFFERED', stderr: '', exitCode: 7 });
+        }
+        assert.fail('unexpected synthetic request');
+      },
+      socketFactory: () => {
+        const socket = {
+          close() {},
+          send(frame) {
+            const start = JSON.parse(frame);
+            assert.equal(start.type, 'start');
+            assert(files.get(start.start.command).includes(Buffer.from('STREAM')));
+            queueMicrotask(() => {
+              for (const event of [
+                { type: 'stdout', data: Buffer.from('STREAM').toString('base64') },
+                { type: 'stderr', data: Buffer.from('ERR').toString('base64') },
+                { type: 'exit_code', exitCode: 7 },
+              ]) {
+                streamFrames++;
+                socket.onmessage({ data: JSON.stringify(event) });
+              }
+            });
+          },
+        };
+        queueMicrotask(() => socket.onopen({}));
+        return socket;
       },
     });
     const logger = {
@@ -383,23 +495,75 @@ test('fresh production source bundle uses the guarded native create/readiness/de
           },
         },
         fetch: guard.fetch,
+        webSocket: guard.webSocket,
         retry: { maxAttempts: 1 },
         pollIntervalMs: 1,
       },
       logger,
     );
     const manager = new SandboxContainerManager(client, logger, { defaultTier: 'S' });
+    const inputDir = join(dir, 'input');
+    mkdirSync(inputDir);
+    writeFileSync(join(inputDir, 'input.txt'), 'from-host\n');
     assert.equal(
       await manager.spawn({
         image: target.image,
         podId: receipt.runId,
         env: {},
         networkPolicyMode: 'deny-all',
+        volumes: [{ host: inputDir, container: '/mnt/worktree' }],
       }),
       object.id,
     );
     assert.equal(createCalls, 1);
     assert.equal(receipt.acceptedId, object.id);
+    assert.equal(uploaded, true);
+    assert.equal(await client.getImageDigest(object.id), target.image.split('@')[1]);
+    assert.deepEqual(await client.getResourceAllocation(object.id), {
+      memoryLimitBytes: 2 ** 30,
+      cpuLimit: 0.5,
+    });
+    assert.deepEqual(
+      await manager.execInContainer(object.id, ['sh', '-c', 'printf BUFFERED; exit 7']),
+      { stdout: 'BUFFERED', stderr: '', exitCode: 7 },
+    );
+    const streaming = await manager.execStreaming(object.id, ['sh', '-c', 'printf STREAM; exit 7']);
+    let stdout = '';
+    let stderr = '';
+    streaming.stdout.on('data', (value) => {
+      stdout += value;
+    });
+    streaming.stderr.on('data', (value) => {
+      stderr += value;
+    });
+    const [streamExit] = await Promise.all([
+      streaming.exitCode,
+      finished(streaming.stdout),
+      finished(streaming.stderr),
+    ]);
+    assert.equal(streamExit, 7);
+    assert.equal(stdout, 'STREAM');
+    assert.equal(stderr, 'ERR');
+    assert.equal(streamFrames, 3);
+    await manager.writeFile(object.id, '/workspace/synthetic/input.txt', 'from-host\n');
+    await manager.writeFile(object.id, '/workspace/synthetic/output.txt', 'from-sandbox\n');
+    assert.equal(
+      await manager.readFile(object.id, '/workspace/synthetic/input.txt'),
+      'from-host\n',
+    );
+    state = 'Suspended'; // Running would early-return and hide the missing resume allowlist entry.
+    const outputDir = join(dir, 'output');
+    await manager.extractDirectoryFromContainer(object.id, '/workspace/synthetic', outputDir, [
+      'node_modules',
+    ]);
+    assert.equal(resumeCalls, 1);
+    assert.equal(readFileSync(join(outputDir, 'input.txt'), 'utf8'), 'from-host\n');
+    assert.equal(readFileSync(join(outputDir, 'output.txt'), 'utf8'), 'from-sandbox\n');
+    await manager.refreshFirewall(
+      object.id,
+      JSON.stringify({ sandboxEgressPolicy: { defaultAction: 'Deny', hostRules: [] } }),
+    );
+    assert.deepEqual(policy, { defaultAction: 'Deny' });
     await manager.kill(object.id);
     await manager.kill(object.id);
     assert.equal(deleted, true);
