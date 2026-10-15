@@ -28,7 +28,8 @@ Create a separate opt-in script under scripts (with narrow supporting script fil
 only if needed). Input is an explicit private selected-target JSON path, never
 implicit defaults or committed account IDs. Fail closed on missing/invalid exact
 subscription/group/location/immutable image/ready-disk ID. Use current authenticated
-Azure CLI account via existing SDK credential; verify matching subscription and
+Azure CLI account via explicitly injected AzureCliCredential (not the default
+credential chain); verify matching subscription and
 record metadata without token values. No login or registry exchange.
 
 One unique run/pod label and one create attempt, tierS (1GiB/0.5CPU), synthetic
@@ -52,6 +53,12 @@ Never delete based solely on a group-wide before/after difference.
 
 Fresh preflight must confirm selected Ready immutable cache identity, no stale
 same-source images, target account and group, and capture initial unrelated IDs.
+Native streaming bypasses fetch: inject a forwarding webSocket factory that
+allows only exact selected wss endpoint + accepted owned sandbox ID + /exec/stream.
+Preserve production frames and headers, enforce bounded connection/lifetime and
+frame/output sizes, and close every owned socket on deadline/failure. Its local
+tests must reject wrong endpoint/ID and bound a stalled connection. Do not log
+handshake headers. This seam constrains the live qualification, not production.
 Guard denied calls fail the proof; do not transparently rewrite production requests.
 Record safe request method/path/status/counts, never Authorization or token bodies.
 All synthetic payload/output is bounded; suppress arbitrary remote/log payloads.
@@ -113,3 +120,11 @@ No product API/schema/UI changes. Remove the opt-in qualification script to reve
 No automatic live CI, spend monitor or scheduled task. No assertion about a new
 worker image, model execution, full daemon bootstrap or complete pod lifecycle.
 No human judgment check is needed for these deterministic adapter assertions.
+
+## Independent plan review
+
+research_lifecycle confirmed the observed target, S-tier and existing cleanup APIs.
+Review caught streaming bypassing the fetch seam; root added an independently
+guarded forwarding WebSocket and wrong-target/stall tests. Explicit AzureCliCredential
+keeps account preflight and runtime identity on the same existing credential source.
+No unresolved plan decisions remain.
