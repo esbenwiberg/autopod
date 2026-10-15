@@ -100,12 +100,12 @@ choice or missing authority that repository evidence cannot establish.
 | ID | Task | Dependencies | Status / next action |
 |---|---|---|---|
 | R00 | Existing CI covers campaign PRs and contract paths | Baseline | Complete: PR #416 passed hosted checks and merged into campaign at 980e0b86 |
-| R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a complete (PR #417, ace8de29); R01b actual crash proof validating; native follow-up being narrowed |
+| R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a complete (PR #417); R01b complete (PR #419, cf8c6663), integrated43tests passed |
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | R03a complete: PR #420 merged at20b7652b, hosted+integrated proof passed |
-| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a confirmed pause/kill worker implementing; broader pending/draft slices remain |
+| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a PR #421 reviewed, awaiting hosted checks; broader pending/draft research ongoing |
 | R05 | Shared response/event contract scenarios | R00, R01 | Extend established fixture pattern for selected R03/R04 boundaries |
-| R06 | Lifecycle interruption scenarios and first extraction | R01 | Artifact finalization boundary researched; checking cycle reachability before characterization |
+| R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a cycle-fence worker reproducing public Pause/Message race before repair |
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | Separate wireframe batch and bounded task plans |
 | R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | Measure baseline first; compare same data/toolchain and record thresholds before optimizing |
 
@@ -247,3 +247,10 @@ R01b PR419 awaits hosted daemon/desktop checks after independent process proof.
 R04a worker implements the reviewed confirmed pause/kill plan with native
 component-composition evidence. Artifact-finalization ownership research is
 recorded separately; no manager extraction is authorized by that map alone.
+
+R01b is now merged atcf8c6663 after all hosted checks, with43 integrated tests
+passing. R04a independently reviewed at3918b6dd;20 focused invocations passed
+and native captures inspected; PR421 awaits hosted checks. R06a artifact cycle
+fence has a reviewed implementation plan incorporating cleanup's internal
+ownership assertions. R03b selects rejected401 response disposal as a bounded
+CLI transport repair; a universal timeout policy remains deliberately unselected.

@@ -130,7 +130,7 @@ the host Node24/native-ABI mismatch.
 - [x] Database integrity and foreign-key checks pass.
 - [x] Owned process/filesystem teardown verified.
 - [x] Relevant regression/build/type/lint/secret checks passed.
-- [ ] Independent final review and hosted PR checks recorded.
+- [x] Independent final review and hosted PR checks recorded.
 
 ## Performance, migration and rollback
 
@@ -195,3 +195,21 @@ Scope of proof: POSIX process death and real on-disk SQLite reopen through the
 production repository/reconciler boundary. It does not establish host power-loss
 durability, full daemon startup, provider behavior or Docker/real-container behavior.
 Windows explicitly skips the signal-specific case. No pods were started.
+
+## Independent review and integrated proof
+
+research_desktop independently reviewed final51d29bdd0b203aa5da9154a7a12881d7bd9b872e
+with no actionable findings, reran the actual process test and the negative
+startup/watchdog harness proof successfully. Root reviewed the complete new
+source/test files and relevant production boundary before PR419.
+
+https://github.com/esbenwiberg/autopod/pull/419 passed hosted CI (38784972448)
+and Desktop (38784972258), including build/test/typecheck/secret scan and native
+checks. It merged only into codex/reliability at
+cf8c66636e56a8e6fd44a8c7afeace4768f5d3d7. Root ran the integrated process,
+reconciler and completion-journal suites with SKIP_DB_TESTS=0:43tests passed.
+Evidence retained in `.autopod-data/reliability/r01b/` and
+`r01b-integrated.log`.
+
+Final scoped verdict: PROVEN on local macOS and hosted Linux process boundaries.
+The original full-daemon/provider/power-loss/Windows limitations remain.
