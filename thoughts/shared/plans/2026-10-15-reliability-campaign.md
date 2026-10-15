@@ -103,18 +103,17 @@ choice or missing authority that repository evidence cannot establish.
 | R01 | Verification harness feasibility and deterministic fixtures | R00 | R01a complete (PR #417); R01b complete (PR #419, cf8c6663), integrated43tests passed; R01c complete (#429,f818a8b3), live proof and hosted/integrated checks passed |
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | R03a complete (#420); R03b complete (#422,913c0622); hosted+integrated proof passed |
-| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b complete (#425,173d3450); R04c complete (#427,80fc8158; integrated18tests at43a5fad2 after fixture PR430); R04d Inline controls in rendered proof |
-| R05 | Shared response/event contract scenarios | R00, R01 | R05a complete (#426,98b9d912); hosted and integrated daemon/CLI/Swift proof passed |
+| R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b complete (#425,173d3450); R04c complete (#427,80fc8158; integrated18tests at43a5fad2 after fixture PR430); R04d PR431 reviewed/native proof passed, final hosted app build pending; draft retention remains |
+| R05 | Shared response/event contract scenarios | R00, R01 | R05a complete (#426,98b9d912); R05b decision identity/fencing implementing from36566b48 after reviewed plan |
 | R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a complete: PR423 merged at5cc8fbc6;704 integrated tests passed |
-| R07 | Existing navigation/readability/keyboard polish | R02, R04 | Separate wireframe batch and bounded task plans |
+| R07 | Existing navigation/readability/keyboard polish | R02, R04 | Researching existing navigation defects; separate wireframes before visible changes |
 | R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | R08a complete (#424,c1faba3a), hosted+integrated roundtrip passed; R08b complete (#428,04dabd6a), independent reproduction and hosted/integrated checks passed |
 
-R00 and the bounded R01a CLI executable harness have reviewed detailed plans.
-The remaining R01 harness slices need detailed plans. R02's design direction is
-selected; R04 still needs its task-specific implementation plan and evidence.
-R03-R08 are deliberately unresolved at implementation-detail level and must not
-be handed to executors as approved detailed specifications. They represent the
-agreed outcomes, with scope selected from new evidence.
+The ledger above is current; execution checkpoints below preserve chronology.
+Implemented slices each have their own reviewed RPI plan and proof. Remaining
+reconnect outcomes, reply drafts, orchestration extraction and navigation work
+still require bounded plans from current source evidence. A workstream heading
+is not an executable specification or permission for a speculative rewrite.
 
 ## Verification strategy
 
@@ -323,3 +322,19 @@ Swift/Xcode checks. Earlier compile/disk failures remain recorded. R04d preserve
 the duplicate POST/unconditional DELETE baseline, implemented owned controls at
 7530db73 and passed42focused invocations; independent source review found no
 actionable issues. Rendering and final frozen-head proof remain incomplete.
+
+R04d independently reviewed at4e91054c:31 focused functions passed and all47
+independently regenerated native PNGs matched the inspected worker captures.
+Worker full suite434 Swift Testing plus13 XCTest passed; existing opt-in live
+suite/test skipped. Root corrected the original no-skips evidence statement.
+PR431 targets campaign; reviewed conflict resolution at30278af1 preserved the
+whole packages tree and passed32 focused functions. Hosted general/Swift tests
+passed; final Xcode build remains pending. Evidence is retained in r04d/.
+
+R05b research corrected the reachable compact merge analysis and exposed discarded
+decision IDs plus late-resolution/REST question replacement. Root plan at36566b48
+was independently reviewed, including malformed-event scope and non-reused token
+proof after pod removal/reinsertion. Worker research_desktop reuses the completed
+R04c fixture checkout on codex/reliability-decision-identity; owns native identity
+and event-response fencing only. Draft storage/reply binding are not implemented.
+R07 navigation and server reply-admission research proceed read-only in parallel.
