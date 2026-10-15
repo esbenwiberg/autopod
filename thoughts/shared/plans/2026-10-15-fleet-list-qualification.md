@@ -22,8 +22,9 @@ The repository's existing benchmark pattern records source/runtime/fixture ident
 
 ## Phase 1: isolated benchmark and structural checks
 
-Add an opt-in Vitest qualification under `scripts/benchmarks/` and its explicit
-config. No production or ordinary CI workload changes, no new dependency. The
+Add an opt-in `.bench.mjs` Vitest qualification under `scripts/benchmarks/`
+and an explicit `.config.mjs` config. Use plain JavaScript with runtime assertions
+and `node --check`/Biome; do not claim daemon TypeScript covers these files. No production or ordinary CI workload changes, no new dependency. The
 benchmark filename must not match the default test glob. Invoke from repository
 root using the explicit config; require an explicit environment opt-in and fail
 with a useful command if absent. Force a single worker, no concurrent datasets.
@@ -32,11 +33,15 @@ Keep run output under ignored `.autopod-data/reliability/r08b/`, never source pa
 Use production podRoutes, real createPodRepository and createTestDb. A narrow
 manager facade may expose repository methods like the existing contract test;
 no mocked list/project/serialization implementation. Register no provider/network
-side effects and make no external requests. Close Fastify and SQLite in finally.
+side effects and make no external requests. Resolve Fastify with createRequire anchored to packages/daemon/package.json,
+using its installed dependency, with no new root dependency. Close Fastify and
+SQLite in nested finally blocks, so failed app closure cannot skip DB closure.
 Any local temporary files must be owned and removed on success/failure.
 
 Fixed datasets:100,1000,10000 pods, page size500. Each uses synthetic IDs and dates,
-with groups sharing createdAt to exercise the ID tie-breaker. Cycle statuses
+with groups of37 sharing createdAt so ties cross the500-record page boundary
+in the1000 and10000 datasets. Use ASCII fixed-width IDs and SQLite-compatible
+lexical ordering to exercise the ID tie-breaker. Cycle statuses
 running, paused, awaiting_input and complete; no validating/review-event workload
 is claimed. Use a4096-character synthetic task per row, a well-formed question for
 awaiting_input, and a real finalization row for every pod with deterministic
@@ -53,11 +58,16 @@ ceil(N/500); maximum500 records; no repeated cursor; final cursor null;200 statu
 bounded task excerpts and valid question/finalization summary; unrelated evidence
 absent from responses. Compare first and last tied-date groups explicitly. These
 checks must fail if a page repeats, drops, duplicates or reorders a record.
-Do not silently continue after a correctness failure or empty benchmark selection.
+Within every traversal, cap requests at ceil(N/500) and fail immediately if a
+non-null cursor would require more. This safety bookkeeping is timed consistently;
+it prevents broken pagination from hanging before post-run checks. Set a120-second
+whole-test timeout. Do not silently continue after a correctness failure or empty
+benchmark selection.
 
 ## Phase 2: measurement and evidence
 
-One untimed full traversal primes each dataset. Then seven measured traversals
+Keep all three fixture databases resident for the complete run and explicitly
+report that condition. One untimed full traversal primes each dataset. Then seven measured traversals
 per dataset, in rotating size order across rounds so one size is not always
 measured last. Fixed seeds and identical assertions in all runs. Use monotonic
 performance.now. Record per-page request+JSON-decode duration, first-page duration,
@@ -84,8 +94,10 @@ assuming causation. Never hide slow/error samples by rerunning until green.
 
 ## Phase 3: independent proof and integration
 
-Worker executes the complete protocol once under Node22/pnpm9.15.4, supported
-TypeScript/static checks for new files, scoped Biome, whitespace and secret scan.
+The exact reproduction command must first freshly build @autopod/shared and
+record hashes of its actually loaded dist output; direct Vitest bypasses daemon
+pretest. Worker executes the complete protocol once under Node22/pnpm9.15.4,
+node --check on both new MJS files, scoped Biome, whitespace and secret scan.
 Add small deterministic tests for any nontrivial report/statistics helpers only
 where they protect evidence correctness; avoid implementation-mirroring tests.
 An independent reviewer inspects fixture fidelity, timing boundary, ordering and
@@ -113,5 +125,9 @@ MainActor merge and visible rendering remain separate workloads.
 
 ## Status
 
-Root resolved technical plan under standing campaign authorization, awaiting
-independent plan review before delegation. No unresolved product choices.
+Independent plan review by research_desktop resolved four source-backed gaps:
+ties must cross page boundaries, traversal needs its own hard page cap, root
+Fastify resolution/static coverage must be explicit, and loaded shared output
+must be freshly built and hashed. Root incorporated those corrections plus
+resident-database accounting and nested cleanup. Resolved under standing campaign
+authorization; ready for implementation. No unresolved product choices.
