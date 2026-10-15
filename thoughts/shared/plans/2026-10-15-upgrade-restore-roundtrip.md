@@ -80,7 +80,7 @@ No human manual verification is needed for this disposable data contract.
 - [x] Separate restored copy upgrades and reopens with retained data/current schema.
 - [x] Original newer data and backup/receipt bytes remain unchanged.
 - [x] Idempotence, integrity/FKs, cleanup and broader qualification pass.
-- [ ] Independent pre-PR review, hosted and integrated proof recorded.
+- [x] Independent pre-PR review, hosted and integrated proof recorded.
 
 ## Compatibility, performance and rollback
 
@@ -155,3 +155,13 @@ support matrix, power-loss durability, client compatibility or performance targe
 The plan deliberately requires the affected qualification set rather than an
 additional unrelated full daemon run. Independent pre-PR review and hosted/
 integrated checks remain coordinator-owned and unchecked.
+
+## Coordinator integration proof
+
+Independent pre-PR review inspected the entire test and backup/migration context
+and reran the actual round trip at22f88734; no actionable findings. PR424 passed
+general CI38789895697 and native test/Xcode38789895670, then merged into
+codex/reliability atc1faba3a. The new round trip passed again on integration
+(one test,438ms; `.autopod-data/reliability/r08a-integrated.log`). Worker and
+review evidence is retained under `.autopod-data/reliability/r08a/`.
+Verdict remains PROVEN within the disposable historical-database scope above.

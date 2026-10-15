@@ -104,7 +104,7 @@ choice or missing authority that repository evidence cannot establish.
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | R03a complete (#420); R03b complete (#422,913c0622); hosted+integrated proof passed |
 | R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b socket ownership worker implementing reviewed plan; pending/draft research completed |
-| R05 | Shared response/event contract scenarios | R00, R01 | Extend established fixture pattern for selected R03/R04 boundaries |
+| R05 | Shared response/event contract scenarios | R00, R01 | R05a decision-response contract implementing reviewed plan; real baseline list/detail mismatch reproduced |
 | R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a complete: PR423 merged at5cc8fbc6;704 integrated tests passed |
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | Separate wireframe batch and bounded task plans |
 | R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | R08a upgrade/actual-backup/restore roundtrip at22f88734 in independent review; performance policy remains unselected |
@@ -277,3 +277,11 @@ independent final review. Live validation availability research records Docker
 timeout and hosted revision mismatch; no real-pod proof is claimed. Worker
 archival attempts for R00/R01a were refused because the worktrees are protected
 by a pinned task/workspace; source and evidence are retained, no forced deletion.
+
+R08a merged atc1faba3a after independent review and successful general/native
+hosted checks. Its real historical database upgrade/backup/restore/reupgrade test
+passed again after integration. R04b independent review inspected final source
+and reran15 native socket/control/resync/dedupe cases at3e97aed5 before PR425;
+all passed, with peer/session/listener teardown observed. R05a baseline reproduces
+list serialization dropping a valid escalation envelope that detail preserves;
+its bounded repair and cross-client contract fixtures are in implementation.
