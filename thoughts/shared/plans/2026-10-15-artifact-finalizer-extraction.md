@@ -122,7 +122,7 @@ closure. Existing gated live suites are skipped, not passing real-pod proof.
 - [x] Typed artifact boundary extracted without behavior or ownership changes.
 - [x] Identical characterization and interruption races pass after movement.
 - [x] Full daemon and supported build/typecheck/hygiene checks recorded.
-- [ ] Independent pre-PR, hosted and integrated checks complete.
+- [x] Independent pre-PR, hosted and integrated checks complete.
 
 No human manual judgment is required for this headless compatibility contract.
 Evidence uses real SQLite/filesystem with controlled runtime/container/Git adapters;
@@ -201,3 +201,14 @@ and evidence SHA256s, commands, versions, final revision and limitations. Privat
 test roots were removed and DBs/child copies settled by teardown; no pod, service,
 cloud resource or deployment was created. Independent pre-PR review, hosted checks
 and post-merge integration remain coordinator-owned and unchecked above.
+
+## Independent review and campaign closure
+
+Root and desktop reviewer found no actionable findings atd285b818. Root reran
+8focused characterization/cycle cases (666name-filtered), checked exact movement
+and all source/evidence hashes. PR434 passed general38806316467 and native
+38806316314 checks and merged at a1e048d1. Fresh integrated daemon/dependency
+ESM/declaration build plus all seven affected suites passed:708tests,zero skips.
+Evidence: campaign .autopod-data/reliability/r06b/root-proof.json and integrated.log.
+No real provider or Git push was used by these compatibility tests; the preserved
+limits above still apply.

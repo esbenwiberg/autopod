@@ -105,7 +105,7 @@ choice or missing authority that repository evidence cannot establish.
 | R03 | CLI transport and log-follow reliability | R01 | R03a complete (#420); R03b complete (#422,913c0622); hosted+integrated proof passed |
 | R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b complete (#425,173d3450); R04c complete (#427,80fc8158; integrated18tests at43a5fad2 after fixture PR430); R04d complete (#431,1ace904a), hosted/integrated32 tests and47 capture matches; R04e connection ownership implementing reviewed planf8693f23; draft retention follows |
 | R05 | Shared response/event contract scenarios | R00, R01 | R05a complete (#426,98b9d912); R05b complete (#432,be22402d); independent47tests/six captures, hosted and integrated47tests passed |
-| R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a complete (#423,5cc8fbc6); R06b independently reviewed, PR434 hosted checks pending |
+| R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a complete (#423,5cc8fbc6); R06b complete (#434,a1e048d1), independent/hosted and fresh-build integrated708tests passed |
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | R07a complete (#433,96783185); independent/hosted/integrated12functions and14 capture matches; literal mouse proof excluded |
 | R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | R08a complete (#424,c1faba3a), hosted+integrated roundtrip passed; R08b complete (#428,04dabd6a), independent reproduction and hosted/integrated checks passed |
 
@@ -374,3 +374,9 @@ R06b root reproduced8 characterization/cycle cases and independent reviewers fou
 no findings before PR434. R04e reviewed planf8693f23 includes source-key caching,
 handler ownership, late-error fencing and both explicit/automatic auth recovery
 wiring; research_desktop implements in the reused completed R05b checkout.
+
+R06b complete at a1e048d1: PR434 hosted general/native checks passed; fresh
+integrated daemon/dependency build and708affected tests passed with no skips.
+The first pod-manager extraction preserves artifact publication and ownership
+ordering through a typed module, with before/after characterization and real
+private-file copying. Decision draft research/plan follows while R04e implements.
