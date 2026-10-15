@@ -99,8 +99,8 @@ PR with base `codex/reliability`; observe hosted checks before integration.
 - [x] Real top-level error/nonzero exit behavior proven.
 - [x] Failure cleanup reaps children and removes owned resources.
 - [x] Existing CLI tests, relevant lint/typecheck and secret checks pass.
-- [ ] Independent plan review and final diff/proof review recorded.
-- [ ] Hosted checks observed for the final PR revision.
+- [x] Independent plan review and final diff/proof review recorded.
+- [x] Hosted checks observed for the final PR revision.
 
 ## Rollback and risk
 
@@ -110,6 +110,18 @@ connections and listeners attached too late. Explicit build, environment
 construction, bounded ownership and immediate listener registration address them.
 
 ## Status
+
+Completed and integrated: independent reviewer rebuilt and reran the three real
+executable scenarios on `8463781c22d9d8455e949c756b27f037d2c8f49b`, finding no
+actionable issues. PR https://github.com/esbenwiberg/autopod/pull/417 passed hosted
+build-and-test and secret-scan (run 38783243727), then merged only into
+codex/reliability at `ace8de295139748f447f22c948a10128d0d8dc6c`. Coordinator rebuilt
+shared+CLI and reran all three scenarios on that integration commit: passed.
+Verdict **PROVEN** for the scoped real-executable and cleanup claims on local
+macOS and hosted Linux; Windows remains unexecuted. Evidence retained under
+integration `.autopod-data/reliability/r01a/` and `r01a-integrated.log`.
+
+The following worker evidence preserves the implementation history.
 
 Prepared from delegated research. Independent technical plan review by
 research_cli completed on October 15. Its three clarifications (exact 403/exit 2
