@@ -182,3 +182,7 @@ Ignored evidence: `.autopod-data/reliability/r07a/proof.json`,
 mouse/focus probes. Scope-adjusted local proof is PROVEN; literal mouse activation
 remains unproven under the explicit root adjustment. Independent pre-PR review,
 hosted CI and integrated focused checks remain root-owned and unchecked above.
+
+Final review cleanup: the retained-content test's timeout label now says "keyboard
+activation" (it delivers Return). This is a diagnostic string correction only;
+full-run assertions and production source remain those verified at `927f39ef`.

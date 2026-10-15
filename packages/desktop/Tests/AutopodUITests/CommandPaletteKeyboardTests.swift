@@ -313,7 +313,7 @@ extension CommandPaletteKeyboardTests {
     try await view.query("recovery")
     try view.key(125, characters: "\u{F701}")
     try view.key(36)
-    try await view.wait("mouse activation") { !view.inputs.presented }
+    try await view.wait("keyboard activation") { !view.inputs.presented }
     #expect(view.inputs.owner.calls == ["pod:recovery-b"])
     view.inputs.presented = true
     try await view.refresh()
