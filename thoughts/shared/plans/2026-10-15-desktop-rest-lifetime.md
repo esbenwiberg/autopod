@@ -38,7 +38,10 @@ Baseline cases before product edits:
   series call returns nil. Exercise current B calls to prove normal behavior.
 - Hold A hydration; configure B; start/hold B same-ID hydration; finish A; call B
   hydration again and assert only one B request is active. Finish B and assert
-  caching suppresses a further redundant request. Reconfigure even to the same
+  caching suppresses a further redundant request. Also fail current B hydration,
+  await it, then hydrate again and assert a fresh request is admitted (failed
+  hydration must release its own admission without marking it hydrated).
+  Reconfigure even to the same
   API object and prove a fresh hydration is admitted.
 - Replace during A loadSessions' selected hydration await. A continuation cannot
   reset current loading or initiate quality-score work against B afterwards.
@@ -88,3 +91,10 @@ when switching to B, fence a new call made by an old ActionHandler after configu
 invalidate immediately on disconnect, or isolate other stores. Those boundaries
 are explicitly outside this change and must not be described as solved.
 Reverting requires no migration. No persistent state or wire contract changes.
+
+## Independent plan review
+
+research_cli found no design blocker and added a current-epoch hydration failure/
+retry case to verify defer ownership on both success and failure. Root accepted
+that addition. Internal pagination already inside DaemonAPI may continue for A;
+the store rejects its final result. This task does not cancel network requests.
