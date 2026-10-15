@@ -3,7 +3,7 @@
   "esbuild": "0.28.1",
   "revision": "32c94831a1a6cfcde4010ae73fe77534622664af",
   "files": {
-    "renderer.css": "184ec00cc4c192e4542b6d08ca6594a495c896b9e5fab1f82601cac28f353821",
+    "renderer.css": "664155cf8b7c3e20ca8c3519e85c44711f6be542089ba8c88f4b20bc2f20225b",
     "renderer.js": "e1990fe886ca0ecee64e20b8221e68427208b677a88a924a1cee15b0db008ca8",
     "upstream/README.md": "31874f397ed57da76a0b17dfaa9f49258626eef0e7ee14bfcd9b2721a8db5efb",
     "upstream/docs/asset-production.md": "2dc4311068efa6701efaace808ec12513d5e6e4a6a4152ec01656b373ab47cc8",

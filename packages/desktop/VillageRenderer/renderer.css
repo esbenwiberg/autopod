@@ -121,7 +121,8 @@ body {
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
-.camera-controls button, .camera-controls select {
+.camera-controls button,
+.camera-controls select {
   min-height: 32px;
   border: 1px solid #4a615b;
   border-radius: 6px;
@@ -135,4 +136,6 @@ body {
   background: #3c574b;
   color: #fff0cc;
 }
-.camera-controls select { max-width: 100%; }
+.camera-controls select {
+  max-width: 100%;
+}
