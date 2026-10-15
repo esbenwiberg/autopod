@@ -19031,6 +19031,194 @@ describe('PodManager', () => {
         expect(ctx.containerManager.kill).not.toHaveBeenCalled();
       });
 
+      it.each(['copy-success', 'copy-failure', 'before-cleanup'] as const)(
+        'fences old artifact finalization after public pause/message starts a new cycle: %s',
+        async (boundary) => {
+          const ctx = createTestContext();
+          ctx.deps.providerAttemptRepo = createProviderAttemptRepository(ctx.db);
+          ctx.runtime.suspend = vi.fn(async () => {});
+          const entered = deferred<void>();
+          const releaseOld = deferred<void>();
+          const resumed = deferred<void>();
+          const releaseWorker = deferred<void>();
+          const previousDataDir = process.env.DATA_DIR;
+          let dataDir: string | undefined;
+          let completing: Promise<void> | undefined;
+          let continuing: Promise<void> | undefined;
+          const within = async <T>(promise: Promise<T>, label: string): Promise<T> => {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            try {
+              return await Promise.race([
+                promise,
+                new Promise<never>((_, reject) => {
+                  timer = setTimeout(() => reject(new Error(`${label} did not settle`)), 5_000);
+                }),
+              ]);
+            } finally {
+              if (timer) clearTimeout(timer);
+            }
+          };
+          try {
+            dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autopod-artifact-cycle-'));
+            process.env.DATA_DIR = dataDir;
+            let copies = 0;
+            vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementation(
+              async (_id, _source, target) => {
+                const first = ++copies === 1;
+                fs.writeFileSync(
+                  path.join(target, 'report.md'),
+                  first ? 'old report' : 'new report',
+                );
+                if (first && boundary !== 'before-cleanup') {
+                  entered.resolve();
+                  await releaseOld.promise;
+                  if (boundary === 'copy-failure') throw new Error('old copy failed');
+                }
+              },
+            );
+            if (boundary === 'before-cleanup') {
+              ctx.deps.beforeContainerCleanup = vi.fn(async () => {
+                entered.resolve();
+                await releaseOld.promise;
+              });
+            }
+            vi.mocked(ctx.runtime.resume).mockImplementation(async function* () {
+              resumed.resolve();
+              await releaseWorker.promise;
+              yield { type: 'complete', timestamp: new Date().toISOString(), result: 'New report' };
+            });
+            const manager = createPodManager(ctx.deps);
+            const pod = manager.createSession(
+              {
+                profileName: 'test-profile',
+                task: 'Collect report',
+                options: {
+                  agentMode: 'auto',
+                  output: 'artifact',
+                  validate: false,
+                  promotable: false,
+                },
+              },
+              'user-1',
+            );
+            ctx.podRepo.update(pod.id, { status: 'running', containerId: 'container-abc' });
+            // Only initial resources are fixture state. Both journal cycles and
+            // durable worker admissions come from the production event consumer.
+            await manager.consumeAgentEvents(
+              pod.id,
+              (async function* () {
+                yield {
+                  type: 'complete',
+                  timestamp: new Date().toISOString(),
+                  result: 'Old report',
+                };
+              })(),
+            );
+            const first = ctx.podRepo.getOrThrow(pod.id);
+            expect(first.finalization).toMatchObject({ cycle: 1, phase: 'ready' });
+            expect(ctx.podRepo.taskExecutions?.hasActiveRun(pod.id)).toBe(false);
+            completing = manager.handleCompletion(pod.id);
+            void completing.catch(() => {});
+            await within(entered.promise, 'old artifact boundary');
+            await within(manager.pauseSession(pod.id), 'public pause');
+            expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('paused');
+            continuing = manager.sendMessage(pod.id, 'Revise the report');
+            void continuing.catch(() => {});
+            await within(resumed.promise, 'resumed worker admission');
+
+            const active = ctx.podRepo.getOrThrow(pod.id);
+            expect(active).toMatchObject({
+              status: 'running',
+              lifecycleGeneration: first.lifecycleGeneration,
+              containerId: first.containerId,
+              finalization: {
+                cycle: 2,
+                phase: 'running',
+                agentSettledAt: null,
+                sourcePreservedAt: null,
+              },
+            });
+            expect(ctx.podRepo.taskExecutions?.hasActiveRun(pod.id)).toBe(true);
+            const journals = () =>
+              ctx.db
+                .prepare('SELECT * FROM pod_finalizations WHERE pod_id = ? ORDER BY cycle')
+                .all(pod.id);
+            const beforeJournals = journals();
+            const effects = () => ({
+              kills: vi.mocked(ctx.containerManager.kill).mock.calls.length,
+              stops: vi.mocked(ctx.containerManager.stop).mock.calls.length,
+              pushes: vi.mocked(ctx.worktreeManager.pushBranch).mock.calls.length,
+              worktrees: vi.mocked(ctx.worktreeManager.create).mock.calls.length,
+              terminalEvents: ctx.eventRepo
+                .getForSession(pod.id)
+                .filter(
+                  (event) =>
+                    event.payload.type === 'pod.completed' ||
+                    (event.payload.type === 'pod.status_changed' &&
+                      ['complete', 'failed', 'killed'].includes(event.payload.newStatus)),
+                ).length,
+            });
+            const beforeEffects = effects();
+            if (boundary === 'before-cleanup') {
+              expect(active.artifactsPath).not.toBeNull();
+              expect(
+                fs.readFileSync(path.join(active.artifactsPath as string, 'report.md'), 'utf8'),
+              ).toBe('old report');
+            } else expect(active.artifactsPath).toBeNull();
+
+            releaseOld.resolve();
+            await within(completing, 'superseded artifact finalization');
+            expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+              status: 'running',
+              lifecycleGeneration: active.lifecycleGeneration,
+              containerId: active.containerId,
+              worktreePath: active.worktreePath,
+              branch: active.branch,
+              artifactsPath: active.artifactsPath,
+              failureReason: active.failureReason,
+              finalization: active.finalization,
+            });
+            expect(journals()).toEqual(beforeJournals);
+            expect(ctx.podRepo.taskExecutions?.hasActiveRun(pod.id)).toBe(true);
+            expect(effects()).toEqual(beforeEffects);
+            const artifactRoot = path.join(dataDir, 'artifacts', pod.id);
+            expect(fs.readdirSync(artifactRoot).some((name) => name.startsWith('.collect-'))).toBe(
+              false,
+            );
+            if (boundary !== 'before-cleanup') expect(fs.readdirSync(artifactRoot)).toEqual([]);
+
+            releaseWorker.resolve();
+            await within(continuing, 'new worker completion');
+            const complete = ctx.podRepo.getOrThrow(pod.id);
+            expect(complete).toMatchObject({
+              status: 'complete',
+              lifecycleGeneration: first.lifecycleGeneration,
+              finalization: { cycle: 2, phase: 'finished', result: 'New report' },
+            });
+            expect(complete.artifactsPath).not.toBe(active.artifactsPath);
+            expect(
+              fs.readFileSync(path.join(complete.artifactsPath as string, 'report.md'), 'utf8'),
+            ).toBe('new report');
+            expect(ctx.podRepo.taskExecutions?.hasActiveRun(pod.id)).toBe(false);
+            expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
+            expect(ctx.containerManager.kill).toHaveBeenCalledTimes(beforeEffects.kills + 1);
+            expect(effects().terminalEvents).toBe(beforeEffects.terminalEvents + 1);
+          } finally {
+            releaseOld.resolve();
+            releaseWorker.resolve();
+            try {
+              await within(Promise.allSettled([completing, continuing]), 'owned work teardown');
+            } finally {
+              ctx.db.close();
+              if (previousDataDir === undefined) Reflect.deleteProperty(process.env, 'DATA_DIR');
+              else process.env.DATA_DIR = previousDataDir;
+              if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
+            }
+          }
+        },
+        20_000,
+      );
+
       it('does not push a native repository artifact when only artifact delivery was requested', async () => {
         const ctx = createTestContext();
         const manager = createPodManager(ctx.deps);
