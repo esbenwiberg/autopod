@@ -119,9 +119,9 @@ closure. Existing gated live suites are skipped, not passing real-pod proof.
 ## Acceptance and limits
 
 - [x] Added public characterization passes on unchanged source with recorded SHA.
-- [ ] Typed artifact boundary extracted without behavior or ownership changes.
-- [ ] Identical characterization and interruption races pass after movement.
-- [ ] Full daemon and supported build/typecheck/hygiene checks recorded.
+- [x] Typed artifact boundary extracted without behavior or ownership changes.
+- [x] Identical characterization and interruption races pass after movement.
+- [x] Full daemon and supported build/typecheck/hygiene checks recorded.
 - [ ] Independent pre-PR, hosted and integrated checks complete.
 
 No human manual judgment is required for this headless compatibility contract.
@@ -164,3 +164,40 @@ with a 3-second timeout; tests await callback settlement and restore the mock.
 Hook and kill observations both verify receipt/content and durable publication
 before completion. The five cases close their SQLite DBs and use existing private
 completion DATA_DIR teardown. No provider request or real Git push occurs.
+
+## Implementation evidence: Phases 2–3
+
+Phase 1 was committed/pushed as72076f9f081d3ebe745167196afe33854e898a0a.
+The extracted195-line artifact-finalizer module has typed collaborators and
+returns the two existing functions. Manager wiring preserves shared policy,
+public admission, both promise registries, cleanup and transition ownership.
+Private verify-movement.py compares both moved guard/function blocks exactly
+against that characterization commit, allowing only the container-selection
+adapter rename; both comparisons pass. Existing manager imports remain needed
+by other callers. No production behavior fix was mixed into the move.
+
+Final source verification (all exit0):
+
+| Check | Observed result | Private evidence under .autopod-data/reliability/r06b/ |
+|---|---|---|
+| Same focused command as Phase 1 | 8 passed, 666 name-filtered skips, 1 file | characterization-after.log |
+| Planned seven affected suites | 708 passed, 7 files, zero skips | affected.log |
+| Full daemon test command | 6128 passed, 10 skipped; 394 passed files, 5 skipped | daemon-full.log |
+| Daemon and dependency build | ESM and declarations passed | build.log |
+| Supported daemon typecheck | Declaration build passed | typecheck-secrets.log |
+| Scoped Biome on all three TS files | Passed without changes | biome-final.log |
+| Secret scanner after staging new module | Passed (scanner enumerates tracked/index files) | secrets-final.log |
+| Diff whitespace check and exact movement comparison | Passed | diff-check.log, movement.json |
+
+The full daemon run took94.57s. The affected local sandbox-adapter test used18
+simulated client requests across three stages and real local archive/filesystem
+operations; it did not contact Azure. Gated container/live tests and platform
+skips remain unproven. Existing process-boundary tests in the broader daemon suite
+are not artifact-specific crash qualification. No standalone factory mock test
+was added: public tests exercise both new wiring and the real copied bytes.
+
+Source stayed unchanged throughout final checks. proof.json records exact source
+and evidence SHA256s, commands, versions, final revision and limitations. Private
+test roots were removed and DBs/child copies settled by teardown; no pod, service,
+cloud resource or deployment was created. Independent pre-PR review, hosted checks
+and post-merge integration remain coordinator-owned and unchecked above.
