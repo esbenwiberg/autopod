@@ -78,10 +78,10 @@ new store and affected confirmed-action tests on integration.
 
 ## Acceptance
 
-- [ ] Baseline superseded responses reproduce failures.
-- [ ] All six async entry points reject superseded results/follow-up work.
-- [ ] Hydration admission and loading/error cleanup retain current ownership.
-- [ ] Current behavior and existing event merge tests pass.
+- [x] Baseline superseded responses reproduce failures.
+- [x] All six async entry points reject superseded results/follow-up work.
+- [x] Hydration admission and loading/error cleanup retain current ownership.
+- [x] Current behavior and existing event merge tests pass.
 - [ ] Independent pre-PR, hosted and integrated proof complete.
 
 ## Limits and rollback
@@ -98,3 +98,53 @@ research_cli found no design blocker and added a current-epoch hydration failure
 retry case to verify defer ownership on both success and failure. Root accepted
 that addition. Internal pagination already inside DaemonAPI may continue for A;
 the store rejects its final result. This task does not cancel network requests.
+
+## Implementation evidence
+
+Phase 1: production remains unchanged. `swift test --package-path packages/desktop
+--no-parallel --filter PodStoreLifetimeTests` exited 1: seven test functions,
+six failed and fixture failure-cleanup passed, 42 issues in 100.734 seconds.
+Evidence: `.autopod-data/reliability/r04c/baseline.log`. Assertions demonstrate old
+fleet/selection/error/loading writes, unwanted B score follow-ups, old detail
+hydration, scores/series/diff writes, suppressed B hydration and A-object reuse.
+Some additional baseline issues are expected fail-safe deadlines releasing the
+unfixed implementation's unexpected requests. These are not counted as separate
+product defects. Held REST transport was extracted without behavioral changes;
+only its registry became test-module internal for sharing.
+
+Phase 2: `PodStore` now advances an epoch on every configure, resets only
+hydration admission and transient loading/error state, and rejects superseded
+responses before writes. List catch/cleanup/follow-up and hydration defer retain
+epoch ownership. Visible caches and existing merge/revision rules are unchanged.
+Production diff: 24 added lines and one removed line.
+
+Phase 3 worker validation (Swift 6.3.3, macOS arm64):
+
+- `swift test --package-path packages/desktop --no-parallel --filter PodStoreLifetimeTests`
+  — exit 0; seven functions / fourteen scenarios, no deadline expirations or
+  active fixture requests at cleanup (`fixed-regression.log`).
+- `swift test --package-path packages/desktop --no-parallel --filter 'PodStoreLifetimeTests|PodStoreFleetTests|confirmedAction|confirmedKill|ReplyDecisionRetentionTests|PodMapperTests|EventStreamResyncTests'`
+  — exit 0; 50 tests in three suites (`affected-tests.log`).
+- `swift test --package-path packages/desktop --no-parallel`
+  — exit 0; 13 XCTest tests and 418 Swift Testing tests in 15 suites
+  (`swift-tests.log`). Existing opt-in LiveVillageConnectionTests and its test
+  explicitly skipped. No live credentials or services were used.
+- `swift build --package-path packages/desktop --product AutopodDesktopExe`
+  — exit 0 (`swift-build.log`).
+- `node scripts/secret-scan.mjs` and `git diff --check bafc75bf1376ffcb2d5670c626731f2334d0f3c7`
+  — exit 0 (`secret-scan.log`, `diff-check.log`).
+
+All logs live under ignored `.autopod-data/reliability/r04c/`. Baseline commit
+`929e0a05` preserves the failures against unchanged production. An initial
+incremental rebuild diagnosed a sending closure in unchanged EventStreamResyncTests;
+a clean rebuild removed that diagnostic. That clean build was then rejected
+because an EOF whitespace correction was made during compilation. Sources were
+frozen and the regression, affected, full-suite and build commands above passed.
+No unrelated code was changed to address those build attempts.
+
+Worker verdict: PROVEN for the configured response-epoch contract only. Existing
+fixture closure invocation and real URLSession decoding prove store behavior;
+there is no full-app, visual, live-daemon, immediate-disconnect, transport
+cancellation, cached-daemon separation or old-action admission claim. Final
+revision and source/log hashes are recorded in ignored `proof.json`. Independent
+review, hosted checks and integrated rerun remain root-owned and unchecked.
