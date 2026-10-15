@@ -104,7 +104,7 @@ choice or missing authority that repository evidence cannot establish.
 | R02 | Desktop connection/action wireframes | Campaign research | Wireframes shown; user selected Inline status; carry direction into R04 plan |
 | R03 | CLI transport and log-follow reliability | R01 | R03a complete (#420); R03b complete (#422,913c0622); hosted+integrated proof passed |
 | R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | R04a complete (#421); R04b complete (#425,173d3450); R04c complete (#427,80fc8158; integrated18tests at43a5fad2 after fixture PR430); R04d complete (#431,1ace904a), hosted/integrated32 tests and47 capture matches; draft retention remains |
-| R05 | Shared response/event contract scenarios | R00, R01 | R05a complete (#426,98b9d912); R05b independently reviewed at a8ca3f51; PR432 awaits hosted checks after47 focused tests and six inspected native captures |
+| R05 | Shared response/event contract scenarios | R00, R01 | R05a complete (#426,98b9d912); R05b complete (#432,be22402d); independent47tests/six captures, hosted and integrated47tests passed |
 | R06 | Lifecycle interruption scenarios and first extraction | R01 | R06a complete: PR423 merged at5cc8fbc6;704 integrated tests passed |
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | R07a keyboard lifetime implementing reviewed plan21b50a2b; native baseline reproduced stale Return selection; inline wireframe shown |
 | R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | R08a complete (#424,c1faba3a), hosted+integrated roundtrip passed; R08b complete (#428,04dabd6a), independent reproduction and hosted/integrated checks passed |
@@ -361,3 +361,9 @@ and dependency builds passed; managed/upgrade/restore checks397passed,4skipped
 (42filespassed,1skipped), shared417passed, secret scan/diffcheck passed. This
 incorporates existing main work; no live Docker/provider or deployment claim.
 Evidence: .autopod-data/reliability/main-checkpoint/.
+
+R05b complete atbe22402d: PR432 hosted general/native checks and integrated47
+functions/6suites passed; reviewed desktop source unchanged. Decision identity is
+now available for later drafts. R06b first characterization committed72076f9f on
+unchanged production:5newcases plus3cycle races passed; extraction implementing.
+R07a native keyboard fix passed workerfullsuite and is entering independent review.

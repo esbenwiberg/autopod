@@ -149,7 +149,7 @@ assertion. These are technical corrections within standing campaign authority.
 - [x] Held pre-event REST cannot replace or resurrect the decision group.
 - [x] Unknown identity and later authoritative reconciliation covered.
 - [x] Native question/option retention captures inspected.
-- [ ] Independent pre-PR, hosted and integrated verification passed.
+- [x] Independent pre-PR, hosted and integrated verification passed.
 
 This local event/request fence is not universal cross-stream linearizability.
 The wire has no decision revision on compact rows and timestamps are not unique.
@@ -220,3 +220,14 @@ joinable by the fixture; successful assertions await its state, and teardown
 invalidates the store epoch, disconnects the controlled socket and releases all
 private requests/sessions. Independent pre-PR review, hosted checks and integrated
 verification remain root-owned pending gates.
+
+## Coordinator closure
+
+Independent source review at a8ca3f51 found no remaining actionable issues. Root
+reran47affected functions/6suites and inspected all six regenerated native images.
+Existing opt-in live skip accounting was corrected before PR432. Hosted general
+38803251049 and native38803251104 passed; PR432 merged atbe22402d. Integrated
+47functions/6suites passed at97638457 with unchanged desktop source and regenerated
+captures. Root proof/logs retained in campaign .autopod-data/reliability/r05b/.
+Native component, controlled-transport and unjoined event-refresh limitations
+remain; no full-app, draft retention or reply-acceptance expansion is claimed.
