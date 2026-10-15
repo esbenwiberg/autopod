@@ -116,11 +116,11 @@ contracts; the actual terminal output is captured by the executable tests.
 
 ## Acceptance
 
-- [ ] Baseline abnormal close reproduced as wrong exit0.
-- [ ] Final drop/graceful/auth/protocol/connection failure codes/messages proven.
-- [ ] Ctrl+C works while connecting and after subscribing.
-- [ ] Aliases, normal log errors and reasoning formatting preserved.
-- [ ] No duplicate diagnostics, leaked signal handlers or socket resources.
+- [x] Baseline abnormal close reproduced as wrong exit0.
+- [x] Final drop/graceful/auth/protocol/connection failure codes/messages proven.
+- [x] Ctrl+C works while connecting and after subscribing.
+- [x] Aliases, normal log errors and reasoning formatting preserved.
+- [x] No duplicate diagnostics, leaked signal handlers or socket resources.
 - [ ] Full CLI/relevant checks pass; independent review completed before PR.
 - [ ] Hosted checks and integrated result recorded.
 
@@ -138,3 +138,62 @@ findings. Deterministic output and race/listener proof details incorporated abov
 R01a is integrated at ace8de29; implementation authorized under the user's standing
 campaign instruction and Go. Scope excludes reconnect/replay, generic HTTP
 deadlines and unrelated CLI commands.
+
+## Implementation and local evidence — 2026-10-15
+
+Worker branch: `codex/reliability-log-follow`, forked from
+`74a5b2cfd4e8dfdd2534a6067609b19a9607b125`. Local implementation/proof phases
+are complete. Independent review, PR hosted checks and integration remain pending
+and are owned by the campaign root; no PR was created by this worker.
+
+`utils/log-follow.ts` now owns the subscription lifetime and chooses the first
+terminal cause, retaining its error listener until the socket closes. `pod.ts`
+awaits that promise and leaves diagnostics/exit codes to the existing CLI handler.
+The existing formatter, banner, flags, token acquisition and non-follow behavior
+remain in the command. The executable fixture adds an owned loopback WS peer,
+subscription/request/output barriers and normal signal delivery distinct from
+fixture-forced cleanup. The three original HTTP executable tests are unchanged.
+
+**Local prove-work verdict: PROVEN for the bounded CLI contract on macOS/Node22.**
+This verdict does not claim hosted checks, Windows Ctrl+C, live daemon/provider
+behavior, reconnection or independent review.
+
+| Claim | Observable evidence | Result |
+|---|---|---|
+| Regression exists before repair | Fresh baseline bundle received `[error] Worker diagnostic` before TCP drop; new executable regression failed with actual exit0 versus expected1 | Proven |
+| Disconnects fail accurately | Built executable close1006/1000 exit1 with exact reconnect stderr; close4001 exit2 with login suggestion | Proven |
+| Protocol and handshake failures do not silently succeed | Peer sends top-level error and stays open: child exit1 and peer closes; HTTP403 handshake exits1 with exactly one socket diagnostic | Proven |
+| Ctrl+C is intentional success | Real SIGINT after subscription and during held upgrade: normal exit0, no signal termination, no fixture cancellation/watchdog/error | Proven on POSIX |
+| Existing output/flags remain | Both aliases; hidden/default and visible reasoning; nested worker error retained; follow still takes precedence over build | Proven |
+| First outcome and ownership survive races | Focused fake-event tests for failure→SIGINT, SIGINT→error/close, owned-only listener removal, synchronous send/open throws and send callback failure | Proven |
+| Test fixtures release resources | Child close barrier, peer closure before teardown for accepted streams, zero sockets/child timers, stopped server and removed private tree after disposal; original held-HTTP cleanup case still passes | Proven |
+
+Commands ran using `npx -y -p node@22 -p pnpm@9.15.4 -c '<command>'`
+(Node v22.23.3; pnpm9.15.4):
+
+- `pnpm install --frozen-lockfile` — passed.
+- `pnpm --filter @autopod/cli... build` — shared and CLI freshly built, passed.
+- Before production edits: `pnpm --filter @autopod/cli exec vitest run src/commands/log-follow.test.ts --reporter=json --outputFile=../../.autopod-data/reliability/log-follow-before.json`
+  — expected regression failure, actual exit0.
+- `pnpm --filter @autopod/cli exec vitest run src/commands/log-follow.test.ts src/utils/log-follow.test.ts src/index.test.ts`
+  — 3 files/17 tests passed.
+- `pnpm --filter @autopod/cli exec vitest run --reporter=json --outputFile=../../.autopod-data/reliability/log-follow-suite.json`
+  — all 38 files/325 tests passed.
+- `pnpm --filter @autopod/cli typecheck` — passed.
+- `pnpm --filter @autopod/cli exec tsc --noEmit --target ES2022 --module ESNext --moduleResolution bundler --strict --noUncheckedIndexedAccess --noUnusedLocals --noUnusedParameters --skipLibCheck src/commands/log-follow.test.ts src/utils/log-follow.test.ts src/index.test.ts`
+  — passed, including the fixture/helper imports.
+- `pnpm exec biome check packages/cli/src/utils/log-follow.ts packages/cli/src/utils/log-follow.test.ts packages/cli/src/commands/log-follow.test.ts packages/cli/src/test-utils/cli-executable.ts packages/cli/src/commands/pod.ts`
+  — passed.
+- `pnpm secret-scan` — passed with new source files staged for scanner visibility.
+- `git diff --check` — passed.
+
+Ignored evidence is retained in this worker's `.autopod-data/reliability/`:
+`log-follow-before.json`, `log-follow-before.log`, `log-follow-development.log`,
+`log-follow-suite.json`, `log-follow-validation.log`, `log-follow-secret-scan.log`.
+Final revision is recorded in `log-follow-revision.txt` after commit; the root's
+independent review must build and rerun executable proof at that revision.
+
+No material plan mismatch. One validation invocation initially put reporter
+options directly on `pnpm test`, which pnpm rejected before executing any tests;
+the corrected `pnpm exec vitest run` command above completed successfully. No
+manual user verification is asserted or required by this bounded plan.
