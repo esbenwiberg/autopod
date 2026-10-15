@@ -78,7 +78,7 @@ new store and affected confirmed-action tests on integration.
 
 ## Acceptance
 
-- [ ] Baseline superseded responses reproduce failures.
+- [x] Baseline superseded responses reproduce failures.
 - [ ] All six async entry points reject superseded results/follow-up work.
 - [ ] Hydration admission and loading/error cleanup retain current ownership.
 - [ ] Current behavior and existing event merge tests pass.
@@ -98,3 +98,16 @@ research_cli found no design blocker and added a current-epoch hydration failure
 retry case to verify defer ownership on both success and failure. Root accepted
 that addition. Internal pagination already inside DaemonAPI may continue for A;
 the store rejects its final result. This task does not cancel network requests.
+
+## Implementation evidence
+
+Phase 1: production remains unchanged. `swift test --package-path packages/desktop
+--no-parallel --filter PodStoreLifetimeTests` exited 1: seven test functions,
+six failed and fixture failure-cleanup passed, 42 issues in 100.734 seconds.
+Evidence: `.autopod-data/reliability/r04c/baseline.log`. Assertions demonstrate old
+fleet/selection/error/loading writes, unwanted B score follow-ups, old detail
+hydration, scores/series/diff writes, suppressed B hydration and A-object reuse.
+Some additional baseline issues are expected fail-safe deadlines releasing the
+unfixed implementation's unexpected requests. These are not counted as separate
+product defects. Held REST transport was extracted without behavioral changes;
+only its registry became test-module internal for sharing.
