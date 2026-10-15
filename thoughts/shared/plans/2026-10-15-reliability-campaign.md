@@ -100,7 +100,7 @@ choice or missing authority that repository evidence cannot establish.
 | ID | Task | Dependencies | Status / next action |
 |---|---|---|---|
 | R00 | Existing CI covers campaign PRs and contract paths | Baseline | Independently reviewed; PR #416 open against campaign branch; hosted checks running |
-| R01 | Verification harness feasibility and deterministic fixtures | R00 | Research existing loopback, native UI, process and container seams; prove cleanup and isolation before live tests |
+| R01 | Verification harness feasibility and deterministic fixtures | R00 | Feasibility researched; R01a CLI executable plan independently reviewed and ready |
 | R02 | Desktop connection/action wireframes | Campaign research | Interactive proposals prepared and browser-checked; present before visible implementation |
 | R03 | CLI transport and log-follow reliability | R01 | Task-specific research/plan; include actual executable exit/output and replay behavior |
 | R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | Task-specific research/plan; deterministic store tests plus actual app proof |
@@ -109,7 +109,8 @@ choice or missing authority that repository evidence cannot establish.
 | R07 | Existing navigation/readability/keyboard polish | R02, R04 | Separate wireframe batch and bounded task plans |
 | R08 | Representative performance, upgrade and restore qualification | R01; affected changes integrated | Measure baseline first; compare same data/toolchain and record thresholds before optimizing |
 
-Only R00 is implementation-ready now. R01/R02 are bounded research/design work.
+R00 and the bounded R01a CLI executable harness have reviewed detailed plans.
+The remaining R01 harness slices and R02 stay bounded research/design work.
 R03-R08 are deliberately unresolved at implementation-detail level and must not
 be handed to executors as approved detailed specifications. They represent the
 agreed outcomes, with scope selected from new evidence.
@@ -192,8 +193,18 @@ blockers. R00 worker commit `9592eee6` passed independent pre-PR review and
 rerunnable local proof (60 routing cases, eight before/after assertions, parsed
 workflow preservation, scope and whitespace). PR #416 targets this branch:
 https://github.com/esbenwiberg/autopod/pull/416. Hosted CI and desktop checks
-started; integration waits for their result. R01 feasibility research is delegated
-across CLI, native desktop and lifecycle boundaries.
+started; integration waits for their result. R01 feasibility research across CLI,
+native desktop and lifecycle boundaries is recorded in
+`thoughts/shared/research/2026-10-15-reliability-verification-seams.md`.
+The first executable harness plan is `2026-10-15-cli-executable-proof.md`;
+independent plan review clarified private environment probes, precise permission
+error behavior, and waiting for subprocess stream closure. Implementation has
+not started. Native full-app isolation requires a separate planned bootstrap;
+model/view tests do not establish that isolation.
+
+Baseline logs are copied from /tmp into the integration worktree's ignored
+`.autopod-data/reliability/baseline/`. R00 local script/JSON evidence is also
+retained in `.autopod-data/reliability/r00/` before any worker archival.
 
 R02 proposals are in `2026-10-15-desktop-state-wireframes.html`: Inline status
 and Action panel, with connected, pending pause, disconnected outcome, rejected,
