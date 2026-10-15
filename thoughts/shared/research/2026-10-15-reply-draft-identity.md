@@ -109,3 +109,44 @@ question text and settlement metadata cannot substitute for an active ID.
 Server-side expected-decision binding and complete cross-stream ordering are
 separate from merely retaining client text. No mutation/API/storage changes are
 authorized by this research artifact alone.
+
+## Follow-up Research: connection provenance and retained owner
+
+At campaignddd3c492, research_desktop traced both application entrypoints,
+ConnectionManager, AppRootView, PodStore, ActionHandler and current reply views.
+Root reread the entrypoint, connection switching/disconnect, model and affected
+store/action/view paths. R05b subsequently merged atbe22402d: its identity fields
+and fences supersede the earlier statements that IDs are discarded, but do not
+provide connection provenance or draft ownership. No new tests run for this trace.
+
+PodStore is app-level State in both AutopodDesktopExe/AutopodApp.swift and
+Autopod/AutopodXcodeApp.swift. Every handler replacement receives that same store.
+wireUpConnection has saved conn.id but currently passes it to neither store nor
+handler. Disconnect tears down EventStream only; reconnect configures the same
+store and replaces ActionHandler. Store configure retains visible pods, selection
+and cached data while advancing its REST response epoch. Therefore already-visible
+A data may remain under B, even if no old request is allowed to finish. Same-ID
+compact B discovery can preserve A based on timestamp. A current saved UUID cannot
+alone establish the source of an existing cached question.
+
+Saved connection UUID survives reconnect/token replacement. ConnectionManager's
+saved-record switch changes metadata/API after successful health/stats and restores
+previous state on failure. URL is mutable in the model, though no ordinary edit
+flow was located; UUID is not a daemon-incarnation identity. Clearing on every API
+configuration would also clear same-record reconnect state.
+
+Overview/card reply and paused-resume texts are separate local State. Detail
+selection/remount loses text; a different question on the same pod does not reset
+that owner. Both typed and option replies clear before async Void submission.
+The weak-handler wrapper can return normally without a handler; POST errors are
+caught and GET errors swallowed. Thus Void completion/lastError absence cannot
+prove acceptance. Paused resume/guidance have no exact escalation identity and
+cannot automatically share a decision-keyed namespace. Existing retry journals
+remain separate, request-keyed operations rather than typed-text ownership.
+
+Existing private PodStoreLifetimeFixture supplies A/B APIs, held requests and
+real decoding. It can expose cached A immediately after B configuration, including
+colliding IDs/timestamps. R05b native fixtures can render typed decisions across
+state changes but do not yet prove keyboard text retention or connection switching.
+Connection ownership and asynchronous handler writes need a bounded follow-up
+map before a shared draft is attached to the visible decision.
