@@ -67,10 +67,10 @@ proof. Record pre-fix and final revision evidence and cleanup outcomes.
 
 ## Acceptance
 
-- [ ] Baseline unfinished401 ownership reproduced or plan reassessed with evidence.
-- [ ] Real retry releases first stream and completes normally without watchdog.
-- [ ] Retry count, request/auth semantics and final errors remain unchanged.
-- [ ] Refresh failure and body cancellation edge cases retain correct ownership.
+- [x] Baseline unfinished401 ownership reproduced or plan reassessed with evidence.
+- [x] Real retry releases first stream and completes normally without watchdog.
+- [x] Retry count, request/auth semantics and final errors remain unchanged.
+- [x] Refresh failure and body cancellation edge cases retain correct ownership.
 - [ ] Full CLI/relevant checks pass and independent pre-PR review completed.
 - [ ] Hosted and integrated result recorded.
 
@@ -86,3 +86,55 @@ a total request deadline or server-side operation cancellation.
 
 Root-prepared resolved plan based on source. Ready for bounded worker execution
 under standing campaign authorization, with baseline mismatch gate above.
+
+## Implementation and local proof — 2026-10-15
+
+Worker `codex/reliability-cli-auth-cleanup` started from
+`4e79fedc2f4ee98b6e2ffa7ed5906b3133eef3ce`. Production changes are five lines
+inside generic request's first401 branch: await body cancellation when present,
+ignore cancellation rejection locally, then execute the unchanged refresh/retry.
+The separate updateFromBase path is unchanged.
+
+**Local prove-work verdict: PROVEN for this bounded response-ownership contract.**
+Independent pre-PR review, hosted checks and integration remain pending with root.
+No live daemon/provider, new deadline policy or server-side cancellation is claimed.
+
+| Claim | Evidence | Result |
+|---|---|---|
+| Baseline leaves unfinished401 open while retrying | Fresh baseline executable reached second request; successful response gated on first response close could not finish; fixture watchdog killed child after10s | Reproduced before production edit |
+| Retry now releases the discarded stream | Real executable's first unfinished401 closes; gated second response completes with exit0, JSON `[]`, exactly two identical authenticated list requests and no watchdog/cancellation | Proven |
+| Cancellation finishes before refresh/retry | Actual Response/ReadableStream with deferred cancel hook; mutation request remains unchanged except refreshed bearer token | Proven |
+| Existing body/error behavior survives | Actual absent, closed, errored and cancellation-rejecting bodies; refresh failure after release; second401 produces existing AuthError without third request | Proven |
+| Resources are owned | Explicit response-close barrier plus existing child-close teardown; server stopped, no sockets/child timers, private directory removed in finally | Proven |
+
+All commands used `npx -y -p node@22 -p pnpm@9.15.4 -c '<command>'`
+(Node v22.23.3, pnpm9.15.4):
+
+- `pnpm install --frozen-lockfile` — passed.
+- `pnpm --filter @autopod/cli... build` — fresh shared and CLI builds passed,
+  both before baseline reproduction and after the production repair.
+- Baseline: `pnpm --filter @autopod/cli exec vitest run src/index.test.ts -t "unfinished 401" --reporter=json --outputFile=../../.autopod-data/reliability/auth-cleanup-before.json`
+  — expected failure on non-null fixture-watchdog result; this is not a product timeout.
+- `pnpm --filter @autopod/cli exec vitest run --reporter=json --outputFile=../../.autopod-data/reliability/auth-cleanup-suite.json`
+  — 39 files/333 tests passed, including original HTTP and log-follow executable tests.
+- `pnpm --filter @autopod/cli typecheck` — passed.
+- `pnpm --filter @autopod/cli exec tsc --noEmit --target ES2022 --module ESNext --moduleResolution bundler --strict --noUncheckedIndexedAccess --noUnusedLocals --noUnusedParameters --skipLibCheck src/api/client-auth-retry.test.ts src/index.test.ts`
+  — changed test sources and their fixture/client imports passed.
+- `pnpm exec biome check packages/cli/src/api/client.ts packages/cli/src/api/client-auth-retry.test.ts packages/cli/src/index.test.ts packages/cli/src/test-utils/cli-executable.ts`
+  — passed.
+- `pnpm secret-scan` and `git diff --check` — passed.
+
+Implementation detail: the focused cases live in the co-located
+`api/client-auth-retry.test.ts`. An initial explicit typecheck of the existing
+`api/client.test.ts` found its unrelated, pre-existing line444 series fixture uses
+`profile`, which is no longer a SeriesLaunchRequest field (TS2353). That original
+file was restored unchanged; its runtime tests still pass in the full suite.
+No broader test-source typecheck success is claimed. No material plan mismatch.
+
+Ignored evidence lives under this worker's `.autopod-data/reliability/`:
+`auth-cleanup-before.json`, `auth-cleanup-before.log`,
+`auth-cleanup-development.log`, `auth-cleanup-suite.json`,
+`auth-cleanup-validation.log` (initial existing-test TS2353), and
+`auth-cleanup-validation-final.log` (all scoped checks passed).
+The committed revision and final focused rerun are recorded after commit in
+`auth-cleanup-revision.txt`, `auth-cleanup-final.json`, `auth-cleanup-final.log`.

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { access, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
+import { type ServerResponse, createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -132,6 +132,7 @@ export async function createCliFixture(reply: {
   body?: unknown;
   hold?: boolean;
   websocket?: 'accept' | 'hold' | 'reject';
+  respond?: (response: ServerResponse, requestNumber: number) => void;
 }) {
   await access(executable).catch(() => {
     throw new Error('Build @autopod/cli and its dependencies before executable tests');
@@ -164,6 +165,10 @@ export async function createCliFixture(reply: {
     };
     requests.push(recorded);
     resolveRequest(recorded);
+    if (reply.respond) {
+      reply.respond(response, requests.length);
+      return;
+    }
     if (reply.hold) return;
     response.statusCode = reply.status ?? 200;
     response.setHeader('content-type', 'application/json');
