@@ -159,9 +159,9 @@ npx -y -p node@22 -p pnpm@9.15.4 -c 'pnpm --filter @autopod/shared build && AUTO
 
 PROVEN for this bounded warm in-memory route qualification. The exact reproduction
 command above completed once on clean implementation commit
-`1581c68c10100547247d524b1cda5558ebb5f0bf`, using Node22.23.3, pnpm9.15.4,
-Vitest4.1.11, Fastify5.12.5 and better-sqlite3 11.10.0. All three priming traversals
-and all21 measured traversals passed every ordering/field assertion; the two
+`1581c68c10100547247d524b1cda5558ebb5f0bf`, using Node 22.23.3, pnpm 9.15.4,
+Vitest 4.1.11, Fastify 5.12.5 and better-sqlite3 11.10.0. All three priming traversals
+and all 21 measured traversals passed every ordering/field assertion; the two
 protocol checks passed too (three Vitest tests total). All three DBs closed,
 with zero cleanup errors. No failed full measurement runs were discarded.
 
@@ -179,12 +179,12 @@ benchmark/product hashes remain the qualification target.
 | 10000 | 20 | 621.705 / 638.411 / 664.028 | 44.510 | 35554542 |
 
 Each row has seven raw samples; nearest-rank traversal p95 equals that row's max.
-The100-pod9.806ms sample is retained, not rerun away. The10000-pod median is about
-21.4times the1000-pod median for10times as many rows. This is an observation,
+The 100-pod 9.806 ms sample is retained, not rerun away. The 10000-pod median is about
+21.4 times the 1000-pod median for 10 times as many rows. This is an observation,
 not a diagnosis of query complexity or an optimization claim. Byte totals were
 identical across the seven traversals of each dataset.
 
-The largest sampled process RSS was1405632512bytes and heapUsed460906104bytes.
+The largest sampled process RSS was 1405632512 bytes and heapUsed 460906104 bytes.
 These include Vitest, all three resident databases, fixture expectations, raw and
 decoded response retention, and other process state. They are not isolated route
 allocations, true peaks, leak proof, or production memory requirements. Measurements
@@ -193,9 +193,9 @@ timings include the documented per-page sampling and safety bookkeeping. Host
 contention remains uncontrolled. No product latency or native/UI claim follows.
 
 Static checks: `node --check` on all four MJS files, scoped `pnpm exec biome check
-scripts/benchmarks`, secret scan, and diff whitespace checks all exited0. Logs:
+scripts/benchmarks`, secret scan, and diff whitespace checks all exited 0. Logs:
 `static.log`, `secret-scan.log`, `diff-check.log`. Explicit opt-in absence and
-missing-file selection exited1 as intended (`opt-in-required.log`,
+missing-file selection exited 1 as intended (`opt-in-required.log`,
 `empty-selection.log`); default Vitest file listing selected no benchmark files
 (`default-discovery.log`). Independent review/reproduction, hosted checks and
 integrated verification remain root-owned and unchecked. No human manual check
