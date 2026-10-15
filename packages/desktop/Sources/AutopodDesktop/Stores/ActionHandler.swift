@@ -37,6 +37,8 @@ public final class ActionHandler {
   private let podStore: PodStore
   private let profileStore: ProfileStore
 
+  private let replyContextID = UUID()
+  private let replySource: PodStore.Source?
   private let ownership: PodStore.Ownership?
   private let journalRoot: URL?
 
@@ -45,6 +47,7 @@ public final class ActionHandler {
     self.podStore = podStore
     self.profileStore = profileStore
     self.ownership = podStore.ownership(for: api)
+    self.replySource = podStore.ownership(for: api) == nil ? nil : podStore.retainedSource
     self.journalRoot = journalRoot
   }
 
@@ -74,6 +77,7 @@ public final class ActionHandler {
       approve: { [weak self] id, reason in await self?.approve(id, reason: reason) },
       reject: { [weak self] id, feedback in await self?.reject(id, feedback: feedback) },
       reply: { [weak self] id, message in await self?.reply(id, message: message) },
+      decisionReply: decisionReplyActions,
       nudge: { [weak self] id, message in await self?.nudge(id, message: message) },
       pendingControl: { [weak self] id in self?.pendingControl(id) },
       killAndDelete: { [weak self] id in await self?.killAndDelete(id) },
@@ -841,4 +845,153 @@ public final class ActionHandler {
   }
 
 
+}
+
+// MARK: - Exact-decision replies
+
+extension ActionHandler {
+  private var decisionReplyActions: DecisionReplyActions {
+    DecisionReplyActions(
+      contextID: replyContextID,
+      pod: { [weak self] id in self?.replyPod(id) },
+      snapshot: { [weak self] id, decision in self?.replySnapshot(id, decision) ?? .init() },
+      isCurrent: { [weak self] id, decision, recordID in
+        guard let self, self.podStore.isCurrent(self.ownership),
+              let key = self.replyKey(id, decision) else { return false }
+        return self.podStore.decisionReplies.read(key)?.id == recordID
+      },
+      edit: { [weak self] id, decision, text in
+        guard let self, let key = self.replyKey(id, decision) else { return }
+        self.podStore.decisionReplies.get(key).edit(text)
+      },
+      discard: { [weak self] id, decision in
+        guard let self, let key = self.replyKey(id, decision) else { return }
+        self.podStore.decisionReplies.get(key).edit("")
+      },
+      prepare: { [weak self] id in
+        guard let self else { return .unavailable("Connect to load this question.") }
+        return await self.prepareReply(id)
+      },
+      submit: { [weak self] id, decision in
+        guard let self else { return Task { .notAdmitted } }
+        return self.submitReply(id, decision)
+      }
+    )
+  }
+
+  private func replyPod(_ id: String) -> Pod? {
+    guard let replySource, podStore.retainedSource == replySource else { return nil }
+    return podStore.pods.first { $0.id == id }
+  }
+
+  private func replyKey(_ id: String, _ decision: String?) -> DecisionReplyStore.Key? {
+    guard let replySource, let decision, !decision.isEmpty,
+          let pod = replyPod(id), pod.status == .awaitingInput,
+          pod.escalationId == decision else { return nil }
+    return .init(source: replySource, podID: id, decisionID: decision)
+  }
+
+  private func replySnapshot(_ id: String, _ decision: String?) -> DecisionReplySnapshot {
+    var result = DecisionReplySnapshot()
+    guard let key = replyKey(id, decision) else { return result }
+    let record = podStore.decisionReplies.read(key)
+    result.recordID = record?.id
+    result.text = record?.text ?? ""
+    result.canEdit = true
+    result.pending = podStore.decisionReplies.pending(key) != nil
+    result.acknowledged = record?.acknowledged ?? false
+    result.canSubmit = podStore.isCurrent(ownership) && !result.pending && !result.acknowledged
+    if result.acknowledged {
+      result.notice = "Reply acknowledged — waiting for an updated question."
+    } else if let notice = record?.notice {
+      result.notice = notice
+    } else if result.pending {
+      result.notice = "Sending reply… Draft kept until acknowledgement."
+    } else if !podStore.isCurrent(ownership) {
+      result.notice = "Reconnecting — draft kept."
+    } else {
+      result.notice = record?.notice
+    }
+    return result
+  }
+
+  private func prepareReply(_ id: String) async -> DecisionReplyPreparation {
+    do {
+      try requireCurrent()
+      guard replyPod(id) != nil, let replySource else { return .unavailable("This question is no longer available.") }
+      let drafts = podStore.decisionReplies
+      let lifetime = drafts.lifetime(source: replySource, podID: id)
+      _ = try await podStore.readSession(id, accepting: {
+        self.replyPod(id) != nil && drafts.ownsLifetime(source: replySource, podID: id, id: lifetime)
+      })
+      try requireCurrent()
+      guard let pod = replyPod(id), replyKey(id, pod.escalationId) != nil else {
+        return .unavailable("No unanswered question is available. Refresh to check again.")
+      }
+      return .ready
+    } catch {
+      return .unavailable("Could not load this question. Reconnect or refresh to try again.")
+    }
+  }
+
+  /// This is intentionally synchronous: capture text/revision and publish admission
+  /// before returning to any view. Waiters never own or cancel the shared task.
+  private func submitReply(_ id: String, _ decision: String) -> Task<DecisionReplyOutcome, Never> {
+    guard let key = replyKey(id, decision) else { return Task { .notAdmitted } }
+    let drafts = podStore.decisionReplies
+    if let task = drafts.pending(key) { return task }
+    let record = drafts.get(key)
+    guard !record.acknowledged, podStore.isCurrent(ownership) else {
+      return Task { .notAdmitted }
+    }
+    let message = record.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !message.isEmpty else { return Task { .notAdmitted } }
+    let revision = record.revision
+    let attempt = UUID()
+    record.attemptID = attempt
+    record.notice = nil
+    let task = Task { @MainActor [self] in
+      defer {
+        drafts.settle(key, id: attempt)
+        if record.attemptID == attempt {
+          record.attemptID = nil
+          record.task = nil
+        }
+      }
+      let stillOwnsDecision: @MainActor @Sendable () -> Bool = { [self] in
+        podStore.isCurrent(ownership) && drafts.owns(key, record) && replyKey(id, decision) == key
+      }
+      var postAdmitted = false
+      do {
+        guard stillOwnsDecision() else { throw CancellationError() }
+        let read = try await podStore.readSession(id, accepting: stillOwnsDecision)
+        guard stillOwnsDecision(), read.returned.status == .awaitingInput,
+              read.returned.escalationId == decision,
+              read.current.escalationId == decision else { throw CancellationError() }
+        // No suspension between this final authority check and the API call.
+        postAdmitted = true
+        try await api.sendMessage(id, message: message)
+        guard stillOwnsDecision() else { throw CancellationError() }
+        record.acknowledged = true
+        if record.revision == revision { record.edit("") }
+        // Acknowledgement is already visible; refresh cannot revoke it or invent
+        // Running. A later decision/source/removal must not be overwritten.
+        _ = try? await podStore.readSession(id, accepting: stillOwnsDecision)
+        return DecisionReplyOutcome.acknowledged
+      } catch {
+        if postAdmitted {
+          record.notice = "Delivery unconfirmed — draft kept. Inspect activity before retrying."
+          if stillOwnsDecision() {
+            _ = try? await podStore.readSession(id, accepting: stillOwnsDecision)
+          }
+          return .unconfirmed
+        }
+        record.notice = "Reply not sent. Refresh the question before trying again."
+        return .notAdmitted
+      }
+    }
+    record.task = task
+    drafts.admit(key, id: attempt, task: task)
+    return task
+  }
 }

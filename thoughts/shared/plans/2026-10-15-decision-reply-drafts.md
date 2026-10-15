@@ -242,10 +242,10 @@ must pass before closure. No new live cloud pod is needed for this local contrac
 
 ## Acceptance and limits
 
-- [ ] Native original text-loss/early-clear behavior reproduced.
-- [ ] Shared exact-decision draft ownership and isolated unknown handling proven.
-- [ ] Attempt lifetime, acknowledgement and unconfirmed outcomes proven.
-- [ ] Detail/card native text/input states inspected at final source.
+- [x] Native original text-loss/early-clear behavior reproduced.
+- [x] Shared exact-decision draft ownership and isolated unknown handling proven.
+- [x] Attempt lifetime, acknowledgement and unconfirmed outcomes proven.
+- [x] Detail/card native text/input states inspected at final source.
 - [ ] Independent pre-PR, hosted and integrated checks recorded.
 
 This task improves process-lifetime decision drafts, not app-restart persistence,
@@ -267,6 +267,53 @@ Final independent plan review found no remaining blocker. Baseline is two native
 cases on unchanged production: field-editor text across Overview unmount/remount,
 and text during held POST then500 after native Return. Production overlap waits
 R04e integration; all phases are authorized together after that prerequisite.
+
+## Phase 1 baseline evidence (2026-10-15)
+
+Unchanged production baseline:88a739c5ec52425e85d1d6e70da11ea9e3eb01a4.
+Worker branch codex/reliability-decision-drafts uses the completed
+reliability-inline-controls checkout. Only the opt-in baseline test and this plan
+are changed; overlapping production work remains held for R04e integration and
+coordinator API reconciliation.
+
+`DecisionReplyDraftBaselineTests` mounts actual DetailPanel/Overview at900×760,
+types through NSTextField's real field editor and sends Return through this test
+process's NSApplication. The remount case changes the real detail-tab binding to
+Logs and back, verifies the field disappeared and was recreated for decisionA,
+and observes the typed text replaced by an empty string. The submission case
+observes exactly one private held POST /pods/decision/message containing the exact
+synthetic draft; its field/editor are already empty while the request is held and
+remain empty after an HTTP500. The handler records an error, the pod remains on
+questionA/awaiting-input, and no second request or refresh is admitted.
+
+Compilation passed (`swift build --package-path packages/desktop --build-tests`,
+64.09s; Swift6.3.3). Strict baseline command from the worktree root:
+
+```sh
+AUTOPOD_REPLY_DRAFT_BASELINE=1 AUTOPOD_REPLY_DRAFT_RENDER_DIR="$PWD/.autopod-data/reliability/r04f/baseline/captures" swift test --package-path packages/desktop --skip-build --no-parallel --filter DecisionReplyDraftBaselineTests
+```
+
+Observed exit1:2 Swift Testing functions in1 suite,3 expected desired-retention
+assertion failures (remount, held POST, after500), zero skipped cases or unrelated
+fixture failures. XCTest's preceding0-test report is not the Swift Testing result.
+This is a reproduced baseline defect, not a passing implementation. Opt-in gating
+keeps the strict failing checkpoint from running in unrelated default suites.
+
+Private evidence `.autopod-data/reliability/r04f/baseline/` contains build.log,
+native-baseline.log, source-before.json, the exact copied test source, proof.json
+and six captures/text observations: remount-before/away/after and
+post-before-return/held/after-500. All six screenshots were opened and inspected;
+actual text, questionA and empty field states are legible. No replacement renderer,
+account startup, system keystrokes, home-data or external daemon access was used.
+The reply callback wrapper only retains/joins the existing production action task;
+production submission and text logic remain intact. Private transport fails closed.
+
+Both cases close windows, restore process accessibility/private defaults, join
+owned tasks, invalidate sessions and assert no active or deadline-expired requests.
+Native slot was released after this run. Baseline proves only the selected900px
+Overview behavior, not card,600px, reconnect, final retention or acceptance logic.
+Next step remains coordinator-owned R04e integration/API reconciliation, followed
+by separately dispatched production phases and independent final review.
 
 ## R04e API reconciliation and baseline checkpoint
 
@@ -305,3 +352,149 @@ The baseline is retained in Git and ignored evidence; convert/replace its opt-in
 test into ordinary final regression coverage with the new preflight semantics.
 No permanent skipped baseline is needed. R04e hosted/integration completion
 remains the production-start prerequisite; root will record its exact merged base.
+
+## Implementation and qualification (worker R04f)
+
+R04e prerequisite merged at d2a426a26cd038fd9c27dbd66c8e2e9a4ff4002e;
+worker merge47a6966d preserves baselinebc846039 and the API addendum. Core
+checkpointdc769f11 adds PodStore-owned DecisionReplyStore, exact retained Source
+keys and a typed DecisionReplyActions contract. Production freeze5e6675a6 wires
+Overview and actual card sheet/approval controls. Test-only follow-up4d117372
+handles the new real preparation request in existing native identity proof;
+production bytes are unchanged from5e6675a6.
+
+All selected decision paths now capture the displayed decision, retain one shared
+text revision and synchronously own admission before awaiting. The existing
+refresh merge returns both raw mapped and reconciled decisions for preflight.
+Only HTTP acknowledgement can clear the submitted revision; it is published before
+optional refresh. POST failure stays unconfirmed, with no automatic replay. Paused
+Resume still uses the unchanged legacy reply contract. Missing/default handlers
+cannot acknowledge. Unknown questions require an actual result-bearing detail
+read and cannot acquire an identity from compact text.
+
+Early independent review refined implementation within the approved plan:
+
+- Expected request outcome distinct from task cleanup; found pending cleanup could
+  mask unconfirmed delivery during held refresh. Notice now takes priority, while
+  admission remains owned. Held500/transport-loss regressions assert this.
+- Expected one active submission per exact key across retirement; found immediate
+  record removal could permit a second request after equal-key reinsertion. A
+  separate active-key owner survives retirement; new record UUID/text remain
+  isolated from old completion. The regression joins the held old attempt.
+- Expected preparation tied to actual pod lifetime; ID existence alone survived
+  removal/reinsertion. Non-reused source/pod lifetime tokens now fence publication.
+- Expected all fixture-owned work joined on failure; direct tasks were untracked,
+  and invalidating URLSession before a late best-effort GET caused an actual
+  teardown exception. Fixtures now track external tasks, close fail-closed peers,
+  join work, then invalidate sessions. Injected early failure at GET and POST
+  proves pending cleanup and zero expired requests.
+- Expected rendered controls to answer their displayed decision; a computed live
+  sheet pod could retarget an old callback to a new question before rendering.
+  Immutable DecisionReplyInteraction captures the displayed context. Retained
+  edit/option/Cancel callbacks are exercised after replacement without rendering.
+- Expected obsolete view work not to dismiss a new question or resurrect a mount.
+  Live source/epoch/decision/record checks now supplement the reference-owned
+  mounted context. A non-reused mount lease is captured synchronously before
+  scheduling preparation or dismissal waiters. Exact same-context unmount/remount,
+  queued old preparation, and completion-before-render regressions cover this.
+
+These are testable local ownership fences, not a server-side expected-decision
+binding. No API/schema/dependency or non-Swift production change was made.
+
+Native final command (worktree root):
+
+```sh
+AUTOPOD_REPLY_DRAFT_RENDER_DIR="$PWD/.autopod-data/reliability/r04f/implementation/captures" swift test --package-path packages/desktop --jobs 2 --no-parallel --filter DecisionReply
+```
+
+Passed22 Swift Testing functions /43 executions /3 suites, zero skips. The strict
+baseline is replaced by ordinary regressions; no opt-in skipped baseline remains.
+Actual field-editor typing, native Return twice in one event turn, native option,
+approval/rejection and Cancel activation use real views/handler/DaemonAPI with
+private held transport. Tests cover Overview600/900, actual AppKit sheet hydration
+from unknown to approval, all decision button paths, card/detail text sharing,
+ordinary unmount retention, reconnect, failure, acknowledgement and newer question.
+
+Visual proof limitation: AppKit sheet cacheDisplay loses vibrancy/background and
+native button appearance (white masks). Actual sheet interactions and transport
+assertions remain executed. Supplementary `production-sheet-*` captures mount the
+identical production DecisionReplySheet in an ordinary NSHostingView at560px with
+its real handler/transport, not a replacement renderer. These legible captures
+cover question/approval ready, sending, unconfirmed, acknowledged, loading and
+unavailable states. All captures were opened and inspected; Overview and directly
+mounted production-sheet text and controls are legible. This is isolated native
+component/interaction proof, not full-app startup, account wiring or human signoff.
+
+Affected command:
+
+```sh
+swift test --package-path packages/desktop --jobs 2 --no-parallel --filter 'DecisionReply|DecisionIdentity|PodStoreLifetime|ConnectionOwnership|ConnectionLaunchOwnership|ConnectionWiring|confirmedAction|inlineControl|inlineCombined|InlineControlRendering|replyRetainsDecision|factWaiverRefresh|unverifiedTermination'
+```
+
+Passed85 functions /205 executions /13 suites, zero skips,9.552s. The first run
+failed only two fixed GET-count assertions in DecisionIdentityRenderingTests:
+matching resolution now admits the mounted composer's real fourth preparation
+read. The fixture explicitly holds/settles and joins it, retaining exact B/staleA/C
+identity assertions and checking four GETs, no POST. No production merge semantics
+were broadened to impose ordering between ordinary concurrent REST responses.
+
+Full worker qualification at4d117372:
+
+```sh
+swift test --package-path packages/desktop --skip-build --no-parallel
+swift build --package-path packages/desktop --jobs 2 --product AutopodDesktopExe
+npx -y -p node@22 -p pnpm@9.15.4 -c 'pnpm secret-scan'
+git diff --check
+```
+
+All exit0. Swift Testing reports496 discovered functions /28 suites:495 passed
+functions /651 passed parameterized executions /27 passed suites, plus one existing
+skipped live-daemon function in LiveVillageConnectionTests. XCTest separately
+passes13 tests. Full Swift elapsed19.619s; executable build1.76s. Existing compiler
+deprecation/unused-capture warnings remain. No live daemon, accounts, Keychain,
+home data, OS-wide keystrokes, cloud pods or external network were used.
+
+Ignored evidence remains in `.autopod-data/reliability/r04f/baseline/` and
+`implementation/`: exact logs (including failed diagnostic runs), original and
+final source/evidence hashes, captures and proof.json. All test windows/private
+defaults/sessions/held requests are cleaned up; owned work is joined. Native slot
+was released after the full run. Root and independent desktop reviewer have read
+the production and lifetime changes; final independent reproduction, hosted checks
+and integrated qualification remain coordinator-owned before closure/PR.
+
+Final independent pre-PR proof: root reproduced the affected selection plus
+confirmedKillAcceptsTerminalSnapshot() at4d117372:86 functions /206 executions /13 suites, zero skips,9.929s. Root read
+the final source and inspected all43 independent captures (37 root-native plus6
+root-decision); legible production-sheet supplements passed inspection, while
+raw AppKit sheet rasterization retains the stated limitation. Independent desktop
+reviewer reported no remaining actionable findings at4d117372, including the
+test-only preparation fixture adjustment. Root independently records87 hashed
+files and43 inspected PNGs in root-proof.json. Root proof is retained at
+`.autopod-data/reliability/r04f/root-focused.log`, `root-native/`, `root-decision/`.
+Hosted and integrated qualification remain pending coordinator PR/integration.
+
+
+### Hosted Swift 6.1 compatibility correction
+
+Hosted PR436 compilation on Swift6.1.2 rejected conversion of the local
+MainActor function `stillOwnsDecision` to the Sendable acceptance closure at
+three readSession calls. Local Swift6.3.3 accepted it. The predicate is now an
+explicit `@MainActor @Sendable () -> Bool` closure, retaining the same handler
+capture and exact ownership/record/decision checks. No behavior or test assertion
+changes are included. Prior proof/manifest remain preserved under
+`implementation/prior-cb8384b2/`; the hosted failure log is retained. Fresh focused,
+full-suite and executable checks and independent source review follow this change;
+Swift6.1.2 compatibility requires the hosted rerun, not inference from local Swift.
+
+Correction verification on local Swift6.3.3 passed: focused86 functions /206
+executions /13 suites, zero skips,9.587s; full495 passed functions /651 executions
+/27 passed suites plus the existing one live-daemon skipped function/suite,
+XCTest13 passed separately,19.427s; executable build0.30s and diffcheck passed.
+Logs are `implementation/focused-swift61-correction.log`,
+`full-swift61-correction.log`, `executable-swift61-correction.log` and
+`diff-swift61-correction.log`. Root and independent desktop reviewer read the
+one-line correction with no findings; reviewed ActionHandler SHA256 is
+8b2f792ca2e780758ad7b2d6a8188749bca0e5e5c7dd13ebc73a9d0e1717df90. No new visual
+claim is made by this annotation correction; existing inspected captures remain
+prior-head evidence, and current focused native interactions pass. Hosted rerun
+and integrated proof remain coordinator-owned.

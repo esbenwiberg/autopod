@@ -39,6 +39,13 @@ import AutopodUI
     return DaemonAPI(baseURL: url, token: "synthetic", session: session)
   }
 
+  /// Join independently owned product tasks on fixture failure as well as success.
+  @discardableResult
+  func track<T: Sendable>(_ task: Task<T, Never>) -> Task<T, Never> {
+    tasks.append(Task { _ = await task.value; return nil })
+    return task
+  }
+
   func start(_ operation: @escaping @MainActor () async -> Void) -> Task<String?, Never> {
     startResult { await operation(); return nil }
   }
@@ -67,8 +74,8 @@ import AutopodUI
   func dispose() async {
     a.close(); b.close()
     tasks.forEach { $0.cancel() }
-    sessions.forEach { $0.invalidateAndCancel() }
     for task in tasks { _ = await task.value }
+    sessions.forEach { $0.invalidateAndCancel() }
     ConfirmedActionRegistry.shared.remove(a)
     ConfirmedActionRegistry.shared.remove(b)
     #expect(a.activeCount == 0 && b.activeCount == 0)
