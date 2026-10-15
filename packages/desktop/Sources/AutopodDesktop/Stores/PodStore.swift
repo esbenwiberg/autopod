@@ -55,6 +55,7 @@ public final class PodStore {
   // MARK: - API
 
   private var api: DaemonAPI?
+  private var configurationEpoch: UInt64 = 0
   private var hydratedPodIds = Set<String>()
   private var hydratingPodIds = Set<String>()
   private var statusRevisions: [String: Int] = [:]
@@ -62,7 +63,13 @@ public final class PodStore {
   private var insertionRevisions: [String: Int] = [:]
 
   public func configure(api: DaemonAPI) {
+    configurationEpoch += 1
     self.api = api
+    // Preserve visible data, but no request or hydration admission crosses epochs.
+    hydratedPodIds.removeAll()
+    hydratingPodIds.removeAll()
+    isLoading = false
+    error = nil
   }
 
   private func recordInsertion(_ podId: String) {
@@ -161,12 +168,14 @@ public final class PodStore {
       error = "API client not configured — try disconnecting and reconnecting"
       return
     }
+    let epoch = configurationEpoch
     isLoading = true
     error = nil
     let statusRevisionSnapshot = statusRevisions
     let fleetMembershipSnapshot = fleetMembershipRevision
     do {
       let responses = try await api.listAllCompactPods()
+      guard epoch == configurationEpoch else { return }
       let fresh = PodMapper.map(responses, baseURL: api.baseURL)
       let currentById = Dictionary(uniqueKeysWithValues: pods.map { ($0.id, $0) })
       let staleHydratedIds: Set<String> = Set(
@@ -218,9 +227,12 @@ public final class PodStore {
         await hydrateSessionIfNeeded(selectedSessionId)
       }
     } catch {
+      guard epoch == configurationEpoch else { return }
       print("[PodStore] Failed to load pods: \(error)")
       self.error = error.localizedDescription
     }
+    // Selected-pod hydration above can suspend across another configuration.
+    guard epoch == configurationEpoch else { return }
     isLoading = false
 
     // Best-effort score refresh — failures are non-fatal. Fires after pods
@@ -232,8 +244,10 @@ public final class PodStore {
   /// Silent failure — the badge is a nice-to-have, not a blocker.
   public func loadQualityScores() async {
     guard let api else { return }
+    let epoch = configurationEpoch
     do {
       let list = try await api.listQualityScores(limit: 500)
+      guard epoch == configurationEpoch else { return }
       var byId: [String: PodQualityScore] = [:]
       byId.reserveCapacity(list.count)
       for score in list { byId[score.podId] = score }
@@ -246,9 +260,11 @@ public final class PodStore {
 
   public func refreshSession(_ id: String) async {
     guard let api else { return }
+    let epoch = configurationEpoch
     let statusRevision = statusRevisions[id, default: 0]
     do {
       let response = try await api.getPod(id)
+      guard epoch == configurationEpoch else { return }
       var updated = PodMapper.map(response, baseURL: api.baseURL)
       if let index = pods.firstIndex(where: { $0.id == id }) {
         updated = mergeRestPod(
@@ -273,8 +289,11 @@ public final class PodStore {
 
   public func hydrateSessionIfNeeded(_ id: String) async {
     guard !hydratedPodIds.contains(id), !hydratingPodIds.contains(id) else { return }
+    let epoch = configurationEpoch
     hydratingPodIds.insert(id)
-    defer { hydratingPodIds.remove(id) }
+    defer {
+      if epoch == configurationEpoch { hydratingPodIds.remove(id) }
+    }
     await refreshSession(id)
   }
 
@@ -287,8 +306,10 @@ public final class PodStore {
   @discardableResult
   public func loadSeries(_ seriesId: String) async -> SeriesResponse? {
     guard let api else { return nil }
+    let epoch = configurationEpoch
     do {
       let response = try await api.getSeries(seriesId)
+      guard epoch == configurationEpoch else { return nil }
       seriesCache[seriesId] = response
       // Upsert any pods in the response that aren't yet in our local store.
       for pod in PodMapper.map(response.pods) {
@@ -307,8 +328,10 @@ public final class PodStore {
 
   public func loadDiff(_ podId: String) async {
     guard let api else { return }
+    let epoch = configurationEpoch
     do {
       let response = try await api.getSessionDiff(podId)
+      guard epoch == configurationEpoch else { return }
       let hasDiff =
         !response.files.isEmpty ||
         !(response.previewFiles ?? []).isEmpty ||
