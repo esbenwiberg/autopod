@@ -29,7 +29,8 @@ A duplicate guard must not return early and accidentally advance that sequence.
 ## Phase1: request ownership and completion
 
 Own ActionHandler.swift and narrowly extended PodActions.swift. Add a small
-Sendable/Equatable UI presentation enum for Pause/Kill pending kind and a
+Sendable/Equatable UI presentation enum for Pause/Kill/combined Kill-and-delete
+pending kind and a
 MainActor Sendable `pendingControl(podId)` getter with a nil preview default.
 No MainView plumbing is needed. Keep API wire methods and existing pause/kill
 closure signatures unchanged.
@@ -64,6 +65,13 @@ when it already offers Kill-and-delete, and plain delete when already deletable.
 Coalesce duplicate killAndDelete workflows themselves through their complete
 Kill-then-Delete lifetime: joining Kill alone would otherwise let two callers send
 two DELETEs. This separate owned workflow must not recursively await itself.
+Expose the combined pending kind from admission through DELETE completion, including
+the gap between its Kill and Delete awaits. Its notice is `Kill and delete requested
+— waiting for daemon`; it remains accurate during both operations. An overlapping
+public plain-delete call must join the combined workflow instead of sending a
+second DELETE. The combined task uses a private raw-delete path to avoid self-join.
+Do not permit a new Pause/Kill to slip into a combined workflow after Kill finishes.
+Keep ownership identity checks on both registries and do not broaden other actions.
 No confirmation text or delete eligibility redesign.
 
 Establish baseline duplicate-POST and unconditional-delete behavior before the
@@ -76,7 +84,8 @@ assertions after those interfaces exist. No guessed baseline claims.
 Own DetailPanelView.swift, PodCardFinal.swift and PodActivityPanel.swift plus one
 small reusable UI notice if it avoids divergent text. Use existing styles and
 spacing. At the pod heading show `Pause requested — waiting for daemon` or
-`Kill requested — waiting for daemon` while the owned operation exists. Buttons
+`Kill requested — waiting for daemon` while the owned operation exists; use the
+combined workflow wording above when applicable. Buttons
 show `Pausing…`/`Killing…` for the active kind, and disable both Pause and Kill for
 that pod while busy. Confirmed status badge, work/evidence, selection and other
 pod controls retain their current source of truth. Never replace Running with
@@ -104,7 +113,13 @@ barriers and complete cleanup. Required cases:
 - Kill-and-delete failure or conflicting Pause never DELETEs; duplicate Kill joins
   and DELETE starts only after acknowledged Kill and its awaited refresh finish.
   Two combined-workflow callers produce one DELETE and both await a held DELETE;
-that held DELETE must not be reported as completed. Existing deletion errors remain.
+that held DELETE must not be reported as completed. After the Kill refresh changes
+status to deletable, the actual card Delete must remain disabled until the combined
+workflow settles; overlapping plain-delete entry joins it without another request.
+Existing deletion errors remain.
+- Cancel initiating and joining callers separately while the shared POST/GET is
+held; remaining caller still awaits one request sequence and pending stays owned.
+Repeat during a combined workflow held at DELETE. Disposal releases all tasks.
 - Existing20 confirmed-action invocations continue passing, including newer events.
 - Getter preview defaults and actual MainView action-copy path stay compatible.
 
@@ -149,6 +164,9 @@ remain absent from release notes until separately proved.
 
 ## Status
 
-Root resolved the smallest useful native pending-control slice under standing
-authorization. Await independent technical review before worker dispatch; base
-must include R04c's shared held transport. No unresolved product decisions.
+Independent research_cli plan review identified combined-workflow busy ownership
+through DELETE and missing explicit caller-cancellation proof. Root incorporated
+both: combined notice/disable lifetime, plain-delete join without self-recursion,
+and initiating/joining cancellation cases. Resolved under standing authorization;
+ready for worker dispatch after R04c shared held transport is integrated. No
+unresolved product decisions.
