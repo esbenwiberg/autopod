@@ -47,6 +47,7 @@ public actor EventSocket {
     baseURL: URL,
     token: String,
     tokenProvider: DaemonAccessTokenProvider? = nil,
+    session: URLSession = .shared,
     onEvent: @escaping @Sendable (RawSystemEvent) -> Void,
     onStateChange: @escaping @Sendable (State) -> Void,
     onResyncRequired: @escaping @Sendable () -> Void = {}
@@ -54,7 +55,7 @@ public actor EventSocket {
     self.baseURL = baseURL
     self.token = DaemonAuth.normalizeBearerToken(token)
     self.tokenProvider = tokenProvider
-    self.pod = URLSession.shared
+    self.pod = session
     self.onEvent = onEvent
     self.onStateChange = onStateChange
     self.onResyncRequired = onResyncRequired

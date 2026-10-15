@@ -109,7 +109,7 @@ needed for this isolated transport contract. Full-app behavior remains unproven.
 
 ## Acceptance
 
-- [ ] Baseline ownership failures reproduced without external services.
+- [x] Baseline ownership failures reproduced without external services.
 - [ ] Disconnect cancels/fences pending connect and reconnect work.
 - [ ] Active duplicate connect is harmless; current reconnect/replay still works.
 - [ ] EventStream closes captured old socket and rejects its queued callbacks.
@@ -136,3 +136,17 @@ after new lifetimeB is established on the same actor. Added case4 above, and
 explicit cancellation at public connect actor entry. Existing resync work already
 inside REST remains outside the task's cancellation claim. These technical
 clarifications preserve scope; root resolved them before worker execution.
+
+## Worker phase 1 evidence
+
+Base `3426702dc3bb17d41456ea95829e460046dbe4fc`. Before ownership changes,
+added only defaulted URLSession injection and the planned internal EventStream
+factory seam, then ran `swift test --package-path packages/desktop --no-parallel
+--filter 'EventSocketLifetimeTests|EventStreamLifetimeTests'`. All seven cases
+failed with 19 issues: late token/backoff resurrection, duplicate peers, late A
+supplanting B, cancelled actor-entry start, stale stream callbacks/subscriptions,
+and lost captured disconnect. Logs: `.autopod-data/reliability/r04b/baseline.log`.
+Native teardown observed cancellation of every accepted peer, session invalidation
+and listener cancellation even after the expected close-barrier failures. Initial
+fresh build hit one test closure Sendable compiler error, corrected before the
+baseline run; the ownership production implementation remained unchanged.
