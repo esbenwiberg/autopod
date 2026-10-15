@@ -1,0 +1,157 @@
+<div id="autopod-reliability-wireframes">
+  <div class="viz-controls" aria-label="Wireframe preview controls">
+    <label class="form-label">Scenario
+      <select class="form-select" id="ap-preview-state">
+        <option value="live">Connected</option>
+        <option value="pending">Pause requested</option>
+        <option value="offline">Connection lost during pause</option>
+        <option value="rejected">Pause rejected</option>
+        <option value="confirmed">Pause confirmed after reconnect</option>
+        <option value="resumePending">Resume requested</option>
+        <option value="reply">Reply draft while disconnected</option>
+      </select>
+    </label>
+  </div>
+  <div class="viz-carousel" aria-label="Autopod state wireframes">
+    <section data-variant="Inline status" aria-label="Inline status wireframe">
+      <div class="ap-window" data-layout="inline"></div>
+    </section>
+    <section data-variant="Action panel" aria-label="Action panel wireframe" hidden>
+      <div class="ap-window" data-layout="panel"></div>
+    </section>
+  </div>
+  <template id="ap-window-template">
+    <div class="ap-titlebar"><span aria-hidden="true">● ● ●</span><span>Autopod</span><span class="ap-subtle">Wireframe</span></div>
+    <div class="ap-shell">
+      <aside class="ap-sidebar" aria-label="Existing navigation">
+        <div class="ap-daemon">Local test daemon</div>
+        <div class="ap-connection">Connected</div>
+        <div class="ap-navigation"><span>Attention</span><span>Village</span><span class="ap-selected">Active</span><span>Running</span><span>Interactive</span><span>Series</span><span>Completed</span><span>Browse</span><span>History</span><span>Memory</span><span>Scheduled jobs</span></div>
+        <div class="ap-navgroup">Managed pods</div><div class="ap-navgroup">Analytics</div><div class="ap-navgroup">Profiles</div>
+      </aside>
+      <main class="ap-main">
+        <div class="ap-heading"><div><div class="ap-subtle">autopod · steady-otter</div><h2>Restore interrupted checkout</h2><div class="ap-statusline"><span class="ap-status">Running</span><span class="ap-freshness">Confirmed just now</span></div></div><button class="ap-action cursor-interaction" type="button">Pause</button></div>
+        <div class="ap-body-grid">
+          <div class="ap-content">
+            <div class="ap-tabs" aria-label="Existing detail tabs"><span class="ap-current-tab">Overview</span><span>Work</span><span>Validation</span><span>Readiness</span><span>Evidence</span><span>Diff</span><span>Logs</span></div>
+            <section class="ap-situation" aria-live="polite"><div class="ap-situation-title">Implementing the requested repair</div><p class="ap-situation-detail">The worker is updating recovery behavior. No input is needed.</p></section>
+            <dl class="ap-facts"><div><dt>Work</dt><dd>Branch created · changes in progress</dd></div><div><dt>Validation</dt><dd class="ap-validation">Not started for this attempt</dd></div><div><dt>Last observed activity</dt><dd>Editing the recovery handler</dd></div></dl>
+            <section class="ap-reply" hidden><label>Reply to the pending question<textarea rows="3" aria-label="Reply draft">Keep the existing approval requirement.</textarea></label><div class="ap-reply-footer"><span>Draft retained on this device</span><button type="button" disabled>Send when connected</button></div></section>
+          </div>
+          <aside class="ap-action-panel" aria-label="Current action"><span class="ap-subtle">Current action</span><div class="ap-panel-title">No action pending</div><p class="ap-panel-detail">The worker is running.</p><button class="ap-panel-action cursor-interaction" type="button">Pause</button></aside>
+        </div>
+        <div class="ap-footer">steady-otter <span>Existing work and evidence stay visible during reconnect</span></div>
+      </main>
+    </div>
+  </template>
+</div>
+<style>
+#autopod-reliability-wireframes .ap-window{--ap-bg:light-dark(#fff,#242424);--ap-side:light-dark(#f3f3f4,#29292b);--ap-text:light-dark(#202124,#f2f2f4);--ap-muted:light-dark(#626269,#b7b7c0);--ap-line:light-dark(#dadade,#45454b);--ap-fill:light-dark(#f5f5f7,#303034);--ap-select:light-dark(#dedee3,#46464f);--ap-button:light-dark(#303035,#e1e1e7);--ap-button-text:light-dark(#fff,#202024);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--ap-text);background:var(--ap-bg);border:1px solid var(--ap-line);border-radius:12px;overflow:hidden;min-height:610px;margin-top:14px}
+#autopod-reliability-wireframes .ap-window *{box-sizing:border-box}
+#autopod-reliability-wireframes .ap-titlebar{display:flex;justify-content:space-between;align-items:center;padding:12px 18px;background:var(--ap-side);border-bottom:1px solid var(--ap-line);gap:12px}
+#autopod-reliability-wireframes .ap-titlebar>span:first-child{letter-spacing:4px;color:var(--ap-muted)}
+#autopod-reliability-wireframes .ap-shell{display:grid;grid-template-columns:168px minmax(0,1fr);min-height:565px}
+#autopod-reliability-wireframes .ap-sidebar{padding:18px 12px;background:var(--ap-side);border-right:1px solid var(--ap-line)}
+#autopod-reliability-wireframes .ap-daemon{font-weight:500;padding:0 6px}
+#autopod-reliability-wireframes .ap-connection{font-size:12px;color:var(--ap-muted);padding:3px 6px 16px}
+#autopod-reliability-wireframes .ap-navigation{display:grid;gap:2px}
+#autopod-reliability-wireframes .ap-navigation>span{padding:5px 8px;border-radius:5px}
+#autopod-reliability-wireframes .ap-selected{background:var(--ap-select);font-weight:500}
+#autopod-reliability-wireframes .ap-navgroup{border-top:1px solid var(--ap-line);margin-top:12px;padding:10px 8px 0}
+#autopod-reliability-wireframes .ap-main{min-width:0;padding:22px;display:flex;flex-direction:column}
+#autopod-reliability-wireframes .ap-heading{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+#autopod-reliability-wireframes h2{font-size:19px;line-height:1.3;font-weight:500;margin:5px 0 10px}
+#autopod-reliability-wireframes .ap-subtle,#autopod-reliability-wireframes .ap-freshness{font-size:12px;color:var(--ap-muted)}
+#autopod-reliability-wireframes .ap-statusline{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+#autopod-reliability-wireframes .ap-status{background:var(--ap-fill);padding:3px 8px;border-radius:4px;font-weight:500}
+#autopod-reliability-wireframes .ap-window button{font:inherit;background:var(--ap-button);color:var(--ap-button-text);border:0;border-radius:6px;padding:7px 14px;white-space:normal}
+#autopod-reliability-wireframes .ap-window button:disabled{background:var(--ap-fill);color:var(--ap-muted);cursor:not-allowed}
+#autopod-reliability-wireframes .ap-body-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;margin-top:26px}
+#autopod-reliability-wireframes .ap-tabs{display:flex;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--ap-line);padding-bottom:9px;color:var(--ap-muted);font-size:12px}
+#autopod-reliability-wireframes .ap-current-tab{color:var(--ap-text);font-weight:500}
+#autopod-reliability-wireframes .ap-situation{margin:20px 0;padding:16px;background:var(--ap-fill);border-radius:7px}
+#autopod-reliability-wireframes .ap-situation-title,#autopod-reliability-wireframes .ap-panel-title{font-weight:500}
+#autopod-reliability-wireframes .ap-window p{margin:6px 0 0}
+#autopod-reliability-wireframes .ap-facts{margin:0}
+#autopod-reliability-wireframes .ap-facts>div{display:grid;grid-template-columns:130px minmax(0,1fr);gap:12px;padding:13px 0;border-bottom:1px solid var(--ap-line)}
+#autopod-reliability-wireframes dt{color:var(--ap-muted)}
+#autopod-reliability-wireframes dd{margin:0}
+#autopod-reliability-wireframes .ap-reply{margin-top:20px}
+#autopod-reliability-wireframes textarea{display:block;resize:vertical;min-height:78px;width:100%;background:var(--ap-bg);color:var(--ap-text);border:1px solid var(--ap-line);border-radius:6px;font:inherit;padding:10px;margin-top:7px}
+#autopod-reliability-wireframes .ap-reply-footer{display:flex;gap:12px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--ap-muted)}
+#autopod-reliability-wireframes .ap-footer{margin-top:auto;padding-top:22px;font-size:11px;color:var(--ap-muted);display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
+#autopod-reliability-wireframes .ap-action-panel{display:none}
+#autopod-reliability-wireframes [data-layout="panel"] .ap-body-grid{grid-template-columns:minmax(0,1fr) 180px}
+#autopod-reliability-wireframes [data-layout="panel"] .ap-action-panel{display:block;border-left:1px solid var(--ap-line);padding-left:18px}
+#autopod-reliability-wireframes [data-layout="panel"] .ap-panel-title{margin-top:12px}
+#autopod-reliability-wireframes [data-layout="panel"] .ap-panel-action{margin-top:16px}
+#autopod-reliability-wireframes [data-layout="panel"] .ap-heading>.ap-action{display:none}
+#autopod-reliability-wireframes [data-layout="panel"] .ap-situation{background:transparent;padding:0}
+@media(max-width:760px){#autopod-reliability-wireframes .ap-shell{grid-template-columns:132px minmax(0,1fr)}#autopod-reliability-wireframes .ap-main{padding:16px}#autopod-reliability-wireframes [data-layout="panel"] .ap-body-grid{grid-template-columns:minmax(0,1fr)}#autopod-reliability-wireframes [data-layout="panel"] .ap-action-panel{border-left:0;border-top:1px solid var(--ap-line);padding:14px 0 0}#autopod-reliability-wireframes .ap-facts>div{grid-template-columns:1fr;gap:4px}}
+@media(max-width:480px){#autopod-reliability-wireframes .ap-shell{grid-template-columns:minmax(0,1fr)}#autopod-reliability-wireframes .ap-sidebar{border-right:0;border-bottom:1px solid var(--ap-line)}#autopod-reliability-wireframes .ap-navigation{display:flex;flex-wrap:wrap;gap:4px}#autopod-reliability-wireframes .ap-navigation>span:not(.ap-selected),#autopod-reliability-wireframes .ap-navgroup{display:none}#autopod-reliability-wireframes .ap-connection{padding-bottom:6px}#autopod-reliability-wireframes .ap-window{min-height:680px}}
+@media(pointer:coarse){#autopod-reliability-wireframes .ap-window button{min-height:44px}#autopod-reliability-wireframes textarea{font-size:16px}}
+</style>
+<script>
+(() => {
+  const root = document.getElementById('autopod-reliability-wireframes');
+  const template = root.querySelector('#ap-window-template');
+  const select = root.querySelector('#ap-preview-state');
+  const windows = [...root.querySelectorAll('.ap-window')];
+  const states = {
+    live: {connection:'Connected · live updates',status:'Running',fresh:'Confirmed just now',title:'Implementing the requested repair',detail:'The worker is updating recovery behavior. No input is needed.',action:'Pause',disabled:false,panel:'No action pending'},
+    pending: {connection:'Connected · live updates',status:'Running',fresh:'Last confirmed 4 seconds ago',title:'Pause requested — awaiting confirmation',detail:'The request is in progress. The last confirmed pod state remains Running.',action:'Pausing…',disabled:true,panel:'Waiting for confirmation'},
+    offline: {connection:'Reconnecting · data may be stale',status:'Running',fresh:'Last confirmed 42 seconds ago',title:'Connection lost while pausing',detail:'The request may have reached the daemon. Autopod will check its outcome after reconnecting.',action:'Checking outcome…',disabled:true,panel:'Outcome unknown'},
+    rejected: {connection:'Connected · live updates',status:'Validating',fresh:'Confirmed just now',title:'Pause was rejected',detail:'Validation started before the pause request was accepted. The current state has been refreshed.',action:'Pause unavailable',disabled:true,panel:'Request rejected'},
+    confirmed: {connection:'Connected · state refreshed',status:'Paused',fresh:'Confirmed just now',title:'Pause confirmed after reconnect',detail:'The daemon reports that the pod is paused. The original request was not submitted again.',action:'Resume',disabled:false,panel:'Pause confirmed'},
+    resumePending: {connection:'Connected · live updates',status:'Paused',fresh:'Last confirmed 4 seconds ago',title:'Resume requested — awaiting confirmation',detail:'The request is in progress. The last confirmed pod state remains Paused.',action:'Resuming…',disabled:true,panel:'Waiting for confirmation'},
+    reply: {connection:'Reconnecting · data may be stale',status:'Awaiting input',fresh:'Last confirmed 42 seconds ago',title:'Your reply is still here',detail:'Reconnect to refresh the pending question before sending. This draft has not been sent.',action:'Waiting for connection',disabled:true,panel:'Reply not sent'}
+  };
+  let draft = 'Keep the existing approval requirement.';
+  const saved = window.openai?.widgetState;
+  if(typeof saved?.privateContent?.draft === 'string') draft = saved.privateContent.draft;
+  const savedState = saved?.modelContent?.scenario;
+  if(states[savedState]) select.value = savedState;
+  windows.forEach(surface => {
+    surface.append(template.content.cloneNode(true));
+    surface.querySelector('textarea').value = draft;
+    surface.querySelector('textarea').addEventListener('input', event => {
+      draft = event.target.value;
+      windows.forEach(other => { if(other !== surface) other.querySelector('textarea').value = draft; });
+      persist();
+    });
+    surface.querySelectorAll('.ap-action,.ap-panel-action').forEach(button => button.addEventListener('click', () => {
+      select.value = select.value === 'confirmed' ? 'resumePending' : 'pending';
+      render(); persist();
+    }));
+  });
+  function render() {
+    const s = states[select.value] || states.live;
+    windows.forEach(surface => {
+      surface.querySelector('.ap-connection').textContent = s.connection;
+      surface.querySelector('.ap-status').textContent = s.status;
+      surface.querySelector('.ap-freshness').textContent = s.fresh;
+      surface.querySelector('.ap-validation').textContent = select.value === 'rejected' ? 'Running' : 'Not started for this attempt';
+      surface.querySelector('.ap-situation-title').textContent = s.title;
+      surface.querySelector('.ap-situation-detail').textContent = s.detail;
+      surface.querySelector('.ap-panel-title').textContent = s.panel;
+      surface.querySelector('.ap-panel-detail').textContent = s.detail;
+      surface.querySelector('.ap-reply').hidden = select.value !== 'reply';
+      surface.querySelectorAll('.ap-action,.ap-panel-action').forEach(button => {button.textContent=s.action;button.disabled=s.disabled;});
+    });
+  }
+  function persist() {
+    window.openai?.setWidgetState?.({modelContent:{scenario:select.value},privateContent:{draft}})?.catch(() => {});
+  }
+  select.addEventListener('change', () => {render();persist();});
+  window.addEventListener('openai:set_globals', event => {
+    const incoming=event.detail?.globals?.widgetState;
+    if(states[incoming?.modelContent?.scenario]) select.value=incoming.modelContent.scenario;
+    if(typeof incoming?.privateContent?.draft === 'string') {
+      draft=incoming.privateContent.draft;
+      windows.forEach(surface=>{surface.querySelector('textarea').value=draft;});
+    }
+    render();
+  });
+  render();
+})();
+</script>

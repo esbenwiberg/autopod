@@ -177,7 +177,9 @@ under `/tmp/autopod-reliability-*`. Pending checks are not passes.
 - Node 22.23.3 and pnpm 9.15.4: frozen installation passed; lockfile unchanged.
   Host default Node is 24.21.0, so the campaign uses an explicit Node 22 runtime.
 - Swift 6.3.3 / Xcode 26.6 available. `swift test --package-path packages/desktop
-  --no-parallel` exited 0: 396 Swift Testing tests in 12 suites passed.
+  --no-parallel` exited 0: 13 XCTest tests passed; Swift Testing reported 396
+  tests in 12 suites passed. The opt-in live Village suite/test was explicitly
+  skipped. These counts do not prove a live daemon connection or full app build.
 - `pnpm lint` exited 0 with 64 existing warnings; no fixes applied.
 - Full `SKIP_DB_TESTS=0 pnpm test` under Node 22 exited 0: 7,103 Vitest tests
   passed and 10 skipped; 15 Turbo tasks succeeded, including builds. Script

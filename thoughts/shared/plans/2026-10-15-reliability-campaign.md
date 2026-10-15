@@ -46,7 +46,7 @@ the campaign worktree was created. See
 The code already includes durable completion/merge/retry ledgers, generation
 fences, event replay, REST merge protection, and selected cross-language
 fixtures. Tests exercise repository restart and mocked boundary failures.
-The initial full baseline passed; Docker server probing timed out. Default
+The executed baseline checks passed; Docker server probing timed out. Default
 workflow branch filters do not include the requested integration branch.
 
 ## Desired End State
@@ -99,9 +99,9 @@ choice or missing authority that repository evidence cannot establish.
 
 | ID | Task | Dependencies | Status / next action |
 |---|---|---|---|
-| R00 | Existing CI covers campaign PRs and contract paths | Baseline | Detailed plan under independent review |
+| R00 | Existing CI covers campaign PRs and contract paths | Baseline | Independently reviewed; PR #416 open against campaign branch; hosted checks running |
 | R01 | Verification harness feasibility and deterministic fixtures | R00 | Research existing loopback, native UI, process and container seams; prove cleanup and isolation before live tests |
-| R02 | Desktop connection/action wireframes | Campaign research | Prepare and show normal, pending, disconnected, rejected and reconciled states before visible changes |
+| R02 | Desktop connection/action wireframes | Campaign research | Interactive proposals prepared and browser-checked; present before visible implementation |
 | R03 | CLI transport and log-follow reliability | R01 | Task-specific research/plan; include actual executable exit/output and replay behavior |
 | R04 | Desktop confirmed state, pending actions, draft retention | R01, R02 shown | Task-specific research/plan; deterministic store tests plus actual app proof |
 | R05 | Shared response/event contract scenarios | R00, R01 | Extend established fixture pattern for selected R03/R04 boundaries |
@@ -186,7 +186,24 @@ preservation notes in the task plan. Keep production deployment separate.
 
 ## Progress and exact next action
 
-Campaign branch created; research synthesized; baseline tests/lint passed.
-Collect typecheck/secret-scan outcome, complete independent R00 plan review,
-commit/push research and plans, then dispatch R00 to its own branch. Develop
-R01/R02 after the foundation without altering visible product UI beforehand.
+Campaign branch published at `2274e78c`; research synthesized; executed baseline
+tests/lint/typecheck/secret-scan passed. Independent plan review found no R00
+blockers. R00 worker commit `9592eee6` passed independent pre-PR review and
+rerunnable local proof (60 routing cases, eight before/after assertions, parsed
+workflow preservation, scope and whitespace). PR #416 targets this branch:
+https://github.com/esbenwiberg/autopod/pull/416. Hosted CI and desktop checks
+started; integration waits for their result. R01 feasibility research is delegated
+across CLI, native desktop and lifecycle boundaries.
+
+R02 proposals are in `2026-10-15-desktop-state-wireframes.html`: Inline status
+and Action panel, with connected, pending pause, disconnected outcome, rejected,
+confirmed pause, pending resume and retained reply scenarios. Browser interaction
+confirmed pending actions preserve the last confirmed status and draft text
+survives switching layouts. Screenshots inspected at desktop and 360px widths;
+no browser console errors observed. This verifies the proposal only, not native
+app behavior. No visible product code has changed. Inline status is the current
+recommendation because the existing detail content retains more space.
+
+Independent campaign-plan review confirmed the requirements and bounded first
+task, and corrected baseline wording to distinguish skipped live checks and
+unexecuted Xcode/full-app proof from passing local test suites.
