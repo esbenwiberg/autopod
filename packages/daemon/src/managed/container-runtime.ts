@@ -186,6 +186,7 @@ export class ManagedContainerRuntime implements ManagedRuntimePort {
     }
     const allowedMounts = new Set([
       '/output',
+      ...(request.task.contextFiles?.length ? ['/inputs/context'] : []),
       ...scope.repositories.map((repo) => `/repositories/${repo.enrollmentId}`),
       ...request.inputArtifacts.map((input) => input.mountPath),
     ]);

@@ -39,6 +39,7 @@ import {
   composeManagedAcceptance,
   parseManagedAcceptanceConfig,
 } from './managed/acceptance-config.js';
+import { composeManagedCatalog } from './managed/catalog.js';
 import { composeDarkManagedCli, parseManagedCliConfig } from './managed/cli-config.js';
 import {
   composeManagedProfileSet,
@@ -1096,7 +1097,7 @@ await podsitterService.start().catch((err) => {
   logger.error({ err }, 'Podsitter startup reconciliation failed');
 });
 
-const managedRuntime = managedAcceptanceConfig
+const legacyManagedRuntime = managedAcceptanceConfig
   ? composeManagedAcceptance(managedAcceptanceConfig, managedCliConfig, {
       db,
       databasePath: DB_PATH,
@@ -1116,6 +1117,24 @@ const managedRuntime = managedAcceptanceConfig
         githubAuth,
       })
     : undefined;
+const managedRuntime =
+  managedProfileSetConfig?.catalogArtifacts &&
+  legacyManagedRuntime &&
+  'components' in legacyManagedRuntime
+    ? composeManagedCatalog(managedProfileSetConfig, legacyManagedRuntime, {
+        db,
+        databasePath: DB_PATH,
+        manager:
+          managedProfileSetConfig.profiles[0]?.profileSnapshot.route.executionTarget === 'local'
+            ? containerManager
+            : sandboxContainerManager,
+        networkManager,
+        providerAccounts: providerAccountStore,
+        githubAuth,
+        catalog: configuration.store,
+        worktrees: worktreeManager,
+      })
+    : legacyManagedRuntime;
 if (managedRuntime) await managedRuntime.resume();
 
 // Server

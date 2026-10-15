@@ -72,6 +72,11 @@ export interface ManagedPodRow {
 
 /** A subordinate execution service: no legacy queue, series, fallback or user notification path. */
 export class ManagedPodService {
+  catalog?: {
+    assertInstallation(request: ManagedPodRequest, installation: string | undefined): void;
+    options(): unknown;
+    prepare(installation: string, request: unknown): Promise<ManagedPodRequest>;
+  };
   artifactPipeline?: ManagedArtifactPipeline;
   inputs?: ManagedArtifactInputs;
   source?: ManagedSourceDelivery;
@@ -121,6 +126,7 @@ export class ManagedPodService {
   async preflight(raw: unknown, installation?: string): Promise<ManagedPodRequest> {
     if (!this.enabled) throw new Error('managed-lane-disabled');
     const request = validateManagedRequest(raw);
+    this.catalog?.assertInstallation(request, installation);
     admitManagedRequest(request, this.admission, this.now());
     if (request.validation.autopod && !this.validation)
       throw new Error('managed-validation-unavailable');

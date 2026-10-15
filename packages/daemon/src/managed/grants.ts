@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   type ManagedPodRequest,
   type ProfileSnapshot,
@@ -15,6 +16,8 @@ export const REQUIRED_ENFORCEMENT = [
   'autonomous-expiry',
 ] as const;
 export interface ManagedAdmission {
+  /** Resolve a server-prepared catalog snapshot. Never trusts a worker/client snapshot. */
+  resolveAdmission?: (request: ManagedPodRequest) => ManagedAdmission;
   profiles: ReadonlyMap<string, ProfileSnapshot>;
   enrollmentCeiling: Scope;
   identityCeiling: Scope;
@@ -40,6 +43,20 @@ export function validateManagedRequest(raw: unknown): ManagedPodRequest {
   checkDigest(request, 'executionSpecDigest');
   checkDigest(request.profileSnapshot, 'snapshotDigest');
   checkDigest(request.effectiveGrant, 'digest');
+  if (request.task.contextFiles) {
+    const files = request.task.contextFiles;
+    if (
+      digest(files) !== request.task.contextBundleDigest ||
+      new Set(files.map((file) => file.path)).size !== files.length ||
+      files.some(
+        (file) =>
+          file.path.split('/').includes('..') ||
+          file.sha256 !== `sha256:${createHash('sha256').update(file.content).digest('hex')}`,
+      ) ||
+      Buffer.byteLength(canonical(files)) > 1_000_000
+    )
+      throw new Error('managed-context-binding-mismatch');
+  }
   if (
     request.effectiveGrant.dispatcherAttemptId !== request.dispatcherAttemptId ||
     request.effectiveGrant.profileSnapshotDigest !== request.profileSnapshot.snapshotDigest ||
@@ -84,6 +101,10 @@ export function admitManagedRequest(
   policy: ManagedAdmission,
   now: number,
 ): void {
+  if (policy.resolveAdmission) {
+    admitManagedRequest(request, policy.resolveAdmission(request), now);
+    return;
+  }
   if (policy.expectedRequest && canonical(request) !== canonical(policy.expectedRequest))
     throw new Error('managed-request-not-reviewed');
   policy.requestPolicy?.(request);

@@ -9,6 +9,7 @@ import { ManagedContainerRuntime } from './container-runtime.js';
 import { type ManagedGitHubReadConfig, ManagedGitHubReadGateway } from './github-read-gateway.js';
 import type { ManagedPodRow } from './managed-service.js';
 import { ManagedProviderGateway } from './provider-gateway.js';
+import { ManagedPublicReadGateway } from './public-read-gateway.js';
 import { ManagedQuotaFeed } from './quota-feed.js';
 import { ManagedSupervisedValidation } from './validation-runtime.js';
 import type { ManagedValidationConfig } from './validation.js';
@@ -28,6 +29,7 @@ export interface ManagedWorkerProviderChannel {
       maximumTokens: number,
     ) => ReturnType<ManagedProviderGateway['invoke']>;
     invokeGitHub?: (key: string, request: string) => Promise<string>;
+    invokePublic?: (key: string, request: string) => Promise<string>;
   }): Promise<() => void>;
   /** Queue one digest-bound follow-up inside the already-bound runtime. */
   send?(
@@ -38,6 +40,7 @@ export interface ManagedWorkerProviderChannel {
   ): Promise<void>;
 }
 export interface ManagedRuntimeBinding {
+  publicRead?: boolean;
   route: Route;
   /** Optional stage binding when several reviewed profiles share one exact route. */
   profileId?: string;
@@ -117,6 +120,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         throw new Error('managed-channel-route');
       gateways[index]!.preflight(request);
       await binding.channel.preflight(request);
+      publicGateways[index]?.preflight(request);
       const stop = await binding.channel.attach({
         podId,
         runtimeRef: ref,
@@ -130,6 +134,18 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
             prompt,
             maximumTokens,
           ),
+        ...(publicGateways[index]
+          ? {
+              invokePublic: (key: string, request: string) =>
+                publicGateways[index]!.invoke(
+                  row.dispatcher_installation_id,
+                  podId,
+                  row.grant_revision,
+                  key,
+                  request,
+                ),
+            }
+          : {}),
         ...(githubGateways[index]
           ? {
               invokeGitHub: (key: string, request: string) =>
@@ -293,6 +309,9 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
         )
       : undefined,
   );
+  const publicGateways = bindings.map((binding) =>
+    binding.publicRead ? new ManagedPublicReadGateway(components.service) : undefined,
+  );
   const feeds = bindings.map(
     (binding) => new ManagedQuotaFeed(components.service, binding.manager),
   );
@@ -301,7 +320,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
     runtime,
     workspaces,
     /** Reattach leases/channels to durable identities; never allocate or restart a worker. */
-    async resume() {
+    async resume(profileIds?: ReadonlySet<string>) {
       if (!components.service.enabled) throw new Error('managed-lane-disabled');
       if (closed) throw new Error('managed-composition-closed');
       const rows = config.db
@@ -310,6 +329,7 @@ export function composeManagedRuntime(config: ManagedRuntimeCompositionConfig) {
       for (const row of rows) {
         if (row.revoked || row.stop_requested || components.service.expired(row)) continue;
         const request = JSON.parse(row.request_json) as ManagedPodRequest;
+        if (profileIds && !profileIds.has(request.profileSnapshot.profileId)) continue;
         const index = bindings.findIndex(
           (binding) =>
             canonical(binding.route) === canonical(request.route) &&

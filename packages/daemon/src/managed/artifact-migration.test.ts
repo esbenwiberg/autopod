@@ -59,7 +59,7 @@ it('managed and native migrations preserve rows on a real 150 upgrade through th
     expect(
       db
         .prepare(
-          "SELECT name,sql FROM sqlite_master WHERE type='table' AND name LIKE 'managed_%' AND name NOT IN ('managed_pods','managed_provider_requests','managed_github_reads','managed_validations') ORDER BY name",
+          "SELECT name,sql FROM sqlite_master WHERE type='table' AND name LIKE 'managed_%' AND name NOT IN ('managed_pods','managed_provider_requests','managed_github_reads','managed_validations','managed_catalog_preparations','managed_public_reads') ORDER BY name",
         )
         .all(),
     ).toEqual(tables);
@@ -71,6 +71,8 @@ it('managed and native migrations preserve rows on a real 150 upgrade through th
     expect(db.prepare('SELECT * FROM managed_provider_requests').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM managed_github_reads').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM managed_validations').all()).toEqual([]);
+    expect(db.prepare('SELECT * FROM managed_catalog_preparations').all()).toEqual([]);
+    expect(db.prepare('SELECT * FROM managed_public_reads').all()).toEqual([]);
     expect(db.pragma('quick_check')).toEqual([{ quick_check: 'ok' }]);
     expect(db.prepare('SELECT max(version) AS version FROM schema_version').get()).toEqual({
       version: Math.max(
