@@ -18,16 +18,57 @@ public final class ActionHandler {
   /// so creation sheets can show submit failures inline.
   public private(set) var lastCreatePodError: String?
 
+  private struct OwnedControl {
+    let id: UUID
+    let kind: PendingPodControl
+    let task: Task<Bool, Never>
+  }
+  @ObservationIgnored private var controls: [String: OwnedControl] = [:]
+  @ObservationIgnored private var deletionWorkflows: [String: OwnedControl] = [:]
+  private var pendingControls: [String: PendingPodControl] = [:]
+
+  public func pendingControl(_ podId: String) -> PendingPodControl? {
+    pendingControls[podId]
+  }
+
   private let api: DaemonAPI
   private var pendingForkRequests: [String: ComposableLaunchRequest] = [:]
   private var pendingWorkerRequests: [String: (draft: Data, request: ComposableLaunchRequest)] = [:]
   private let podStore: PodStore
   private let profileStore: ProfileStore
 
-  public init(api: DaemonAPI, podStore: PodStore, profileStore: ProfileStore) {
+  private let replyContextID = UUID()
+  private let replySource: PodStore.Source?
+  private let ownership: PodStore.Ownership?
+  private let journalRoot: URL?
+
+  public init(api: DaemonAPI, podStore: PodStore, profileStore: ProfileStore, journalRoot: URL? = nil) {
     self.api = api
     self.podStore = podStore
     self.profileStore = profileStore
+    self.ownership = podStore.ownership(for: api)
+    self.replySource = podStore.ownership(for: api) == nil ? nil : podStore.retainedSource
+    self.journalRoot = journalRoot
+  }
+
+  private func requireCurrent() throws {
+    guard podStore.isCurrent(ownership) else {
+      throw DaemonError.networkError("Connection changed. Refresh before continuing.")
+    }
+  }
+
+  /// Admission is local authority, not cancellation of already-admitted server work.
+  private func perform<T>(_ operation: @MainActor () async throws -> T) async throws -> T {
+    try requireCurrent()
+    do {
+      let result = try await operation()
+      try requireCurrent()
+      return result
+    } catch {
+      // A late 404/error belongs to the old owner too; do not normalize it as current.
+      try requireCurrent()
+      throw error
+    }
   }
 
   /// Build a PodActions struct wired to this handler.
@@ -36,7 +77,10 @@ public final class ActionHandler {
       approve: { [weak self] id, reason in await self?.approve(id, reason: reason) },
       reject: { [weak self] id, feedback in await self?.reject(id, feedback: feedback) },
       reply: { [weak self] id, message in await self?.reply(id, message: message) },
+      decisionReply: decisionReplyActions,
       nudge: { [weak self] id, message in await self?.nudge(id, message: message) },
+      pendingControl: { [weak self] id in self?.pendingControl(id) },
+      killAndDelete: { [weak self] id in await self?.killAndDelete(id) },
       kill: { [weak self] id in await self?.kill(id) },
       complete: { [weak self] id in await self?.complete(id) },
       pause: { [weak self] id in await self?.pause(id) },
@@ -85,48 +129,48 @@ public final class ActionHandler {
       retryDraftScope: api.baseURL.absoluteString,
       loadGoal: { [weak self] id in
         guard let self else { throw URLError(.notConnectedToInternet) }
-        do { return try await self.api.getGoal(id) }
+        do { return try await self.perform { try await self.api.getGoal(id) } }
         catch DaemonError.notFound { return nil }
       },
       controlGoal: { [weak self] id, request in
         guard let self else { throw URLError(.notConnectedToInternet) }
-        return try await self.api.controlGoal(id, body: request)
+        return try await self.perform { try await self.api.controlGoal(id, body: request) }
       },
       loadExecutionProvenance: { [weak self] id in
         guard let self else { throw URLError(.notConnectedToInternet) }
-        return try await self.api.getExecutionProvenance(id)
+        return try await self.perform { try await self.api.getExecutionProvenance(id) }
       },
       loadDispatchPreflight: { [weak self] id in
         guard let self else { throw URLError(.notConnectedToInternet) }
-        return try await self.api.getDispatchPreflight(id)
+        return try await self.perform { try await self.api.getDispatchPreflight(id) }
       },
       loadRerunTemplate: { [weak self] id in
         guard let self else { throw URLError(.notConnectedToInternet) }
-        return try await self.api.getRerunTemplate(id)
+        return try await self.perform { try await self.api.getRerunTemplate(id) }
       },
       createIntentionalRerun: { [weak self] request in
         guard let self else { throw URLError(.notConnectedToInternet) }
-        let response = try await self.api.createIntentionalRerun(request)
+        let response = try await self.perform { try await self.api.createIntentionalRerun(request) }
         self.podStore.upsertSession(PodMapper.map(response))
         return response.id
       },
       loadRetryState: { [weak self] id, stage in
         guard let self else { throw URLError(.notConnectedToInternet) }
-        return try await self.api.getRetryState(id, stage: stage)
+        return try await self.perform { try await self.api.getRetryState(id, stage: stage) }
       },
       authorizeRetry: { [weak self] id, input in
         guard let self else { throw URLError(.notConnectedToInternet) }
-        return try await self.api.authorizeRetry(id, request: input)
+        return try await self.perform { try await self.api.authorizeRetry(id, request: input) }
       },
       reworkRetry: { [weak self] id in
         guard let self else { throw URLError(.notConnectedToInternet) }
-        try await self.api.triggerValidation(id)
-        await self.podStore.refreshSession(id)
+        try await self.perform { try await self.api.triggerValidation(id) }
+        try await self.perform { await self.podStore.refreshSession(id) }
       },
       resumeRetry: { [weak self] id in
         guard let self else { throw URLError(.notConnectedToInternet) }
-        _ = try await self.api.resumePod(id)
-        await self.podStore.refreshSession(id)
+        _ = try await self.perform { try await self.api.resumePod(id) }
+        try await self.perform { await self.podStore.refreshSession(id) }
       },
       resume: { [weak self] id in await self?.resume(id) },
       recoverWorktree: { [weak self] id in await self?.recoverWorktree(id) ?? nil },
@@ -166,7 +210,7 @@ public final class ActionHandler {
   public func approve(_ podId: String, reason: String? = nil) async {
     pendingAction = "approve-\(podId)"
     do {
-      try await api.approvePod(podId, reason: reason)
+      try await perform { try await api.approvePod(podId, reason: reason) }
       // Status is updated by the daemon event after readiness gates accept the approval.
     } catch {
       lastError = error.localizedDescription
@@ -177,7 +221,7 @@ public final class ActionHandler {
   public func reject(_ podId: String, feedback: String?) async {
     pendingAction = "reject-\(podId)"
     do {
-      try await api.rejectPod(podId, feedback: feedback)
+      try await perform { try await api.rejectPod(podId, feedback: feedback) }
       // Status will be updated via WebSocket event
     } catch {
       lastError = error.localizedDescription
@@ -188,10 +232,10 @@ public final class ActionHandler {
   public func reply(_ podId: String, message: String) async {
     pendingAction = "reply-\(podId)"
     do {
-      try await api.sendMessage(podId, message: message)
+      try await perform { try await api.sendMessage(podId, message: message) }
       // A reply may leave another decision pending or advance into validation.
       // Keep the observed state until the daemon confirms its actual disposition.
-      await podStore.refreshSession(podId)
+      try await perform { await podStore.refreshSession(podId) }
     } catch {
       lastError = error.localizedDescription
     }
@@ -201,7 +245,7 @@ public final class ActionHandler {
   public func nudge(_ podId: String, message: String) async {
     pendingAction = "nudge-\(podId)"
     do {
-      try await api.nudgeSession(podId, message: message)
+      try await perform { try await api.nudgeSession(podId, message: message) }
     } catch {
       lastError = error.localizedDescription
     }
@@ -209,20 +253,76 @@ public final class ActionHandler {
   }
 
   public func kill(_ podId: String) async {
-    pendingAction = "kill-\(podId)"
-    podStore.updateStatus(podId, to: .killing)
-    do {
-      try await api.killPod(podId)
-    } catch {
-      lastError = error.localizedDescription
+    _ = await controlTask(podId, kind: .kill)?.value
+  }
+
+  /// Admission is synchronous on MainActor. Caller cancellation does not cancel
+  /// an unstructured task that other callers are also awaiting.
+  private func controlTask(_ podId: String, kind: PendingPodControl) -> Task<Bool, Never>? {
+    do { try requireCurrent() } catch { lastError = error.localizedDescription; return nil }
+    if let workflow = deletionWorkflows[podId] {
+      return kind == .kill ? workflow.task : nil
     }
-    pendingAction = nil
+    if let current = controls[podId] {
+      return current.kind == kind ? current.task : nil
+    }
+    let id = UUID()
+    let marker = "\(kind == .pause ? "pause" : "kill")-\(podId)"
+    pendingAction = marker
+    pendingControls[podId] = kind
+    let task = Task { @MainActor in
+      defer {
+        if self.controls[podId]?.id == id {
+          self.controls.removeValue(forKey: podId)
+          if self.deletionWorkflows[podId] == nil {
+            self.pendingControls.removeValue(forKey: podId)
+          }
+          if self.pendingAction == marker { self.pendingAction = nil }
+        }
+      }
+      do {
+        if kind == .pause { try await self.perform { try await self.api.pauseSession(podId) } }
+        else { try await self.perform { try await self.api.killPod(podId) } }
+        try await self.perform { await self.podStore.refreshSession(podId) }
+        return true // POST acknowledgement only; refresh may fail or observe another state.
+      } catch {
+        self.lastError = error.localizedDescription
+        return false
+      }
+    }
+    controls[podId] = OwnedControl(id: id, kind: kind, task: task)
+    return task
+  }
+
+  public func killAndDelete(_ podId: String) async {
+    do { try requireCurrent() } catch { lastError = error.localizedDescription; return }
+    if let current = deletionWorkflows[podId] {
+      _ = await current.task.value
+      return
+    }
+    // Admit/join Kill before publishing the combined workflow, avoiding self-join.
+    guard let kill = controlTask(podId, kind: .kill) else { return }
+    let id = UUID()
+    let task = Task { @MainActor in
+      defer {
+        if self.deletionWorkflows[podId]?.id == id {
+          self.deletionWorkflows.removeValue(forKey: podId)
+          self.pendingControls.removeValue(forKey: podId)
+        }
+      }
+      guard await kill.value else { return false }
+      await self.deletePodRaw(podId)
+      return true
+    }
+    deletionWorkflows[podId] = OwnedControl(id: id, kind: .killAndDelete, task: task)
+    pendingControls[podId] = .killAndDelete
+    _ = await task.value
   }
 
   public func complete(_ podId: String) async {
     pendingAction = "complete-\(podId)"
     do {
-      try await api.completeSession(podId)
+      try await perform { try await api.completeSession(podId) }
     } catch {
       lastError = error.localizedDescription
     }
@@ -230,21 +330,13 @@ public final class ActionHandler {
   }
 
   public func pause(_ podId: String) async {
-    pendingAction = "pause-\(podId)"
-    podStore.updateStatus(podId, to: .paused)
-    do {
-      try await api.pauseSession(podId)
-    } catch {
-      podStore.updateStatus(podId, to: .running)
-      lastError = error.localizedDescription
-    }
-    pendingAction = nil
+    _ = await controlTask(podId, kind: .pause)?.value
   }
 
   public func rework(_ podId: String) async {
     pendingAction = "rework-\(podId)"
     do {
-      try await api.triggerValidation(podId)
+      try await perform { try await api.triggerValidation(podId) }
     } catch {
       lastError = error.localizedDescription
     }
@@ -254,7 +346,7 @@ public final class ActionHandler {
   public func fixManually(_ podId: String) async -> String? {
     pendingAction = "fix-\(podId)"
     do {
-      let workspace = try await api.fixManually(podId)
+      let workspace = try await perform { try await api.fixManually(podId) }
       let pod = PodMapper.map(workspace)
       podStore.upsertSession(pod)
       pendingAction = nil
@@ -269,7 +361,7 @@ public final class ActionHandler {
   public func revalidate(_ podId: String) async {
     pendingAction = "revalidate-\(podId)"
     do {
-      _ = try await api.revalidateSession(podId)
+      _ = try await perform { try await api.revalidateSession(podId) }
       // Status will be updated via WebSocket event
     } catch {
       lastError = error.localizedDescription
@@ -280,7 +372,7 @@ public final class ActionHandler {
   public func extendAttempts(_ podId: String, additionalAttempts: Int) async {
     pendingAction = "extend-\(podId)"
     do {
-      try await api.extendAttempts(podId, additionalAttempts: additionalAttempts)
+      try await perform { try await api.extendAttempts(podId, additionalAttempts: additionalAttempts) }
       // Status will be updated via WebSocket event (back to running/validating)
     } catch {
       lastError = error.localizedDescription
@@ -291,7 +383,7 @@ public final class ActionHandler {
   public func extendPrAttempts(_ podId: String, additionalAttempts: Int) async {
     pendingAction = "extend-pr-\(podId)"
     do {
-      try await api.extendPrAttempts(podId, additionalAttempts: additionalAttempts)
+      try await perform { try await api.extendPrAttempts(podId, additionalAttempts: additionalAttempts) }
       // Status will be updated via WebSocket event (back to merge_pending)
     } catch {
       lastError = error.localizedDescription
@@ -304,7 +396,7 @@ public final class ActionHandler {
     pendingAction = "spawn-fix-\(podId)"
     defer { pendingAction = nil }
     do {
-      let response = try await api.spawnFixSession(podId, userMessage: userMessage)
+      let response = try await perform { try await api.spawnFixSession(podId, userMessage: userMessage) }
       // Fix pod will appear via WebSocket pod.created event
       return response
     } catch {
@@ -316,8 +408,8 @@ public final class ActionHandler {
   public func retryCreatePr(_ podId: String) async {
     pendingAction = "retry-pr-\(podId)"
     do {
-      try await api.retryCreatePr(podId)
-      await podStore.refreshSession(podId)
+      try await perform { try await api.retryCreatePr(podId) }
+      try await perform { await podStore.refreshSession(podId) }
     } catch {
       lastError = error.localizedDescription
     }
@@ -327,11 +419,11 @@ public final class ActionHandler {
   public func resume(_ podId: String) async {
     pendingAction = "resume-\(podId)"
     do {
-      _ = try await api.resumePod(podId)
+      _ = try await perform { try await api.resumePod(podId) }
       // Resume can flip the pod back to validated (Path 1) or kick off a fresh
       // validation (Path 2). Either way the WebSocket will stream the eventual
       // status — but pull a fresh snapshot now so the UI doesn't sit on `failed`.
-      await podStore.refreshSession(podId)
+      try await perform { await podStore.refreshSession(podId) }
     } catch {
       lastError = error.localizedDescription
     }
@@ -342,11 +434,11 @@ public final class ActionHandler {
     pendingAction = "recover-worktree-\(podId)"
     defer { pendingAction = nil }
     do {
-      let result = try await api.recoverWorktree(podId)
+      let result = try await perform { try await api.recoverWorktree(podId) }
       // The daemon clears `worktreeCompromised` on success, so refresh now to
       // re-enable Resume/Rework. On failure the flag stays set; the surfaced
       // message tells the operator what to do next.
-      await podStore.refreshSession(podId)
+      try await perform { await podStore.refreshSession(podId) }
       if !result.recovered {
         lastError = "Recovery failed: \(result.message)"
       }
@@ -361,8 +453,8 @@ public final class ActionHandler {
     pendingAction = "force-complete-\(podId)"
     do {
       let trimmed = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
-      try await api.forceComplete(podId, reason: (trimmed?.isEmpty ?? true) ? nil : trimmed)
-      await podStore.refreshSession(podId)
+      try await perform { try await api.forceComplete(podId, reason: (trimmed?.isEmpty ?? true) ? nil : trimmed) }
+      try await perform { await podStore.refreshSession(podId) }
     } catch {
       lastError = error.localizedDescription
     }
@@ -373,11 +465,11 @@ public final class ActionHandler {
     pendingAction = "kick-\(podId)"
     do {
       let trimmed = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
-      _ = try await api.kickPod(podId, reason: (trimmed?.isEmpty ?? true) ? nil : trimmed)
+      _ = try await perform { try await api.kickPod(podId, reason: (trimmed?.isEmpty ?? true) ? nil : trimmed) }
       // Kick may flip a queued pod back into the active queue (status unchanged)
       // or transition a running pod to failed. Either way refresh now so the
       // UI doesn't sit on the old state until the next WebSocket tick.
-      await podStore.refreshSession(podId)
+      try await perform { await podStore.refreshSession(podId) }
     } catch {
       lastError = error.localizedDescription
     }
@@ -415,7 +507,7 @@ public final class ActionHandler {
       referenceRepos: (referenceRepos?.isEmpty ?? true) ? nil : referenceRepos
     )
     do {
-      let response = try await api.createPod(req)
+      let response = try await perform { try await api.createPod(req) }
       let pod = PodMapper.map(response)
       podStore.upsertSession(pod)
       lastCreatePodError = nil
@@ -436,12 +528,12 @@ public final class ActionHandler {
   ) async {
     pendingAction = "promote-\(podId)"
     do {
-      try await api.promoteSession(
+      try await perform { try await api.promoteSession(
         podId,
         targetOutput: targetOutput,
         instructions: instructions,
         skipAgent: skipAgent
-      )
+      ) }
       // Status will be updated via WebSocket event (running → handoff → provisioning → ...)
     } catch {
       lastError = error.localizedDescription
@@ -452,8 +544,8 @@ public final class ActionHandler {
   public func approveAllValidated() async {
     pendingAction = "approve-all"
     do {
-      _ = try await api.approveAllValidated()
-      await podStore.loadSessions()
+      _ = try await perform { try await api.approveAllValidated() }
+      try await perform { await podStore.loadSessions() }
     } catch {
       lastError = error.localizedDescription
     }
@@ -463,8 +555,8 @@ public final class ActionHandler {
   public func killAllFailed() async {
     pendingAction = "kill-failed"
     do {
-      _ = try await api.killAllFailed()
-      await podStore.loadSessions()
+      _ = try await perform { try await api.killAllFailed() }
+      try await perform { await podStore.loadSessions() }
     } catch {
       lastError = error.localizedDescription
     }
@@ -475,13 +567,14 @@ public final class ActionHandler {
     pendingAction = "fork-\(podId)"
     defer { pendingAction = nil }
     do {
+      try requireCurrent()
       var request: ComposableLaunchRequest
       if let pending = pendingForkRequests[podId] { request = pending }
       else {
         guard let source = podStore.pods.first(where: { $0.id == podId }) else {
           throw DaemonError.networkError("Source pod is unavailable")
         }
-        let frozen = try await api.getLaunchConfiguration(podId)
+        let frozen = try await perform { try await api.getLaunchConfiguration(podId) }
         request = ComposableLaunchRequest(
           repositoryId: frozen.fields["repository"]?["id"]?.string,
           profileId: frozen.fields["profileId"]?.string, task: source.task)
@@ -493,11 +586,12 @@ public final class ActionHandler {
           if let base = source.baseBranch { request.work?["baseBranch"] = .string(base) }
         }
         request.requestId = UUID().uuidString
-        request.expectedDigest = try await api.resolveLaunch(request).digest
+        request.expectedDigest = try await perform { try await api.resolveLaunch(request) }.digest
         pendingForkRequests[podId] = request
       }
-      _ = try LaunchRequestJournal.save(request)
-      let response = try await api.launchPod(request)
+      try requireCurrent()
+      _ = try LaunchRequestJournal.save(request, directory: journalRoot?.appendingPathComponent("launches", isDirectory: true))
+      let response = try await perform { try await api.launchPod(request) }
       podStore.upsertSession(PodMapper.map(response))
       pendingForkRequests.removeValue(forKey: podId)
       lastError = nil
@@ -506,20 +600,29 @@ public final class ActionHandler {
   }
 
   public func deletePod(_ podId: String) async {
+    do { try requireCurrent() } catch { lastError = error.localizedDescription; return }
+    if let workflow = deletionWorkflows[podId] {
+      _ = await workflow.task.value
+      return
+    }
+    await deletePodRaw(podId)
+  }
+
+  private func deletePodRaw(_ podId: String) async {
     pendingAction = "delete-\(podId)"
     do {
-      try await api.deletePod(podId)
+      try await perform { try await api.deletePod(podId) }
       podStore.removeSession(podId)
     } catch {
       lastError = error.localizedDescription
     }
-    pendingAction = nil
+    if pendingAction == "delete-\(podId)" { pendingAction = nil }
   }
 
   public func deleteSeries(_ seriesId: String) async {
     pendingAction = "delete-series-\(seriesId)"
     do {
-      try await api.deleteSeries(seriesId)
+      try await perform { try await api.deleteSeries(seriesId) }
       podStore.removeSeriesPods(seriesId)
     } catch {
       lastError = error.localizedDescription
@@ -529,7 +632,7 @@ public final class ActionHandler {
 
   public func openLiveApp(_ podId: String) async {
     do {
-      let previewUrl = try await api.startPreview(podId)
+      let previewUrl = try await perform { try await api.startPreview(podId) }
       guard let url = URL(string: previewUrl) else { return }
       NSWorkspace.shared.open(url)
     } catch {
@@ -539,7 +642,7 @@ public final class ActionHandler {
 
   public func interruptValidation(_ podId: String) async {
     do {
-      try await api.interruptValidation(podId: podId)
+      try await perform { try await api.interruptValidation(podId: podId) }
     } catch {
       lastError = error.localizedDescription
     }
@@ -547,8 +650,8 @@ public final class ActionHandler {
 
   public func setSkipValidation(_ podId: String, skip: Bool) async {
     do {
-      try await api.setSkipValidation(podId, skip: skip)
-      await podStore.refreshSession(podId)
+      try await perform { try await api.setSkipValidation(podId, skip: skip) }
+      try await perform { await podStore.refreshSession(podId) }
     } catch {
       lastError = error.localizedDescription
     }
@@ -563,14 +666,14 @@ public final class ActionHandler {
     guidance: String?
   ) async {
     do {
-      try await api.addValidationOverride(
+      try await perform { try await api.addValidationOverride(
         podId: podId,
         findingId: findingId,
         description: description,
         action: action,
         reason: reason,
         guidance: guidance
-      )
+      ) }
     } catch {
       lastError = error.localizedDescription
     }
@@ -578,7 +681,7 @@ public final class ActionHandler {
 
   public func forceApprove(_ podId: String, reason: String?) async {
     do {
-      try await api.forceApprove(podId, reason: reason)
+      try await perform { try await api.forceApprove(podId, reason: reason) }
     } catch {
       lastError = error.localizedDescription
     }
@@ -586,8 +689,8 @@ public final class ActionHandler {
 
   public func approveFactWaiver(_ podId: String, factId: String, reason: String?) async {
     do {
-      try await api.approveFactWaiver(podId: podId, factId: factId, reason: reason)
-      let response = try await api.getPod(podId)
+      try await perform { try await api.approveFactWaiver(podId: podId, factId: factId, reason: reason) }
+      let response = try await perform { try await api.getPod(podId) }
       podStore.upsertSession(PodMapper.map(response))
     } catch {
       lastError = error.localizedDescription
@@ -603,7 +706,7 @@ public final class ActionHandler {
   public func previewSeriesFolder(path: String) async -> SeriesPreviewResponse? {
     lastPreviewError = nil
     do {
-      return try await api.previewSeriesFolder(path: path)
+      return try await perform { try await api.previewSeriesFolder(path: path) }
     } catch {
       lastPreviewError = error.localizedDescription
       return nil
@@ -615,9 +718,9 @@ public final class ActionHandler {
   ) async -> SeriesPreviewResponse? {
     lastPreviewError = nil
     do {
-      return try await api.previewSeriesOnBranch(
+      return try await perform { try await api.previewSeriesOnBranch(
         repositoryId: profileName, branch: branch, path: path
-      )
+      ) }
     } catch {
       lastPreviewError = error.localizedDescription
       return nil
@@ -627,7 +730,7 @@ public final class ActionHandler {
   public func previewBriefFolder(path: String) async -> ParsedBriefResponse? {
     lastPreviewError = nil
     do {
-      return try await api.previewBriefFolder(path: path)
+      return try await perform { try await api.previewBriefFolder(path: path) }
     } catch {
       lastPreviewError = error.localizedDescription
       return nil
@@ -639,11 +742,11 @@ public final class ActionHandler {
   ) async -> ParsedBriefResponse? {
     lastPreviewError = nil
     do {
-      let source = try await api.getLaunchConfiguration(sourcePodId)
+      let source = try await perform { try await api.getLaunchConfiguration(sourcePodId) }
       guard let repositoryId = source.fields["repository"]?["id"]?.string else {
         throw DaemonError.networkError("The source workspace has no repository")
       }
-      return try await api.previewBriefOnBranch(repositoryId: repositoryId, branch: branch, path: path)
+      return try await perform { try await api.previewBriefOnBranch(repositoryId: repositoryId, branch: branch, path: path) }
     } catch { lastPreviewError = error.localizedDescription; return nil }
   }
 
@@ -652,8 +755,9 @@ public final class ActionHandler {
     lastCreatePodError = nil
     defer { pendingAction = nil }
     do {
-      _ = try LaunchRequestJournal.saveSeries(request)
-      let response = try await api.createSeries(request)
+      try requireCurrent()
+      _ = try LaunchRequestJournal.saveSeries(request, directory: journalRoot?.appendingPathComponent("series", isDirectory: true))
+      let response = try await perform { try await api.createSeries(request) }
       for pod in PodMapper.map(response.pods) {
         podStore.upsertSession(pod)
       }
@@ -668,9 +772,9 @@ public final class ActionHandler {
     pendingAction = "update-from-base-\(podId)"
     defer { pendingAction = nil }
     do {
-      let result = try await api.updateFromBase(podId)
+      let result = try await perform { try await api.updateFromBase(podId) }
       if result.action == "rebased" || result.action == "queued_after_abort" {
-        await podStore.refreshSession(podId)
+        try await perform { await podStore.refreshSession(podId) }
       }
       return result
     } catch {
@@ -683,7 +787,7 @@ public final class ActionHandler {
     pendingAction = "sync-branch-\(podId)"
     defer { pendingAction = nil }
     do {
-      return try await api.syncWorkspaceBranch(podId)
+      return try await perform { try await api.syncWorkspaceBranch(podId) }
     } catch {
       lastError = error.localizedDescription
       return nil
@@ -694,6 +798,7 @@ public final class ActionHandler {
     pendingAction = "launch-worker"; lastCreatePodError = nil
     defer { pendingAction = nil }
     do {
+      try requireCurrent()
       guard let pod = podStore.pods.first(where: { $0.id == sourcePodId }) else {
         throw DaemonError.networkError("Source workspace is unavailable")
       }
@@ -713,9 +818,9 @@ public final class ActionHandler {
       var request: ComposableLaunchRequest
       if let saved = pendingWorkerRequests[sourcePodId], saved.draft == bytes { request = saved.request }
       else {
-        let source = try await api.getLaunchConfiguration(sourcePodId)
+        let source = try await perform { try await api.getLaunchConfiguration(sourcePodId) }
         if source.fields["repository"]?["id"]?.string != nil {
-          let synchronization = try await api.syncWorkspaceBranch(sourcePodId)
+          let synchronization = try await perform { try await api.syncWorkspaceBranch(sourcePodId) }
           guard synchronization.ok == true, synchronization.pushed == true else {
             throw DaemonError.networkError(synchronization.error ?? "The workspace branch could not be published for the worker. Retry after synchronization succeeds.")
           }
@@ -727,11 +832,12 @@ public final class ActionHandler {
         request.source = LaunchSource(podId: sourcePodId, digest: source.digest, configuration: "worker")
         request.work = work; request.requiredSidecarIds = sidecars
         request.requestId = UUID().uuidString
-        request.expectedDigest = try await api.resolveLaunch(request).digest
+        request.expectedDigest = try await perform { try await api.resolveLaunch(request) }.digest
         pendingWorkerRequests[sourcePodId] = (bytes, request)
       }
-      _ = try LaunchRequestJournal.save(request)
-      let response = try await api.launchPod(request)
+      try requireCurrent()
+      _ = try LaunchRequestJournal.save(request, directory: journalRoot?.appendingPathComponent("launches", isDirectory: true))
+      let response = try await perform { try await api.launchPod(request) }
       podStore.upsertSession(PodMapper.map(response))
       pendingWorkerRequests.removeValue(forKey: sourcePodId)
       return response.id
@@ -739,4 +845,153 @@ public final class ActionHandler {
   }
 
 
+}
+
+// MARK: - Exact-decision replies
+
+extension ActionHandler {
+  private var decisionReplyActions: DecisionReplyActions {
+    DecisionReplyActions(
+      contextID: replyContextID,
+      pod: { [weak self] id in self?.replyPod(id) },
+      snapshot: { [weak self] id, decision in self?.replySnapshot(id, decision) ?? .init() },
+      isCurrent: { [weak self] id, decision, recordID in
+        guard let self, self.podStore.isCurrent(self.ownership),
+              let key = self.replyKey(id, decision) else { return false }
+        return self.podStore.decisionReplies.read(key)?.id == recordID
+      },
+      edit: { [weak self] id, decision, text in
+        guard let self, let key = self.replyKey(id, decision) else { return }
+        self.podStore.decisionReplies.get(key).edit(text)
+      },
+      discard: { [weak self] id, decision in
+        guard let self, let key = self.replyKey(id, decision) else { return }
+        self.podStore.decisionReplies.get(key).edit("")
+      },
+      prepare: { [weak self] id in
+        guard let self else { return .unavailable("Connect to load this question.") }
+        return await self.prepareReply(id)
+      },
+      submit: { [weak self] id, decision in
+        guard let self else { return Task { .notAdmitted } }
+        return self.submitReply(id, decision)
+      }
+    )
+  }
+
+  private func replyPod(_ id: String) -> Pod? {
+    guard let replySource, podStore.retainedSource == replySource else { return nil }
+    return podStore.pods.first { $0.id == id }
+  }
+
+  private func replyKey(_ id: String, _ decision: String?) -> DecisionReplyStore.Key? {
+    guard let replySource, let decision, !decision.isEmpty,
+          let pod = replyPod(id), pod.status == .awaitingInput,
+          pod.escalationId == decision else { return nil }
+    return .init(source: replySource, podID: id, decisionID: decision)
+  }
+
+  private func replySnapshot(_ id: String, _ decision: String?) -> DecisionReplySnapshot {
+    var result = DecisionReplySnapshot()
+    guard let key = replyKey(id, decision) else { return result }
+    let record = podStore.decisionReplies.read(key)
+    result.recordID = record?.id
+    result.text = record?.text ?? ""
+    result.canEdit = true
+    result.pending = podStore.decisionReplies.pending(key) != nil
+    result.acknowledged = record?.acknowledged ?? false
+    result.canSubmit = podStore.isCurrent(ownership) && !result.pending && !result.acknowledged
+    if result.acknowledged {
+      result.notice = "Reply acknowledged — waiting for an updated question."
+    } else if let notice = record?.notice {
+      result.notice = notice
+    } else if result.pending {
+      result.notice = "Sending reply… Draft kept until acknowledgement."
+    } else if !podStore.isCurrent(ownership) {
+      result.notice = "Reconnecting — draft kept."
+    } else {
+      result.notice = record?.notice
+    }
+    return result
+  }
+
+  private func prepareReply(_ id: String) async -> DecisionReplyPreparation {
+    do {
+      try requireCurrent()
+      guard replyPod(id) != nil, let replySource else { return .unavailable("This question is no longer available.") }
+      let drafts = podStore.decisionReplies
+      let lifetime = drafts.lifetime(source: replySource, podID: id)
+      _ = try await podStore.readSession(id, accepting: {
+        self.replyPod(id) != nil && drafts.ownsLifetime(source: replySource, podID: id, id: lifetime)
+      })
+      try requireCurrent()
+      guard let pod = replyPod(id), replyKey(id, pod.escalationId) != nil else {
+        return .unavailable("No unanswered question is available. Refresh to check again.")
+      }
+      return .ready
+    } catch {
+      return .unavailable("Could not load this question. Reconnect or refresh to try again.")
+    }
+  }
+
+  /// This is intentionally synchronous: capture text/revision and publish admission
+  /// before returning to any view. Waiters never own or cancel the shared task.
+  private func submitReply(_ id: String, _ decision: String) -> Task<DecisionReplyOutcome, Never> {
+    guard let key = replyKey(id, decision) else { return Task { .notAdmitted } }
+    let drafts = podStore.decisionReplies
+    if let task = drafts.pending(key) { return task }
+    let record = drafts.get(key)
+    guard !record.acknowledged, podStore.isCurrent(ownership) else {
+      return Task { .notAdmitted }
+    }
+    let message = record.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !message.isEmpty else { return Task { .notAdmitted } }
+    let revision = record.revision
+    let attempt = UUID()
+    record.attemptID = attempt
+    record.notice = nil
+    let task = Task { @MainActor [self] in
+      defer {
+        drafts.settle(key, id: attempt)
+        if record.attemptID == attempt {
+          record.attemptID = nil
+          record.task = nil
+        }
+      }
+      let stillOwnsDecision: @MainActor @Sendable () -> Bool = { [self] in
+        podStore.isCurrent(ownership) && drafts.owns(key, record) && replyKey(id, decision) == key
+      }
+      var postAdmitted = false
+      do {
+        guard stillOwnsDecision() else { throw CancellationError() }
+        let read = try await podStore.readSession(id, accepting: stillOwnsDecision)
+        guard stillOwnsDecision(), read.returned.status == .awaitingInput,
+              read.returned.escalationId == decision,
+              read.current.escalationId == decision else { throw CancellationError() }
+        // No suspension between this final authority check and the API call.
+        postAdmitted = true
+        try await api.sendMessage(id, message: message)
+        guard stillOwnsDecision() else { throw CancellationError() }
+        record.acknowledged = true
+        if record.revision == revision { record.edit("") }
+        // Acknowledgement is already visible; refresh cannot revoke it or invent
+        // Running. A later decision/source/removal must not be overwritten.
+        _ = try? await podStore.readSession(id, accepting: stillOwnsDecision)
+        return DecisionReplyOutcome.acknowledged
+      } catch {
+        if postAdmitted {
+          record.notice = "Delivery unconfirmed — draft kept. Inspect activity before retrying."
+          if stillOwnsDecision() {
+            _ = try? await podStore.readSession(id, accepting: stillOwnsDecision)
+          }
+          return .unconfirmed
+        }
+        record.notice = "Reply not sent. Refresh the question before trying again."
+        return .notAdmitted
+      }
+    }
+    record.task = task
+    drafts.admit(key, id: attempt, task: task)
+    return task
+  }
 }

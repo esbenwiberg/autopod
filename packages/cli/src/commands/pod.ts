@@ -17,6 +17,7 @@ import { withSpinner } from '../output/spinner.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
 import { formatToolUse } from '../utils/formatToolUse.js';
 import { resolvePodId } from '../utils/id-resolver.js';
+import { followLogs } from '../utils/log-follow.js';
 import { registerBudgetCommand } from './budget.js';
 import { registerGoalCommands } from './goal.js';
 import { registerLaunchCommand } from './launch.js';
@@ -676,35 +677,15 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      ws.on('open', () => {
-        ws.send(JSON.stringify({ type: 'subscribe', podId: resolvedId }));
-        console.log(chalk.dim(`Following pod ${resolvedId.slice(0, 8)}… (Ctrl+C to stop)\n`));
-      });
-
-      ws.on('message', (data: Buffer) => {
-        try {
-          const event = JSON.parse(data.toString()) as { type: string };
-          // Skip subscribe/unsubscribe confirmations
-          if (['subscribed', 'unsubscribed', 'subscribed_all', 'error'].includes(event.type))
-            return;
+      await followLogs(ws, resolvedId, {
+        onOpen: () => {
+          console.log(chalk.dim(`Following pod ${resolvedId.slice(0, 8)}… (Ctrl+C to stop)\n`));
+        },
+        onEvent: (event) => {
           formatLogEvent(event as SystemEvent, { showReasoning: opts.showReasoning });
-        } catch {
-          // Ignore malformed messages
-        }
+        },
       });
 
-      ws.on('close', () => process.exit(0));
-      ws.on('error', (err: Error) => {
-        console.error(chalk.red(`WebSocket error: ${err.message}`));
-        process.exit(1);
-      });
-
-      process.on('SIGINT', () => {
-        ws.close();
-        process.exit(0);
-      });
-
-      // Keep the process alive — the event loop stays open via the WebSocket
       return;
     }
 

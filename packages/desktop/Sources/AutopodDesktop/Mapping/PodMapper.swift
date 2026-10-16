@@ -152,6 +152,12 @@ public enum PodMapper {
     }()
 
     // Map escalation from pending escalation
+    let escalationId: String? = {
+      guard let escalation = response.pendingEscalation,
+            escalation.response == nil, !escalation.id.isEmpty else { return nil }
+      return escalation.id
+    }()
+
     let escalationQuestion: String? = {
       guard let esc = response.pendingEscalation, esc.response == nil else { return nil }
       if esc.type == "action_approval", let actionName = esc.payload.actionName {
@@ -489,6 +495,7 @@ public enum PodMapper {
       baseBranch: response.baseBranch,
       contract: response.contract,
       diffStats: diffStats,
+      escalationId: escalationId,
       escalationQuestion: escalationQuestion,
       escalationOptions: escalationOptions,
       escalationType: escalationType,

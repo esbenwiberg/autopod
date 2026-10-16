@@ -957,6 +957,11 @@ export class AutopodClient {
     if (response.status === 401) {
       // Single retry with fresh token
       try {
+        await response.body?.cancel();
+      } catch {
+        // A closed/errored rejected body must not prevent the existing auth retry.
+      }
+      try {
         token = await this.getToken();
         response = await fetch(url, {
           method,

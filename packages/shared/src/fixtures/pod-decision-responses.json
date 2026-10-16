@@ -1,0 +1,94 @@
+{
+  "_contract": [
+    "Selected fields captured from the seeded real daemon detail and compact routes by pod-decision-contract.test.ts.",
+    "Includes required Swift DTO fields, complete options/decision/finalization objects, and compact diagnostics.",
+    "Omits unrelated optional profile, provider, validation, runtime, telemetry detail, artifact and series fields; no volatile values are normalized.",
+    "Stable synthetic IDs and timestamps are seeded in SQLite. No Node generation step is required for Swift."
+  ],
+  "detail": {
+    "id": "decision-contract-pod",
+    "profileName": "test-profile",
+    "task": "Preserve the selected implementation",
+    "status": "awaiting_input",
+    "model": "gpt-5",
+    "runtime": "codex",
+    "executionTarget": "local",
+    "branch": "contract-fixture",
+    "validationAttempts": 0,
+    "maxValidationAttempts": 3,
+    "escalationCount": 0,
+    "skipValidation": false,
+    "createdAt": "2026-10-15T12:00:00.000Z",
+    "updatedAt": "2026-10-15T12:00:00.000Z",
+    "userId": "fixture-operator",
+    "filesChanged": 0,
+    "linesAdded": 0,
+    "linesRemoved": 0,
+    "outputMode": "pr",
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "costUsd": 0,
+    "commitCount": 0,
+    "options": {
+      "agentMode": "auto",
+      "output": "pr",
+      "validate": true,
+      "validationSuite": "full",
+      "advisoryBrowserQaEnabled": false,
+      "promotable": false
+    },
+    "pendingEscalation": {
+      "id": "decision-contract-question",
+      "podId": "decision-contract-pod",
+      "type": "ask_human",
+      "timestamp": "2026-10-15T12:00:00.000Z",
+      "payload": {
+        "question": "Which implementation should be preserved?",
+        "options": ["First", "Second"]
+      },
+      "response": null
+    },
+    "finalization": {
+      "generation": 1,
+      "cycle": 1,
+      "phase": "awaiting_human",
+      "agentSettledAt": "2026-10-15T12:00:00.000Z",
+      "result": null,
+      "pendingDecisionId": "decision-contract-question",
+      "sourcePreservedAt": null
+    }
+  },
+  "compact": {
+    "id": "decision-contract-pod",
+    "title": "Preserve the selected implementation",
+    "profileName": "test-profile",
+    "status": "awaiting_input",
+    "model": "gpt-5",
+    "runtime": "codex",
+    "executionTarget": "local",
+    "branch": "contract-fixture",
+    "options": {
+      "agentMode": "auto",
+      "output": "pr",
+      "validate": true,
+      "validationSuite": "full",
+      "advisoryBrowserQaEnabled": false,
+      "promotable": false
+    },
+    "hasWebUi": true,
+    "createdAt": "2026-10-15T12:00:00.000Z",
+    "updatedAt": "2026-10-15T12:00:00.000Z",
+    "pendingEscalationSummary": "Which implementation should be preserved?",
+    "finalization": {
+      "generation": 1,
+      "cycle": 1,
+      "phase": "awaiting_human",
+      "agentSettledAt": "2026-10-15T12:00:00.000Z",
+      "result": null,
+      "resultTruncated": false,
+      "pendingDecisionId": "decision-contract-question",
+      "sourcePreservedAt": null
+    },
+    "recordDiagnostics": []
+  }
+}

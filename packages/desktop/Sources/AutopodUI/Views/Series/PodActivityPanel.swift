@@ -26,6 +26,11 @@ struct PodActivityPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             panelHeader
+            if let pendingControl {
+                PendingControlNotice(kind: pendingControl, podId: pod.id)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+            }
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -62,6 +67,8 @@ struct PodActivityPanel: View {
             await fetchQuality()
         }
     }
+
+    private var pendingControl: PendingPodControl? { actions.pendingControl(pod.id) }
 
     private func fetchQuality() async {
         guard let loadQuality else { return }
@@ -150,9 +157,11 @@ struct PodActivityPanel: View {
                 .controlSize(.small)
             }
             if pod.status.isActive {
-                Button("Pause") {
+                Button(pendingControl == .pause ? "Pausing…" : "Pause") {
                     Task { await actions.pause(pod.id) }
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-pause-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }

@@ -2,6 +2,26 @@ import Foundation
 import AutopodClient
 import AutopodUI
 
+// Internal seam for deterministic callback ordering; production uses EventSocket.
+protocol EventStreamSocket: Sendable {
+  func connect() async
+  func disconnect() async
+  func subscribe(podId: String) async
+  func unsubscribe(podId: String) async
+}
+
+extension EventSocket: EventStreamSocket {}
+
+struct EventStreamSocketCallbacks: Sendable {
+  let event: @Sendable (RawSystemEvent) -> Void
+  let state: @Sendable (EventSocket.State) -> Void
+  let resync: @Sendable () -> Void
+}
+
+typealias EventStreamSocketFactory = @MainActor (
+  URL, String, DaemonAccessTokenProvider?, EventStreamSocketCallbacks
+) -> any EventStreamSocket
+
 /// Bridges the WebSocket event stream into PodStore updates.
 /// Owns the EventSocket lifecycle and dispatches events.
 @Observable
@@ -38,7 +58,11 @@ public final class EventStream {
   /// Coverage of the historical events currently loaded into `sessionEvents`.
   public private(set) var historicalEventScope: [String: HistoricalEventScope] = [:]
 
-  private var eventSocket: EventSocket?
+  private var eventSocket: (any EventStreamSocket)?
+  private var connectionGeneration: UInt64 = 0
+  private var connectionStartTask: Task<Void, Never>?
+  private let notifyEscalation: (Pod, String) -> Void
+  private let socketFactory: EventStreamSocketFactory
   private let podStore: PodStore
   private weak var memoryStore: MemoryStore?
   private weak var scheduledJobStore: ScheduledJobStore?
@@ -56,14 +80,32 @@ public final class EventStream {
 
   // MARK: - Init
 
-  public init(
+  public convenience init(
     podStore: PodStore,
     memoryStore: MemoryStore? = nil,
     scheduledJobStore: ScheduledJobStore? = nil
   ) {
+    self.init(podStore: podStore, memoryStore: memoryStore, scheduledJobStore: scheduledJobStore,
+      socketFactory: { baseURL, token, tokenProvider, callbacks in
+        EventSocket(baseURL: baseURL, token: token, tokenProvider: tokenProvider,
+          onEvent: callbacks.event, onStateChange: callbacks.state, onResyncRequired: callbacks.resync)
+      })
+  }
+
+  init(
+    podStore: PodStore,
+    memoryStore: MemoryStore? = nil,
+    scheduledJobStore: ScheduledJobStore? = nil,
+    socketFactory: @escaping EventStreamSocketFactory,
+    notifyEscalation: @escaping (Pod, String) -> Void = { pod, question in
+      NotificationService.shared.notifyEscalation(pod: pod, question: question)
+    }
+  ) {
     self.podStore = podStore
     self.memoryStore = memoryStore
     self.scheduledJobStore = scheduledJobStore
+    self.socketFactory = socketFactory
+    self.notifyEscalation = notifyEscalation
   }
 
   // MARK: - Lifecycle
@@ -75,39 +117,46 @@ public final class EventStream {
     tokenProvider: DaemonAccessTokenProvider? = nil
   ) {
     disconnect()
+    let generation = connectionGeneration
 
-    let socket = EventSocket(
-      baseURL: baseURL,
-      token: token,
-      tokenProvider: tokenProvider,
-      onEvent: { [weak self] raw in
+    let callbacks = EventStreamSocketCallbacks(
+      event: { [weak self] raw in
         Task { @MainActor [weak self] in
-          self?.handleRawEvent(raw)
+          guard let self, self.connectionGeneration == generation else { return }
+          self.handleRawEvent(raw)
         }
       },
-      onStateChange: { [weak self] state in
+      state: { [weak self] state in
         Task { @MainActor [weak self] in
-          self?.handleStateChange(state)
+          guard let self, self.connectionGeneration == generation else { return }
+          self.handleStateChange(state)
         }
       },
-      onResyncRequired: { [weak self] in
+      resync: { [weak self] in
         Task { @MainActor [weak self] in
-          await self?.handleResyncRequired(api: api)
+          guard let self, self.connectionGeneration == generation else { return }
+          await self.handleResyncRequired(api: api)
         }
       }
     )
+    let socket = socketFactory(baseURL, token, tokenProvider, callbacks)
     eventSocket = socket
 
-    Task {
+    connectionStartTask = Task { [weak self] in
+      guard !Task.isCancelled, self?.connectionGeneration == generation else { return }
       await socket.connect()
     }
   }
 
   public func disconnect() {
-    Task {
-      await eventSocket?.disconnect()
-    }
+    connectionGeneration &+= 1
+    connectionStartTask?.cancel()
+    connectionStartTask = nil
+    let oldSocket = eventSocket
     eventSocket = nil
+    if let oldSocket {
+      Task { await oldSocket.disconnect() }
+    }
     flushTask?.cancel()
     flushTask = nil
     flushPendingEvents()
@@ -116,15 +165,21 @@ public final class EventStream {
 
   /// Subscribe to a specific pod's events (when detail panel opens)
   public func subscribeToSession(_ podId: String) {
-    Task {
-      await eventSocket?.subscribe(podId: podId)
+    guard let socket = eventSocket else { return }
+    let generation = connectionGeneration
+    Task { [weak self] in
+      guard self?.connectionGeneration == generation else { return }
+      await socket.subscribe(podId: podId)
     }
   }
 
   /// Unsubscribe from a pod (when navigating away)
   public func unsubscribeFromSession(_ podId: String) {
-    Task {
-      await eventSocket?.unsubscribe(podId: podId)
+    guard let socket = eventSocket else { return }
+    let generation = connectionGeneration
+    Task { [weak self] in
+      guard self?.connectionGeneration == generation else { return }
+      await socket.unsubscribe(podId: podId)
     }
   }
 
@@ -289,16 +344,17 @@ public final class EventStream {
         guard let opts = escalation.payload.options, !opts.isEmpty else { return nil }
         return opts
       }()
-      podStore.setEscalation(podId, question: question, options: options)
+      podStore.setEscalation(podId, question: question, options: options,
+        id: escalation.id, type: escalation.type)
       podStore.updateStatus(podId, to: .awaitingInput)
       // Notification
       if let pod = podStore.pods.first(where: { $0.id == podId }) {
-        NotificationService.shared.notifyEscalation(pod: pod, question: question)
+        notifyEscalation(pod, question)
       }
 
-    case .escalationResolved(let podId, _):
-      podStore.setEscalation(podId, question: nil)
-      podStore.updateStatus(podId, to: .running)
+    case .escalationResolved(let podId, let escalationId):
+      podStore.resolveEscalation(podId, id: escalationId)
+      Task { await podStore.refreshSession(podId) }
 
     case .sessionCompleted(let podId, let finalStatus, _):
       if let status = PodStatus(rawValue: finalStatus) {

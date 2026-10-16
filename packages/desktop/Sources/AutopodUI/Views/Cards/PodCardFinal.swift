@@ -58,6 +58,8 @@ public struct SessionCardFinal: View {
     @State private var isHovered = false
     @State private var isInfrastructureResumePending = false
 
+    private var pendingControl: PendingPodControl? { actions.pendingControl(pod.id) }
+
     private var isAdvisoryQaRunning: Bool {
         pod.validationProgress?.advisory.status == .running
     }
@@ -160,14 +162,21 @@ public struct SessionCardFinal: View {
                 Button(role: .destructive) {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
             }
             Button(role: .destructive) {
                 showDeleteConfirmation = true
             } label: {
                 Label("Delete", systemImage: "trash")
             }
+            .disabled(pendingControl != nil)
+            .accessibilityIdentifier("pod-control-delete-menu-\(pod.id)")
+        }
+        .sheet(isPresented: $showOptionsPicker) {
+            DecisionReplySheet(podID: pod.id, actions: actions.decisionReply) { showOptionsPicker = false }
         }
         .sheet(isPresented: $showRejectFeedback) { rejectFeedbackSheet }
         .sheet(isPresented: $showNudgeInput) { nudgeSheet }
@@ -177,12 +186,15 @@ public struct SessionCardFinal: View {
         ) {
             Button(deleteButtonTitle, role: .destructive) {
                 Task {
-                    if !isDeletableNow {
-                        await actions.kill(pod.id)
+                    if isDeletableNow {
+                        await actions.delete(pod.id)
+                    } else {
+                        await actions.killAndDelete(pod.id)
                     }
-                    await actions.delete(pod.id)
                 }
             }
+            .disabled(pendingControl != nil)
+            .accessibilityIdentifier("pod-control-delete-confirm-\(pod.id)")
         } message: {
             Text(deleteDialogMessage)
         }
@@ -264,6 +276,10 @@ public struct SessionCardFinal: View {
                 }
                 modeBadge
                 statusBadge
+            }
+
+            if let pendingControl {
+                PendingControlNotice(kind: pendingControl, podId: pod.id)
             }
 
             // Summary row — one line per state
@@ -684,9 +700,11 @@ public struct SessionCardFinal: View {
                 Button {
                     Task { await actions.pause(pod.id) }
                 } label: {
-                    Label("Pause", systemImage: "pause.circle")
+                    Label(pendingControl == .pause ? "Pausing…" : "Pause", systemImage: "pause.circle")
                         .frame(maxWidth: .infinity)
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-pause-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.yellow)
@@ -743,7 +761,7 @@ public struct SessionCardFinal: View {
                 } else if pod.escalationType == "action_approval" {
                     HStack(spacing: 6) {
                         Button {
-                            Task { await actions.reply(pod.id, "approved") }
+                            submitDecisionAnswer("approved")
                         } label: {
                             Label("Approve", systemImage: "checkmark.circle.fill")
                                 .frame(maxWidth: .infinity)
@@ -751,9 +769,10 @@ public struct SessionCardFinal: View {
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .tint(.green)
+                        .accessibilityIdentifier("decision-card-approve")
 
                         Button {
-                            Task { await actions.reply(pod.id, "rejected") }
+                            submitDecisionAnswer("rejected")
                         } label: {
                             Label("Reject", systemImage: "xmark.circle.fill")
                                 .frame(maxWidth: .infinity)
@@ -761,6 +780,12 @@ public struct SessionCardFinal: View {
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .tint(.red)
+                        .accessibilityIdentifier("decision-card-reject")
+                    }
+                    .disabled(pod.escalationId != nil && !decisionSnapshot.canSubmit)
+                    if let notice = decisionSnapshot.notice {
+                        Text(notice).font(.caption).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 } else {
                     Button {
@@ -772,9 +797,7 @@ public struct SessionCardFinal: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .tint(.orange)
-                    .sheet(isPresented: $showOptionsPicker) {
-                        replySheet
-                    }
+                    .accessibilityIdentifier("decision-card-reply")
                 }
             }
 
@@ -905,9 +928,11 @@ public struct SessionCardFinal: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                         .frame(maxWidth: .infinity)
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -1075,7 +1100,6 @@ public struct SessionCardFinal: View {
     }
 
     @State private var showQueuePopover = false
-    @State private var replyInputText = ""
     @State private var showOptionsPicker = false
     @State private var showNudgeInput = false
     @State private var nudgeInputText = ""
@@ -1095,92 +1119,18 @@ public struct SessionCardFinal: View {
         }
     }
 
-    private var replySheet: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Markdown(pod.escalationQuestion ?? "Agent needs input")
-                        .markdownTheme(.autopod)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+    private var decisionSnapshot: DecisionReplySnapshot {
+        actions.decisionReply.snapshot(pod.id, pod.escalationId)
+    }
 
-                    if let options = pod.escalationOptions, !options.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(options, id: \.self) { option in
-                                Button {
-                                    showOptionsPicker = false
-                                    Task { await actions.reply(pod.id, option) }
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "circle")
-                                            .font(.system(size: 11))
-                                        Text(option)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .multilineTextAlignment(.leading)
-                                    }
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 7)
-                                }
-                                .buttonStyle(.bordered)
-                                .tint(.orange)
-                            }
-                        }
-
-                        Divider()
-
-                        HStack(spacing: 4) {
-                            Image(systemName: "pencil")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("Or type a custom reply:")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .padding(20)
-                .padding(.bottom, 4)
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    TextField("Type your reply…", text: $replyInputText)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit {
-                            guard !replyInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                            let message = replyInputText
-                            replyInputText = ""
-                            showOptionsPicker = false
-                            Task { await actions.reply(pod.id, message) }
-                        }
-
-                    Button {
-                        let message = replyInputText
-                        replyInputText = ""
-                        showOptionsPicker = false
-                        Task { await actions.reply(pod.id, message) }
-                    } label: {
-                        Image(systemName: "paperplane.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.orange)
-                    .disabled(replyInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-
-                HStack {
-                    Spacer()
-                    Button("Cancel", role: .cancel) {
-                        replyInputText = ""
-                        showOptionsPicker = false
-                    }
-                    .controlSize(.small)
-                }
-            }
-            .padding(20)
+    private func submitDecisionAnswer(_ answer: String) {
+        guard let decision = pod.escalationId else {
+            showOptionsPicker = true
+            return
         }
-        .frame(minWidth: 560, maxWidth: 760, minHeight: 200, maxHeight: 600)
+        guard decisionSnapshot.canSubmit else { return }
+        actions.decisionReply.edit(pod.id, decision, answer)
+        _ = actions.decisionReply.submit(pod.id, decision)
     }
 
     private var nudgeSheet: some View {
@@ -1263,6 +1213,8 @@ public struct SessionCardFinal: View {
             Label("Delete", systemImage: "trash")
                 .frame(maxWidth: .infinity)
         }
+        .disabled(pendingControl != nil)
+        .accessibilityIdentifier("pod-control-delete-\(pod.id)")
         .buttonStyle(.bordered)
         .controlSize(.small)
     }
