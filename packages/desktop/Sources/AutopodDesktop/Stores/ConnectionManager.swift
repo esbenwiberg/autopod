@@ -48,6 +48,7 @@ public final class ConnectionManager {
   // MARK: - Init
 
   public init() {
+    if DesktopIdentity.usesDesignFixtures { return }
     // CLI launches should win over stale saved state. Restoring the previous
     // connection first can touch old Keychain items and block launch behind a
     // system prompt before the fresh `ap desktop` deep link is handled.
@@ -230,7 +231,7 @@ public final class ConnectionManager {
   }
 
   private static func launchDeepLink() -> URL? {
-    if let arg = CommandLine.arguments.dropFirst().first(where: { $0.hasPrefix("autopod://") }),
+    if let arg = CommandLine.arguments.dropFirst().first(where: { $0.hasPrefix("\(DesktopIdentity.deepLinkScheme)://") }),
        let url = URL(string: arg) {
       return url
     }
@@ -246,7 +247,7 @@ public final class ConnectionManager {
   /// one is added. Token resolution: explicit `token` param wins; otherwise local
   /// connections fall back to the on-disk dev token, and Entra connections sign in.
   public func handleDeepLink(_ deepLink: URL) {
-    guard deepLink.scheme == "autopod", deepLink.host == "connect",
+    guard deepLink.scheme == DesktopIdentity.deepLinkScheme, deepLink.host == "connect",
       let comps = URLComponents(url: deepLink, resolvingAgainstBaseURL: false),
       let rawURL = comps.queryItems?.first(where: { $0.name == "url" })?.value,
       let url = DaemonConnection.normalizedURL(from: rawURL)
