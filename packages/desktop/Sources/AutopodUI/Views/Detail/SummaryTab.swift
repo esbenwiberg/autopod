@@ -4,6 +4,7 @@ import SwiftUI
 
 /// Work tab — task, plan, task summary, deviations, quality signals, and cost.
 struct WorkTab: View {
+    @Environment(\.desktopRedesign) private var redesign
     let pod: Pod
     var actions: PodActions = .preview
     /// Optional closures for fetching server-derived cards. When nil
@@ -283,6 +284,8 @@ struct WorkTab: View {
     }
 
     private func planStepState(index: Int, plan: SessionPlan, phase: PhaseProgress?) -> PlanStepState {
+        // The reported milestone counter is independent of the saved plan.
+        if redesign { return .neutral }
         guard let phase, phase.total == plan.steps.count else {
             return .neutral
         }

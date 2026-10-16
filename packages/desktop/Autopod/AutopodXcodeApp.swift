@@ -19,6 +19,7 @@ struct AutopodXcodeApp: App {
   @State private var eventStream: EventStream?
   @State private var terminalManager: TerminalManager?
   @State private var showSetup = false
+  @State private var designFixtures = DesktopIdentity.usesDesignFixtures
   @State private var wiringGate = DesktopConnectionWiringGate()
 
   private var activeConnectionIdentity: DesktopConnectionIdentity? {
@@ -27,7 +28,10 @@ struct AutopodXcodeApp: App {
   }
 
   var body: some Scene {
-    Window("Autopod", id: "main") {
+    Window(DesktopIdentity.displayName, id: "main") {
+      if designFixtures {
+        DesktopDesignPreview(onConnect: { designFixtures = false })
+      } else {
       AppRootView(
         connectionManager: connectionManager,
         podStore: podStore,
@@ -67,9 +71,10 @@ struct AutopodXcodeApp: App {
           wiringGate.disconnect()
         }
       }
+      }
     }
     .windowStyle(.titleBar)
-    .defaultSize(width: 1200, height: 700)
+    .defaultSize(width: DesktopIdentity.isPreview ? 1680 : 1200, height: DesktopIdentity.isPreview ? 1000 : 700)
     .defaultLaunchBehavior(.presented)
     // Window's min size tracks the content's current min size — lets the user
     // shrink the window back down if a transient view (e.g. a warning banner)
@@ -81,8 +86,8 @@ struct AutopodXcodeApp: App {
 
     MenuBarExtra {
       MenuBarView(
-        pods: podStore.pods,
-        actions: actionHandler?.actions ?? .preview
+        pods: designFixtures ? [] : podStore.pods,
+        actions: designFixtures ? .preview : actionHandler?.actions ?? .preview
       )
     } label: {
       let count = podStore.attentionSessions.count

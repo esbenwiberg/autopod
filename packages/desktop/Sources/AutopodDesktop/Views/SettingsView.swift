@@ -6,6 +6,7 @@ import AutopodUI
 
 enum SettingsSection: Hashable {
     case connections
+    case appearance
     case profiles
     case providerAccounts
     case podsitter
@@ -15,6 +16,7 @@ enum SettingsSection: Hashable {
 
     var label: String {
         switch self {
+        case .appearance: "Appearance"
         case .connections:   "Connections"
         case .profiles:      "Profiles"
         case .providerAccounts: "Provider Accounts"
@@ -27,6 +29,7 @@ enum SettingsSection: Hashable {
 
     var icon: String {
         switch self {
+        case .appearance: "circle.lefthalf.filled"
         case .connections:   "server.rack"
         case .profiles:      "person.crop.rectangle.stack"
         case .providerAccounts: "person.2.badge.key"
@@ -157,7 +160,7 @@ public struct SettingsView: View {
     private var settingsSidebar: some View {
         VStack(spacing: 1) {
             ForEach(
-                [SettingsSection.connections, .profiles, .providerAccounts, .podsitter, .notifications, .logs],
+                [SettingsSection.appearance, SettingsSection.connections, .profiles, .providerAccounts, .podsitter, .notifications, .logs],
                 id: \.self
             ) { section in
                 sidebarRow(section)
@@ -202,6 +205,7 @@ public struct SettingsView: View {
     @ViewBuilder
     private var settingsContent: some View {
         switch selectedSection {
+        case .appearance: DesktopAppearanceSettings()
         case .connections:   connectionsContent
         case .profiles:      profilesContent
         case .providerAccounts:

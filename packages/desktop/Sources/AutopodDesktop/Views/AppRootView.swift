@@ -446,6 +446,7 @@ public struct AppRootView: View {
         isPresented: $showSettings
       )
     }
+    .modifier(DesktopAppearanceModifier())
     .onChange(of: showSettings) { _, isShowing in
       if isShowing {
         Task { await launchConfiguration.load() }

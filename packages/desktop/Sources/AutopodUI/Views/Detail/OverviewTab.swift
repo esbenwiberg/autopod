@@ -5,6 +5,7 @@ import SwiftUI
 
 /// Overview tab — pod metadata, escalation, plan progress, activity feed.
 struct OverviewTab: View {
+    @Environment(\.desktopRedesign) private var redesign
     let pod: Pod
     let events: [AgentEvent]
     var actions: PodActions = .preview
@@ -75,24 +76,11 @@ struct OverviewTab: View {
 
                 overviewSnapshotGrid
 
-                if pod.hasWebUi {
-                    compactPreviewCard
-                }
-
-                if let artifactsPath = pod.artifactsPath, !artifactsPath.isEmpty {
-                    artifactsSection(artifactsPath)
-                }
-
-                if !pod.requireSidecars.isEmpty
-                    || !pod.sidecarContainerIds.isEmpty
-                    || !pod.testRunBranches.isEmpty
-                {
-                    infrastructureSection
-                }
-
-                if pod.commitCount > 0 || pod.status == .running || pod.status == .paused {
-                    commitSection
-                }
+                if redesign {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), alignment: .top)], alignment: .leading, spacing: 16) {
+                        resourceCards
+                    }
+                } else { resourceCards }
 
                 if let checks = pod.validationChecks {
                     validationSummary(checks)
@@ -104,7 +92,7 @@ struct OverviewTab: View {
 
                 activityFeed
             }
-            .padding(20)
+            .padding(redesign ? 24 : 20)
         }
         .onAppear { prepareReplySurface(replyContext) }
         .onChange(of: replyContext) { _, context in prepareReplySurface(context) }
@@ -128,10 +116,33 @@ struct OverviewTab: View {
         }
     }
 
+    @ViewBuilder
+    private var resourceCards: some View {
+                if pod.hasWebUi {
+                    compactPreviewCard
+                }
+
+                if let artifactsPath = pod.artifactsPath, !artifactsPath.isEmpty {
+                    artifactsSection(artifactsPath)
+                }
+
+                if !pod.requireSidecars.isEmpty
+                    || !pod.sidecarContainerIds.isEmpty
+                    || !pod.testRunBranches.isEmpty
+                {
+                    infrastructureSection
+                }
+
+                if pod.commitCount > 0 || pod.status == .running || pod.status == .paused {
+                    commitSection
+                }
+
+    }
+
     // MARK: - Overview summary
 
     private var overviewStatusStrip: some View {
-        let accent = pod.status.color
+        let accent = redesign && !pod.status.needsAttention ? DesktopTheme.accent : pod.status.color
         return HStack(alignment: .top, spacing: 12) {
             Image(systemName: overviewStatusIcon)
                 .font(.system(size: 18, weight: .semibold))
@@ -296,7 +307,7 @@ struct OverviewTab: View {
             Spacer(minLength: 0)
         }
         .padding(10)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -384,7 +395,7 @@ struct OverviewTab: View {
             .tint(running && reachable ? .green : nil)
         }
         .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(accentColor.opacity(0.16), lineWidth: 1))
     }
@@ -536,7 +547,7 @@ struct OverviewTab: View {
                     .disabled(!replySnapshot.canEdit)
                     .textFieldStyle(.plain)
                     .padding(8)
-                    .background(Color(nsColor: .controlBackgroundColor))
+                    .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .onSubmit { sendReply() }
 
@@ -609,8 +620,10 @@ struct OverviewTab: View {
 
     // MARK: - Progress
 
+    @ViewBuilder
     private func progressSection(_ phase: PhaseProgress) -> some View {
-        AgentPhaseProgressView(phase: phase, variant: .compact)
+        if redesign { ReportedMilestoneView(phase: phase) }
+        else { AgentPhaseProgressView(phase: phase, variant: .compact) }
     }
 
     // MARK: - Memory suggestions
@@ -670,7 +683,7 @@ struct OverviewTab: View {
             }
         }
         .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -722,7 +735,7 @@ struct OverviewTab: View {
             .padding(.vertical, 7)
         }
         .padding(.horizontal, 12)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -944,7 +957,7 @@ struct OverviewTab: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -1036,7 +1049,7 @@ struct OverviewTab: View {
             }
         }
         .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
@@ -1062,7 +1075,7 @@ struct OverviewTab: View {
             }
         }
         .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -1188,7 +1201,7 @@ struct OverviewTab: View {
                     }
                 }
                 .padding(10)
-                .background(Color(nsColor: .controlBackgroundColor))
+                .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }

@@ -42,6 +42,8 @@
 	<string>NSApplication</string>
 	<key>CFBundleDisplayName</key>
 	<string>Autopod Preview</string>
+	<key>AutopodDesignFixtures</key>
+	<string>$(AUTOPOD_PREVIEW_FIXTURES)</string>
 	<key>AutopodPreview</key>
 	<true/>
 </dict>

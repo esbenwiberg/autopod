@@ -1,3 +1,4 @@
+import AutopodClient
 import SwiftUI
 
 /// Sidebar with smart groups, profiles, and connection status.
@@ -57,7 +58,12 @@ public struct SidebarView: View {
     }
     private var profiles: [String] { Array(Set(pods.map(\.profileName))).sorted() }
 
+    @Environment(\.desktopRedesign) private var redesign
     public var body: some View {
+        if redesign { redesignedSidebar } else { legacySidebar }
+    }
+
+    private var legacySidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Connection indicator
             connectionHeader
@@ -170,6 +176,94 @@ public struct SidebarView: View {
         }
         .background(.ultraThinMaterial)
         .frame(minWidth: 180, idealWidth: 200, maxWidth: 220)
+    }
+
+    private var redesignedSidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 9) {
+                Image(systemName: "square.on.square.fill").font(.title3).foregroundStyle(DesktopTheme.accent)
+                Text("Autopod").font(.title3.weight(.semibold))
+                Spacer()
+                if DesktopIdentity.isPreview { Text("PREVIEW").font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary) }
+            }.padding(.horizontal, 20).padding(.vertical, 24)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 3) {
+                    navigationHeading("Your work")
+                    redesignedRow(.all, "square.grid.2x2", "All pods", pods.count)
+                    redesignedRow(.attention, "exclamationmark.circle", "Needs attention", attentionCount)
+                    redesignedRow(.active, "bolt.circle", "Active", activeCount)
+                    redesignedRow(.running, "arrow.trianglehead.2.clockwise", "In progress", runningCount)
+                    redesignedRow(.workspaces, "terminal", "Interactive", workspaceCount)
+                    redesignedRow(.seriesAll, "rectangle.3.group", "Series", activeSeriesCount)
+                    redesignedRow(.completed, "checkmark.circle", "Completed", completedCount)
+                    navigationHeading("Workspace").padding(.top, 20)
+                    Button(action: { onShowSettings?() }) {
+                        navigationLabel("Profiles", "person.crop.rectangle.stack", 0)
+                    }.buttonStyle(.plain).accessibilityIdentifier("desktop-profiles")
+                    redesignedRow(.scheduledJobs, "clock.badge.checkmark", "Schedules", catchupPendingCount > 0 ? catchupPendingCount : scheduledJobCount)
+                    redesignedRow(.history, "clock.arrow.circlepath", "History", 0)
+                    redesignedRow(.analytics, "chart.bar", "Analytics", 0)
+                    redesignedRow(.memory, "brain", "Memory", pendingMemoryCount)
+                    redesignedRow(.managedPods, "shippingbox", "Managed pods", managedPodCount)
+                    if !profiles.isEmpty {
+                        DisclosureGroup("Filter by profile") {
+                            ForEach(profiles, id: \.self) { name in
+                                redesignedRow(.profile(name), "folder", name, pods.filter { $0.profileName == name }.count)
+                            }
+                        }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.top, 12)
+                    }
+                }.padding(.horizontal, 12)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                Divider()
+                HStack(spacing: 7) {
+                    Circle().fill(isConnected ? DesktopTheme.accent : .orange).frame(width: 6, height: 6)
+                    Text(connectionLabel).font(.caption).lineLimit(1).truncationMode(.middle)
+                }
+                DesktopAppearancePicker()
+                Divider()
+                redesignedRow(.village, "house", "Village", 0)
+                HStack {
+                    Button { onShowSettings?() } label: { Label("Settings", systemImage: "gearshape").font(.caption) }
+                        .buttonStyle(.plain).keyboardShortcut(",", modifiers: .command)
+                        .accessibilityIdentifier("desktop-settings")
+                    Spacer()
+                    Menu {
+                        Button("Why Autopod") { selection = .salesPitch }
+                        Button("How it Works") { selection = .featureOverview }
+                        Button("Documentation") { NSWorkspace.shared.open(URL(string: "https://esbenwiberg.github.io/autopod")!) }
+                    } label: { Image(systemName: "questionmark.circle") }
+                    .menuStyle(.borderlessButton).fixedSize().help("Help and documentation")
+                }.padding(.horizontal, 12)
+            }.padding(12)
+        }
+        .background(DesktopTheme.sidebar)
+        .frame(minWidth: 200, idealWidth: 224, maxWidth: 260)
+    }
+
+    private func navigationHeading(_ title: String) -> some View {
+        Text(title.uppercased()).font(.system(size: 9, weight: .semibold)).tracking(1.3)
+            .foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 8)
+    }
+
+    private func navigationLabel(_ title: String, _ icon: String, _ count: Int) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).frame(width: 16)
+            Text(title).lineLimit(1)
+            Spacer(minLength: 4)
+            if count > 0 { Text("\(count)").font(.caption2).monospacedDigit() }
+        }.font(.system(size: 12)).foregroundStyle(.secondary)
+            .padding(.horizontal, 12).padding(.vertical, 9).contentShape(Rectangle())
+    }
+
+    private func redesignedRow(_ item: SidebarItem, _ icon: String, _ title: String, _ count: Int) -> some View {
+        Button { selection = item } label: {
+            navigationLabel(title, icon, count)
+                .background(selection == item ? DesktopTheme.selection : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(alignment: .leading) {
+                    if selection == item { Capsule().fill(DesktopTheme.accent).frame(width: 2, height: 16) }
+                }
+        }.buttonStyle(.plain).accessibilityAddTraits(selection == item ? .isSelected : [])
     }
 
     // MARK: - Connection header

@@ -11,6 +11,7 @@ public enum DesktopIdentity {
     isPreview ? "com.autopod.desktop.preview" : "com.autopod.desktop"
   }
   public static var usesDesignFixtures: Bool {
-    isPreview && ProcessInfo.processInfo.arguments.contains("--design-fixtures")
+    isPreview && (Bundle.main.object(forInfoDictionaryKey: "AutopodDesignFixtures") as? String == "YES"
+      || ProcessInfo.processInfo.arguments.contains("--design-fixtures"))
   }
 }

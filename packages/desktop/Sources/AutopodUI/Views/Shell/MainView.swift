@@ -311,7 +311,9 @@ public struct MainView: View {
         self.onLoadMemories = onLoadMemories
     }
 
-    @State private var sidebarSelection: SidebarItem = .attention
+    @State private var sidebarSelection: SidebarItem = DesktopIdentity.isPreview ? .all : .attention
+    @AppStorage("autopod.desktop.redesign") private var redesign = DesktopIdentity.isPreview
+    @State private var repositoryID: String?
     @State private var villageSelectedSource: VillageActor.Source = .native
     @State private var villageShowsDetails = false
     @State private var villageSearch = ""
@@ -363,18 +365,20 @@ public struct MainView: View {
             browseScope: browseScope,
             query: searchText,
             sortOrder: sortOrder,
-            selectedPodId: selectedSessionId
+            selectedPodId: selectedSessionId,
+            repositoryID: repositoryID, profiles: profileDetails
         )
     }
 
     /// Filters pods by a free-text query. Matches against the pod's name (id),
     /// brief title, task description, profile, and series name so users can find
     /// pods by anything they'd recognise on the card. Empty query is a no-op.
-    static func searchPods(_ pods: [Pod], query: String) -> [Pod] {
+    static func searchPods(_ pods: [Pod], query: String, profiles: [Profile] = []) -> [Pod] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return pods }
         return pods.filter { pod in
-            pod.id.localizedCaseInsensitiveContains(trimmed)
+            (DesktopRepository.resolve(pod, profiles: profiles)?.label.localizedCaseInsensitiveContains(trimmed) ?? false)
+                || pod.id.localizedCaseInsensitiveContains(trimmed)
                 || (pod.briefTitle?.localizedCaseInsensitiveContains(trimmed) ?? false)
                 || pod.task.localizedCaseInsensitiveContains(trimmed)
                 || pod.profileName.localizedCaseInsensitiveContains(trimmed)
@@ -413,18 +417,23 @@ public struct MainView: View {
         query: String = "",
         sortOrder: SortOrder = .created,
         selectedPodId: String? = nil,
-        limit: Int = defaultBrowseRecentLimit
+        limit: Int = defaultBrowseRecentLimit,
+        repositoryID: String? = nil,
+        profiles: [Profile] = []
     ) -> [Pod] {
+        let scoped = repositoryID.map { id in
+            pods.filter { DesktopRepository.resolve($0, profiles: profiles)?.id == id }
+        } ?? pods
         let base = selection == .all
             ? browsePods(
-                pods,
+                scoped,
                 scope: browseScope,
                 query: query,
                 selectedPodId: selectedPodId,
                 limit: limit
             )
-            : filterPods(pods, for: selection)
-        return sortPods(searchPods(base, query: query), by: sortOrder)
+            : filterPods(scoped, for: selection)
+        return sortPods(searchPods(base, query: query, profiles: profiles), by: sortOrder)
     }
 
     private static func recentBrowsePods(_ pods: [Pod], limit: Int) -> [Pod] {
@@ -504,6 +513,7 @@ public struct MainView: View {
                 onShowSettings: onShowSettings
             )
         } content: {
+            Group {
             if sidebarSelection == .village {
                 VillageView(
                     snapshotForDate: villageSnapshot,
@@ -634,8 +644,9 @@ public struct MainView: View {
                     }
                     contentArea
                 }
-                .frame(minWidth: 500)
+                .frame(minWidth: redesign ? 420 : 500)
             }
+            }.navigationSplitViewColumnWidth(min: 420, ideal: 820, max: 1500)
         } detail: {
             VStack(spacing: 0) {
                 if sidebarSelection == .village && villageShowsDetails {
@@ -790,8 +801,24 @@ public struct MainView: View {
                     emptyDetail
                 }
             }
+            .navigationSplitViewColumnWidth(min: 350, ideal: 720, max: 1400)
         }
         .navigationSplitViewStyle(.balanced)
+        .environment(\.desktopRedesign, redesign)
+        .environment(\.desktopRepositories, repositoriesByPod)
+        .environment(\.desktopRepositoryFilter, { repositoryID = $0 })
+        .environment(\.desktopPodSelection, { selectedSessionId = $0 })
+        .modifier(DesktopAppearanceModifier())
+        .tint(redesign ? DesktopTheme.accent : .accentColor)
+        .onChange(of: redesign) { _, enabled in
+            if !enabled { repositoryID = nil }
+        }
+        .onChange(of: repositoryID) { _, _ in
+            if let selectedSessionId, !filteredSessions.contains(where: { $0.id == selectedSessionId }) {
+                self.selectedSessionId = filteredSessions.first?.id
+            }
+        }
+        .onChange(of: connectionLabel) { _, _ in repositoryID = nil }
         .sheet(isPresented: $showCreateSheet) {
             if let configurationActions {
                 ComposableCreatePodSheet(isPresented: $showCreateSheet, actions: configurationActions)
@@ -898,7 +925,72 @@ public struct MainView: View {
 
     // MARK: - Content toolbar
 
+    @ViewBuilder
     private var contentToolbar: some View {
+        if redesign { redesignedToolbar } else { legacyToolbar }
+    }
+
+    private var repositoriesByPod: [String: DesktopRepository] {
+        Dictionary(uniqueKeysWithValues: pods.compactMap { pod in
+            DesktopRepository.resolve(pod, profiles: profileDetails).map { (pod.id, $0) }
+        })
+    }
+
+    private var repositories: [DesktopRepository] {
+        Array(Set(repositoriesByPod.values.map(\.id))).compactMap { id in
+            repositoriesByPod.values.first { $0.id == id }
+        }.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
+    }
+
+    private var redesignedToolbar: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(sidebarSelection == .all ? "All pods" : sidebarSelection.label)
+                        .font(.system(size: 26, weight: .semibold)).tracking(-0.7)
+                    Text("\(filteredSessions.count) \(filteredSessions.count == 1 ? "pod" : "pods") · \(repositories.first { $0.id == repositoryID }?.label ?? "All repositories")")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Button { showCreateSheet = true } label: { Label("New pod", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent).controlSize(.regular).keyboardShortcut("n", modifiers: .command)
+                Menu {
+                    Button("New series") { showCreateSeriesSheet = true }
+                    Divider()
+                    Picker("View", selection: $viewMode) { Text("Cards").tag(ViewMode.cards); Text("List").tag(ViewMode.list) }
+                    Picker("Card density", selection: $cardDensity) {
+                        ForEach(CardDensity.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    Picker("Sort", selection: $sortOrder) {
+                        ForEach(SortOrder.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                    if sidebarSelection == .all {
+                        Picker("Browse", selection: $browseScope) {
+                            ForEach(BrowseScope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                    }
+                    Divider()
+                    Button("Refresh") { Task { await onRefresh?() } }
+                } label: { Image(systemName: "ellipsis") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Fleet options")
+            }
+            HStack(spacing: 10) {
+                searchField(width: nil)
+                Picker("Repository", selection: $repositoryID) {
+                    Text("All repositories").tag(nil as String?)
+                    ForEach(repositories) { Text($0.label).tag(Optional($0.id)) }
+                }.labelsHidden().controlSize(.regular)
+                    .frame(minWidth: 110, idealWidth: 180, maxWidth: 230)
+                    .accessibilityLabel("Filter by repository")
+                if repositoryID != nil {
+                    Button { repositoryID = nil } label: { Image(systemName: "xmark.circle") }
+                        .buttonStyle(.plain).help("Clear repository filter")
+                }
+            }
+        }.padding(24).background(DesktopTheme.canvas)
+    }
+
+    private var legacyToolbar: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
                 toolbarTitle
@@ -1188,6 +1280,11 @@ public struct MainView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if filteredSessions.isEmpty {
+            VStack(spacing: 12) {
+                ContentUnavailableView("No matching pods", systemImage: "line.3.horizontal.decrease", description: Text("Try another repository or search."))
+                Button("Clear filters") { repositoryID = nil; searchText = "" }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             switch viewMode {
             case .cards:
@@ -1198,7 +1295,48 @@ public struct MainView: View {
         }
     }
 
+    @ViewBuilder
     private var cardGrid: some View {
+        if redesign { redesignedGrid } else { legacyCardGrid }
+    }
+
+    private var redesignedGrid: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                if sidebarSelection == .all || sidebarSelection == .active {
+                    fleetGroup("Needs attention", pods: filteredSessions.filter { $0.status.needsAttention })
+                    fleetGroup("In progress & recent", pods: filteredSessions.filter { !$0.status.needsAttention })
+                } else { fleetGroup(nil, pods: filteredSessions) }
+            }.padding(24)
+            browseArchiveFooter(visibleCount: filteredSessions.count)
+        }.background(DesktopTheme.canvas)
+    }
+
+    @ViewBuilder
+    private func fleetGroup(_ title: String?, pods group: [Pod]) -> some View {
+        if !group.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                if let title {
+                    HStack(spacing: 8) {
+                        Text(title).font(.caption.weight(.semibold))
+                        Text("\(group.count)").font(.caption).foregroundStyle(.secondary)
+                        DesktopTheme.line.frame(height: 1)
+                    }
+                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 14)], spacing: 14) {
+                    ForEach(group) { pod in
+                        SessionCardFinal(pod: pod, actions: wiredActions, density: cardDensity,
+                            isSelected: selectedSessionId == pod.id,
+                            onSpawnFollowUp: { spawnFollowUpInitiator = $0 },
+                            onLaunchSeriesFromPod: { seriesFromPod = $0 }, qualityScore: qualityScores[pod.id])
+                            .onTapGesture { selectedSessionId = pod.id }
+                    }
+                }
+            }
+        }
+    }
+
+    private var legacyCardGrid: some View {
         let sessions = filteredSessions
         return ScrollView {
             LazyVGrid(
@@ -1240,9 +1378,10 @@ public struct MainView: View {
     @ViewBuilder
     private func browseArchiveFooter(visibleCount: Int) -> some View {
         let queryIsEmpty = searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if sidebarSelection == .all && browseScope == .recent && queryIsEmpty && visibleCount < pods.count {
+        let total = repositoryID.map { id in pods.filter { repositoriesByPod[$0.id]?.id == id }.count } ?? pods.count
+        if sidebarSelection == .all && browseScope == .recent && queryIsEmpty && visibleCount < total {
             HStack(spacing: 8) {
-                Text("Showing \(visibleCount) of \(pods.count)")
+                Text("Showing \(visibleCount) of \(total)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Archive") {
