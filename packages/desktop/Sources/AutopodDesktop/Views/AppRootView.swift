@@ -345,6 +345,17 @@ public struct AppRootView: View {
     } message: {
       Text(scheduledJobStore.error ?? "Unknown error")
     }
+    .alert(
+      "Scheduled Job",
+      isPresented: Binding(
+        get: { scheduledJobStore.notice != nil && scheduledJobStore.error == nil },
+        set: { if !$0 { scheduledJobStore.notice = nil } }
+      )
+    ) {
+      Button("OK") { scheduledJobStore.notice = nil }
+    } message: {
+      Text(scheduledJobStore.notice ?? "")
+    }
     .task(id: "\(connectionManager.isConnected)-\(connectionManager.connectionLabel)") {
       if let api = connectionManager.api, connectionManager.isConnected { launchConfiguration.configure(api: api); await launchConfiguration.load() }
       else { launchConfiguration.disconnect() }

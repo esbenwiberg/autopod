@@ -27,6 +27,7 @@ struct ScanInboxView: View {
   @State private var rollingWindow = false
   @State private var windowHours = 24
 
+  private var sameBranchWithoutWindow: Bool { !rollingWindow && baseRef == headRef }
   private var draftKey: String { "autopod.scan-triage.\(api.baseURL.absoluteString).\(reportId)" }
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -41,7 +42,8 @@ struct ScanInboxView: View {
           if rollingWindow { Stepper("Last \(windowHours) hours (base and head must match)", value: $windowHours, in: 1...720) }
           HStack { Toggle("Secrets", isOn: $secrets); Toggle("Dependencies", isOn: $dependencies); Toggle("Bounded judgment", isOn: $judgment) }
           Text("The exact freshly fetched branch delta is collected. Empty deltas stay empty. npm dependency metadata goes to the public npm advisory service. Bounded judgment may incur configured provider cost.").font(.caption)
-          Button("Save report-only policy") { Task { await savePolicy() } }.disabled(busy || (!secrets && !dependencies) || baseRef.isEmpty || headRef.isEmpty)
+          if sameBranchWithoutWindow { Text("Base and head are the same branch, so the delta is always empty. Turn on the rolling time window to scan recent commits.").font(.caption).foregroundStyle(.orange) }
+          Button("Save report-only policy") { Task { await savePolicy() } }.disabled(busy || (!secrets && !dependencies) || baseRef.isEmpty || headRef.isEmpty || sameBranchWithoutWindow)
         }.textFieldStyle(.roundedBorder)
       }
       HStack {

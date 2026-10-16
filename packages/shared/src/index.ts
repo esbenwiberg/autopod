@@ -616,7 +616,10 @@ export type {
   ValidationInputIdentity,
 } from './types/validation-evidence.js';
 
-export { scheduledScanPolicySchema } from './types/scheduled-scan.js';
+export {
+  scheduledScanPolicyInputSchema,
+  scheduledScanPolicySchema,
+} from './types/scheduled-scan.js';
 export type {
   ScheduledScanPolicy,
   ScheduledScanReport,
