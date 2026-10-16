@@ -12,6 +12,8 @@ public final class ScheduledJobStore {
   public private(set) var templates: [ScheduledJobTemplate] = []
   public private(set) var isLoading = false
   public var error: String?
+  /// Outcome of the last manual run or catch-up; cleared when acknowledged.
+  public var notice: String?
 
   private var api: DaemonAPI?
 
@@ -74,7 +76,7 @@ public final class ScheduledJobStore {
   public func runCatchup(_ jobId: String) async throws {
     guard let api else { return }
     do {
-      _ = try await api.runScheduledJobCatchup(jobId)
+      notice = try await api.runScheduledJobCatchup(jobId).summary
       await refreshJob(jobId)
     } catch {
       self.error = error.localizedDescription
@@ -96,7 +98,7 @@ public final class ScheduledJobStore {
   public func triggerJob(_ jobId: String) async throws {
     guard let api else { return }
     do {
-      _ = try await api.triggerScheduledJob(jobId)
+      notice = try await api.triggerScheduledJob(jobId).summary
       await refreshJob(jobId)
     } catch {
       self.error = error.localizedDescription

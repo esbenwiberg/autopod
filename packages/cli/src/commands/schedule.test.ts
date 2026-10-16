@@ -415,6 +415,19 @@ it('passes an explicit time window and rejects a wider two-branch window before 
         '24',
       ]),
     ).rejects.toThrow('must match');
+    await expect(
+      createProgram({ updateScheduledJob }).parseAsync([
+        'node',
+        'ap',
+        'schedule',
+        'scan-configure',
+        'job',
+        '--base',
+        'main',
+        '--head',
+        'main',
+      ]),
+    ).rejects.toThrow('delta is always empty');
     expect(updateScheduledJob).toHaveBeenCalledTimes(1);
   } finally {
     log.mockRestore();

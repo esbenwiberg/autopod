@@ -16,6 +16,7 @@ import Testing
   let api = DaemonAPI(baseURL: URL(string: "https://scan-fixture.invalid")!, token: "synthetic", session: URLSession(configuration: configuration))
   let report = try await api.triggerScheduledJob("job")
   #expect(report.isReport); #expect(report.status == "incomplete")
+  #expect(report.summary.contains("incomplete"))
   let detail = try await api.getScanReport("report")
   #expect(detail.report.collection?.scanners.first?.findingCount == nil)
   #expect(detail.unresolved.count == 1); #expect(detail.decisions.isEmpty)
@@ -112,4 +113,11 @@ private final class ScanFixtureProtocol: URLProtocol, @unchecked Sendable {
   let report = try JSONDecoder().decode(ScheduledScanReport.self, from: data)
   #expect(report.status == "complete"); #expect(report.policy == nil); #expect(report.collection == nil); #expect(report.judgment == nil)
   #expect(report.evidenceDiagnostics?.count == 3)
+}
+
+@Test func emptyDeltaRunSummarySaysNothingWasChecked() throws {
+  let empty = try JSONDecoder().decode(ScheduledRunResponse.self, from: Data(#"{"kind":"scan_report","id":"r","status":"empty_delta"}"#.utf8))
+  #expect(empty.summary.contains("nothing was checked"))
+  let pod = try JSONDecoder().decode(ScheduledRunResponse.self, from: Data(#"{"id":"abc12345","status":"queued"}"#.utf8))
+  #expect(pod.summary == "Pod abc12345 started.")
 }
