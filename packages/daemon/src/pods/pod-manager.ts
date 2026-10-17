@@ -166,11 +166,7 @@ import { parseDiffFilePaths } from '../validation/review-context-builder.js';
 import { addTokenUsage } from '../validation/review-synthesizer.js';
 import { resolveToolReviewModelId } from '../validation/review-tool-runner.js';
 import { publishScreenshotArtifacts } from '../validation/screenshot-artifacts.js';
-import {
-  buildGitHubImageUrl,
-  collectFactScreenshots,
-  collectScreenshots,
-} from '../validation/screenshot-collector.js';
+import { buildGitHubImageUrl } from '../validation/screenshot-collector.js';
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
 import { authenticatedGitEnvironment } from '../worktrees/authenticated-git-environment.js';
 import { deriveBareRepoPath } from '../worktrees/bare-push.js';
@@ -293,6 +289,7 @@ import { generateSystemInstructions } from './system-instructions-generator.js';
 import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import { createValidationAttemptStart } from './validation-attempt-start.js';
+import { createValidationEvidence } from './validation-evidence.js';
 import { createValidationExecution } from './validation-execution.js';
 import { createValidationInputs } from './validation-inputs.js';
 import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
@@ -5566,6 +5563,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     validationInfrastructureFailureLabel,
     isReviewInfrastructureOnlyFailure,
     reviewInfrastructureFailureLabel,
+  });
+
+  const { collectValidationEvidence } = createValidationEvidence({
+    logger,
+    containerManagerFactory,
+    checkpointSandboxWorkspaceForPod,
+    syncWorkspaceBack,
+    screenshotStore,
+    hostScreenshotDir,
+    emitActivityStatus,
+    formatElapsedDuration,
   });
 
   async function preserveSandboxAfterAgentFailure(podId: string, reason: string): Promise<void> {
@@ -13599,127 +13607,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         emitActivityStatus(podId, 'Validation checks finished — finalizing result…');
 
-        const hasFactScreenshotEvidence = result.factValidation?.results.some((fact) =>
-          fact.attachments?.some(
-            (attachment) =>
-              attachment.kind === 'screenshot' &&
-              !path.isAbsolute(attachment.path) &&
-              attachment.path.toLowerCase().endsWith('.png'),
-          ),
-        );
-        const hasHostFactScreenshotEvidence = result.factValidation?.results.some(
-          (fact) =>
-            fact.kind === 'browser-test' &&
-            fact.attachments?.some(
-              (attachment) =>
-                attachment.kind === 'screenshot' &&
-                !path.isAbsolute(attachment.path) &&
-                attachment.path.toLowerCase().endsWith('.png'),
-            ),
-        );
-        const hasValidationScreenshots = result.smoke.pages.some((page) => page.screenshotPath);
-
-        // Host browser facts write evidence directly to the host worktree. Collect
-        // those screenshots before syncWorkspaceBack mirrors /workspace over it.
-        if (pod.worktreePath && hasHostFactScreenshotEvidence && screenshotStore) {
-          emitActivityStatus(podId, 'Collecting host fact evidence…');
-          try {
-            const screenshots = await collectFactScreenshots(
-              pod.worktreePath,
-              result.factValidation,
-              screenshotStore,
-              pod.id,
-            );
-            logger.info({ podId, count: screenshots.length }, 'Collected host fact screenshots');
-          } catch (err) {
-            logger.warn({ err, podId }, 'Failed to collect host fact screenshots');
-          }
-        }
-
-        // Sync workspace after validation — screenshots and build artifacts are now in /workspace
-        if (pod.containerId && pod.worktreePath) {
-          emitActivityStatus(podId, 'Syncing post-validation workspace…');
-          const syncStartedAt = Date.now();
-          try {
-            if (pod.executionTarget === 'sandbox') {
-              const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
-              validationSyncOk =
-                checkpoint.promoted && checkpoint.materialized && checkpoint.lineageVerified;
-            } else {
-              const cm = containerManagerFactory.get(pod.executionTarget);
-              await syncWorkspaceBack(
-                pod.containerId,
-                pod.worktreePath,
-                cm,
-                podId,
-                pod.executionTarget,
-              );
-            }
-            emitActivityStatus(
-              podId,
-              `Workspace sync complete (${formatElapsedDuration(Date.now() - syncStartedAt)})`,
-            );
-          } catch (err) {
-            validationSyncOk = false;
-            logger.warn({ err, podId }, 'Failed to sync workspace after validation');
-            emitActivityStatus(
-              podId,
-              `Workspace sync failed after ${formatElapsedDuration(Date.now() - syncStartedAt)} — continuing with degraded safeguards`,
-            );
-          }
-        }
-
-        // Collect screenshots from the host worktree and write to the on-disk store
-        if (pod.worktreePath && hasValidationScreenshots && screenshotStore) {
-          emitActivityStatus(podId, 'Collecting validation screenshots…');
-          try {
-            const screenshots = await collectScreenshots(
-              pod.worktreePath,
-              result.smoke.pages,
-              screenshotStore,
-              pod.id,
-              { allowedHostScreenshotDir: hostScreenshotDir?.(pod.id) },
-            );
-            for (const ss of screenshots) {
-              const page = result.smoke.pages.find((p) => p.path === ss.pagePath);
-              if (page) {
-                page.screenshot = ss.ref;
-              }
-            }
-            const missingCount = result.smoke.pages.filter(
-              (p) => p.screenshotPath && !p.screenshot,
-            ).length;
-            if (missingCount > 0) {
-              logger.warn(
-                { podId, missingCount, collectedCount: screenshots.length },
-                'Validation page screenshots were reported but not collected',
-              );
-            }
-            logger.info({ podId, count: screenshots.length }, 'Collected validation screenshots');
-          } catch (err) {
-            logger.warn({ err, podId }, 'Failed to collect screenshots');
-          }
-        }
-
-        if (pod.worktreePath && hasFactScreenshotEvidence && screenshotStore) {
-          emitActivityStatus(
-            podId,
-            validationSyncOk
-              ? 'Collecting synced fact evidence…'
-              : 'Collecting available fact evidence after degraded sync…',
-          );
-          try {
-            const screenshots = await collectFactScreenshots(
-              pod.worktreePath,
-              result.factValidation,
-              screenshotStore,
-              pod.id,
-            );
-            logger.info({ podId, count: screenshots.length }, 'Collected fact screenshots');
-          } catch (err) {
-            logger.warn({ err, podId }, 'Failed to collect fact screenshots');
-          }
-        }
+        validationSyncOk = await collectValidationEvidence(podId, pod, result, validationSyncOk);
 
         podRepo.update(podId, { lastValidationResult: result });
 

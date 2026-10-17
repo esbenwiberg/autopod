@@ -183,9 +183,9 @@ all other baseline package/script files unchanged.
 ### Success criteria
 
 Automated:
-- [ ] Frozen public checks pass unchanged after extraction.
-- [ ] Actual factory/collector/store byte/ref and failure-boundary checks pass.
-- [ ] Exact movement and two-product/two-test path scope pass.
+- [x] Frozen public checks pass unchanged after extraction.
+- [x] Actual factory/collector/store byte/ref and failure-boundary checks pass.
+- [x] Exact movement and two-product/two-test path scope pass.
 
 Manual: None required. Live container/provider behavior is outside this proof.
 
@@ -228,7 +228,7 @@ commit/push verified increments, then verify clean worktree and remote identity.
 ### Success criteria
 
 Automated:
-- [ ] All 52 affected suites pass with SQLite and no new skips.
+- [x] All 52 affected suites pass with SQLite and no new skips.
 - [ ] Full uncached pipeline passes under the documented qualification environment.
 - [ ] Scoped lint/whitespace, new-test semantic diagnostics, hashes and movement review pass.
 - [ ] Final plan/evidence records actual results, limitations and pushed identities.
@@ -255,7 +255,7 @@ Sources: pod-manager.ts:13602–13723, :13724 and :14187; validation/screenshot-
 pods/screenshot-store.ts; pods/workspace-preservation.ts and workspace-transfer.ts.
 
 The user explicitly approved this plan and all three phases together.
-Next action: characterize the unchanged product before extraction.
+Next action: qualify the frozen implementation with the full uncached pipeline.
 
 ## Phase 1 evidence
 
@@ -272,3 +272,40 @@ Biome and supplemental semantic checking of the new group pass with zero warning
 or diagnostics. Initial one-case failure was a fixture using nonexistent updateStatus;
 use the actual update API. Required page/fact fields were completed before freeze.
 Raw initial failures and final passing results are retained privately.
+
+## Extraction implementation detail
+
+Biome rejects mutable parameters (noParameterAssign). Use the same fourth boolean
+argument as initialValidationSyncOk and initialize a local validationSyncOk before
+the exact moved block. This wrapper-only adjustment preserves the interface,
+original block tokens and returned flag. No lint suppression or behavioral change.
+The initial formatting diagnostics are retained in the private evidence folder.
+
+## Phase 2 evidence
+
+All 18 selected public checks pass after extraction with frozen assertions
+byte-identical. All 62 direct cases pass through the actual factory. Real local
+collectors/store prove byte roundtrips, reopening evidence, preservation before
+destructive sync, post-sync refs, mixed facts, duplicate paths, containment/symlink
+rejection, original reference mutation and partial storage. Contract fault cases
+separately establish resolver/collector/logger/activity/formatting catch boundaries.
+All eight sandbox flag combinations, target selection, captured references, late
+factory method lookup, precomputed gates and measured duration are pinned.
+
+The explicit 52-suite affected set passes: 1,864 tests, zero skips. Daemon/dependency
+ESM and supported declaration builds pass. Four-file scoped Biome is clean and
+supplemental semantic diagnostics are zero in both new test boundaries.
+
+Parsed TypeScript proof verifies the exact moved block without receiver changes,
+typed wrapper/composition and complete remaining manager. Manual revalidation and
+all following code are byte-identical. The new module is 179 lines; the manager is
+17,399 lines, 112 fewer. All 1,961 other baseline package/script paths are unchanged.
+The final 1,965-file manifest is frozen for qualification. Product changes after
+initial extraction were limited to the documented lint-required local flag.
+
+Initial direct-test semantic checking found FactCheckResult is not a public shared
+export. Derive its type from ValidationResult instead; no new shared export. Direct
+assertions passed on their first run and were not weakened. The import-format
+check and a private movement verifier initially parsing a method suffix as a whole
+TypeScript source were corrected; final lint/types/movement pass. Raw initial
+diagnostics are retained alongside final results.
