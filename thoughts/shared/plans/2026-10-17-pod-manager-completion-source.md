@@ -1,6 +1,6 @@
 # Slice 5: completion source preparation extraction
 
-Status: IN PROGRESS — Phases 1 and 2 complete; full qualification pending.
+Status: COMPLETE — all three approved phases implemented and locally verified.
 Baseline: d804b1da21af7d26ccbc14e5484bc67a43d528e6.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -253,10 +253,10 @@ Update this plan with observed evidence. Unrun or failed checks remain labeled.
 
 Automated:
 - [x] All affected suites pass with SQLite included and no new skipped cases.
-- [ ] Full uncached install/lint/build/typecheck/test/audit/secret pipeline passes.
-- [ ] Runtime/source identities and before/after/material evidence are recorded.
-- [ ] Scoped lint, whitespace and exact movement review pass.
-- [ ] Verified commits are pushed and remote commit identity matches.
+- [x] Full uncached install/lint/build/typecheck/test/audit/secret pipeline passes.
+- [x] Runtime/source identities and before/after/material evidence are recorded.
+- [x] Scoped lint, whitespace and exact movement review pass.
+- [x] Verified commits are pushed and remote commit identity matches.
 
 Manual: None required. Approval authorizes all three automated phases together.
 
@@ -284,8 +284,9 @@ Integration with concurrent main work remains a separate requested action.
 - Existing primitives: workspace-preservation.ts, workspace-transfer.ts,
   ../worktrees/local-worktree-manager.ts, auto-commit-message.ts and diff-utils.ts.
 
-No unresolved design question remains. Next action: explicit approval of this
-concrete plan, then characterize the unchanged manager before moving product code.
+All three approved phases are complete. No manual acceptance remains for this
+headless compatibility boundary. Integration, PR creation and deployment remain
+separate requested work; none was performed.
 
 ## Phase 1 evidence
 
@@ -327,3 +328,51 @@ four-file scoped Biome and git diff --check passed. movement.json compares parse
 TypeScript against the exact recipe and confirms all 1,951 other baseline package/
 script paths unchanged. All 1,955 final package/script identities are frozen for
 qualification. Evidence is under ignored .autopod-data/completion-source/.
+
+## Final verification: Phase 3
+
+Verdict: PROVEN for the approved local compatibility extraction. All required
+automated work is complete; no manual gate remains.
+
+| Claim/check | Observed evidence | Result |
+|---|---|---|
+| Caller compatibility | Byte-identical characterization: 85 selected cases before/after, 758 name-filtered | Passed |
+| Actual source preparation | 21 direct cases with real Git staging, commits, guards and canonical comparisons, plus real SQLite persistence | Passed |
+| Guard/resource behavior | Real 0/100 refusal retains HEAD/tree, resets index and leaves missing work files; restored-source retry commits actual bytes | Passed |
+| Surrounding orchestration | 27 affected suites, 1,225 passed, zero skipped | Passed |
+| Full uncached pipeline | Frozen install, lint, build, repository typecheck, tests, audit and secret scan | Passed |
+| Repository Vitest | 7,402 passed across 492 passing files; 10 existing skipped cases | Passed with existing skips |
+| Standalone Node scripts | 35 passed, zero failed/skipped | Passed |
+| Source identity | All 1,955 frozen package/script files unchanged through qualification | Passed |
+| Scoped lint and whitespace | Four TypeScript files clean; git diff --check clean | Passed |
+
+Actual full command: TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh,
+using the established task-local npx launcher. Node 22.23.3 opened SQLite; pnpm
+reports 9.15.4. Build/typecheck/test Turbo groups ran uncached. Frozen install
+succeeded without fallback. Repository Biome retained 82 existing warnings;
+scoped Biome had no warnings. Audit found no known vulnerabilities. Standalone
+release verification, build provenance and hosted-cleanup script checks passed.
+
+The 10 existing skipped cases retain the Docker/platform/live-model gates from
+the preceding slice; no new test was skipped. SQLite-backed tests were explicitly
+enabled. The initial direct fixture run remains recorded as failed and is not
+relabeled; its execution-target setup was corrected before final qualification.
+
+Validated implementation: 6440b52ddebbe410f8b1f9397f7f3e5625ee5170.
+A following documentation-only commit records these results without changing
+tested product sources. Parsed source comparison confirms the contiguous move
+with only the approved lookup adaptations, wrapper, return and manager wiring.
+All remaining manager policy and existing transfer/checkpoint/Git primitives are
+unchanged. pod-manager is 17,811 lines; the new module is 291 lines.
+
+Evidence: .autopod-data/completion-source/proof.json, movement.json, baseline/final
+source manifests, frozen characterization and before-source copies, actual
+before/after/material/affected/build/scoped-Biome/full-validation logs, runtime
+records and the retained initial fixture failure. Final documentation/remote
+identity and clean-worktree confirmation are added to private proof after push.
+
+Limits: actual local Git and SQLite substantiate source preparation. The provider
+helper returns no_credentials; checkpoint and recovery callbacks are controlled.
+Unchanged earlier suites qualify their local transport contracts. No live Docker/
+Azure/provider qualification, deployment, PR/main integration, new crash recovery,
+atomicity, lifecycle fencing or cross-process serialization is claimed.
