@@ -1,6 +1,6 @@
 # Slice 4: completion human gate extraction
 
-Status: READY FOR REVIEW — implementation has not started.
+Status: IN PROGRESS — approved; Phase 1 complete.
 Baseline: 52e19de13907deec1737fb56829f833a5fcb2678.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -11,7 +11,7 @@ Extract the two completion branches that hold a settled worker for an unanswered
 question or uncollected guidance. This begins the completion/decisions workstream
 after the three workspace slices. Use the accepted characterize → extract → qualify
 structure. Approval of this concrete plan authorizes all three phases together,
-with no intermediate manual gate. Implementation awaits that approval.
+with no intermediate manual gate. The user explicitly approved all three phases.
 
 ## Current state analysis
 
@@ -143,9 +143,9 @@ under .autopod-data/completion-human-gate/ (ignored).
 ### Success criteria
 
 Automated:
-- [ ] New public cases pass against unchanged baseline product source.
-- [ ] Existing reply/guidance/journal end-to-end cases pass with SQLite enabled.
-- [ ] Before-source/test hashes and actual command results are retained.
+- [x] New public cases pass against unchanged baseline product source.
+- [x] Existing reply/guidance/journal end-to-end cases pass with SQLite enabled.
+- [x] Before-source/test hashes and actual command results are retained.
 
 Manual: None required for this headless compatibility extraction.
 
@@ -253,3 +253,23 @@ Integration with concurrent main work remains separate.
 
 No unresolved design question remains. Next action: explicit approval of this
 concrete plan, then Phase 1 against baseline product source before any movement.
+
+## Phase 1 evidence
+
+At unchanged product baseline 52e19de1 (documentation HEAD bafeee2e), 34 new
+public cases plus three existing source/artifact compatibility cases passed: 37
+passed, 761 name-filtered. Six existing reply, guidance, journal, lifecycle and
+unit-of-work suites passed 68 cases, with zero skipped. Actual Node 22.23.3 opened
+SQLite; pnpm is 9.15.4. Scoped Biome and whitespace checks passed. Baseline product
+and characterization hashes/copies and raw logs are retained under the ignored
+.autopod-data/completion-human-gate/ directory.
+
+Initial fixture runs omitted the required ACR-qualified sandbox warm-image tag.
+Four stale-owner assertions then overreached by treating preservation activity
+timestamps as lifecycle mutation. The final assertions compare all other fields
+exactly, explicitly retain the activity update, and still forbid subsequent journal
+marks, failed transitions and final guidance activity. These corrections happened
+before any product movement; failed logs remain retained. An extra broad tsc
+--noEmit diagnostic includes existing unrelated test/type errors and is not the
+repository typecheck command. Its new optional-callback type error was corrected;
+the supported build/typecheck pipeline remains a required Phase 3 gate.

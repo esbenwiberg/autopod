@@ -25513,3 +25513,432 @@ describe('updateFromBase', () => {
     expect(ctx.runtime.spawn).not.toHaveBeenCalled();
   });
 });
+
+describe('completion human gate compatibility', () => {
+  beforeEach(() => mockExecFileSuccess());
+  afterEach(() => vi.restoreAllMocks());
+
+  function statusMessages(ctx: TestContext, podId: string): string[] {
+    return ctx.eventRepo
+      .getForSession(podId, { type: 'pod.agent_activity' })
+      .map((event) => (event.payload as { event?: { message?: unknown } }).event?.message)
+      .filter((message): message is string => typeof message === 'string');
+  }
+
+  function fixture() {
+    const ctx = createTestContext(undefined, {
+      executionTarget: 'sandbox',
+      warmImageTag: 'registry.azurecr.io/autopod/human:latest',
+    });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Retain human work' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'human-worker',
+      worktreePath: '/tmp/human-source',
+    });
+    const question: EscalationRequest = {
+      id: 'human-question',
+      podId: pod.id,
+      type: 'ask_human',
+      timestamp: '2026-10-17T12:00:00Z',
+      payload: { question: 'Keep the source?' },
+      response: null,
+    };
+    const ask = (status: 'running' | 'awaiting_input' = 'awaiting_input') => {
+      ctx.escalationRepo.insert(question);
+      ctx.podRepo.update(pod.id, { status, pendingEscalation: question });
+    };
+    const retained = () => {
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.commitPendingChanges).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+    };
+    return { ctx, manager, pod, ask, question, retained };
+  }
+
+  it.each(['awaiting_input', 'running'] as const)(
+    'retains an unanswered question on %s ahead of queued guidance',
+    async (status) => {
+      const { ctx, manager, pod, ask, question, retained } = fixture();
+      try {
+        ask(status);
+        ctx.deps.nudgeRepo.queue(pod.id, 'Late guidance');
+        const queue = ctx.deps.nudgeRepo.listPending(pod.id);
+        await manager.handleCompletion(pod.id);
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status,
+          pendingEscalation: question,
+          containerId: 'human-worker',
+          worktreePath: '/tmp/human-source',
+          finalization: {
+            phase: 'awaiting_human',
+            pendingDecisionId: question.id,
+            agentSettledAt: expect.any(String),
+            sourcePreservedAt: expect.any(String),
+          },
+        });
+        expect(ctx.deps.nudgeRepo.listPending(pod.id)).toEqual(queue);
+        expect(ctx.escalationRepo.getOrThrow(question.id).response).toBeNull();
+        expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalledOnce();
+        retained();
+      } finally {
+        ctx.db.close();
+      }
+    },
+  );
+
+  it('retains awaiting_input even without a pending escalation pointer and does not recapture proof', async () => {
+    const { ctx, manager, pod, retained } = fixture();
+    try {
+      ctx.podRepo.update(pod.id, { status: 'awaiting_input' });
+      await manager.handleCompletion(pod.id);
+      const first = ctx.podRepo.getOrThrow(pod.id).finalization;
+      await manager.handleCompletion(pod.id);
+      expect(ctx.podRepo.getOrThrow(pod.id).finalization).toEqual(first);
+      expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalledOnce();
+      expect(
+        statusMessages(ctx, pod.id).filter((m) => m.startsWith('Agent settled;')),
+      ).toHaveLength(2);
+      retained();
+    } finally {
+      ctx.db.close();
+    }
+  });
+
+  it.each(['question', 'guidance'] as const)(
+    'keeps %s handling valid without an optional journal',
+    async (kind) => {
+      const { ctx, manager, pod, ask, retained } = fixture();
+      try {
+        if (kind === 'question') ask();
+        else ctx.deps.nudgeRepo.queue(pod.id, 'Retain this');
+        ctx.podRepo.completionJournal = undefined;
+        await manager.handleCompletion(pod.id);
+        expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalledOnce();
+        expect(ctx.podRepo.getOrThrow(pod.id).status).toBe(
+          kind === 'question' ? 'awaiting_input' : 'failed',
+        );
+        retained();
+      } finally {
+        ctx.db.close();
+      }
+    },
+  );
+
+  it.each(
+    (['question', 'guidance'] as const).flatMap((kind) =>
+      (['containerId', 'worktreePath'] as const).map((missing) => ({ kind, missing })),
+    ),
+  )('retains $kind without $missing, without inventing source proof', async ({ kind, missing }) => {
+    const { ctx, manager, pod, ask, retained } = fixture();
+    try {
+      if (kind === 'question') ask();
+      else ctx.deps.nudgeRepo.queue(pod.id, 'Retain this');
+      ctx.podRepo.update(pod.id, { [missing]: null });
+      await manager.handleCompletion(pod.id);
+      expect(ctx.deps.sandboxWorkspaceCheckpoint).not.toHaveBeenCalled();
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: kind === 'question' ? 'awaiting_input' : 'failed',
+        finalization: { phase: 'awaiting_human', sourcePreservedAt: null },
+      });
+      retained();
+    } finally {
+      ctx.db.close();
+    }
+  });
+
+  it.each([new Error('capture rejected'), 'capture rejected'])(
+    'retains a question after capture rejects with %s and allows a later preservation retry',
+    async (error) => {
+      const { ctx, manager, pod, ask, retained } = fixture();
+      try {
+        ask();
+        vi.mocked(ctx.containerManager.getStatus).mockRejectedValueOnce(error);
+        await manager.handleCompletion(pod.id);
+        const first = ctx.podRepo.getOrThrow(pod.id).finalization;
+        expect(first).toMatchObject({ phase: 'awaiting_human', sourcePreservedAt: null });
+        await manager.handleCompletion(pod.id);
+        expect(ctx.podRepo.getOrThrow(pod.id).finalization).toMatchObject({
+          agentSettledAt: first?.agentSettledAt,
+          sourcePreservedAt: expect.any(String),
+        });
+        retained();
+      } finally {
+        ctx.db.close();
+      }
+    },
+  );
+
+  it('catches question source-mark failure after capture without answering the question', async () => {
+    const { ctx, manager, pod, ask, retained } = fixture();
+    try {
+      ask();
+      const journal = ctx.podRepo.completionJournal;
+      if (!journal) throw new Error('Missing journal');
+      vi.spyOn(journal, 'mark').mockImplementationOnce(() => {
+        throw new Error('mark fault');
+      });
+      const log = vi.spyOn(logger, 'error');
+      await manager.handleCompletion(pod.id);
+      expect(log).toHaveBeenCalledWith(
+        expect.objectContaining({ podId: pod.id }),
+        'Pending-decision workspace preservation failed; retaining worker resources',
+      );
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'awaiting_input',
+        finalization: { sourcePreservedAt: null },
+      });
+      retained();
+    } finally {
+      ctx.db.close();
+    }
+  });
+
+  it.each(['question', 'guidance'] as const)(
+    'propagates %s settlement failure before capture',
+    async (kind) => {
+      const { ctx, manager, pod, ask, retained } = fixture();
+      try {
+        if (kind === 'question') ask();
+        else ctx.deps.nudgeRepo.queue(pod.id, 'Retain this');
+        const journal = ctx.podRepo.completionJournal;
+        if (!journal) throw new Error('Missing journal');
+        vi.spyOn(journal, 'settle').mockImplementationOnce(() => {
+          throw new Error('settle fault');
+        });
+        await expect(manager.handleCompletion(pod.id)).rejects.toThrow('settle fault');
+        expect(ctx.deps.sandboxWorkspaceCheckpoint).not.toHaveBeenCalled();
+        retained();
+      } finally {
+        ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['unread', 'read-without-ack', 'existing-proof'] as const)(
+    'parks %s guidance without consuming it, with exact reason and proof',
+    async (mode) => {
+      const { ctx, manager, pod, retained } = fixture();
+      try {
+        ctx.deps.nudgeRepo.queue(pod.id, 'First guidance');
+        ctx.deps.nudgeRepo.queue(pod.id, 'Second guidance');
+        if (mode === 'read-without-ack') {
+          ctx.podRepo.taskExecutions?.beginRun(pod.id, 1, 1, {
+            runtime: 'claude',
+            model: 'model',
+            providerAccountId: null,
+          });
+          expect(ctx.deps.nudgeRepo.readPending(pod.id)?.messages).toEqual([
+            'First guidance',
+            'Second guidance',
+          ]);
+        }
+        if (mode === 'existing-proof') {
+          const saved = ctx.podRepo.getOrThrow(pod.id);
+          ctx.podRepo.completionJournal?.settle(saved);
+          ctx.podRepo.completionJournal?.mark(saved, 'awaiting_human', true);
+        }
+        const queue = ctx.deps.nudgeRepo.listPending(pod.id);
+        const statuses: string[] = [];
+        ctx.eventBus.subscribe((event) => {
+          if (event.type === 'pod.status_changed') {
+            statuses.push(event.newStatus);
+            expect(ctx.db.inTransaction).toBe(false);
+            expect(ctx.podRepo.getOrThrow(pod.id).finalization?.phase).toBe('awaiting_human');
+          }
+        });
+        await manager.handleCompletion(pod.id);
+        const reason =
+          'Worker settled with uncollected human guidance. Use Rework to read check_messages, acknowledge its receipt, and apply the saved guidance before validation or delivery. Original resources and guidance retained.';
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'failed',
+          failureReason: reason,
+          finalization: { phase: 'awaiting_human', sourcePreservedAt: expect.any(String) },
+        });
+        expect(statusMessages(ctx, pod.id)).toContain(reason);
+        expect(statuses).toEqual(['failed']);
+        expect(ctx.deps.nudgeRepo.listPending(pod.id)).toEqual(queue);
+        expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalledOnce();
+        retained();
+      } finally {
+        ctx.db.close();
+      }
+    },
+  );
+
+  it.each([new Error('capture rejected'), 'capture rejected'])(
+    'parks guidance and retains its queue after capture rejects with %s',
+    async (error) => {
+      const { ctx, manager, pod, retained } = fixture();
+      try {
+        ctx.deps.nudgeRepo.queue(pod.id, 'Keep saved guidance');
+        vi.mocked(ctx.containerManager.getStatus).mockRejectedValueOnce(error);
+        await manager.handleCompletion(pod.id);
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'failed',
+          failureReason:
+            'Worker settled with uncollected human guidance. Use Rework to read check_messages, acknowledge its receipt, and apply the saved guidance before validation or delivery. Workspace preservation failed: capture rejected. Original resources and guidance retained.',
+          finalization: { sourcePreservedAt: null },
+        });
+        expect(ctx.deps.nudgeRepo.listPending(pod.id).map((row) => row.message)).toEqual([
+          'Keep saved guidance',
+        ]);
+        retained();
+      } finally {
+        ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['generation', 'container', 'status', 'question'] as const)(
+    'does not park a superseding %s after held guidance capture',
+    async (change) => {
+      const { ctx, manager, pod, ask, question, retained } = fixture();
+      const held = deferred<void>();
+      let completion: Promise<void> | undefined;
+      try {
+        ctx.deps.nudgeRepo.queue(pod.id, 'Keep saved guidance');
+        const original = ctx.deps.sandboxWorkspaceCheckpoint;
+        if (!original) throw new Error('Missing checkpoint');
+        vi.mocked(original).mockImplementationOnce(async (args) => {
+          await held.promise;
+          return originalResult(args);
+        });
+        function originalResult(args: Parameters<NonNullable<typeof original>>[0]) {
+          return {
+            sequence: args.sequence,
+            sourceHead: 'a'.repeat(40),
+            sourceTree: 'b'.repeat(40),
+            snapshotCommit: 'c'.repeat(40),
+            snapshotTree: 'd'.repeat(40),
+            transferVerified: true,
+            bundleVerified: true,
+            hostImported: true,
+            lineageVerified: true,
+            promoted: true,
+            materialized: true,
+            quarantineRef: `refs/autopod-quarantine/${args.podId}/${args.sequence}`,
+          };
+        }
+        completion = manager.handleCompletion(pod.id);
+        await waitForAssertion(() => expect(original).toHaveBeenCalledOnce());
+        if (change === 'generation') ctx.podRepo.incrementLifecycleGeneration(pod.id);
+        else if (change === 'container') ctx.podRepo.update(pod.id, { containerId: 'replacement' });
+        else if (change === 'status') ctx.podRepo.update(pod.id, { status: 'paused' });
+        else ask('running');
+        const before = ctx.podRepo.getOrThrow(pod.id);
+        const mark = ctx.podRepo.completionJournal
+          ? vi.spyOn(ctx.podRepo.completionJournal, 'mark')
+          : undefined;
+        held.resolve();
+        await completion;
+        const after = ctx.podRepo.getOrThrow(pod.id);
+        // The existing preservation activity updates this observation timestamp.
+        expect({
+          ...after,
+          lastAgentEventAt: before.lastAgentEventAt,
+          updatedAt: before.updatedAt,
+        }).toEqual(before);
+        expect(after.lastAgentEventAt).toEqual(expect.any(String));
+        expect(mark).not.toHaveBeenCalled();
+        expect(statusMessages(ctx, pod.id).some((m) => m.startsWith('Worker settled with'))).toBe(
+          false,
+        );
+        if (change === 'question') expect(before.pendingEscalation).toEqual(question);
+        retained();
+      } finally {
+        held.resolve();
+        await completion;
+        ctx.db.close();
+      }
+    },
+  );
+
+  it('rolls back guidance mark and failed write without rolling back earlier settlement', async () => {
+    const { ctx, manager, pod, retained } = fixture();
+    try {
+      ctx.deps.nudgeRepo.queue(pod.id, 'Keep saved guidance');
+      const published: string[] = [];
+      ctx.eventBus.subscribe((event) => {
+        if (event.type === 'pod.status_changed') published.push(event.newStatus);
+      });
+      const update = ctx.podRepo.update;
+      vi.spyOn(ctx.podRepo, 'update').mockImplementation((id, changes) => {
+        update(id, changes);
+        if (changes.status === 'failed') throw new Error('failed write fault');
+      });
+      await expect(manager.handleCompletion(pod.id)).rejects.toThrow('failed write fault');
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'running',
+        failureReason: null,
+        finalization: {
+          phase: 'ready',
+          sourcePreservedAt: null,
+          agentSettledAt: expect.any(String),
+        },
+      });
+      expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalledOnce();
+      expect(ctx.deps.nudgeRepo.hasPending(pod.id)).toBe(true);
+      expect(published).toEqual([]);
+      expect(statusMessages(ctx, pod.id).some((m) => m.startsWith('Worker settled with'))).toBe(
+        false,
+      );
+      retained();
+    } finally {
+      ctx.db.close();
+    }
+  });
+
+  it.each([
+    'paused',
+    'failed',
+    'validating',
+    'validated',
+    'review_required',
+    'complete',
+    'killed',
+    'killing',
+  ] as const)('keeps %s admission before question handling', async (status) => {
+    const { ctx, manager, pod, ask, retained } = fixture();
+    try {
+      ask();
+      ctx.podRepo.update(pod.id, { status });
+      await manager.handleCompletion(pod.id);
+      expect(ctx.podRepo.getOrThrow(pod.id).finalization).toBeNull();
+      expect(ctx.deps.sandboxWorkspaceCheckpoint).not.toHaveBeenCalled();
+      retained();
+    } finally {
+      ctx.db.close();
+    }
+  });
+  it.each(['running', 'complete'] as const)(
+    'checks native Goal admission before %s human work',
+    async (status) => {
+      const { ctx, manager, pod, ask, retained } = fixture();
+      try {
+        ask('running');
+        ctx.podRepo.update(pod.id, { status });
+        ctx.deps.launchConfiguration = {
+          read: () => ({ intent: 'goal' }) as import('@autopod/shared').EffectiveLaunchConfig,
+          executionSettings: () => ctx.profileStore.get('test-profile'),
+          assertCurrentCapabilities: async () => {},
+          prepareEnvironment: async () => 'fixture',
+        };
+        await expect(manager.handleCompletion(pod.id)).rejects.toMatchObject({
+          code: 'GOAL_NOT_ACHIEVED',
+        });
+        expect(ctx.podRepo.getOrThrow(pod.id).finalization).toBeNull();
+        retained();
+      } finally {
+        ctx.db.close();
+      }
+    },
+  );
+});
