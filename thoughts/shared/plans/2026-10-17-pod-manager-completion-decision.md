@@ -1,6 +1,6 @@
 # Slice 6: completion decision extraction
 
-Status: READY FOR REVIEW — implementation has not started.
+Status: APPROVED — implementing all three phases.
 Baseline: f84f255e57c90a194386e291d59b4b3012467537.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -10,7 +10,7 @@ Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
 Extract the source completion decisions and their current actions into a typed
 factory. The user accepted the next slice with the established illustrated plan
 and characterize → extract → qualify structure. Approval of this concrete plan
-authorizes all three phases together; implementation awaits that explicit approval.
+authorizes all three phases together; the user explicitly approved this plan.
 No intermediate manual check is needed for this headless compatibility boundary.
 Commit and push verified increments per the user's repository instructions.
 
@@ -151,9 +151,9 @@ Close DBs, restore spies/environment/timers and release/join held work in finall
 ### Success criteria
 
 Automated:
-- [ ] New public cases pass against unchanged product baseline.
-- [ ] Relevant existing completion/source/human/artifact/fork/schedule cases pass.
-- [ ] Raw results, runtime and before-source/test hashes are retained.
+- [x] New public cases pass against unchanged product baseline.
+- [x] Relevant existing completion/source/human/artifact/fork/schedule cases pass.
+- [x] Raw results, runtime and before-source/test hashes are retained.
 
 Manual: None required.
 
@@ -260,3 +260,20 @@ together. Integration with concurrent main work remains separate requested work.
 
 Next action: explicit approval of this concrete plan, then characterize against
 the unchanged product baseline before applying the extraction. No open questions.
+
+## Phase 1 evidence
+
+42 new public decision cases and 87 selected existing cases passed against unchanged
+product source: 129 passed, 756 name-filtered. Assertions cover all four outcomes,
+independent linked/base forks, scheduled Rework, each disable mechanism and suite
+precedence, contradictory sandbox counters, bounded telemetry, held cleanup and
+fan-in/shared-branch eligibility, fresh bypass state, late method receiver/await/error
+behavior and settings failure. Runtime actually opened SQLite under Node 22.23.3;
+pnpm is 9.15.4. Frozen assertions, before-source manifests and raw logs are under
+ignored .autopod-data/completion-decision/.
+
+Two initial runs exposed fixture issues, retained in their failure logs: linked
+membership must be set at creation and reference an existing parent; inherited full
+suite must be cleared to exercise the validate:false fallback-off activity. Fixtures
+were corrected before freezing. No product change or weakened behavioral expectation
+was used to obtain the passing baseline.

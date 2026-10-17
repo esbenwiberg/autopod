@@ -26474,3 +26474,420 @@ describe('completion source compatibility', () => {
     }
   });
 });
+
+describe('completion decision compatibility', () => {
+  beforeEach(() => mockExecFileSuccess());
+  afterEach(() => vi.restoreAllMocks());
+
+  interface Case {
+    name: string;
+    target?: 'local' | 'sandbox';
+    files?: number;
+    canonical?: 'changed' | 'unchanged';
+    disable?: 'skip' | 'validate' | 'off' | 'false-full' | 'off-true';
+    fork?: 'linked' | 'branch' | 'default';
+    correction?: string;
+    scheduled?: boolean;
+    noWorktree?: boolean;
+    expected: 'complete' | 'failed' | 'validated' | 'validate';
+  }
+  const cases: Case[] = [
+    { name: 'local empty', files: 0, expected: 'complete' },
+    { name: 'local changed', files: 2, expected: 'validate' },
+    { name: 'zero without worktree', noWorktree: true, expected: 'validate' },
+    { name: 'rework', files: 0, correction: '[REWORK IN PROGRESS] repair', expected: 'failed' },
+    {
+      name: 'non-prefix correction',
+      files: 0,
+      correction: 'old [REWORK IN PROGRESS]',
+      expected: 'complete',
+    },
+    {
+      name: 'scheduled rework',
+      files: 0,
+      correction: '[REWORK IN PROGRESS]',
+      scheduled: true,
+      expected: 'complete',
+    },
+    {
+      name: 'linked rework',
+      files: 0,
+      fork: 'linked',
+      correction: '[REWORK IN PROGRESS]',
+      expected: 'validate',
+    },
+    {
+      name: 'branch rework',
+      files: 0,
+      fork: 'branch',
+      correction: '[REWORK IN PROGRESS]',
+      expected: 'validate',
+    },
+    { name: 'default branch', files: 0, fork: 'default', expected: 'complete' },
+    ...(['skip', 'validate', 'off', 'false-full', 'off-true'] as const).flatMap(
+      (disable): Case[] => [
+        { name: `local changed ${disable}`, files: 2, disable, expected: 'validated' },
+        {
+          name: `local rework ${disable}`,
+          files: 0,
+          correction: '[REWORK IN PROGRESS]',
+          disable,
+          expected: 'validated',
+        },
+        {
+          name: `fork unchanged ${disable}`,
+          files: 0,
+          fork: 'linked',
+          disable,
+          expected: 'validated',
+        },
+        {
+          name: `sandbox changed ${disable}`,
+          target: 'sandbox',
+          canonical: 'changed',
+          disable,
+          expected: 'validate',
+        },
+        {
+          name: `sandbox unchanged ${disable}`,
+          target: 'sandbox',
+          canonical: 'unchanged',
+          disable,
+          expected: 'validated',
+        },
+      ],
+    ),
+    {
+      name: 'sandbox unchanged rework',
+      target: 'sandbox',
+      canonical: 'unchanged',
+      correction: '[REWORK IN PROGRESS]',
+      expected: 'failed',
+    },
+    {
+      name: 'sandbox scheduled rework',
+      target: 'sandbox',
+      canonical: 'unchanged',
+      scheduled: true,
+      correction: '[REWORK IN PROGRESS]',
+      expected: 'complete',
+    },
+    {
+      name: 'sandbox unchanged fork',
+      target: 'sandbox',
+      canonical: 'unchanged',
+      fork: 'branch',
+      expected: 'validate',
+    },
+  ];
+
+  function fixture(c: Case = { name: 'default', files: 0, expected: 'complete' }) {
+    const ctx = createTestContext(undefined, {
+      executionTarget: c.target ?? 'local',
+      warmImageTag: 'registry.azurecr.io/autopod/decision:latest',
+    });
+    const info = vi.fn();
+    ctx.deps.logger = { ...logger, info } as typeof logger;
+    const manager = createPodManager(ctx.deps);
+    if (c.scheduled) {
+      ctx.db
+        .prepare(
+          "INSERT INTO scheduled_job_templates (id,name,prompt) VALUES ('decision-t','Decision','Inspect')",
+        )
+        .run();
+      ctx.db
+        .prepare(
+          "INSERT INTO scheduled_jobs (id,name,template_id,profile_name,task,cron_expression,next_run_at) VALUES ('decision-job','Decision','decision-t','test-profile','Inspect','0 9 * * *','2030-01-01')",
+        )
+        .run();
+    }
+    const linkedParent =
+      c.fork === 'linked'
+        ? manager.createSession({ profileName: 'test-profile', task: 'Linked parent' }, 'operator')
+        : undefined;
+    const pod = manager.createSession(
+      {
+        profileName: 'test-profile',
+        task: c.name,
+        ...(c.scheduled ? { scheduledJobId: 'decision-job' } : {}),
+        ...(linkedParent ? { linkedPodId: linkedParent.id } : {}),
+      },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'decision-container',
+      worktreePath: c.noWorktree ? null : '/tmp/completion-decision',
+      startCommitSha: 'a'.repeat(40),
+      filesChanged: c.noWorktree ? 0 : 9,
+      lastCorrectionMessage: c.correction ?? 'old correction',
+      ...(c.fork === 'branch' || c.fork === 'default'
+        ? { baseBranch: c.fork === 'default' ? 'main' : 'release' }
+        : {}),
+      skipValidation: c.disable === 'skip',
+      options: {
+        ...manager.getSession(pod.id).options,
+        ...(c.disable === 'validate' || c.disable === 'false-full' ? { validate: false } : {}),
+        ...(c.disable === 'off' || c.disable === 'off-true'
+          ? { validationSuite: 'off' as const }
+          : {}),
+        ...(c.disable === 'validate' ? { validationSuite: undefined } : {}),
+        ...(c.disable === 'false-full' ? { validationSuite: 'full' as const } : {}),
+        ...(c.disable === 'off-true' ? { validate: true } : {}),
+      },
+    });
+    vi.mocked(ctx.worktreeManager.getDiffStats).mockResolvedValue({
+      filesChanged: c.files ?? 0,
+      linesAdded: 3,
+      linesRemoved: 1,
+    });
+    if (c.target === 'sandbox')
+      vi.mocked(ctx.worktreeManager.classifyCanonicalDiff).mockResolvedValue({
+        outcome: c.canonical ?? 'changed',
+        // Deliberately contradictory counters: canonical outcome owns sandbox policy.
+        stats: {
+          filesChanged: c.canonical === 'unchanged' ? 7 : 0,
+          linesAdded: 4,
+          linesRemoved: 1,
+        },
+        hostHead: 'c'.repeat(40),
+        hostTree: 'd'.repeat(40),
+      });
+    const validate = vi.spyOn(manager, 'triggerValidation').mockResolvedValue();
+    const statuses: string[] = [];
+    const completed: Array<{ filesChanged: number }> = [];
+    const activity: string[] = [];
+    ctx.eventBus.subscribeToSession(pod.id, (event) => {
+      if (event.type === 'pod.status_changed') statuses.push(event.newStatus);
+      if (event.type === 'pod.completed') completed.push(event.summary);
+      if (event.type === 'pod.agent_activity' && event.event.type === 'status')
+        activity.push(event.event.message);
+    });
+    return { ctx, manager, pod, info, validate, statuses, completed, activity };
+  }
+
+  it.each(cases)('$name preserves its outcome and effects', async (c) => {
+    const f = fixture(c);
+    try {
+      await f.manager.handleCompletion(f.pod.id);
+      const saved = f.manager.getSession(f.pod.id);
+      expect(saved.status).toBe(c.expected === 'validate' ? 'running' : c.expected);
+      expect(f.validate).toHaveBeenCalledTimes(c.expected === 'validate' ? 1 : 0);
+      expect(f.ctx.containerManager.kill).toHaveBeenCalledTimes(c.expected === 'complete' ? 1 : 0);
+      expect(f.completed).toEqual(
+        c.expected === 'complete' ? [expect.objectContaining({ filesChanged: 0 })] : [],
+      );
+      expect(f.statuses).toEqual(
+        c.expected === 'validate'
+          ? []
+          : c.expected === 'validated'
+            ? ['validating', 'validated']
+            : [c.expected],
+      );
+      expect(saved.completedAt).toEqual(
+        c.expected === 'complete' || c.expected === 'failed' ? expect.any(String) : null,
+      );
+      expect(saved.lastCorrectionMessage).toBe(
+        c.expected === 'failed'
+          ? 'Rework produced no file changes.'
+          : c.expected === 'validate'
+            ? (c.correction ?? 'old correction')
+            : null,
+      );
+      if (c.expected === 'validated') {
+        const unchanged = c.target === 'sandbox' ? c.canonical === 'unchanged' : c.files === 0;
+        if (unchanged) expect(f.activity).toContain('No files changed — skipping validation');
+        else if (c.disable !== 'skip' && c.disable !== 'false-full')
+          expect(f.activity).toContain('Validation suite is off — marking pod validated');
+        else expect(f.activity).not.toContain('Validation suite is off — marking pod validated');
+      }
+      if (c.target === 'sandbox') {
+        const unchanged = c.canonical === 'unchanged';
+        const fork = c.fork === 'branch' || c.fork === 'linked';
+        const disabled = Boolean(c.disable);
+        expect(f.info).toHaveBeenCalledWith(
+          {
+            podId: f.pod.id,
+            attempt: 0,
+            checkpointSequence: expect.any(Number),
+            baseCommit: 'a'.repeat(12),
+            branch: f.pod.branch,
+            checkpointCommit: 'c'.repeat(12),
+            checkpointTree: 'd'.repeat(12),
+            hostHead: 'c'.repeat(12),
+            hostTree: 'd'.repeat(12),
+            outcome: c.canonical,
+            stats: { filesChanged: unchanged ? 7 : 0, linesAdded: 4, linesRemoved: 1 },
+            predicateFlags: {
+              noChanges: unchanged,
+              isForkSession: fork,
+              isScheduledSession: Boolean(c.scheduled),
+              validationDisabled: disabled,
+            },
+            lifecycleDecision: unchanged && !fork && !disabled ? 'complete' : 'validate',
+            cleanupSelected: unchanged && !fork && !disabled,
+            validationSelected: !unchanged || fork,
+            prEligible: !unchanged || fork,
+          },
+          'Sandbox finalization proof and decision',
+        );
+      }
+      expect(f.ctx.prManager.createPr).not.toHaveBeenCalled();
+      expect(f.ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it.each(['complete', 'bypass'] as const)(
+    'orders %s effects and dependent eligibility',
+    async (mode) => {
+      const f = fixture({
+        name: 'parent',
+        files: 0,
+        disable: mode === 'bypass' ? 'skip' : undefined,
+        expected: mode === 'bypass' ? 'validated' : 'complete',
+      });
+      const held = deferred<void>();
+      let operation: Promise<void> | undefined;
+      try {
+        const second = f.manager.createSession(
+          { profileName: 'test-profile', task: 'Other parent' },
+          'operator',
+        );
+        const children = ['ordinary', 'shared', 'fan-in'].map((kind) => {
+          const child = f.manager.createSession(
+            {
+              profileName: 'test-profile',
+              task: kind,
+              dependsOnPodIds: kind === 'fan-in' ? [f.pod.id, second.id] : [f.pod.id],
+            },
+            'operator',
+          );
+          if (kind === 'shared')
+            f.ctx.db.prepare('UPDATE pods SET branch = ? WHERE id = ?').run(f.pod.branch, child.id);
+          return child;
+        });
+        f.ctx.enqueuedSessions.length = 0;
+        const order: string[] = [];
+        // enqueueSession is captured at construction; observe it through its retained array.
+        f.ctx.eventBus.subscribeToSession(f.pod.id, (event) => {
+          if (event.type === 'pod.status_changed') {
+            order.push(event.newStatus);
+            if (event.newStatus === 'validating')
+              f.ctx.podRepo.update(f.pod.id, { task: 'fresh after validating' });
+          }
+          if (event.type === 'pod.completed') {
+            expect(f.ctx.enqueuedSessions).toEqual([]);
+            order.push('completed');
+          }
+        });
+        vi.mocked(f.ctx.containerManager.kill).mockImplementationOnce(async () => {
+          order.push('cleanup-start');
+          await held.promise;
+          order.push('cleanup-end');
+        });
+        operation = f.manager.handleCompletion(f.pod.id);
+        if (mode === 'complete') {
+          await waitForAssertion(() => expect(order).toEqual(['cleanup-start']));
+          expect(f.manager.getSession(f.pod.id).status).toBe('running');
+          expect(f.completed).toEqual([]);
+          expect(f.ctx.enqueuedSessions).toEqual([]);
+          held.resolve();
+        }
+        await operation;
+        expect(order).toEqual(
+          mode === 'complete'
+            ? ['cleanup-start', 'cleanup-end', 'complete', 'completed']
+            : ['validating', 'validated'],
+        );
+        expect(f.ctx.enqueuedSessions).toEqual(
+          mode === 'complete' ? [children[0]?.id, children[1]?.id] : [children[0]?.id],
+        );
+        for (const child of children)
+          expect(f.manager.getSession(child.id).dependencyStartedAt !== null).toBe(
+            f.ctx.enqueuedSessions.includes(child.id),
+          );
+        if (mode === 'bypass')
+          expect(f.manager.getSession(f.pod.id).task).toBe('fresh after validating');
+      } finally {
+        held.resolve();
+        await Promise.allSettled(operation ? [operation] : []);
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each([false, true])(
+    'looks up current validation method after held preparation, rejection=%s',
+    async (reject) => {
+      const f = fixture({ name: 'late method', files: 2, expected: 'validate' });
+      const prepared = deferred<void>();
+      const admitted = deferred<void>();
+      const finished = deferred<void>();
+      const fault = new Error('validation admission fault');
+      let operation: Promise<void> | undefined;
+      try {
+        vi.mocked(f.ctx.worktreeManager.getDiffStats).mockImplementationOnce(async () => {
+          prepared.resolve();
+          await admitted.promise;
+          return { filesChanged: 2, linesAdded: 3, linesRemoved: 1 };
+        });
+        let receiver: unknown;
+        const late = vi.fn(async function (this: ReturnType<typeof createPodManager>, id: string) {
+          receiver = this;
+          expect(id).toBe(f.pod.id);
+          await finished.promise;
+          if (reject) throw fault;
+        });
+        operation = f.manager.handleCompletion(f.pod.id);
+        void operation.catch(() => {});
+        await prepared.promise;
+        f.manager.triggerValidation = late;
+        admitted.resolve();
+        await waitForAssertion(() => expect(late).toHaveBeenCalledOnce());
+        let settled = false;
+        void operation.then(
+          () => {
+            settled = true;
+          },
+          () => {
+            settled = true;
+          },
+        );
+        await Promise.resolve();
+        expect(settled).toBe(false);
+        expect(receiver).toBe(f.manager);
+        expect(f.validate).not.toHaveBeenCalled();
+        finished.resolve();
+        if (reject) await expect(operation).rejects.toBe(fault);
+        else await operation;
+        expect(f.ctx.containerManager.kill).not.toHaveBeenCalled();
+      } finally {
+        admitted.resolve();
+        finished.resolve();
+        await Promise.allSettled(operation ? [operation] : []);
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it('propagates the fresh decision settings error after persisted preparation', async () => {
+    const f = fixture();
+    const fault = new Error('decision settings unavailable');
+    try {
+      vi.mocked(f.ctx.worktreeManager.getDiffStats).mockImplementationOnce(async () => {
+        vi.mocked(f.ctx.profileStore.get).mockImplementationOnce(() => {
+          throw fault;
+        });
+        return { filesChanged: 0, linesAdded: 0, linesRemoved: 0 };
+      });
+      await expect(f.manager.handleCompletion(f.pod.id)).rejects.toBe(fault);
+      expect(f.manager.getSession(f.pod.id)).toMatchObject({ status: 'running', filesChanged: 0 });
+      expect(f.ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(f.completed).toEqual([]);
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+});
