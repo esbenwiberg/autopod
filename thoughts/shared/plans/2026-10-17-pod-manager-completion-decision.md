@@ -1,6 +1,6 @@
 # Slice 6: completion decision extraction
 
-Status: APPROVED — implementing all three phases.
+Status: COMPLETE — all three approved phases implemented and locally verified.
 Baseline: f84f255e57c90a194386e291d59b4b3012467537.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -19,7 +19,7 @@ Commit and push verified increments per the user's repository instructions.
 See ../research/2026-10-17-pod-manager-completion-decision.md. References below use
 packages/daemon/src/ at the baseline. handleCompletion (:11108) already delegates
 human holds and source preparation, and retains artifact admission/coalescing.
-The contiguous decision tail (:11156–11259) reloads the pod/settings, derives
+The contiguous decision tail (:11156–11244) reloads the pod/settings, derives
 predicates, logs successful sandbox proof and chooses one of four outcomes.
 Shared transition, cleanup, event, dependency and validation helpers serve other
 paths. Their algorithms and other callers remain in place.
@@ -94,7 +94,7 @@ source preparation remain byte-equivalent except import/composition/formatting.
    Preserve original pod target/worktree reads versus refreshed fields exactly.
    Missing local worktree does not become a zero-change observation.
 2. Preserve fork detection (linked ID or non-default non-null base), its lack of
-   default-branch fallback, scheduledId !== null, and exact Rework startsWith rule.
+   default-branch fallback, scheduledJobId !== null, and exact Rework startsWith rule.
 3. Preserve validation disabled precedence: skipValidation OR validate:false OR
    suite:off. Preserve getPodValidationSuite activity selection independently.
 4. Preserve branch order: unchanged enabled ordinary Rework fails; scheduled Rework
@@ -229,10 +229,10 @@ Update this plan with observed evidence and exact remaining limitations.
 ### Success criteria
 
 Automated:
-- [ ] All affected suites pass with SQLite included and no new skipped cases.
-- [ ] Full uncached install/lint/build/typecheck/test/audit/secret pipeline passes.
-- [ ] Runtime, source hashes, raw results and exact movement review are recorded.
-- [ ] Scoped lint and whitespace pass; verified commits are pushed; remote matches.
+- [x] All affected suites pass with SQLite included and no new skipped cases.
+- [x] Full uncached install/lint/build/typecheck/test/audit/secret pipeline passes.
+- [x] Runtime, source hashes, raw results and exact movement review are recorded.
+- [x] Scoped lint and whitespace pass; verified commits are pushed; remote matches.
 
 Manual: None required. Approval covers all three phases together.
 
@@ -258,8 +258,9 @@ together. Integration with concurrent main work remains separate requested work.
 - Existing collaborators: pods/pod-repository.ts, pods/state-machine.ts and the
   shared manager transition/cleanup/completion/dependent helpers.
 
-Next action: explicit approval of this concrete plan, then characterize against
-the unchanged product baseline before applying the extraction. No open questions.
+All three approved phases are complete. No manual acceptance remains for this
+headless compatibility extraction. Integration, PR creation and deployment remain
+separate requested work; none was performed.
 
 ## Phase 1 evidence
 
@@ -298,3 +299,71 @@ Daemon/dependency ESM and declaration build passed. Scoped Biome over all five
 source/test files and whitespace checks passed. Supplemental TypeScript semantic
 diagnostics restricted to the new direct test and new public group returned zero;
 this is not a claim that unrelated repository test typing is clean.
+
+## Phase 3: final verification
+
+Verdict: PROVEN for the approved local compatibility extraction. All required
+automated checks passed; no manual gate remains.
+
+| Claim/check | Observed evidence | Result |
+|---|---|---|
+| Public compatibility | 129 selected cases pass before and after; assertions byte-identical | Passed |
+| Persisted decision effects | 29 direct SQLite cases: close/reopen, integrity/foreign-key checks, ordering and failure effects | Passed |
+| Surrounding orchestration | 30 affected suites, 1,318 passed, zero skipped | Passed |
+| Full uncached pipeline | Frozen install, lint, build, repository typecheck, tests, audit and secret scan | Passed |
+| Vitest | 7,473 passed across 493 passing files; 10 existing skipped cases | Passed with existing skips |
+| Standalone Node scripts | 35 passed, zero failed/skipped | Passed |
+| Source identity | All 1,957 frozen package/script files unchanged through qualification | Passed |
+| Scope and movement | Three product paths, two test paths; exact movement recipe; all other baseline source unchanged | Passed |
+| Scoped quality | Five-file Biome and whitespace clean; zero semantic diagnostics in new test code | Passed |
+
+Pipeline body: TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh, using the
+established task-local npx launcher. Actual Node 22.23.3 opened SQLite 3.49.2;
+pnpm is 9.15.4. Build/typecheck/test Turbo groups ran uncached. Frozen install
+succeeded without fallback. Repository lint retains its existing warnings; the
+five changed source/test files have no scoped Biome diagnostics. No new skip was
+introduced. Existing skips retain their Docker/platform/live-model gates.
+
+Tested implementation: 03844471a47dbab15e107d94aca5e24e77488fa3. A following documentation-only commit
+records the evidence without changing these tested product/test sources. The final
+documentation/remote identity and clean-worktree confirmation are recorded in private
+proof after push. Public baseline fixture failures remain recorded as failures;
+no production or assertion changes were needed after extraction.
+
+The 147-line factory owns the existing decision tail. Manager is 17,736 lines
+(75 fewer). Preparation behavior changes only by exporting its existing interface.
+Late validation lookup preserves the current manager receiver, admission timing
+and awaited rejection behavior. Source algorithms, shared helper bodies and all
+remaining manager policy match the approved recipe.
+
+Evidence under ignored .autopod-data/completion-decision/: proof.json, movement.json,
+baseline/frozen manifests, frozen characterization, before-source and expected-move
+copies, runtime/pnpm records, before/after/build/affected/full-validation/scoped-Biome
+logs, new-test-types.log, retained fixture-failure logs and remote commit identities.
+
+Limits: actual SQLite substantiates persisted decision effects; controlled helper
+callbacks substantiate this boundary's call order/arguments and partial failures.
+Public manager cases exercise real shared helpers around mocked infrastructure.
+Earlier source/Git/checkpoint suites retain their source-authority responsibility.
+No live Docker/Azure/model-provider qualification, deployment, main integration,
+new atomicity, lifecycle fencing, deduplication or crash/concurrency guarantee.
+
+### Qualification environment adjustment
+
+The default full pipeline failed one unchanged managed/source-delivery.test.ts
+case: Git 2.56.0 removed objects/maintenance.lock between readdir and lstat during
+ManagedGitBroker.freeze. The isolated unchanged 26-case suite reproduced the same
+after-pr failure (25 passed). Its source and source-git/source-delivery dependencies
+match the baseline; the approved extraction does not touch these implementations.
+
+With automatic maintenance disabled only in the qualification process, all 26
+source-delivery cases passed and the complete pipeline was rerun. Actual final
+command (in addition to the documented Node/pnpm PATH harness):
+
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+No global or repository Git configuration, product source or assertions changed.
+The default run is recorded as failed, not relabeled as a pass. This environment
+adjustment prevents background maintenance in inherited test fixture Git processes;
+it does not fix or qualify the unchanged metadata scanner against concurrent Git
+maintenance. That existing race remains a separate limitation.

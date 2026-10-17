@@ -26,7 +26,7 @@ from completed slice 5.
 
 ## Decision inputs
 
-The contiguous remaining decision region is pod-manager.ts:11156–11259. It reloads
+The contiguous remaining decision region is pod-manager.ts:11156–11244. It reloads
 the current pod and execution settings before evaluating policy. noChanges uses
 the original pod's target and worktree presence: sandbox uses canonical outcome
 unchanged; local uses worktree presence and freshly stored filesChanged === 0.
