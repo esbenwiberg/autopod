@@ -2347,6 +2347,406 @@ describe('PodManager', () => {
     });
   });
 
+  describe('workspace transfer compatibility', () => {
+    const bare = '/tmp/transfer-compatibility.git';
+    const ok = { stdout: '', stderr: '', exitCode: 0 };
+
+    function transferPod(ctx: TestContext) {
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Transfer workspace' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'transfer-container',
+        worktreePath: '/tmp/transfer-worktree',
+        worktreeCompromised: true,
+      });
+      return { manager, pod: ctx.podRepo.getOrThrow(pod.id) };
+    }
+
+    function hostGit(
+      options: { deriveFails?: boolean; resetFails?: boolean; pushFails?: boolean } = {},
+    ) {
+      let resets = 0;
+      mockedExecFile.mockImplementation((...args: unknown[]) => {
+        const command = args[1] as string[];
+        const callback = args.at(-1) as (
+          err: Error | null,
+          result: { stdout: string; stderr: string },
+        ) => void;
+        let stdout = '';
+        let error: Error | null = null;
+        if (command[0] === 'rev-parse' && command[1] === '--git-common-dir') {
+          stdout = bare;
+          if (options.deriveFails) error = new Error('cannot derive Git directory');
+        } else if (command[0] === 'reset') {
+          resets++;
+          if (options.resetFails && resets === 1) error = new Error('index refresh failed');
+        } else if (command.includes('push') && options.pushFails) {
+          error = new Error('push refused');
+        } else if (command.includes('--abbrev-ref')) {
+          stdout = 'feature/transfer';
+        } else if (command.includes('--verify')) {
+          stdout = 'a'.repeat(40);
+        }
+        callback(error, { stdout, stderr: '' });
+        return undefined as never;
+      });
+      return () => resets;
+    }
+
+    function containerGit(ctx: TestContext, alternate = bare, pushFails = false) {
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(async (_id, command) => {
+        if (command[2]?.includes('/workspace/.git/objects/info/alternates')) {
+          return { ...ok, stdout: alternate };
+        }
+        if (command.includes('--abbrev-ref')) return { ...ok, stdout: 'feature/transfer' };
+        if (pushFails && command.includes('push')) return { ...ok, exitCode: 1, stderr: 'refused' };
+        return ok;
+      });
+    }
+
+    it.each(['matching', 'mismatched', 'underivable'] as const)(
+      'preserves files with %s alternates while keeping publication authority',
+      async (mode) => {
+        const ctx = createTestContext();
+        const info = vi.spyOn(logger, 'info');
+        try {
+          const resets = hostGit({ deriveFails: mode === 'underivable' });
+          containerGit(ctx, mode === 'mismatched' ? '/untrusted/repo.git' : bare);
+          const { manager, pod } = transferPod(ctx);
+
+          await manager.preserveWorkspace(pod.id, 'transfer probe');
+
+          const published = mode === 'matching';
+          expect(
+            ctx.containerManager.execInContainer.mock.calls.some(([, c]) => c.includes('push')),
+          ).toBe(published);
+          expect(resets()).toBe(published ? 1 : 0);
+          expect(info).toHaveBeenCalledWith(
+            expect.objectContaining({ podId: pod.id, commitsPushed: published }),
+            'Workspace preserved before recovery boundary',
+          );
+          expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
+            pod.containerId,
+            ['sh', '-c', expect.stringContaining('staging_count=')],
+            { timeout: 120_000 },
+          );
+          expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: pod.status,
+            containerId: pod.containerId,
+            worktreePath: pod.worktreePath,
+            worktreeCompromised: true,
+          });
+        } finally {
+          info.mockRestore();
+          ctx.db.close();
+        }
+      },
+    );
+
+    it.each(['exec', 'copy', 'index'] as const)(
+      'uses archive files and separate Git recovery after %s failure',
+      async (failure) => {
+        const ctx = createTestContext();
+        const info = vi.spyOn(logger, 'info');
+        let temporaryGit: string | undefined;
+        try {
+          const resets = hostGit({ resetFails: failure === 'index' });
+          containerGit(ctx);
+          const exec = vi.mocked(ctx.containerManager.execInContainer);
+          const normal = exec.getMockImplementation();
+          exec.mockImplementation(async (id, command, options) => {
+            if (failure === 'exec') throw new Error('container exec unavailable');
+            if (failure === 'copy' && command[2]?.includes('STAGING=')) {
+              return { ...ok, exitCode: 1, stderr: 'copy failed' };
+            }
+            if (!normal) throw new Error('missing normal exec');
+            return normal(id, command, options);
+          });
+          const { manager, pod } = transferPod(ctx);
+
+          await manager.preserveWorkspace(pod.id, 'fallback probe');
+
+          const calls = vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mock.calls;
+          expect(calls).toHaveLength(2);
+          expect(calls[0]).toEqual([
+            pod.containerId,
+            '/workspace',
+            pod.worktreePath,
+            ['.git', 'node_modules', '.serena', '.roslyn-codelens'],
+          ]);
+          expect(calls[1]?.[1]).toBe('/workspace/.git');
+          temporaryGit = calls[1]?.[2];
+          expect(temporaryGit).toMatch(/autopod-git-\d+$/);
+          expect(fs.existsSync(temporaryGit ?? '')).toBe(false);
+          expect(resets()).toBe(failure === 'index' ? 2 : 1);
+          expect(info).toHaveBeenCalledWith(
+            expect.objectContaining({ commitsPushed: true }),
+            'Workspace preserved before recovery boundary',
+          );
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        } finally {
+          if (temporaryGit) fs.rmSync(temporaryGit, { recursive: true, force: true });
+          info.mockRestore();
+          ctx.db.close();
+        }
+      },
+    );
+
+    it.each(['derive', 'git-extract', 'git-push'] as const)(
+      'accepts archived files with pushed=false when %s recovery fails',
+      async (failure) => {
+        const ctx = createTestContext();
+        const info = vi.spyOn(logger, 'info');
+        try {
+          hostGit({ deriveFails: failure === 'derive', pushFails: failure === 'git-push' });
+          vi.mocked(ctx.containerManager.execInContainer).mockRejectedValue(
+            new Error('exec failed'),
+          );
+          vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementation(
+            async (_id, source) => {
+              if (source === '/workspace/.git' && failure === 'git-extract') {
+                throw new Error('Git archive unavailable');
+              }
+            },
+          );
+          const { manager, pod } = transferPod(ctx);
+          await manager.preserveWorkspace(pod.id, 'best effort');
+          expect(info).toHaveBeenCalledWith(
+            expect.objectContaining({ commitsPushed: false }),
+            'Workspace preserved before recovery boundary',
+          );
+          expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(
+            failure === 'derive' ? 1 : 2,
+          );
+        } finally {
+          info.mockRestore();
+          ctx.db.close();
+        }
+      },
+    );
+
+    it.each([
+      'ECONNREFUSED',
+      'ECONNRESET',
+      'EPIPE',
+      'ETIMEDOUT',
+      'socket hang up',
+      'connect ENOENT',
+      'EAI_AGAIN',
+      'server error',
+      '502 Bad Gateway',
+    ])('retries the final %s failure three times when the engine is ready', async (message) => {
+      const ctx = createTestContext();
+      try {
+        const error = new Error(message);
+        vi.mocked(ctx.containerManager.execInContainer).mockRejectedValue(new Error('exec failed'));
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(error);
+        const { manager, pod } = transferPod(ctx);
+        await expect(manager.preserveWorkspace(pod.id, 'retry probe')).rejects.toBe(error);
+        expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(3);
+        expect(ctx.containerManager.getStatus).toHaveBeenCalledTimes(2);
+        expect(manager.getSession(pod.id)).toMatchObject(pod);
+      } finally {
+        ctx.db.close();
+      }
+    });
+
+    it.each([new Error('permission denied'), 'ECONNRESET'])(
+      'does not retry a domain error or non-Error rejection: %s',
+      async (error) => {
+        const ctx = createTestContext();
+        try {
+          vi.mocked(ctx.containerManager.execInContainer).mockRejectedValue(
+            new Error('exec failed'),
+          );
+          vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(error);
+          const { manager, pod } = transferPod(ctx);
+          await expect(manager.preserveWorkspace(pod.id, 'domain probe')).rejects.toBe(error);
+          expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledOnce();
+          expect(ctx.containerManager.getStatus).not.toHaveBeenCalled();
+        } finally {
+          ctx.db.close();
+        }
+      },
+    );
+
+    it('does not retry an exec engine error when archive fallback succeeds', async () => {
+      const ctx = createTestContext();
+      try {
+        hostGit({ deriveFails: true });
+        vi.mocked(ctx.containerManager.execInContainer).mockRejectedValue(new Error('ECONNRESET'));
+        const { manager, pod } = transferPod(ctx);
+        await manager.preserveWorkspace(pod.id, 'archive succeeds');
+        expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledOnce();
+        expect(ctx.containerManager.getStatus).not.toHaveBeenCalled();
+      } finally {
+        ctx.db.close();
+      }
+    });
+
+    it('can preserve files on the second attempt after an engine failure', async () => {
+      const ctx = createTestContext();
+      try {
+        hostGit({ deriveFails: true });
+        vi.mocked(ctx.containerManager.execInContainer).mockRejectedValue(new Error('exec failed'));
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValueOnce(
+          new Error('ECONNRESET'),
+        );
+        const { manager, pod } = transferPod(ctx);
+        await manager.preserveWorkspace(pod.id, 'retry succeeds');
+        expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
+        expect(ctx.containerManager.getStatus).toHaveBeenCalledOnce();
+      } finally {
+        ctx.db.close();
+      }
+    });
+
+    it.each(['mismatch', 'push-failure'] as const)(
+      'keeps the strict completion deletion guard after %s',
+      async (mode) => {
+        const ctx = createTestContext({ overall: 'pass' });
+        try {
+          hostGit();
+          containerGit(
+            ctx,
+            mode === 'mismatch' ? '/untrusted/repo.git' : bare,
+            mode === 'push-failure',
+          );
+          const { manager, pod } = transferPod(ctx);
+          ctx.podRepo.update(pod.id, { status: 'running', worktreeCompromised: false });
+          await manager.handleCompletion(pod.id);
+          expect(ctx.worktreeManager.commitPendingChangesWithGeneratedMessage).toHaveBeenCalledWith(
+            pod.worktreePath,
+            pod.task,
+            expect.any(Object),
+            pod.model,
+            { maxDeletions: 0 },
+          );
+          expect(ctx.validationEngine.validate).toHaveBeenCalled();
+        } finally {
+          ctx.db.close();
+        }
+      },
+    );
+
+    it.each(['stopped', 'deleted'] as const)(
+      'aborts retry when the container is %s',
+      async (status) => {
+        const ctx = createTestContext();
+        try {
+          const error = new Error('ECONNRESET');
+          vi.mocked(ctx.containerManager.execInContainer).mockRejectedValue(error);
+          vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(error);
+          vi.mocked(ctx.containerManager.getStatus).mockResolvedValue(status);
+          const { manager, pod } = transferPod(ctx);
+          await expect(manager.preserveWorkspace(pod.id, 'gone probe')).rejects.toBe(error);
+          expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledOnce();
+          expect(ctx.containerManager.getStatus).toHaveBeenCalledOnce();
+        } finally {
+          ctx.db.close();
+        }
+      },
+    );
+
+    it.each(['unknown', 'error'] as const)(
+      'exhausts reachability budgets and still retries after status %s',
+      async (status) => {
+        const ctx = createTestContext();
+        vi.useFakeTimers();
+        let outcome: Promise<PromiseSettledResult<void>[]> | undefined;
+        try {
+          const error = new Error('ECONNRESET');
+          vi.mocked(ctx.containerManager.execInContainer).mockRejectedValue(error);
+          vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(error);
+          if (status === 'unknown')
+            vi.mocked(ctx.containerManager.getStatus).mockResolvedValue('unknown');
+          else
+            vi.mocked(ctx.containerManager.getStatus).mockRejectedValue(
+              new Error('engine offline'),
+            );
+          const { manager, pod } = transferPod(ctx);
+          outcome = Promise.allSettled([manager.preserveWorkspace(pod.id, 'budget probe')]);
+          await vi.advanceTimersByTimeAsync(5_999);
+          expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(1);
+          await vi.advanceTimersByTimeAsync(1);
+          expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
+          await vi.advanceTimersByTimeAsync(15_999);
+          expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
+          await vi.advanceTimersByTimeAsync(1);
+          expect(await outcome).toEqual([{ status: 'rejected', reason: error }]);
+          expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(3);
+          expect(ctx.containerManager.getStatus).toHaveBeenCalledTimes(11);
+        } finally {
+          await vi.advanceTimersByTimeAsync(30_000);
+          if (outcome) await outcome;
+          vi.useRealTimers();
+          ctx.db.close();
+        }
+      },
+    );
+
+    it.each([
+      'running-push-failed',
+      'stopped',
+      'deleted',
+      'unknown',
+      'status-error',
+      'extract-error',
+      'index-error',
+    ] as const)(
+      'retains public recovery decisions after live recovery outcome %s',
+      async (mode) => {
+        const ctx = createTestContext();
+        try {
+          hostGit({ resetFails: mode === 'index-error' });
+          containerGit(ctx, bare, true);
+          ctx.worktreeManager.restoreFromHead = vi.fn(async () => ({
+            restored: false,
+            reason: 'blocked by unrelated work',
+            restoredCount: 0,
+          }));
+          if (mode === 'stopped' || mode === 'deleted' || mode === 'unknown') {
+            vi.mocked(ctx.containerManager.getStatus).mockResolvedValue(mode);
+          }
+          if (mode === 'status-error')
+            vi.mocked(ctx.containerManager.getStatus).mockRejectedValue(new Error('unavailable'));
+          if (mode === 'extract-error')
+            vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(
+              new Error('archive failed'),
+            );
+          const { manager, pod } = transferPod(ctx);
+          const result = await manager.recoverWorktree(pod.id);
+          const recovered = mode === 'running-push-failed';
+          expect(result.recovered).toBe(recovered);
+          expect(manager.getSession(pod.id).worktreeCompromised).toBe(!recovered);
+          if (recovered) {
+            expect(
+              ctx.worktreeManager.commitPendingChangesWithGeneratedMessage,
+            ).toHaveBeenCalledWith(pod.worktreePath, pod.task, expect.any(Object), pod.model, {
+              maxDeletions: 100,
+            });
+            expect(ctx.worktreeManager.restoreFromHead).not.toHaveBeenCalled();
+          } else {
+            expect(
+              ctx.worktreeManager.commitPendingChangesWithGeneratedMessage,
+            ).not.toHaveBeenCalled();
+            expect(ctx.worktreeManager.restoreFromHead).toHaveBeenCalledWith(pod.worktreePath, {
+              allowTrackedModifications: true,
+            });
+          }
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        } finally {
+          ctx.db.close();
+        }
+      },
+    );
+  });
+
   describe('verified sandbox checkpoint lifecycle', () => {
     it('resumes a stopped sandbox before checkpoint recovery', async () => {
       const ctx = createTestContext(undefined, {

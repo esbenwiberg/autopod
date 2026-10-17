@@ -1,6 +1,6 @@
 # Workspace transfer extraction implementation plan
 
-Status: READY FOR REVIEW — product implementation has not started.
+Status: APPROVED — Phase 1 complete; implementation in progress.
 Baseline: 944f5c46cece345dbf3786bd8ca4c57ebf6fe326.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -11,9 +11,8 @@ Continue the accepted incremental rewrite by extracting the local workspace
 transfer operation behind the callback established in the first extraction.
 Keep the accepted three-phase structure: characterize, extract, qualify.
 
-The preceding preservation plan is complete. Its approval excluded Docker
-transport and does not constitute approval of this new detailed plan. This plan
-is ready for explicit approval; no new product code has been changed.
+The user explicitly approved this concrete plan in the conversation. All three
+phases are authorized together; no intermediate manual gate is required.
 
 ## Current state analysis
 
@@ -125,10 +124,10 @@ and test hashes and a source manifest proving no production edits in this phase.
 ### Success criteria
 
 Automated:
-- [ ] New public characterization passes at the recorded unchanged product baseline.
-- [ ] Existing relevant sync/recovery and preservation tests pass.
-- [ ] Fixtures terminate and release databases, timers and temporary resources.
-- [ ] Before-source and test hashes/logs are retained under ignored task evidence.
+- [x] New public characterization passes at the recorded unchanged product baseline.
+- [x] Existing relevant sync/recovery and preservation tests pass.
+- [x] Fixtures terminate and release databases, timers and temporary resources.
+- [x] Before-source and test hashes/logs are retained under ignored task evidence.
 
 Manual: None required for this headless compatibility boundary.
 
@@ -244,5 +243,17 @@ record any later intentional behavior change in a separately approved scope.
 - Completed predecessor: 2026-10-17-pod-manager-workspace-preservation.md.
 - Existing real Git pattern: packages/daemon/src/worktrees/bare-push.test.ts.
 
-Next action: obtain explicit approval of this concrete plan, then implement all
-three phases without intermediate manual gates. No new phase is marked complete.
+Next action: extract and qualify the boundary in Phases 2 and 3.
+
+## Phase 1 evidence
+
+Thirty-five new public transfer compatibility cases passed against unchanged
+product source at baseline 944f5c46, together with the 17 preservation cases and
+six existing sync/recovery cases: 58 passed, 668 name-filtered. The actual test
+child runtime is Node 22.23.3 via the existing ignored launcher; SQLite is included.
+
+The first run found three over-broad fixture assertions: successful activity
+updates lastAgentEventAt. Those assertions were narrowed to the planned lifecycle
+and source-resource invariants. No production source or behavior changed. Its
+failed log remains characterization-initial-failure.log. The passing baseline and
+source/test identities are under .autopod-data/workspace-transfer/.
