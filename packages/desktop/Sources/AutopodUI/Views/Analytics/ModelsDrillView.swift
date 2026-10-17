@@ -11,8 +11,15 @@ import SwiftUI
 struct ModelsDrillView: View {
     let load: ((Int) async throws -> ModelsAnalyticsResponse)?
 
+    var initialSection = "Comparison"
+    @Environment(\.desktopRedesign) private var redesign
+    @State private var desktopSection = ""
+    private var section: String { desktopSection.isEmpty ? initialSection : desktopSection }
+
     @State private var response: ModelsAnalyticsResponse?
-    @State private var days: Int = 30
+    @Environment(\.desktopAnalyticsWindow) private var workspaceDays
+    @State private var localDays: Int = 30
+    private var days: Int { workspaceDays ?? localDays }
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var grain: Grain = .model
@@ -23,6 +30,9 @@ struct ModelsDrillView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 headerRow
+                if redesign {
+                    DesktopSectionPicker(title: "", items: ["Comparison", "Failure stages", "What-if simulator"], selection: Binding(get: { section }, set: { desktopSection = $0 }), label: { $0 })
+                }
 
                 if let err = loadError {
                     ModelsInlineErrorBanner(message: "Couldn't load models data: \(err)")
@@ -32,19 +42,24 @@ struct ModelsDrillView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 40)
-                } else {
-                    leaderboardSection
-                    Divider()
-                    comparisonSection
-                    Divider()
-                    failureMatrixSection
-                    Divider()
-                    simulatorSection
+                } else if response != nil {
+                    DesktopAnalyticsColumns {
+                        if !redesign || section == "Comparison" {
+                            leaderboardSection.desktopAnalyticsPanel()
+                            comparisonSection.desktopAnalyticsPanel()
+                        }
+                        if !redesign || section == "Failure stages" {
+                            failureMatrixSection.desktopAnalyticsPanel()
+                        }
+                        if !redesign || section == "What-if simulator" {
+                            simulatorSection.desktopAnalyticsPanel()
+                        }
+                    }
                 }
             }
             .padding(24)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DesktopAnalyticsBackground())
         .task(id: days) { await fetchData() }
     }
 
@@ -59,7 +74,7 @@ struct ModelsDrillView: View {
             Spacer()
             if isLoading { ProgressView().controlSize(.small) }
             grainPicker
-            daysPicker
+            if workspaceDays == nil { daysPicker }
         }
     }
 
@@ -74,7 +89,7 @@ struct ModelsDrillView: View {
     }
 
     private var daysPicker: some View {
-        Picker("Days", selection: $days) {
+        Picker("Days", selection: $localDays) {
             Text("7d").tag(7)
             Text("14d").tag(14)
             Text("30d").tag(30)

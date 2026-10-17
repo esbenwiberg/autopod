@@ -62,8 +62,8 @@ public struct MainView: View {
     public var loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])?
     public var loadActionAudit: ((String, String?) async throws -> ActionAuditResponse)?
     public var loadQualityScores: (() async throws -> [PodQualityScore])?
-    public var loadCostAnalytics: (() async throws -> CostAnalyticsResponse)?
-    public var loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)?
+    public var loadCostAnalytics: ((Int) async throws -> CostAnalyticsResponse)?
+    public var loadReliabilityAnalytics: ((Int) async throws -> ReliabilityAnalyticsResponse)?
     public var loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)?
     public var loadSafetyAnalytics: ((Int) async throws -> SafetyAnalyticsResponse)?
     public var loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)?
@@ -171,8 +171,8 @@ public struct MainView: View {
         loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])? = nil,
         loadActionAudit: ((String, String?) async throws -> ActionAuditResponse)? = nil,
         loadQualityScores: (() async throws -> [PodQualityScore])? = nil,
-        loadCostAnalytics: (() async throws -> CostAnalyticsResponse)? = nil,
-        loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
+        loadCostAnalytics: ((Int) async throws -> CostAnalyticsResponse)? = nil,
+        loadReliabilityAnalytics: ((Int) async throws -> ReliabilityAnalyticsResponse)? = nil,
         loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)? = nil,
         loadSafetyAnalytics: ((Int) async throws -> SafetyAnalyticsResponse)? = nil,
         loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)? = nil,
@@ -529,6 +529,7 @@ public struct MainView: View {
         }
     }
 
+    @State private var analyticsDays = 30
     @State private var settingsRoute: DesktopSettingsRoute = .appearance
     @State private var configurationKind: ConfigurationKind = .profile
     @State private var configurationToOpen: String?
@@ -569,7 +570,16 @@ public struct MainView: View {
     }
 
     @ViewBuilder private var configurationWorkspace: some View {
-        if sidebarSelection == .scheduledJobs, let scheduledWorkspaceActions {
+        if sidebarSelection == .history {
+            DesktopHistoryWorkspace(pods: pods, configuration: configurationActions, refresh: onRefresh,
+                openPod: { id in selectedSessionId = id; sidebarSelection = .all },
+                isConnected: isConnected, isLoading: isLoading, loadError: loadError)
+        } else if sidebarSelection == .analytics {
+            DesktopAnalyticsWorkspace(selected: $selectedAnalyticsCard, days: $analyticsDays, isConnected: isConnected,
+                viewHistory: { sidebarSelection = .history }, overview: { _ in AnyView(analyticsOverview) },
+                detail: { card, _ in AnyView(analyticsDetail(card)) })
+                .id(configurationReset)
+        } else if sidebarSelection == .scheduledJobs, let scheduledWorkspaceActions {
             if let job = scanWorkspaceJob, let scanWorkspace {
                 scanWorkspace(job, Binding(get: { scanWorkspaceJob != nil }, set: { if !$0 { scanWorkspaceJob = nil } }))
                   .id(configurationReset)
@@ -614,7 +624,7 @@ public struct MainView: View {
 
     public var body: some View {
         Group {
-            if redesign && ([.profilesWorkspace, .settingsWorkspace].contains(sidebarSelection) || (sidebarSelection == .scheduledJobs && scheduledWorkspaceActions != nil)) {
+            if redesign && ([.profilesWorkspace, .settingsWorkspace, .history, .analytics].contains(sidebarSelection) || (sidebarSelection == .scheduledJobs && scheduledWorkspaceActions != nil)) {
                 NavigationSplitView {
                     workspaceSidebar
                 } detail: {
@@ -799,6 +809,65 @@ public struct MainView: View {
         }
     }
 
+    private var analyticsOverview: some View {
+        AnalyticsView(pods: pods, loadScores: loadQualityScores, loadCost: loadCostAnalytics,
+            loadReliability: loadReliabilityAnalytics, loadQualityAnalytics: loadQualityAnalytics,
+            loadSafetyAnalytics: loadSafetyAnalytics, loadThroughputAnalytics: loadThroughputAnalytics,
+            loadEscalationsAnalytics: loadEscalationsAnalytics, loadModelsAnalytics: loadModelsAnalytics,
+            loadMemoryAnalytics: loadMemoryAnalytics, selectedCard: $selectedAnalyticsCard)
+    }
+
+    private func analyticsDetail(_ card: AnalyticsCardKind?) -> some View {
+        AnalyticsRightPaneView(
+            card: card,
+            pods: pods,
+            loadScores: loadQualityScores,
+            loadCost: loadCostAnalytics,
+            loadReliability: loadReliabilityAnalytics,
+            loadQuality: loadQualityAnalytics,
+            loadSafety: loadSafetyAnalytics,
+            loadThroughput: loadThroughputAnalytics,
+            loadEscalations: loadEscalationsAnalytics,
+            loadModels: loadModelsAnalytics,
+            loadMemory: loadMemoryAnalytics,
+            verifyAuditChain: isConnected ? verifyAuditChain : nil,
+            onSelectPod: { sessionId in
+                let result = Self.analyticsSelectPodResult(sessionId: sessionId)
+                selectedAnalyticsCard = result.card
+                sidebarSelection = result.sidebar
+                selectedSessionId = result.session
+            },
+            onQualitySelectPod: { sessionId in
+                let result = Self.analyticsSelectPodResult(sessionId: sessionId)
+                selectedAnalyticsCard = result.card
+                sidebarSelection = result.sidebar
+                selectedSessionId = result.session
+                requestedDetailTab = .work
+            },
+            onSafetySelectPod: { sessionId in
+                let result = Self.analyticsSelectPodResult(sessionId: sessionId)
+                selectedAnalyticsCard = result.card
+                sidebarSelection = result.sidebar
+                selectedSessionId = result.session
+                requestedDetailTab = .work
+            },
+            onThroughputSelectPod: { sessionId in
+                let result = Self.analyticsSelectPodResult(sessionId: sessionId)
+                selectedAnalyticsCard = result.card
+                sidebarSelection = result.sidebar
+                selectedSessionId = result.session
+                requestedDetailTab = .work
+            },
+            onEscalationsSelectPod: { sessionId in
+                let result = Self.analyticsSelectPodResult(sessionId: sessionId)
+                selectedAnalyticsCard = result.card
+                sidebarSelection = result.sidebar
+                selectedSessionId = result.session
+                requestedDetailTab = .work
+            }
+                    )
+    }
+
     private var podNavigation: some View {
         NavigationSplitView {
             SidebarView(
@@ -836,19 +905,7 @@ public struct MainView: View {
                 )
                 .frame(minWidth: 600)
             } else if sidebarSelection == .analytics {
-                AnalyticsView(
-                    pods: pods,
-                    loadScores: loadQualityScores,
-                    loadCost: loadCostAnalytics,
-                    loadReliability: loadReliabilityAnalytics,
-                    loadQualityAnalytics: loadQualityAnalytics,
-                    loadSafetyAnalytics: loadSafetyAnalytics,
-                    loadThroughputAnalytics: loadThroughputAnalytics,
-                    loadEscalationsAnalytics: loadEscalationsAnalytics,
-                    loadModelsAnalytics: loadModelsAnalytics,
-                    loadMemoryAnalytics: loadMemoryAnalytics,
-                    selectedCard: $selectedAnalyticsCard
-                )
+                analyticsOverview
                 .frame(minWidth: 600)
             } else if sidebarSelection == .history {
                 HistoryView(pods: pods, actions: wiredActions, profileNames: profileNames, configurationActions: configurationActions)
@@ -983,54 +1040,7 @@ public struct MainView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 } else if sidebarSelection == .analytics {
-                    AnalyticsRightPaneView(
-                        card: selectedAnalyticsCard,
-                        pods: pods,
-                        loadScores: loadQualityScores,
-                        loadCost: loadCostAnalytics,
-                        loadReliability: loadReliabilityAnalytics,
-                        loadQuality: loadQualityAnalytics,
-                        loadSafety: loadSafetyAnalytics,
-                        loadThroughput: loadThroughputAnalytics,
-                        loadEscalations: loadEscalationsAnalytics,
-                        loadModels: loadModelsAnalytics,
-                        loadMemory: loadMemoryAnalytics,
-                        verifyAuditChain: verifyAuditChain,
-                        onSelectPod: { sessionId in
-                            let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                            selectedAnalyticsCard = result.card
-                            sidebarSelection = result.sidebar
-                            selectedSessionId = result.session
-                        },
-                        onQualitySelectPod: { sessionId in
-                            let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                            selectedAnalyticsCard = result.card
-                            sidebarSelection = result.sidebar
-                            selectedSessionId = result.session
-                            requestedDetailTab = .work
-                        },
-                        onSafetySelectPod: { sessionId in
-                            let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                            selectedAnalyticsCard = result.card
-                            sidebarSelection = result.sidebar
-                            selectedSessionId = result.session
-                            requestedDetailTab = .work
-                        },
-                        onThroughputSelectPod: { sessionId in
-                            let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                            selectedAnalyticsCard = result.card
-                            sidebarSelection = result.sidebar
-                            selectedSessionId = result.session
-                            requestedDetailTab = .work
-                        },
-                        onEscalationsSelectPod: { sessionId in
-                            let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                            selectedAnalyticsCard = result.card
-                            sidebarSelection = result.sidebar
-                            selectedSessionId = result.session
-                            requestedDetailTab = .work
-                        }
-                    )
+                    analyticsDetail(selectedAnalyticsCard)
                 } else if sidebarSelection == .salesPitch {
                     VStack(spacing: 10) {
                         Image(systemName: "bolt.fill")

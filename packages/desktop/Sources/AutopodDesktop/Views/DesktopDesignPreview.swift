@@ -5,6 +5,7 @@ import SwiftUI
 /// Explicit fixture mode for native visual review; never wires a daemon or provider.
 public struct DesktopDesignPreview: View {
   @State private var scheduleFixtures = DesktopScheduleFixtures()
+  @State private var simulateAnalyticsFailure = false
   @State private var scanFixtures = DesktopScanFixtures()
   @State private var selectedID: String? = "retry-demo"
   @State private var showSettings = false
@@ -15,7 +16,7 @@ public struct DesktopDesignPreview: View {
   public init(onConnect: @escaping () -> Void = {}) { self.onConnect = onConnect }
   public var body: some View {
     MainView(pods: Self.pods, scheduledJobs: scheduleFixtures.jobs, scheduledJobTemplates: scheduleFixtures.templates, selectedSessionId: $selectedID,
-      isConnected: false, connectionLabel: "Design fixtures", connectionState: "Sample data",
+      isConnected: true, connectionLabel: "Design fixtures", connectionState: "Sample data",
       actions: Self.fixtureActions,
       profileNames: MockProfiles.all.map(\.name), profileDetails: MockProfiles.all,
       configurationActions: configurationActions,
@@ -35,6 +36,15 @@ public struct DesktopDesignPreview: View {
       loadQuality: { id in Self.fixtureQuality(id) },
       loadCost: { id in PodCostBreakdownResponse(podId: id, model: "Codex", totalCostUsd: 1.84, inputTokens: 12000, outputTokens: 3400, segments: [PodCostSegment(bucket: "work", label: "Implementation", costUsd: 1.52, inputTokens: 10000, outputTokens: 2800, sourcePhases: ["worker"]), PodCostSegment(bucket: "validation", label: "Validation", costUsd: 0.32, inputTokens: 2000, outputTokens: 600, sourcePhases: ["review"])]) },
       loadValidationHistory: { _ in Self.validationHistory },
+      loadCostAnalytics: { days in if simulateAnalyticsFailure { throw DaemonError.badRequest("Fictional analytics load failure") }; return try DesktopAnalyticsFixtures.cost(days) },
+      loadReliabilityAnalytics: { days in if simulateAnalyticsFailure { throw DaemonError.badRequest("Fictional analytics load failure") }; return try DesktopAnalyticsFixtures.reliability(days) },
+      loadQualityAnalytics: { days in if simulateAnalyticsFailure { throw DaemonError.badRequest("Fictional analytics load failure") }; return try DesktopAnalyticsFixtures.quality(days) },
+      loadSafetyAnalytics: { days in if simulateAnalyticsFailure { throw DaemonError.badRequest("Fictional analytics load failure") }; return try DesktopAnalyticsFixtures.safety(days) },
+      loadThroughputAnalytics: { days in if simulateAnalyticsFailure { throw DaemonError.badRequest("Fictional analytics load failure") }; return try DesktopAnalyticsFixtures.throughput(days) },
+      loadEscalationsAnalytics: { days in if simulateAnalyticsFailure { throw DaemonError.badRequest("Fictional analytics load failure") }; return try DesktopAnalyticsFixtures.escalations(days) },
+      loadModelsAnalytics: { days in if simulateAnalyticsFailure { throw DaemonError.badRequest("Fictional analytics load failure") }; return try DesktopAnalyticsFixtures.models(days) },
+      loadMemoryAnalytics: { days in if simulateAnalyticsFailure { throw DaemonError.badRequest("Fictional analytics load failure") }; return try DesktopAnalyticsFixtures.memory(days) },
+      verifyAuditChain: { try DesktopAnalyticsFixtures.verify() },
       scheduledWorkspaceActions: scheduleFixtures.actions,
       scanWorkspace: { job, presented in
         AnyView(ScanInboxView(job: job, api: scanFixtures, embedded: true, onClose: { presented.wrappedValue = false }))
@@ -46,6 +56,7 @@ public struct DesktopDesignPreview: View {
           Menu("Fixture options") {
             Toggle("Simulate configuration save conflict", isOn: $simulateConfigurationConflict)
             Toggle("Simulate schedule save failure", isOn: $scheduleFixtures.failWrites)
+            Toggle("Simulate analytics load failure", isOn: $simulateAnalyticsFailure)
           }.menuStyle(.borderlessButton).fixedSize()
         }.foregroundStyle(.secondary)
       }
@@ -127,7 +138,7 @@ public struct DesktopDesignPreview: View {
     {"podId":"\(id)","inspectionAvailability":"available","readCount":12,"editCount":3,"modifiedFileCount":3,"readEditRatio":4,"editsWithoutPriorRead":0,"userInterrupts":0,"editChurnCount":0,"tellsCount":0,"prFixAttempts":0,"validationPassed":true,"tokens":{"input":12000,"output":3400,"costUsd":1.84},"grade":"green","score":84,"model":"Codex"}
     """) }
 
-  private static let pods: [Pod] = [
+  static let pods: [Pod] = [
     Pod(id: "retry-demo", status: .validated, branch: "fix/reconnect-retry", profileName: "backend",
         task: "Preserve active work when a daemon connection drops, then resume safely after reconnecting.", model: "Codex", startedAt: Date().addingTimeInterval(-1080),
         diffStats: DiffStats(added: 86, removed: 24, files: 3),

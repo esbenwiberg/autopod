@@ -13,7 +13,9 @@ struct EscalationsDrillView: View {
     let onSelectPod: ((String) -> Void)?
 
     @State private var response: EscalationsAnalyticsResponse?
-    @State private var days: Int = 30
+    @Environment(\.desktopAnalyticsWindow) private var workspaceDays
+    @State private var localDays: Int = 30
+    private var days: Int { workspaceDays ?? localDays }
     @State private var isLoading = false
     @State private var loadError: String?
 
@@ -30,17 +32,17 @@ struct EscalationsDrillView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 40)
-                } else {
-                    ttrHistogramSection
-                    Divider()
-                    perProfileSection
-                    Divider()
-                    blockerPatternsSection
+                } else if response != nil {
+                    DesktopAnalyticsColumns {
+                        ttrHistogramSection.desktopAnalyticsPanel()
+                        perProfileSection.desktopAnalyticsPanel()
+                        blockerPatternsSection.desktopAnalyticsPanel()
+                    }
                 }
             }
             .padding(24)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DesktopAnalyticsBackground())
         .task(id: days) { await fetchData() }
     }
 
@@ -54,12 +56,12 @@ struct EscalationsDrillView: View {
                 .font(.title3.weight(.semibold))
             Spacer()
             if isLoading { ProgressView().controlSize(.small) }
-            daysPicker
+            if workspaceDays == nil { daysPicker }
         }
     }
 
     private var daysPicker: some View {
-        Picker("Days", selection: $days) {
+        Picker("Days", selection: $localDays) {
             Text("7d").tag(7)
             Text("14d").tag(14)
             Text("30d").tag(30)

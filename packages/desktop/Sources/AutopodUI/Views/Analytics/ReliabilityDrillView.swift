@@ -7,8 +7,11 @@ import SwiftUI
 /// Right-pane drill for Outcome Quality — fetches reliability analytics and renders
 /// four sections: funnel, stage failures, profile heatmap, and summary callout.
 struct ReliabilityDrillView: View {
-    let loadReliability: (() async throws -> ReliabilityAnalyticsResponse)?
+    let loadReliability: ((Int) async throws -> ReliabilityAnalyticsResponse)?
     let onSelectPod: ((String) -> Void)?
+
+    @Environment(\.desktopAnalyticsWindow) private var workspaceDays
+    private var days: Int { workspaceDays ?? 30 }
 
     @State private var data: ReliabilityAnalyticsResponse?
     @State private var loadError: String?
@@ -31,21 +34,22 @@ struct ReliabilityDrillView: View {
                 }
 
                 if let d = data {
-                    ReliabilityFunnelSectionView(funnel: d.funnel, onSelectPod: onSelectPod)
-                    Divider()
-                    ReliabilityStageFailureSectionView(stageFailures: d.stageFailures)
-                    Divider()
-                    ReliabilityProfileHeatmapSectionView(profileHeatmap: d.profileHeatmap)
-                    Divider()
-                    ReliabilitySummaryCalloutView(summary: d.summary)
-                } else if !isLoading && loadError == nil {
-                    skeletonPlaceholder
+                    DesktopAnalyticsColumns {
+                        ReliabilityFunnelSectionView(funnel: d.funnel, onSelectPod: onSelectPod).desktopAnalyticsPanel()
+                        ReliabilityStageFailureSectionView(stageFailures: d.stageFailures).desktopAnalyticsPanel()
+                        ReliabilityProfileHeatmapSectionView(profileHeatmap: d.profileHeatmap).desktopAnalyticsPanel()
+                        ReliabilitySummaryCalloutView(summary: d.summary).desktopAnalyticsPanel()
+                    }
+                } else if isLoading {
+                    ProgressView("Loading outcome quality…")
+                } else if loadError == nil {
+                    ContentUnavailableView("Outcome-quality data unavailable", systemImage: "chart.bar")
                 }
             }
             .padding(24)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
-        .task { await fetchData() }
+        .background(DesktopAnalyticsBackground())
+        .task(id: days) { await fetchData() }
     }
 
     private func fetchData() async {
@@ -53,7 +57,7 @@ struct ReliabilityDrillView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            data = try await loadReliability()
+            data = try await loadReliability(days)
             loadError = nil
         } catch {
             loadError = error.localizedDescription
@@ -137,7 +141,7 @@ private struct ReliabilityFunnelSectionView: View {
 
     private func bandRow(_ bc: BandCount, maxCount: Int, drops: [DropEntry], availableWidth: CGFloat) -> some View {
         let fraction = maxCount > 0 ? CGFloat(bc.count) / CGFloat(maxCount) : 0
-        let bandWidth = max(availableWidth * fraction, 40)
+        let bandWidth = max((availableWidth - (funnel.drops.isEmpty ? 0 : 140)) * fraction, 40)
 
         return VStack(alignment: .leading, spacing: 2) {
             ZStack(alignment: .leading) {
@@ -172,7 +176,7 @@ private struct ReliabilityFunnelSectionView: View {
                 expandedDrops.insert(key)
             }
         } label: {
-            Text("→ \(drop.to.rawValue) (\(drop.count))")
+            Text("→ \(drop.to.rawValue) (\(drop.count))").fixedSize()
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(color)
                 .padding(.horizontal, 6)

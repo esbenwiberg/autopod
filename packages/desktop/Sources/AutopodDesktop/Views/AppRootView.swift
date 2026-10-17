@@ -236,13 +236,13 @@ public struct AppRootView: View {
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.listQualityScores()
       },
-      loadCostAnalytics: { [connectionManager] in
+      loadCostAnalytics: { [connectionManager] days in
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
-        return try await api.getCostAnalytics()
+        return try await api.getCostAnalytics(days: days)
       },
-      loadReliabilityAnalytics: { [connectionManager] in
+      loadReliabilityAnalytics: { [connectionManager] days in
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
-        return try await api.getReliabilityAnalytics()
+        return try await api.getReliabilityAnalytics(days: days)
       },
       loadQualityAnalytics: { [connectionManager] (days: Int) in
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }

@@ -22,7 +22,9 @@ struct ThroughputDrillView: View {
     let onSelectPod: ((String) -> Void)?
 
     @State private var response: ThroughputAnalyticsResponse?
-    @State private var days: Int = 30
+    @Environment(\.desktopAnalyticsWindow) private var workspaceDays
+    @State private var localDays: Int = 30
+    private var days: Int { workspaceDays ?? localDays }
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var heatmapGrid: [[HeatmapCellData]] = []
@@ -41,17 +43,17 @@ struct ThroughputDrillView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 40)
-                } else {
-                    heatmapSection
-                    Divider()
-                    queueDepthSection
-                    Divider()
-                    timeInStatusSection
+                } else if response != nil {
+                    DesktopAnalyticsColumns {
+                        heatmapSection.desktopAnalyticsPanel()
+                        queueDepthSection.desktopAnalyticsPanel()
+                        timeInStatusSection.desktopAnalyticsPanel()
+                    }
                 }
             }
             .padding(24)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DesktopAnalyticsBackground())
         .task(id: days) { await fetchData() }
     }
 
@@ -65,12 +67,12 @@ struct ThroughputDrillView: View {
                 .font(.title3.weight(.semibold))
             Spacer()
             if isLoading { ProgressView().controlSize(.small) }
-            daysPicker
+            if workspaceDays == nil { daysPicker }
         }
     }
 
     private var daysPicker: some View {
-        Picker("Days", selection: $days) {
+        Picker("Days", selection: $localDays) {
             Text("7d").tag(7)
             Text("14d").tag(14)
             Text("30d").tag(30)

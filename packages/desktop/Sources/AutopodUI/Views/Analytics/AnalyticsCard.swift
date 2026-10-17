@@ -69,9 +69,38 @@ public struct AnalyticsCard: View {
         self.onClick = onClick
     }
 
+    @Environment(\.desktopRedesign) private var redesign
+    @Environment(\.desktopAnalyticsWindow) private var window
     @State private var isHovered = false
 
     public var body: some View {
+        if redesign { redesignedCard } else { legacyCard }
+    }
+    private var redesignedCard: some View {
+        Button(action: onClick) {
+            VStack(alignment: .leading, spacing: 13) {
+                HStack { Text(title).font(.callout).foregroundStyle(.secondary); Spacer(); Image(systemName: "arrow.up.right").font(.caption2).foregroundStyle(.secondary) }
+                HStack(alignment: .center, spacing: 20) {
+                    Text(value).font(.system(size: 31, weight: .medium)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+                    Spacer(minLength: 0)
+                    if let sparkline { CardSparklineView(values: sparkline).frame(width: 110, height: 36) }
+                }
+                if let subline { Text(subline).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                if let delta {
+                    Label(delta.value, systemImage: delta.direction.systemImage).font(.caption).foregroundStyle(DesktopTheme.accent)
+                }
+                Spacer(minLength: 0)
+                Rectangle().fill(DesktopTheme.line).frame(height: 1)
+                Text(title == "Status distribution" ? "Loaded records · current snapshot" : "Trailing \(window ?? 30) days · inspect evidence ↗")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }.padding(22).frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain)
+            .background(isHovered || isSelected ? DesktopTheme.selection : DesktopTheme.canvas, in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(isSelected ? DesktopTheme.accent : DesktopTheme.line))
+            .onHover { isHovered = $0 }
+    }
+    private var legacyCard: some View {
         Button(action: onClick) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
@@ -136,6 +165,7 @@ public struct AnalyticsCard: View {
 /// (Charts is not in Package.swift; uses same GeometryReader + Path pattern
 /// as SparklineView in AnalyticsView.swift. Add Charts dep to switch.)
 private struct CardSparklineView: View {
+    @Environment(\.desktopRedesign) private var redesign
     let values: [Double]
 
     var body: some View {
@@ -150,10 +180,10 @@ private struct CardSparklineView: View {
 
                 ZStack(alignment: .bottomLeading) {
                     areaPath(step: step, w: w, h: h, minV: minV, range: range)
-                        .fill(Color.accentColor.opacity(0.10))
+                        .fill((redesign ? DesktopTheme.accent : Color.accentColor).opacity(0.10))
                     linePath(step: step, h: h, minV: minV, range: range)
                         .stroke(
-                            Color.accentColor.opacity(0.6),
+                            (redesign ? DesktopTheme.accent : Color.accentColor).opacity(0.6),
                             style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
                         )
                 }
