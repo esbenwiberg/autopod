@@ -90,6 +90,7 @@ import {
   GitMissingRemoteBranchError,
   GitTransientFetchError,
 } from '../worktrees/local-worktree-manager.js';
+import type { WorkspaceCheckpointResult } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { createEscalationRepository } from './escalation-repository.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import { createEventBus } from './event-bus.js';
@@ -112,6 +113,10 @@ import type { PodRepository } from './pod-repository.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 import { resolveReviewerModel } from './runtime-resolver.js';
 import { createValidationRepository } from './validation-repository.js';
+import {
+  type CheckpointRecord,
+  WorkspaceCheckpointController,
+} from './workspace-checkpoint-controller.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -1926,6 +1931,422 @@ describe('PodManager', () => {
       task: 'literal original task',
     });
   });
+  describe('workspace preservation compatibility', () => {
+    const completeProof: WorkspaceCheckpointResult = {
+      sequence: 1,
+      sourceHead: 'a'.repeat(40),
+      sourceTree: 'b'.repeat(40),
+      snapshotCommit: 'c'.repeat(40),
+      snapshotTree: 'd'.repeat(40),
+      transferVerified: true,
+      bundleVerified: true,
+      hostImported: true,
+      lineageVerified: true,
+      promoted: true,
+      materialized: true,
+      quarantineRef: 'refs/autopod-quarantine/preservation/1',
+    };
+
+    function preservationPod(ctx: TestContext) {
+      const manager = createPodManager(ctx.deps);
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Preserve workspace' },
+        'operator',
+      );
+      ctx.podRepo.update(pod.id, {
+        status: 'failed',
+        containerId: 'preservation-container',
+        worktreePath: '/tmp/preservation-worktree',
+        worktreeCompromised: true,
+      });
+      return { manager, pod: ctx.podRepo.getOrThrow(pod.id) };
+    }
+
+    function sandboxContext() {
+      return createTestContext(undefined, {
+        executionTarget: 'sandbox',
+        warmImageTag: 'registry.azurecr.io/test:latest',
+      });
+    }
+
+    function activity(ctx: TestContext, podId: string): string[] {
+      return ctx.eventRepo
+        .getForSession(podId, { type: 'pod.agent_activity' })
+        .flatMap(({ payload }) =>
+          payload.type === 'pod.agent_activity' && payload.event.type === 'status'
+            ? [payload.event.message]
+            : [],
+        );
+    }
+
+    it.each(['containerId', 'worktreePath'] as const)(
+      'does nothing when %s is absent',
+      async (missing) => {
+        const ctx = sandboxContext();
+        try {
+          const { manager, pod } = preservationPod(ctx);
+          ctx.podRepo.update(pod.id, { [missing]: null });
+          vi.mocked(ctx.deps.containerManagerFactory.get).mockClear();
+
+          await manager.preserveWorkspace(pod.id, 'probe');
+
+          expect(ctx.deps.containerManagerFactory.get).not.toHaveBeenCalled();
+          expect(ctx.deps.sandboxWorkspaceCheckpoint).not.toHaveBeenCalled();
+          expect(activity(ctx, pod.id)).toEqual([]);
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(manager.getSession(pod.id).status).toBe('failed');
+        } finally {
+          ctx.db.close();
+        }
+      },
+    );
+
+    it('rejects an unavailable sandbox without capture, activity, or cleanup', async () => {
+      const ctx = sandboxContext();
+      try {
+        vi.mocked(ctx.containerManager.getStatus).mockResolvedValue('unknown');
+        const { manager, pod } = preservationPod(ctx);
+
+        await expect(manager.preserveWorkspace(pod.id, 'probe')).rejects.toThrow(
+          'Sandbox preservation-container is unavailable for workspace preservation',
+        );
+
+        expect(ctx.deps.sandboxWorkspaceCheckpoint).not.toHaveBeenCalled();
+        expect(ctx.containerManager.start).not.toHaveBeenCalled();
+        expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(activity(ctx, pod.id)).toEqual([]);
+        expect(manager.getSession(pod.id)).toMatchObject(pod);
+      } finally {
+        ctx.db.close();
+      }
+    });
+
+    it('waits for a stopped sandbox to resume before capture or success activity', async () => {
+      const ctx = sandboxContext();
+      const release = deferred<void>();
+      let pending: Promise<void> | undefined;
+      try {
+        vi.mocked(ctx.containerManager.getStatus).mockResolvedValue('stopped');
+        vi.mocked(ctx.containerManager.start).mockImplementation(async () => release.promise);
+        const { manager, pod } = preservationPod(ctx);
+        pending = manager.preserveWorkspace(pod.id, 'probe');
+
+        await waitForAssertion(() => expect(ctx.containerManager.start).toHaveBeenCalledOnce());
+        expect(ctx.deps.sandboxWorkspaceCheckpoint).not.toHaveBeenCalled();
+        expect(activity(ctx, pod.id)).toEqual([]);
+        release.resolve();
+        await pending;
+
+        expect(ctx.containerManager.start).toHaveBeenCalledWith(pod.containerId);
+        expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalledWith({
+          containerManager: ctx.containerManager,
+          containerId: pod.containerId,
+          podId: pod.id,
+          worktreePath: pod.worktreePath,
+          sequence: expect.any(Number),
+        });
+        expect(activity(ctx, pod.id)).toEqual(['Verified workspace checkpoint before probe.']);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: 'failed',
+          containerId: pod.containerId,
+          worktreeCompromised: true,
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      } finally {
+        release.resolve();
+        await Promise.allSettled(pending ? [pending] : []);
+        ctx.db.close();
+      }
+    });
+
+    it('propagates a failed resume without attempting capture', async () => {
+      const ctx = sandboxContext();
+      try {
+        const error = new Error('resume unavailable');
+        vi.mocked(ctx.containerManager.getStatus).mockResolvedValue('stopped');
+        vi.mocked(ctx.containerManager.start).mockRejectedValue(error);
+        const { manager, pod } = preservationPod(ctx);
+
+        await expect(manager.preserveWorkspace(pod.id, 'probe')).rejects.toBe(error);
+
+        expect(ctx.deps.sandboxWorkspaceCheckpoint).not.toHaveBeenCalled();
+        expect(activity(ctx, pod.id)).toEqual([]);
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id)).toMatchObject(pod);
+      } finally {
+        ctx.db.close();
+      }
+    });
+
+    it.each(['promoted', 'materialized', 'lineageVerified'] as const)(
+      'requires %s even when the other checkpoint proof fields pass',
+      async (field) => {
+        const ctx = sandboxContext();
+        try {
+          ctx.deps.sandboxWorkspaceCheckpoint = vi.fn(async () => ({
+            ...completeProof,
+            [field]: false,
+          }));
+          const { manager, pod } = preservationPod(ctx);
+
+          await expect(manager.preserveWorkspace(pod.id, 'probe')).rejects.toThrow(
+            'sandbox checkpoint was not fully verified',
+          );
+
+          expect(activity(ctx, pod.id)).toEqual([]);
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+          expect(manager.getSession(pod.id)).toMatchObject(pod);
+        } finally {
+          ctx.db.close();
+        }
+      },
+    );
+
+    it.each([true, false])(
+      'uses the controller result without direct recapture (materialized=%s)',
+      async (materialized) => {
+        const ctx = sandboxContext();
+        try {
+          const proof: WorkspaceCheckpointResult = {
+            ...completeProof,
+            materialized,
+            ...(!materialized && {
+              error: {
+                phase: 'materialize',
+                code: 'MATERIALIZATION_FAILED',
+                retryable: false,
+                message: 'retained controller failure',
+              },
+            }),
+          };
+          const records: CheckpointRecord[] = [];
+          const capture = vi.fn(async () => proof);
+          ctx.deps.workspaceCheckpointController = new WorkspaceCheckpointController({
+            observe: async () => ({ head: proof.sourceHead, tree: proof.sourceTree, dirty: true }),
+            checkpoint: capture,
+            records: {
+              save: async (record) => {
+                records.push(record);
+              },
+              latest: async () => null,
+              latestVerified: async () => null,
+              incomplete: async () => [],
+            },
+          });
+          const { manager, pod } = preservationPod(ctx);
+
+          const pending = manager.preserveWorkspace(pod.id, 'probe');
+          if (materialized) await pending;
+          else await expect(pending).rejects.toThrow('retained controller failure');
+
+          expect(capture).toHaveBeenCalledWith(pod.id, 'completion', 1);
+          expect(records[0]?.result).toBe(proof);
+          expect(ctx.deps.sandboxWorkspaceCheckpoint).not.toHaveBeenCalled();
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(activity(ctx, pod.id)).toEqual(
+            materialized ? ['Verified workspace checkpoint before probe.'] : [],
+          );
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: pod.status,
+            containerId: pod.containerId,
+            worktreeCompromised: true,
+          });
+        } finally {
+          ctx.db.close();
+        }
+      },
+    );
+
+    it.each(['observation', 'capture'])(
+      'propagates controller %s rejection without direct fallback',
+      async (phase) => {
+        const ctx = sandboxContext();
+        try {
+          const error = new Error('controller rejected');
+          ctx.deps.workspaceCheckpointController = new WorkspaceCheckpointController({
+            observe: async () => {
+              if (phase === 'observation') throw error;
+              return { head: 'a', tree: 'b', dirty: true };
+            },
+            checkpoint: async () => {
+              throw error;
+            },
+            records: {
+              save: async () => {},
+              latest: async () => null,
+              latestVerified: async () => null,
+              incomplete: async () => [],
+            },
+          });
+          const { manager, pod } = preservationPod(ctx);
+
+          await expect(manager.preserveWorkspace(pod.id, 'probe')).rejects.toBe(error);
+
+          expect(ctx.deps.sandboxWorkspaceCheckpoint).not.toHaveBeenCalled();
+          expect(activity(ctx, pod.id)).toEqual([]);
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(manager.getSession(pod.id)).toMatchObject(pod);
+        } finally {
+          ctx.db.close();
+        }
+      },
+    );
+
+    it('falls back to direct capture only when the controller supplies no result', async () => {
+      const ctx = sandboxContext();
+      const controller = new WorkspaceCheckpointController({
+        observe: async () => ({ head: 'a', tree: 'b', dirty: true }),
+        checkpoint: async () => completeProof,
+        records: {
+          save: async () => {},
+          latest: async () => null,
+          latestVerified: async () => null,
+          incomplete: async () => [],
+        },
+      });
+      const request = vi.spyOn(controller, 'request').mockResolvedValue({
+        checkpointed: false,
+        degraded: false,
+      });
+      try {
+        ctx.deps.workspaceCheckpointController = controller;
+        const { manager, pod } = preservationPod(ctx);
+
+        await manager.preserveWorkspace(pod.id, 'probe');
+
+        expect(request).toHaveBeenCalledWith(pod.id, 'completion');
+        expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalledOnce();
+        expect(activity(ctx, pod.id)).toEqual(['Verified workspace checkpoint before probe.']);
+        expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+      } finally {
+        request.mockRestore();
+        ctx.db.close();
+      }
+    });
+
+    it.each([false, true])(
+      'coalesces direct capture and releases it after settlement (reject=%s)',
+      async (reject) => {
+        const ctx = sandboxContext();
+        const release = deferred<void>();
+        const runs: Promise<void>[] = [];
+        const outcomes: Promise<PromiseSettledResult<void>>[] = [];
+        try {
+          const error = new Error('direct capture rejected');
+          const capture = vi.fn(async () => {
+            await release.promise;
+            if (reject) throw error;
+            return completeProof;
+          });
+          ctx.deps.sandboxWorkspaceCheckpoint = capture;
+          const { manager, pod } = preservationPod(ctx);
+          for (let i = 0; i < 2; i++) {
+            const run = manager.preserveWorkspace(pod.id, 'probe');
+            runs.push(run);
+            outcomes.push(
+              Promise.allSettled([run]).then(([outcome]) => {
+                if (!outcome) throw new Error('missing preservation outcome');
+                return outcome;
+              }),
+            );
+          }
+          await waitForAssertion(() => expect(capture).toHaveBeenCalledOnce());
+          expect(activity(ctx, pod.id)).toEqual([]);
+          release.resolve();
+          const settled = await Promise.all(outcomes);
+
+          if (reject) {
+            expect(settled).toEqual([
+              { status: 'rejected', reason: error },
+              { status: 'rejected', reason: error },
+            ]);
+            expect(activity(ctx, pod.id)).toEqual([]);
+          } else {
+            expect(settled.every((outcome) => outcome.status === 'fulfilled')).toBe(true);
+          }
+          capture.mockResolvedValueOnce(completeProof);
+          await manager.preserveWorkspace(pod.id, 'retry');
+
+          expect(capture).toHaveBeenCalledTimes(2);
+          expect(activity(ctx, pod.id).at(-1)).toBe('Verified workspace checkpoint before retry.');
+          expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: pod.status,
+            containerId: pod.containerId,
+            worktreeCompromised: true,
+          });
+        } finally {
+          release.resolve();
+          await Promise.allSettled(runs);
+          ctx.db.close();
+        }
+      },
+    );
+
+    it('retains local sync arguments and accepts preserved files with pushed=false', async () => {
+      const ctx = createTestContext();
+      const info = vi.spyOn(logger, 'info');
+      try {
+        const { manager, pod } = preservationPod(ctx);
+
+        await manager.preserveWorkspace(pod.id, 'probe');
+
+        expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
+          pod.containerId,
+          ['sh', '-c', expect.stringContaining('STAGING="/mnt/worktree/.autopod-sync-')],
+          { timeout: 120_000 },
+        );
+        expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+        expect(info).toHaveBeenCalledWith(
+          {
+            podId: pod.id,
+            containerId: pod.containerId,
+            executionTarget: 'local',
+            reason: 'probe',
+            commitsPushed: false,
+          },
+          'Workspace preserved before recovery boundary',
+        );
+        expect(activity(ctx, pod.id)).toEqual(['Workspace preserved before probe.']);
+        expect(manager.getSession(pod.id)).toMatchObject({
+          status: pod.status,
+          containerId: pod.containerId,
+          worktreeCompromised: true,
+        });
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      } finally {
+        info.mockRestore();
+        ctx.db.close();
+      }
+    });
+
+    it('propagates local exec and archive failure while retaining source resources', async () => {
+      const ctx = createTestContext();
+      try {
+        const error = new Error('archive failed');
+        vi.mocked(ctx.containerManager.execInContainer).mockRejectedValue(new Error('exec failed'));
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(error);
+        const { manager, pod } = preservationPod(ctx);
+
+        await expect(manager.preserveWorkspace(pod.id, 'probe')).rejects.toBe(error);
+
+        expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledWith(
+          pod.containerId,
+          '/workspace',
+          pod.worktreePath,
+          ['.git', 'node_modules', '.serena', '.roslyn-codelens'],
+        );
+        expect(activity(ctx, pod.id)).toEqual([]);
+        expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id)).toMatchObject(pod);
+      } finally {
+        ctx.db.close();
+      }
+    });
+  });
+
   describe('verified sandbox checkpoint lifecycle', () => {
     it('resumes a stopped sandbox before checkpoint recovery', async () => {
       const ctx = createTestContext(undefined, {
