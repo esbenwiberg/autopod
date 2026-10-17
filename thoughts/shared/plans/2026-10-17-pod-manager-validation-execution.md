@@ -1,6 +1,6 @@
 # Slice 9: validation execution and infrastructure retry extraction
 
-Status: IN PROGRESS — explicitly approved; Phase 1 complete.
+Status: IN PROGRESS — explicitly approved; Phases 1 and 2 complete; qualification running.
 Baseline: 5cef752cadbf76390caedceec03c60217ee8283c.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -222,9 +222,9 @@ exact movement and actual line counts, verify all other baseline files unchanged
 ### Success criteria
 
 Automated:
-- [ ] Frozen public checks pass unchanged after extraction.
-- [ ] Direct contract and real SQLite admission/outcome/close-reopen checks pass.
-- [ ] Exact movement, unchanged helpers/call sites and four-path product/test scope pass.
+- [x] Frozen public checks pass unchanged after extraction.
+- [x] Direct contract and real SQLite admission/outcome/close-reopen checks pass.
+- [x] Exact movement, unchanged helpers/call sites and four-path product/test scope pass.
 
 Manual: None required. Live provider/container availability is outside this proof.
 
@@ -273,7 +273,7 @@ and push verified increments, and verify final remote identity and clean worktre
 ### Success criteria
 
 Automated:
-- [ ] All 48 affected suites pass with SQLite and no new skips.
+- [x] All 48 affected suites pass with SQLite and no new skips.
 - [ ] Full uncached pipeline passes under the documented qualification environment.
 - [ ] Scoped lint/whitespace, new-test semantic diagnostics, frozen hashes and movement review pass.
 - [ ] Evidence and final plan record actual results, limitations and pushed identities.
@@ -317,3 +317,31 @@ A review-infrastructure helper returns Partial<ValidationResult>; the new test n
 supplies the standard complete result defaults. These fixture/type corrections
 preceded the final passing baseline and freeze; no product behavior changed.
 The selected filter also includes the existing authorized-later-admission case.
+
+## Phase 2 evidence
+
+All 69 selected public cases pass after extraction with the frozen assertions
+byte-identical. All 51 direct cases pass using the actual factory, migrated private
+file-backed SQLite, real task retry ledgers and captureValidationOwnership.
+Close/reopen, integrity and foreign-key checks cover pass/transient/nonretryable/
+cancelled history, persisted schedules, one-use authorization and task-wide exhaustion.
+
+Direct cases distinguish admitted-but-not-started cancellation from measured
+started work, preserve the start-before-preflight conversion boundary, settle old
+outcomes before superseded rejection, retain collector/result/reference identity,
+and test initial/later errors and cleanup-error precedence. They exercise real
+identity fallback over synthetic container output; no live container proof is claimed.
+Default/no-ledger/early/stalled-clock paths use the existing timer import with a
+controlled Date-only clock. Late callback and captured ledger-reference timing are pinned.
+
+All 48 affected suites passed: 1,747 tests, zero skips. Daemon/dependency ESM and
+supported declaration builds passed. Four-file scoped Biome is clean using the
+approved 2 MiB limit. Supplemental semantic diagnostics are zero in both new test
+boundaries. The 51 direct cases passed without fixture/assertion corrections.
+
+Parsed TypeScript comparison proves the 129-line helper with exactly two receiver
+substitutions, its typed wrapper/composition and the complete remaining manager.
+Both call sites and all shared helper implementations remain unchanged. The new
+module is 215 lines; the manager is 17,511 lines, 114 fewer. All 1,959 other baseline
+package/script files are unchanged. The final 1,963-file manifest is frozen for
+full qualification. No product change was needed after the original move.
