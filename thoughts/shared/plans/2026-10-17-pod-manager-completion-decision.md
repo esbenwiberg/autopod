@@ -193,10 +193,10 @@ Confirm no source-preparation runtime or shared helper implementation changed.
 ### Success criteria
 
 Automated:
-- [ ] Byte-identical public characterization passes after extraction.
-- [ ] Direct persisted decision effects, ordering and failure probes pass.
-- [ ] Movement receipt matches the exact recipe across all three product files.
-- [ ] Only the three approved product paths and two test paths differ from baseline.
+- [x] Byte-identical public characterization passes after extraction.
+- [x] Direct persisted decision effects, ordering and failure probes pass.
+- [x] Movement receipt matches the exact recipe across all three product files.
+- [x] Only the three approved product paths and two test paths differ from baseline.
 
 Manual: None required. No live provider/container qualification is claimed.
 
@@ -277,3 +277,24 @@ membership must be set at creation and reference an existing parent; inherited f
 suite must be cleared to exercise the validate:false fallback-off activity. Fixtures
 were corrected before freezing. No product change or weakened behavioral expectation
 was used to obtain the passing baseline.
+
+## Phase 2 evidence
+
+All 129 selected public cases passed with the byte-identical frozen characterization
+after extraction. All 29 direct boundary cases passed on their first run with real
+file-backed SQLite close/reopen, integrity and foreign-key checks. They establish
+persisted outcomes, original/refreshed input distinctions, no default-branch fallback,
+cleanup and validation waits, returned-object forwarding, fresh bypass reloads and
+partial effects/error identity across nine controlled failure sites. Synthetic helper
+callbacks remain explicitly controlled; actual manager helpers are exercised publicly.
+
+The 147-line createCompletionDecision module retains the contiguous decision tail
+with one validation receiver adaptation. Manager shrank 75 lines, from 17,811 to
+17,736. Parsed TypeScript token comparison matches both module and remaining manager;
+completion-source.ts differs only by its type export. All 1,952 other baseline
+package/script files are unchanged. Public test hash matches the baseline.
+
+Daemon/dependency ESM and declaration build passed. Scoped Biome over all five
+source/test files and whitespace checks passed. Supplemental TypeScript semantic
+diagnostics restricted to the new direct test and new public group returned zero;
+this is not a claim that unrelated repository test typing is clean.

@@ -7,7 +7,7 @@ import { DeletionGuardError } from '../worktrees/local-worktree-manager.js';
 import type { WorkspaceCheckpointResult } from '../worktrees/sandbox-workspace-checkpoint.js';
 import type { PodRepository } from './pod-repository.js';
 
-interface CompletionSourcePreparation {
+export interface CompletionSourcePreparation {
   sandboxCheckpoint?: WorkspaceCheckpointResult;
   sandboxCanonicalOutcome?: 'changed' | 'unchanged' | 'unavailable';
   sandboxHostProof?: { head: string; tree: string };
