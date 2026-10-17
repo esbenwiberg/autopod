@@ -1,6 +1,6 @@
 # Slice 3: validation workspace extraction
 
-Status: APPROVED — Phase 1 complete; extraction in progress.
+Status: APPROVED — Phases 1 and 2 complete; full qualification in progress.
 Baseline: 1a2dd0c8a82db8e16f36c0849e91945e101e75e1.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -192,11 +192,11 @@ oracle. Primitive tests alone do not establish complete module composition.
 ### Success criteria
 
 Automated:
-- [ ] Identical public characterization passes after movement.
-- [ ] Actual local Git, isolated object-store and bundle outcomes pass.
-- [ ] Error identity is shared and manager lifecycle policy stays outside the module.
-- [ ] Movement receipt confirms exact scope and unchanged existing primitives.
-- [ ] Final product diff contains only the two approved product files.
+- [x] Identical public characterization passes after movement.
+- [x] Actual local Git, isolated object-store and bundle outcomes pass.
+- [x] Error identity is shared and manager lifecycle policy stays outside the module.
+- [x] Movement receipt confirms exact scope and unchanged existing primitives.
+- [x] Final product diff contains only the two approved product files.
 
 Manual: None required. No live Docker/Azure qualification is claimed.
 
@@ -264,7 +264,7 @@ Integration with concurrent main-branch work remains a separate integration step
 - Predecessor: 2026-10-17-pod-manager-workspace-transfer.md (complete).
 - Existing primitives: worktrees/graft-reconcile.ts and worktrees/sandbox-reconcile.ts.
 
-Next action: extract the approved boundary, then qualify final sources.
+Next action: run full uncached qualification and record the final result.
 
 ## Phase 1 evidence
 
@@ -280,3 +280,33 @@ window before validation/diff, which is the approved boundary. No production
 behavior changed or assertion of the preparation choice was relaxed. The failed
 characterization-initial-failure.log remains retained. All new fixtures close
 their DBs, join held observations and remove any controlled bundle files.
+
+## Phase 2 evidence
+
+The new 480-line validation-workspace module owns the eight moved helpers and
+the exported error class. pod-manager is 443 lines smaller. It imports the same
+constructor for both existing instanceof checks and composes the factory after
+transfer composition. Both preparation call sites and surrounding policy remain
+unchanged. No existing primitive was edited.
+
+The 94 selected public cases passed after extraction, with the Phase 1 test file
+byte-identical (670 name-filtered). Ten direct module cases use actual local Git,
+private configuration and private temporary bundle paths. Together with the six
+existing graft/bundle primitive cases, the material-boundary run passed 16 cases.
+All 18 affected suites then passed: 924 tests, zero skipped. The dependency/daemon
+build, four-file scoped Biome and git diff --check also passed.
+
+The real boundary cases assert source refs/indexes for no-op and rejected local
+paths, local host reset/clean and actual sync-back composition, real isolated-store
+transfer before reset, correct graft parent/tree/bytes, equal-tree fast return,
+host-ahead target preservation, cleanup, refused unrelated publication, and
+retained host graft after upload/fetch failure. No isolated-store case uses shared
+alternates. No direct boundary test required a fixture correction.
+
+movement.json confirms exact construction of both product files, allowing only
+Biome relocation of one import block and wrapping of one composition call. All
+1,466 other baseline product/script paths and existing primitives are unchanged.
+Node 22.23.3 opens SQLite and actual pnpm is 9.15.4. Receipts are under
+.autopod-data/validation-workspace/, including before/after characterization,
+material-boundary.log, affected.log, build.log and scoped-biome.log. Full pipeline
+acceptance is still pending its observed result.
