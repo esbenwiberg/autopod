@@ -26891,3 +26891,475 @@ describe('completion decision compatibility', () => {
     }
   });
 });
+
+describe('validation attempt start compatibility', () => {
+  beforeEach(() => mockExecFileSuccess());
+  afterEach(() => vi.restoreAllMocks());
+
+  interface EntryCase {
+    name: string;
+    status?: 'running' | 'failed' | 'review_required' | 'killed' | 'validated';
+    count?: number;
+    marker?: 'wake' | 'restart';
+    suite?: 'off' | 'thin' | 'thin-with-facts' | 'deterministic' | 'full' | 'custom';
+    validate?: boolean;
+    reworks?: number;
+    attempt: number;
+  }
+
+  function fixture(c: EntryCase = { name: 'entry', count: 2, attempt: 3 }, scanner = false) {
+    const ctx = createTestContext();
+    const order: string[] = [];
+    const scan = vi.fn(
+      async (
+        checkpoint: 'push' | 'provisioning',
+        input: { podId: string },
+      ): Promise<import('../security/scan-engine.js').RepoScanResult> => {
+        order.push('scan');
+        return {
+          checkpoint,
+          podId: input.podId,
+          startedAt: 1,
+          completedAt: 2,
+          filesScanned: 1,
+          filesSkipped: 0,
+          scanIncomplete: false,
+          findings: [],
+          decision: 'pass',
+          warningSection: null,
+        };
+      },
+    );
+    if (scanner) ctx.deps.repoScanner = { scan };
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession({ profileName: 'test-profile', task: c.name }, 'operator');
+    ctx.podRepo.update(pod.id, {
+      status: c.status ?? 'running',
+      containerId: 'entry-container',
+      worktreePath: scanner ? '/tmp/validation-entry' : null,
+      validationAttempts: c.count ?? 2,
+      lastRecoveryTrigger: c.marker ?? null,
+      reworkCount: c.reworks ?? 0,
+      maxValidationAttempts: 7,
+      options: {
+        ...manager.getSession(pod.id).options,
+        validationSuite: c.suite,
+        validate: c.validate ?? true,
+      },
+    });
+    const update = ctx.podRepo.update.bind(ctx.podRepo);
+    vi.spyOn(ctx.podRepo, 'update').mockImplementation((id, values) => {
+      const result = update(id, values);
+      if (values.validationAttempts !== undefined)
+        order.push(`attempt:${values.validationAttempts}`);
+      if (values.lastRecoveryTrigger === null) order.push('clear-wake');
+      if (values.status === 'validating') order.push('status-write');
+      return result;
+    });
+    const snapshots: Array<{ at: string; count: number; marker: string | null; status: string }> =
+      [];
+    const starts: Array<{ attempt: number; timestamp: string }> = [];
+    const activity: string[] = [];
+    ctx.eventBus.subscribeToSession(pod.id, (event) => {
+      let at: string | undefined;
+      if (event.type === 'pod.status_changed' && event.newStatus === 'validating')
+        at = 'status-event';
+      if (event.type === 'pod.validation_started') {
+        at = 'started-event';
+        starts.push(event);
+      }
+      if (event.type === 'pod.agent_activity' && event.event.type === 'status') {
+        activity.push(event.event.message);
+        if (
+          event.event.message.startsWith('Starting ') &&
+          event.event.message.includes(' validation (')
+        )
+          at = 'start-activity';
+      }
+      if (at) {
+        order.push(at);
+        const current = ctx.podRepo.getOrThrow(pod.id);
+        snapshots.push({
+          at,
+          count: current.validationAttempts,
+          marker: current.lastRecoveryTrigger,
+          status: current.status,
+        });
+      }
+    });
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    const wait = async () => {
+      order.push('container');
+      entered.resolve();
+      await release.promise;
+    };
+    vi.mocked(ctx.containerManager.getStatus).mockImplementationOnce(async () => {
+      await wait();
+      return 'running';
+    });
+    vi.mocked(ctx.containerManager.start).mockImplementationOnce(wait);
+    return { ctx, manager, pod, order, scan, starts, activity, snapshots, entered, release };
+  }
+
+  const entries: EntryCase[] = [
+    { name: 'normal zero', count: 0, attempt: 1 },
+    { name: 'normal nonzero', count: 2, attempt: 3 },
+    ...(['failed', 'review_required', 'killed', 'validated'] as const).map(
+      (status): EntryCase => ({ name: `terminal ${status}`, status, count: 4, attempt: 1 }),
+    ),
+    { name: 'wake', count: 2, marker: 'wake', attempt: 2 },
+    { name: 'terminal wake', status: 'failed', count: 4, marker: 'wake', attempt: 0 },
+    { name: 'restart', count: 2, marker: 'restart', attempt: 3 },
+    ...(['off', 'thin', 'thin-with-facts', 'deterministic', 'full', 'custom'] as const).map(
+      (suite): EntryCase => ({ name: `suite ${suite}`, suite, reworks: 3, count: 2, attempt: 3 }),
+    ),
+    { name: 'validate false fallback', validate: false, count: 0, attempt: 1 },
+    {
+      name: 'explicit full overrides validate false suite',
+      validate: false,
+      suite: 'full',
+      count: 0,
+      attempt: 1,
+    },
+  ];
+
+  it.each(entries)('$name preserves persisted entry, event order and engine inputs', async (c) => {
+    const f = fixture(c);
+    let operation: Promise<void> | undefined;
+    try {
+      operation = f.manager.triggerValidation(f.pod.id);
+      await f.entered.promise;
+      const terminal = c.status !== undefined && c.status !== 'running';
+      const before = terminal ? 0 : (c.count ?? 2);
+      const marker = c.marker === 'wake' ? null : (c.marker ?? null);
+      const suite = c.suite ?? (c.validate === false ? 'off' : 'full');
+      expect(f.ctx.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+        status: 'validating',
+        validationAttempts: c.attempt,
+        lastRecoveryTrigger: marker,
+      });
+      expect(f.order).toEqual([
+        ...(terminal ? ['attempt:0'] : []),
+        'status-write',
+        'status-event',
+        c.marker === 'wake' ? 'clear-wake' : `attempt:${c.attempt}`,
+        'started-event',
+        'start-activity',
+        'container',
+      ]);
+      expect(f.snapshots).toEqual([
+        { at: 'status-event', count: before, marker: c.marker ?? null, status: 'validating' },
+        { at: 'started-event', count: c.attempt, marker, status: 'validating' },
+        { at: 'start-activity', count: c.attempt, marker, status: 'validating' },
+      ]);
+      expect(f.starts).toEqual([
+        expect.objectContaining({ attempt: c.attempt, timestamp: expect.any(String) }),
+      ]);
+      expect(Number.isFinite(Date.parse(f.starts[0]?.timestamp ?? ''))).toBe(true);
+      expect(f.activity).toContain(
+        `Starting ${suite} validation (${c.reworks ? `rework ${c.reworks}, ` : ''}attempt ${c.attempt}/7)…`,
+      );
+      expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+      f.release.resolve();
+      await operation;
+      expect(vi.mocked(f.ctx.validationEngine.validate).mock.calls[0]?.[0]).toMatchObject({
+        attempt: c.attempt,
+        validationSuite: suite,
+      });
+    } finally {
+      f.release.resolve();
+      await Promise.allSettled(operation ? [operation] : []);
+      f.ctx.db.close();
+    }
+  });
+
+  it('clears wake once, then increments the next ordinary entry', async () => {
+    const f = fixture({ name: 'one-shot wake', count: 2, marker: 'wake', attempt: 2 });
+    try {
+      f.release.resolve();
+      await f.manager.triggerValidation(f.pod.id);
+      await f.manager.triggerValidation(f.pod.id);
+      // A validated terminal entry resets its budget before starting the next cycle.
+      expect(f.starts.map((x) => x.attempt)).toEqual([2, 1]);
+      f.ctx.podRepo.update(f.pod.id, { status: 'running', validationAttempts: 2 });
+      await f.manager.triggerValidation(f.pod.id);
+      expect(f.starts.map((x) => x.attempt)).toEqual([2, 1, 3]);
+    } finally {
+      f.release.resolve();
+      f.ctx.db.close();
+    }
+  });
+
+  it.each([
+    'pass',
+    'warn',
+    'escalate',
+    'block',
+    'ordinary-error',
+    'domain-error',
+    'missing-worktree',
+  ] as const)('keeps shared scan handling for %s', async (mode) => {
+    const f = fixture({ name: 'scan', count: 2, attempt: 3 }, true);
+    let operation: Promise<void> | undefined;
+    const fault =
+      mode === 'domain-error'
+        ? new AutopodError('scan domain fault', 'SCAN_DOMAIN', 409)
+        : new Error('scanner unavailable');
+    try {
+      if (mode === 'missing-worktree') f.ctx.podRepo.update(f.pod.id, { worktreePath: null });
+      const scanBody = f.scan.getMockImplementation();
+      if (!scanBody) throw new Error('Missing scan fixture');
+      f.scan.mockImplementationOnce(async (...args) => {
+        if (mode === 'ordinary-error' || mode === 'domain-error') throw fault;
+        const result = await scanBody(...args);
+        return { ...result, decision: mode === 'missing-worktree' ? 'pass' : mode };
+      });
+      operation = f.manager.triggerValidation(f.pod.id);
+      void operation.catch(() => {});
+      if (mode === 'block' || mode === 'domain-error') {
+        if (mode === 'block')
+          await expect(operation).rejects.toMatchObject({
+            code: 'SECURITY_SCAN_BLOCKED',
+            statusCode: 400,
+          });
+        else await expect(operation).rejects.toBe(fault);
+        expect(f.ctx.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+          status: 'running',
+          validationAttempts: 2,
+        });
+        expect(f.starts).toEqual([]);
+        expect(f.ctx.containerManager.getStatus).not.toHaveBeenCalled();
+        expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+      } else {
+        await f.entered.promise;
+        expect(f.starts[0]?.attempt).toBe(3);
+        expect(f.scan).toHaveBeenCalledTimes(mode === 'missing-worktree' ? 0 : 1);
+        if (mode === 'pass')
+          expect(f.scan).toHaveBeenCalledWith(
+            'push',
+            expect.objectContaining({
+              podId: f.pod.id,
+              workdir: '/tmp/validation-entry',
+              baseRef: 'origin/main',
+              isWorkspacePod: false,
+            }),
+          );
+        f.release.resolve();
+        await operation;
+      }
+    } finally {
+      f.release.resolve();
+      await Promise.allSettled(operation ? [operation] : []);
+      f.ctx.db.close();
+    }
+  });
+
+  it('does not reset terminal counters or publish entry while the scan is held', async () => {
+    const f = fixture({ name: 'held scan', status: 'failed', count: 4, attempt: 1 }, true);
+    const scanned = deferred<void>();
+    const releaseScan = deferred<void>();
+    let operation: Promise<void> | undefined;
+    try {
+      const body = f.scan.getMockImplementation();
+      if (!body) throw new Error('Missing scan');
+      f.scan.mockImplementationOnce(async (...args) => {
+        scanned.resolve();
+        await releaseScan.promise;
+        return body(...args);
+      });
+      operation = f.manager.triggerValidation(f.pod.id);
+      await scanned.promise;
+      expect(f.ctx.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+        status: 'failed',
+        validationAttempts: 4,
+      });
+      expect(f.order).toEqual([]);
+      expect(f.starts).toEqual([]);
+      expect(f.ctx.containerManager.getStatus).not.toHaveBeenCalled();
+      releaseScan.resolve();
+      await f.entered.promise;
+      expect(f.order.slice(0, 3)).toEqual(['scan', 'attempt:0', 'status-write']);
+      f.release.resolve();
+      await operation;
+    } finally {
+      releaseScan.resolve();
+      f.release.resolve();
+      await Promise.allSettled(operation ? [operation] : []);
+      f.ctx.db.close();
+    }
+  });
+
+  it.each(['guidance', 'compromised', 'goal', 'unverified'] as const)(
+    'rejects %s before ordinary entry',
+    async (mode) => {
+      const f = fixture(undefined, true);
+      try {
+        if (mode === 'guidance')
+          createNudgeRepository(f.ctx.db).queue(f.pod.id, 'Apply saved guidance');
+        if (mode === 'compromised') f.ctx.podRepo.update(f.pod.id, { worktreeCompromised: true });
+        if (mode === 'goal')
+          f.ctx.deps.launchConfiguration = {
+            read: () => ({ intent: 'goal' }) as import('@autopod/shared').EffectiveLaunchConfig,
+            executionSettings: () => f.ctx.profileStore.get('test-profile'),
+            assertCurrentCapabilities: async () => {},
+            prepareEnvironment: async () => 'fixture',
+          };
+        if (mode === 'unverified') {
+          const run = f.ctx.podRepo.taskExecutions?.beginRun(
+            f.pod.id,
+            f.pod.lifecycleGeneration,
+            1,
+            { runtime: f.pod.runtime, model: f.pod.model, providerAccountId: null },
+          );
+          if (!run) throw new Error('Missing run');
+          if (mode === 'unverified') f.ctx.podRepo.taskExecutions?.retainUnverifiedRun(run);
+        }
+        const codes = {
+          guidance: 'UNCOLLECTED_HUMAN_GUIDANCE',
+          compromised: 'WORKTREE_COMPROMISED',
+          goal: 'GOAL_NOT_ACHIEVED',
+          unverified: 'TASK_EXECUTION_TERMINATION_UNVERIFIED',
+        };
+        await expect(f.manager.triggerValidation(f.pod.id)).rejects.toMatchObject({
+          code: codes[mode],
+        });
+        expect(f.scan).not.toHaveBeenCalled();
+        expect(f.starts).toEqual([]);
+        expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+        expect(f.ctx.containerManager.getStatus).not.toHaveBeenCalled();
+        expect(f.ctx.podRepo.getOrThrow(f.pod.id).validationAttempts).toBe(2);
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it('does not introduce a new active-run guard for a verified ledger entry', async () => {
+    const f = fixture();
+    let operation: Promise<void> | undefined;
+    try {
+      const run = f.ctx.podRepo.taskExecutions?.beginRun(f.pod.id, f.pod.lifecycleGeneration, 1, {
+        runtime: f.pod.runtime,
+        model: f.pod.model,
+        providerAccountId: null,
+      });
+      if (!run) throw new Error('Missing active run');
+      operation = f.manager.triggerValidation(f.pod.id);
+      await f.entered.promise;
+      expect(f.ctx.podRepo.taskExecutions?.hasActiveRun(f.pod.id)).toBe(true);
+      expect(f.starts[0]?.attempt).toBe(3);
+      f.release.resolve();
+      await operation;
+    } finally {
+      f.release.resolve();
+      await Promise.allSettled(operation ? [operation] : []);
+      f.ctx.db.close();
+    }
+  });
+
+  it.each(['reset', 'transition', 'counter', 'start-event', 'activity'] as const)(
+    'propagates %s entry failure without the engine handler',
+    async (stage) => {
+      const f = fixture({ name: 'partial failure', status: 'failed', count: 4, attempt: 1 });
+      const fault = new Error(`${stage} fault`);
+      try {
+        const update = vi.mocked(f.ctx.podRepo.update).getMockImplementation();
+        if (!update) throw new Error('Missing update fixture');
+        vi.mocked(f.ctx.podRepo.update).mockImplementation((id, values) => {
+          if (
+            (stage === 'reset' && values.validationAttempts === 0) ||
+            (stage === 'transition' && values.status === 'validating') ||
+            (stage === 'counter' && values.validationAttempts === 1)
+          )
+            throw fault;
+          return update(id, values);
+        });
+        const emit = f.ctx.eventBus.emit.bind(f.ctx.eventBus);
+        vi.spyOn(f.ctx.eventBus, 'emit').mockImplementation((event) => {
+          if (stage === 'start-event' && event.type === 'pod.validation_started') throw fault;
+          if (
+            stage === 'activity' &&
+            event.type === 'pod.agent_activity' &&
+            event.event.type === 'status' &&
+            event.event.message.startsWith('Starting ')
+          )
+            throw fault;
+          return emit(event);
+        });
+        await expect(f.manager.triggerValidation(f.pod.id)).rejects.toBe(fault);
+        expect(f.ctx.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+          status: stage === 'reset' || stage === 'transition' ? 'failed' : 'validating',
+          validationAttempts:
+            stage === 'reset' ? 4 : stage === 'transition' || stage === 'counter' ? 0 : 1,
+        });
+        expect(f.starts).toHaveLength(stage === 'activity' ? 1 : 0);
+        expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+        expect(f.ctx.containerManager.getStatus).not.toHaveBeenCalled();
+        expect(f.ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(f.ctx.eventRepo.countForSession(f.pod.id, 'pod.validation_completed')).toBe(0);
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it('retains event-bus subscriber error handling while starting validation', async () => {
+    const f = fixture();
+    let operation: Promise<void> | undefined;
+    try {
+      f.ctx.eventBus.subscribe((event) => {
+        if (event.type === 'pod.validation_started') throw new Error('subscriber fault');
+      });
+      operation = f.manager.triggerValidation(f.pod.id);
+      await f.entered.promise;
+      expect(f.ctx.eventRepo.countForSession(f.pod.id, 'pod.validation_started')).toBe(1);
+      expect(f.starts).toHaveLength(1);
+      f.release.resolve();
+      await operation;
+    } finally {
+      f.release.resolve();
+      await Promise.allSettled(operation ? [operation] : []);
+      f.ctx.db.close();
+    }
+  });
+
+  it('keeps forced reprovisioning ahead of ordinary guidance and scan entry', async () => {
+    const f = fixture({ name: 'forced rework', status: 'failed', count: 4, attempt: 1 }, true);
+    try {
+      createNudgeRepository(f.ctx.db).queue(f.pod.id, 'Collect during Rework');
+      f.release.resolve();
+      await f.manager.triggerValidation(f.pod.id, { force: true });
+      expect(f.ctx.podRepo.getOrThrow(f.pod.id).status).toBe('queued');
+      expect(f.ctx.enqueuedSessions).toContain(f.pod.id);
+      expect(f.scan).not.toHaveBeenCalled();
+      expect(f.starts).toEqual([]);
+      expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it('keeps manual revalidation reset-before-scan and attempt-one activity', async () => {
+    const f = fixture(
+      { name: 'manual revalidation', status: 'failed', count: 4, marker: 'wake', attempt: 1 },
+      true,
+    );
+    let operation: ReturnType<typeof f.manager.revalidateSession> | undefined;
+    try {
+      vi.mocked(f.ctx.worktreeManager.pullBranch).mockResolvedValueOnce({ newCommits: false });
+      operation = f.manager.revalidateSession(f.pod.id, { force: true });
+      await f.entered.promise;
+      expect(f.order.indexOf('attempt:0')).toBeLessThan(f.order.indexOf('scan'));
+      expect(f.starts[0]?.attempt).toBe(1);
+      expect(f.ctx.podRepo.getOrThrow(f.pod.id).lastRecoveryTrigger).toBe('wake');
+      expect(f.activity).toContain('Starting revalidation…');
+      f.release.resolve();
+      await operation;
+    } finally {
+      f.release.resolve();
+      await Promise.allSettled(operation ? [operation] : []);
+      f.ctx.db.close();
+    }
+  });
+});

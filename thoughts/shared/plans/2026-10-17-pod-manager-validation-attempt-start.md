@@ -1,6 +1,6 @@
 # Slice 7: validation attempt start extraction
 
-Status: READY FOR REVIEW — implementation has not started.
+Status: APPROVED — implementing all three phases.
 Baseline: 5385bfd6f37e17c8e8ef03ae49b2f7a6f990e142.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -10,7 +10,7 @@ Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
 Begin the validation-orchestration workstream by extracting the ordinary attempt-start
 sequence in triggerValidation. Keep the established characterize → extract → qualify
 structure. Approval of this concrete plan covers all three phases together, without
-an intermediate manual gate. Implementation awaits explicit approval of this plan.
+an intermediate manual gate. The user explicitly approved this plan.
 Commit and push verified increments per the user's repository instructions.
 
 ## Current state analysis
@@ -148,9 +148,9 @@ timers and clean private fixtures. Preserve earlier slices' evidence.
 ### Success criteria
 
 Automated:
-- [ ] New public cases pass against unchanged baseline product source.
-- [ ] Relevant existing wake, Rework, guidance, security and validation cases pass.
-- [ ] Frozen source/test identities, runtime and raw before results are recorded.
+- [x] New public cases pass against unchanged baseline product source.
+- [x] Relevant existing wake, Rework, guidance, security and validation cases pass.
+- [x] Frozen source/test identities, runtime and raw before results are recorded.
 
 Manual: None required for this headless compatibility boundary.
 
@@ -254,3 +254,23 @@ together. Integrating concurrent main work remains separate requested work.
 
 Next action: explicit approval of this concrete plan, then characterize the unchanged
 ordinary start path before extracting it. No unresolved questions remain.
+
+## Phase 1 evidence
+
+39 new public cases and 8 selected existing wake/security/terminal-Rework cases
+passed against unchanged product source: 47 passed, 877 name-filtered. The new
+cases pin accounting, suite/rework activity, event/write/container ordering, held
+scan, shared scan outcomes, early guards, forced/manual paths, partial failures
+and the actual engine configuration. Supplemental semantic diagnostics restricted
+to the new public group returned zero. Actual Node 22.23.3 opened SQLite 3.49.2;
+pnpm is 9.15.4. Frozen assertions, before-source hashes and raw results are stored
+under ignored .autopod-data/validation-attempt-start/.
+
+The first run is retained as failed. Its fixture omitted validate:true when
+clearing a suite, inadvertently selecting off; its engine assertion assumed two
+arguments instead of checking the actual four-argument API's configuration. The
+initial active-ledger rejection expectation was unsupported: the existing
+termination guard checks unverified termination only. It is now characterized
+explicitly as allowing ordinary entry for a verified active ledger record, while
+unverified termination still rejects. No product behavior was changed. All fixture
+and characterization corrections occurred before the passing baseline was frozen.
