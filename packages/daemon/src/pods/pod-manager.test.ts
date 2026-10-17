@@ -27806,3 +27806,341 @@ describe('validation inputs compatibility', () => {
     }
   });
 });
+
+describe('validation execution compatibility', () => {
+  beforeEach(() => {
+    mockExecFileSuccess();
+    vi.mocked(sleep).mockClear();
+    vi.mocked(sleep).mockImplementation(() => Promise.resolve());
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.mocked(sleep).mockImplementation(() => Promise.resolve());
+    vi.restoreAllMocks();
+  });
+
+  function fixture(entry: 'trigger' | 'revalidate', backoffs: readonly number[] = [0, 0]) {
+    const ctx = createTestContext();
+    ctx.deps.validationInfrastructureRetryBackoffMs = backoffs;
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Execution compatibility' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: entry === 'trigger' ? 'running' : 'failed',
+      containerId: 'execution-container',
+      worktreePath: '/tmp/validation-execution',
+      validationAttempts: 0,
+      maxValidationAttempts: 1,
+    });
+    const ledger = ctx.podRepo.taskRetries;
+    if (!ledger) throw new Error('Missing retry ledger fixture');
+    return {
+      ctx,
+      manager,
+      pod,
+      ledger,
+      run: () =>
+        entry === 'trigger'
+          ? manager.triggerValidation(pod.id)
+          : manager.revalidateSession(pod.id, { force: true }),
+    };
+  }
+
+  const cases = [
+    { name: 'first pass', outcomes: ['pass'], calls: 1, outcome: 'pass', overall: 'pass' },
+    {
+      name: 'deterministic failure',
+      outcomes: ['fail'],
+      calls: 1,
+      outcome: 'nonretryable',
+      overall: 'fail',
+    },
+    {
+      name: 'infrastructure retry passes',
+      outcomes: ['infra', 'pass'],
+      calls: 2,
+      outcome: 'pass',
+      overall: 'pass',
+    },
+    {
+      name: 'infrastructure retries exhausted',
+      outcomes: ['infra', 'infra', 'infra'],
+      calls: 3,
+      outcome: 'transient',
+      overall: 'fail',
+    },
+    {
+      name: 'review-only infrastructure',
+      outcomes: ['review'],
+      calls: 1,
+      outcome: 'transient',
+      overall: 'fail',
+    },
+    {
+      name: 'thrown engine',
+      outcomes: ['throw'],
+      calls: 1,
+      outcome: 'nonretryable',
+      overall: 'fail',
+    },
+  ];
+  it.each(
+    (['trigger', 'revalidate'] as const).flatMap((entry) => cases.map((c) => ({ ...c, entry }))),
+  )('$entry preserves $name, inner history and callbacks', async (c) => {
+    const f = fixture(c.entry);
+    try {
+      const engine = vi.mocked(f.ctx.validationEngine.validate);
+      for (const outcome of c.outcomes) {
+        if (outcome === 'throw')
+          engine.mockRejectedValueOnce(new Error('synthetic engine failure'));
+        else
+          engine.mockResolvedValueOnce(
+            outcome === 'infra'
+              ? validationInfrastructureFailureResult()
+              : outcome === 'review'
+                ? makeValidationResult(reviewInfrastructureFailureResult())
+                : makeValidationResult({ overall: outcome === 'pass' ? 'pass' : 'fail' }),
+          );
+      }
+      await f.run();
+      expect(engine).toHaveBeenCalledTimes(c.calls);
+      const signal = engine.mock.calls[0]?.[2];
+      expect(signal).toBeInstanceOf(AbortSignal);
+      for (const [config, onProgress, receivedSignal, callbacks] of engine.mock.calls) {
+        expect(config.podId).toBe(f.pod.id);
+        expect(config.attempt).toBe(1);
+        expect(config.captureEvidenceIdentity).toBe(
+          engine.mock.calls[0]?.[0].captureEvidenceIdentity,
+        );
+        expect(typeof config.captureEvidenceIdentity).toBe('function');
+        expect(typeof config.beforeReviewerLaunch).toBe('function');
+        expect(typeof onProgress).toBe('function');
+        expect(receivedSignal).toBe(signal);
+        expect(callbacks).toMatchObject({
+          onPhaseStarted: expect.any(Function),
+          onPhaseCompleted: expect.any(Function),
+          onReviewProgress: expect.any(Function),
+        });
+      }
+      expect(f.ledger.state(f.pod.id)).toMatchObject({
+        admissionCount: c.calls,
+        executedCount: c.calls,
+        latest: { outcome: c.outcome },
+      });
+      expect(f.ctx.validationRepo.getForSession(f.pod.id)).toHaveLength(1);
+      expect(f.manager.getSession(f.pod.id).lastValidationResult?.overall).toBe(c.overall);
+      expect(
+        f.ctx.eventRepo.getForSession(f.pod.id, { type: 'pod.validation_started' }),
+      ).toHaveLength(1);
+      expect(
+        f.ctx.eventRepo.getForSession(f.pod.id, { type: 'pod.validation_completed' }),
+      ).toHaveLength(1);
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      if (c.overall === 'pass') expect(f.manager.getSession(f.pod.id).validationAttempts).toBe(1);
+      if (c.name === 'thrown engine')
+        expect(f.manager.getSession(f.pod.id).lastValidationResult?.smoke.build.output).toContain(
+          'synthetic engine failure',
+        );
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s reads changed identity callback after construction and between retries',
+    async (entry) => {
+      const f = fixture(entry);
+      try {
+        const identity = {
+          source: 'a'.repeat(64),
+          contract: 'b'.repeat(64),
+          commands: 'c'.repeat(64),
+          environment: null,
+          implementation: null,
+        };
+        const second = vi.fn(async () => ({ ...identity, source: 'd'.repeat(64) }));
+        const first = vi.fn(async () => {
+          f.ctx.deps.captureRetryIdentity = second;
+          return identity;
+        });
+        f.ctx.deps.captureRetryIdentity = first;
+        vi.mocked(f.ctx.validationEngine.validate)
+          .mockResolvedValueOnce(validationInfrastructureFailureResult())
+          .mockResolvedValueOnce(makeValidationResult());
+        await f.run();
+        expect(first).toHaveBeenCalledOnce();
+        expect(second).toHaveBeenCalledOnce();
+        expect(f.ledger.state(f.pod.id).latest?.identity.source).toBe('d'.repeat(64));
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s retains the real fallback capture when no custom callback exists',
+    async (entry) => {
+      const f = fixture(entry);
+      try {
+        f.ctx.deps.captureRetryIdentity = undefined;
+        const exec = vi.mocked(f.ctx.containerManager.execInContainer);
+        const original = exec.getMockImplementation();
+        if (!original) throw new Error('Missing container exec fixture');
+        exec.mockImplementation(async (...args) => {
+          if (args[1][0] === 'node' && args[1][2]?.includes('files.length > 100000'))
+            return {
+              exitCode: 0,
+              stdout: JSON.stringify({ source: 'a'.repeat(64), node: '22.23.3' }),
+              stderr: '',
+            };
+          return original(...args);
+        });
+        await f.run();
+        expect(
+          exec.mock.calls.some(
+            ([, command]) => command[0] === 'node' && command[2]?.includes('files.length > 100000'),
+          ),
+        ).toBe(true);
+        expect(f.ledger.state(f.pod.id).latest?.identity.source).toBe('a'.repeat(64));
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(
+    (['trigger', 'revalidate'] as const).flatMap((entry) =>
+      [[], [0], [7]].map((backoffs) => ({ entry, backoffs })),
+    ),
+  )('$entry preserves no-ledger retry schedule $backoffs', async ({ entry, backoffs }) => {
+    const f = fixture(entry, backoffs);
+    try {
+      Object.defineProperty(f.ctx.podRepo, 'taskRetries', { value: undefined, configurable: true });
+      const capture = vi.fn(async () => ({
+        source: null,
+        contract: null,
+        commands: null,
+        environment: null,
+        implementation: null,
+      }));
+      f.ctx.deps.captureRetryIdentity = capture;
+      vi.mocked(f.ctx.validationEngine.validate).mockResolvedValue(
+        validationInfrastructureFailureResult(),
+      );
+      await f.run();
+      expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1 + backoffs.length);
+      expect(capture).not.toHaveBeenCalled();
+      expect(vi.mocked(sleep).mock.calls.map(([delay]) => delay)).toEqual(
+        backoffs.filter((n) => n > 0),
+      );
+      expect(f.ctx.validationRepo.getForSession(f.pod.id)).toHaveLength(1);
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s preserves the default retry policy with persisted deadlines',
+    async (entry) => {
+      const f = fixture(entry);
+      try {
+        f.ctx.deps.validationInfrastructureRetryBackoffMs = undefined;
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.mocked(sleep).mockImplementation(async (delay) => {
+          vi.setSystemTime(Date.now() + (typeof delay === 'number' ? delay : 0));
+        });
+        vi.mocked(f.ctx.validationEngine.validate).mockResolvedValue(
+          validationInfrastructureFailureResult(),
+        );
+        await f.run();
+        expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(3);
+        expect(f.ledger.state(f.pod.id)).toMatchObject({
+          backoffsMs: [1000, 5000],
+          admissionCount: 3,
+          executedCount: 3,
+        });
+        expect(vi.mocked(sleep).mock.calls.map(([delay]) => delay)).toEqual([1000, 5000]);
+      } finally {
+        vi.useRealTimers();
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(
+    (['trigger', 'revalidate'] as const).flatMap((entry) =>
+      [1, 2].map((refusal) => ({ entry, refusal })),
+    ),
+  )(
+    '$entry keeps initial versus later refusal at admission $refusal',
+    async ({ entry, refusal }) => {
+      const f = fixture(entry);
+      try {
+        const { TaskRetryBlockedError } = await import('./task-retry-ledger.js');
+        const admit = f.ledger.admit.bind(f.ledger);
+        let calls = 0;
+        vi.spyOn(f.ledger, 'admit').mockImplementation((...args) => {
+          if (++calls === refusal) throw new TaskRetryBlockedError('synthetic admission refusal');
+          return admit(...args);
+        });
+        vi.mocked(f.ctx.validationEngine.validate).mockResolvedValue(
+          validationInfrastructureFailureResult(),
+        );
+        await f.run();
+        expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(refusal - 1);
+        expect(f.ctx.validationRepo.getForSession(f.pod.id)).toHaveLength(refusal - 1);
+        expect(f.manager.getSession(f.pod.id).failureReason).toBe('synthetic admission refusal');
+        if (refusal === 2)
+          expect(
+            f.manager.getSession(f.pod.id).lastValidationResult?.infrastructureFailure?.retryable,
+          ).toBe(true);
+        expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s suppresses phase/progress callbacks after guidance supersedes held engine work',
+    async (entry) => {
+      const f = fixture(entry);
+      const entered = deferred<void>();
+      const release = deferred<void>();
+      let operation: ReturnType<typeof f.run> | undefined;
+      try {
+        vi.mocked(f.ctx.validationEngine.validate).mockImplementationOnce(
+          async (_config, progress, _signal, callbacks) => {
+            entered.resolve();
+            await release.promise;
+            progress?.('stale execution progress');
+            callbacks?.onPhaseStarted?.('test');
+            callbacks?.onPhaseCompleted?.('test', 'pass', { status: 'pass', duration: 1 });
+            return makeValidationResult();
+          },
+        );
+        operation = f.run();
+        await entered.promise;
+        f.ctx.deps.nudgeRepo?.queue(f.pod.id, 'New operator guidance');
+        const emit = vi.spyOn(f.ctx.eventBus, 'emit');
+        emit.mockClear();
+        release.resolve();
+        await operation;
+        expect(emit).not.toHaveBeenCalled();
+        expect(f.ctx.validationRepo.getForSession(f.pod.id)).toHaveLength(0);
+        expect(f.ledger.state(f.pod.id)).toMatchObject({
+          executedCount: 1,
+          latest: { outcome: 'pass' },
+        });
+        expect(f.ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      } finally {
+        release.resolve();
+        await Promise.allSettled(operation ? [operation] : []);
+        f.ctx.db.close();
+      }
+    },
+  );
+});

@@ -1,6 +1,6 @@
 # Slice 9: validation execution and infrastructure retry extraction
 
-Status: READY FOR REVIEW — implementation has not started.
+Status: IN PROGRESS — explicitly approved; Phase 1 complete.
 Baseline: 5cef752cadbf76390caedceec03c60217ee8283c.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -12,7 +12,7 @@ validation-execution.ts. Give engine invocation, durable retry admission and
 infrastructure retry handling one module, preserving current behavior.
 Use the established characterize → extract → qualify structure. Explicit approval
 of this plan covers all three phases together, without an intermediate manual gate.
-Implementation awaits that approval. Commit and push verified increments per the
+The user explicitly approved this concrete plan. Commit and push verified increments per the
 user's repository instructions.
 
 ## Current state analysis
@@ -177,8 +177,8 @@ runtime, selected case names and passing raw before results under ignored
 ### Success criteria
 
 Automated:
-- [ ] New public cases and selected existing execution/ownership cases pass on unchanged product.
-- [ ] Frozen public/product identities, actual runtime/SQLite and raw before results are recorded.
+- [x] New public cases and selected existing execution/ownership cases pass on unchanged product.
+- [x] Frozen public/product identities, actual runtime/SQLite and raw before results are recorded.
 
 Manual: None required for this headless compatibility boundary.
 
@@ -301,3 +301,19 @@ Revert module and manager wiring together. Main integration remains separate wor
 
 Next action: review and explicitly approve this concrete plan, then execute all
 three phases together. No implementation or test execution has started.
+
+## Phase 1 evidence
+
+30 new public cases and 39 selected existing execution/retry/ownership cases passed
+on unchanged product source: 69 passed, 913 name-filtered. Public assertions and
+all baseline package/script identities are frozen under ignored
+.autopod-data/validation-execution/. Actual Node 22.23.3 opened SQLite 3.49.2.
+Scoped Biome is clean with the approved 2 MiB processing limit; supplemental
+semantic diagnostics in the new public group are zero.
+
+Initial baseline failures are retained: eight new timer assertions included old
+mock-call history from preceding tests. The fixture now clears that history.
+A review-infrastructure helper returns Partial<ValidationResult>; the new test now
+supplies the standard complete result defaults. These fixture/type corrections
+preceded the final passing baseline and freeze; no product behavior changed.
+The selected filter also includes the existing authorized-later-admission case.
