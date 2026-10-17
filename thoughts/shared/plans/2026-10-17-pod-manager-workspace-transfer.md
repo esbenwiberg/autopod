@@ -1,6 +1,6 @@
 # Workspace transfer extraction implementation plan
 
-Status: APPROVED — Phases 1 and 2 complete; full qualification in progress.
+Status: COMPLETE — all three approved phases implemented and locally verified.
 Baseline: 944f5c46cece345dbf3786bd8ca4c57ebf6fe326.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -210,10 +210,10 @@ final diff. Commit and push validated increments under repository instructions.
 ### Success criteria
 
 Automated:
-- [ ] Affected suites and full uncached pipeline pass on frozen final product sources.
-- [ ] Source identities, actual runtime, before/after results and limits are recorded.
-- [ ] Final diff review confirms compatibility scope and no unrelated policy changes.
-- [ ] Validated commits are pushed and remote commit identity is checked.
+- [x] Affected suites and full uncached pipeline pass on frozen final product sources.
+- [x] Source identities, actual runtime, before/after results and limits are recorded.
+- [x] Final diff review confirms compatibility scope and no unrelated policy changes.
+- [x] Validated commits are pushed and remote commit identity is checked.
 
 Manual: None required. PR/integration and deployment remain separate requests.
 
@@ -243,7 +243,9 @@ record any later intentional behavior change in a separately approved scope.
 - Completed predecessor: 2026-10-17-pod-manager-workspace-preservation.md.
 - Existing real Git pattern: packages/daemon/src/worktrees/bare-push.test.ts.
 
-Next action: run the full uncached qualification pipeline and record the final result.
+All three approved phases are complete. No manual verification is required for
+this headless compatibility boundary. PR/integration and deployment remain
+separate actions; neither was performed.
 
 ## Phase 1 evidence
 
@@ -289,3 +291,48 @@ Receipts under .autopod-data/workspace-transfer/: movement.json, runtime.json,
 characterization-before.log, characterization-after.log, affected.log, build.log,
 scoped-biome.log and the frozen baseline/test copies. Full pipeline acceptance
 remains incomplete until its actual result is recorded.
+
+## Final verification: Phase 3
+
+Verdict: PROVEN for the approved local compatibility extraction. All required
+implementation and automated checks in this plan are complete.
+
+| Claim/check | Observed evidence | Result |
+|---|---|---|
+| Public behavior retained | Identical assertions: 58 passed before and after; 668 other manager tests name-filtered in each selected run | Passed |
+| Transfer material boundary | Nine direct tests execute real local shell/Git/files; two new common-directory cases plus existing staging-publication coverage | Passed |
+| Surrounding orchestration retained | All 15 affected suites: 870 passed, zero skipped | Passed |
+| Full uncached validation | Frozen install, lint, build, typecheck, tests, audit and secret scan | Passed |
+| Repository Vitest | 7,240 passed across 489 passing files; 10 existing skips, including five fully gated files | Passed with existing skips |
+| Standalone Node scripts | 35 passed, zero skipped | Passed |
+| Shell scripts | Hosted release verification, build provenance and hosted cleanup checks | Passed |
+| Source identity | All 1,949 frozen package/script files unchanged through validation | Passed |
+| Scoped lint/whitespace | Eight changed TypeScript files clean; git diff --check clean | Passed |
+| Dependency audit | No known vulnerabilities found | Passed |
+
+Command: TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh under verified
+Node 22.23.3 and pnpm 9.15.4. Turbo build/typecheck/test groups reported 7, 11
+and 15 successful tasks respectively, all with zero cached tasks. Repository
+Biome passed with 82 existing warnings; changed-file Biome had no warnings.
+
+The 10 skipped cases are the existing platform-specific Docker container case,
+the optional live-model RPI case, and Docker gates in isolated-deploy-runner,
+native-goal-recovery, sidecar-isolation, local-runtime and reference-snapshots.
+No new test was skipped. SQLite was forced on and actually opened under Node 22.
+
+The validated implementation commit is ccfb5d81. The subsequent documentation
+commit only records these results. Production helper bodies, callbacks and
+shared callers match the recorded movement receipt. The manager retains lifecycle,
+commit/deletion guards, validation reconciliation, compromised-worktree decisions
+and cleanup. No schema, API, profile, dependency or publication algorithm changed.
+
+Private proof: .autopod-data/workspace-transfer/proof.json, movement.json,
+final-source-manifest.json and full-validation.log, with actual log/source hashes.
+Both earlier failed fixture runs remain retained and are not relabeled as passing.
+The source identities match the final implementation. Final documentation commit
+and remote identity are appended to the private proof after push confirmation.
+
+Limits: controlled local container adapters establish local orchestration and
+material Git/filesystem outcomes. No live Docker/Azure, real provider, external
+Git remote, deployment, PR, main merge, process-death proof or new atomic-copy/
+cross-process serialization guarantee is claimed. No manual acceptance remains.
