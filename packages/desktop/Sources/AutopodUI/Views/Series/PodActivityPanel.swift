@@ -14,6 +14,8 @@ import SwiftUI
 ///   - Activity feed: last 10 overview-worthy events with tap-to-expand detail.
 ///   - Action buttons: Nudge / Pause when active or attention-needed.
 struct PodActivityPanel: View {
+    @Environment(\.desktopRedesign) private var redesign
+    @Environment(\.desktopRepositories) private var repositories
     let pod: Pod
     var events: [AgentEvent] = []
     var actions: PodActions
@@ -34,13 +36,30 @@ struct PodActivityPanel: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    if redesign {
+                        Text(pod.desktopTitle).font(.title3.weight(.semibold))
+                        Label(repositories[pod.id]?.label ?? "Repository unavailable", systemImage: "folder")
+                            .font(.caption).foregroundStyle(DesktopTheme.accent).textSelection(.enabled)
+                    }
                     metaRow
+                    if redesign {
+                        Button { onNavigate?() } label: { Label("Open full pod detail", systemImage: "arrow.up.right.square") }
+                            .buttonStyle(.borderedProminent).controlSize(.small)
+                            .accessibilityIdentifier("series-open-pod")
+                        if let requestTab {
+                            Button("Full validation →") { requestTab(.validation) }.font(.caption)
+                        }
+                        if !pod.dependsOnPodIds.isEmpty {
+                            Text("Depends on: " + pod.dependsOnPodIds.joined(separator: ", "))
+                                .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        }
+                    }
                     if let phase = pod.phase {
                         phaseSection(phase)
                     }
                     if let q = quality {
                         SessionQualityCard(signals: q)
-                        if let requestTab {
+                        if !redesign, let requestTab {
                             Button {
                                 requestTab(.validation)
                             } label: {
@@ -62,7 +81,7 @@ struct PodActivityPanel: View {
                 .padding(12)
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .task(id: pod.id) {
             await fetchQuality()
         }
@@ -133,6 +152,9 @@ struct PodActivityPanel: View {
     }
 
     private func phaseSection(_ phase: PhaseProgress) -> some View {
+        Group {
+            if redesign { ReportedMilestoneView(phase: phase) }
+            else {
         VStack(alignment: .leading, spacing: 6) {
             Text("Progress")
                 .font(.system(.caption2).weight(.semibold))
@@ -144,6 +166,8 @@ struct PodActivityPanel: View {
             Text(phase.description)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+            }
         }
     }
 

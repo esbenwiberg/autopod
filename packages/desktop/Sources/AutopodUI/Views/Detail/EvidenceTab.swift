@@ -29,6 +29,7 @@ public enum EvidenceSection: String, CaseIterable {
 /// Evidence tab — proof screenshots, generated artifacts, and rendered markdown
 /// outputs in one place so the top-level detail nav stays calm.
 public struct EvidenceTab: View {
+  @Environment(\.desktopRedesign) private var redesign
   public let pod: Pod
   public var loadFiles: ((String) async throws -> [SessionFileEntry])?
   public var loadArtifacts: ((String) async throws -> [SessionFileEntry])?
@@ -93,12 +94,23 @@ public struct EvidenceTab: View {
   }
 
   public var body: some View {
-    HSplitView {
-      sectionRail
-        .frame(minWidth: 150, idealWidth: 170, maxWidth: 210)
-
-      content
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    Group {
+      if redesign {
+        VStack(spacing: 0) {
+          DesktopSectionPicker(title: "Evidence", items: visibleSections, selection: $selectedSection, label: { section in
+            if let count = sectionBadgeCount(section) { return "\(section.label) · \(count)" }
+            return section.label
+          })
+          Divider()
+          content.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(DesktopTheme.surface)
+      } else {
+        HSplitView {
+          sectionRail.frame(minWidth: 150, idealWidth: 170, maxWidth: 210)
+          content.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+      }
     }
     .overlay {
       if isLightboxPresented, !lightboxRefs.isEmpty {
@@ -158,7 +170,7 @@ public struct EvidenceTab: View {
       Spacer(minLength: 0)
     }
     .padding(.horizontal, 8)
-    .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+    .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)).opacity(0.55))
   }
 
   @ViewBuilder
@@ -336,7 +348,7 @@ public struct EvidenceTab: View {
           }
         }
       }
-      .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+      .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)).opacity(0.45))
       .clipShape(RoundedRectangle(cornerRadius: 8))
       .overlay(
         RoundedRectangle(cornerRadius: 8)
@@ -458,7 +470,7 @@ public struct EvidenceTab: View {
           }
         }
       }
-      .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+      .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)).opacity(0.45))
       .clipShape(RoundedRectangle(cornerRadius: 8))
       .overlay(
         RoundedRectangle(cornerRadius: 8)

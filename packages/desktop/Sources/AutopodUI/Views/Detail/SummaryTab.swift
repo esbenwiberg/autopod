@@ -46,16 +46,19 @@ struct WorkTab: View {
     }
 
     var body: some View {
-        HSplitView {
-            sectionRail
-                .frame(minWidth: 150, idealWidth: 170, maxWidth: 220)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    selectedSectionContent
+        Group {
+            if redesign {
+                VStack(spacing: 0) {
+                    DesktopSectionPicker(title: "Work", items: WorkSection.allCases, selection: $selectedSection, label: { $0.label })
+                    Divider()
+                    workContent
                 }
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(DesktopTheme.surface)
+            } else {
+                HSplitView {
+                    sectionRail.frame(minWidth: 150, idealWidth: 170, maxWidth: 220)
+                    workContent
+                }
             }
         }
         .task(id: pod.id) {
@@ -67,6 +70,13 @@ struct WorkTab: View {
         }
         .onChange(of: pod.id) { _, _ in
             selectedSection = defaultSection
+        }
+    }
+
+    private var workContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) { selectedSectionContent }
+                .padding(20).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -120,7 +130,7 @@ struct WorkTab: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 8)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+        .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)).opacity(0.55))
     }
 
     @ViewBuilder
@@ -279,7 +289,7 @@ struct WorkTab: View {
             }
         }
         .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -379,7 +389,7 @@ struct WorkTab: View {
             }
         }
         .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -416,7 +426,7 @@ struct WorkTab: View {
             }
         }
         .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -441,7 +451,7 @@ struct WorkTab: View {
             }
         }
         .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 

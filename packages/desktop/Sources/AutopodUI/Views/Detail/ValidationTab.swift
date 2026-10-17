@@ -174,6 +174,7 @@ public func validationShouldDisplayLiveProgress(
 ///   2. `checks`   (full result, from REST refresh after completion)
 ///   3. Neither → empty state with all chips in "not started"
 public struct ValidationTab: View {
+  @Environment(\.desktopRedesign) private var redesign
   public let pod: Pod
   public let checks: ValidationChecks?
   public var actions: PodActions
@@ -447,7 +448,11 @@ public struct ValidationTab: View {
   /// The phase to show in the detail panel — user pick, then auto-running, else nil.
   private var displayPhase: ValidationPhase? {
     if let selectedPhase { return selectedPhase }
-    return progress?.activePhase
+    if let active = progress?.activePhase { return active }
+    if redesign, displayedChecks != nil || progress != nil {
+      return displayedPhases.first { phaseStatus($0) == .failed } ?? .review
+    }
+    return nil
   }
 
   /// Combined ordered screenshot set for lightbox navigation: smoke -> review -> advisory.
@@ -616,6 +621,33 @@ public struct ValidationTab: View {
   // MARK: - Body
 
   public var body: some View {
+    Group {
+      if redesign {
+        GeometryReader { geometry in
+          VStack(spacing: 0) {
+            HStack {
+              Text("Validation").font(.title3.weight(.semibold))
+              Spacer(minLength: 12)
+              headerView.fixedSize(horizontal: true, vertical: false)
+            }.padding(.horizontal, 20).padding(.vertical, 14)
+            Divider()
+            ScrollView {
+              VStack(alignment: .leading, spacing: 20) {
+                validationSummaryPanel
+                if geometry.size.width >= 620 {
+                  HStack(alignment: .top, spacing: 22) {
+                    desktopPhaseNavigation(vertical: true).frame(width: 150)
+                    phaseDetailPanel.frame(maxWidth: .infinity, alignment: .leading)
+                  }
+                } else {
+                  desktopPhaseNavigation(vertical: false)
+                  phaseDetailPanel.frame(maxWidth: .infinity, alignment: .leading)
+                }
+              }.padding(20)
+            }
+          }.background(DesktopTheme.surface)
+        }
+      } else {
     VStack(alignment: .leading, spacing: 0) {
       headerView
         .padding(.horizontal, 16)
@@ -635,6 +667,8 @@ public struct ValidationTab: View {
           phaseDetailPanel
         }
         .padding(20)
+      }
+    }
       }
     }
     .task(id: pod.id) {
@@ -964,6 +998,37 @@ public struct ValidationTab: View {
     }
   }
 
+  @ViewBuilder
+  private func desktopPhaseNavigation(vertical: Bool) -> some View {
+    if vertical {
+      VStack(spacing: 4) { desktopPhaseButtons }
+    } else {
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 4) { desktopPhaseButtons }
+      }
+    }
+  }
+
+  private var desktopPhaseButtons: some View {
+    ForEach(displayedPhases, id: \.self) { phase in
+      let result = phaseState(phase)
+      Button { selectedPhase = selectedPhase == phase ? nil : phase } label: {
+        HStack(spacing: 8) {
+          Text(phase.displayName).font(.caption).fixedSize()
+          Spacer(minLength: 8)
+          Image(systemName: result.status.icon).foregroundStyle(result.status.color).font(.caption2)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 10)
+        .foregroundStyle(displayPhase == phase ? DesktopTheme.accent : .secondary)
+        .background(displayPhase == phase ? DesktopTheme.selection : .clear, in: RoundedRectangle(cornerRadius: 6))
+      }
+      .buttonStyle(.plain)
+      .help(chipSubLabel(phase) ?? phase.displayName)
+      .accessibilityIdentifier("validation-phase-\(phase.rawValue)")
+      .accessibilityAddTraits(displayPhase == phase ? .isSelected : [])
+    }
+  }
+
   // MARK: - Detail panel
 
   @ViewBuilder
@@ -1149,7 +1214,7 @@ public struct ValidationTab: View {
         .padding(.top, 40)
       } else {
         // Prompt to click a chip
-        Text("Select a phase above to see details")
+        Text("Select a validation phase to see details")
           .font(.caption)
           .foregroundStyle(.tertiary)
           .frame(maxWidth: .infinity)
@@ -1315,7 +1380,7 @@ public struct ValidationTab: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
         .clipShape(RoundedRectangle(cornerRadius: 8))
       }
     }
@@ -1395,7 +1460,7 @@ public struct ValidationTab: View {
     }
     .padding(10)
     .background(page.status == "pass"
-                ? Color(nsColor: .controlBackgroundColor)
+                ? (redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
                 : Color.red.opacity(0.05))
     .clipShape(RoundedRectangle(cornerRadius: 8))
   }
@@ -1471,7 +1536,7 @@ public struct ValidationTab: View {
               }
               .padding(10)
               .frame(maxWidth: .infinity, alignment: .leading)
-              .background(Color(nsColor: .controlBackgroundColor))
+              .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
               .clipShape(RoundedRectangle(cornerRadius: 8))
             }
           }
@@ -1533,7 +1598,7 @@ public struct ValidationTab: View {
     }
     .padding(10)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(Color(nsColor: .controlBackgroundColor))
+    .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
     .clipShape(RoundedRectangle(cornerRadius: 8))
     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.blue.opacity(0.12), lineWidth: 1))
   }
@@ -1668,14 +1733,14 @@ public struct ValidationTab: View {
           .padding(.horizontal, 10)
           .padding(.vertical, 8)
           .frame(maxWidth: .infinity, alignment: .leading)
-          .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
+          .background((redesign ? DesktopTheme.canvas : Color(nsColor: .windowBackgroundColor)).opacity(0.6))
           .clipShape(RoundedRectangle(cornerRadius: 6))
         }
       }
       .padding(12)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(Color(nsColor: .controlBackgroundColor))
+    .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
     .clipShape(RoundedRectangle(cornerRadius: 8))
     .overlay(RoundedRectangle(cornerRadius: 8).stroke(status.color.opacity(0.15), lineWidth: 1))
   }
@@ -1812,7 +1877,7 @@ public struct ValidationTab: View {
       }
       .padding(10)
     }
-    .background(Color(nsColor: .controlBackgroundColor))
+    .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
     .clipShape(RoundedRectangle(cornerRadius: 8))
     .overlay(RoundedRectangle(cornerRadius: 8).stroke(status.color.opacity(0.15), lineWidth: 1))
   }
@@ -1852,7 +1917,7 @@ public struct ValidationTab: View {
       .padding(.horizontal, 8)
       .padding(.vertical, 6)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background(Color(nsColor: .windowBackgroundColor).opacity(0.6))
+      .background((redesign ? DesktopTheme.canvas : Color(nsColor: .windowBackgroundColor)).opacity(0.6))
       .clipShape(RoundedRectangle(cornerRadius: 4))
     if let attachments = check.attachments, !attachments.isEmpty {
       ForEach(Array(attachments.enumerated()), id: \.offset) { _, attachment in
@@ -2144,7 +2209,7 @@ public struct ValidationTab: View {
       }
       .padding(10)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background(Color(nsColor: .controlBackgroundColor))
+      .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
       .clipShape(RoundedRectangle(cornerRadius: 8))
 
       if !advisory.reasoning.isEmpty {
@@ -2265,7 +2330,7 @@ public struct ValidationTab: View {
     }
     .padding(10)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(Color(nsColor: .controlBackgroundColor))
+    .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
     .clipShape(RoundedRectangle(cornerRadius: 8))
     .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.14), lineWidth: 1))
   }
@@ -2545,7 +2610,7 @@ public struct ValidationTab: View {
       }
     }
     .padding(12)
-    .background(Color(nsColor: .controlBackgroundColor))
+    .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
     .clipShape(RoundedRectangle(cornerRadius: 8))
     .overlay(RoundedRectangle(cornerRadius: 8).stroke(tint.opacity(0.18), lineWidth: 1))
     .opacity(isDismissed ? 0.65 : 1)
@@ -2661,7 +2726,7 @@ public struct ValidationTab: View {
     }
     .padding(10)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(Color(nsColor: .controlBackgroundColor))
+    .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
     .clipShape(RoundedRectangle(cornerRadius: 8))
   }
 
@@ -2772,6 +2837,7 @@ private struct ReviewFindingItem: Identifiable {
 // MARK: - PhaseChip
 
 private struct PhaseChip: View {
+    @Environment(\.desktopRedesign) private var redesign
   let phase: ValidationPhase
   let state: ValidationPhaseState
   let isSelected: Bool
@@ -2810,7 +2876,7 @@ private struct PhaseChip: View {
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
       .frame(minWidth: 76)
-      .background(isSelected ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
+      .background(isSelected ? Color.accentColor.opacity(0.12) : (redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
       .overlay(
         RoundedRectangle(cornerRadius: 8)
           .stroke(isSelected ? Color.accentColor.opacity(0.6) : Color.clear, lineWidth: 1.5)
@@ -2824,6 +2890,7 @@ private struct PhaseChip: View {
 // MARK: - CollapsibleSection
 
 private struct CollapsibleSection<Content: View>: View {
+    @Environment(\.desktopRedesign) private var redesign
   let title: String
   let icon: String
   var initiallyExpanded: Bool = false
@@ -2862,7 +2929,7 @@ private struct CollapsibleSection<Content: View>: View {
         .padding(12)
       }
     }
-    .background(Color(nsColor: .controlBackgroundColor))
+    .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
     .clipShape(RoundedRectangle(cornerRadius: 8))
   }
 }

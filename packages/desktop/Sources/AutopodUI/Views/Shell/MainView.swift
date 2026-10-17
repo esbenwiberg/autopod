@@ -322,6 +322,7 @@ public struct MainView: View {
     @State private var showCreateSheet = false
     @State private var showCreateSeriesSheet = false
     @State private var showCommandPalette = false
+    @State private var selectedDesktopSeriesID: String?
     @State private var pipelineExpanded = true
     @State private var spawnFollowUpInitiator: Pod?
     /// When set, the Create Series sheet opens pre-filled with this pod's
@@ -336,6 +337,29 @@ public struct MainView: View {
     @State private var selectedAnalyticsCard: AnalyticsCardKind?
     @State private var selectedDetailTab: DetailTab?
     @State private var requestedDetailTab: DetailTab?
+
+    private var isDesktopSeriesWorkspace: Bool {
+        guard redesign else { return false }
+        if sidebarSelection == .seriesAll { return true }
+        if case .series = sidebarSelection { return true }
+        return false
+    }
+
+    private var selectedDesktopSeries: DesktopSeriesGroup? {
+        let groups = DesktopSeriesGroup.groups(pods, includeCompleted: true)
+        let id: String?
+        if case .series(let seriesID) = sidebarSelection { id = seriesID }
+        else { id = selectedDesktopSeriesID }
+        return groups.first { $0.id == id }
+    }
+
+    private func openSeriesPod(_ id: String, tab: DetailTab) {
+        repositoryID = nil
+        sidebarSelection = .all
+        selectedSessionId = id
+        selectedDetailTab = tab
+        requestedDetailTab = tab
+    }
 
     private var selectedSession: Pod? {
         pods.first { $0.id == selectedSessionId }
@@ -626,6 +650,8 @@ public struct MainView: View {
             } else if sidebarSelection == .featureOverview {
                 FeatureOverviewView(selectedFeature: $selectedFeature)
                     .frame(minWidth: 600)
+            } else if isDesktopSeriesWorkspace {
+                DesktopSeriesNavigation(pods: pods, selectedID: $selectedDesktopSeriesID)
             } else if sidebarSelection == .seriesAll {
                 SeriesListView(
                     pods: pods,
@@ -646,7 +672,7 @@ public struct MainView: View {
                 }
                 .frame(minWidth: redesign ? 420 : 500)
             }
-            }.navigationSplitViewColumnWidth(min: 420, ideal: 820, max: 1500)
+            }.navigationSplitViewColumnWidth(min: isDesktopSeriesWorkspace ? 260 : 420, ideal: isDesktopSeriesWorkspace ? 300 : 820, max: isDesktopSeriesWorkspace ? 400 : 1500)
         } detail: {
             VStack(spacing: 0) {
                 if sidebarSelection == .village && villageShowsDetails {
@@ -759,6 +785,14 @@ public struct MainView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
+                } else if isDesktopSeriesWorkspace {
+                    if let group = selectedDesktopSeries {
+                        DesktopSeriesWorkspace(group: group, qualityScores: qualityScores, actions: wiredActions,
+                            eventsForPod: eventsForPod, loadEventsForPod: loadEventsForPod,
+                            loadQuality: loadQuality, openPod: openSeriesPod)
+                    } else {
+                        ContentUnavailableView("Select a series", systemImage: "rectangle.3.group")
+                    }
                 } else if let pod = selectedSession {
                     DetailPanelView(
                         pod: pod,
@@ -801,7 +835,7 @@ public struct MainView: View {
                     emptyDetail
                 }
             }
-            .navigationSplitViewColumnWidth(min: 350, ideal: 720, max: 1400)
+            .navigationSplitViewColumnWidth(min: isDesktopSeriesWorkspace ? 560 : 350, ideal: isDesktopSeriesWorkspace ? 1100 : 720, max: isDesktopSeriesWorkspace ? 1800 : 1400)
         }
         .navigationSplitViewStyle(.balanced)
         .environment(\.desktopRedesign, redesign)
@@ -810,8 +844,18 @@ public struct MainView: View {
         .environment(\.desktopPodSelection, { selectedSessionId = $0 })
         .modifier(DesktopAppearanceModifier())
         .tint(redesign ? DesktopTheme.accent : .accentColor)
+        .onChange(of: sidebarSelection) { _, selection in
+            if redesign, case .series(let id) = selection {
+                selectedDesktopSeriesID = id
+                sidebarSelection = .seriesAll
+            }
+        }
         .onChange(of: redesign) { _, enabled in
             if !enabled { repositoryID = nil }
+            else if case .series(let id) = sidebarSelection {
+                selectedDesktopSeriesID = id
+                sidebarSelection = .seriesAll
+            }
         }
         .onChange(of: repositoryID) { _, _ in
             if let selectedSessionId, !filteredSessions.contains(where: { $0.id == selectedSessionId }) {

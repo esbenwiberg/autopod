@@ -12,6 +12,7 @@ public enum DesktopAppearance: String, CaseIterable, Identifiable {
 }
 
 extension EnvironmentValues {
+    @Entry var desktopSeriesOpenPod: ((String, DetailTab) -> Void)? = nil
     @Entry var desktopRedesign = false
     @Entry var desktopRepositories: [String: DesktopRepository] = [:]
     @Entry var desktopPodSelection: ((String) -> Void)? = nil

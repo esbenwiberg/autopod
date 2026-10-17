@@ -19,7 +19,7 @@ func reviewRequiredPrimaryAction(for checks: ValidationChecks?) -> ReviewRequire
 }
 
 /// Detail panel — shown when a pod is selected. Tabbed around operator questions:
-/// Overview, Work, Validation, Evidence, Diff, Logs, Terminal, and Series.
+/// Overview, Work, Validation, Readiness, Evidence, Diff, Logs, and Terminal.
 public struct DetailPanelView: View {
     @Environment(\.desktopRedesign) private var redesign
     @Environment(\.desktopRepositories) private var repositories
@@ -147,7 +147,7 @@ public struct DetailPanelView: View {
     private var pendingControl: PendingPodControl? { actions.pendingControl(pod.id) }
 
     private var isTerminalAvailable: Bool { pod.pod.agentMode == .interactive }
-    private var activeTab: DetailTab { selectedTab ?? Self.defaultTab(for: pod) }
+    private var activeTab: DetailTab { selectedTab == .series ? Self.defaultTab(for: pod) : selectedTab ?? Self.defaultTab(for: pod) }
     private var isEvidenceAvailable: Bool {
         redesign || pod.hasWorktree
         || pod.pod.output == .artifact
@@ -189,7 +189,7 @@ public struct DetailPanelView: View {
         terminalAvailable: Bool
     ) -> Bool {
         switch tab {
-        case .series: return pod.seriesId != nil
+        case .series: return false
         case .evidence: return evidenceAvailable
         case .terminal: return terminalAvailable
         default: return true
@@ -373,24 +373,7 @@ public struct DetailPanelView: View {
                     requestedSection: $requestedEvidenceSection
                 )
                 case .terminal:   EmptyView()
-                case .series:
-                    SeriesPipelineView(
-                        pods: seriesPods,
-                        qualityScores: qualityScores,
-                        selectedPodId: pod.id,
-                        onSelectPod: { onSelectPod?($0) },
-                        panelEnabled: true,
-                        actions: actions,
-                        eventsForPod: { id in
-                            // For the currently-focused pod, prefer the live events array
-                            // (it's already being streamed). For siblings, fall back to the
-                            // store lookup.
-                            id == pod.id ? events : (eventsForPod?(id) ?? [])
-                        },
-                        loadEventsForPod: loadEventsForPod,
-                        loadQuality: loadQuality,
-                        requestTab: { tab in requestedTab = tab }
-                    )
+                case .series: EmptyView() // Retained as an input compatibility case; never selectable.
                 }
 
                 if isTerminalAvailable {
@@ -1775,7 +1758,7 @@ public struct DetailPanelView: View {
     private var visibleTabs: [DetailTab] {
         DetailTab.allCases.filter { tab in
             switch tab {
-            case .series: return pod.seriesId != nil
+            case .series: return false
             case .evidence: return isEvidenceAvailable
             default: return true
             }

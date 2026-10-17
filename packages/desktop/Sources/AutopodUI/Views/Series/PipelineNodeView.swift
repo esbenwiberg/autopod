@@ -3,6 +3,8 @@ import SwiftUI
 /// Compact pod node for the series pipeline DAG. ~200×96 to match the
 /// `PipelineDAGLayout.Metrics.default`.
 public struct PipelineNodeView: View {
+    @Environment(\.desktopRedesign) private var redesign
+    @Environment(\.desktopRepositories) private var repositories
     public let pod: Pod
     public let isSelected: Bool
     public let onTap: () -> Void
@@ -43,18 +45,29 @@ public struct PipelineNodeView: View {
 
     public var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: redesign ? 8 : 4) {
+                if redesign {
+                    HStack {
+                        Text(pod.status.label).font(.caption2.weight(.semibold)).foregroundStyle(pod.status.color)
+                        Spacer()
+                        Text(pod.desktopMilestoneToken ?? "No report").font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
+                    }
+                }
                 HStack(spacing: 6) {
                     StatusDot(status: pod.status)
                     Text(title)
                         .font(.system(.subheadline).weight(.semibold))
-                        .lineLimit(1)
+                        .lineLimit(redesign ? 2 : 1)
                     Spacer()
                     Text(pod.duration)
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }
-                if let excerpt = briefExcerpt {
+                if redesign {
+                    Label(repositories[pod.id]?.label ?? "Repository unavailable", systemImage: "folder")
+                        .font(.caption2).foregroundStyle(DesktopTheme.accent).lineLimit(1)
+                }
+                if !redesign, let excerpt = briefExcerpt {
                     Text(excerpt)
                         .font(.system(.caption2))
                         .foregroundStyle(.secondary)
@@ -105,7 +118,7 @@ public struct PipelineNodeView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .fill(redesign ? DesktopTheme.surface : Color(nsColor: .controlBackgroundColor))
                     .shadow(color: .black.opacity(isSelected ? 0.15 : 0.05),
                             radius: isSelected ? 6 : 2, y: 1)
             )
@@ -113,7 +126,7 @@ public struct PipelineNodeView: View {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(
                         isSelected
-                            ? Color.accentColor
+                            ? (redesign ? DesktopTheme.accent : Color.accentColor)
                             : isHovered
                                 ? Color.accentColor.opacity(0.4)
                                 : pod.status.color.opacity(0.25),
