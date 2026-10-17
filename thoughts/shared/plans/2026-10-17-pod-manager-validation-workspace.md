@@ -1,6 +1,6 @@
 # Slice 3: validation workspace extraction
 
-Status: APPROVED — Phases 1 and 2 complete; full qualification in progress.
+Status: COMPLETE — all three approved phases implemented and locally verified.
 Baseline: 1a2dd0c8a82db8e16f36c0849e91945e101e75e1.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -229,11 +229,11 @@ failed gate as passing or create a deployment/PR as a side effect.
 ### Success criteria
 
 Automated:
-- [ ] Affected suites pass with SQLite explicitly included.
-- [ ] Full uncached install/lint/build/typecheck/test/audit/secret pipeline passes.
-- [ ] Source identities, before/after results, runtime and skips are recorded.
-- [ ] Diff review confirms compatibility scope and unchanged primitives/caller policy.
-- [ ] Validated commits are pushed and remote identity confirmed.
+- [x] Affected suites pass with SQLite explicitly included.
+- [x] Full uncached install/lint/build/typecheck/test/audit/secret pipeline passes.
+- [x] Source identities, before/after results, runtime and skips are recorded.
+- [x] Diff review confirms compatibility scope and unchanged primitives/caller policy.
+- [x] Validated commits are pushed and remote identity confirmed.
 
 Manual: None required. Approval authorizes all three phases together with no
 intermediate human gate; final acceptance is the recorded local compatibility proof.
@@ -264,7 +264,9 @@ Integration with concurrent main-branch work remains a separate integration step
 - Predecessor: 2026-10-17-pod-manager-workspace-transfer.md (complete).
 - Existing primitives: worktrees/graft-reconcile.ts and worktrees/sandbox-reconcile.ts.
 
-Next action: run full uncached qualification and record the final result.
+All three approved phases are complete. No manual verification is outstanding
+for this headless compatibility extraction. PR/integration and deployment remain
+separate requested actions; neither was performed.
 
 ## Phase 1 evidence
 
@@ -310,3 +312,51 @@ Node 22.23.3 opens SQLite and actual pnpm is 9.15.4. Receipts are under
 .autopod-data/validation-workspace/, including before/after characterization,
 material-boundary.log, affected.log, build.log and scoped-biome.log. Full pipeline
 acceptance is still pending its observed result.
+
+## Final verification: Phase 3
+
+Verdict: PROVEN for the approved local compatibility extraction. All required
+implementation and automated checks are complete; no manual acceptance remains.
+
+| Claim/check | Observed evidence | Result |
+|---|---|---|
+| Existing caller behavior | Identical test file: 94 selected cases pass before and after; 670 other cases name-filtered in each selected run | Passed |
+| Material workspace boundary | Ten new direct cases plus six existing primitive cases use actual Git, isolated object stores, bundle bytes and filesystem outcomes | Passed |
+| Surrounding orchestration | 18 affected suites: 924 passed, zero skipped | Passed |
+| Full uncached pipeline | Frozen install, lint, build, typecheck, tests, audit and secret scanning | Passed |
+| Repository Vitest | 7,288 passed across 490 passing files; 10 existing skipped cases, including five fully gated files | Passed with existing skips |
+| Standalone Node scripts | 35 passed, zero skipped | Passed |
+| Shell verification | Hosted release verification, build provenance and hosted cleanup script checks | Passed |
+| Source identity | All 1,951 frozen package/script files unchanged through validation | Passed |
+| Scoped lint and whitespace | Four changed TypeScript files clean; git diff --check clean | Passed |
+| Dependency audit | No known vulnerabilities found | Passed |
+
+Actual command: TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh using the
+existing ignored runtime launcher. Node 22.23.3 opened SQLite; pnpm reports 9.15.4.
+Turbo build/typecheck/test groups had 7, 11 and 15 successful tasks respectively,
+with zero cached tasks. Repository Biome passed with 82 existing warnings; scoped
+Biome had no warnings. Frozen installation passed without fallback.
+
+The 10 existing skipped cases are the platform-specific Docker container case,
+optional live-model RPI case, and Docker gates in isolated-deploy-runner,
+native-goal-recovery, sidecar-isolation, local-runtime and reference-snapshots.
+No new case was skipped. SQLite-backed tests were explicitly included.
+
+The validated implementation commit is 69a9422e. The following documentation-only
+commit records these results without altering tested product sources. Movement
+comparison confirms eight exact helper bodies, the moved constructor and unchanged
+remaining manager code after only planned wiring/import/formatting adaptation.
+The same constructor is used by the module and both manager catches. Existing
+Git primitives, checkpoint routing, lifecycle, validation execution, live recovery
+and forced-resume policy retain their original implementations and callers.
+
+Private proof: .autopod-data/validation-workspace/proof.json, movement.json,
+final-source-manifest.json, before/after source/test copies and actual command
+logs, including full-validation.log. The initial failed assertion run is retained
+and hashed, not relabeled as a passing run. Final commit/remote identity and clean
+worktree confirmation are appended to private proof after push confirmation.
+
+Limits: a controlled local ContainerManager adapter proves the local contract and
+real Git/filesystem outcomes. This is not live Docker/Azure or real-provider
+qualification, deployment, PR or main integration. No new crash rollback, atomicity
+or cross-process serialization guarantee is claimed.
