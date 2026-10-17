@@ -1,6 +1,6 @@
 # Slice 10: post-validation evidence collection extraction
 
-Status: APPROVED — implementation in progress.
+Status: COMPLETE — all three approved phases implemented and locally verified.
 Date: 2026-10-18.
 Baseline: fa4f8abab07ee54147ec1b01d529ff3b745ce43a.
 Branch: codex/pod-manager-workspace.
@@ -67,8 +67,9 @@ performs no I/O or collaborator calls. Factory returns:
       podId: string, pod: Pod, result: ValidationResult, validationSyncOk: boolean,
     ): Promise<boolean>
 
-Move the exact block as the operation body, with the incoming flag as a mutable
-parameter and a final return validationSyncOk. Keep podId distinct from pod.id:
+Move the exact block as the operation body, initializing local validationSyncOk
+from the fourth argument and adding a final return validationSyncOk (see the
+lint-required wrapper detail below). Keep podId distinct from pod.id:
 existing activity/log/sync calls use podId while collector/resolver calls use pod.id.
 No body receiver substitutions or behavioral rewrites are needed.
 
@@ -229,9 +230,9 @@ commit/push verified increments, then verify clean worktree and remote identity.
 
 Automated:
 - [x] All 52 affected suites pass with SQLite and no new skips.
-- [ ] Full uncached pipeline passes under the documented qualification environment.
-- [ ] Scoped lint/whitespace, new-test semantic diagnostics, hashes and movement review pass.
-- [ ] Final plan/evidence records actual results, limitations and pushed identities.
+- [x] Full uncached pipeline passes under the documented qualification environment.
+- [x] Scoped lint/whitespace, new-test semantic diagnostics, hashes and movement review pass.
+- [x] Final plan/evidence records actual results, limitations and pushed identities.
 
 Manual: None required. Approval covers all three phases together.
 
@@ -255,7 +256,8 @@ Sources: pod-manager.ts:13602–13723, :13724 and :14187; validation/screenshot-
 pods/screenshot-store.ts; pods/workspace-preservation.ts and workspace-transfer.ts.
 
 The user explicitly approved this plan and all three phases together.
-Next action: qualify the frozen implementation with the full uncached pipeline.
+All three approved phases are complete. No manual acceptance remains.
+Integration, PR creation and deployment remain separate work.
 
 ## Phase 1 evidence
 
@@ -309,3 +311,55 @@ assertions passed on their first run and were not weakened. The import-format
 check and a private movement verifier initially parsing a method suffix as a whole
 TypeScript source were corrected; final lint/types/movement pass. Raw initial
 diagnostics are retained alongside final results.
+
+## Phase 3: final qualification
+
+Verdict: PROVEN for the approved local compatibility extraction under the documented
+qualification environment. All phases are complete; no manual acceptance remains.
+
+| Claim/check | Observed final evidence | Result |
+|---|---|---|
+| Public compatibility | 18 selected before/after checks, 16 new; assertions byte-identical | Passed |
+| Evidence preservation and contracts | 62 direct cases; real files/collectors/store, reopened byte/ref roundtrips and controlled failures | Passed |
+| Surrounding orchestration | 52 affected suites; 1,864 passed; zero skipped | Passed |
+| Full uncached pipeline | Frozen install, lint, build, supported declaration typecheck, tests, audit and secret scan | Passed under documented environment |
+| Vitest | 7,770 passed across 497 passing files; 10 existing gated skips | Passed with existing skips |
+| Standalone Node scripts | 35 passed; zero failed/skipped | Passed |
+| Source integrity | 1,965 package/script hashes plus 6 root control hashes unchanged through qualification | Passed |
+| Exact movement and scope | Original moved body; one delegation; two product/two test paths | Passed |
+| Scoped quality | Biome/whitespace clean; zero semantic diagnostics in both new test boundaries | Passed |
+
+Tested implementation: 8cafbc0ae387b4d4756753aa9d52f63293a55eb9. The following documentation-only commit
+records qualification without changing qualified source/test bytes. Final remote
+identity and clean-worktree confirmation are recorded privately after push.
+
+Actual full command using the existing task-local npx launcher:
+
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+Actual Node 22.23.3 opens SQLite 3.49.2; pnpm 9.15.4. Build/typecheck/test groups
+ran uncached. Frozen install succeeded without fallback or lockfile mutation.
+Root lint retained 82 existing warnings while processing the large manager test
+with only the approved --files-max-size=2097152 addition. Scoped files are clean;
+no rule/file selection was disabled and no repository/global configuration changed.
+The inherited maintenance.auto=false is process-only. The default-environment Git
+maintenance metadata-scan race and audit-clock flake remain outside this extraction.
+The 10 existing gated skips remain; no new case was skipped. No source/test change
+was made during final qualification. Raw failures, corrections and limits are retained.
+
+The manager is 17,399 lines, 112 fewer. validation-evidence.ts is 179 lines. Parsed
+TypeScript comparison verifies the exact moved body and complete remaining manager;
+manual revalidation and all following code are byte-identical. The only wrapper
+adjustment after initial extraction was the local flag required by noParameterAssign.
+All 1,961 other baseline package/script files are unchanged.
+
+Evidence is retained under ignored .autopod-data/validation-evidence/: proof.json,
+movement.json, baseline/frozen/root-control manifests, frozen public assertions,
+before-source and expected-recipe copies, actual runtime and qualification command,
+before/after/build/affected/full/scoped-Biome/type logs and exits, initial diagnostics,
+and implementation/final remote identities.
+
+Real local screenshot bytes and reference mutations substantiate preservation and
+collection. Migrated SQLite manager tests substantiate result/history/deletion-guard
+wiring. Controlled sync/checkpoint/provider seams do not establish live Docker/Azure
+availability or stronger fencing, atomicity, crash recovery or cross-process safety.
