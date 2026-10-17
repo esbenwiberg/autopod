@@ -11,9 +11,15 @@ public enum DesktopAppearance: String, CaseIterable, Identifiable {
     }
 }
 
+public enum DesktopSettingsRoute: Hashable, CaseIterable {
+    case appearance, connections, providerAccounts, podsitter, notifications, logs, about
+}
+
 extension EnvironmentValues {
+    @Entry var desktopOpenProviderAccounts: (() -> Void)? = nil
+    @Entry public var desktopOpenConfiguration: ((ConfigurationKind) -> Void)? = nil
     @Entry var desktopSeriesOpenPod: ((String, DetailTab) -> Void)? = nil
-    @Entry var desktopRedesign = false
+    @Entry public var desktopRedesign = false
     @Entry var desktopRepositories: [String: DesktopRepository] = [:]
     @Entry var desktopPodSelection: ((String) -> Void)? = nil
     @Entry var desktopRepositoryFilter: ((String) -> Void)? = nil
@@ -59,14 +65,72 @@ public struct DesktopAppearanceModifier: ViewModifier {
 
 public struct DesktopAppearanceSettings: View {
     @AppStorage("autopod.desktop.redesign") private var redesign = DesktopIdentity.isPreview
+    @AppStorage("autopod.desktop.appearance") private var appearance = DesktopAppearance.system
     public init() {}
     public var body: some View {
-        Form {
-            Section("Appearance") { DesktopAppearancePicker() }
-            Section("Desktop redesign") {
-                Toggle("New desktop interface", isOn: $redesign)
-                Text("Compare the new shell, fleet, and overview with the current interface.").font(.caption).foregroundStyle(.secondary)
-            }
-        }.formStyle(.grouped)
+        if redesign {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    Text("THIS MAC").font(.system(size: 9, weight: .medium)).tracking(1.2).foregroundStyle(
+                        .secondary)
+                    Text("Appearance").font(.title2.weight(.semibold))
+                    Text("Choose how Autopod looks.").font(.callout).foregroundStyle(.secondary)
+                    DesktopPanel(title: "Color scheme") {
+                        Text("Follow the system appearance or choose a fixed theme.").font(.callout)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 14) {
+                            ForEach(DesktopAppearance.allCases) { choice in
+                                Button {
+                                    appearance = choice
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        HStack(spacing: 6) {
+                                            RoundedRectangle(cornerRadius: 3).fill(DesktopTheme.selection)
+                                                .frame(width: 22)
+                                            VStack(spacing: 5) {
+                                                RoundedRectangle(cornerRadius: 3).fill(DesktopTheme.line)
+                                                    .frame(height: 15)
+                                                Spacer(minLength: 0)
+                                            }
+                                        }.padding(8).frame(height: 64)
+                                            .background(
+                                                choice == .dark
+                                                    ? Color(red: 0.10, green: 0.14, blue: 0.11)
+                                                    : choice == .light ? .white : DesktopTheme.surface,
+                                                in: RoundedRectangle(cornerRadius: 5))
+                                        Text(choice.label).font(.caption)
+                                    }.padding(12).frame(width: 135)
+                                        .background(
+                                            appearance == choice
+                                                ? DesktopTheme.selection : DesktopTheme.surface,
+                                            in: RoundedRectangle(cornerRadius: 7)
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 7).stroke(
+                                                appearance == choice ? DesktopTheme.accent : DesktopTheme.line
+                                            ))
+                                }.buttonStyle(.plain).accessibilityLabel(choice.label)
+                                    .accessibilityAddTraits(appearance == choice ? .isSelected : [])
+                            }
+                        }
+                    }
+                    DesktopPanel(title: "Desktop redesign") {
+                        Toggle("New desktop interface", isOn: $redesign)
+                        Text("Compare the redesigned workspace with the current interface.").font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }.frame(maxWidth: 1000, alignment: .leading).padding(28)
+            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(DesktopTheme.canvas)
+        } else {
+            Form {
+                Section("Appearance") { DesktopAppearancePicker() }
+                Section("Desktop redesign") {
+                    Toggle("New desktop interface", isOn: $redesign)
+                    Text("Compare the redesigned workspace with the current interface.").font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }.formStyle(.grouped)
+        }
     }
 }

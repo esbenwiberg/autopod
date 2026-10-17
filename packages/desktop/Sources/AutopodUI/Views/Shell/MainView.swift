@@ -50,6 +50,7 @@ public struct MainView: View {
     public var onSelectSession: ((String?) -> Void)?
     public var onRefreshDiff: ((String) -> Void)?
     public var onShowSettings: (() -> Void)?
+    public var settingsWorkspace: ((DesktopSettingsRoute) -> AnyView)?
     public var onEditProfile: ((String) -> Void)?
     public var loadFiles: ((String) async throws -> [SessionFileEntry])?
     public var loadArtifacts: ((String) async throws -> [SessionFileEntry])?
@@ -156,6 +157,7 @@ public struct MainView: View {
         onSelectSession: ((String?) -> Void)? = nil,
         onRefreshDiff: ((String) -> Void)? = nil,
         onShowSettings: (() -> Void)? = nil,
+        settingsWorkspace: ((DesktopSettingsRoute) -> AnyView)? = nil,
         onEditProfile: ((String) -> Void)? = nil,
         loadFiles: ((String) async throws -> [SessionFileEntry])? = nil,
         loadArtifacts: ((String) async throws -> [SessionFileEntry])? = nil,
@@ -253,6 +255,7 @@ public struct MainView: View {
         self.onSelectSession = onSelectSession
         self.onRefreshDiff = onRefreshDiff
         self.onShowSettings = onShowSettings
+        self.settingsWorkspace = settingsWorkspace
         self.onEditProfile = onEditProfile
         self.loadFiles = loadFiles
         self.loadArtifacts = loadArtifacts
@@ -498,7 +501,7 @@ public struct MainView: View {
         case .workspaces:            pods.filter { $0.isWorkspace }
         case .completed:             pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
         case .all:                   pods
-        case .managedPods, .village: []
+        case .managedPods, .village, .profilesWorkspace, .settingsWorkspace: []
         case .analytics:             []
         case .history:               []
         case .memory:                []
@@ -521,11 +524,265 @@ public struct MainView: View {
         }
     }
 
+    @State private var settingsRoute: DesktopSettingsRoute = .appearance
+    @State private var configurationKind: ConfigurationKind = .profile
+    @State private var configurationToOpen: String?
+    @State private var configurationDirty = false
+    @State private var configurationBusy = false
+    @State private var pendingWorkspaceAction: (() -> Void)?
+    @State private var showWorkspaceDiscard = false
+    @State private var configurationReset = UUID()
+
+    private var sidebarBinding: Binding<SidebarItem> {
+        Binding(
+            get: { sidebarSelection },
+            set: { destination in
+                guard destination != sidebarSelection else { return }
+                requestWorkspace { sidebarSelection = destination }
+            })
+    }
+
+    private func requestWorkspace(_ action: @escaping () -> Void) {
+        guard !configurationBusy else { return }
+        if redesign && configurationDirty {
+            pendingWorkspaceAction = action
+            showWorkspaceDiscard = true
+        } else {
+            action()
+        }
+    }
+
+    private var workspaceSidebar: some View {
+        SidebarView(
+            pods: pods, selection: sidebarBinding, showCreateSheet: $showCreateSheet,
+            showCreateSeriesSheet: $showCreateSeriesSheet, isConnected: isConnected,
+            connectionLabel: connectionLabel, pendingMemoryCount: pendingMemoryCount,
+            scheduledJobCount: scheduledJobs.count,
+            catchupPendingCount: scheduledJobs.filter { $0.catchupPending }.count,
+            managedPodCount: managedPods.count, onShowSettings: onShowSettings)
+    }
+
+    @ViewBuilder private var configurationWorkspace: some View {
+        if sidebarSelection == .settingsWorkspace {
+            if let settingsWorkspace {
+                settingsWorkspace(settingsRoute).id(settingsRoute)
+            } else {
+                ContentUnavailableView {
+                    Label("Settings", systemImage: "gearshape")
+                } description: {
+                    Text("Open desktop preferences to manage this connection.")
+                } actions: {
+                    Button("Open Settings") { onShowSettings?() }
+                }
+            }
+        } else if let configurationActions {
+            ConfigurationLibraryView(
+                actions: configurationActions, initialKind: configurationKind,
+                profileToOpen: $configurationToOpen,
+                onDirtyChanged: { configurationDirty = $0 }, onBusyChanged: { configurationBusy = $0 }
+            )
+            .id(configurationReset)
+        } else {
+            ContentUnavailableView {
+                Label("Profiles", systemImage: "person.crop.rectangle.stack")
+            } description: {
+                Text("Open profile settings for this daemon's legacy configuration.")
+            } actions: {
+                Button("Open Profiles") { onShowSettings?() }
+            }
+        }
+    }
+
     public var body: some View {
+        Group {
+            if redesign && [.profilesWorkspace, .settingsWorkspace].contains(sidebarSelection) {
+                NavigationSplitView {
+                    workspaceSidebar
+                } detail: {
+                    configurationWorkspace.frame(minWidth: 650, maxWidth: .infinity, maxHeight: .infinity)
+                }.navigationSplitViewStyle(.balanced)
+            } else {
+                podNavigation
+            }
+        }
+
+        .environment(
+            \.desktopOpenProviderAccounts,
+            {
+                configurationDirty = false
+                settingsRoute = .providerAccounts
+                sidebarSelection = .settingsWorkspace
+            }
+        )
+        .environment(
+            \.desktopOpenConfiguration,
+            { kind in
+                configurationKind = kind
+                configurationReset = UUID()
+                sidebarSelection = .profilesWorkspace
+            }
+        )
+        .confirmationDialog("Discard unsaved configuration changes?", isPresented: $showWorkspaceDiscard) {
+            Button("Discard changes", role: .destructive) {
+                let action = pendingWorkspaceAction
+                pendingWorkspaceAction = nil; configurationDirty = false; configurationReset = UUID()
+                action?()
+            }
+            Button("Keep editing", role: .cancel) { pendingWorkspaceAction = nil }
+        } message: {
+            Text("Your configuration draft has not been saved.")
+        }
+        .environment(\.desktopRedesign, redesign)
+        .environment(\.desktopRepositories, repositoriesByPod)
+        .environment(\.desktopRepositoryFilter, { repositoryID = $0 })
+        .environment(\.desktopPodSelection, { selectedSessionId = $0 })
+        .modifier(DesktopAppearanceModifier())
+        .tint(redesign ? DesktopTheme.accent : .accentColor)
+        .onChange(of: sidebarSelection) { _, selection in
+            if redesign, case .series(let id) = selection {
+                selectedDesktopSeriesID = id
+                sidebarSelection = .seriesAll
+            }
+        }
+        .onChange(of: redesign) { _, enabled in
+            if !enabled {
+                repositoryID = nil
+                if [.profilesWorkspace, .settingsWorkspace].contains(sidebarSelection) {
+                    sidebarSelection = .all
+                }
+            } else if case .series(let id) = sidebarSelection {
+                selectedDesktopSeriesID = id
+                sidebarSelection = .seriesAll
+            }
+        }
+        .onChange(of: repositoryID) { _, _ in
+            if let selectedSessionId, !filteredSessions.contains(where: { $0.id == selectedSessionId }) {
+                self.selectedSessionId = filteredSessions.first?.id
+            }
+        }
+        .onChange(of: connectionLabel) { _, _ in
+            repositoryID = nil; configurationDirty = false; configurationBusy = false;
+            configurationToOpen = nil
+            pendingWorkspaceAction = nil; showWorkspaceDiscard = false; configurationReset = UUID()
+        }
+        .sheet(isPresented: $showCreateSheet) {
+            if let configurationActions {
+                ComposableCreatePodSheet(isPresented: $showCreateSheet, actions: configurationActions)
+            } else {
+                CreateSessionSheet(
+                    isPresented: $showCreateSheet,
+                    actions: actions,
+                    profileNames: profileNames,
+                    profileDetails: profileDetails
+                )
+            }
+        }
+        .sheet(isPresented: $showCreateSeriesSheet) {
+            CreateSeriesSheet(
+                isPresented: $showCreateSeriesSheet,
+                actions: actions,
+                profileNames: profileNames,
+                configurationActions: configurationActions,
+                onSeriesCreated: { seriesId in
+                    sidebarSelection = .series(seriesId)
+                }
+            )
+        }
+        .sheet(item: $seriesFromPod) { initiator in
+            CreateSeriesSheet(
+                isPresented: Binding(
+                    get: { seriesFromPod != nil },
+                    set: { if !$0 { seriesFromPod = nil } }
+                ),
+                actions: actions,
+                profileNames: profileNames,
+                configurationActions: configurationActions,
+                initialBaseBranch: initiator.branch,
+                initialTargetBranch: initiator.baseBranch,
+                initialProfile: initiator.profileName,
+                initialSyncPodId: initiator.isTerminal ? nil : initiator.id,
+                onSeriesCreated: { seriesId in
+                    seriesFromPod = nil
+                    sidebarSelection = .series(seriesId)
+                }
+            )
+        }
+        .sheet(item: $spawnFollowUpInitiator) { initiator in
+            SpawnDependentSheet(
+                isPresented: Binding(
+                    get: { spawnFollowUpInitiator != nil },
+                    set: { if !$0 { spawnFollowUpInitiator = nil } }
+                ),
+                initiator: initiator,
+                candidatePods: pods,
+                actions: actions,
+                profileNames: profileNames,
+                configurationActions: configurationActions,
+                onPodCreated: { newId in
+                    selectedSessionId = newId
+                }
+            )
+        }
+        .onChange(of: selectedSessionId) { _, newId in
+            onSelectSession?(newId)
+        }
+        .overlay {
+            if showCommandPalette {
+                ZStack(alignment: .top) {
+                    Color.black.opacity(0.2)
+                        .ignoresSafeArea()
+                        .onTapGesture { showCommandPalette = false }
+                        .allowsHitTesting(true)
+                    CommandPalette(
+                        isPresented: $showCommandPalette,
+                        pods: pods,
+                        profiles: profileDetails,
+                        actions: actions,
+                        onSelectSession: { id in
+                            requestWorkspace {
+                                sidebarSelection = .all; selectedSessionId = id
+                            }
+                        },
+                        onCreatePod: {
+                            showCreateSheet = true
+                        },
+                        onShowProfilePods: { name in
+                            requestWorkspace {
+                                searchText = ""; sidebarSelection = .profile(name)
+                            }
+                        },
+                        onEditProfile: { name in
+                            if redesign && configurationActions != nil {
+                                requestWorkspace {
+                                    configurationReset = UUID(); configurationKind = .profile
+                                    configurationToOpen = name; sidebarSelection = .profilesWorkspace
+                                }
+                            } else {
+                                onEditProfile?(name)
+                            }
+                        }
+                    )
+                    .padding(.top, 80)
+                }
+            }
+        }
+        .background {
+            // Hidden button to catch Cmd+K
+            Button("") { showCommandPalette.toggle() }
+                .keyboardShortcut("k", modifiers: .command)
+                .hidden()
+            // Hidden button to catch Cmd+R (refresh pods)
+            Button("") { Task { await onRefresh?() } }
+                .keyboardShortcut("r", modifiers: .command)
+                .hidden()
+        }
+    }
+
+    private var podNavigation: some View {
         NavigationSplitView {
             SidebarView(
                 pods: pods,
-                selection: $sidebarSelection,
+                selection: sidebarBinding,
                 showCreateSheet: $showCreateSheet,
                 showCreateSeriesSheet: $showCreateSeriesSheet,
                 isConnected: isConnected,
@@ -838,133 +1095,6 @@ public struct MainView: View {
             .navigationSplitViewColumnWidth(min: isDesktopSeriesWorkspace ? 560 : 350, ideal: isDesktopSeriesWorkspace ? 1100 : 720, max: isDesktopSeriesWorkspace ? 1800 : 1400)
         }
         .navigationSplitViewStyle(.balanced)
-        .environment(\.desktopRedesign, redesign)
-        .environment(\.desktopRepositories, repositoriesByPod)
-        .environment(\.desktopRepositoryFilter, { repositoryID = $0 })
-        .environment(\.desktopPodSelection, { selectedSessionId = $0 })
-        .modifier(DesktopAppearanceModifier())
-        .tint(redesign ? DesktopTheme.accent : .accentColor)
-        .onChange(of: sidebarSelection) { _, selection in
-            if redesign, case .series(let id) = selection {
-                selectedDesktopSeriesID = id
-                sidebarSelection = .seriesAll
-            }
-        }
-        .onChange(of: redesign) { _, enabled in
-            if !enabled { repositoryID = nil }
-            else if case .series(let id) = sidebarSelection {
-                selectedDesktopSeriesID = id
-                sidebarSelection = .seriesAll
-            }
-        }
-        .onChange(of: repositoryID) { _, _ in
-            if let selectedSessionId, !filteredSessions.contains(where: { $0.id == selectedSessionId }) {
-                self.selectedSessionId = filteredSessions.first?.id
-            }
-        }
-        .onChange(of: connectionLabel) { _, _ in repositoryID = nil }
-        .sheet(isPresented: $showCreateSheet) {
-            if let configurationActions {
-                ComposableCreatePodSheet(isPresented: $showCreateSheet, actions: configurationActions)
-            } else {
-            CreateSessionSheet(
-                isPresented: $showCreateSheet,
-                actions: actions,
-                profileNames: profileNames,
-                profileDetails: profileDetails
-            )
-            }
-        }
-        .sheet(isPresented: $showCreateSeriesSheet) {
-            CreateSeriesSheet(
-                isPresented: $showCreateSeriesSheet,
-                actions: actions,
-                profileNames: profileNames,
-                configurationActions: configurationActions,
-                onSeriesCreated: { seriesId in
-                    sidebarSelection = .series(seriesId)
-                }
-            )
-        }
-        .sheet(item: $seriesFromPod) { initiator in
-            CreateSeriesSheet(
-                isPresented: Binding(
-                    get: { seriesFromPod != nil },
-                    set: { if !$0 { seriesFromPod = nil } }
-                ),
-                actions: actions,
-                profileNames: profileNames,
-                configurationActions: configurationActions,
-                initialBaseBranch: initiator.branch,
-                initialTargetBranch: initiator.baseBranch,
-                initialProfile: initiator.profileName,
-                initialSyncPodId: initiator.isTerminal ? nil : initiator.id,
-                onSeriesCreated: { seriesId in
-                    seriesFromPod = nil
-                    sidebarSelection = .series(seriesId)
-                }
-            )
-        }
-        .sheet(item: $spawnFollowUpInitiator) { initiator in
-            SpawnDependentSheet(
-                isPresented: Binding(
-                    get: { spawnFollowUpInitiator != nil },
-                    set: { if !$0 { spawnFollowUpInitiator = nil } }
-                ),
-                initiator: initiator,
-                candidatePods: pods,
-                actions: actions,
-                profileNames: profileNames,
-                configurationActions: configurationActions,
-                onPodCreated: { newId in
-                    selectedSessionId = newId
-                }
-            )
-        }
-        .onChange(of: selectedSessionId) { _, newId in
-            onSelectSession?(newId)
-        }
-        .overlay {
-            if showCommandPalette {
-                ZStack(alignment: .top) {
-                    Color.black.opacity(0.2)
-                        .ignoresSafeArea()
-                        .onTapGesture { showCommandPalette = false }
-                        .allowsHitTesting(true)
-                    CommandPalette(
-                        isPresented: $showCommandPalette,
-                        pods: pods,
-                        profiles: profileDetails,
-                        actions: actions,
-                        onSelectSession: { id in
-                            sidebarSelection = .all
-                            selectedSessionId = id
-                        },
-                        onCreatePod: {
-                            showCreateSheet = true
-                        },
-                        onShowProfilePods: { name in
-                            searchText = ""
-                            sidebarSelection = .profile(name)
-                        },
-                        onEditProfile: { name in
-                            onEditProfile?(name)
-                        }
-                    )
-                    .padding(.top, 80)
-                }
-            }
-        }
-        .background {
-            // Hidden button to catch Cmd+K
-            Button("") { showCommandPalette.toggle() }
-                .keyboardShortcut("k", modifiers: .command)
-                .hidden()
-            // Hidden button to catch Cmd+R (refresh pods)
-            Button("") { Task { await onRefresh?() } }
-                .keyboardShortcut("r", modifiers: .command)
-                .hidden()
-        }
     }
 
     // MARK: - Content toolbar

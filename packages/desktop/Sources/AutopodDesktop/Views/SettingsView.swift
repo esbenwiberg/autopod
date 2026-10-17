@@ -65,6 +65,9 @@ public struct SettingsView: View {
     public var onReloadProfiles: (() async -> Void)?
     @Binding public var deepLinkedProfileName: String?
     @Binding public var isPresented: Bool
+    public var embedded: Bool
+    @AppStorage("autopod.desktop.redesign") private var redesign = DesktopIdentity.isPreview
+    @Environment(\.desktopOpenConfiguration) private var openConfiguration
 
     public init(connectionManager: ConnectionManager, profiles: [Profile],
                 configurationActions: LaunchConfigurationActions? = nil,
@@ -83,7 +86,8 @@ public struct SettingsView: View {
                 onDeleteProfile: ((String) async throws -> Void)? = nil,
                 onReloadProfiles: (() async -> Void)? = nil,
                 deepLinkedProfileName: Binding<String?> = .constant(nil),
-                isPresented: Binding<Bool>) {
+        isPresented: Binding<Bool>, embedded: Bool = false, initialRoute: DesktopSettingsRoute = .appearance
+    ) {
         self.connectionManager = connectionManager
         self.profiles = profiles
         self.configurationActions = configurationActions
@@ -100,6 +104,18 @@ public struct SettingsView: View {
         self.onReloadProfiles = onReloadProfiles
         self._deepLinkedProfileName = deepLinkedProfileName
         self._isPresented = isPresented
+        self.embedded = embedded
+        let section: SettingsSection =
+            switch initialRoute {
+            case .appearance: .appearance
+            case .connections: .connections
+            case .providerAccounts: .providerAccounts
+            case .podsitter: .podsitter
+            case .notifications: .notifications
+            case .logs: .logs
+            case .about: .about
+            }
+        self._selectedSection = State(initialValue: embedded ? section : .profiles)
     }
 
     @State private var selectedSection: SettingsSection = .profiles
@@ -118,12 +134,16 @@ public struct SettingsView: View {
                 Text("Settings")
                     .font(.headline)
                 Spacer()
-                Button { isPresented = false } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.tertiary)
-                        .font(.title3)
+                if !embedded {
+                    Button {
+                        isPresented = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.tertiary)
+                            .font(.title3)
                 }
-                .buttonStyle(.borderless)
+                    .buttonStyle(.borderless)
+                }
             }
             .padding(.horizontal, 20)
             .padding(.top, 20)
@@ -138,11 +158,16 @@ public struct SettingsView: View {
                 settingsContent
             }
         }
-        .frame(width: 1040, height: 720)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .frame(width: embedded ? nil : 1040, height: embedded ? nil : 720)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .environment(\.desktopRedesign, redesign && embedded)
+        .tint(redesign ? DesktopTheme.accent : .accentColor)
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .windowBackgroundColor))
         .onAppear {
             if deepLinkedProfileName != nil {
                 selectedSection = .profiles
+            } else if redesign && !embedded {
+                selectedSection = .appearance
             }
         }
         .onChange(of: deepLinkedProfileName) { _, name in
@@ -158,19 +183,37 @@ public struct SettingsView: View {
     // MARK: - Sidebar
 
     private var settingsSidebar: some View {
-        VStack(spacing: 1) {
-            ForEach(
-                [SettingsSection.appearance, SettingsSection.connections, .profiles, .providerAccounts, .podsitter, .notifications, .logs],
-                id: \.self
-            ) { section in
-                sidebarRow(section)
+        VStack(alignment: .leading, spacing: 2) {
+            if redesign {
+                settingsHeading("This Mac")
+                ForEach([SettingsSection.appearance, .connections, .notifications, .logs], id: \.self) {
+                    sidebarRow($0)
+                }
+                settingsHeading("Selected daemon").padding(.top, 16)
+                ForEach([SettingsSection.providerAccounts, .podsitter], id: \.self) { sidebarRow($0) }
+                if !embedded { sidebarRow(.profiles) }
+                settingsHeading("Information").padding(.top, 16)
+                sidebarRow(.about)
+            } else {
+                ForEach(
+                    [
+                        SettingsSection.appearance, .connections, .profiles, .providerAccounts, .podsitter,
+                        .notifications, .logs,
+                    ], id: \.self
+                ) { sidebarRow($0) }
+                Spacer()
+                sidebarRow(.about)
             }
-            Spacer()
-            sidebarRow(.about)
+            Spacer(minLength: 0)
         }
-        .padding(10)
-        .frame(width: 160)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .padding(redesign ? 16 : 10)
+        .frame(width: redesign ? 218 : 160)
+        .background(redesign ? DesktopTheme.sidebar : Color(nsColor: .controlBackgroundColor).opacity(0.5))
+    }
+
+    private func settingsHeading(_ title: String) -> some View {
+        Text(title.uppercased()).font(.system(size: 9, weight: .medium))
+            .tracking(1.2).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.vertical, 8)
     }
 
     private func sidebarRow(_ section: SettingsSection) -> some View {
@@ -183,17 +226,23 @@ public struct SettingsView: View {
                 Image(systemName: section.icon)
                     .font(.system(size: 12))
                     .frame(width: 18)
-                    .foregroundStyle(selectedSection == section ? .white : .blue)
+                    .foregroundStyle(
+                        redesign ? DesktopTheme.accent : (selectedSection == section ? .white : .blue))
                 Text(section.label)
                     .font(.system(.callout))
-                    .foregroundStyle(selectedSection == section ? .white : .primary)
+                    .foregroundStyle(
+                        redesign
+                            ? (selectedSection == section ? DesktopTheme.accent : .primary)
+                            : (selectedSection == section ? .white : .primary))
                 Spacer()
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(selectedSection == section ? Color.accentColor : .clear)
+                    .fill(
+                        selectedSection == section
+                            ? (redesign ? DesktopTheme.selection : Color.accentColor) : .clear)
             )
             .contentShape(Rectangle())
         }
@@ -214,9 +263,12 @@ public struct SettingsView: View {
                 profiles: configurationActions == nil ? profiles : [],
                 onProfilesChanged: onReloadProfiles,
                 onConfigurePresets: configurationActions == nil ? nil : {
-                    configurationKind = .ai
-                    selectedSection = .profiles
-                }
+                        if embedded, let openConfiguration {
+                            openConfiguration(.ai)
+                        } else {
+                            configurationKind = .ai; selectedSection = .profiles
+                        }
+                    }
             )
         case .podsitter:
             if let api = connectionManager.api {
@@ -315,7 +367,9 @@ public struct SettingsView: View {
                                 .buttonStyle(.borderless)
                             }
                             .padding(10)
-                            .background(Color(nsColor: .controlBackgroundColor))
+                            .background(
+                                (redesign ? DesktopTheme.surface : Color(nsColor: .controlBackgroundColor))
+                            )
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                     }
@@ -507,7 +561,7 @@ public struct SettingsView: View {
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .fill((redesign ? DesktopTheme.surface : Color(nsColor: .controlBackgroundColor)))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
@@ -544,7 +598,7 @@ public struct SettingsView: View {
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .fill((redesign ? DesktopTheme.surface : Color(nsColor: .controlBackgroundColor)))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)

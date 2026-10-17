@@ -6,6 +6,8 @@ import SwiftUI
 public struct DesktopDesignPreview: View {
   @State private var selectedID: String? = "retry-demo"
   @State private var showSettings = false
+  @State private var configurationDocuments = DesktopConfigurationFixtures.documents
+  @State private var simulateConfigurationConflict = false
   @State private var connectionManager = ConnectionManager()
   private let onConnect: () -> Void
   public init(onConnect: @escaping () -> Void = {}) { self.onConnect = onConnect }
@@ -14,10 +16,18 @@ public struct DesktopDesignPreview: View {
       isConnected: false, connectionLabel: "Design fixtures", connectionState: "Sample data",
       actions: Self.fixtureActions,
       profileNames: MockProfiles.all.map(\.name), profileDetails: MockProfiles.all,
+      configurationActions: configurationActions,
       selectedSessionEvents: selectedID == "retry-demo" ? Self.events : [],
       eventsForPod: { $0 == "retry-demo" ? Self.events : [] },
       sessionDiffs: ["retry-demo": Self.fixtureDiff],
       onShowSettings: { showSettings = true },
+      settingsWorkspace: { route in
+        AnyView(
+          SettingsView(
+            connectionManager: connectionManager, profiles: MockProfiles.all,
+            configurationActions: configurationActions, isPresented: $showSettings,
+            embedded: true, initialRoute: route))
+      },
       loadFiles: { _ in Self.fixtureFiles }, loadArtifacts: { _ in Self.fixtureFiles },
       loadContent: { _, path in SessionFileContent(path: path, content: "# Recovery review\n\nSaved checkpoint restored before reconnecting.\n\n- No repeated side effects\n- Regression checks recorded", size: 130) },
       loadQuality: { id in Self.fixtureQuality(id) },
@@ -25,10 +35,15 @@ public struct DesktopDesignPreview: View {
       loadValidationHistory: { _ in Self.validationHistory })
       .toolbar {
         ToolbarItem(placement: .principal) {
-          Text("Design fixtures · sample data").font(.caption).foregroundStyle(.secondary)
-        }
-        ToolbarItem(placement: .primaryAction) {
-          Button("Connect to a daemon…", action: onConnect).font(.caption)
+        HStack {
+          Text("Design fixtures · sample data").font(.caption)
+          Menu("Fixture options") {
+            Toggle("Simulate configuration save conflict", isOn: $simulateConfigurationConflict)
+          }.menuStyle(.borderlessButton).fixedSize()
+        }.foregroundStyle(.secondary)
+      }
+      ToolbarItem(placement: .primaryAction) {
+        Button("Connect to a daemon…", action: onConnect).font(.caption)
         }
       }
       .sheet(isPresented: $showSettings) {
@@ -36,6 +51,39 @@ public struct DesktopDesignPreview: View {
       }
       .environment(\.controlActiveState, .key)
       .modifier(DesktopAppearanceModifier())
+  }
+
+  private var configurationActions: LaunchConfigurationActions {
+    let unavailable = DaemonError.badRequest("This fixture has no daemon or provider connection.")
+    var actions = LaunchConfigurationActions(
+      documents: configurationDocuments, capabilities: .object([:]),
+      reload: {}, resolve: { _ in throw unavailable }, launch: { _ in throw unavailable },
+      save: { kind, request in
+        let id = request.id ?? UUID().uuidString
+        let existing = configurationDocuments.first { $0.id == id }
+        if simulateConfigurationConflict, let existing {
+          let newer = try DesktopConfigurationFixtures.document(
+            kind, id: id, name: existing.name,
+            payload: existing.payload, revision: existing.revision + 1)
+          configurationDocuments.removeAll { $0.id == id }; configurationDocuments.append(newer)
+          throw DaemonError.serverError(
+            409, "A newer configuration revision was saved. Your draft has been retained.")
+        }
+        guard existing?.revision == request.expectedRevision else {
+          throw DaemonError.serverError(409, "The saved revision changed.")
+        }
+        let saved = try DesktopConfigurationFixtures.document(
+          kind, id: id, name: request.name,
+          payload: request.payload, revision: (existing?.revision ?? 0) + 1)
+        configurationDocuments.removeAll { $0.id == id }; configurationDocuments.append(saved)
+        return saved
+      }, archive: { item in configurationDocuments.removeAll { $0.id == item.id } },
+      discoverGitHubRepositories: { [] }, discoverGitHubWorkflows: { _ in [] },
+      loadProviderAccounts: { DesktopConfigurationFixtures.accounts },
+      discoverPim: { _ in throw unavailable },
+      saveFromLaunch: { _ in throw unavailable }, listWatchers: { [] })
+    actions.listDeployments = { [] }
+    return actions
   }
 
   private static func decodeFixture<T: Decodable>(_ type: T.Type, _ json: String) -> T {

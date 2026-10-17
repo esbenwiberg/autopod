@@ -197,9 +197,8 @@ public struct SidebarView: View {
                     redesignedRow(.seriesAll, "rectangle.3.group", "Series", activeSeriesCount)
                     redesignedRow(.completed, "checkmark.circle", "Completed", completedCount)
                     navigationHeading("Workspace").padding(.top, 20)
-                    Button(action: { onShowSettings?() }) {
-                        navigationLabel("Profiles", "person.crop.rectangle.stack", 0)
-                    }.buttonStyle(.plain).accessibilityIdentifier("desktop-profiles")
+                    redesignedRow(.profilesWorkspace, "person.crop.rectangle.stack", "Profiles", 0)
+                        .accessibilityIdentifier("desktop-profiles")
                     redesignedRow(.scheduledJobs, "clock.badge.checkmark", "Schedules", catchupPendingCount > 0 ? catchupPendingCount : scheduledJobCount)
                     redesignedRow(.history, "clock.arrow.circlepath", "History", 0)
                     redesignedRow(.analytics, "chart.bar", "Analytics", 0)
@@ -224,9 +223,13 @@ public struct SidebarView: View {
                 Divider()
                 redesignedRow(.village, "house", "Village", 0)
                 HStack {
-                    Button { onShowSettings?() } label: { Label("Settings", systemImage: "gearshape").font(.caption) }
-                        .buttonStyle(.plain).keyboardShortcut(",", modifiers: .command)
-                        .accessibilityIdentifier("desktop-settings")
+                    Button {
+                        selection = .settingsWorkspace
+                    } label: {
+                        Label("Settings", systemImage: "gearshape").font(.caption)
+                    }
+                    .buttonStyle(.plain).keyboardShortcut(",", modifiers: .command)
+                    .accessibilityIdentifier("desktop-settings")
                     Spacer()
                     Menu {
                         Button("Why Autopod") { selection = .salesPitch }
@@ -342,6 +345,8 @@ public enum SidebarItem: Hashable {
     case completed
     case all
     case managedPods
+    case profilesWorkspace
+    case settingsWorkspace
     case village
     case analytics
     case history
@@ -364,6 +369,8 @@ public enum SidebarItem: Hashable {
         case .completed: "Completed"
         case .all: "Browse"
         case .managedPods: "Managed Pods"
+        case .profilesWorkspace: "Profiles"
+        case .settingsWorkspace: "Settings"
         case .village: "Village"
         case .analytics: "Analytics"
         case .history: "History"

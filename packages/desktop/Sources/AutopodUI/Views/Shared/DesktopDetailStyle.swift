@@ -10,12 +10,14 @@ struct DesktopSectionPicker<Item: Hashable>: View {
     var body: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 16) {
-                Text(title).font(.title3.weight(.semibold))
-                Spacer(minLength: 8)
+                if !title.isEmpty {
+                    Text(title).font(.title3.weight(.semibold))
+                    Spacer(minLength: 8)
+                }
                 buttons
-            }
+            }.frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .leading, spacing: 12) {
-                Text(title).font(.title3.weight(.semibold))
+                if !title.isEmpty { Text(title).font(.title3.weight(.semibold)) }
                 ScrollView(.horizontal, showsIndicators: false) { buttons }
             }
         }

@@ -47,7 +47,8 @@ public final class ConnectionManager {
 
   // MARK: - Init
 
-  public init() {
+  public init(restoreConnection: Bool = true) {
+    guard restoreConnection else { return }
     if DesktopIdentity.usesDesignFixtures { return }
     // CLI launches should win over stale saved state. Restoring the previous
     // connection first can touch old Keychain items and block launch behind a

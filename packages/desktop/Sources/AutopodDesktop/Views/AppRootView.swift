@@ -165,9 +165,8 @@ public struct AppRootView: View {
       onRefreshDiff: { podId in
         Task { await podStore.loadDiff(podId) }
       },
-      onShowSettings: {
-        showSettings = true
-      },
+      onShowSettings: { showSettings = true },
+      settingsWorkspace: { route in AnyView(settingsContent(embedded: true, route: route)) },
       onEditProfile: { name in
         settingsProfileToEdit = name
         showSettings = true
@@ -371,10 +370,21 @@ public struct AppRootView: View {
       )
     }
     .sheet(isPresented: $showSettings) {
-      SettingsView(
-        connectionManager: connectionManager,
-        profiles: profileStore.profiles,
-        configurationActions: launchConfiguration.actions(onCreated: { id in
+      settingsContent(embedded: false, route: .appearance)
+    }
+    .modifier(DesktopAppearanceModifier())
+    .onChange(of: showSettings) { _, isShowing in
+      if isShowing {
+        Task { await launchConfiguration.load() }
+      }
+    }
+  }
+
+  private func settingsContent(embedded: Bool, route: DesktopSettingsRoute) -> some View {
+    SettingsView(
+      connectionManager: connectionManager,
+      profiles: profileStore.profiles,
+      configurationActions: launchConfiguration.actions(onCreated: { id in
           await podStore.loadSessions(); podStore.selectedSessionId = id
         }),
         actionCatalog: profileStore.actionCatalog,
@@ -454,15 +464,8 @@ public struct AppRootView: View {
           await launchConfiguration.load()
         },
         deepLinkedProfileName: $settingsProfileToEdit,
-        isPresented: $showSettings
-      )
-    }
-    .modifier(DesktopAppearanceModifier())
-    .onChange(of: showSettings) { _, isShowing in
-      if isShowing {
-        Task { await launchConfiguration.load() }
-      }
-    }
+      isPresented: $showSettings, embedded: embedded, initialRoute: route
+    )
   }
 
   private func handleAuthenticationError(_ message: String?) {
