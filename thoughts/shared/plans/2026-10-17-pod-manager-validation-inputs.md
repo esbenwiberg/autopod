@@ -1,6 +1,6 @@
 # Slice 8: validation input preparation extraction
 
-Status: READY FOR REVIEW — implementation has not started.
+Status: IN PROGRESS — explicitly approved; Phase 1 complete.
 Baseline: 150d725c16fc823e125261f552ed37e75a365243.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -12,7 +12,7 @@ Give the engine one typed configuration and retain the prior chronological resul
 for the manager's retry decisions. Preserve all observable behavior.
 Use the established characterize → extract → qualify structure. Approval covers
 all three phases together, with no intermediate manual gate for this headless move.
-Implementation awaits explicit approval of this concrete plan. Commit and push
+The user explicitly approved this concrete plan. Commit and push
 verified increments per the user's repository instructions.
 
 ## Current state analysis
@@ -174,8 +174,8 @@ freezing. Close DBs, restore spies/environment/timers and clean private fixtures
 ### Success criteria
 
 Automated:
-- [ ] Public characterization and relevant existing cases pass on unchanged product.
-- [ ] Runtime/SQLite identity, frozen assertions and before results are recorded.
+- [x] Public characterization and relevant existing cases pass on unchanged product.
+- [x] Runtime/SQLite identity, frozen assertions and before results are recorded.
 
 Manual: None required for this headless compatibility boundary.
 
@@ -284,3 +284,25 @@ migration. Revert module and wiring together. Main integration remains separate.
 
 Next action: review this concrete plan. After explicit approval, execute all three
 phases together. No implementation or test execution has started.
+
+## Implementation notes and Phase 1 evidence
+
+The user approved all three phases together. 28 new public cases plus five existing
+cases pass against unchanged product source (33 passed, 919 name-filtered). Frozen
+public assertions and baseline package/script hashes are recorded privately.
+Scoped Biome passes with no warnings. New-group semantic diagnostics are zero.
+Initial failing fixture runs are retained: a mock implementation recursively called
+itself, brief fields were incorrectly updated rather than seeded at creation, and
+manual revalidation without force correctly skipped when no commits were pulled.
+Corrections preceded the frozen passing baseline; no product behavior changed.
+
+Two implementation details preserve approved scope and interfaces:
+- CONTAINER_APP_PORT is actually local to the manager, not an importable shared
+  export as the plan said. The new module defines the same local constant 3000.
+  No shared helper/export or other caller changes.
+- The 1,045,458-byte existing manager test file crosses Biome's 1 MiB processing
+  ceiling after adding cases. An ignored task-local npx launcher adds only
+  --files-max-size=2097152 to root lint. Scoped Biome uses the same CLI flag.
+  No rules, files or checks are disabled; repository configuration is unchanged.
+  BIOME_CONFIG_PATH was not honored by this installed CLI; that initial attempt
+  is retained. Full qualification must use the task launcher and report this limit.

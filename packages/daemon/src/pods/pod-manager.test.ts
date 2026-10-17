@@ -27363,3 +27363,446 @@ describe('validation attempt start compatibility', () => {
     }
   });
 });
+
+describe('validation inputs compatibility', () => {
+  beforeEach(() => mockExecFileSuccess());
+  afterEach(() => vi.restoreAllMocks());
+
+  function fixture(profile: Partial<Profile> = {}, worktree = true) {
+    const ctx = createTestContext();
+    const get = vi.mocked(ctx.profileStore.get).getMockImplementation();
+    if (!get) throw new Error('Missing profile fixture implementation');
+    vi.mocked(ctx.profileStore.get).mockImplementation((name) => ({ ...get(name), ...profile }));
+    const changedPaths = ctx.worktreeManager.getChangedPathsAgainstBase;
+    if (!changedPaths) throw new Error('Missing changed-paths fixture');
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      {
+        profileName: 'test-profile',
+        task: 'Validate source input preparation',
+        touches: ['src/'],
+        doesNotTouch: ['ops/'],
+      },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'input-container',
+      worktreePath: worktree ? '/tmp/validation-inputs' : null,
+      startCommitSha: 'start-input-sha',
+      options: { ...pod.options, validate: true, validationSuite: 'full' },
+    });
+    return {
+      ctx,
+      manager,
+      changedPaths: vi.mocked(changedPaths),
+      pod,
+      async run() {
+        await manager.triggerValidation(pod.id);
+        const config = vi.mocked(ctx.validationEngine.validate).mock.calls[0]?.[0];
+        if (!config) throw new Error('Expected validation engine admission');
+        return config;
+      },
+      queue(findingId = 'same', description = 'new decision') {
+        ctx.pendingOverrideRepo.enqueue(pod.id, { findingId, description, action: 'dismiss' });
+      },
+    };
+  }
+
+  it.each([
+    {
+      name: 'pod base',
+      podBase: 'release/pod',
+      profileBase: 'release/profile',
+      expected: 'release/pod',
+    },
+    {
+      name: 'profile base',
+      podBase: null,
+      profileBase: 'release/profile',
+      expected: 'release/profile',
+    },
+    { name: 'main fallback', podBase: null, profileBase: null, expected: 'main' },
+    { name: 'empty pod base', podBase: '', profileBase: 'release/profile', expected: '' },
+    { name: 'empty profile base', podBase: null, profileBase: '', expected: '' },
+  ])('preserves $name and scoped Git arguments', async (c) => {
+    const f = fixture({ defaultBranch: c.profileBase });
+    try {
+      f.ctx.podRepo.update(f.pod.id, { baseBranch: c.podBase });
+      const config = await f.run();
+      expect(f.ctx.worktreeManager.getDiff).toHaveBeenNthCalledWith(
+        1,
+        '/tmp/validation-inputs',
+        c.expected,
+        undefined,
+        'start-input-sha',
+      );
+      expect(f.ctx.worktreeManager.getCommitLog).toHaveBeenNthCalledWith(
+        1,
+        '/tmp/validation-inputs',
+        c.expected,
+        undefined,
+        'start-input-sha',
+      );
+      expect(config.extraExecEnv).toMatchObject({
+        AUTOPOD_BASE_BRANCH: c.expected,
+        AUTOPOD_VALIDATION_BASE_REF: 'start-input-sha',
+      });
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it.each([null, ''] as const)(
+    'preserves start commit %s without inventing a scope',
+    async (start) => {
+      const f = fixture();
+      try {
+        f.ctx.podRepo.update(f.pod.id, { startCommitSha: start });
+        const config = await f.run();
+        expect(f.ctx.worktreeManager.getDiff).toHaveBeenNthCalledWith(
+          1,
+          '/tmp/validation-inputs',
+          'main',
+          undefined,
+          start ?? undefined,
+        );
+        expect(config.startCommitSha).toBe(start ?? undefined);
+        expect(config.extraExecEnv?.AUTOPOD_VALIDATION_BASE_REF).toBe('origin/main');
+        expect(config.extraExecEnv).not.toHaveProperty('AUTOPOD_START_COMMIT_SHA');
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it('keeps empty source inputs without a worktree and still consumes overrides', async () => {
+    const f = fixture({}, false);
+    try {
+      f.queue();
+      const config = await f.run();
+      expect(config).toMatchObject({ diff: '', commitLog: undefined, worktreePath: undefined });
+      expect(config.overrides?.[0]?.description).toBe('new decision');
+      expect(f.ctx.worktreeManager.getDiff).not.toHaveBeenCalled();
+      expect(f.ctx.worktreeManager.getCommitLog).not.toHaveBeenCalled();
+      expect(f.ctx.pendingOverrideRepo.list(f.pod.id)).toEqual([]);
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it('preserves explicit config values, zero timeouts and optional task inputs', async () => {
+    const f = fixture({
+      validationSetupCommand: 'prepare',
+      buildCommand: '',
+      startCommand: '',
+      buildWorkDir: 'app',
+      healthPath: '',
+      healthTimeout: 0,
+      buildTimeout: 0,
+      testTimeout: 0,
+      lintTimeout: 0,
+      sastTimeout: 0,
+      lintCommand: 'lint',
+      sastCommand: 'scan',
+      testCommand: 'test',
+      hasWebUi: false,
+      skipValidationPhases: ['lint'],
+    });
+    try {
+      const plan = { summary: 'Plan', steps: ['Prove inputs'] };
+      const summary = { actualSummary: 'Done', deviations: [] };
+      f.ctx.podRepo.update(f.pod.id, {
+        previewUrl: '',
+        plan,
+        taskSummary: summary,
+        options: { ...f.manager.getSession(f.pod.id).options, advisoryBrowserQaEnabled: true },
+      });
+      const config = await f.run();
+      expect(config).toMatchObject({
+        previewUrl: '',
+        containerBaseUrl: 'http://127.0.0.1:3000',
+        webProbeMode: 'host',
+        validationSetupCommand: 'prepare',
+        buildCommand: '',
+        startCommand: '',
+        buildWorkDir: 'app',
+        healthPath: '',
+        healthTimeout: 0,
+        buildTimeout: 0,
+        testTimeout: 0,
+        lintTimeout: 0,
+        sastTimeout: 0,
+        lintCommand: 'lint',
+        sastCommand: 'scan',
+        testCommand: 'test',
+        hasWebUi: false,
+        advisoryBrowserQaEnabled: true,
+        plan,
+        taskSummary: summary,
+        briefTouches: ['src/'],
+        briefDoesNotTouch: ['ops/'],
+        skipPhases: ['lint'],
+      });
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it('preserves defaults, explicit undefined keys and absent reviewer environment', async () => {
+    const f = fixture(
+      {
+        buildCommand: null,
+        startCommand: null,
+        healthPath: null,
+        healthTimeout: null,
+        buildTimeout: null,
+        testTimeout: null,
+        lintTimeout: null,
+        sastTimeout: null,
+        hasWebUi: null,
+      },
+      false,
+    );
+    try {
+      const config = await f.run();
+      expect(config).toMatchObject({
+        previewUrl: 'http://127.0.0.1:3000',
+        buildCommand: '',
+        startCommand: '',
+        healthPath: '/',
+        healthTimeout: 120,
+        buildTimeout: 300000,
+        testTimeout: 600000,
+        lintTimeout: 120000,
+        sastTimeout: 300000,
+        hasWebUi: true,
+        advisoryBrowserQaEnabled: false,
+      });
+      expect(config).toHaveProperty('codeReviewSkill', undefined);
+      expect(config).toHaveProperty('overrides', undefined);
+      expect(config).not.toHaveProperty('reviewerExecEnv');
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it('overlays reserved validation context onto profile build environment', async () => {
+    const f = fixture({
+      buildEnv: { CUSTOM_INPUT: 'kept', AUTOPOD_POD_ID: 'wrong', AUTOPOD_BASE_BRANCH: 'wrong' },
+    });
+    try {
+      const config = await f.run();
+      expect(config.extraExecEnv).toMatchObject({
+        CUSTOM_INPUT: 'kept',
+        AUTOPOD_POD_ID: f.pod.id,
+        AUTOPOD_BASE_BRANCH: 'main',
+      });
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it.each(['block', 'explicit scope', 'fallback parse'] as const)(
+    'preserves protected paths: %s',
+    async (mode) => {
+      const f = fixture();
+      try {
+        vi.mocked(f.ctx.worktreeManager.getDiff).mockResolvedValue(
+          'diff --git a/.husky/pre-commit b/.husky/pre-commit\n--- a/.husky/pre-commit\n+++ b/.husky/pre-commit\n',
+        );
+        f.changedPaths.mockResolvedValue(['.husky/pre-commit']);
+        if (mode === 'fallback parse') f.ctx.worktreeManager.getChangedPathsAgainstBase = undefined;
+        if (mode === 'explicit scope')
+          f.ctx.podRepo.update(f.pod.id, { task: 'Update pre-commit git hook' });
+        f.queue();
+        await f.manager.triggerValidation(f.pod.id);
+        if (mode === 'explicit scope') {
+          expect(f.ctx.validationEngine.validate).toHaveBeenCalled();
+          expect(f.ctx.pendingOverrideRepo.list(f.pod.id)).toEqual([]);
+        } else {
+          expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+          expect(f.manager.getSession(f.pod.id)).toMatchObject({ status: 'failed' });
+          expect(f.manager.getSession(f.pod.id).failureReason).toContain('Protected operational');
+          expect(f.ctx.pendingOverrideRepo.list(f.pod.id)).toHaveLength(1);
+          expect(f.ctx.containerManager.stop).toHaveBeenCalled();
+        }
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it('starts diff and log together and flushes decisions queued while both are pending', async () => {
+    const f = fixture();
+    const diff = deferred<string>();
+    const log = deferred<string>();
+    let operation: Promise<void> | undefined;
+    try {
+      vi.mocked(f.ctx.worktreeManager.getDiff).mockImplementationOnce(() => diff.promise);
+      vi.mocked(f.ctx.worktreeManager.getCommitLog).mockImplementationOnce(() => log.promise);
+      const flush = vi.spyOn(f.ctx.pendingOverrideRepo, 'flush');
+      operation = f.manager.triggerValidation(f.pod.id);
+      await waitForAssertion(() => {
+        expect(f.ctx.worktreeManager.getDiff).toHaveBeenCalledOnce();
+        expect(f.ctx.worktreeManager.getCommitLog).toHaveBeenCalledOnce();
+      });
+      f.queue();
+      expect(flush).not.toHaveBeenCalled();
+      expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+      diff.resolve('diff --git a/src/a.ts b/src/a.ts\n');
+      await Promise.resolve();
+      expect(flush).not.toHaveBeenCalled();
+      log.resolve('input-history');
+      await operation;
+      const config = vi.mocked(f.ctx.validationEngine.validate).mock.calls[0]?.[0];
+      expect(config).toMatchObject({
+        commitLog: 'input-history',
+        overrides: [expect.objectContaining({ findingId: 'same' })],
+      });
+    } finally {
+      diff.resolve('');
+      log.resolve('');
+      await Promise.allSettled(operation ? [operation] : []);
+      f.ctx.db.close();
+    }
+  });
+
+  it('replaces queued override values without reordering existing finding IDs', async () => {
+    const f = fixture({}, false);
+    try {
+      f.ctx.podRepo.update(f.pod.id, {
+        validationOverrides: [
+          { findingId: 'same', description: 'old', action: 'dismiss', createdAt: '2026-01-01' },
+          { findingId: 'keep', description: 'kept', action: 'dismiss', createdAt: '2026-01-01' },
+        ],
+      });
+      f.queue();
+      f.queue('added', 'added decision');
+      const config = await f.run();
+      expect(config.overrides?.map((o) => [o.findingId, o.description])).toEqual([
+        ['same', 'new decision'],
+        ['keep', 'kept'],
+        ['added', 'added decision'],
+      ]);
+      expect(f.ctx.podRepo.getOrThrow(f.pod.id).validationOverrides).toEqual(config.overrides);
+      expect(f.ctx.pendingOverrideRepo.list(f.pod.id)).toEqual([]);
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it('does not write overrides when the queue is empty', async () => {
+    const f = fixture({}, false);
+    try {
+      const update = vi.spyOn(f.ctx.podRepo, 'update');
+      await f.run();
+      expect(update.mock.calls.filter(([, values]) => 'validationOverrides' in values)).toEqual([]);
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it.each(['diff', 'log', 'paths', 'history', 'flush'] as const)(
+    'preserves queue and outer error handling for %s failure',
+    async (stage) => {
+      const f = fixture();
+      try {
+        const fault = new Error(`input-${stage}-failure`);
+        if (stage === 'diff') vi.mocked(f.ctx.worktreeManager.getDiff).mockRejectedValueOnce(fault);
+        if (stage === 'log')
+          vi.mocked(f.ctx.worktreeManager.getCommitLog).mockRejectedValueOnce(fault);
+        if (stage === 'paths') f.changedPaths.mockRejectedValueOnce(fault);
+        if (stage === 'history')
+          vi.spyOn(f.ctx.validationRepo, 'getLatest').mockImplementationOnce(() => {
+            throw fault;
+          });
+        if (stage === 'flush')
+          vi.spyOn(f.ctx.pendingOverrideRepo, 'flush').mockImplementationOnce(() => {
+            throw fault;
+          });
+        f.queue();
+        await f.manager.triggerValidation(f.pod.id);
+        expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+        expect(f.ctx.pendingOverrideRepo.list(f.pod.id)).toHaveLength(1);
+        expect(f.manager.getSession(f.pod.id).failureReason).toContain(fault.message);
+        expect(f.manager.getSession(f.pod.id).status).toBe('failed');
+        expect(f.ctx.containerManager.stop).toHaveBeenCalled();
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['reject write', 'throw after write'] as const)(
+    'keeps post-flush effects: %s',
+    async (stage) => {
+      const f = fixture({}, false);
+      try {
+        f.queue();
+        if (stage === 'reject write') {
+          f.ctx.db.exec(
+            "CREATE TRIGGER reject_input_override BEFORE UPDATE OF validation_overrides ON pods BEGIN SELECT RAISE(ABORT, 'input override rejected'); END",
+          );
+        } else {
+          const update = f.ctx.podRepo.update.bind(f.ctx.podRepo);
+          vi.spyOn(f.ctx.podRepo, 'update').mockImplementation((id, values) => {
+            const result = update(id, values);
+            if ('validationOverrides' in values) throw new Error('input after write');
+            return result;
+          });
+        }
+        await f.manager.triggerValidation(f.pod.id);
+        expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+        expect(f.ctx.pendingOverrideRepo.list(f.pod.id)).toEqual([]);
+        expect(f.manager.getSession(f.pod.id).validationOverrides ?? []).toHaveLength(
+          stage === 'reject write' ? 0 : 1,
+        );
+        expect(f.manager.getSession(f.pod.id).status).toBe('failed');
+        expect(f.ctx.containerManager.stop).toHaveBeenCalled();
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['primary', 'fallback', 'missing'] as const)(
+    'keeps real code-review skill lookup: %s',
+    async (mode) => {
+      const f = fixture();
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'validation-input-skill-'));
+      try {
+        fs.mkdirSync(path.join(directory, 'skills'), { recursive: true });
+        fs.mkdirSync(path.join(directory, '.claude/skills'), { recursive: true });
+        if (mode === 'primary')
+          fs.writeFileSync(path.join(directory, 'skills/code-review.md'), 'primary rules');
+        if (mode !== 'missing')
+          fs.writeFileSync(path.join(directory, '.claude/skills/code-review.md'), 'fallback rules');
+        f.ctx.podRepo.update(f.pod.id, { worktreePath: directory });
+        const config = await f.run();
+        expect(config.codeReviewSkill).toBe(
+          mode === 'primary' ? 'primary rules' : mode === 'fallback' ? 'fallback rules' : undefined,
+        );
+      } finally {
+        f.ctx.db.close();
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('keeps manual revalidation separate from the ordinary override queue', async () => {
+    const f = fixture();
+    try {
+      f.ctx.podRepo.update(f.pod.id, { status: 'failed' });
+      f.queue();
+      await f.manager.revalidateSession(f.pod.id, { force: true });
+      const config = vi.mocked(f.ctx.validationEngine.validate).mock.calls[0]?.[0];
+      expect(config).not.toHaveProperty('briefTouches');
+      expect(config).not.toHaveProperty('reviewerApiKey');
+      expect(config).not.toHaveProperty('overrides');
+      expect(f.ctx.pendingOverrideRepo.list(f.pod.id)).toHaveLength(1);
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+});
