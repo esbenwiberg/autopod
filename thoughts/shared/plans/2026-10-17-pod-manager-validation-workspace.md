@@ -1,6 +1,6 @@
 # Slice 3: validation workspace extraction
 
-Status: READY FOR REVIEW — implementation has not started.
+Status: APPROVED — Phase 1 complete; extraction in progress.
 Baseline: 1a2dd0c8a82db8e16f36c0849e91945e101e75e1.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -9,8 +9,8 @@ Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
 
 Extract workspace preparation before validation, following the same accepted
 three-phase structure as slices 1 and 2: characterize, extract, qualify.
-The user requested the next slice. This concrete plan is ready for explicit
-approval; previous slice approvals do not authorize its implementation.
+The user explicitly approved this concrete plan in the conversation. All three
+phases are authorized together, with no intermediate manual acceptance gate.
 
 ## Current state analysis
 
@@ -139,10 +139,10 @@ Freeze baseline source/test identities and retain logs under ignored evidence.
 ### Success criteria
 
 Automated:
-- [ ] New public cases pass against unchanged production source at recorded baseline.
-- [ ] Existing stale-container, recovery, force-resume and checkpoint cases pass.
-- [ ] New fixtures dispose databases, temporary resources and async work.
-- [ ] Product identity and before-test hashes/logs are recorded.
+- [x] New public cases pass against unchanged production source at recorded baseline.
+- [x] Existing stale-container, recovery, force-resume and checkpoint cases pass.
+- [x] New fixtures dispose databases, temporary resources and async work.
+- [x] Product identity and before-test hashes/logs are recorded.
 
 Manual: None required for this headless compatibility boundary.
 
@@ -264,5 +264,19 @@ Integration with concurrent main-branch work remains a separate integration step
 - Predecessor: 2026-10-17-pod-manager-workspace-transfer.md (complete).
 - Existing primitives: worktrees/graft-reconcile.ts and worktrees/sandbox-reconcile.ts.
 
-Next action: obtain approval of this concrete slice 3 plan, then implement all
-three phases. No implementation check is complete or claimed as passing yet.
+Next action: extract the approved boundary, then qualify final sources.
+
+## Phase 1 evidence
+
+At unchanged product baseline 1a2dd0c8 (documentation HEAD de9f4b4e), 38 new
+public validation workspace cases and 56 existing compatibility/validation cases
+passed: 94 passed, 670 name-filtered. SQLite opened under the actual Node 22.23.3
+child through the established pnpm 9.15.4 launcher. Baseline source and test hashes
+are retained under .autopod-data/validation-workspace/.
+
+The initial run had four overly broad assertions: the manager can synchronize
+again during publication after validation. The cases now assert the preparation
+window before validation/diff, which is the approved boundary. No production
+behavior changed or assertion of the preparation choice was relaxed. The failed
+characterization-initial-failure.log remains retained. All new fixtures close
+their DBs, join held observations and remove any controlled bundle files.

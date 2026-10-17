@@ -2747,6 +2747,466 @@ describe('PodManager', () => {
     );
   });
 
+  describe('validation workspace compatibility', () => {
+    const host = 'b'.repeat(40);
+    const container = 'a'.repeat(40);
+    const grafted = 'c'.repeat(40);
+    const bare = '/tmp/validation-compatibility.git';
+    const ok = { stdout: '', stderr: '', exitCode: 0 };
+    type Failure =
+      | 'host-head'
+      | 'container-head'
+      | 'container-head-exit'
+      | 'ancestry'
+      | 'reset'
+      | 'reset-transport'
+      | 'clean'
+      | 'clean-transport'
+      | 'graft'
+      | 'bundle'
+      | 'upload'
+      | 'fetch'
+      | 'verify'
+      | 'import'
+      | 'derive'
+      | 'mismatch';
+    interface Scenario {
+      target?: 'local' | 'sandbox';
+      sameHead?: boolean;
+      hostHead?: string;
+      containerHead?: string;
+      hostStatus?: string | null;
+      containerStatus?: string | null;
+      ancestry?: 'host' | 'container' | 'diverged' | 'unknown';
+      failure?: Failure;
+      missingObject?: boolean;
+      equalTree?: boolean;
+      gate?: ReturnType<typeof deferred<void>>;
+    }
+
+    async function scenario(
+      options: Scenario,
+      check: (f: {
+        ctx: TestContext;
+        manager: ReturnType<typeof createPodManager>;
+        pod: ReturnType<PodRepository['getOrThrow']>;
+        trace: string[];
+        bundles: string[];
+      }) => Promise<void>,
+    ) {
+      const ctx = createTestContext(
+        { overall: 'pass' },
+        options.target === 'sandbox'
+          ? {
+              executionTarget: 'sandbox',
+              warmImageTag: 'registry.azurecr.io/test:latest',
+            }
+          : undefined,
+      );
+      const trace: string[] = [];
+      const bundles: string[] = [];
+      let currentHost = options.hostHead ?? host;
+      let objectPresent = !options.missingObject;
+      try {
+        mockedExecFile.mockImplementation((...call: unknown[]) => {
+          const args = call[1] as string[];
+          const callback = call.at(-1) as (
+            error: Error | null,
+            result: { stdout: string; stderr: string },
+          ) => void;
+          let stdout = '';
+          let failure = false;
+          let observation = false;
+          if (args[0] === 'rev-parse' && args[1] === 'HEAD') {
+            trace.push('host-head');
+            observation = true;
+            stdout = currentHost;
+            failure = options.failure === 'host-head';
+          } else if (args[0] === 'status') {
+            trace.push('host-status');
+            observation = true;
+            stdout = options.hostStatus ?? '';
+            failure = options.hostStatus === null;
+          } else if (args[1] === '--git-common-dir') {
+            stdout = bare;
+            failure = options.failure === 'derive';
+          } else if (args[0] === 'cat-file') {
+            failure = !objectPresent;
+          } else if (args[0] === 'merge-base' && args[1] === '--is-ancestor') {
+            failure = true; // sandbox host-side divergence enters the actual graft helper
+          } else if (args[0] === 'reset' && args[1] === '--soft') {
+            trace.push('graft');
+            currentHost = container;
+          } else if (args[0] === 'diff' && args[1] === '--cached') {
+            failure = !options.equalTree;
+          } else if (args[0] === 'commit') {
+            failure = options.failure === 'graft';
+            if (!failure) currentHost = grafted;
+          } else if (args[0] === 'bundle' && args[1] === 'create') {
+            failure = options.failure === 'bundle';
+            if (!failure && args[2]) {
+              bundles.push(args[2]);
+              fs.writeFileSync(args[2], 'controlled baseline bundle bytes');
+            }
+          } else if (args[0] === '--git-dir' && args.includes('update-ref')) {
+            trace.push('cleanup-reconcile-ref');
+          }
+          const finish = () =>
+            callback(failure ? new Error('controlled Git failure') : null, { stdout, stderr: '' });
+          if (observation && options.gate) void options.gate.promise.then(finish);
+          else finish();
+          return undefined as never;
+        });
+        vi.mocked(ctx.containerManager.execInContainer).mockImplementation(async (_id, command) => {
+          const workspaceIndex = command.indexOf('/workspace');
+          const args = workspaceIndex === -1 ? [] : command.slice(workspaceIndex + 1);
+          if (args[0] === 'rev-parse' && args[1] === 'HEAD') {
+            trace.push('container-head');
+            await options.gate?.promise;
+            if (options.failure === 'container-head') throw new Error('HEAD transport failure');
+            return {
+              ...ok,
+              stdout: options.containerHead ?? (options.sameHead ? host : container),
+              exitCode: options.failure === 'container-head-exit' ? 128 : 0,
+            };
+          }
+          if (args[0] === 'status') {
+            trace.push('container-status');
+            await options.gate?.promise;
+            return {
+              ...ok,
+              stdout: options.containerStatus ?? '',
+              exitCode: options.containerStatus === null ? 128 : 0,
+            };
+          }
+          if (args[0] === 'merge-base') {
+            trace.push('ancestry');
+            if (options.failure === 'ancestry') throw new Error('ancestry transport failure');
+            const first = args[2] === container;
+            const ancestor =
+              options.ancestry === 'host'
+                ? first
+                : options.ancestry === 'container'
+                  ? !first
+                  : false;
+            return { ...ok, exitCode: options.ancestry === 'unknown' ? 128 : ancestor ? 0 : 1 };
+          }
+          if (args[0] === 'reset' || args[0] === 'clean') {
+            const action = args[0];
+            trace.push(action);
+            if (options.failure === `${action}-transport`)
+              throw new Error(`${action} transport failure`);
+            return {
+              ...ok,
+              exitCode: options.failure === action ? 1 : 0,
+              stderr: 'controlled command failure',
+            };
+          }
+          if (command[2]?.includes('/workspace/.git/objects/info/alternates')) {
+            return {
+              ...ok,
+              stdout: options.missingObject
+                ? options.failure === 'mismatch'
+                  ? '/untrusted/repo.git'
+                  : bare
+                : '',
+            };
+          }
+          if (args[0] === 'push') {
+            trace.push('import');
+            if (options.failure === 'import') return { ...ok, exitCode: 1 };
+            objectPresent = true;
+          }
+          if (args[0] === 'fetch') {
+            trace.push('fetch');
+            return { ...ok, exitCode: options.failure === 'fetch' ? 1 : 0 };
+          }
+          if (args[0] === 'cat-file')
+            return { ...ok, exitCode: options.failure === 'verify' ? 1 : 0 };
+          if (command[0] === 'rm') trace.push('cleanup-container-bundle');
+          if (command[2]?.includes('STAGING=')) trace.push('sync');
+          return ok;
+        });
+        vi.mocked(ctx.containerManager.writeFile).mockImplementation(async () => {
+          trace.push('upload');
+          if (options.failure === 'upload') throw new Error('bundle upload failure');
+        });
+        const getDiff = vi.mocked(ctx.worktreeManager.getDiff).getMockImplementation();
+        vi.mocked(ctx.worktreeManager.getDiff).mockImplementation(async (...args) => {
+          trace.push('diff');
+          if (!getDiff) throw new Error('missing diff implementation');
+          return getDiff(...args);
+        });
+        const validate = vi.mocked(ctx.validationEngine.validate).getMockImplementation();
+        vi.mocked(ctx.validationEngine.validate).mockImplementation(async (config) => {
+          trace.push('validate');
+          if (!validate) throw new Error('missing validation implementation');
+          return validate(config);
+        });
+        vi.mocked(ctx.worktreeManager.pullBranch).mockResolvedValue({ newCommits: true });
+        const manager = createPodManager(ctx.deps);
+        const pod = manager.createSession(
+          { profileName: 'test-profile', task: 'Prepare validation' },
+          'operator',
+        );
+        ctx.podRepo.update(pod.id, {
+          status: 'running',
+          containerId: 'validation-container',
+          worktreePath: '/tmp/validation-worktree',
+        });
+        await check({ ctx, manager, pod: ctx.podRepo.getOrThrow(pod.id), trace, bundles });
+      } finally {
+        options.gate?.resolve();
+        for (const bundle of bundles) fs.rmSync(bundle, { force: true });
+        ctx.db.close();
+      }
+    }
+
+    it.each([
+      { label: 'blank host', hostHead: '' },
+      { label: 'unreadable host', failure: 'host-head' as const },
+      { label: 'blank container', containerHead: '' },
+      { label: 'rejected container read', failure: 'container-head' as const },
+      { label: 'failed container read', failure: 'container-head-exit' as const },
+    ])('syncs before validation for $label HEAD', async (options) => {
+      await scenario(options, async ({ manager, pod, trace }) => {
+        await manager.triggerValidation(pod.id);
+        expect(trace.indexOf('sync')).toBeGreaterThanOrEqual(0);
+        expect(trace.indexOf('sync')).toBeLessThan(trace.indexOf('validate'));
+        expect(trace).not.toContain('reset');
+        expect(manager.getSession(pod.id).status).toBe('validated');
+      });
+    });
+
+    it.each([
+      { hostStatus: '', containerStatus: '', sync: false },
+      { hostStatus: ' M host.txt\n', containerStatus: '', sync: false },
+      { hostStatus: null, containerStatus: '', sync: false },
+      { hostStatus: '', containerStatus: ' M worker.txt\n', sync: true },
+      { hostStatus: '', containerStatus: null, sync: true },
+    ])('retains equal-HEAD handling for $hostStatus / $containerStatus', async (options) => {
+      await scenario({ ...options, sameHead: true }, async ({ manager, pod, trace }) => {
+        await manager.triggerValidation(pod.id);
+        expect(trace.slice(0, trace.indexOf('validate')).includes('sync')).toBe(options.sync);
+        expect(trace).not.toContain('reset');
+        expect(trace).not.toContain('ancestry');
+        expect(trace).toContain('validate');
+      });
+    });
+
+    it('starts all four observations before any held observation finishes', async () => {
+      const gate = deferred<void>();
+      await scenario({ sameHead: true, gate }, async ({ manager, pod, trace }) => {
+        const running = manager.triggerValidation(pod.id);
+        try {
+          await waitForAssertion(() =>
+            expect(trace).toEqual([
+              'host-head',
+              'host-status',
+              'container-head',
+              'container-status',
+            ]),
+          );
+          expect(trace).not.toContain('validate');
+        } finally {
+          gate.resolve();
+          await running;
+        }
+        expect(trace).toContain('validate');
+      });
+    });
+
+    it.each(['host', 'container'] as const)(
+      'preserves %s-ahead preparation and ordering',
+      async (ancestry) => {
+        await scenario(
+          { ancestry, containerStatus: ' M worker.txt\n' },
+          async ({ ctx, manager, pod, trace }) => {
+            await manager.triggerValidation(pod.id);
+            if (ancestry === 'host') {
+              expect(trace.indexOf('reset')).toBeLessThan(trace.indexOf('clean'));
+              expect(trace.indexOf('clean')).toBeLessThan(trace.indexOf('diff'));
+              expect(trace.slice(0, trace.indexOf('validate'))).not.toContain('sync');
+              expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
+                pod.containerId,
+                ['git', '-C', '/workspace', 'reset', '--hard', host],
+                { timeout: 30_000 },
+              );
+              expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
+                pod.containerId,
+                ['git', '-C', '/workspace', 'clean', '-fd'],
+                { timeout: 30_000 },
+              );
+            } else {
+              expect(trace).toContain('sync');
+              expect(trace).not.toContain('reset');
+            }
+            expect(manager.getSession(pod.id).status).toBe('validated');
+          },
+        );
+      },
+    );
+
+    it.each(['diverged', 'unknown'] as const)(
+      'blocks local %s ancestry without live recovery',
+      async (ancestry) => {
+        await scenario({ ancestry }, async ({ ctx, manager, pod, trace }) => {
+          await manager.triggerValidation(pod.id);
+          expect(trace).not.toContain('validate');
+          expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'failed',
+            worktreeCompromised: true,
+            containerId: pod.containerId,
+            worktreePath: pod.worktreePath,
+          });
+        });
+      },
+    );
+
+    it.each(['reset', 'clean', 'reset-transport', 'clean-transport', 'ancestry'] as const)(
+      'preserves domain versus transport recovery after %s failure',
+      async (failure) => {
+        await scenario({ ancestry: 'host', failure }, async ({ ctx, manager, pod, trace }) => {
+          await manager.triggerValidation(pod.id);
+          const recoverable = failure.endsWith('-transport') || failure === 'ancestry';
+          expect(trace.includes('validate')).toBe(recoverable);
+          expect(
+            vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mock.calls.length,
+          ).toBe(recoverable ? 1 : 0);
+          expect(manager.getSession(pod.id).worktreeCompromised).toBe(!recoverable);
+        });
+      },
+    );
+
+    it('keeps ordinary sandbox validation on the checkpoint route', async () => {
+      await scenario({ target: 'sandbox' }, async ({ ctx, manager, pod, trace }) => {
+        await manager.triggerValidation(pod.id);
+        expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalled();
+        expect(trace).not.toContain('container-head');
+        expect(trace).not.toContain('ancestry');
+        expect(trace).not.toContain('graft');
+        expect(trace).toContain('validate');
+      });
+    });
+
+    it.each([false, true])(
+      'reconciles sandbox revalidation with missing container object=%s',
+      async (missingObject) => {
+        await scenario(
+          { target: 'sandbox', missingObject },
+          async ({ ctx, manager, pod, trace, bundles }) => {
+            ctx.podRepo.update(pod.id, { status: 'failed' });
+            await manager.revalidateSession(pod.id);
+            expect(trace.includes('import')).toBe(missingObject);
+            expect(trace).toContain('graft');
+            expect(trace).toContain('upload');
+            expect(trace).toContain('fetch');
+            expect(trace.indexOf('fetch')).toBeLessThan(trace.indexOf('reset'));
+            expect(trace.indexOf('clean')).toBeLessThan(trace.indexOf('validate'));
+            expect(bundles).toHaveLength(1);
+            expect(fs.existsSync(bundles[0] ?? '')).toBe(false);
+            expect(trace).toContain('cleanup-reconcile-ref');
+            expect(trace).toContain('cleanup-container-bundle');
+            expect(manager.getSession(pod.id).worktreeCompromised).toBe(false);
+          },
+        );
+      },
+    );
+
+    it('retains the equal-tree sandbox fast return without transfer or reset', async () => {
+      await scenario(
+        { target: 'sandbox', equalTree: true },
+        async ({ ctx, manager, pod, trace }) => {
+          ctx.podRepo.update(pod.id, { status: 'failed' });
+          await manager.revalidateSession(pod.id);
+          expect(trace).toContain('graft');
+          expect(trace).toContain('validate');
+          expect(trace).not.toContain('upload');
+          expect(trace).not.toContain('reset');
+          expect(trace).toContain('cleanup-container-bundle');
+        },
+      );
+    });
+
+    it.each([
+      'mismatch',
+      'derive',
+      'import',
+      'graft',
+      'bundle',
+      'upload',
+      'fetch',
+      'verify',
+      'reset',
+      'clean',
+    ] as const)(
+      'blocks sandbox revalidation and retains cleanup on %s failure',
+      async (failure) => {
+        await scenario(
+          {
+            target: 'sandbox',
+            failure,
+            missingObject: ['mismatch', 'derive', 'import'].includes(failure),
+          },
+          async ({ ctx, manager, pod, trace, bundles }) => {
+            ctx.podRepo.update(pod.id, { status: 'failed' });
+            await manager.revalidateSession(pod.id);
+            expect(trace).not.toContain('validate');
+            expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+            expect(trace).toContain('cleanup-container-bundle');
+            if (failure === 'mismatch' || failure === 'derive')
+              expect(trace).not.toContain('import');
+            if (!['reset', 'clean'].includes(failure)) expect(trace).not.toContain('reset');
+            for (const bundle of bundles) expect(fs.existsSync(bundle)).toBe(false);
+            expect(manager.getSession(pod.id)).toMatchObject({
+              status: 'failed',
+              worktreeCompromised: true,
+              worktreePath: pod.worktreePath,
+              containerId: pod.containerId,
+            });
+          },
+        );
+      },
+    );
+
+    it.each(['reset', 'reset-transport'] as const)(
+      'keeps non-forced revalidation recovery classification for %s',
+      async (failure) => {
+        await scenario({ ancestry: 'host', failure }, async ({ ctx, manager, pod, trace }) => {
+          ctx.podRepo.update(pod.id, { status: 'failed' });
+          await manager.revalidateSession(pod.id);
+          const recoverable = failure === 'reset-transport';
+          expect(trace.includes('validate')).toBe(recoverable);
+          expect(
+            vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mock.calls.length,
+          ).toBe(recoverable ? 1 : 0);
+          expect(manager.getSession(pod.id).worktreeCompromised).toBe(!recoverable);
+        });
+      },
+    );
+
+    it.each(['reset', 'reset-transport'] as const)(
+      'requeues forced revalidation after %s failure',
+      async (failure) => {
+        await scenario({ ancestry: 'host', failure }, async ({ ctx, manager, pod, trace }) => {
+          ctx.podRepo.update(pod.id, { status: 'failed' });
+          await manager.revalidateSession(pod.id, { force: true });
+          expect(trace).not.toContain('validate');
+          expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+          expect(manager.getSession(pod.id)).toMatchObject({
+            status: 'queued',
+            containerId: null,
+            skipAgent: true,
+            recoveryWorktreePath: pod.worktreePath,
+            worktreeCompromised: false,
+          });
+          expect(ctx.enqueuedSessions).toContain(pod.id);
+        });
+      },
+    );
+  });
+
   describe('verified sandbox checkpoint lifecycle', () => {
     it('resumes a stopped sandbox before checkpoint recovery', async () => {
       const ctx = createTestContext(undefined, {
