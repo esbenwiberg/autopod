@@ -78,6 +78,8 @@ public struct MainView: View {
     // Scheduled Jobs
     public var onRunCatchup: ((ScheduledJob) -> Void)?
     public var onSkipCatchup: ((ScheduledJob) -> Void)?
+    public var scheduledWorkspaceActions: ScheduledWorkspaceActions?
+    public var scanWorkspace: ((ScheduledJob, Binding<Bool>) -> AnyView)?
     public var onOpenScanReports: ((ScheduledJob) -> Void)?
   public var onTriggerJob: ((ScheduledJob) -> Void)?
     public var onCreateJob: ((CreateScheduledJobRequest) -> Void)?
@@ -182,6 +184,8 @@ public struct MainView: View {
         onRunCatchup: ((ScheduledJob) -> Void)? = nil,
         onSkipCatchup: ((ScheduledJob) -> Void)? = nil,
         onOpenScanReports: ((ScheduledJob) -> Void)? = nil,
+        scheduledWorkspaceActions: ScheduledWorkspaceActions? = nil,
+        scanWorkspace: ((ScheduledJob, Binding<Bool>) -> AnyView)? = nil,
     onTriggerJob: ((ScheduledJob) -> Void)? = nil,
         onCreateJob: ((CreateScheduledJobRequest) -> Void)? = nil,
         onEditJob: ((String, UpdateScheduledJobRequest) -> Void)? = nil,
@@ -279,6 +283,7 @@ public struct MainView: View {
         self.qualityScores = qualityScores
         self.onRunCatchup = onRunCatchup
         self.onSkipCatchup = onSkipCatchup
+        self.scheduledWorkspaceActions = scheduledWorkspaceActions; self.scanWorkspace = scanWorkspace
         self.onOpenScanReports = onOpenScanReports
     self.onTriggerJob = onTriggerJob
         self.onCreateJob = onCreateJob
@@ -527,6 +532,7 @@ public struct MainView: View {
     @State private var settingsRoute: DesktopSettingsRoute = .appearance
     @State private var configurationKind: ConfigurationKind = .profile
     @State private var configurationToOpen: String?
+    @State private var scanWorkspaceJob: ScheduledJob?
     @State private var configurationDirty = false
     @State private var configurationBusy = false
     @State private var pendingWorkspaceAction: (() -> Void)?
@@ -563,7 +569,20 @@ public struct MainView: View {
     }
 
     @ViewBuilder private var configurationWorkspace: some View {
-        if sidebarSelection == .settingsWorkspace {
+        if sidebarSelection == .scheduledJobs, let scheduledWorkspaceActions {
+            if let job = scanWorkspaceJob, let scanWorkspace {
+                scanWorkspace(job, Binding(get: { scanWorkspaceJob != nil }, set: { if !$0 { scanWorkspaceJob = nil } }))
+                  .id(configurationReset)
+            } else {
+                DesktopSchedulesView(
+                    jobs: scheduledJobs, templates: scheduledJobTemplates, profiles: profileNames,
+                    configuration: configurationActions, actions: scheduledWorkspaceActions,
+                    openReports: { job in if scanWorkspace != nil { scanWorkspaceJob = job } else { onOpenScanReports?(job) } },
+                    openPod: { id in selectedSessionId = id; sidebarSelection = .all },
+                    onDirty: { configurationDirty = $0 }, onBusy: { configurationBusy = $0 })
+                    .id(configurationReset)
+            }
+        } else if sidebarSelection == .settingsWorkspace {
             if let settingsWorkspace {
                 settingsWorkspace(settingsRoute).id(settingsRoute)
             } else {
@@ -595,7 +614,7 @@ public struct MainView: View {
 
     public var body: some View {
         Group {
-            if redesign && [.profilesWorkspace, .settingsWorkspace].contains(sidebarSelection) {
+            if redesign && ([.profilesWorkspace, .settingsWorkspace].contains(sidebarSelection) || (sidebarSelection == .scheduledJobs && scheduledWorkspaceActions != nil)) {
                 NavigationSplitView {
                     workspaceSidebar
                 } detail: {
@@ -622,15 +641,17 @@ public struct MainView: View {
                 sidebarSelection = .profilesWorkspace
             }
         )
-        .confirmationDialog("Discard unsaved configuration changes?", isPresented: $showWorkspaceDiscard) {
+        .environment(\.desktopWorkspaceDirty, { configurationDirty = $0 })
+        .environment(\.desktopWorkspaceBusy, { configurationBusy = $0 })
+        .confirmationDialog("Discard unsaved workspace changes?", isPresented: $showWorkspaceDiscard) {
             Button("Discard changes", role: .destructive) {
                 let action = pendingWorkspaceAction
-                pendingWorkspaceAction = nil; configurationDirty = false; configurationReset = UUID()
+                pendingWorkspaceAction = nil; configurationDirty = false; configurationReset = UUID(); scanWorkspaceJob = nil
                 action?()
             }
             Button("Keep editing", role: .cancel) { pendingWorkspaceAction = nil }
         } message: {
-            Text("Your configuration draft has not been saved.")
+            Text("Your workspace draft has not been saved.")
         }
         .environment(\.desktopRedesign, redesign)
         .environment(\.desktopRepositories, repositoriesByPod)
@@ -662,7 +683,7 @@ public struct MainView: View {
         }
         .onChange(of: connectionLabel) { _, _ in
             repositoryID = nil; configurationDirty = false; configurationBusy = false;
-            configurationToOpen = nil
+            configurationToOpen = nil; scanWorkspaceJob = nil
             pendingWorkspaceAction = nil; showWorkspaceDiscard = false; configurationReset = UUID()
         }
         .sheet(isPresented: $showCreateSheet) {

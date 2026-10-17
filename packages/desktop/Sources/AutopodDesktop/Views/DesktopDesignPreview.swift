@@ -4,15 +4,17 @@ import SwiftUI
 
 /// Explicit fixture mode for native visual review; never wires a daemon or provider.
 public struct DesktopDesignPreview: View {
+  @State private var scheduleFixtures = DesktopScheduleFixtures()
+  @State private var scanFixtures = DesktopScanFixtures()
   @State private var selectedID: String? = "retry-demo"
   @State private var showSettings = false
   @State private var configurationDocuments = DesktopConfigurationFixtures.documents
   @State private var simulateConfigurationConflict = false
-  @State private var connectionManager = ConnectionManager()
+  @State private var connectionManager = ConnectionManager(restoreConnection: false)
   private let onConnect: () -> Void
   public init(onConnect: @escaping () -> Void = {}) { self.onConnect = onConnect }
   public var body: some View {
-    MainView(pods: Self.pods, selectedSessionId: $selectedID,
+    MainView(pods: Self.pods, scheduledJobs: scheduleFixtures.jobs, scheduledJobTemplates: scheduleFixtures.templates, selectedSessionId: $selectedID,
       isConnected: false, connectionLabel: "Design fixtures", connectionState: "Sample data",
       actions: Self.fixtureActions,
       profileNames: MockProfiles.all.map(\.name), profileDetails: MockProfiles.all,
@@ -32,13 +34,18 @@ public struct DesktopDesignPreview: View {
       loadContent: { _, path in SessionFileContent(path: path, content: "# Recovery review\n\nSaved checkpoint restored before reconnecting.\n\n- No repeated side effects\n- Regression checks recorded", size: 130) },
       loadQuality: { id in Self.fixtureQuality(id) },
       loadCost: { id in PodCostBreakdownResponse(podId: id, model: "Codex", totalCostUsd: 1.84, inputTokens: 12000, outputTokens: 3400, segments: [PodCostSegment(bucket: "work", label: "Implementation", costUsd: 1.52, inputTokens: 10000, outputTokens: 2800, sourcePhases: ["worker"]), PodCostSegment(bucket: "validation", label: "Validation", costUsd: 0.32, inputTokens: 2000, outputTokens: 600, sourcePhases: ["review"])]) },
-      loadValidationHistory: { _ in Self.validationHistory })
+      loadValidationHistory: { _ in Self.validationHistory },
+      scheduledWorkspaceActions: scheduleFixtures.actions,
+      scanWorkspace: { job, presented in
+        AnyView(ScanInboxView(job: job, api: scanFixtures, embedded: true, onClose: { presented.wrappedValue = false }))
+      })
       .toolbar {
         ToolbarItem(placement: .principal) {
         HStack {
           Text("Design fixtures · sample data").font(.caption)
           Menu("Fixture options") {
             Toggle("Simulate configuration save conflict", isOn: $simulateConfigurationConflict)
+            Toggle("Simulate schedule save failure", isOn: $scheduleFixtures.failWrites)
           }.menuStyle(.borderlessButton).fixedSize()
         }.foregroundStyle(.secondary)
       }

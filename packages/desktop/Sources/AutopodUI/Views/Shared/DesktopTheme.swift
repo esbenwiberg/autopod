@@ -16,6 +16,8 @@ public enum DesktopSettingsRoute: Hashable, CaseIterable {
 }
 
 extension EnvironmentValues {
+    @Entry public var desktopWorkspaceDirty: ((Bool) -> Void)? = nil
+    @Entry public var desktopWorkspaceBusy: ((Bool) -> Void)? = nil
     @Entry var desktopOpenProviderAccounts: (() -> Void)? = nil
     @Entry public var desktopOpenConfiguration: ((ConfigurationKind) -> Void)? = nil
     @Entry var desktopSeriesOpenPod: ((String, DetailTab) -> Void)? = nil

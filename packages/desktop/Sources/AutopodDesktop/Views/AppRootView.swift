@@ -43,6 +43,29 @@ public struct AppRootView: View {
   }
 
   @State private var launchConfiguration = LaunchConfigurationStore()
+  private func requireScheduledConnection() throws {
+    guard connectionManager.isConnected, connectionManager.api != nil else {
+      throw DaemonError.badRequest("Connect to the daemon before changing or running schedules.")
+    }
+  }
+  private var scheduledWorkspaceActions: ScheduledWorkspaceActions {
+    ScheduledWorkspaceActions(
+      reload: { try requireScheduledConnection(); await scheduledJobStore.load(); if let error = scheduledJobStore.error { throw DaemonError.badRequest(error) } },
+      run: { job, catchup in
+        try requireScheduledConnection()
+        if catchup { try await scheduledJobStore.runCatchup(job.id) }
+        else { try await scheduledJobStore.triggerJob(job.id) }
+        return scheduledJobStore.notice ?? "Run requested."
+      },
+      skip: { try requireScheduledConnection(); try await scheduledJobStore.skipCatchup($0.id) },
+      create: { try requireScheduledConnection(); try await scheduledJobStore.createJob($0) },
+      update: { try requireScheduledConnection(); try await scheduledJobStore.updateJob($0, $1) },
+      delete: { try requireScheduledConnection(); try await scheduledJobStore.deleteJob($0.id) },
+      createTemplate: { try requireScheduledConnection(); try await scheduledJobStore.createTemplate($0) },
+      updateTemplate: { try requireScheduledConnection(); try await scheduledJobStore.updateTemplate($0, $1) },
+      deleteTemplate: { try requireScheduledConnection(); try await scheduledJobStore.deleteTemplate($0.id) })
+  }
+
   @State private var scanJob: ScheduledJob?
   @State private var showError = false
   @State private var showAuthRecoveryFailure = false
@@ -253,6 +276,14 @@ public struct AppRootView: View {
       onRunCatchup: { job in Task { try? await scheduledJobStore.runCatchup(job.id) } },
       onSkipCatchup: { job in Task { try? await scheduledJobStore.skipCatchup(job.id) } },
       onOpenScanReports: { job in scanJob = job },
+      scheduledWorkspaceActions: scheduledWorkspaceActions,
+      scanWorkspace: { job, presented in
+        AnyView(Group {
+          if let api = connectionManager.api {
+            ScanInboxView(job: job, api: api, embedded: true, onClose: { presented.wrappedValue = false })
+          } else { ContentUnavailableView("Connect to review scan reports", systemImage: "network") }
+        })
+      },
       onTriggerJob: { job in Task { try? await scheduledJobStore.triggerJob(job.id) } },
       onCreateJob: { req in Task { try? await scheduledJobStore.createJob(req) } },
       onEditJob: { id, req in Task { try? await scheduledJobStore.updateJob(id, req) } },
