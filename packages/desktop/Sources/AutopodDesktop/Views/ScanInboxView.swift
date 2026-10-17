@@ -200,19 +200,47 @@ struct ScanInboxView: View {
     }.background(DesktopTheme.canvas)
   }
   private var policyControls: some View {
-      DisclosureGroup("Report-only scan policy", isExpanded: .constant(true)) {
-        VStack(alignment: .leading) {
-          TextField("Base branch", text: $baseRef)
-          TextField("Head branch", text: $headRef)
-          Toggle("Rolling time window on one branch", isOn: $rollingWindow)
-          if rollingWindow { Stepper("Last \(windowHours) hours (base and head must match)", value: $windowHours, in: 1...720) }
-          HStack { Toggle("Secrets", isOn: $secrets); Toggle("Dependencies", isOn: $dependencies); Toggle("Bounded judgment", isOn: $judgment) }
-          Text("The exact freshly fetched branch delta is collected. Empty deltas stay empty. npm dependency metadata goes to the public npm advisory service. Bounded judgment may incur configured provider cost.").font(.caption)
-          if sameBranchWithoutWindow { Text("Base and head are the same branch, so the delta is always empty. Turn on the rolling time window to scan recent commits.").font(.caption).foregroundStyle(.orange) }
-          Button("Save report-only policy") { Task { await savePolicy() } }.disabled(busy || !policyCanSave)
-        }.textFieldStyle(.roundedBorder)
+    VStack(alignment: .leading, spacing: 22) {
+      VStack(alignment: .leading, spacing: 16) {
+        Text("Source range").font(.headline)
+        LabeledContent("Base branch") {
+          TextField("Base branch", text: $baseRef).accessibilityLabel("Base branch").frame(maxWidth: 400)
+        }
+        LabeledContent("Head branch") {
+          TextField("Head branch", text: $headRef).accessibilityLabel("Head branch").frame(maxWidth: 400)
+        }
+        Toggle("Rolling time window on one branch", isOn: $rollingWindow)
+        if rollingWindow {
+          Stepper("Last \(windowHours) hours (base and head must match)", value: $windowHours, in: 1...720)
+        }
+        Text("The exact freshly fetched branch delta is collected. Empty deltas stay empty.")
+          .font(.caption).foregroundStyle(.secondary)
+        if sameBranchWithoutWindow {
+          Text("Base and head are the same branch. Turn on the rolling time window to scan recent commits.")
+            .font(.caption).foregroundStyle(.orange)
+        }
+        if rollingWindow && baseRef != headRef {
+          Text("A rolling time window requires the same base and head branch.").font(.caption).foregroundStyle(.orange)
+        }
+      }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesktopTheme.canvas, in: RoundedRectangle(cornerRadius: 8))
+      VStack(alignment: .leading, spacing: 16) {
+        Text("Scanners & judgment").font(.headline)
+        Toggle("Secrets", isOn: $secrets)
+        Toggle("Dependencies", isOn: $dependencies)
+        Text("npm dependency metadata goes to the public npm advisory service.").font(.caption).foregroundStyle(.secondary)
+        Divider()
+        Toggle("Bounded judgment", isOn: $judgment)
+        Text("Bounded judgment may incur configured provider cost.").font(.caption).foregroundStyle(.secondary)
+      }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesktopTheme.canvas, in: RoundedRectangle(cornerRadius: 8))
+      HStack {
+        Text("The schedule’s enabled state is unchanged.").font(.caption).foregroundStyle(.secondary)
+        Spacer()
+        Button("Save report-only policy") { Task { await savePolicy() } }
+          .buttonStyle(.borderedProminent).disabled(busy || !policyCanSave)
       }
-
+    }.textFieldStyle(.roundedBorder)
   }
   private func reportSummary(_ detail: ScanReportDetail) -> some View {
     let unavailable = !(detail.report.evidenceDiagnostics ?? []).isEmpty
