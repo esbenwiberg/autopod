@@ -1,6 +1,6 @@
 # Slice 9: validation execution and infrastructure retry extraction
 
-Status: IN PROGRESS — explicitly approved; Phases 1 and 2 complete; qualification running.
+Status: COMPLETE — all three approved phases implemented and locally verified.
 Baseline: 5cef752cadbf76390caedceec03c60217ee8283c.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -274,9 +274,9 @@ and push verified increments, and verify final remote identity and clean worktre
 
 Automated:
 - [x] All 48 affected suites pass with SQLite and no new skips.
-- [ ] Full uncached pipeline passes under the documented qualification environment.
-- [ ] Scoped lint/whitespace, new-test semantic diagnostics, frozen hashes and movement review pass.
-- [ ] Evidence and final plan record actual results, limitations and pushed identities.
+- [x] Full uncached pipeline passes under the documented qualification environment.
+- [x] Scoped lint/whitespace, new-test semantic diagnostics, frozen hashes and movement review pass.
+- [x] Evidence and final plan record actual results, limitations and pushed identities.
 
 Manual: None required. Approval covers all three phases together.
 
@@ -299,8 +299,8 @@ Revert module and manager wiring together. Main integration remains separate wor
 - Sources: pod-manager.ts:6744–6872 and its two existing callers; validation-ownership.ts;
   task-retry-ledger.ts; retry-backoff-wait.ts; validation identity modules.
 
-Next action: review and explicitly approve this concrete plan, then execute all
-three phases together. No implementation or test execution has started.
+All three approved phases are complete. No manual acceptance remains for this
+headless extraction. Integration, PR creation and deployment remain separate work.
 
 ## Phase 1 evidence
 
@@ -345,3 +345,57 @@ Both call sites and all shared helper implementations remain unchanged. The new
 module is 215 lines; the manager is 17,511 lines, 114 fewer. All 1,959 other baseline
 package/script files are unchanged. The final 1,963-file manifest is frozen for
 full qualification. No product change was needed after the original move.
+
+## Phase 3: final qualification
+
+Verdict: PROVEN for the approved local compatibility extraction under the documented
+qualification environment. No required manual verification remains.
+
+| Claim/check | Observed final evidence | Result |
+|---|---|---|
+| Public compatibility | 69 selected before/after checks, 30 new; assertions byte-identical | Passed |
+| Actual execution and retry history | 51 direct cases; real file SQLite, ownership, admissions, close/reopen and integrity checks | Passed |
+| Surrounding orchestration | 48 affected suites; 1,747 passed; zero skipped | Passed |
+| Full uncached pipeline | Frozen install, lint, build, supported declaration typecheck, tests, audit and secret scan | Passed under documented environment |
+| Vitest | 7,692 passed across 496 passing files; 10 existing gated skips | Passed with existing skips |
+| Standalone Node scripts | 35 passed, zero failed/skipped | Passed |
+| Source integrity | All 1,963 frozen package/script hashes unchanged through qualification | Passed |
+| Exact movement and scope | Two receiver substitutions, two unchanged call sites; two product/two test paths | Passed |
+| Scoped quality | Biome/whitespace clean; zero semantic diagnostics in new test boundaries | Passed |
+
+Tested implementation: 9421661100618706d95371dfaaf85a85927d9742. A following documentation-only commit
+records qualification without changing qualified source/test bytes. Final remote
+identity and clean-worktree confirmation are recorded privately after push.
+
+Actual full command using the established task-local npx launcher:
+
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+Actual Node 22.23.3 opened SQLite 3.49.2; pnpm 9.15.4. Turbo build/typecheck/test
+groups ran uncached. Frozen install succeeded without fallback or lockfile mutation.
+Root lint used only --files-max-size=2097152 to process the large manager test and
+retained 82 existing warnings; scoped files are clean. No rule or file selection
+was disabled, and no repository configuration changed.
+
+The process-only maintenance.auto=false is the inherited qualification adjustment;
+no global/repository Git setting changed. The separate default-environment Git
+maintenance-lock scan race and audit-clock flake remain unfixed. The 10 existing
+Docker/platform/live-model gated skips remain; no new case was skipped. No source
+or frozen public assertion change was needed after extraction. The full run's
+actual result and any retained initial failures are recorded with raw logs.
+
+The manager is 17,511 lines, 114 fewer; validation-execution.ts is 215 lines. Parsed
+TypeScript comparison proves the entire remaining manager, moved helper, two
+receiver changes and two unchanged invocation sites. All 1,959 other baseline
+package/script paths remain unchanged.
+
+Evidence under ignored .autopod-data/validation-execution/: proof.json, movement.json,
+baseline/frozen manifests, frozen public assertions, before-source/expected recipe
+copies, runtime/pnpm and command/environment records, before/after/build/affected/
+full/scoped-Biome/type logs and exit codes, retained initial baseline fixture/type
+failures, and implementation/final remote identities.
+
+Local real SQLite admissions/outcomes and ownership checks substantiate the stated
+boundary. Controlled engine/container/callback seams prove local contracts and do
+not establish live provider availability, actual external command execution or
+stronger atomicity, fencing, crash recovery or cross-process synchronization.
