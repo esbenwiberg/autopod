@@ -1,6 +1,6 @@
 # Slice 10: post-validation evidence collection extraction
 
-Status: PROPOSED — awaiting explicit approval before implementation.
+Status: APPROVED — implementation in progress.
 Date: 2026-10-18.
 Baseline: fa4f8abab07ee54147ec1b01d529ff3b745ce43a.
 Branch: codex/pod-manager-workspace.
@@ -144,8 +144,8 @@ selected case names and raw results under ignored .autopod-data/validation-evide
 ### Success criteria
 
 Automated:
-- [ ] New and selected existing public cases pass against unchanged product source.
-- [ ] Frozen assertions/source identities, actual runtime/SQLite and raw before evidence recorded.
+- [x] New and selected existing public cases pass against unchanged product source.
+- [x] Frozen assertions/source identities, actual runtime/SQLite and raw before evidence recorded.
 
 Manual: None required for this local headless compatibility extraction.
 
@@ -254,5 +254,21 @@ Predecessor: 2026-10-17-pod-manager-validation-execution.md (complete).
 Sources: pod-manager.ts:13602–13723, :13724 and :14187; validation/screenshot-collector.ts;
 pods/screenshot-store.ts; pods/workspace-preservation.ts and workspace-transfer.ts.
 
-Next action: user reviews this concrete illustrated plan and explicitly approves it.
-No product code has changed and no implementation test results are claimed.
+The user explicitly approved this plan and all three phases together.
+Next action: characterize the unchanged product before extraction.
+
+## Phase 1 evidence
+
+16 new public cases and two selected existing cases pass against unchanged product:
+18 passed, 980 name-filtered. Real filesystem stores prove host bytes survive sync,
+post-sync smoke/fact refs precede persistence/publication, best-effort failures,
+verified/unverified/throwing checkpoint flags and local sync failure control the
+later deletion guard. A held-write terminal transition pins current persistence
+before the existing terminal check, without claiming a stronger ownership fence.
+
+All 1,963 baseline package/script identities are recorded; only the test file changed.
+Public assertions are frozen byte-for-byte. Node 22.23.3 opens SQLite 3.49.2. Scoped
+Biome and supplemental semantic checking of the new group pass with zero warnings
+or diagnostics. Initial one-case failure was a fixture using nonexistent updateStatus;
+use the actual update API. Required page/fact fields were completed before freeze.
+Raw initial failures and final passing results are retained privately.

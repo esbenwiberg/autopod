@@ -112,6 +112,7 @@ import { createPodRepository } from './pod-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 import { resolveReviewerModel } from './runtime-resolver.js';
+import { createScreenshotStore } from './screenshot-store.js';
 import { createValidationRepository } from './validation-repository.js';
 import {
   type CheckpointRecord,
@@ -28143,4 +28144,398 @@ describe('validation execution compatibility', () => {
       }
     },
   );
+});
+
+describe('validation evidence compatibility', () => {
+  function required<T>(value: T | null | undefined): T {
+    if (value == null) throw new Error('Expected evidence fixture value');
+    return value;
+  }
+
+  beforeEach(() => mockExecFileSuccess());
+  afterEach(() => vi.restoreAllMocks());
+
+  function fixture(target: 'local' | 'sandbox' = 'local', overall: 'pass' | 'fail' = 'fail') {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'validation-evidence-public-'));
+    const worktree = path.join(root, 'worktree');
+    const host = path.join(root, 'host');
+    fs.mkdirSync(worktree);
+    fs.mkdirSync(host);
+    const ctx = createTestContext(undefined, {
+      executionTarget: target,
+      warmImageTag: target === 'sandbox' ? 'registry.azurecr.io/autopod/test:latest' : null,
+    });
+    const store = createScreenshotStore(path.join(root, 'store'));
+    ctx.deps.screenshotStore = store;
+    ctx.deps.hostScreenshotDir = () => host;
+    const result = makeValidationResult({
+      overall,
+      ...(overall === 'fail' ? ordinaryTestFailureResult() : {}),
+    });
+    let afterChecks = false;
+    let onSync = () => {};
+    const execImpl = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+    if (!execImpl) throw new Error('Missing container fixture implementation');
+    vi.mocked(ctx.containerManager.execInContainer).mockImplementation(async (...args) => {
+      if (afterChecks && args[1][2]?.includes('STAGING=')) onSync();
+      return execImpl(...args);
+    });
+    const checkpoint = ctx.deps.sandboxWorkspaceCheckpoint;
+    if (!checkpoint) throw new Error('Missing checkpoint fixture');
+    const checkpointImpl = vi.mocked(checkpoint).getMockImplementation();
+    if (!checkpointImpl) throw new Error('Missing checkpoint implementation');
+    vi.mocked(checkpoint).mockImplementation(async (args) => {
+      const receipt = await checkpointImpl(args);
+      if (afterChecks) onSync();
+      return receipt;
+    });
+    vi.mocked(ctx.validationEngine.validate).mockImplementation(async () => {
+      afterChecks = true;
+      return result;
+    });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Evidence compatibility' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'evidence-container',
+      worktreePath: worktree,
+      maxValidationAttempts: 1,
+    });
+    const messages: string[] = [];
+    const unsubscribe = ctx.eventBus.subscribe((event) => {
+      if (
+        event.type === 'pod.agent_activity' &&
+        event.podId === pod.id &&
+        event.event.type === 'status'
+      )
+        messages.push(event.event.message);
+    });
+    return {
+      ctx,
+      root,
+      worktree,
+      host,
+      store,
+      result,
+      manager,
+      pod,
+      messages,
+      sync: (fn: () => void) => {
+        onSync = fn;
+      },
+      write: (relative: string, bytes: string) => {
+        const file = path.join(worktree, relative);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, bytes);
+      },
+      facts: (kind: 'browser-test' | 'unit-test' = 'browser-test') => {
+        result.factValidation = {
+          status: 'pass',
+          results: [kind, 'unit-test' as const].map((value, i) => ({
+            factId: `fact-${i}`,
+            proves: ['visible'],
+            kind: value,
+            artifactPath: 'artifact.txt',
+            command: 'test',
+            passed: true,
+            reasoning: 'Fixture fact passed',
+            attachments: [{ kind: 'screenshot' as const, path: `evidence/fact-${i}.PNG` }],
+          })),
+        };
+      },
+      pages: (screenshotPath = '/workspace/page.png') => {
+        result.smoke.pages = [
+          {
+            path: '/',
+            status: 'pass',
+            screenshotPath,
+            consoleErrors: [],
+            assertions: [],
+            loadTime: 1,
+          },
+        ];
+      },
+      run: () => manager.triggerValidation(pod.id),
+      stored: () => ctx.podRepo.getOrThrow(pod.id).lastValidationResult,
+      close: () => {
+        unsubscribe();
+        ctx.db.close();
+        fs.rmSync(root, { recursive: true, force: true });
+      },
+    };
+  }
+
+  it('saves all fact bytes before mirror sync removes host evidence', async () => {
+    const f = fixture();
+    try {
+      f.facts();
+      f.write('evidence/fact-0.PNG', 'host-browser');
+      f.write('evidence/fact-1.PNG', 'host-unit');
+      f.sync(() => fs.rmSync(path.join(f.worktree, 'evidence'), { recursive: true, force: true }));
+      await f.run();
+      const reopened = createScreenshotStore(path.join(f.root, 'store'));
+      const refs = await reopened.list(f.pod.id);
+      expect(refs).toHaveLength(2);
+      expect(
+        await Promise.all(refs.map(async (ref) => (await reopened.read(ref)).toString())),
+      ).toEqual(['host-browser', 'host-unit']);
+      expect(
+        f.stored()?.factValidation?.results.map((fact) => fact.attachments?.[0]?.screenshot),
+      ).toEqual(refs);
+      expect(fs.existsSync(path.join(f.worktree, 'evidence'))).toBe(false);
+      expect(f.messages.indexOf('Collecting host fact evidence…')).toBeLessThan(
+        f.messages.indexOf('Syncing post-validation workspace…'),
+      );
+      expect(f.stored()?.overall).toBe('fail');
+    } finally {
+      f.close();
+    }
+  });
+
+  it.each(['local', 'sandbox'] as const)(
+    'stores post-sync smoke/fact bytes before %s result publication',
+    async (target) => {
+      const f = fixture(target);
+      try {
+        f.facts('unit-test');
+        f.pages();
+        f.sync(() => {
+          f.write('page.png', 'smoke-after-sync');
+          f.write('evidence/fact-0.PNG', 'fact-after-sync');
+        });
+        const observations: ValidationResult[] = [];
+        const unsubscribe = f.ctx.eventBus.subscribe((event) => {
+          if (event.type === 'pod.validation_completed') {
+            const persisted = f.stored();
+            const history = f.ctx.validationRepo.getLatest(f.pod.id);
+            if (persisted && history) {
+              observations.push(persisted, history.result);
+            }
+          }
+        });
+        await f.run();
+        unsubscribe();
+        expect(observations).toHaveLength(2);
+        for (const saved of observations) {
+          expect(saved.smoke.pages[0]?.screenshot).toEqual(f.result.smoke.pages[0]?.screenshot);
+          expect(saved.factValidation?.results[0]?.attachments?.[0]?.screenshot).toEqual(
+            f.result.factValidation?.results[0]?.attachments?.[0]?.screenshot,
+          );
+        }
+        expect(
+          (await f.store.read(required(required(f.result.smoke.pages[0]).screenshot))).toString(),
+        ).toBe('smoke-after-sync');
+        expect(
+          (
+            await f.store.read(
+              required(
+                required(required(required(f.result.factValidation).results[0]).attachments?.[0])
+                  .screenshot,
+              ),
+            )
+          ).toString(),
+        ).toBe('fact-after-sync');
+        expect(f.messages).not.toContain('Collecting host fact evidence…');
+        expect(f.messages.indexOf('Collecting validation screenshots…')).toBeGreaterThan(
+          f.messages.indexOf('Syncing post-validation workspace…'),
+        );
+      } finally {
+        f.close();
+      }
+    },
+  );
+
+  it.each(['relative', 'host'] as const)(
+    'supports %s smoke paths using real stored bytes',
+    async (mode) => {
+      const f = fixture();
+      try {
+        const file = mode === 'host' ? path.join(f.host, 'page.png') : 'page.png';
+        f.pages(file);
+        if (mode === 'host') fs.writeFileSync(file, 'host-smoke');
+        else f.write(file, 'host-smoke');
+        await f.run();
+        const ref = f.stored()?.smoke.pages[0]?.screenshot;
+        expect(ref).toBeDefined();
+        expect((await f.store.read(required(ref))).toString()).toBe('host-smoke');
+      } finally {
+        f.close();
+      }
+    },
+  );
+
+  it.each(['missing', 'escape', 'write-error'] as const)(
+    'keeps %s screenshot failure best effort',
+    async (mode) => {
+      const f = fixture();
+      try {
+        f.pages(mode === 'escape' ? '../outside.png' : 'page.png');
+        fs.writeFileSync(path.join(f.root, 'outside.png'), 'outside');
+        if (mode === 'write-error') {
+          f.write('page.png', 'exists');
+          vi.spyOn(f.store, 'write').mockRejectedValue(new Error('store unavailable'));
+        }
+        await f.run();
+        expect(await f.store.list(f.pod.id)).toEqual([]);
+        expect(f.stored()?.overall).toBe('fail');
+        expect(f.stored()?.smoke.pages[0]?.screenshot).toBeUndefined();
+        expect(f.ctx.podRepo.getOrThrow(f.pod.id).status).toBe('review_required');
+      } finally {
+        f.close();
+      }
+    },
+  );
+
+  it.each(['verified', 'unverified', 'throws'] as const)(
+    'uses the %s sandbox post-check receipt for deletion guard',
+    async (mode) => {
+      const f = fixture('sandbox', 'pass');
+      try {
+        const checkpoint = vi.mocked(required(f.ctx.deps.sandboxWorkspaceCheckpoint));
+        const original = required(checkpoint.getMockImplementation());
+        let count = 0;
+        checkpoint.mockImplementation(async (args) => {
+          const receipt = await original(args);
+          if (++count === 2) {
+            if (mode === 'throws') throw new Error('post-check checkpoint failed');
+            if (mode === 'unverified') return { ...receipt, lineageVerified: false };
+          }
+          return receipt;
+        });
+        await f.run();
+        expect(f.ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+          expect.objectContaining({ maxDeletions: mode === 'verified' ? 100 : 0 }),
+        );
+        expect(f.stored()?.overall).toBe('pass');
+        if (mode === 'throws')
+          expect(f.messages.some((m) => m.includes('continuing with degraded safeguards'))).toBe(
+            true,
+          );
+        else expect(f.messages.some((m) => m.startsWith('Workspace sync complete'))).toBe(true);
+      } finally {
+        f.close();
+      }
+    },
+  );
+
+  it('retains available facts and tightens delivery after actual local sync failure', async () => {
+    const f = fixture('local', 'pass');
+    try {
+      f.facts('unit-test');
+      f.write('evidence/fact-0.PNG', 'available');
+      f.sync(() => {
+        throw new Error('post-check mirror failed');
+      });
+      vi.mocked(f.ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(
+        new Error('archive failed'),
+      );
+      await f.run();
+      expect(f.messages).toContain('Collecting available fact evidence after degraded sync…');
+      expect(f.ctx.worktreeManager.mergeBranch).toHaveBeenCalledWith(
+        expect.objectContaining({ maxDeletions: 0 }),
+      );
+      expect(f.stored()?.factValidation?.results[0]?.attachments?.[0]?.screenshot).toBeDefined();
+    } finally {
+      f.close();
+    }
+  });
+
+  it('catches a throwing host resolver but keeps later fact collection', async () => {
+    const f = fixture();
+    try {
+      // The original captured callback is called late; fail through its existing filesystem lookup.
+      f.pages();
+      f.facts('unit-test');
+      f.write('evidence/fact-0.PNG', 'fact');
+      // Reconstruct with the requested resolver before capture, using the same public pod.
+      f.ctx.deps.hostScreenshotDir = () => {
+        throw new Error('resolver unavailable');
+      };
+      const manager = createPodManager(f.ctx.deps);
+      await manager.triggerValidation(f.pod.id);
+      expect(f.stored()?.smoke.pages[0]?.screenshot).toBeUndefined();
+      expect(f.stored()?.factValidation?.results[0]?.attachments?.[0]?.screenshot).toBeDefined();
+      expect(f.stored()?.overall).toBe('fail');
+    } finally {
+      f.close();
+    }
+  });
+
+  it('retains partial refs when a collection info logger throws', async () => {
+    const f = fixture();
+    try {
+      f.pages();
+      f.write('page.png', 'smoke');
+      const info = logger.info.bind(logger);
+      vi.spyOn(logger, 'info').mockImplementation((...args: Parameters<typeof logger.info>) => {
+        if (args[1] === 'Collected validation screenshots') throw new Error('log failed');
+        info(...args);
+      });
+      await f.run();
+      expect(f.stored()?.smoke.pages[0]?.screenshot).toBeDefined();
+      expect(f.stored()?.overall).toBe('fail');
+    } finally {
+      f.close();
+    }
+  });
+
+  it('uses the outer failure path for an activity error before collection try', async () => {
+    const f = fixture();
+    try {
+      f.pages();
+      const emit = f.ctx.eventBus.emit.bind(f.ctx.eventBus);
+      vi.spyOn(f.ctx.eventBus, 'emit').mockImplementation((event) => {
+        if (
+          event.type === 'pod.agent_activity' &&
+          event.event.type === 'status' &&
+          event.event.message === 'Collecting validation screenshots…'
+        )
+          throw new Error('activity failed');
+        return emit(event);
+      });
+      await f.run();
+      expect(f.ctx.podRepo.getOrThrow(f.pod.id).status).toBe('failed');
+      expect(f.ctx.podRepo.getOrThrow(f.pod.id).failureReason).toContain('activity failed');
+      expect(f.stored()).toBeNull();
+      expect(f.ctx.validationRepo.getLatest(f.pod.id)).toBeNull();
+    } finally {
+      f.close();
+    }
+  });
+
+  it('preserves current persistence before terminal-status check during held evidence', async () => {
+    const f = fixture();
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    let run: Promise<void> | undefined;
+    try {
+      f.pages();
+      f.write('page.png', 'held');
+      const write = f.store.write.bind(f.store);
+      vi.spyOn(f.store, 'write').mockImplementation(async (...args) => {
+        entered.resolve();
+        await release.promise;
+        return write(...args);
+      });
+      run = f.run();
+      await entered.promise;
+      f.ctx.podRepo.update(f.pod.id, { status: 'killing' });
+      f.ctx.podRepo.update(f.pod.id, { status: 'killed' });
+      release.resolve();
+      await run;
+      expect(f.ctx.podRepo.getOrThrow(f.pod.id).status).toBe('killed');
+      expect(f.stored()?.smoke.pages[0]?.screenshot).toBeDefined();
+      expect(
+        f.ctx.validationRepo.getLatest(f.pod.id)?.result.smoke.pages[0]?.screenshot,
+      ).toBeDefined();
+      expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    } finally {
+      release.resolve();
+      await run;
+      f.close();
+    }
+  });
 });
