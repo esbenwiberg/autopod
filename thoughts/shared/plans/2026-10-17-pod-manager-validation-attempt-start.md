@@ -184,10 +184,10 @@ against the exact recipe. No shared helper implementation or other caller change
 ### Success criteria
 
 Automated:
-- [ ] Byte-identical public characterization passes after extraction.
-- [ ] Real SQLite persistence, returned snapshot, ordering and failure cases pass.
-- [ ] Exact movement receipt and unchanged shared helpers are recorded.
-- [ ] Only two approved product paths and two test paths differ from baseline.
+- [x] Byte-identical public characterization passes after extraction.
+- [x] Real SQLite persistence, returned snapshot, ordering and failure cases pass.
+- [x] Exact movement receipt and unchanged shared helpers are recorded.
+- [x] Only two approved product paths and two test paths differ from baseline.
 
 Manual: None required. No live provider/container qualification is claimed.
 
@@ -274,3 +274,26 @@ termination guard checks unverified termination only. It is now characterized
 explicitly as allowing ordinary entry for a verified active ledger record, while
 unverified termination still rejects. No product behavior was changed. All fixture
 and characterization corrections occurred before the passing baseline was frozen.
+
+## Phase 2 evidence
+
+All 47 selected public checks passed after extraction with the frozen public
+characterization byte-identical. All 31 direct cases passed using real file-backed
+SQLite and event repositories, close/reopen, integrity and foreign-key checks.
+Evidence includes normal/terminal/wake/restart accounting, suite/rework activity,
+returned snapshot identity, held scan, captured inputs and transition reload,
+eight controlled failure sites, actual SQLite start-event rejection, and real
+event-bus subscriber exception handling.
+
+The 89-line module retains the contiguous ordinary-start body with zero receiver
+or expression adaptations. Manager shrank 22 lines, from 17,736 to 17,714. Parsed
+TypeScript token comparison proves the exact module and remaining-manager recipe.
+All 1,955 other baseline package/script files are unchanged. Exactly the approved
+two product paths and two test paths differ from the product baseline.
+
+Daemon/dependency ESM and declaration builds passed. Four-file scoped Biome and
+whitespace checks passed; supplemental semantic diagnostics in both new test
+boundaries returned zero. Initial lint found two multi-variable declarations in
+the new direct test; they were split without assertion changes, then all 78
+selected public/direct checks were rerun successfully on the final test source.
+No product or behavioral adjustment was needed after the extraction.

@@ -89,3 +89,10 @@ These are predecessor results, not slice 7 execution evidence.
 
 No product or test code changed and no tests ran during this research. The companion
 plan fixes a small attempt-start extraction. There are no unresolved questions.
+
+## Baseline characterization clarification
+
+Implementation-phase inspection of task-execution-ledger.ts:63 confirmed that
+assertExecutionTerminationVerified checks unverified termination. A verified active
+ledger record alone does not reject triggerValidation entry. The public baseline
+now characterizes both paths explicitly; this clarification adds no new guard.

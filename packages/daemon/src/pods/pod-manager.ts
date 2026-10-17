@@ -294,6 +294,7 @@ import {
 import { generateSystemInstructions } from './system-instructions-generator.js';
 import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
+import { createValidationAttemptStart } from './validation-attempt-start.js';
 import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
 import type { ValidationRepository } from './validation-repository.js';
 import {
@@ -5521,6 +5522,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     maybeTriggerDependents,
     emitActivityStatus,
     logger,
+  });
+
+  const { startValidationAttempt } = createValidationAttemptStart({
+    assertGuidanceCollected,
+    runPushCheckpointScan,
+    podRepo,
+    transition,
+    eventBus,
+    getPodValidationSuite,
+    emitActivityStatus,
   });
 
   async function preserveSandboxAfterAgentFailure(podId: string, reason: string): Promise<void> {
@@ -13557,43 +13568,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         return;
       }
 
-      assertGuidanceCollected(podId);
-
-      // Pre-push security scan: inspect the diff for secrets / PII / injection
-      // before running validation. block decision throws and the pod's outer
-      // error handler transitions to failed; warn / escalate findings ride
-      // along into the PR body via scanRepo lookup at PR creation time.
-      await runPushCheckpointScan(pod, profile);
-
-      // Reset attempt counter when re-validating from a terminal/failed/validated state
-      if (fromTerminal) {
-        podRepo.update(podId, { validationAttempts: 0 });
-      }
-
-      const s1 = transition(pod, 'validating');
-
-      // Wake-recovery: don't burn a validation attempt for the involuntary restart.
-      // The flag is one-shot — clear it so subsequent attempts in the same run increment normally.
-      const isWakeRecovery = s1.lastRecoveryTrigger === 'wake';
-      const attempt = isWakeRecovery
-        ? s1.validationAttempts
-        : (fromTerminal ? 0 : s1.validationAttempts) + 1;
-      podRepo.update(podId, {
-        ...(isWakeRecovery ? { lastRecoveryTrigger: null } : { validationAttempts: attempt }),
-      });
-
-      eventBus.emit({
-        type: 'pod.validation_started',
-        timestamp: new Date().toISOString(),
-        podId,
-        attempt,
-      });
-
-      const reworkLabel = s1.reworkCount > 0 ? `rework ${s1.reworkCount}, ` : '';
-      const validationSuite = getPodValidationSuite(s1);
-      emitActivityStatus(
-        podId,
-        `Starting ${validationSuite} validation (${reworkLabel}attempt ${attempt}/${s1.maxValidationAttempts})…`,
+      const { s1, attempt, validationSuite } = await startValidationAttempt(
+        pod,
+        profile,
+        fromTerminal,
       );
 
       try {
