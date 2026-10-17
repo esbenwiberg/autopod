@@ -95,6 +95,7 @@ import Testing
 @MainActor private func renderInsights<V: View>(_ view: V, width: Double, path: String?, appearance: NSAppearance.Name = .darkAqua) async throws {
     let height = 960.0
     let host = NSHostingView(rootView: view.environment(\.desktopRedesign, true).environment(\.desktopAnalyticsWindow, 30)
+        .environment(\.colorScheme, appearance == .aqua ? .light : .dark)
         .environment(\.desktopRepositories, Dictionary(uniqueKeysWithValues: DesktopDesignPreview.pods.compactMap { pod in DesktopRepository.resolve(pod, profiles: MockProfiles.all).map { (pod.id, $0) } }))
         .environment(\.controlActiveState, .key).tint(DesktopTheme.accent).frame(width: width, height: height))
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.titled], backing: .buffered, defer: false)
