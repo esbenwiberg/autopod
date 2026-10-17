@@ -193,10 +193,9 @@ import {
 import { MergeQueue } from '../worktrees/merge-queue.js';
 import { mergeReconciliation } from '../worktrees/merge-source-identity.js';
 import { transferCommitToContainer } from '../worktrees/sandbox-reconcile.js';
-import {
-  type SandboxWorkspaceCheckpointArgs,
-  type WorkspaceCheckpointResult,
-  checkpointSandboxWorkspace,
+import type {
+  SandboxWorkspaceCheckpointArgs,
+  WorkspaceCheckpointResult,
 } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
 import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
@@ -302,6 +301,7 @@ import {
   workerBindingHash,
 } from './worker-retry-history.js';
 import type { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
+import { createWorkspacePreservation } from './workspace-preservation.js';
 import {
   buildBashrcHintBlock,
   buildWorkspaceToolsDoc,
@@ -4000,9 +4000,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const validationAbortControllers = new Map<string, AbortController>();
   /** Slow operator recovery is detached from HTTP and coalesced per pod. */
   const attemptExtensionRuns = new Map<string, Promise<void>>();
-  // Completion, explicit recovery, and destructive-boundary preservation can race.
-  // One immutable checkpoint per pod makes duplicate requests observationally identical.
-  const sandboxCheckpointRuns = new Map<string, Promise<WorkspaceCheckpointResult>>();
   const infrastructureResumeRuns = new Map<string, Promise<void>>();
   const artifactResumeRuns = new Map<string, Promise<void>>();
   const artifactCompletionRuns = new Map<string, Promise<void>>();
@@ -5654,85 +5651,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     );
   }
 
-  async function preservePodWorkspace(pod: Pod, reason: string): Promise<void> {
-    if (!pod.containerId || !pod.worktreePath) return;
-    const cm = containerManagerFactory.get(pod.executionTarget);
-    if (pod.executionTarget === 'sandbox') {
-      const status = await cm.getStatus(pod.containerId);
-      if (status === 'unknown') {
-        throw new Error(`Sandbox ${pod.containerId} is unavailable for workspace preservation`);
-      }
-      if (status === 'stopped') {
-        await cm.start(pod.containerId);
-      }
-    }
-    if (pod.executionTarget === 'sandbox') {
-      const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
-      if (!checkpoint.promoted || !checkpoint.materialized || !checkpoint.lineageVerified) {
-        throw new Error(checkpoint.error?.message ?? 'sandbox checkpoint was not fully verified');
-      }
-      emitActivityStatus(pod.id, `Verified workspace checkpoint before ${reason}.`);
-      return;
-    }
-    const result = await syncWorkspaceBack(
-      pod.containerId,
-      pod.worktreePath,
-      cm,
-      pod.id,
-      pod.executionTarget,
-    );
-    logger.info(
-      {
-        podId: pod.id,
-        containerId: pod.containerId,
-        executionTarget: pod.executionTarget,
-        reason,
-        commitsPushed: result.pushed,
-      },
-      'Workspace preserved before recovery boundary',
-    );
-    emitActivityStatus(pod.id, `Workspace preserved before ${reason}.`);
-  }
-
-  async function checkpointSandboxWorkspaceForPod(pod: Pod): Promise<WorkspaceCheckpointResult> {
-    if (!pod.containerId || !pod.worktreePath) {
-      return {
-        sequence: 0,
-        sourceHead: '',
-        sourceTree: '',
-        snapshotCommit: '',
-        snapshotTree: '',
-        transferVerified: false,
-        bundleVerified: false,
-        hostImported: false,
-        lineageVerified: false,
-        promoted: false,
-        materialized: false,
-        quarantineRef: '',
-        error: {
-          phase: 'capture',
-          code: 'NO_WORKSPACE',
-          retryable: false,
-          message: 'Sandbox pod has no container or Git worktree',
-        },
-      };
-    }
-    const existing = sandboxCheckpointRuns.get(pod.id);
-    if (existing) return existing;
-    if (deps.workspaceCheckpointController) {
-      const decision = await deps.workspaceCheckpointController.request(pod.id, 'completion');
-      if (decision.result) return decision.result;
-    }
-    const run = (deps.sandboxWorkspaceCheckpoint ?? checkpointSandboxWorkspace)({
-      containerManager: containerManagerFactory.get('sandbox'),
-      containerId: pod.containerId,
-      podId: pod.id,
-      worktreePath: pod.worktreePath,
-      sequence: Date.now(),
-    }).finally(() => sandboxCheckpointRuns.delete(pod.id));
-    sandboxCheckpointRuns.set(pod.id, run);
-    return run;
-  }
+  const { preservePodWorkspace, checkpointSandboxWorkspaceForPod } = createWorkspacePreservation({
+    getContainerManager: (target) => containerManagerFactory.get(target),
+    syncWorkspaceBack,
+    workspaceCheckpointController: deps.workspaceCheckpointController,
+    sandboxWorkspaceCheckpoint: deps.sandboxWorkspaceCheckpoint,
+    logger,
+    emitActivityStatus,
+  });
 
   async function preserveSandboxAfterAgentFailure(podId: string, reason: string): Promise<void> {
     const pod = podRepo.getOrThrow(podId);

@@ -1,6 +1,6 @@
 # First workspace preservation extraction
 
-Status: approved by the user ("Plan approved"); Phase 1 complete; implementation underway.
+Status: COMPLETE — all three approved phases implemented and locally verified.
 Baseline: 6e51d1ce9495235e6aac2e498393cd2dd9a0e66b (remote main verified 2026-10-17).
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
 Branch: codex/pod-manager-workspace.
@@ -173,11 +173,11 @@ Keep the public characterization as the manager-wiring oracle.
 ### Success criteria
 
 Automated:
-- [ ] Identical Phase 1 cases pass after extraction.
-- [ ] Direct boundary case verifies actual materialized local Git/files.
-- [ ] Source comparison confirms movement, with only typed composition adapters changed.
-- [ ] New module has no runtime dependency on pod-manager or repository/status policy.
-- [ ] Existing local and sandbox routing behavior, including legacy callers, is retained.
+- [x] Identical Phase 1 cases pass after extraction.
+- [x] Direct boundary case verifies actual materialized local Git/files.
+- [x] Source comparison confirms movement, with only typed composition adapters changed.
+- [x] New module has no runtime dependency on pod-manager or repository/status policy.
+- [x] Existing local and sandbox routing behavior, including legacy callers, is retained.
 
 Manual:
 - None required for this phase.
@@ -212,11 +212,11 @@ pipeline is required for final acceptance; running it is planned, not yet comple
 ### Success criteria
 
 Automated:
-- [ ] Affected suites pass with SQLite explicitly included.
-- [ ] Full validation passes on final product source.
-- [ ] Before/after logs and actual source identities are retained.
-- [ ] Diff review confirms no extra policy or externally visible behavior change.
-- [ ] Final report states exact execution boundaries and skips.
+- [x] Affected suites pass with SQLite explicitly included.
+- [x] Full validation passes on final product source.
+- [x] Before/after logs and actual source identities are retained.
+- [x] Diff review confirms no extra policy or externally visible behavior change.
+- [x] Final report states exact execution boundaries and skips.
 
 Manual:
 - No UI/manual judgment is required. A later deployment or real-pod acceptance
@@ -256,18 +256,98 @@ operation semantics are preserved. Production deployment is outside this task.
 
 ## Next action
 
-Proceed with Phase 2 under the recorded approval, then Phase 3. No PR publication,
-main merge, deployment or real-pod run is part of this task.
+All three approved phases are complete. The implementation branch is ready for
+the separately requested PR/integration workflow. No manual verification is required
+for the headless compatibility contract. No deployment or real-pod run occurred.
 
 ## Implementation evidence: Phase 1
 
 Seventeen public characterization cases passed against unchanged product source
-at baseline 6e51d1ce; 674 other manager cases were name-filtered. Node 22.23.3,
-pnpm 9.15.4, Vitest 4.1.11. Frozen installation and the daemon/dependency build
-passed. Production manager bytes match git HEAD exactly. Each new case closes its
+at baseline 6e51d1ce; 674 other manager cases were name-filtered. pnpm 9.15.4 and Vitest 4.1.11 were used. The initial Node 22 version report
+identified only the launcher; its subprocesses selected Node 24, as corrected
+below. Frozen installation and the daemon/dependency build passed; both the
+original manager and extracted source were subsequently qualified under Node 22. Production manager bytes match git HEAD exactly. Each new case closes its
 SQLite database and releases its held work. No real container or provider was used.
 
 Private receipts and before-source/test copies are retained under
 .autopod-data/workspace-preservation/: characterization-before.log,
 characterization-before.json, characterization-before.test.ts, before-pod-manager.ts,
-baseline-build.log and install.log. The next action is Phase 2 extraction.
+baseline-build.log and install.log. Phase 2 subsequently completed, as recorded below.
+
+## Implementation evidence: Phase 2 and runtime correction
+
+The 124-line workspace-preservation factory now owns the two helper functions
+and the per-instance direct capture map. All existing callers and lifecycle policy
+remain in pod-manager. movement.json verifies the helper bodies exactly, allowing
+only the planned dependency adapters, and verifies unchanged characterization.
+
+The initial version report identified the Node 22 launcher but did not identify
+its test children: npm exec inserted the system bin directory ahead of the pinned
+runtime, selecting Node 24. The first broader run ended with 13 passed files and
+one native SQLite worker crash. Its failed raw affected.log is retained. Initial
+before/after logs and the initial metadata are retained as historical receipts;
+they are superseded for runtime qualification by the verified reruns below.
+
+An ignored, task-local npx launcher invokes cached pnpm 9.15.4 under Node 22.23.3.
+No product script, dependency or assertion changed for this correction. The daemon's
+SQLite binding was rebuilt for Node ABI 127 and a real in-memory DB opened under
+Node 22. Exact original manager bytes were temporarily restored for the baseline
+rerun and the extracted bytes were restored in finally. The same 17 public cases
+passed before movement under verified Node 22; afterward all 17 plus four direct
+boundary cases passed (21 total; 674 other manager cases name-filtered).
+
+The direct boundary tests use real local Git bundles, host branch/tree verification,
+report bytes and unchanged source HEAD/index behavior through both the controller
+and default direct transport. Fixture databases are closed before module execution.
+Two cases also assert the full NO_WORKSPACE proof. The local container adapter maps
+only its private workspace and temporary-file directories. No real container,
+provider or external Git remote is used.
+
+Receipts: characterization-before-node22.log, characterization-after-node22.log,
+characterization-before.json, native-rebuild.log, movement.json and bin/npx under
+.autopod-data/workspace-preservation/. Affected-suite rerun and full pipeline remain
+Phase 3 work until their actual results are recorded.
+
+## Final verification: Phase 3
+
+Verdict: PROVEN for the approved local compatibility extraction. All required work
+in this plan is complete; no human/manual acceptance is outstanding.
+
+| Check | Observed result |
+|---|---|
+| Original-manager public characterization under Node 22 | 17 passed; 674 name-filtered |
+| Identical assertions after extraction + direct boundary cases | 21 passed; 674 name-filtered |
+| Fourteen affected suites, SQLite forced on | 824 passed; zero skipped |
+| Full uncached repository pipeline | Frozen install, lint, build, typecheck, tests, audit and secret scan passed |
+| Workspace Vitest results | 7,194 passed across 488 passing files; 10 existing skips across the daemon's gated/platform cases |
+| Standalone Node script tests | 35 passed; zero skipped |
+| Shell validation | Hosted deployment, build provenance and cleanup script checks passed |
+| Dependency audit | No known vulnerabilities found |
+| Scoped changed-file Biome and whitespace | Passed; no fixes or warnings on the four changed TypeScript files |
+| Complete repository Biome | Passed with 82 repository warnings |
+| Exact movement and source identity | Helper bodies match the baseline after only dependency adapters; all 1,911 frozen product paths and hashes unchanged through validation |
+
+The full command was TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh using
+the recorded task-local pinned runtime launcher. Turbo reported zero cached tasks
+in each build/typecheck/test group (7, 11 and 15 successful tasks respectively).
+The final source-only cleanup removed an unused test type import before the frozen
+manifest and full run; no production behavior changed after characterization.
+
+Direct tests prove actual Git bundle import, quarantine/head/tree identity, report
+contents, unchanged sandbox HEAD/index, and complete NO_WORKSPACE results. Existing
+manager tests protect the surrounding lifecycle and cleanup wiring. Diff review
+confirmed the approved file scope, typed dependencies and absence of manager,
+repository, transition or cleanup imports in the extracted module.
+
+Ten skipped tests are the existing Docker/live-model gates and the platform-specific
+container case. A locally controlled container adapter is not live Docker/Azure
+qualification. No process-death, remote billing, or new cancellation guarantee is
+claimed. The earlier Node 24 worker crash remains a failed historical run; the
+successful verified-runtime runs do not relabel it.
+
+Final private proof and exact command/log/source hashes:
+.autopod-data/workspace-preservation/proof.json,
+final-source-manifest.json, movement.json and full-validation.log. Raw local
+receipts are ignored files; the committed plan records their counts and limits.
+The public characterization baseline is commit e515db4e. Final implementation
+commit identity is added to the private proof after commit/push confirmation.
