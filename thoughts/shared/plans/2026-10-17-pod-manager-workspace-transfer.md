@@ -1,6 +1,6 @@
 # Workspace transfer extraction implementation plan
 
-Status: APPROVED — Phase 1 complete; implementation in progress.
+Status: APPROVED — Phases 1 and 2 complete; full qualification in progress.
 Baseline: 944f5c46cece345dbf3786bd8ca4c57ebf6fe326.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -173,11 +173,11 @@ Verify unrelated manager regions and the staging publication algorithm are uncha
 ### Success criteria
 
 Automated:
-- [ ] Identical Phase 1 public cases pass after extraction.
-- [ ] Real local file/Git cases establish the outcomes above.
-- [ ] Exact movement receipt and dependency review show only planned adaptation.
-- [ ] Shared provisioning, approval, validation and preservation callers remain wired.
-- [ ] Product diff contains only the five planned files; tests/docs are separately listed.
+- [x] Identical Phase 1 public cases pass after extraction.
+- [x] Real local file/Git cases establish the outcomes above.
+- [x] Exact movement receipt and dependency review show only planned adaptation.
+- [x] Shared provisioning, approval, validation and preservation callers remain wired.
+- [x] Product diff contains only the five planned files; tests/docs are separately listed.
 
 Manual: None required. No live Docker or cloud acceptance is claimed.
 
@@ -243,7 +243,7 @@ record any later intentional behavior change in a separately approved scope.
 - Completed predecessor: 2026-10-17-pod-manager-workspace-preservation.md.
 - Existing real Git pattern: packages/daemon/src/worktrees/bare-push.test.ts.
 
-Next action: extract and qualify the boundary in Phases 2 and 3.
+Next action: run the full uncached qualification pipeline and record the final result.
 
 ## Phase 1 evidence
 
@@ -257,3 +257,35 @@ updates lastAgentEventAt. Those assertions were narrowed to the planned lifecycl
 and source-resource invariants. No production source or behavior changed. Its
 failed log remains characterization-initial-failure.log. The passing baseline and
 source/test identities are under .autopod-data/workspace-transfer/.
+
+## Phase 2 evidence
+
+The five approved product files now contain the extraction. pod-manager is reduced
+by 507 lines. All moved implementations/constants and the remaining manager match
+the mechanical construction exactly, allowing only Biome's relocation of two
+imports. The staging publication algorithm and 1,462 unrelated baseline product
+paths are unchanged. Phase 1 characterization is byte-identical.
+
+The same 58 selected public cases pass after extraction (668 name-filtered).
+Nine direct boundary cases execute actual local shell/Git/files, and two new
+bare-push cases cover common-directory derivation. All 15 affected suites pass:
+870 tests, zero skipped. The daemon/dependency build, eight-file scoped Biome
+and whitespace checks pass. Actual SQLite opens under the verified Node 22 child.
+
+The first material-boundary run had three fixture failures: macOS resolves linked
+worktree common directories through /private/var, while fixtures supplied /var.
+The fixture root and linked-worktree expectation now use canonical paths, retaining
+the strict production comparison. No product behavior or assertion of publication
+authority was weakened. material-boundary-initial-failure.log remains available.
+
+Private Git configuration isolates safe.directory writes. File cases assert dirty
+and committed bytes, old-path removal, symlinks, executable mode, retained host
+gitlink/caches, untouched source HEAD/index, blocked unrelated-ref publication,
+archive recovery and temporary Git removal. Fixture cleanup also removes captured
+temporary directories if an assertion fails. Archive orchestration uses a local
+copy adapter; it is not live Docker tar qualification.
+
+Receipts under .autopod-data/workspace-transfer/: movement.json, runtime.json,
+characterization-before.log, characterization-after.log, affected.log, build.log,
+scoped-biome.log and the frozen baseline/test copies. Full pipeline acceptance
+remains incomplete until its actual result is recorded.
