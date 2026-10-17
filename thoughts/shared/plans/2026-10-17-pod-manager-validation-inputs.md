@@ -1,6 +1,6 @@
 # Slice 8: validation input preparation extraction
 
-Status: IN PROGRESS — explicitly approved; Phase 1 complete.
+Status: IN PROGRESS — explicitly approved; Phases 1 and 2 complete; qualification running.
 Baseline: 150d725c16fc823e125261f552ed37e75a365243.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -214,9 +214,9 @@ manager against the explicit recipe. Capture changes and actual line counts.
 ### Success criteria
 
 Automated:
-- [ ] Frozen public cases pass unchanged after extraction.
-- [ ] Direct config/order/error and real SQLite close/reopen checks pass.
-- [ ] Exact movement proof and four-path product/test scope pass.
+- [x] Frozen public cases pass unchanged after extraction.
+- [x] Direct config/order/error and real SQLite close/reopen checks pass.
+- [x] Exact movement proof and four-path product/test scope pass.
 
 Manual: None required; live provider/container qualification is not claimed.
 
@@ -306,3 +306,32 @@ Two implementation details preserve approved scope and interfaces:
   No rules, files or checks are disabled; repository configuration is unchanged.
   BIOME_CONFIG_PATH was not honored by this installed CLI; that initial attempt
   is retained. Full qualification must use the task launcher and report this limit.
+
+## Phase 2 evidence
+
+The 33 selected public checks pass after extraction with frozen assertions
+byte-identical. All 40 direct cases pass on the final source in the affected run.
+Real migrated private file-backed SQLite, close/reopen and integrity/foreign-key
+checks substantiate override and history effects. Cases include real rejected
+SQL override writes after queue consumption, chronological records across attempt
+resets, error identity at 14 sites, pass-through references, held concurrent reads,
+late optional repository/property reads, environment overlay and config defaults.
+
+All 43 affected suites passed: 1,651 tests, zero skipped. Daemon/dependency ESM and
+declaration builds passed. Four-file scoped Biome is clean with the documented
+processing-size flag. Supplemental semantic diagnostics are zero for the new
+public group and direct test file. Existing broad test typing is not claimed.
+
+The 208-line module contains the exact original 114-line assembly sequence with
+one receiver adaptation. The manager is 17,625 lines, 89 fewer than baseline.
+Parsed TypeScript token comparison verifies the entire remaining manager and
+new module against the exact recipe, including unchanged 3000 port and retained
+outer try/catch position. All 1,957 other baseline package/script paths are unchanged.
+The final 1,961-file manifest is frozen before broader qualification.
+
+Retained initial direct-test failures concerned incomplete diff input for the real
+path parser, environment restoration, and missing shared-type fixture fields.
+They were corrected before the final affected run and source freeze; product code
+and frozen public assertions did not change. The verifier's first comparison also
+needed the formatter's semicolon in a new type wrapper included in its expected
+recipe; moved-body expressions did not change.

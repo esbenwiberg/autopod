@@ -295,6 +295,7 @@ import { generateSystemInstructions } from './system-instructions-generator.js';
 import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import { createValidationAttemptStart } from './validation-attempt-start.js';
+import { createValidationInputs } from './validation-inputs.js';
 import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
 import type { ValidationRepository } from './validation-repository.js';
 import {
@@ -5531,6 +5532,23 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     transition,
     eventBus,
     getPodValidationSuite,
+    emitActivityStatus,
+  });
+
+  const { prepareValidationInputs } = createValidationInputs({
+    logger,
+    worktreeManager,
+    podRepo,
+    validationRepo,
+    overrideSource: deps,
+    validationEnvironmentForPod,
+    assertProtectedOperationalPathsInScope,
+    loadCodeReviewSkill,
+    getEffectiveReviewerConfig,
+    buildReviewerExecEnv,
+    mergeOverrides,
+    getReviewerExecutor,
+    getPodValidationSkipPhases,
     emitActivityStatus,
   });
 
@@ -13660,120 +13678,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           return;
         }
 
-        // Get the actual diff and commit log for AI task review.
-        // Always scope to the agent's own commits via startCommitSha. The reviewer
-        // should only evaluate what this agent changed — pre-existing code on a
-        // parent branch is not the agent's responsibility. Stats/file counts still
-        // use the full branch diff (computed earlier) for accurate PR sizing.
-        emitActivityStatus(podId, 'Computing diff…');
-        const diffSinceCommit = pod.startCommitSha ?? undefined;
-        const validationDefaultBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
-        const validationExecEnv = {
-          ...((await validationEnvironmentForPod(pod, profile)) ?? {}),
-          ...buildValidationContextEnv({
-            podId,
-            headBranch: pod.branch,
-            baseBranch: validationDefaultBranch,
-            startCommitSha: pod.startCommitSha,
-          }),
-        };
-        const [diff, commitLog] = pod.worktreePath
-          ? await Promise.all([
-              worktreeManager.getDiff(
-                pod.worktreePath,
-                validationDefaultBranch,
-                undefined,
-                diffSinceCommit,
-              ),
-              worktreeManager.getCommitLog(
-                pod.worktreePath,
-                validationDefaultBranch,
-                undefined,
-                diffSinceCommit,
-              ),
-            ])
-          : ['', ''];
-        const changedPathsAgainstBase =
-          pod.worktreePath && worktreeManager.getChangedPathsAgainstBase
-            ? await worktreeManager.getChangedPathsAgainstBase(
-                pod.worktreePath,
-                validationDefaultBranch,
-              )
-            : parseDiffFilePaths(diff);
-        assertProtectedOperationalPathsInScope(pod, changedPathsAgainstBase);
-
-        // Try to load a repo-specific code-review skill from the worktree
-        const codeReviewSkill = pod.worktreePath
-          ? await loadCodeReviewSkill(pod.worktreePath, logger)
-          : undefined;
-
-        const { profile: reviewerProfile, credentials: reviewerProviderCredentials } =
-          getEffectiveReviewerConfig(pod);
-        const reviewerExecEnv = await buildReviewerExecEnv(pod);
-
-        // Attempt is a resettable per-cycle budget. Capture chronological history
-        // before this run so rework attempt 1 still closes the prior council ledger.
-        const previousValidation = validationRepo?.getLatest(podId) ?? null;
-        const priorReviewBatch = validationRepo?.getLatestReviewBatch(podId);
-
-        // Flush any pending overrides enqueued via API and merge into pod overrides
-        const pendingOverrides = deps.pendingOverrideRepo?.flush(podId) ?? [];
-        let currentOverrides = pod.validationOverrides ?? [];
-        if (pendingOverrides.length > 0) {
-          currentOverrides = mergeOverrides(currentOverrides, pendingOverrides);
-          podRepo.update(podId, { validationOverrides: currentOverrides });
-        }
-
-        const validationConfig = {
-          podId,
-          containerId: pod.containerId,
-          executionTarget: pod.executionTarget,
-          previewUrl: pod.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
-          containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
-          webProbeMode:
-            pod.executionTarget === 'sandbox' ? ('container' as const) : ('host' as const),
-          validationSetupCommand: profile.validationSetupCommand ?? undefined,
-          buildCommand: profile.buildCommand ?? '',
-          startCommand: profile.startCommand ?? '',
-          buildWorkDir: profile.buildWorkDir ?? undefined,
-          healthPath: profile.healthPath ?? '/',
-          healthTimeout: profile.healthTimeout ?? 120,
-          smokePages: profile.smokePages,
+        const { validationConfig, previousValidation } = await prepareValidationInputs(
+          pod,
+          profile,
+          s1,
           attempt,
           validationSuite,
-          task: pod.task,
-          diff,
-          testCommand: profile.testCommand,
-          buildTimeout: (profile.buildTimeout ?? 300) * 1_000,
-          testTimeout: (profile.testTimeout ?? 600) * 1_000,
-          lintCommand: profile.lintCommand ?? undefined,
-          lintTimeout: (profile.lintTimeout ?? 120) * 1_000,
-          sastCommand: profile.sastCommand ?? undefined,
-          sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
-          reviewerModel: resolveReviewerModel(reviewerProfile, logger),
-          reviewerProvider: resolveReviewerProvider(reviewerProfile),
-          reviewerProviderAccountId: reviewerProfile.providerAccountId ?? null,
-          reviewerProviderCredentials,
-          ...(reviewerExecEnv ? { reviewerExecEnv } : {}),
-          reviewerExecutor: getReviewerExecutor(pod),
-          contract: pod.contract ?? undefined,
-          codeReviewSkill,
-          commitLog: commitLog || undefined,
-          plan: pod.plan ?? undefined,
-          taskSummary: pod.taskSummary ?? undefined,
-          briefTouches: pod.touches ?? undefined,
-          briefDoesNotTouch: pod.doesNotTouch ?? undefined,
-          worktreePath: pod.worktreePath ?? undefined,
-          startCommitSha: pod.startCommitSha ?? undefined,
-          overrides: currentOverrides.length > 0 ? currentOverrides : undefined,
-          hasWebUi: profile.hasWebUi ?? true,
-          advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
-          reviewerApiKey: pod.launchConfigDigest ? undefined : process.env.ANTHROPIC_API_KEY,
-          extraExecEnv: validationExecEnv,
-          preSubmitReview: pod.preSubmitReview ?? undefined,
-          skipPhases: getPodValidationSkipPhases(profile, s1),
-          priorReviewBatch,
-        };
+        );
 
         let result: Awaited<ReturnType<typeof validationEngine.validate>>;
         const validationController = new AbortController();
