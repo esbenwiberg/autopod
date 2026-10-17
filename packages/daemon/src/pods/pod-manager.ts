@@ -205,6 +205,7 @@ import {
   observeArtifactResume,
 } from './artifact-resume-observation.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
+import { createCompletionHumanGate } from './completion-human-gate.js';
 import { admitComposablePod } from './composable-pod-admission.js';
 import {
   AgentContinuationSupersededError,
@@ -5475,6 +5476,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     syncWorkspaceBack,
     workspaceCheckpointController: deps.workspaceCheckpointController,
     sandboxWorkspaceCheckpoint: deps.sandboxWorkspaceCheckpoint,
+    logger,
+    emitActivityStatus,
+  });
+
+  const { holdCompletionForHumanWork } = createCompletionHumanGate({
+    podRepo,
+    nudgeRepo,
+    preservePodWorkspace,
+    ownsArtifactCompletion,
+    transition,
     logger,
     emitActivityStatus,
   });
@@ -11101,54 +11112,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         return;
       }
 
-      // Worker settlement cannot discharge an unanswered human decision. Preserve
-      // the workspace while retaining the waiter, even if its HTTP stream expired.
-      if (pod.status === 'awaiting_input' || pod.pendingEscalation) {
-        const settlement = podRepo.completionJournal?.settle(pod);
-        if (!settlement?.sourcePreservedAt && pod.containerId && pod.worktreePath) {
-          try {
-            await preservePodWorkspace(pod, 'waiting for human decision after agent settlement');
-            podRepo.completionJournal?.mark(pod, 'awaiting_human', true);
-          } catch (err) {
-            logger.error(
-              { err, podId },
-              'Pending-decision workspace preservation failed; retaining worker resources',
-            );
-          }
-        }
-        emitActivityStatus(
-          podId,
-          'Agent settled; human decision remains unanswered. Review the pending question before continuing.',
-        );
-        return;
-      }
-
-      if (nudgeRepo.hasPending(podId)) {
-        // A recorded answer is not proof that the settled worker collected it.
-        // Preserve source but retain the queue and resources for explicit Rework.
-        podRepo.completionJournal?.settle(pod);
-        let preserved = false;
-        let preservationFailure = '';
-        try {
-          if (pod.containerId && pod.worktreePath) {
-            await preservePodWorkspace(pod, 'uncollected human guidance after agent settlement');
-            preserved = true;
-          }
-        } catch (err) {
-          preservationFailure = ` Workspace preservation failed: ${err instanceof Error ? err.message : String(err)}.`;
-          logger.error(
-            { err, podId },
-            'Uncollected-guidance preservation failed; retaining resources',
-          );
-        }
-        if (!ownsArtifactCompletion(pod, false, true)) return;
-        const current = podRepo.getOrThrow(podId);
-        const reason = `Worker settled with uncollected human guidance. Use Rework to read check_messages, acknowledge its receipt, and apply the saved guidance before validation or delivery.${preservationFailure} Original resources and guidance retained.`;
-        atomicPodChange(podRepo, () => {
-          podRepo.completionJournal?.mark(current, 'awaiting_human', preserved);
-          transition(current, 'failed', { failureReason: reason });
-        });
-        emitActivityStatus(podId, reason);
+      const heldCompletion = holdCompletionForHumanWork(pod);
+      if (heldCompletion) {
+        await heldCompletion;
         return;
       }
 

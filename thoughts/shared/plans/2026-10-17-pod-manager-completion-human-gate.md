@@ -1,6 +1,6 @@
 # Slice 4: completion human gate extraction
 
-Status: IN PROGRESS — approved; Phase 1 complete.
+Status: IN PROGRESS — approved; Phases 1 and 2 complete; full qualification pending.
 Baseline: 52e19de13907deec1737fb56829f833a5fcb2678.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -186,10 +186,10 @@ queue/delivery, preservation and output dispatch implementations are untouched.
 ### Success criteria
 
 Automated:
-- [ ] Identical public characterization passes after movement.
-- [ ] Direct file-backed persistence, ordering and real rollback tests pass.
-- [ ] Movement receipt proves only the planned boundary changed.
-- [ ] Only two approved product paths differ from baseline.
+- [x] Identical public characterization passes after movement.
+- [x] Direct file-backed persistence, ordering and real rollback tests pass.
+- [x] Movement receipt proves only the planned boundary changed.
+- [x] Only two approved product paths differ from baseline.
 
 Manual: None required. Live Docker/Azure qualification is outside this boundary.
 
@@ -219,7 +219,7 @@ remote identity. Update this plan with observed results. Unrun checks stay pendi
 ### Success criteria
 
 Automated:
-- [ ] All affected suites pass with SQLite included and no new skipped cases.
+- [x] All affected suites pass with SQLite included and no new skipped cases.
 - [ ] Full uncached install/lint/build/typecheck/test/audit/secret pipeline passes.
 - [ ] Runtime/source identities and baseline/final evidence are recorded.
 - [ ] Scoped lint, whitespace and exact movement review pass.
@@ -273,3 +273,28 @@ before any product movement; failed logs remain retained. An extra broad tsc
 --noEmit diagnostic includes existing unrelated test/type errors and is not the
 repository typecheck command. Its new optional-callback type error was corrected;
 the supported build/typecheck pipeline remains a required Phase 3 gate.
+
+## Phase 2 evidence
+
+createCompletionHumanGate is a 94-line module. Two private helpers retain the
+original branch bodies and returns; its public dispatch remains synchronous when
+no human work is pending. The manager is 34 lines smaller (18,040 to 18,006),
+retaining native Goal/status admission, shared ownership/transition functions,
+artifact coalescing and downstream source/validation/delivery behavior.
+
+The same 37 selected public cases passed after extraction (761 name-filtered),
+with the characterization file byte-identical. Fourteen direct cases passed
+against real temporary SQLite files, with close/reopen, integrity/foreign-key
+checks, durable question and queue retention, source-marker ordering, real
+transaction rollback, current ownership and optional legacy repositories.
+Controlled preserver callbacks establish orchestration; physical source handling
+is covered by the unchanged preservation suites.
+
+All 23 affected suites passed: 1,004 cases, zero skipped. Dependency/daemon build,
+four-file Biome and git diff --check passed. movement.json compares parsed
+TypeScript tokens to the exact construction recipe (allowing import order and
+formatting/trailing commas) and confirms all 1,949 other baseline package/script
+paths unchanged. The comparator was corrected to parse template literals rather
+than treating their contents as standalone scanner tokens; no product adjustment
+was needed. Final qualification freezes 1,953 package/script identities. Logs and
+receipts are retained under .autopod-data/completion-human-gate/.
