@@ -1,6 +1,6 @@
 # Slice 4: completion human gate extraction
 
-Status: IN PROGRESS — approved; Phases 1 and 2 complete; full qualification pending.
+Status: COMPLETE — all three approved phases implemented and locally verified.
 Baseline: 52e19de13907deec1737fb56829f833a5fcb2678.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -220,10 +220,10 @@ remote identity. Update this plan with observed results. Unrun checks stay pendi
 
 Automated:
 - [x] All affected suites pass with SQLite included and no new skipped cases.
-- [ ] Full uncached install/lint/build/typecheck/test/audit/secret pipeline passes.
-- [ ] Runtime/source identities and baseline/final evidence are recorded.
-- [ ] Scoped lint, whitespace and exact movement review pass.
-- [ ] Verified commits are pushed and remote commit identity matches.
+- [x] Full uncached install/lint/build/typecheck/test/audit/secret pipeline passes.
+- [x] Runtime/source identities and baseline/final evidence are recorded.
+- [x] Scoped lint, whitespace and exact movement review pass.
+- [x] Verified commits are pushed and remote commit identity matches.
 
 Manual: None required. Approval covers all three automated phases together.
 
@@ -251,8 +251,9 @@ Integration with concurrent main work remains separate.
 - Relevant implementations: completion-journal.ts, nudge-repository.ts,
   operator-guidance-delivery.ts, ../db/unit-of-work.ts and artifact-finalizer.ts.
 
-No unresolved design question remains. Next action: explicit approval of this
-concrete plan, then Phase 1 against baseline product source before any movement.
+All three approved phases are complete. No manual acceptance remains for this
+headless compatibility boundary. Integration, PR creation and deployment remain
+separate requested work; none was performed.
 
 ## Phase 1 evidence
 
@@ -298,3 +299,50 @@ paths unchanged. The comparator was corrected to parse template literals rather
 than treating their contents as standalone scanner tokens; no product adjustment
 was needed. Final qualification freezes 1,953 package/script identities. Logs and
 receipts are retained under .autopod-data/completion-human-gate/.
+
+## Final verification: Phase 3
+
+Verdict: PROVEN for the approved local compatibility extraction. All required
+automated work is complete; no manual gate remains.
+
+| Claim/check | Observed evidence | Result |
+|---|---|---|
+| Caller compatibility | Byte-identical characterization: 37 selected cases before/after, 761 name-filtered | Passed |
+| Durable human work and capture ordering | 14 direct real-file SQLite cases, actual close/reopen and integrity checks | Passed |
+| Transaction behavior | Real rollback retains earlier settlement/queue and discards mark/status writes and queued publication | Passed |
+| Surrounding orchestration | 23 affected suites, 1,004 passed, zero skipped | Passed |
+| Full uncached pipeline | Frozen install, lint, build, repository typecheck, tests, audit and secret scan | Passed |
+| Repository Vitest | 7,336 passed across 491 passing files; 10 existing skipped cases | Passed with existing skips |
+| Standalone Node scripts | 35 passed, zero failed/skipped | Passed |
+| Source identity | All 1,953 frozen package/script files unchanged through qualification | Passed |
+| Scoped lint and whitespace | Four TypeScript files clean; git diff --check clean | Passed |
+
+Actual full command: TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh,
+using the established task-local npx launcher. Node 22.23.3 opened SQLite; pnpm
+reports 9.15.4. Build/typecheck/test Turbo groups ran uncached. Frozen install
+succeeded without fallback. Repository Biome retained 82 existing warnings;
+scoped Biome had no warnings. Audit found no known vulnerabilities.
+
+The 10 existing skipped cases retain the Docker/platform/live-model gates from
+the preceding slice; no new test was skipped. All SQLite-backed tests were
+explicitly enabled. An extra broad tsc --noEmit diagnostic during characterization
+reported existing unrelated test/type errors and one new optional-callback type
+annotation, corrected before the baseline freeze. That supplemental diagnostic
+is retained as failed; the required repository build and typecheck both passed.
+
+Validated implementation: ce588dcbf672be1dbda2d746fc03c8fee44f9ab7. A following documentation-only commit records
+these results without changing tested product sources. Parsed source comparison
+confirms the exact two-branch movement and unchanged remaining manager after
+planned imports/wiring/formatting. No existing journal, queue, acknowledgment,
+transaction, preservation, artifact or validation implementation was edited.
+
+Evidence: .autopod-data/completion-human-gate/proof.json, movement.json,
+baseline/final source manifests, frozen characterization and before-source copies,
+actual before/after/persistence/affected/build/scoped-Biome/full-validation logs,
+and retained failed fixture/diagnostic logs. Final documentation/remote identity
+and clean-worktree confirmation are added to private proof after the final push.
+
+Limits: persistence/ordering are tested against real local SQLite, with controlled
+preserver callbacks. Physical source handling is covered by the unchanged prior
+slice suites. This is not live Docker/Azure/provider qualification, deployment,
+PR/main integration, crash recovery or a new serialization/fencing guarantee.
