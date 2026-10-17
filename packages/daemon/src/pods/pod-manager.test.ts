@@ -25942,3 +25942,535 @@ describe('completion human gate compatibility', () => {
     },
   );
 });
+
+describe('completion source compatibility', () => {
+  beforeEach(() => mockExecFileSuccess());
+  afterEach(() => vi.restoreAllMocks());
+
+  function fixture(target: 'local' | 'sandbox' = 'local', series = false) {
+    const ctx = createTestContext(undefined, {
+      executionTarget: target,
+      warmImageTag: 'registry.azurecr.io/autopod/source:latest',
+    });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      {
+        profileName: 'test-profile',
+        task: 'Prepare completion source',
+        ...(series ? { seriesId: 'source-series' } : {}),
+      },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: 'running',
+      containerId: 'source-worker',
+      worktreePath: '/tmp/completion-source',
+      startCommitSha: 'a'.repeat(40),
+      filesChanged: 7,
+      linesAdded: 17,
+      linesRemoved: 3,
+    });
+    const admissions: Array<{ filesChanged: number; status: string }> = [];
+    const validate = vi.spyOn(manager, 'triggerValidation').mockImplementation(async () => {
+      const current = ctx.podRepo.getOrThrow(pod.id);
+      admissions.push({ filesChanged: current.filesChanged, status: current.status });
+    });
+    const retained = () => {
+      expect(validate).not.toHaveBeenCalled();
+      expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.cleanup).not.toHaveBeenCalled();
+      expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(ctx.prManager.createPr).not.toHaveBeenCalled();
+    };
+    const commit = vi.mocked(ctx.worktreeManager.commitPendingChangesWithGeneratedMessage);
+    const stats = vi.mocked(ctx.worktreeManager.getDiffStats);
+    return { ctx, manager, pod, validate, admissions, retained, commit, stats };
+  }
+
+  it.each([false, true])(
+    'uses guard threshold for confirmed push=%s and prepares before admission',
+    async (pushed) => {
+      const { ctx, manager, pod, commit, stats, admissions } = fixture();
+      const order: string[] = [];
+      try {
+        if (pushed) {
+          mockedExecFile.mockImplementation((...args: unknown[]) => {
+            const a = args[1] as string[];
+            const callback = args[args.length - 1] as (
+              err: Error | null,
+              result: { stdout: string; stderr: string },
+            ) => void;
+            callback(null, {
+              stdout: a[0] === 'rev-parse' ? '/tmp/source.git' : 'b'.repeat(40),
+              stderr: '',
+            });
+            return undefined as never;
+          });
+        }
+        const exec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+        if (!exec) throw new Error('Missing exec');
+        vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+          async (id, command, options) => {
+            if (String(command[2]).includes('STAGING=')) order.push('sync');
+            if (pushed && command.join(' ').includes('objects/info/alternates'))
+              return { stdout: '/tmp/source.git', stderr: '', exitCode: 0 };
+            if (pushed && command.join(' ').includes('--abbrev-ref HEAD'))
+              return { stdout: 'feature', stderr: '', exitCode: 0 };
+            return exec(id, command, options);
+          },
+        );
+        commit.mockImplementationOnce(async () => {
+          order.push('commit');
+          return true;
+        });
+        stats.mockImplementationOnce(async () => {
+          order.push('stats');
+          return { filesChanged: 2, linesAdded: 4, linesRemoved: 1 };
+        });
+        await manager.handleCompletion(pod.id);
+        expect(order).toEqual(['sync', 'commit', 'stats']);
+        expect(commit).toHaveBeenCalledWith(
+          '/tmp/completion-source',
+          pod.task,
+          expect.any(Object),
+          pod.model,
+          { maxDeletions: pushed ? 100 : 0 },
+        );
+        expect(admissions).toEqual([{ filesChanged: 2, status: 'running' }]);
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          filesChanged: 2,
+          linesAdded: 4,
+          linesRemoved: 1,
+        });
+      } finally {
+        ctx.db.close();
+      }
+    },
+  );
+
+  it.each([true, false])('continues only after failed sync recovery=%s', async (recovered) => {
+    const { ctx, manager, pod, commit, stats, validate, retained } = fixture();
+    try {
+      vi.mocked(ctx.containerManager.execInContainer).mockRejectedValueOnce(
+        new Error('initial exec fault'),
+      );
+      vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValueOnce(
+        new Error('archive fault'),
+      );
+      if (!recovered) vi.mocked(ctx.containerManager.getStatus).mockResolvedValue('stopped');
+      ctx.podRepo.update(pod.id, { worktreeCompromised: true });
+      await manager.handleCompletion(pod.id);
+      if (recovered) {
+        expect(commit).toHaveBeenCalledWith(
+          expect.any(String),
+          pod.task,
+          expect.any(Object),
+          pod.model,
+          { maxDeletions: 100 },
+        );
+        expect(validate).toHaveBeenCalledOnce();
+        expect(ctx.podRepo.getOrThrow(pod.id).worktreeCompromised).toBe(false);
+      } else {
+        expect(commit).not.toHaveBeenCalled();
+        expect(stats).not.toHaveBeenCalled();
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'failed',
+          worktreeCompromised: true,
+        });
+        retained();
+      }
+    } finally {
+      ctx.db.close();
+    }
+  });
+
+  it('propagates a recovered-state write failure before committing or reading stats', async () => {
+    const { ctx, manager, pod, commit, stats, retained } = fixture();
+    try {
+      vi.mocked(ctx.containerManager.execInContainer).mockRejectedValueOnce(
+        new Error('initial exec fault'),
+      );
+      vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValueOnce(
+        new Error('archive fault'),
+      );
+      const update = ctx.podRepo.update;
+      vi.spyOn(ctx.podRepo, 'update').mockImplementation((id, changes) => {
+        if (changes.worktreeCompromised === false) throw new Error('recovery persistence fault');
+        update(id, changes);
+      });
+      await expect(manager.handleCompletion(pod.id)).rejects.toThrow('recovery persistence fault');
+      expect(commit).not.toHaveBeenCalled();
+      expect(stats).not.toHaveBeenCalled();
+      retained();
+    } finally {
+      ctx.db.close();
+    }
+  });
+
+  it.each(['containerId', 'worktreePath'] as const)(
+    'keeps local missing %s behavior',
+    async (missing) => {
+      const { ctx, manager, pod, commit, stats, validate } = fixture();
+      try {
+        ctx.podRepo.update(pod.id, { [missing]: null });
+        await manager.handleCompletion(pod.id);
+        if (missing === 'containerId')
+          expect(commit).toHaveBeenCalledWith(
+            expect.any(String),
+            pod.task,
+            expect.any(Object),
+            pod.model,
+            { maxDeletions: 100 },
+          );
+        else {
+          expect(commit).not.toHaveBeenCalled();
+          expect(stats).not.toHaveBeenCalled();
+        }
+        expect(ctx.containerManager.execInContainer).not.toHaveBeenCalled();
+        expect(validate).toHaveBeenCalledOnce();
+      } finally {
+        ctx.db.close();
+      }
+    },
+  );
+
+  it.each([
+    'retry-success',
+    'retry-guard',
+    'retry-ordinary',
+    'recovery-unavailable',
+    'missing-container',
+    'changed-status',
+    'ordinary-first',
+  ] as const)('preserves commit error handling for %s', async (mode) => {
+    const { ctx, manager, pod, commit, stats, validate, retained } = fixture();
+    try {
+      if (mode === 'missing-container') ctx.podRepo.update(pod.id, { containerId: null });
+      if (mode === 'recovery-unavailable' || mode === 'changed-status')
+        vi.mocked(ctx.containerManager.getStatus).mockResolvedValue('stopped');
+      commit.mockImplementationOnce(async () => {
+        if (mode === 'changed-status') ctx.podRepo.update(pod.id, { status: 'paused' });
+        throw mode === 'ordinary-first'
+          ? new Error('ordinary commit fault')
+          : new DeletionGuardError(1, 0);
+      });
+      if (mode === 'retry-guard') commit.mockRejectedValueOnce(new DeletionGuardError(101, 100));
+      if (mode === 'retry-ordinary')
+        commit.mockRejectedValueOnce(new Error('ordinary retry fault'));
+      await manager.handleCompletion(pod.id);
+      const continued = ['retry-success', 'retry-ordinary', 'ordinary-first'].includes(mode);
+      if (continued) {
+        expect(stats).toHaveBeenCalledOnce();
+        expect(validate).toHaveBeenCalledOnce();
+      } else {
+        expect(stats).not.toHaveBeenCalled();
+        retained();
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: mode === 'changed-status' ? 'paused' : 'failed',
+          worktreeCompromised: true,
+        });
+      }
+      if (mode.startsWith('retry-')) {
+        expect(commit.mock.calls.map((call) => call[4]?.maxDeletions)).toEqual([0, 100]);
+      } else expect(commit).toHaveBeenCalledOnce();
+    } finally {
+      ctx.db.close();
+    }
+  });
+
+  it.each([
+    { base: null, start: null, defaultBranch: 'main', expected: 'main' },
+    { base: 'release', start: 'a'.repeat(40), defaultBranch: 'main', expected: 'release' },
+    { base: null, start: 'a'.repeat(40), defaultBranch: 'develop', expected: 'develop' },
+    { base: null, start: null, defaultBranch: null, expected: 'main' },
+  ])(
+    'retains local diff arguments $expected with start=$start',
+    async ({ base, start, defaultBranch, expected }) => {
+      const { ctx, manager, pod, stats } = fixture();
+      try {
+        ctx.podRepo.update(pod.id, { baseBranch: base, startCommitSha: start });
+        const settings = { ...ctx.profileStore.get('test-profile'), defaultBranch };
+        vi.spyOn(ctx.profileStore, 'get').mockReturnValue(settings);
+        await manager.handleCompletion(pod.id);
+        expect(stats).toHaveBeenCalledWith('/tmp/completion-source', expected, start ?? undefined);
+      } finally {
+        ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['stats', 'second-settings', 'stats-write', 'first-settings'] as const)(
+    'retains local %s failure interpretation',
+    async (mode) => {
+      const { ctx, manager, pod, commit, stats, admissions, retained } = fixture();
+      try {
+        if (mode === 'stats') stats.mockRejectedValueOnce(new Error('stats fault'));
+        if (mode.includes('settings')) {
+          const settings = ctx.profileStore.get('test-profile');
+          const get = vi.spyOn(ctx.profileStore, 'get').mockReturnValue(settings);
+          if (mode === 'second-settings') get.mockReturnValueOnce(settings);
+          get.mockImplementationOnce(() => {
+            throw new Error('settings fault');
+          });
+        }
+        if (mode === 'stats-write') {
+          const update = ctx.podRepo.update;
+          vi.spyOn(ctx.podRepo, 'update').mockImplementation((id, changes) => {
+            if (changes.filesChanged !== undefined) throw new Error('stats write fault');
+            update(id, changes);
+          });
+        }
+        if (mode === 'first-settings') {
+          await expect(manager.handleCompletion(pod.id)).rejects.toThrow('settings fault');
+          expect(commit).not.toHaveBeenCalled();
+          retained();
+        } else {
+          await manager.handleCompletion(pod.id);
+          expect(admissions).toEqual([{ filesChanged: 7, status: 'running' }]);
+          expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+            filesChanged: 7,
+            linesAdded: 17,
+            linesRemoved: 3,
+          });
+          if (mode === 'second-settings') expect(stats).not.toHaveBeenCalled();
+        }
+      } finally {
+        ctx.db.close();
+      }
+    },
+  );
+
+  it.each([
+    'promoted',
+    'materialized',
+    'lineageVerified',
+    'startCommitSha',
+    'containerId',
+    'worktreePath',
+  ] as const)('blocks sandbox preparation missing %s', async (missing) => {
+    const { ctx, manager, pod, commit, stats, retained } = fixture('sandbox');
+    try {
+      if (['startCommitSha', 'containerId', 'worktreePath'].includes(missing))
+        ctx.podRepo.update(pod.id, { [missing]: null });
+      else {
+        const checkpoint = ctx.deps.sandboxWorkspaceCheckpoint;
+        if (!checkpoint) throw new Error('Missing checkpoint');
+        const actual = await checkpoint({
+          containerManager: ctx.containerManager,
+          containerId: 'source-worker',
+          worktreePath: '/tmp/completion-source',
+          podId: pod.id,
+          sequence: 1,
+        });
+        vi.mocked(checkpoint)
+          .mockClear()
+          .mockResolvedValueOnce({ ...actual, [missing]: false });
+      }
+      await manager.handleCompletion(pod.id);
+      expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+        status: 'failed',
+        worktreeCompromised: true,
+        filesChanged: 7,
+      });
+      expect(ctx.worktreeManager.classifyCanonicalDiff).not.toHaveBeenCalled();
+      expect(commit).not.toHaveBeenCalled();
+      expect(stats).not.toHaveBeenCalled();
+      retained();
+    } finally {
+      ctx.db.close();
+    }
+  });
+
+  it.each(['BASE_UNAVAILABLE', 'HOST_PROOF_MISMATCH', 'GIT_FAILURE'] as const)(
+    'retains unavailable sandbox classification %s',
+    async (code) => {
+      const { ctx, manager, pod, retained } = fixture('sandbox');
+      try {
+        vi.mocked(ctx.worktreeManager.classifyCanonicalDiff).mockResolvedValueOnce({
+          outcome: 'unavailable',
+          code,
+        });
+        await manager.handleCompletion(pod.id);
+        expect(ctx.worktreeManager.classifyCanonicalDiff).toHaveBeenCalledWith(
+          '/tmp/completion-source',
+          'a'.repeat(40),
+          'c'.repeat(40),
+          'd'.repeat(40),
+        );
+        expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+          status: 'failed',
+          worktreeCompromised: true,
+          filesChanged: 7,
+        });
+        retained();
+      } finally {
+        ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['checkpoint', 'classifier', 'stats-write'] as const)(
+    'propagates sandbox %s failure',
+    async (mode) => {
+      const { ctx, manager, pod, retained } = fixture('sandbox');
+      try {
+        if (mode === 'checkpoint') {
+          const checkpoint = ctx.deps.sandboxWorkspaceCheckpoint;
+          if (!checkpoint) throw new Error('Missing checkpoint');
+          vi.mocked(checkpoint).mockRejectedValueOnce(new Error('sandbox fault'));
+        } else if (mode === 'classifier')
+          vi.mocked(ctx.worktreeManager.classifyCanonicalDiff).mockRejectedValueOnce(
+            new Error('sandbox fault'),
+          );
+        else {
+          const update = ctx.podRepo.update;
+          vi.spyOn(ctx.podRepo, 'update').mockImplementation((id, changes) => {
+            if (changes.filesChanged !== undefined) throw new Error('sandbox fault');
+            update(id, changes);
+          });
+        }
+        await expect(manager.handleCompletion(pod.id)).rejects.toThrow('sandbox fault');
+        expect(ctx.podRepo.getOrThrow(pod.id).status).toBe('running');
+        retained();
+      } finally {
+        ctx.db.close();
+      }
+    },
+  );
+
+  it.each([
+    'ordinary',
+    'rework',
+    'fork',
+    'scheduled',
+    'off',
+    'sandbox-changed-off',
+    'sandbox-unchanged-off',
+  ] as const)('keeps downstream %s policy after preparation', async (mode) => {
+    const { ctx, manager, pod, stats, validate } = fixture(
+      mode.startsWith('sandbox') ? 'sandbox' : 'local',
+    );
+    try {
+      const zero = { filesChanged: 0, linesAdded: 0, linesRemoved: 0 };
+      if (!mode.startsWith('sandbox')) stats.mockResolvedValueOnce(zero);
+      if (mode === 'rework')
+        ctx.podRepo.update(pod.id, { lastCorrectionMessage: '[REWORK IN PROGRESS] repair' });
+      if (mode === 'fork') ctx.podRepo.update(pod.id, { baseBranch: 'release' });
+      if (mode === 'scheduled') ctx.podRepo.update(pod.id, { scheduledJobId: 'fixture-schedule' });
+      if (mode.includes('off')) ctx.podRepo.update(pod.id, { skipValidation: true });
+      if (mode === 'sandbox-unchanged-off')
+        vi.mocked(ctx.worktreeManager.classifyCanonicalDiff).mockResolvedValueOnce({
+          outcome: 'unchanged',
+          stats: zero,
+          hostHead: 'c'.repeat(40),
+          hostTree: 'd'.repeat(40),
+        });
+      await manager.handleCompletion(pod.id);
+      const validates = mode === 'fork' || mode === 'sandbox-changed-off';
+      expect(validate).toHaveBeenCalledTimes(validates ? 1 : 0);
+      expect(ctx.podRepo.getOrThrow(pod.id).status).toBe(
+        validates
+          ? 'running'
+          : mode === 'rework'
+            ? 'failed'
+            : mode.includes('off')
+              ? 'validated'
+              : 'complete',
+      );
+    } finally {
+      ctx.db.close();
+    }
+  });
+  it.each(['success', 'read-failure', 'write-failure'] as const)(
+    'preserves series handover %s ordering',
+    async (mode) => {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'completion-source-handover-'));
+      const prior = process.env.DATA_DIR;
+      process.env.DATA_DIR = directory;
+      const { ctx, manager, pod, validate, retained } = fixture('sandbox', true);
+      const held = deferred<string>();
+      let operation: Promise<void> | undefined;
+      try {
+        const checkpoint = ctx.deps.sandboxWorkspaceCheckpoint;
+        if (!checkpoint) throw new Error('Missing checkpoint');
+        const body = vi.mocked(checkpoint).getMockImplementation();
+        if (!body) throw new Error('Missing checkpoint body');
+        const order: string[] = [];
+        vi.mocked(ctx.containerManager.readFile).mockImplementationOnce(async () => {
+          order.push('handover');
+          const result = await held.promise;
+          if (mode === 'read-failure') throw new Error('handover read fault');
+          return result;
+        });
+        vi.mocked(checkpoint).mockImplementation(async (args) => {
+          order.push('checkpoint');
+          return body(args);
+        });
+        validate.mockImplementationOnce(async () => {
+          order.push('admit');
+        });
+        if (mode === 'write-failure') {
+          const blocked = path.join(directory, 'not-a-directory');
+          fs.writeFileSync(blocked, 'block');
+          process.env.DATA_DIR = blocked;
+        }
+        operation = manager.handleCompletion(pod.id);
+        // Attach a rejection handler before releasing the controlled operation.
+        void operation.catch(() => {});
+        await waitForAssertion(() => expect(order).toEqual(['handover']));
+        expect(checkpoint).not.toHaveBeenCalled();
+        held.resolve('# saved handover\n');
+        if (mode === 'write-failure') {
+          await expect(operation).rejects.toThrow();
+          expect(checkpoint).not.toHaveBeenCalled();
+          retained();
+        } else {
+          await operation;
+          expect(order).toEqual(['handover', 'checkpoint', 'admit']);
+          if (mode === 'success')
+            expect(
+              fs.readFileSync(
+                path.join(directory, 'pod-artifacts/source-series/handovers', `${pod.id}.md`),
+                'utf8',
+              ),
+            ).toBe('# saved handover\n');
+        }
+      } finally {
+        held.resolve('');
+        await Promise.allSettled(operation ? [operation] : []);
+        ctx.db.close();
+        if (prior === undefined) Reflect.deleteProperty(process.env, 'DATA_DIR');
+        else process.env.DATA_DIR = prior;
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('checks only the existing three checkpoint flags before classification', async () => {
+    const { ctx, manager, pod, validate } = fixture('sandbox');
+    try {
+      const checkpoint = ctx.deps.sandboxWorkspaceCheckpoint;
+      if (!checkpoint) throw new Error('Missing checkpoint');
+      const actual = await checkpoint({
+        containerManager: ctx.containerManager,
+        containerId: 'source-worker',
+        worktreePath: '/tmp/completion-source',
+        podId: pod.id,
+        sequence: 1,
+      });
+      vi.mocked(checkpoint)
+        .mockClear()
+        .mockResolvedValueOnce({
+          ...actual,
+          transferVerified: false,
+          bundleVerified: false,
+          hostImported: false,
+        });
+      await manager.handleCompletion(pod.id);
+      expect(ctx.worktreeManager.classifyCanonicalDiff).toHaveBeenCalledOnce();
+      expect(validate).toHaveBeenCalledOnce();
+    } finally {
+      ctx.db.close();
+    }
+  });
+});

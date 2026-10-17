@@ -1,6 +1,6 @@
 # Slice 5: completion source preparation extraction
 
-Status: READY FOR REVIEW — implementation has not started.
+Status: IN PROGRESS — approved; Phase 1 complete.
 Baseline: d804b1da21af7d26ccbc14e5484bc67a43d528e6.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -8,8 +8,8 @@ Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
 ## Overview and authority
 
 Extract the source preparation portion of handleCompletion, following the accepted
-characterize → extract → qualify structure. The user requested the next slice;
-implementation of this concrete plan awaits explicit approval. Approval covers all
+characterize → extract → qualify structure. The user explicitly approved this
+concrete plan. Approval covers all
 three phases together, with no intermediate manual gate for this headless boundary.
 
 ## Current state analysis
@@ -165,9 +165,9 @@ join held work in finally. Freeze product/test identities and retain raw logs un
 ### Success criteria
 
 Automated:
-- [ ] New public cases pass against unchanged product source at the baseline.
-- [ ] Existing completion, human-gate, artifact, checkpoint and recovery cases pass.
-- [ ] Before-source/test hashes and actual results are recorded.
+- [x] New public cases pass against unchanged product source at the baseline.
+- [x] Existing completion, human-gate, artifact, checkpoint and recovery cases pass.
+- [x] Before-source/test hashes and actual results are recorded.
 
 Manual: None required for this headless compatibility extraction.
 
@@ -286,3 +286,16 @@ Integration with concurrent main work remains a separate requested action.
 
 No unresolved design question remains. Next action: explicit approval of this
 concrete plan, then characterize the unchanged manager before moving product code.
+
+## Phase 1 evidence
+
+At unchanged product baseline d804b1da (documentation HEAD c7097270), all 45 new
+public source-preparation cases passed alongside 40 existing compatibility cases:
+85 passed, 758 name-filtered. Coverage includes series handover success/read failure/
+write failure, held handover ordering, exact checkpoint flags, local sync/push and
+recovery, 0/100 guards, propagated/caught failures, statistics and downstream policy.
+Both baseline runs passed on their first execution; the second added handover and
+checkpoint-flag coverage before freezing the final characterization file. Actual
+Node 22.23.3 opened SQLite; pnpm is 9.15.4. Baseline source/test identities, raw
+command log and runtime evidence are under ignored .autopod-data/completion-source/.
+No product code changed during characterization.
