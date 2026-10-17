@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import { savedLaunchSelectionSchema, scheduledScanPolicySchema } from '@autopod/shared';
+import { savedLaunchSelectionSchema, scheduledScanPolicyInputSchema } from '@autopod/shared';
 import type { Pod, ScanTriageRequest, ScheduledScanReport } from '@autopod/shared';
 import type {
   ScheduledJob,
@@ -196,7 +196,7 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
     judgment: string;
     windowHours?: string;
   }) =>
-    scheduledScanPolicySchema.parse({
+    scheduledScanPolicyInputSchema.parse({
       version: 1,
       baseRef: opts.base,
       headRef: opts.head,
