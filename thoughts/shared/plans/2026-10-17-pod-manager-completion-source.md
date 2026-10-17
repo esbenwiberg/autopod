@@ -1,6 +1,6 @@
 # Slice 5: completion source preparation extraction
 
-Status: IN PROGRESS — approved; Phase 1 complete.
+Status: IN PROGRESS — Phases 1 and 2 complete; full qualification pending.
 Baseline: d804b1da21af7d26ccbc14e5484bc67a43d528e6.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -217,10 +217,10 @@ successful decision telemetry and unchanged downstream manager policy.
 ### Success criteria
 
 Automated:
-- [ ] Identical public characterization passes after extraction.
-- [ ] Direct actual Git commit/guard/classification and SQLite effects pass.
-- [ ] Movement receipt proves only the planned preparation boundary changed.
-- [ ] Exactly two approved product paths differ from baseline.
+- [x] Identical public characterization passes after extraction.
+- [x] Direct actual Git commit/guard/classification and SQLite effects pass.
+- [x] Movement receipt proves only the planned preparation boundary changed.
+- [x] Exactly two approved product paths differ from baseline.
 
 Manual: None required. No live Docker/Azure/provider qualification is claimed.
 
@@ -252,7 +252,7 @@ Update this plan with observed evidence. Unrun or failed checks remain labeled.
 ### Success criteria
 
 Automated:
-- [ ] All affected suites pass with SQLite included and no new skipped cases.
+- [x] All affected suites pass with SQLite included and no new skipped cases.
 - [ ] Full uncached install/lint/build/typecheck/test/audit/secret pipeline passes.
 - [ ] Runtime/source identities and before/after/material evidence are recorded.
 - [ ] Scoped lint, whitespace and exact movement review pass.
@@ -299,3 +299,31 @@ checkpoint-flag coverage before freezing the final characterization file. Actual
 Node 22.23.3 opened SQLite; pnpm is 9.15.4. Baseline source/test identities, raw
 command log and runtime evidence are under ignored .autopod-data/completion-source/.
 No product code changed during characterization.
+
+## Phase 2 evidence
+
+createCompletionSource is a 291-line module. pod-manager is 195 lines smaller
+(18,006 to 17,811). The contiguous preparation region retains its original body
+with only two container lookup receiver adaptations, a local pod ID and the final
+observation return. Manager admission, human/artifact routing, fresh reads, final
+decision telemetry, completion/validation choices and shared helpers are unchanged.
+
+The byte-identical public characterization passed after extraction: 85 selected
+cases, 758 name-filtered. All 21 new material-boundary cases passed using real
+private Git repositories and SQLite files: actual staging/heuristic commits,
+0/100 guard rejection and index reset, controlled file restoration and real retry,
+changed/unchanged/net-zero/excluded-only/mode-only canonical diffs, missing/mismatched
+proof, persisted stats and distinct continuation/error behavior. SQLite close/reopen
+checks include integrity and foreign-key checks. Provider client availability is
+controlled as no_credentials; Git/staging/guard/commit/diff algorithms are real.
+
+The initial direct run had ten fixture setup failures because it selected sandbox
+execution after attaching a container. The fixture now seeds its execution target
+before attachment, respecting the repository invariant. No product fix or assertion
+relaxation was needed; the initial failed log is retained as such.
+
+All 27 affected suites passed: 1,225 tests, zero skipped. Dependency/daemon build,
+four-file scoped Biome and git diff --check passed. movement.json compares parsed
+TypeScript against the exact recipe and confirms all 1,951 other baseline package/
+script paths unchanged. All 1,955 final package/script identities are frozen for
+qualification. Evidence is under ignored .autopod-data/completion-source/.
