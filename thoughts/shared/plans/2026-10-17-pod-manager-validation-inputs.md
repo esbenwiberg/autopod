@@ -1,6 +1,6 @@
 # Slice 8: validation input preparation extraction
 
-Status: IN PROGRESS — explicitly approved; Phases 1 and 2 complete; qualification running.
+Status: COMPLETE — all three approved phases implemented and locally verified.
 Baseline: 150d725c16fc823e125261f552ed37e75a365243.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -256,10 +256,10 @@ remote identity and a clean worktree. Do not copy predecessor test counts as pro
 ### Success criteria
 
 Automated:
-- [ ] All 43 affected suites pass with SQLite and no new skips.
-- [ ] Full uncached pipeline passes under the documented qualification environment.
-- [ ] Scoped lint, whitespace, frozen hashes and exact movement review pass.
-- [ ] Evidence records actual runtime/results/limitations and pushed identities.
+- [x] All 43 affected suites pass with SQLite and no new skips.
+- [x] Full uncached pipeline passes under the documented qualification environment.
+- [x] Scoped lint, whitespace, frozen hashes and exact movement review pass.
+- [x] Evidence records actual runtime/results/limitations and pushed identities.
 
 Manual: None required. Approval covers all three phases together.
 
@@ -282,8 +282,8 @@ migration. Revert module and wiring together. Main integration remains separate.
 - Current sources: pod-manager.ts:13663–13776; interfaces/validation-engine.ts;
   pending-override-repository.ts; validation-repository.ts; validation-context-env.ts.
 
-Next action: review this concrete plan. After explicit approval, execute all three
-phases together. No implementation or test execution has started.
+All three approved phases are complete. No manual verification remains for this
+headless extraction. Integration, PR creation and deployment remain separate work.
 
 ## Implementation notes and Phase 1 evidence
 
@@ -335,3 +335,62 @@ They were corrected before the final affected run and source freeze; product cod
 and frozen public assertions did not change. The verifier's first comparison also
 needed the formatter's semicolon in a new type wrapper included in its expected
 recipe; moved-body expressions did not change.
+
+## Phase 3: final qualification
+
+Verdict: PROVEN for the approved local compatibility extraction under the documented
+qualification environment. No required manual acceptance remains.
+
+| Claim/check | Observed final evidence | Result |
+|---|---|---|
+| Public compatibility | 33 selected cases pass before/after; 28 new; assertions byte-identical | Passed |
+| Actual inputs and database effects | 40 direct cases; real file SQLite, close/reopen, queue/write rejection and chronological history | Passed |
+| Surrounding orchestration | 43 affected suites; 1,651 passed; zero skipped | Passed |
+| Full uncached pipeline | Frozen install, lint, build, supported declaration typecheck, tests, audit, secret scan | Passed under documented environment |
+| Vitest | 7,611 passed across 495 passing files; 10 existing gated skips | Passed with existing skips |
+| Standalone Node scripts | 35 passed; zero failed/skipped | Passed |
+| Source integrity | All 1,961 frozen package/script hashes unchanged through qualification | Passed |
+| Scope and movement | Two product/two test paths; exact move and unchanged shared helpers | Passed |
+| Scoped quality | Biome/whitespace clean; zero semantic diagnostics in new test boundaries | Passed |
+
+Tested implementation: 0c5c44e1e4add333992e771bb56785e2073c5e92. A following documentation-only commit
+records qualification without changing qualified product/test bytes. Final remote
+identity and clean-worktree confirmation are recorded privately after push.
+
+Actual full command, using the task-local npx launcher:
+
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+Actual Node 22.23.3 opened SQLite 3.49.2; pnpm 9.15.4. Full Turbo build/typecheck/
+test groups ran uncached. Frozen install succeeded without fallback or lockfile
+mutation. Root lint checked the large manager test using --files-max-size=2097152
+and retained 82 existing warnings; all scoped files are clean. This process-only
+size adjustment changes no rule or file selection and no repository configuration.
+
+The inherited process-only maintenance.auto=false setting prevents the reproduced
+maintenance.lock race in unchanged source-delivery fixtures. No global/repo Git
+setting changed; the default-environment race remains unfixed. The 10 existing
+platform/Docker/live-model gates remain; no new tests were skipped. No product or
+frozen public assertion changes followed extraction. Direct fixture corrections
+preceded the passing affected/full qualification of the final source.
+
+Evidence under ignored .autopod-data/validation-inputs/: proof.json, movement.json,
+baseline/frozen manifests, frozen public characterization, before-source/expected
+recipe copies, runtime/pnpm records, command/environment receipts, before/after/
+build/affected/full/scoped-Biome/type logs and exit codes, retained initial fixture/
+format/verifier failures, and implementation/final remote identities.
+
+The first full run retained one failure in the unchanged audit hash-stability test;
+the other required gates passed. Reconstruction of the two failure hashes matches
+createdAt values 2026-10-17 21:25:42 and 21:25:43 exactly, establishing the test's
+uncontrolled whole-second boundary. Both audit source/test files match baseline.
+All 22 audit cases passed in isolation. The full uncached pipeline was then rerun
+with identical frozen product/test bytes and qualification settings. No audit fix,
+clock override, assertion change or exclusion was applied. The intermittent audit
+test remains unfixed. See audit-clock-boundary.json, audit-isolated.log and retained
+full-validation-initial-audit-failure.log/.exit alongside the final passing run.
+
+The manager is 17,625 lines (89 fewer); validation-inputs.ts is 208 lines. Local
+SQLite and public manager tests substantiate the claimed compatibility. Controlled
+callbacks prove the extracted call contract. Live providers, containers, deployment,
+main integration and new atomicity/crash/concurrency guarantees are not claimed.
