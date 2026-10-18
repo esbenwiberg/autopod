@@ -54,37 +54,52 @@ import Foundation
     nonisolated static func decode<T: Decodable>(_ type: T.Type, _ data: Data) -> T {
         do { return try JSONDecoder().decode(type, from: data) } catch { preconditionFailure("Invalid knowledge fixture: \(error)") }
     }
-    nonisolated static var summary: [String: Any] { ["podId":"managed-recovery-demo", "dispatcherAttemptId":"attempt-demo-0187", "state":"validated", "validationStatus":"passed", "providerAccountId":"fixture-account", "model":"Fixture model", "runtime":"Codex", "executionTarget":"hosted", "reasoning":"high", "profileId":"backend-delivery", "profileVersion":12, "providerRequests":24, "consumedTokens":48120, "tokenUsageKnown":true, "limitations":["Repository identity is not reported."], "artifacts":[["artifactId":"artifact-demo", "status":"committed", "fileCount":4, "totalBytes":4096, "committedAt":1792233720]], "revoked":false, "stopRequested":false, "observedExit":true, "cleanup":"complete", "exitCode":0, "createdAt":1792233120, "lastEventAt":1792233720] }
-    nonisolated static func detailData() throws -> Data {
-        try JSONSerialization.data(withJSONObject: ["pod":summary, "validations":[["validationId":"validation-demo", "mode":"local", "status":"passed", "newCommit":"ad8b4216", "reason":"Requested checks completed.", "receiptDigest":"sha256:fixture-receipt", "phases":[["phase":"lint","status":"passed","durationMs":1800],["phase":"build","status":"passed","durationMs":7200],["phase":"test","status":"passed","durationMs":12400]]]], "candidates":[["candidateId":"candidate-head-demo","newCommit":"ad8b4216"]], "source":[["operationKey":"source-demo", "operation":"draft_pull_request", "head":"ad8b4216", "status":"complete", "pullRequestId":142]], "verification":["status":"verified"], "events":[["eventId":"event-demo-2","kind":"artifact_committed","createdAt":1792233720],["eventId":"event-demo-1","kind":"validation_receipt","createdAt":1792233660]]])
+    nonisolated static var summary: [String: Any] { ["podId":"managed-recovery-demo", "dispatcherAttemptId":"attempt-demo-0187", "state":"validated", "validationStatus":"passed", "providerAccountId":"fixture-account", "model":"Fixture model", "runtime":"Codex", "executionTarget":"hosted", "reasoning":"high", "profileId":"backend-delivery", "profileVersion":12, "providerRequests":24, "consumedTokens":48120, "tokenUsageKnown":true, "limitations":["Repository identity is not reported."], "artifacts":[["artifactId":"artifact-demo", "status":"committed", "fileCount":5, "totalBytes":6292000, "committedAt":1792233720]], "revoked":false, "stopRequested":false, "observedExit":true, "cleanup":"complete", "exitCode":0, "createdAt":1792233120, "lastEventAt":1792233720] }
+    nonisolated static var summaryObjects: [[String: Any]] {
+        var running = summary
+        running["podId"] = "managed-running-demo"; running["dispatcherAttemptId"] = "attempt-demo-0188"
+        running["state"] = "running"; running["validationStatus"] = "not_requested"; running["profileId"] = "frontend-craft"
+        running["tokenUsageKnown"] = false; running["observedExit"] = false; running["exitCode"] = NSNull(); running["cleanup"] = "pending"; running["artifacts"] = []
+        var failed = summary
+        failed["podId"] = "managed-failure-demo"; failed["dispatcherAttemptId"] = "attempt-demo-0189"
+        failed["state"] = "failed"; failed["validationStatus"] = "not_requested"; failed["exitCode"] = 1; failed["artifacts"] = []
+        failed["failure"] = ["phase":"provider_request", "reason":"The fictional provider account reached its request limit.", "httpStatus":429]
+        return [summary, running, failed]
     }
-    static var managedPods: [ManagedPodSummary] { [decode(ManagedPodSummary.self, try! JSONSerialization.data(withJSONObject: summary))] }
+    nonisolated static func detailData(_ id: String = "managed-recovery-demo") throws -> Data {
+        guard let selected = summaryObjects.first(where: { $0["podId"] as? String == id }) else { throw URLError(.fileDoesNotExist) }
+        let data = try JSONSerialization.data(withJSONObject: ["pod":selected, "validations":[["validationId":"validation-demo", "mode":"local", "status":"passed", "newCommit":"ad8b4216", "reason":"Requested checks completed.", "receiptDigest":"sha256:fixture-receipt", "phases":[["phase":"lint","status":"passed","durationMs":1800],["phase":"build","status":"passed","durationMs":7200],["phase":"test","status":"passed","durationMs":12400]]]], "candidates":[["candidateId":"candidate-head-demo","newCommit":"ad8b4216"]], "source":[["operationKey":"source-demo", "operation":"draft_pull_request", "head":"ad8b4216", "status":"complete", "pullRequestId":142]], "verification":["status":"verified"], "events":[["eventId":"event-demo-2","kind":"artifact_committed","createdAt":1792233720],["eventId":"event-demo-1","kind":"validation_receipt","createdAt":1792233660]]])
+        if id == "managed-recovery-demo" { return data }
+        return try JSONSerialization.data(withJSONObject: ["pod":selected, "validations":[], "candidates":[], "source":[], "events":[], "verification":NSNull()])
+    }
+    static var managedPods: [ManagedPodSummary] { decode([ManagedPodSummary].self, try! JSONSerialization.data(withJSONObject: summaryObjects)) }
     nonisolated static let fileContents = ["summary.md":"# Recovery without repeated work\n\nCheckpoint restoration retains verified artifacts and resumes the unfinished handoff.\n\n- Restore the checkpoint first\n- Keep verified downloads\n- Repeat completed steps safely\n", "report.html":"<h1>Recovery validation</h1><p>All three recorded checks passed against ad8b4216.</p>", "results.json":"{\"status\":\"passed\",\"artifacts\":3}", "trace.bin":"binary"]
     nonisolated static func manifestData() throws -> Data {
-        let files = fileContents.keys.sorted().map { path -> [String: Any] in
+        var files = fileContents.keys.sorted().map { path -> [String: Any] in
             let data = Data(fileContents[path]!.utf8)
             return ["path":path, "size":data.count, "sha256":"sha256:" + SHA256.hash(data: data).map { String(format:"%02x",$0) }.joined(), "mediaType":path.hasSuffix(".md") ? "text/markdown" : path.hasSuffix(".html") ? "text/html" : path.hasSuffix(".json") ? "application/json" : "application/octet-stream"]
         }
+        files.append(["path":"large.log", "size":6 * 1024 * 1024, "sha256":"sha256:fixture-oversized", "mediaType":"text/plain"])
         return try JSONSerialization.data(withJSONObject: ["files":files,"bundle":["format":"tar.gz","size":4096,"sha256":"sha256:fixture-bundle-identity"]])
     }
-    nonisolated static func makeAPI() -> DaemonAPI {
+    nonisolated static func makeAPI(integrityFailure: Bool = false) -> DaemonAPI {
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [KnowledgePreviewProtocol.self]
-        return DaemonAPI(baseURL: URL(string:"https://knowledge-preview.invalid")!, token:"fictional-preview", session:URLSession(configuration:config))
+        return DaemonAPI(baseURL: URL(string: integrityFailure ? "https://knowledge-integrity-preview.invalid" : "https://knowledge-preview.invalid")!, token:"fictional-preview", session:URLSession(configuration:config))
     }
 }
 
 private final class KnowledgePreviewProtocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "knowledge-preview.invalid" }
+    override class func canInit(with request: URLRequest) -> Bool { ["knowledge-preview.invalid", "knowledge-integrity-preview.invalid"].contains(request.url?.host ?? "") }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         do {
             guard let url = request.url else { throw URLError(.badURL) }
             let data: Data
-            if url.path.hasPrefix("/managed/pods/") { data = try DesktopKnowledgeFixtures.detailData() }
+            if url.path.hasPrefix("/managed/pods/") { data = try DesktopKnowledgeFixtures.detailData(url.lastPathComponent) }
             else if url.path.hasSuffix("/manifest") { data = try DesktopKnowledgeFixtures.manifestData() }
             else if url.path.hasSuffix("/files/content") {
                 let path = URLComponents(url:url, resolvingAgainstBaseURL:false)?.queryItems?.first { $0.name == "path" }?.value ?? ""
-                guard let text = DesktopKnowledgeFixtures.fileContents[path] else { throw URLError(.fileDoesNotExist) }; data = Data(text.utf8)
+                guard let text = DesktopKnowledgeFixtures.fileContents[path] else { throw URLError(.fileDoesNotExist) }; data = Data((url.host == "knowledge-integrity-preview.invalid" ? "tampered fixture bytes" : text).utf8)
             } else { throw URLError(.unsupportedURL) }
             client?.urlProtocol(self, didReceive: HTTPURLResponse(url:url,statusCode:200,httpVersion:nil,headerFields:nil)!, cacheStoragePolicy:.notAllowed)
             client?.urlProtocol(self, didLoad:data); client?.urlProtocolDidFinishLoading(self)

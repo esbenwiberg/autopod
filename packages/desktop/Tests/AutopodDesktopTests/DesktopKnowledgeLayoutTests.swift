@@ -23,9 +23,14 @@ import Testing
         try await renderKnowledge(ManagedPodDetailView(pod: summary, initialDetail: detail, initialTab: tab), width: 900, output: output, name: "managed-\(tab.lowercased())")
     }
     let api = DesktopKnowledgeFixtures.makeAPI(), artifact = try #require(summary.artifacts.first)
-    for path in ["summary.md", "report.html", "results.json", "trace.bin"] {
-        try await renderKnowledge(ManagedArtifactViewer(artifact: artifact, api: api, onClose: {}, initialPath: path), width: 1500, output: output, name: "artifact-" + path.replacingOccurrences(of: ".", with: "-"))
+    for path in ["summary.md", "report.html", "results.json", "trace.bin", "large.log"] {
+        let state = KnowledgeRenderState()
+        try await renderKnowledge(ManagedArtifactViewer(artifact: artifact, api: api, onClose: {}, initialPath: path, initialHTMLSource: path.hasSuffix("html"), onPreviewSettled: { state.ready = true }), width: 1500, output: output, name: "artifact-" + path.replacingOccurrences(of: ".", with: "-"), ready: { state.ready })
     }
+    let integrityState = KnowledgeRenderState()
+    try await renderKnowledge(ManagedArtifactViewer(artifact: artifact, api: DesktopKnowledgeFixtures.makeAPI(integrityFailure: true), onClose: {}, initialPath: "summary.md", onPreviewSettled: { integrityState.ready = true }), width: 900, output: output, name: "artifact-integrity-error", ready: { integrityState.ready })
+    let failure = try #require(DesktopKnowledgeFixtures.managedPods.last)
+    try await renderKnowledge(ManagedPodDetailView(pod: failure), width: 900, output: output, name: "managed-provider-failure")
     var draft = DesktopMemoryDraft(); draft.path = "/testing/setup.md"; draft.content = "Use npx pnpm install."
     try await renderKnowledge(DesktopMemoryEditor(draft: .constant(draft), original: DesktopMemoryDraft(), busy: false, error: "Save failed. Your draft is still here; retry after reconnecting.", connected: true, cancel: {}, save: {}), width: 900, output: output, name: "memory-editor-error")
     try await renderKnowledge(memory(section: "Library"), width: 1500, output: output, name: "memory-light", light: true)
@@ -38,7 +43,8 @@ import Testing
         selectedUsage: DesktopKnowledgeFixtures.usage(id), selectedStaleEvidence: warning ? DesktopKnowledgeFixtures.usage(id).filter { $0.outcome == .harmfulStale } : [], selectedMemoryDetailId: id,
         workspaceActions: fixture.actions, initialSection: section, initialDetail: detail, initialMemoryID: section == "Library" ? id : nil)
 }
-@MainActor private func renderKnowledge<V: View>(_ view: V, width: Double, output: String?, name: String, light: Bool = false) async throws {
+@MainActor private final class KnowledgeRenderState { var ready = false }
+@MainActor private func renderKnowledge<V: View>(_ view: V, width: Double, output: String?, name: String, light: Bool = false, ready: (() -> Bool)? = nil) async throws {
     let height = 1000.0
     let host = NSHostingView(rootView: view.environment(\.desktopRedesign, true).environment(\.colorScheme, light ? .light : .dark)
         .environment(\.controlActiveState, .key).tint(DesktopTheme.accent).frame(width: width, height: height))
@@ -46,7 +52,11 @@ import Testing
     window.isReleasedWhenClosed = false; defer { window.contentView = nil; window.close() }
     window.contentView = host; host.appearance = NSAppearance(named: light ? .aqua : .darkAqua)
     window.layoutIfNeeded(); host.layoutSubtreeIfNeeded()
-    try await Task.sleep(for: .milliseconds(350))
+    if let ready {
+        let deadline = Date().addingTimeInterval(5)
+        while !ready(), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(ready(), "Artifact loader must settle before capturing its visual state")
+    } else { try await Task.sleep(for: .milliseconds(350)) }
     window.layoutIfNeeded(); host.layoutSubtreeIfNeeded()
     #expect(host.fittingSize.width <= width); #expect(host.fittingSize.height <= height)
     if let output {

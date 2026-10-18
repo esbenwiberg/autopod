@@ -127,3 +127,29 @@ struct DesktopMemoryEditor: View {
         }
     }
 }
+
+struct DesktopKnowledgeColumns<Main: View, Context: View>: View {
+    @ViewBuilder let main: () -> Main
+    @ViewBuilder let context: () -> Context
+    var body: some View { DesktopKnowledgeColumnLayout { main(); context() } }
+}
+
+/// Measure the text at its actual column width instead of its unwrapped ideal width.
+private struct DesktopKnowledgeColumnLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 900
+        guard subviews.count == 2 else { return .zero }
+        let wide = width >= 780, mainWidth = wide ? width - 307 : width
+        let main = subviews[0].sizeThatFits(ProposedViewSize(width: mainWidth, height: nil))
+        let context = subviews[1].sizeThatFits(ProposedViewSize(width: wide ? 285 : width, height: nil))
+        return CGSize(width: width, height: wide ? max(main.height, context.height) : main.height + 20 + context.height)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        let wide = bounds.width >= 780, mainWidth = wide ? bounds.width - 307 : bounds.width
+        let mainProposal = ProposedViewSize(width: mainWidth, height: nil)
+        let mainHeight = subviews[0].sizeThatFits(mainProposal).height
+        subviews[0].place(at: bounds.origin, anchor: .topLeading, proposal: mainProposal)
+        subviews[1].place(at: CGPoint(x: wide ? bounds.minX + mainWidth + 22 : bounds.minX, y: wide ? bounds.minY : bounds.minY + mainHeight + 20), anchor: .topLeading, proposal: ProposedViewSize(width: wide ? 285 : bounds.width, height: nil))
+    }
+}

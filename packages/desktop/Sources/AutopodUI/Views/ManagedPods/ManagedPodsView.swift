@@ -265,6 +265,8 @@ private struct ManagedPodCard: View {
   }
 }
 
+private struct ManagedDetailLoadKey: Hashable { let podID: String; let baseURL: URL? }
+
 public struct ManagedPodDetailView: View {
   private let initialPod: ManagedPodSummary
   public var pod: ManagedPodSummary {
@@ -286,7 +288,7 @@ public struct ManagedPodDetailView: View {
 
   public var body: some View {
     Group { if redesign { desktopBody } else { legacyBody } }
-    .task(id: pod.podId) {
+    .task(id: ManagedDetailLoadKey(podID: initialPod.podId, baseURL: api?.baseURL)) {
       guard let api else { return }
       detail = nil
       detailError = nil
@@ -294,6 +296,7 @@ public struct ManagedPodDetailView: View {
         do {
           let fetched = try await api.getManagedPod(pod.podId)
           guard !Task.isCancelled else { return }
+          guard fetched.pod.podId == initialPod.podId else { throw DaemonError.badRequest("The detail response belongs to another managed pod.") }
           detail = fetched
           detailError = nil
         } catch {
@@ -925,6 +928,8 @@ struct ManagedArtifactViewer: View {
   let api: DaemonAPI
   var onClose: (() -> Void)? = nil
   var initialPath: String? = nil
+  var initialHTMLSource = false
+  var onPreviewSettled: (() -> Void)? = nil
   @Environment(\.desktopRedesign) private var redesign
 
   @Environment(\.dismiss) private var dismiss
@@ -989,8 +994,12 @@ struct ManagedArtifactViewer: View {
     }
     .frame(minWidth: onClose == nil ? 900 : 650, minHeight: 580)
     .background(redesign ? DesktopTheme.surface : Color(nsColor: .windowBackgroundColor))
+    .onAppear { if initialHTMLSource { htmlPreviewMode = .source } }
     .task { await loadManifest() }
-    .task(id: selectedPath) { await loadSelectedFile() }
+    .task(id: selectedPath) {
+      await loadSelectedFile()
+      if selectedPath != nil && !Task.isCancelled { onPreviewSettled?() }
+    }
   }
 
   private func fileSidebar(_ manifest: ManagedArtifactManifest) -> some View {

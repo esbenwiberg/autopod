@@ -28,10 +28,13 @@ struct DesktopInsightsHeader<Actions: View>: View {
     let title: String
     let subtitle: String
     @ViewBuilder let actions: () -> Actions
+    private var context: String {
+        switch title { case "History": "PAST WORK"; case "Memory": "KNOWLEDGE"; case "Managed pods": "DISPATCHER"; default: "FLEET INSIGHTS" }
+    }
     var body: some View {
         HStack(spacing: 20) {
             VStack(alignment: .leading, spacing: 7) {
-                Text("WORKSPACE / \(title == "History" ? "PAST WORK" : "FLEET INSIGHTS")")
+                Text("WORKSPACE / \(context)")
                     .font(.system(size: 9, weight: .medium)).tracking(1.2).foregroundStyle(.secondary)
                 Text(title).font(.system(size: 27, weight: .semibold))
                 Text(subtitle).font(.callout).foregroundStyle(.secondary)

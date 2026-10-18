@@ -59,7 +59,7 @@ public struct DesktopManagedPodsWorkspace: View {
             onRefresh: refresh, isConnected: isConnected, embedded: true)
     }
     @ViewBuilder private var inspector: some View {
-        if let pod = pods.first(where: { $0.id == selection }) { ManagedPodDetailView(pod: pod, api: api).id(pod.id) }
+        if let pod = pods.first(where: { $0.id == selection }) { ManagedPodDetailView(pod: pod, api: isConnected ? api : nil).id(pod.id) }
         else { ContentUnavailableView("Select an attempt", systemImage: "shippingbox", description: Text("Route, receipts and committed outputs appear here.")) }
     }
 }

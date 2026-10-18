@@ -1507,17 +1507,16 @@ struct CreateMemorySheet: View {
 
 private struct FlowTags: View {
     let tags: [String]
-
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(tags.prefix(8), id: \.self) { tag in
-                Text(tag)
-                    .font(.caption2)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.accentColor.opacity(0.08), in: Capsule())
-                    .foregroundStyle(.secondary)
-            }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) { badges }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], alignment: .leading, spacing: 6) { badges }
+        }
+    }
+    private var badges: some View {
+        ForEach(Array(tags.enumerated()), id: \.offset) { _, tag in
+            Text(tag).font(.caption2).padding(.horizontal, 6).padding(.vertical, 3)
+                .background(DesktopTheme.selection, in: Capsule()).foregroundStyle(.secondary)
         }
     }
 }
@@ -1989,13 +1988,7 @@ extension MemoryManagementView {
                         if isLoadingDetails { ProgressView("Loading evidence…").controlSize(.small) }
                         if detailSection == "Source evidence" { evidencePanel(title: "Source evidence", evidence: detailSourceEvidence(for: .candidate(candidate.id), fallback: candidate.sourceEvidence)) }
                         else {
-                            contentPanel(candidate.content)
-                            infoPanel(title: "Why this was learned", text: candidate.rationale ?? "", systemImage: "quote.bubble")
-                            infoPanel(title: "Expected impact", text: candidate.impactSummary, systemImage: "chart.line.uptrend.xyaxis")
-                            if let applies = candidate.appliesWhen { infoPanel(title: "Applies when", text: applies, systemImage: "checkmark.circle") }
-                            if let avoid = candidate.avoidWhen { infoPanel(title: "Avoid when", text: avoid, systemImage: "minus.circle") }
-                            if let target = candidate.targetMemoryId { Text("Updates active memory \(target). Historical usage evidence is retained.").font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
-                            Text("Source pod: \(candidate.createdByPodId ?? "Manual") · \(candidate.kind.rawValue)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            desktopCandidateContent(candidate)
                         }
                     }.padding(24)
                 }
@@ -2019,17 +2012,59 @@ extension MemoryManagementView {
                         } else if detailSection == "Usage & impact" {
                             impactPanel(memory, usage: detailUsage(for: memory.id)); usagePanel(detailUsage(for: memory.id))
                         } else {
-                            contentPanel(memory.content)
-                            if let rationale = memory.rationale { infoPanel(title: "Why this was learned", text: rationale, systemImage: "quote.bubble") }
-                            if let applies = memory.appliesWhen { infoPanel(title: "Applies when", text: applies, systemImage: "checkmark.circle") }
-                            if let avoid = memory.avoidWhen { infoPanel(title: "Avoid when", text: avoid, systemImage: "minus.circle") }
-                            Text("Source: \(Self.originKey(for: memory)) · Kind: \(memory.kind?.rawValue ?? "Not recorded")").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                            if let setup = memory.repositorySetupId { Text("Repository setup: \(setup)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                            desktopActiveContent(memory)
                         }
                     }.padding(24)
                 }
             } else { ContentUnavailableView("Select knowledge to review", systemImage: "sidebar.right", description: Text("Content, evidence and usage appear here.")) }
         }.background(DesktopTheme.surface)
+    }
+    private func contextFact(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) { Text(label).font(.caption2).foregroundStyle(.secondary); Text(value).font(.callout).textSelection(.enabled) }
+    }
+    private func desktopCandidateContent(_ candidate: MemoryCandidate) -> some View {
+        DesktopKnowledgeColumns {
+            VStack(alignment: .leading, spacing: 20) {
+                contentPanel(candidate.content)
+                infoPanel(title: "Why this was learned", text: candidate.rationale ?? "", systemImage: "quote.bubble")
+                infoPanel(title: "Expected impact", text: candidate.impactSummary, systemImage: "chart.line.uptrend.xyaxis")
+            }
+        } context: {
+            VStack(alignment: .leading, spacing: 20) {
+                DesktopPanel(title: "Context") {
+                    contextFact("Scope", candidate.scope.label)
+                    contextFact("Scope ID", candidate.scopeId.isEmpty ? "Global" : candidate.scopeId)
+                    contextFact("Kind", candidate.kind.rawValue)
+                    contextFact("Source pod", candidate.createdByPodId ?? "Manual")
+                    if let setup = candidate.repositorySetupId { contextFact("Repository setup", setup) }
+                    if let target = candidate.targetMemoryId { contextFact("Updates memory", target) }
+                }
+                if let applies = candidate.appliesWhen { infoPanel(title: "Applies when", text: applies, systemImage: "checkmark.circle") }
+                if let avoid = candidate.avoidWhen { infoPanel(title: "Avoid when", text: avoid, systemImage: "minus.circle") }
+                if let fallback = candidate.fallbackReason { infoPanel(title: "Fallback reason", text: fallback, systemImage: "info.circle") }
+            }
+        }
+    }
+    private func desktopActiveContent(_ memory: MemoryEntry) -> some View {
+        DesktopKnowledgeColumns {
+            VStack(alignment: .leading, spacing: 20) {
+                contentPanel(memory.content)
+                if let rationale = memory.rationale { infoPanel(title: "Why this was learned", text: rationale, systemImage: "quote.bubble") }
+            }
+        } context: {
+            VStack(alignment: .leading, spacing: 20) {
+                DesktopPanel(title: "Context") {
+                    contextFact("Scope", memory.scope.label)
+                    contextFact("Scope ID", memory.scopeId ?? "Global")
+                    contextFact("Kind", memory.kind?.rawValue ?? "Not recorded")
+                    contextFact("Source", Self.originKey(for: memory))
+                    contextFact("Version", String(memory.version))
+                    if let setup = memory.repositorySetupId { contextFact("Repository setup", setup) }
+                }
+                if let applies = memory.appliesWhen { infoPanel(title: "Applies when", text: applies, systemImage: "checkmark.circle") }
+                if let avoid = memory.avoidWhen { infoPanel(title: "Avoid when", text: avoid, systemImage: "minus.circle") }
+            }
+        }
     }
     private func workspaceDetailHeader(path: String, scope: String, id: String, kind: String, confidence: Double?, tags: [String], approve: (() -> Void)?, edit: (() -> Void)?, remove: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 14) {
