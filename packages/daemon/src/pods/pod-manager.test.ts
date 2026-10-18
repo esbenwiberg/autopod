@@ -30934,3 +30934,381 @@ describe('validation environment compatibility', () => {
     }
   });
 });
+
+describe('runtime resume context compatibility', () => {
+  beforeEach(() => mockExecFileSuccess());
+  afterEach(() => vi.restoreAllMocks());
+  function fixture(
+    kind: 'claude' | 'codex' | 'pi' = 'claude',
+    target: 'local' | 'sandbox' = 'local',
+  ) {
+    const provider = kind === 'codex' ? 'openai' : kind === 'pi' ? 'pi' : 'anthropic';
+    const ctx = createTestContext(undefined, {
+      executionTarget: target,
+      warmImageTag: target === 'sandbox' ? 'registry.azurecr.io/autopod/resume:latest' : null,
+      modelProvider: provider,
+      defaultRuntime: kind,
+      defaultModel: kind === 'codex' ? 'auto' : 'sonnet',
+    });
+    const accounts = createProviderAccountStore(ctx.db);
+    const credentials: ProviderCredentials =
+      kind === 'codex'
+        ? { provider: 'openai', authMode: 'chatgpt', authJson: '{"token":"resume-fixture"}' }
+        : kind === 'pi'
+          ? { provider: 'pi', providerId: 'anthropic', credential: { access: 'resume-fixture' } }
+          : { provider: 'anthropic', apiKey: 'resume-fixture-key' };
+    accounts.create({ id: 'resume-account', name: 'Resume account', provider, credentials });
+    linkProfileToProviderAccount(ctx.db, 'test-profile', 'resume-account');
+    ctx.deps.providerAccountStore = accounts;
+    ctx.runtime.type = kind;
+    const setters = {
+      setClaudeSessionId: vi.fn(),
+      setClaudeResumeConfig: vi.fn(),
+      setCodexResumeConfig: vi.fn(),
+      setPiSessionId: vi.fn(),
+      setPiResumeConfig: vi.fn(),
+    };
+    Object.assign(ctx.runtime, setters);
+    ctx.deps.sessionTokenIssuer = {
+      generate: vi.fn(() => 'resume-token'),
+      verify: vi.fn(() => null),
+    };
+    ctx.deps.daemonConfig.mcpServers = [
+      {
+        name: 'shared / tool',
+        url: 'https://remote.example.test',
+        headers: { Authorization: 'must-stay-daemon-side' },
+      },
+    ];
+    const originalExec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+    if (!originalExec) throw new Error('Missing container fixture');
+    vi.mocked(ctx.containerManager.execInContainer).mockImplementation(async (id, cmd, options) => {
+      if (cmd.join(' ').includes(`command -v ${kind}`))
+        return { stdout: `/usr/local/bin/${kind}\n`, stderr: '', exitCode: 0 };
+      if (cmd.join(' ') === `${kind} --version`)
+        return { stdout: `${kind} 1.0.0\n`, stderr: '', exitCode: 0 };
+      return originalExec(id, cmd, options);
+    });
+    ctx.containerManager.getExecutionMetadata = vi.fn(async () => ({
+      imageDigest: `sha256:${'a'.repeat(64)}`,
+      memoryLimitBytes: 16 * 1024 ** 3,
+      cpuLimit: 2,
+      networkMode: 'fixture',
+    }));
+    const manager = createPodManager(ctx.deps);
+    const created = manager.createSession(
+      {
+        profileName: 'test-profile',
+        task: 'Resume configuration compatibility',
+        skipValidation: true,
+      },
+      'operator',
+    );
+    ctx.podRepo.update(created.id, {
+      status: 'awaiting_input',
+      containerId: 'resume-container',
+      worktreePath: '/tmp/resume-context-fixture',
+      claudeSessionId: 'claude-session',
+      piSessionId: 'pi-session',
+      profileSnapshot: { ...ctx.profileStore.get('test-profile'), reasoningEffort: 'xhigh' },
+    });
+    vi.mocked(ctx.runtime.resume).mockImplementation(async function* () {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'Controlled resume stop',
+        fatal: true,
+      };
+    });
+    return {
+      ctx,
+      manager,
+      setters,
+      pod: ctx.podRepo.getOrThrow(created.id),
+      run: (entry: 'message' | 'reject' = 'message') => {
+        if (entry === 'reject') {
+          ctx.podRepo.update(created.id, { status: 'validated' });
+          return manager.rejectSession(created.id, 'Local feedback');
+        }
+        return manager.sendMessage(created.id, 'Local continuation');
+      },
+    };
+  }
+
+  it.each(
+    (['claude', 'codex', 'pi'] as const).flatMap((kind) =>
+      (['message', 'reject'] as const).map((entry) => ({ kind, entry })),
+    ),
+  )(
+    '$entry primes $kind before dispatch with proxy headers and snapshot reasoning',
+    async ({ kind, entry }) => {
+      const f = fixture(kind);
+      try {
+        await f.run(entry);
+        expect(f.ctx.runtime.resume).toHaveBeenCalledOnce();
+        const configure =
+          kind === 'pi'
+            ? f.setters.setPiResumeConfig
+            : kind === 'claude'
+              ? f.setters.setClaudeResumeConfig
+              : f.setters.setCodexResumeConfig;
+        expect(configure).toHaveBeenCalledOnce();
+        expect(configure.mock.invocationCallOrder[0]).toBeLessThan(
+          vi.mocked(f.ctx.runtime.resume).mock.invocationCallOrder[0] ?? 0,
+        );
+        const mcp =
+          kind === 'pi'
+            ? f.setters.setPiResumeConfig.mock.calls[0]?.[0]?.mcpServers
+            : configure.mock.calls[0]?.[1];
+        expect(mcp).toEqual([
+          {
+            type: 'http',
+            name: 'escalation',
+            url: `${f.ctx.deps.mcpBaseUrl}/mcp/${f.pod.id}`,
+            headers: { Authorization: 'Bearer resume-token' },
+          },
+          {
+            type: 'http',
+            name: 'shared / tool',
+            url: `${f.ctx.deps.mcpBaseUrl}/mcp-proxy/shared%20%2F%20tool/${f.pod.id}`,
+            headers: { Authorization: 'Bearer resume-token' },
+          },
+        ]);
+        if (kind === 'pi') {
+          expect(f.setters.setPiSessionId).toHaveBeenCalledWith(f.pod.id, 'pi-session');
+          expect(f.setters.setPiResumeConfig).toHaveBeenCalledWith(
+            expect.objectContaining({
+              podId: f.pod.id,
+              task: '',
+              model: f.pod.model,
+              reasoningEffort: 'xhigh',
+              workDir: '/workspace',
+              containerId: 'resume-container',
+              customInstructions: 'resume',
+            }),
+          );
+          expect(f.setters.setPiResumeConfig.mock.calls[0]?.[0]?.env).toBe(
+            vi.mocked(f.ctx.runtime.resume).mock.calls[0]?.[3],
+          );
+        } else expect(configure).toHaveBeenCalledWith(f.pod.id, mcp, 'xhigh');
+        expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['', null])(
+    'omits a falsey Pi session id=%s and still sets resume configuration',
+    async (id) => {
+      const f = fixture('pi');
+      try {
+        f.ctx.podRepo.update(f.pod.id, { piSessionId: id });
+        await f.run();
+        expect(f.setters.setPiSessionId).not.toHaveBeenCalled();
+        expect(f.setters.setPiResumeConfig).toHaveBeenCalledOnce();
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it('actual Pi crash recovery primes config and session before runtime.resume', async () => {
+    const f = fixture('pi');
+    try {
+      f.ctx.podRepo.update(f.pod.id, {
+        status: 'queued',
+        containerId: null,
+        recoveryWorktreePath: '/tmp/resume-context-fixture',
+        profileSnapshot: null,
+      });
+      await f.manager.processPod(f.pod.id);
+      expect(f.setters.setPiSessionId).toHaveBeenCalledWith(f.pod.id, 'pi-session');
+      expect(f.setters.setPiResumeConfig).toHaveBeenCalledOnce();
+      expect(f.ctx.runtime.resume).toHaveBeenCalledOnce();
+      expect(f.setters.setPiResumeConfig.mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(f.ctx.runtime.resume).mock.invocationCallOrder[0] ?? 0,
+      );
+      expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it.each([false, true])(
+    'launch stdio material is primed only after final capability approval denied=%s',
+    async (denied) => {
+      const f = fixture();
+      try {
+        const { createTestConfiguration } = await import('../test-utils/configuration-helpers.js');
+        const { resolveLaunch } = await import('../configuration/launch-resolver.js');
+        const { resolveLaunchAgentRoute } = await import(
+          '../configuration/agent-route-resolution.js'
+        );
+        const { services } = createTestConfiguration(f.ctx.db);
+        const accountStore = f.ctx.deps.providerAccountStore;
+        if (!accountStore) throw new Error('Missing resume fixture account store');
+        services.resolveAgentRoute = async (route) =>
+          resolveLaunchAgentRoute({ ...route, providerAccountId: 'resume-account' }, accountStore);
+        const config = await resolveLaunch(
+          {
+            repositoryId: 'repo-a',
+            task: 'Resume',
+            overrides: {
+              ai: {
+                main: {
+                  providerAccountId: 'resume-account',
+                  runtime: 'claude',
+                  model: f.pod.model,
+                },
+              },
+            },
+          },
+          services,
+        );
+        f.ctx.db
+          .prepare('UPDATE pods SET launch_config_digest=? WHERE id=?')
+          .run(config.digest, f.pod.id);
+        const error = new Error('Controlled final runtime capability denial');
+        let agentResolved = false;
+        f.ctx.deps.launchConfiguration = {
+          read: () => config,
+          executionSettings: () => f.ctx.profileStore.get('test-profile'),
+          prepareEnvironment: async () => 'fixture',
+          assertCurrentCapabilities: async () => {
+            if (denied && agentResolved) throw error;
+          },
+          credentials: {
+            agent: async () => {
+              agentResolved = true;
+              return {
+                buildEnv: { MATERIAL_ONLY: 'not-worker-env' },
+                mcpServers: [
+                  {
+                    name: 'local-tool',
+                    type: 'stdio',
+                    command: 'fixture-local',
+                    env: { FIXTURE: 'scoped' },
+                  },
+                ],
+              };
+            },
+            buildEnvironment: async () => ({}),
+            deployment: async () => null,
+            httpServer: async () => {
+              throw new Error('Unused HTTP fixture');
+            },
+            registries: async () => ({ files: [], nugetSecret: null }),
+          },
+        };
+        if (denied) await expect(f.run()).rejects.toBe(error);
+        else await f.run();
+        if (denied) {
+          expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+          expect(f.setters.setClaudeResumeConfig).not.toHaveBeenCalled();
+          expect(f.manager.getSession(f.pod.id).status).toBe('failed');
+        } else {
+          expect(f.setters.setClaudeResumeConfig).toHaveBeenCalledWith(
+            f.pod.id,
+            [
+              {
+                type: 'http',
+                name: 'escalation',
+                url: `${f.ctx.deps.mcpBaseUrl}/mcp/${f.pod.id}`,
+                headers: { Authorization: 'Bearer resume-token' },
+              },
+              {
+                type: 'stdio',
+                name: 'local-tool',
+                command: 'fixture-local',
+                args: undefined,
+                env: { FIXTURE: 'scoped' },
+              },
+            ],
+            'xhigh',
+          );
+          expect(f.ctx.runtime.resume).toHaveBeenCalledOnce();
+        }
+        expect(agentResolved).toBe(true);
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it('fresh task feedback after achieved Goal primes the same MCP array passed to spawn', async () => {
+    const f = fixture('claude', 'sandbox');
+    try {
+      const { createTestConfiguration } = await import('../test-utils/configuration-helpers.js');
+      const { resolveLaunch } = await import('../configuration/launch-resolver.js');
+      const { resolveLaunchAgentRoute } = await import(
+        '../configuration/agent-route-resolution.js'
+      );
+      const { createGoalRepository } = await import('./goal-repository.js');
+      const { createPodGoalService } = await import('./pod-goal-service.js');
+      const { services } = createTestConfiguration(f.ctx.db);
+      const accounts = f.ctx.deps.providerAccountStore;
+      if (!accounts) throw new Error('Missing fixture account store');
+      services.resolveAgentRoute = async (route) => resolveLaunchAgentRoute(route, accounts);
+      let config = await resolveLaunch(
+        {
+          repositoryId: 'repo-a',
+          task: 'Achieved native objective',
+          overrides: {
+            ai: {
+              main: { providerAccountId: 'resume-account', runtime: 'claude', model: f.pod.model },
+            },
+          },
+        },
+        services,
+      );
+      config = { ...config, intent: 'goal' };
+      createGoalRepository(f.ctx.db).create(f.pod.id, config.task, 'claude');
+      f.ctx.db
+        .prepare("UPDATE pod_goals SET state='achieved',execution_stopped=1 WHERE pod_id=?")
+        .run(f.pod.id);
+      const goals = createPodGoalService({
+        db: f.ctx.db,
+        pods: f.ctx.podRepo,
+        evidence: [],
+        assertAllowed: async () => {},
+        assertCurrent: () => {},
+        publish: () => {},
+      });
+      const begin = vi.fn(
+        async (_id: string, task: string, apply: (next: typeof config) => void) => {
+          config = { ...config, intent: 'task', task };
+          apply(config);
+        },
+      );
+      f.ctx.deps.launchConfiguration = {
+        read: () => config,
+        executionSettings: () => f.ctx.profileStore.get('test-profile'),
+        assertCurrentCapabilities: async () => {},
+        prepareEnvironment: async () => 'fixture',
+        goals,
+        beginGoalRework: begin,
+      };
+      vi.mocked(f.ctx.runtime.spawn).mockImplementation(async function* () {
+        yield {
+          type: 'error',
+          timestamp: new Date().toISOString(),
+          message: 'Controlled fresh task stop',
+          fatal: true,
+        };
+      });
+      await f.run('reject');
+      expect(begin).toHaveBeenCalledOnce();
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(f.ctx.runtime.spawn).toHaveBeenCalledOnce();
+      expect(f.setters.setClaudeResumeConfig).toHaveBeenCalledOnce();
+      const list = f.setters.setClaudeResumeConfig.mock.calls[0]?.[1];
+      expect(vi.mocked(f.ctx.runtime.spawn).mock.calls[0]?.[0].mcpServers).toBe(list);
+      expect(f.setters.setClaudeResumeConfig.mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(f.ctx.runtime.spawn).mock.invocationCallOrder[0] ?? 0,
+      );
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+});

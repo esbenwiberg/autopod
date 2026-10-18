@@ -1,6 +1,6 @@
 # Slice 18: runtime resume context extraction
 
-Status: PROPOSED — awaiting explicit plan approval.
+Status: APPROVED — implementing all three phases after explicit user approval.
 Date: 2026-10-18.
 Baseline: f09e687bc338aac1c10bff80d88315a8b02e74c8.
 Branch: codex/pod-manager-workspace.
@@ -153,8 +153,8 @@ failures and justified fixture corrections. Product source must remain unchanged
 ### Success criteria
 
 Automated:
-- [ ] New public and selected existing checks pass on unchanged product.
-- [ ] Frozen assertions/filter, actual selected names, source/hashes/runtime saved.
+- [x] New public and selected existing checks pass on unchanged product.
+- [x] Frozen assertions/filter, actual selected names, source/hashes/runtime saved.
 
 Manual: None required for local headless preparation compatibility.
 
@@ -270,5 +270,27 @@ pods/injection-merger.ts; crypto/pod-tokens.ts; configuration/execution-credenti
 runtimes/claude-runtime.ts:327, codex-runtime.ts:501, pi-runtime.ts:119;
 pod-manager.test.ts:19401; existing runtime/injection/token suites.
 
-Next: review the illustrated plan and explicitly approve before implementation.
-Approval covers characterize, extract and qualify together.
+User approved all three phases. Next: characterize unchanged product, extract,
+and qualify frozen final source.
+
+## Phase 1 observed results
+
+12 new public caller checks and 24 selected existing checks pass on unchanged
+product (36 selected; 1139 unrelated cases excluded only by this filter).
+They pin message/rejection Claude/Codex/Pi setters before dispatch, exact proxy/token
+configuration and snapshot reasoning, falsey Pi ids, actual Pi processPod recovery,
+launch stdio/check2 denial and fresh task-feedback spawn using the exact primed MCP
+array after achieved Goal rework. Fresh rework uses real local Goal rows/service and
+a controlled existing rework capability on the sandbox branch; it does not establish
+native Goal authorization/execution. Separate inline Claude/Codex recovery tests retain
+their separate scope. Product bytes are unchanged; public bytes/filter/names are frozen.
+
+Initial launch fixtures incorrectly retained the legacy launch marker and expected a
+swallowed capability error. Explicit fixture SQL now seeds the immutable marker
+(PodUpdates deliberately does not allow it), and tests assert the original propagated
+denial. Typed issuer/daemon fixtures were completed. Initial fresh feedback correctly
+hit the local immutable-network-policy restriction; the sandbox caller branch now
+exercises fresh spawn without bypassing that policy. Initial diagnostics are retained.
+Node22.23.3/pnpm9.15.4 opens SQLite3.49.2; new public semantic diagnostics are zero.
+Next: extract the approved function and verify unchanged public assertions plus direct
+config, token, credential and runtime-setter contracts.
