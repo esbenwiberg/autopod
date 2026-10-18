@@ -1,6 +1,6 @@
 # Slice 15: reviewer context extraction
 
-Status: APPROVED — implementing all three phases after explicit user approval.
+Status: APPROVED — Phases 1 and 2 complete; final qualification running.
 Date: 2026-10-18.
 Baseline: 2cdb48e56551f69f235585c9b12316d3e8409eee.
 Branch: codex/pod-manager-workspace.
@@ -220,9 +220,9 @@ cross-process transaction or actual provider authorization.
 ### Success criteria
 
 Automated:
-- [ ] Frozen public checks pass unchanged after extraction.
-- [ ] Direct config/executor/env and real SQLite/account/persistence/reopen checks pass.
-- [ ] Three-body recipe, unchanged calls/references and two-product/two-test scope pass.
+- [x] Frozen public checks pass unchanged after extraction.
+- [x] Direct config/executor/env and real SQLite/account/persistence/reopen checks pass.
+- [x] Three-body recipe, unchanged calls/references and two-product/two-test scope pass.
 
 Manual: None required. Live paid providers, Docker and Azure remain outside scope.
 
@@ -272,7 +272,7 @@ commit/push verified increments and confirm remote identity and clean checkout.
 ### Success criteria
 
 Automated:
-- [ ] All 79 affected suites pass with SQLite and no new skips.
+- [x] All 79 affected suites pass with SQLite and no new skips.
 - [ ] Full uncached validation passes under the documented qualification environment.
 - [ ] Scoped lint/whitespace/types, exact movement and frozen hashes pass.
 - [ ] Complete plan/proof records actual results, limits and final pushed identities.
@@ -299,8 +299,7 @@ providers/credential-persistence.ts; provider-accounts/provider-account-store.ts
 pods/provider-attempt-repository.ts; interfaces/reviewer-executor.ts;
 configuration/pod-snapshot-integration.test.ts and existing manager reviewer tests.
 
-Next action: user reviews the illustrated plan and explicitly approves all three
-implementation phases. No product/test changes or implementation tests in planning.
+Next action: qualify the frozen implementation with the full uncached pipeline.
 
 ## Phase 1 observed results
 
@@ -322,3 +321,37 @@ the engine config therefore retains that earlier snapshot while the account and
 written auth are fresh. Tests explicitly pin both observations. This extraction
 preserves that order; no product correction or assertion weakening was made.
 Initial logs/exits are retained alongside the passing baseline.
+
+## Phase 2 observed results
+
+createReviewerContext now contains the three complete original bodies. The manager
+passes its original dependency object through the narrow live view, with eight
+original captured collaborators. It composes the factory at the former definition
+site. Parsed TypeScript verifies the complete manager/module recipe, all three
+bodies including internal calls/awaits, seven external calls (2 env / 3 config /
+2 executor), and four shorthand references (three input injections and public
+executor export). The manager is 16,820 lines, 175 fewer; reviewer-context.ts is
+254 lines. All 1,971 other baseline package/script paths are unchanged.
+
+The frozen 98 public checks pass after extraction with byte-identical assertions.
+All 72 direct cases pass using private migrated file SQLite, actual account/attempt/
+pod repositories, account identity/runtime resolver and actual local credential/
+env helpers. Tests cover closed history, nullish route overlays, review/memory,
+no eager dispatch, captured/live references, real OpenAI/Pi rotation, nonexpired
+MAX, controlled Foundry token acquisition, sequential writes and errors. A real
+SQL credential-update abort warns and reuses old auth; earlier account updates
+survive later auth-write failure. Reopen integrity/FK checks and untouched other
+account/profile/attempt evidence pass. All 79 affected suites pass: 2,840 tests,
+zero skipped. Scoped Biome/whitespace are clean; semantic diagnostics are zero in
+both new test boundaries. No product correction followed extraction.
+
+The initial direct run had one expectation error: actual account auth resolution
+rejects non-runnable catalog policy first with PROVIDER_ACCOUNT_NOT_RUNNABLE.
+That exact existing precedence is now pinned. Two initial multi-variable test
+fixture declarations were split to satisfy Biome. The movement verifier needed
+import ordering normalization and a missing trailing type-member semicolon in its
+generated recipe; original body equality remains exact and no product edit was
+needed. Diagnostics and corrected passing runs are retained.
+
+Final source/configuration hashes and commands/environment are frozen under
+ignored .autopod-data/reviewer-context/. Full uncached qualification remains.
