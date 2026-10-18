@@ -1,19 +1,19 @@
 # Pod-manager rewrite: remaining roadmap, slices 19–34
 
-Status: Slices 19–25 COMPLETE. Slices 1–25 complete; 9 milestones remain (26–34).
+Status: Slices 19–26 COMPLETE. Slices 1–26 complete; 8 milestones remain (27–34).
 Date: 2026-10-18. Baseline: ecc324ca4a403d49397dd63cecb1a881e653ad06.
 Branch: codex/pod-manager-workspace.
 
 ## Finite scope and count
 
-9 remaining delivery milestones: Slice 26 through final qualification at 34.
-The bounded baseline roadmap below included 16 (19–34); Slices 19–25 are complete.
+8 remaining delivery milestones: Slice 27 through final qualification at 34.
+The bounded baseline roadmap below included 16 (19–34); Slices 19–26 are complete.
 The milestones define scope; their effort varies, and they do not provide a time estimate. Recent slices moved small helpers;
 future milestones deliberately complete whole responsibilities and can contain
 multiple independently tested implementation phases within their numbered slice.
 
 At roadmap baseline the manager had 16,521 total lines and 73 public object members.
-After Slice 25 it has 8,591 lines and the same public interface. A TypeScript
+After Slice 26 it has 7,399 lines and the same public interface. A TypeScript
 AST inventory below assigns every one of 327 non-import top-level declarations,
 manager-closure declarations/statements and public members to an owning milestone.
 Nested implementation blocks inherit their containing workflow; processPod has an
@@ -38,7 +38,7 @@ corrections and unrelated bugs have their own work, outside this compatibility r
 | 23 | Provisioning — COMPLETE | Extract the provisioning portion of processPod, image/capability checks, materialized files, instructions/tools and sandbox session handover. | Complete provisioning returns prepared context/halted; nineteen helpers, eight constants and 140 statements preserved. 1,192 public cases, 37 direct cases and full qualification pass. |
 | 24 | Agent dispatch and event consumption — COMPLETE | Own the remaining processPod execution loop, spawn/resume/recovery, consumeAgentEvents, activity and terminal-event accounting. | Complete process/stream owners preserve eleven bodies, four initializers, shared map identity and replay accounting; 1,192 public cases, 23 direct cases and full qualification pass. |
 | 25 | Completion orchestration and shared transitions — COMPLETE | Compose the existing completion owners; own completion entry, transition/event helpers, termination/guidance checks and failure reporting. | Complete entry and original three owner constructors delegate through domain workflows;15 bodies, guards/reporting,1,192 public cases,37 direct cases and full qualification pass. |
-| 26 | Approval and readiness | Own approveSession, readiness waits/approvals, fact waivers, forced/bulk approval and approval snapshots. | Approval retains decisions, readiness scope and advisory waiting; no readiness or approval rules remain in manager. |
+| 26 | Approval and readiness — COMPLETE | Own approveSession, readiness waits/approvals, fact waivers, forced/bulk approval and approval snapshots. | Complete approval lifetime/readiness/controls retain17 bodies, shared references and decisions;1,192 public cases,25 direct cases and full qualification pass. |
 | 27 | Delivery and merge polling | Own push/checkpoint scan, PR base/create/retry, merge queue and poller state/startup. | Branch/PR delivery and resumed pollers preserve push/merge order, credentials and failure parking. |
 | 28 | Fix cycles | Own fix task/binding, feedback replies, recyclable fix sessions, delivery failure handling and attempt extension. | Parent/fix ownership and retry ceilings remain covered; fixes do not take over the parent PR. |
 | 29 | Operator lifecycle controls | Own messages, rejection, pause/nudge/kill, escalation notification, credential injection and tool installation. | Public commands delegate through narrow workflow ports and retain quiescence, admission and error behavior. |
@@ -524,3 +524,18 @@ script hashes and six root controls match. New source/test semantics are clean;
 repository build/typecheck passes. No live provider/container/cloud acceptance or
 integration/deployment. Next incomplete:26; nine milestones remain through34. Detailed
 proof:Slice25 plan and .autopod-data/completion-orchestration/proof.json. Goal active.
+
+## Slice26 qualification checkpoint (2026-10-19)
+
+Whole approval/readiness/waiver/snapshot extraction:implementation8a08d5a4.
+Manager8,591 →7,399 lines; five owners135–835 lines. Seventeen complete bodies, three
+types, both original initializers/readiness construction and six full recipes match.
+Public1,192 assertions unchanged;25 direct cases, four real SQLite file-reopen cases
+and a real private snapshot/receipt case pass. Expanded196-suite run:4,683 pass/four
+inherited gates. Full frozen uncached pipeline:8,793 Vitest pass, same ten full gates,
+538 passing files and35 Node script tests. Frozen2,060 package/script hashes and six
+root controls match. Build/typecheck passes; six moved source diagnostics are unchanged
+from baseline and all new test/fixture semantics are clean. No live external acceptance
+or integration/deployment. Next incomplete:27; eight milestones remain. Delivery27
+explicitly includes approval/validation inline delivery and the trigger size review.
+Evidence:Slice26 plan and .autopod-data/approval-readiness/proof.json. Goal remains active.

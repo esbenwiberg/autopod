@@ -1,6 +1,6 @@
 # Slice 26: complete approval and readiness
 
-Status: IN PROGRESS — complete extraction implemented; frozen qualification pending.
+Status: COMPLETE — full frozen qualification passed; goal continues through34.
 Date:2026-10-19. Baseline:e25082d4bbf51e89d304c31309c38dd7cfdb106e.
 Branch:codex/pod-manager-workspace.
 Worktree:/Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -169,10 +169,10 @@ approval/validation paths and the trigger size review.33/34 retain facade<=1,500
 full327-unit/73-member reconciliation, mutable-owner cleanup and final uncached proof.
 
 Automated:
-- [ ] Full affected set passes with real SQLite and no new skips.
-- [ ] Full frozen uncached pipeline passes; actual environment/counts/gates recorded.
-- [ ] Final frozen bytes match a clean pushed tested revision.
-- [ ] Plan/roadmap mark26 only after proof, preserving27–34 finish gates.
+- [x] Full affected set passes with real SQLite and no new skips.
+- [x] Full frozen uncached pipeline passes; actual environment/counts/gates recorded.
+- [x] Final frozen bytes match a clean pushed tested revision.
+- [x] Plan/roadmap mark26 only after proof, preserving27–34 finish gates.
 Manual:none; integration/production acceptance remains separately authorized.
 
 ## Compatibility and rollback
@@ -214,3 +214,32 @@ Evidence:.autopod-data/approval-readiness/ including movement-final.log/movement
 baseline-type-comparison.json, public-comparison.json and named reports/exits;
 direct JSON is packages/daemon/.autopod-data/approval-readiness/direct-final.json.
 Expanded regression and full frozen qualification remain required before26 is done.
+
+## Final qualification —2026-10-19
+
+Implementation:8a08d5a4bb2ce22814b24e7b2739864789fb3396 (pushed).
+Verdict:PROVEN for this whole local compatibility boundary. Evidence is retained in
+.autopod-data/approval-readiness/proof.json and named logs/reports/scripts.
+
+All196 affected suites pass:4,683 passing tests and four unchanged inherited gated
+infrastructure cases. Full frozen uncached pipeline passes install without fallback/
+lock mutation, lint, build/declarations, repository typecheck, workspace tests, audit
+and secret scan.8,793 Vitest tests pass across538 passing files; same ten gated tests/
+five wholly skipped files remain. All35 Node script tests pass. Observed runtime:
+Node22.23.3/pnpm9.15.4/SQLite3.49.2, all15 Turbo tasks uncached. Only the inherited2 MiB
+root-lint processing limit and82 existing warnings remain; no disabled rule/config.
+
+All2,060 package/script hashes and six root controls match after qualification.
+All1,192 public names/statuses/assertion bytes match. All25 direct cases pass across
+five suites; four actual private-file SQLite reopen cases and a real private report
+snapshot/receipt case are included. Seventeen complete bodies/parameters/defaults,
+three types, both initializers, readiness constructor and all six full source recipes
+match. Six moved source diagnostics match baseline code/messages; six new test/fixture
+files have zero diagnostics. No original-policy repair or public assertion edit.
+
+Five new source owners remain135–835 lines. Manager8,591 →7,399 lines. This completes26;
+eight milestones remain27–34. Complete delivery/merge research is saved under
+../research/2026-10-19-pod-manager-delivery-merge.md.27 includes manager/provider/queue/
+poller ownership, approval/validation inline delivery and the trigger1,273-line size
+exception review/reduction. No paid/live provider, Docker/Azure acceptance, PR/main
+integration or deployment is claimed. The goal stays active through all34 finish gates.
