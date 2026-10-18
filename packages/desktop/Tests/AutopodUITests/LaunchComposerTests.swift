@@ -286,12 +286,10 @@ import Testing
 @MainActor private final class LaunchComposerHost {
   let hosting: NSHostingView<AnyView>
   let window: NSWindow
-  let oldEnhanced: Any?
-  let enhanced = NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface")
   init<V: View>(_ view: V, width: Double, light: Bool = false) {
-    NSApplication.shared.finishLaunching()
-    oldEnhanced = NSApplication.shared.accessibilityAttributeValue(enhanced)
-    NSApplication.shared.accessibilitySetValue(true, forAttribute: enhanced)
+    // Keep the native accessibility client active for this test process. Toggling it
+    // off while other framework views are still tearing down affects WebKit clients.
+    NSApplication.shared.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
     hosting = NSHostingView(rootView: AnyView(view.environment(\.desktopRedesign, true).environment(\.colorScheme, light ? .light : .dark)
       .environment(\.controlActiveState, .key).transaction { $0.disablesAnimations = true }.frame(width: width, height: 850)))
     hosting.sizingOptions = []
@@ -299,7 +297,7 @@ import Testing
     window.isReleasedWhenClosed = false; window.contentView = hosting
     hosting.appearance = NSAppearance(named: light ? .aqua : .darkAqua); window.orderFront(nil)
   }
-  func close() { window.contentView = nil; window.close(); NSApplication.shared.accessibilitySetValue(oldEnhanced ?? false, forAttribute: enhanced) }
+  func close() { window.contentView = nil; window.close() }
   var nodes: [NSObject] { window.layoutIfNeeded(); hosting.layoutSubtreeIfNeeded(); return launchNodes(hosting) }
   func matches(_ id: String) -> [NSObject] { nodes.filter { launchAX($0, "accessibilityIdentifier") as? String == id } }
   func containsText(_ text: String) -> Bool { nodes.contains { (launchAX($0, "accessibilityLabel") as? String ?? "").contains(text) || (launchAX($0, "accessibilityValue") as? String ?? "").contains(text) } }
