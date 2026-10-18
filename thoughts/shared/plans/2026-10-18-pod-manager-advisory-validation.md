@@ -1,6 +1,6 @@
 # Slice 19: advisory validation execution and publication
 
-Status: APPROVED — Phases 1 and 2 complete; final qualification next.
+Status: COMPLETE — all three approved phases implemented and locally verified.
 Date: 2026-10-18. Baseline: ecc324ca4a403d49397dd63cecb1a881e653ad06.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -251,10 +251,10 @@ Update roadmap status only after the numbered outcome is proven complete.
 ### Success criteria
 
 Automated:
-- [ ] All 95 affected suites pass unfiltered with real SQLite and no new skips.
-- [ ] Full uncached pipeline passes in the documented environment.
-- [ ] Scoped types/lint/whitespace, exact movement, source scope and frozen hashes pass.
-- [ ] Completed proof/plan/roadmap record actual counts, limits and clean pushed revision.
+- [x] All 95 affected suites pass unfiltered with real SQLite and no new skips.
+- [x] Full uncached pipeline passes in the documented environment.
+- [x] Scoped types/lint/whitespace, exact movement, source scope and frozen hashes pass.
+- [x] Completed proof/plan/roadmap record actual counts, limits and clean pushed revision.
 
 Manual: None required. Approval covers all three phases together.
 
@@ -266,7 +266,8 @@ repositories and reopen checks establish durable history/usage boundaries. Exist
 browser QA runner tests retain their controlled engine scope. No faster execution,
 stronger authorization, atomicity, isolation, replay/crash safety or live browser
 quality claim. No migration. Roll back manager composition and new module together.
-No unresolved design choice. Next action: explicit approval, then all three phases.
+All three approved phases are complete. No manual acceptance remains.
+Next numbered milestone: Slice 20, validation workflows; prepare its concrete plan.
 
 ## Phase 1 observed results
 
@@ -317,3 +318,62 @@ change after exact extraction.
 
 All 95 affected suites pass unfiltered: 3,368 tests, zero skipped. Next is the full
 uncached pipeline on the frozen final 1,983 package/script hashes and six controls.
+
+## Phase 3: final qualification
+
+Verdict: PROVEN for the approved local advisory validation compatibility extraction
+under the documented environment. All three phases complete; no manual gate remains.
+
+| Claim/check | Final observed evidence | Result |
+|---|---|---|
+| Public callers and surrounding approval/event behavior | 33 selected before/after checks, including 13 new; assertions/names/statuses unchanged | Passed |
+| Owner scheduling/publication/error/reference contracts | 59 direct tests | Passed |
+| Durable evidence, usage, human waiver and pending decision | 3 private migrated file SQLite/repository/readiness/event cases with reopen integrity/FK | Passed locally |
+| Surrounding behavior | 95 affected suites; 3,368 tests; zero skips | Passed |
+| Full uncached pipeline | Frozen install, lint, build, supported declaration typecheck, tests, audit and secret scan | Passed in documented environment |
+| Vitest | 8,539 passed across 506 passing files; 10 existing gated skips | Passed with existing skips |
+| Standalone Node script checks | 35 passed; zero failures/skips | Passed |
+| Source integrity | 1,983 package/script hashes and six root controls stable through qualification | Passed |
+| Exact extraction and scope | Byte-identical whole functions, both pairs of external calls, full recipe, two product/two test paths | Passed |
+| Scoped quality | Biome/whitespace clean; zero supplemental semantic diagnostics in both new test boundaries | Passed |
+
+Tested implementation: 31637baa91143676c3f02d1a05066a034054ac7f. The following documentation-only commit
+records this qualification without changing qualified source/test bytes. Private
+proof records final pushed identity and clean-checkout confirmation after push.
+
+Actual full command through the task-local pinned npx/pnpm launcher:
+
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+Node22.23.3 opens real SQLite3.49.2; pnpm9.15.4. Build/typecheck/test groups ran
+uncached. Frozen install succeeded without fallback or lock mutation. Root lint
+retains 82 existing warnings and only the established 2 MiB processing limit;
+scoped files are clean. No rule, file selection, repo/global config or dependency
+changes. maintenance.auto=false is process-only. No new skips. Existing unrelated
+Git metadata-scan race/audit-clock flake remains outside scope.
+
+The manager is 16,369 lines (152 fewer), advisory-validation.ts 224 lines. Both
+whole original functions and their comments are byte-identical. All existing other
+imports, map/semaphore/approval/cleanup implementation and both callers are unchanged.
+The original twelve collaborators are captured once. All 1,979 other baseline
+package/script files and six root controls match. No behavior correction followed
+extraction. Historical QA and cumulative usage retain their earlier write timing,
+including before final stale checks; live results/readiness/events and later caller
+resource actions retain existing ownership fences. Callback/final duplicate effects
+and live optional-engine lookup across the slot wait are preserved.
+
+Real file SQLite checks use actual repositories, event bus/progress and readiness;
+they retain current/superseded exact history, blocking evidence, known usage, a nonempty
+human waiver and pending human nudge through close/reopen integrity/FK checks. QA
+engine/container execution remains controlled. The approval/cleanup helpers stay in
+manager and are covered through the public approval case and broader regression;
+this slice does not redesign or claim new guarantees for deferred-cleanup races.
+No live browser/reviewer/provider, paid execution, Docker/Azure, stronger authorization,
+atomicity, isolation, replay/crash safety, PR/main integration or deployment claim.
+
+Ignored .autopod-data/advisory-validation/ contains proof.json, claims.json, movement,
+original/expected code, before/final hashes, frozen public assertions/names/filter,
+commands/environment/revisions, raw logs/exits and initial fixture diagnostics.
+The initial affected run passed; a premature final restart was stopped while the
+explicit waiver actor fixture was completed, then the 95 suites passed on final
+frozen bytes. The illustrated approval document remains the proposal snapshot.

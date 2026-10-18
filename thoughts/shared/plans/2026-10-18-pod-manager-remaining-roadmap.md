@@ -1,18 +1,19 @@
 # Pod-manager rewrite: remaining roadmap, slices 19–34
 
-Status: PLANNED. Slices 1–18 complete; none of 19–34 implemented by this document.
+Status: Slice 19 COMPLETE. Slices 1–19 complete; 15 milestones remain (20–34).
 Date: 2026-10-18. Baseline: ecc324ca4a403d49397dd63cecb1a881e653ad06.
 Branch: codex/pod-manager-workspace.
 
 ## Finite scope and count
 
-16 remaining delivery milestones, including Slice 19 and final qualification at 34.
-After 19 completes, 15 remain. This is a scope proposal, not a time estimate or a
-claim that all milestones have equal effort. Recent slices moved small helpers;
+15 remaining delivery milestones: Slice 20 through final qualification at 34.
+The bounded baseline roadmap below included 16 (19–34); Slice 19 is now complete.
+The milestones define scope; their effort varies, and they do not provide a time estimate. Recent slices moved small helpers;
 future milestones deliberately complete whole responsibilities and can contain
 multiple independently tested implementation phases within their numbered slice.
 
-The current manager has 16,521 total lines and 73 public object members. A TypeScript
+At roadmap baseline the manager had 16,521 total lines and 73 public object members.
+After Slice 19 it has 16,369 lines and the same public interface. A TypeScript
 AST inventory below assigns every one of 327 non-import top-level declarations,
 manager-closure declarations/statements and public members to an owning milestone.
 Nested implementation blocks inherit their containing workflow; processPod has an
@@ -30,7 +31,7 @@ corrections and unrelated bugs have their own work, outside this compatibility r
 
 | Slice | Responsibility | Scope | Done when |
 |---|---|---|---|
-| 19 | Advisory execution and publication | Move the two existing advisory functions; preserve current-run checks, retained history, usage and slot behavior. | Current plan below; 2 unchanged awaited runner calls and 2 caller ownership checks. |
+| 19 | Advisory execution and publication — COMPLETE | Moved both original functions; retained ownership checks, history, usage and slot behavior. | 33 public checks, 59 direct tests and final uncached qualification passed. |
 | 20 | Validation workflows | Move triggerValidation/revalidateSession coordination, retry/override/abort admission and update-from-base intent. Compose the validation modules already extracted. | Both validation entry points delegate; no validation orchestration branches remain in the facade. |
 | 21 | Provider attempts and binding | Own attempt identity, captured profiles/reasoning, target selection and attempt open/close. | Attempt/provenance tests cover original accounts and failure selection; manager holds no provider selection logic. |
 | 22 | Continuation and Goal rework | Own provider limit handoff, resume/continue, task feedback and native Goal rework through narrow dispatch/admission ports. | Legacy and immutable-launch continuation, rejection feedback and native Goal guards retain their effects and errors. |
@@ -429,3 +430,14 @@ need to be rewritten again. Lines refer to this baseline, not later relocated co
 | top | `hostnameFromUrl` | 16443–16449 | 30 |
 | top | `portFromUrl` | 16451–16459 | 30 |
 | top | `buildCodeIntelligenceServers` | 16466–16521 | 23 |
+
+## Slice 19 completion record
+
+The two functions moved unchanged to advisory-validation.ts. Public characterization
+passes before/after (33 checks), direct contracts pass (59 including three file SQLite
+reopen cases), 95 affected suites pass (3,368 checks, no skips), and the full uncached
+pipeline passes (8,539 Vitest checks, 35 script checks, ten existing gated skips).
+Exact movement and frozen-source checks pass. See the completed Slice 19 plan for
+qualification revision, limits and evidence. Next: prepare Slice 20's validation
+workflow plan. The baseline declaration inventory remains anchored to ecc324ca; the
+two advisory declarations are now delivered, with composition retained in manager.
