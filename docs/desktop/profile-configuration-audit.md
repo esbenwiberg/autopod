@@ -39,9 +39,34 @@ functions include parameterized empty/null and dark/light compact/wide cases.
 `com.autopod.desktop.preview` app. These results do not include a real daemon
 profile save or real sidecar launch.
 
-**Overall form completeness remains partial.** Workflow scan/budget/escalation,
-repository validation/registries, value/credential maps and skill description
-remain open. This slice does not close the whole gap matrix or connected acceptance.
+**Overall form completeness remains partial.** Repository validation/registries,
+value/credential maps and skill description remain open after the Workflow repair below. This slice does not close the whole gap matrix or connected acceptance.
+
+## Second repair slice: Workflow
+
+Workflow now has a Security scans area with explicit detector switches, optional
+confidence thresholds, provisioning/push checkpoint scope and finding outcomes,
+and editable always-scanned paths. Absent/null policies remain untouched until
+customization is enabled. Explicit reset returns to daemon defaults. Optional
+thresholds and default path lists remove their keys rather than writing invalid
+nulls. The initial custom scan policy mirrors the daemon's default preset.
+
+Budgets displays and edits `tokenBudgetWarnAt` as a percentage from 10–99%.
+Escalation exposes human/AI enablement, advisor, blocker threshold, consultation
+limits from 0–50, the complete 60–86400-second human timeout range, and timeout
+behavior. Saved custom values and unrelated nested fields are retained. AI
+consultation routing remains owned by the selected AI setup.
+
+`ConfigurationWorkflowInteractionTests` exercises actual native control presses,
+text entry, revision-checked in-memory save/reopen, absent/null policies, explicit
+reset, omitted optional fields, unknown-field retention and exact 95% budget
+warning persistence. Layout captures cover 900/1400-point windows in dark/light.
+The full `./scripts/test-desktop.sh` runner passes 565 Swift Testing tests
+(355 Client, 11 Desktop, 199 UI) and 13 XCTest tests. The separate signed Preview
+build also passes. Logs: `/private/tmp/autopod-workflow-full.log` and
+`/private/tmp/autopod-workflow-preview-build.log`.
+Native computer use failed before inspection, including after a bridge reset;
+these captures and saves establish the owned-view boundary, not a connected daemon.
 
 ## Evidence boundary
 
@@ -59,7 +84,7 @@ remain open. This slice does not close the whole gap matrix or connected accepta
 - Existing passing layout tests check fitting dimensions; they do not assert that
   every schema field has a usable control or test adding entries from empty state.
 
-## Confirmed gaps
+## Original gap matrix (repair status above)
 
 “Complete JSON” below means the entire payload escape hatch. Preserving a value
 in that payload is not the same as providing a usable form control.

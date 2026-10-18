@@ -1336,7 +1336,6 @@ struct ConfigurationEditorSheet: View {
     }.padding(6)
   }
   @ViewBuilder private var workflowForm: some View {
-    let escalation = objectBinding("escalation")
     VStack(alignment: .leading, spacing: 12) {
       if visible(.run) {
         ConfigurationSection(
@@ -1385,35 +1384,14 @@ struct ConfigurationEditorSheet: View {
           ConfigurationNumberValue(
             title: "Reviewer token limit", fields: $payload, key: "reviewerTokenBudget", fallback: 10000,
             unsetLabel: "No separate limit")
+          ConfigurationWorkflowFraction(title: "Warn at", id: "workflow-budget-warning", fields: $payload, key: "tokenBudgetWarnAt", fallback: 0.8, range: 0.1...0.99)
+          Text("Warn when this share of the token budget is used (10–99%).").font(.caption).foregroundStyle(.secondary)
           stringPicker("Budget policy", key: "tokenBudgetPolicy", values: ["soft", "hard"])
         ConfigurationNumberValue(title: "Budget extensions", fields: $payload, key: "maxBudgetExtensions", fallback: 0, unsetLabel: "Default policy")
       }
       }
-      if visible(.escalation) {
-        ConfigurationSection(
-          title: "Escalation",
-          subtitle:
-            "AI consultation uses the reviewer selected by the AI setup. Workflow presets only limit how often it may be used."
-        ) {
-          Stepper(
-            "AI consultation limit: \(nestedInteger(escalation, group: "askAi", key: "maxCalls", fallback: 5))",
-            value: nestedIntegerBinding(escalation, group: "askAi", key: "maxCalls", fallback: 5), in: 0...20)
-          Toggle(
-            "Proactive AI advisor", isOn: nestedBoolBinding(escalation, group: "advisor", key: "enabled"))
-          Stepper("Pause after \(workflowInteger(escalation, "autoPauseAfter", fallback: 3)) blockers", value: integerBinding(escalation, "autoPauseAfter", fallback: 3), in: 1...20)
-        Picker("Wait for human", selection: integerBinding(escalation, "humanResponseTimeout", fallback: 3600)) {
-          Text("15 minutes").tag(900)
-          Text("1 hour").tag(3600)
-          Text("2 hours").tag(7200)
-          Text("6 hours").tag(21600)
-          Text("24 hours").tag(86400)
-        }
-        Picker("If nobody responds", selection: stringBinding(escalation, "askHumanOnTimeout", fallback: "continue")) {
-          Text("Continue with best judgement").tag("continue")
-          Text("Ask the AI reviewer").tag("ask_ai")
-        }
-      }
-      }
+      if visible(.security) { ConfigurationWorkflowSecurityEditor(payload: $payload) }
+      if visible(.escalation) { ConfigurationWorkflowEscalationEditor(payload: $payload) }
       if visible(.delivery) {
         ConfigurationSection(title: "Delivery details") {
           ConfigurationTextValue(title: "Branch prefix", fields: $payload, key: "branchPrefix")
