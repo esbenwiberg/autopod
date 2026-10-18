@@ -1,19 +1,19 @@
 # Pod-manager rewrite: remaining roadmap, slices 19–34
 
-Status: Slices 19–21 COMPLETE. Slices 1–21 complete; 13 milestones remain (22–34).
+Status: Slices 19–22 COMPLETE. Slices 1–22 complete; 12 milestones remain (23–34).
 Date: 2026-10-18. Baseline: ecc324ca4a403d49397dd63cecb1a881e653ad06.
 Branch: codex/pod-manager-workspace.
 
 ## Finite scope and count
 
-13 remaining delivery milestones: Slice 22 through final qualification at 34.
-The bounded baseline roadmap below included 16 (19–34); Slices 19–21 are complete.
+12 remaining delivery milestones: Slice 23 through final qualification at 34.
+The bounded baseline roadmap below included 16 (19–34); Slices 19–22 are complete.
 The milestones define scope; their effort varies, and they do not provide a time estimate. Recent slices moved small helpers;
 future milestones deliberately complete whole responsibilities and can contain
 multiple independently tested implementation phases within their numbered slice.
 
 At roadmap baseline the manager had 16,521 total lines and 73 public object members.
-After Slice 21 it has 13,833 lines and the same public interface. A TypeScript
+After Slice 22 it has 12,995 lines and the same public interface. A TypeScript
 AST inventory below assigns every one of 327 non-import top-level declarations,
 manager-closure declarations/statements and public members to an owning milestone.
 Nested implementation blocks inherit their containing workflow; processPod has an
@@ -34,7 +34,7 @@ corrections and unrelated bugs have their own work, outside this compatibility r
 | 19 | Advisory execution and publication — COMPLETE | Moved both original functions; retained ownership checks, history, usage and slot behavior. | 33 public checks, 59 direct tests and final uncached qualification passed. |
 | 20 | Validation workflows — COMPLETE | Move triggerValidation/revalidateSession coordination, retry/override/abort admission and update-from-base intent. Compose the validation modules already extracted. | Both validation entry points and five controls delegate; 1,192 public cases, 34 direct cases and full qualification pass. |
 | 21 | Provider attempts and binding — COMPLETE | Own attempt identity, captured profiles/reasoning, target selection and attempt open/close. | Attempt/provenance tests cover original accounts and failure selection; manager holds no provider selection logic. |
-| 22 | Continuation and Goal rework | Own provider limit handoff, resume/continue, task feedback and native Goal rework through narrow dispatch/admission ports. | Legacy and immutable-launch continuation, rejection feedback and native Goal guards retain their effects and errors. |
+| 22 | Continuation and Goal rework — COMPLETE | Own provider limit handoff, resume/continue, task feedback and native Goal rework through narrow dispatch/admission ports. | Legacy and immutable-launch continuation, rejection feedback and native Goal guards retain their effects and errors. |
 | 23 | Provisioning | Extract the provisioning portion of processPod, image/capability checks, materialized files, instructions/tools and sandbox session handover. | Provisioning returns an explicit prepared execution context; queued/provisioning/failed recovery paths remain covered. |
 | 24 | Agent dispatch and event consumption | Own the remaining processPod execution loop, spawn/resume/recovery, consumeAgentEvents, activity and terminal-event accounting. | No agent stream loop remains in manager; recovered and repeated terminal events retain their original accounting. |
 | 25 | Completion orchestration and shared transitions | Compose the existing completion owners; own completion entry, transition/event helpers, termination/guidance checks and failure reporting. | All outputs and human gates run through complete domain workflows; no new shared catch-all module. |
@@ -470,3 +470,14 @@ encrypted SQLite reopen cases, 99 affected suites/3,450 cases, full uncached 8,6
 Vitest cases plus 35 script checks; same ten existing skips. Both new owners are
 below 1,000 lines (91/552). Next: Slice 22, continuation and Goal rework. The Slice-27
 validation-trigger delivery/size review remains required.
+
+## Slice 22 completion
+
+Prompt policy, decision/rework context, provider handoff/continuation and native Goal/
+resume controls have explicit owners. All eighteen bodies/parameters, constant and
+complete recipes match. Manager: 12,995 lines (838 fewer); new owners below 500 lines.
+Qualification: 1,192 unchanged public cases; 50 direct cases including three private
+SQLite file reopen cases; 107 affected suites/3,551 cases; full uncached 8,671
+Vitest cases plus 35 script checks, same ten inherited skips. Next: Slice 23 provisioning.
+Shared recovery-map construction remains assigned 31, active-run ownership 24 and
+validation-trigger delivery/size review 27. The complete goal remains active.

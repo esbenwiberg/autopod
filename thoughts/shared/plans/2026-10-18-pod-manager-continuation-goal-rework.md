@@ -1,6 +1,6 @@
 # Slice 22: continuation and native Goal rework
 
-Status: IN PROGRESS — extraction and affected regression complete; full qualification next.
+Status: COMPLETE — Slice 22 implemented, locally proven and qualified.
 Date: 2026-10-18. Baseline: 2c8bab5c2dacb63de674502de2f6d7e86de33d0c.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -159,10 +159,10 @@ skips. Commit/push source and documentation checkpoints, verify final clean remo
 identity and all frozen hashes. Update this plan/roadmap, then begin milestone23.
 
 Automated:
-- [ ] All 107 affected suites pass, SQLite enabled and no new skips.
-- [ ] Full frozen uncached pipeline passes; actual counts/limits recorded.
-- [ ] Scope, frozen source and clean pushed revision match.
-- [ ] Milestone complete in plan/roadmap; next incomplete scope recorded.
+- [x] All 107 affected suites pass, SQLite enabled and no new skips.
+- [x] Full frozen uncached pipeline passes; actual counts/limits recorded.
+- [x] Scope, frozen source and clean pushed revision match.
+- [x] Milestone complete in plan/roadmap; next incomplete scope recorded.
 Manual: none.
 
 ## Compatibility, rollout and rollback
@@ -202,3 +202,47 @@ case now performs its writes through the private file connection before close/re
 These are fixture corrections; no original algorithm or public assertion changed.
 Initial logs/reports remain retained. Final 2,004 package/script hashes and six root
 controls are frozen before full qualification. Node22.23.3/pnpm9.15.4/SQLite3.49.2.
+
+## Phase 3 final qualification
+
+Verdict: PROVEN for this local compatibility extraction. The complete remaining-slices
+goal stays active; 12 numbered milestones remain, next Slice 23 provisioning.
+
+| Check | Final result |
+|---|---|
+| Unchanged manager suite | 1,192 pass; identical names/statuses/assertion bytes |
+| Direct contract coverage | 50 pass across four suites; three real private SQLite reopen cases |
+| Affected regression | 107 suites; 3,551 cases; no skips |
+| Full uncached pipeline | Frozen install, lint, build/declarations, typecheck, tests, audit, secret scan pass |
+| Vitest | 8,671 cases in 514 passing files; same 10 inherited gated skips |
+| Standalone scripts | 35 pass, zero failures |
+| Complete movement | 18 bodies/parameter lists, constant and full explicit recipes match |
+| Source integrity | 2,004 package/script hashes and six root controls match frozen source |
+| Scoped quality | Clean Biome/whitespace and semantics for all four new direct files |
+
+Tested implementation: 04153ba4f37f33bdb7f57bcd2b3d788dc9550b30. A following documentation-only checkpoint records
+completion without changing qualified source. Final clean pushed identity is retained
+in ignored .autopod-data/continuation-goal-rework/ after push. Actual full command:
+
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+Node22.23.3/pnpm9.15.4 uses real SQLite3.49.2. Build/typecheck/test groups ran uncached;
+frozen install needed no fallback or lock mutation. Root lint retains 82 existing
+warnings and the established 2 MiB processing limit only. No rules/file selection/
+repository/global config change. maintenance.auto=false is process-only.
+
+The manager has 12,995 lines, 838 fewer. Complete prompt/context/provider/control
+algorithms now have owners, all below 500 lines, plus 104 lines of explicit contracts.
+Original callback/await boundaries, exact-arity lazy receiver dispatch, live deps,
+captured references and shared recovery maps remain unchanged. Maps retain original
+construction pending Slice 31; active-run state moves in24.
+
+Direct cases exercise actual repositories with synthetic credentials and controlled
+execution callbacks. Three private file reopen cases cover continuation history and
+binding, separate Task rework retaining native Goal achievement, and native Goal
+revision/budget/after-commit resume; integrity/FK/profile/account checks pass. A real
+private Git worktree proves exclusion before handoff write. Native runtime execution,
+provider/container/worktree/launch callbacks remain controlled. No paid/live provider,
+browser, Docker/Azure, stronger atomicity/isolation/authorization/replay, PR/main
+integration or deployment claim. No manual gate is outstanding. Initial fixture
+diagnostics remain alongside passing evidence. Continue Slice 23 under the full goal.
