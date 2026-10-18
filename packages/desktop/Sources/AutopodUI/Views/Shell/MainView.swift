@@ -367,11 +367,7 @@ public struct MainView: View {
     }
 
     private func openSeriesPod(_ id: String, tab: DetailTab) {
-        repositoryID = nil
-        sidebarSelection = .all
-        selectedSessionId = id
-        selectedDetailTab = tab
-        requestedDetailTab = tab
+        openFleetPod(id, tab: tab)
     }
 
     private var selectedSession: Pod? {
@@ -583,7 +579,7 @@ public struct MainView: View {
             memoryWorkspace.id(configurationReset)
         } else if sidebarSelection == .history {
             DesktopHistoryWorkspace(pods: pods, configuration: configurationActions, refresh: onRefresh,
-                openPod: { id in selectedSessionId = id; sidebarSelection = .all },
+                openPod: { id in openFleetPod(id) },
                 isConnected: isConnected, isLoading: isLoading, loadError: loadError)
         } else if sidebarSelection == .analytics {
             DesktopAnalyticsWorkspace(selected: $selectedAnalyticsCard, days: $analyticsDays, isConnected: isConnected,
@@ -599,7 +595,7 @@ public struct MainView: View {
                     jobs: scheduledJobs, templates: scheduledJobTemplates, profiles: profileNames,
                     configuration: configurationActions, actions: scheduledWorkspaceActions,
                     openReports: { job in if scanWorkspace != nil { scanWorkspaceJob = job } else { onOpenScanReports?(job) } },
-                    openPod: { id in selectedSessionId = id; sidebarSelection = .all },
+                    openPod: { id in openFleetPod(id) },
                     onDirty: { configurationDirty = $0 }, onBusy: { configurationBusy = $0 })
                     .id(configurationReset)
             }
@@ -709,7 +705,7 @@ public struct MainView: View {
         }
         .sheet(isPresented: $showCreateSheet) {
             if let configurationActions {
-                ComposableCreatePodSheet(isPresented: $showCreateSheet, actions: configurationActions)
+                ComposableCreatePodSheet(isPresented: $showCreateSheet, actions: configurationActions, onCreated: { openFleetPod($0) })
             } else {
                 CreateSessionSheet(
                     isPresented: $showCreateSheet,
@@ -760,9 +756,7 @@ public struct MainView: View {
                 actions: actions,
                 profileNames: profileNames,
                 configurationActions: configurationActions,
-                onPodCreated: { newId in
-                    selectedSessionId = newId
-                }
+                onPodCreated: { openFleetPod($0) }
             )
         }
         .onChange(of: selectedSessionId) { _, newId in
@@ -780,17 +774,13 @@ public struct MainView: View {
                         pods: pods,
                         profiles: profileDetails,
                         actions: actions,
-                        onSelectSession: { id in
-                            requestWorkspace {
-                                sidebarSelection = .all; selectedSessionId = id
-                            }
-                        },
+                        onSelectSession: { id in openFleetPod(id) },
                         onCreatePod: {
                             showCreateSheet = true
                         },
                         onShowProfilePods: { name in
                             requestWorkspace {
-                                searchText = ""; sidebarSelection = .profile(name)
+                                searchText = ""; repositoryID = nil; sidebarSelection = .profile(name)
                             }
                         },
                         onEditProfile: { name in
@@ -843,38 +833,19 @@ public struct MainView: View {
             loadMemory: loadMemoryAnalytics,
             verifyAuditChain: isConnected ? verifyAuditChain : nil,
             onSelectPod: { sessionId in
-                let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                selectedAnalyticsCard = result.card
-                sidebarSelection = result.sidebar
-                selectedSessionId = result.session
+                openFleetPod(sessionId)
             },
             onQualitySelectPod: { sessionId in
-                let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                selectedAnalyticsCard = result.card
-                sidebarSelection = result.sidebar
-                selectedSessionId = result.session
-                requestedDetailTab = .work
+                openFleetPod(sessionId, tab: .work)
             },
             onSafetySelectPod: { sessionId in
-                let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                selectedAnalyticsCard = result.card
-                sidebarSelection = result.sidebar
-                selectedSessionId = result.session
-                requestedDetailTab = .work
+                openFleetPod(sessionId, tab: .work)
             },
             onThroughputSelectPod: { sessionId in
-                let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                selectedAnalyticsCard = result.card
-                sidebarSelection = result.sidebar
-                selectedSessionId = result.session
-                requestedDetailTab = .work
+                openFleetPod(sessionId, tab: .work)
             },
             onEscalationsSelectPod: { sessionId in
-                let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                selectedAnalyticsCard = result.card
-                sidebarSelection = result.sidebar
-                selectedSessionId = result.session
-                requestedDetailTab = .work
+                openFleetPod(sessionId, tab: .work)
             }
                     )
     }
@@ -1625,10 +1596,22 @@ public struct MainView: View {
         current == tapping ? nil : tapping
     }
 
-    /// Returns the state tuple produced by the `onSelectPod` handler in the detail pane.
-    /// Extracted for unit testing without constructing the full view.
-    static func analyticsSelectPodResult(sessionId: String) -> (card: AnalyticsCardKind?, sidebar: SidebarItem, session: String) {
-        (card: nil, sidebar: .all, session: sessionId)
+    /// Shared destination for explicit navigation from another workspace into the fleet.
+    static func fleetPodDestination(sessionId: String)
+        -> (card: AnalyticsCardKind?, sidebar: SidebarItem, session: String, query: String, repositoryID: String?) {
+        (card: nil, sidebar: .all, session: sessionId, query: "", repositoryID: nil)
+    }
+
+    private func openFleetPod(_ id: String, tab: DetailTab? = nil) {
+        requestWorkspace {
+            let destination = Self.fleetPodDestination(sessionId: id)
+            selectedAnalyticsCard = destination.card
+            searchText = destination.query
+            repositoryID = destination.repositoryID
+            sidebarSelection = destination.sidebar
+            selectedSessionId = destination.session
+            if let tab { selectedDetailTab = tab; requestedDetailTab = tab }
+        }
     }
 
     private func selectVillageActor(_ actor: VillageActor) {

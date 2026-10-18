@@ -11,6 +11,7 @@ public struct ComposableCreatePodSheet: View {
   @State private var confirmDifferent = false
   @Binding var isPresented: Bool
   public var actions: LaunchConfigurationActions
+  private var onCreated: (@MainActor (String) -> Void)?
   @State private var request = ComposableLaunchRequest()
   @State private var preview: EffectiveLaunchPreview?
   @State private var previewRequest: ComposableLaunchRequest?
@@ -21,10 +22,14 @@ public struct ComposableCreatePodSheet: View {
   @State private var showSaveProfile = false
   @State private var advanced = ""
   @State private var showAdvanced = false
-  public init(isPresented: Binding<Bool>, actions: LaunchConfigurationActions) { self._isPresented = isPresented; self.actions = actions }
+  public init(isPresented: Binding<Bool>, actions: LaunchConfigurationActions,
+    onCreated: (@MainActor (String) -> Void)? = nil) {
+    self._isPresented = isPresented; self.actions = actions; self.onCreated = onCreated
+  }
   internal init(isPresented: Binding<Bool>, actions: LaunchConfigurationActions, initialRequest: ComposableLaunchRequest,
-    stage: LaunchComposerStage = .compose, preview: EffectiveLaunchPreview? = nil, pending: ComposableLaunchRequest? = nil) {
-    self.init(isPresented: isPresented, actions: actions)
+    stage: LaunchComposerStage = .compose, preview: EffectiveLaunchPreview? = nil, pending: ComposableLaunchRequest? = nil,
+    onCreated: (@MainActor (String) -> Void)? = nil) {
+    self.init(isPresented: isPresented, actions: actions, onCreated: onCreated)
     self._request = State(initialValue: initialRequest); self._stage = State(initialValue: stage)
     self._preview = State(initialValue: preview); self._previewRequest = State(initialValue: preview == nil ? nil : initialRequest)
     self._pendingRequest = State(initialValue: pending)
@@ -455,7 +460,7 @@ public struct ComposableCreatePodSheet: View {
     }
     guard let candidate = pendingRequest else { return }
     busy = true; error = nil; defer { busy = false }
-    do { _ = try await actions.launch(candidate); isPresented = false }
+    do { let id = try await actions.launch(candidate); isPresented = false; onCreated?(id) }
     catch { self.error = "\(error.localizedDescription)\nThe launch request is retained. Retry it to avoid creating a duplicate pod." }
   }
 }

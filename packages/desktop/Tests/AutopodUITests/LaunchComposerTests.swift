@@ -53,7 +53,9 @@ import Testing
 
   @Test func nativePodPreviewJSONGuardAndExactRetry() async throws {
     let fixture = LaunchComposerFixture()
-    let view = ComposableCreatePodSheet(isPresented: fixture.presentation, actions: fixture.actions, initialRequest: fixture.request)
+    var createdIDs: [String] = []
+    let view = ComposableCreatePodSheet(isPresented: fixture.presentation, actions: fixture.actions, initialRequest: fixture.request,
+      onCreated: { createdIDs.append($0) })
     let host = LaunchComposerHost(view, width: 1280)
     defer { host.close() }
     try await host.wait { host.enabled("launch-preview") }
@@ -79,12 +81,14 @@ import Testing
     try host.press("launch-submit")
     try await host.wait { host.enabled("launch-retry") }
     #expect(fixture.launches.count == 1)
+    #expect(createdIDs.isEmpty, "An unconfirmed launch must not navigate away")
     #expect(!host.enabled("launch-stage-0"))
     #expect(fixture.launches[0].expectedDigest == String(repeating: "a", count: 64))
     try host.capture("pod-retained-request")
     try host.press("launch-retry")
     try await host.wait { fixture.dismissed }
     #expect(fixture.launches.count == 2)
+    #expect(createdIDs == ["created-pod"], "Navigate only after the retained launch is confirmed")
     #expect(fixture.launches[0] == fixture.launches[1])
     #expect(fixture.launches[0].requestId?.isEmpty == false)
   }
