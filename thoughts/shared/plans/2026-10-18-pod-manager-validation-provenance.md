@@ -1,6 +1,6 @@
 # Slice 14: validation launch provenance extraction
 
-Status: PROPOSED — awaiting explicit approval before implementation.
+Status: APPROVED — implementing all three phases after explicit user approval.
 Date: 2026-10-18.
 Baseline: d2404eb69759c318703f62f5d89e5a1f09136394.
 Branch: codex/pod-manager-workspace.
@@ -156,8 +156,8 @@ Retain initial diagnostics/corrections honestly; no assertion weakening to pass.
 ### Success criteria
 
 Automated:
-- [ ] New and selected existing public checks pass against unchanged product.
-- [ ] Frozen public assertions, before-source/runtime/hashes and raw results recorded.
+- [x] New and selected existing public checks pass against unchanged product.
+- [x] Frozen public assertions, before-source/runtime/hashes and raw results recorded.
 
 Manual: None required for this local headless extraction.
 
@@ -283,3 +283,21 @@ validation/review-tool-runner.ts and the existing provenance/launch tests.
 
 Next action: user reviews the illustrated plan and explicitly approves implementation.
 No product code changed or implementation tests ran in this planning turn.
+
+## Phase 1 observed results
+
+30 new public cases plus 60 selected existing cases pass against unchanged product
+(90 selected total; 1,028 unrelated cases excluded by this selection only). Both
+entries cover checked/blocked receipts, three non-container receipt surfaces, four
+container identity mismatches and matching guard, held preflight supersession/new
+decision, profile/ledger errors and skipped input projection with original contract
+hash. Existing SDK loopback/council/ownership/execution cases remain selected.
+
+Initial four failures shared a fixture assumption: selected API sonnet resolves to
+claude-sonnet-5-5, while legacy tool review resolves to claude-sonnet-4-6. Fixtures
+now pin both actual distinct mappings; one initially unused type alias is used by
+the added skip-projection checks. Public semantics are clean. No product changes.
+
+Before source, frozen public bytes/filter, 1,971 baseline package/script hashes, six
+root controls and raw logs/exits are retained under .autopod-data/validation-provenance/.
+Actual Node 22.23.3 opens SQLite 3.49.2 using the existing pinned pnpm launcher.

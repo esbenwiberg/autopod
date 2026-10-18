@@ -29426,3 +29426,394 @@ describe('validation progress compatibility', () => {
     },
   );
 });
+
+describe('validation provenance compatibility', () => {
+  type Config = Parameters<ValidationEngine['validate']>[0];
+  type Receipt = NonNullable<
+    ReturnType<NonNullable<TestContext['podRepo']['executionProvenance']>['latest']>
+  >;
+  beforeEach(() => mockExecFileSuccess());
+  afterEach(() => vi.restoreAllMocks());
+  function fixture(entry: 'trigger' | 'revalidate') {
+    const ctx = createTestContext();
+    ctx.db
+      .prepare("UPDATE profiles SET reviewer_model = ? WHERE name = 'test-profile'")
+      .run('sonnet');
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Provenance compatibility' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: entry === 'trigger' ? 'running' : 'failed',
+      containerId: 'provenance-container',
+      worktreePath: '/tmp/validation-provenance',
+      validationAttempts: 0,
+      maxValidationAttempts: 1,
+    });
+    const result = makeValidationResult(ordinaryTestFailureResult());
+    vi.mocked(ctx.validationEngine.validate).mockResolvedValue(result);
+    const rows = () =>
+      (
+        ctx.db
+          .prepare('SELECT payload FROM execution_provenance WHERE pod_id = ? ORDER BY rowid')
+          .all(pod.id) as Array<{ payload: string }>
+      ).map((row) => JSON.parse(row.payload) as Receipt);
+    return {
+      ctx,
+      manager,
+      pod,
+      result,
+      rows,
+      run: () =>
+        entry === 'trigger'
+          ? manager.triggerValidation(pod.id)
+          : manager.revalidateSession(pod.id, { force: true }),
+      close: () => ctx.db.close(),
+    };
+  }
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s records checked worker validation before the engine executes',
+    async (entry) => {
+      const f = fixture(entry);
+      let observed: Receipt[] = [];
+      try {
+        vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async () => {
+          observed = f.rows();
+          return f.result;
+        });
+        await f.run();
+        expect(observed).toHaveLength(1);
+        expect(observed[0]).toMatchObject({
+          version: 1,
+          purpose: 'validation',
+          subject: 'worker',
+          status: 'checked',
+          podId: f.pod.id,
+          generation: f.pod.lifecycleGeneration,
+          runtime: f.pod.runtime,
+          model: f.pod.model,
+          executionId: expect.any(String),
+          taskId: expect.any(String),
+        });
+        expect(f.rows()).toEqual(observed);
+        expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+        expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+        expect(f.ctx.validationRepo.getForSession(f.pod.id)).toHaveLength(1);
+      } finally {
+        f.close();
+      }
+    },
+  );
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s saves blocked environment evidence before parking denied admission',
+    async (entry) => {
+      const f = fixture(entry);
+      try {
+        f.ctx.containerManager.getExecutionMetadata = vi.fn(async () => ({
+          imageDigest: null,
+          memoryLimitBytes: 1024,
+          cpuLimit: null,
+          networkMode: null,
+        }));
+        await f.run();
+        expect(f.rows()).toHaveLength(1);
+        expect(f.rows()[0]).toMatchObject({
+          purpose: 'validation',
+          subject: 'worker',
+          status: 'blocked',
+          diagnostics: expect.arrayContaining([
+            expect.objectContaining({ code: 'PREFLIGHT_INSUFFICIENT_MEMORY' }),
+          ]),
+        });
+        expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+        expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+        expect(f.ctx.validationRepo.getForSession(f.pod.id)).toHaveLength(0);
+        expect(f.ctx.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+          status: 'review_required',
+          validationAttempts: 0,
+          failureReason: expect.stringContaining('below required'),
+        });
+      } finally {
+        f.close();
+      }
+    },
+  );
+  it.each(
+    (['trigger', 'revalidate'] as const).flatMap((entry) =>
+      (['selected', 'legacy', 'host'] as const).map((surface) => ({ entry, surface })),
+    ),
+  )(
+    '$entry installs $surface identity checks and saves the proper receipt synchronously',
+    async ({ entry, surface }) => {
+      const f = fixture(entry);
+      let before = 0;
+      let after = 0;
+      let mismatch: unknown;
+      try {
+        vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => {
+          before = f.rows().length;
+          try {
+            if (surface === 'selected') config.recordReviewerApiDispatch?.('wrong');
+            else if (surface === 'legacy') config.recordLegacyReviewerApiDispatch?.('wrong');
+            else
+              config.recordHostReviewerDispatch?.({
+                model: 'wrong',
+                status: 'checked',
+                cliPath: '/fixture/claude',
+                cliVersion: '1.2.3',
+              });
+          } catch (error) {
+            mismatch = error;
+          }
+          if (surface === 'selected') config.recordReviewerApiDispatch?.('claude-sonnet-5-5');
+          else if (surface === 'legacy')
+            config.recordLegacyReviewerApiDispatch?.('claude-sonnet-4-6');
+          else
+            config.recordHostReviewerDispatch?.({
+              model: config.reviewerModel ?? 'auto',
+              status: 'checked',
+              cliPath: '/fixture/claude',
+              cliVersion: '1.2.3',
+            });
+          after = f.rows().length;
+          return f.result;
+        });
+        await f.run();
+        expect(mismatch).toBeInstanceOf(Error);
+        expect(before).toBe(1);
+        expect(after).toBe(2);
+        expect(f.rows()[1]).toMatchObject({
+          version: 2,
+          surface: surface === 'host' ? 'host-cli' : 'provider-api',
+          purpose: 'review',
+          subject: 'reviewer',
+          runtime: surface === 'host' ? 'claude' : null,
+          model: 'sonnet',
+          dispatchModel:
+            surface === 'host'
+              ? 'sonnet'
+              : surface === 'selected'
+                ? 'claude-sonnet-5-5'
+                : 'claude-sonnet-4-6',
+          providerId: surface === 'selected' ? 'anthropic' : null,
+          providerAccountId: null,
+          imageDigest: null,
+          cliPath: surface === 'host' ? '/fixture/claude' : null,
+        });
+        expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      } finally {
+        f.close();
+      }
+    },
+  );
+  it.each(
+    (['trigger', 'revalidate'] as const).flatMap((entry) =>
+      ['match', 'podId', 'containerId', 'model', 'runtime'].map((changed) => ({ entry, changed })),
+    ),
+  )('$entry preserves container launch identity check for $changed', async ({ entry, changed }) => {
+    const f = fixture(entry);
+    let guard: (() => void) | undefined;
+    let launchError: unknown;
+    try {
+      vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => {
+        const identity = {
+          podId: f.pod.id,
+          containerId: 'provenance-container',
+          model: 'sonnet',
+          runtime: 'claude' as const,
+        };
+        const altered =
+          changed === 'runtime'
+            ? { ...identity, runtime: 'codex' as const }
+            : changed === 'match'
+              ? identity
+              : { ...identity, [changed]: 'different' };
+        try {
+          guard = await config.beforeReviewerLaunch?.(altered);
+        } catch (error) {
+          launchError = error;
+        }
+        return f.result;
+      });
+      await f.run();
+      if (changed === 'match') {
+        expect(launchError).toBeUndefined();
+        expect(guard).toBeTypeOf('function');
+        expect(f.rows()[1]).toMatchObject({
+          purpose: 'review',
+          subject: 'reviewer',
+          runtime: 'claude',
+          model: 'sonnet',
+          diagnostics: expect.arrayContaining([
+            expect.objectContaining({ code: 'REVIEWER_LAUNCH_PREFLIGHT' }),
+          ]),
+        });
+        expect(guard).toThrow(/superseded/i);
+      } else {
+        expect(launchError).toMatchObject({
+          message: 'Reviewer launch identity differs from the frozen validation configuration.',
+        });
+        expect(guard).toBeUndefined();
+        expect(f.rows()).toHaveLength(1);
+      }
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    } finally {
+      f.close();
+    }
+  });
+  it.each(
+    (['trigger', 'revalidate'] as const).flatMap((entry) =>
+      (['generation', 'decision'] as const).map((change) => ({ entry, change })),
+    ),
+  )('$entry discards held preflight after $change changes', async ({ entry, change }) => {
+    const f = fixture(entry);
+    const held = deferred<void>();
+    const entered = deferred<void>();
+    f.ctx.containerManager.getExecutionMetadata = vi.fn(async () => {
+      entered.resolve();
+      await held.promise;
+      return { imageDigest: null, memoryLimitBytes: null, cpuLimit: null, networkMode: null };
+    });
+    const running = f.run();
+    try {
+      await entered.promise;
+      if (change === 'generation') {
+        f.ctx.podRepo.incrementLifecycleGeneration(f.pod.id);
+        f.ctx.podRepo.update(f.pod.id, { status: 'running', containerId: 'replacement-container' });
+      } else createNudgeRepository(f.ctx.db).queue(f.pod.id, 'New decision');
+    } finally {
+      held.resolve();
+      await running;
+    }
+    try {
+      expect(f.rows()).toHaveLength(0);
+      expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(f.ctx.containerManager.stop).not.toHaveBeenCalled();
+      expect(f.ctx.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+        status: change === 'generation' ? 'running' : 'validating',
+        lastValidationResult: null,
+      });
+    } finally {
+      f.close();
+    }
+  });
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s retains earlier validation evidence when reviewer ledger write fails',
+    async (entry) => {
+      const f = fixture(entry);
+      const error = new Error('Reviewer ledger write failed');
+      let observed: unknown;
+      try {
+        const ledger = f.ctx.podRepo.executionProvenance;
+        if (!ledger) throw new Error('Missing ledger');
+        const record = ledger.record.bind(ledger);
+        vi.spyOn(ledger, 'record').mockImplementation((id, generation, input) => {
+          if (input.subject === 'reviewer') throw error;
+          return record(id, generation, input);
+        });
+        vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => {
+          try {
+            config.recordReviewerApiDispatch?.('claude-sonnet-5-5');
+          } catch (failure) {
+            observed = failure;
+          }
+          return f.result;
+        });
+        await f.run();
+        expect(observed).toBe(error);
+        expect(f.rows()).toHaveLength(1);
+        expect(f.rows()[0]?.subject).toBe('worker');
+      } finally {
+        f.close();
+      }
+    },
+  );
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s propagates current bound-profile failure through the reviewer guard',
+    async (entry) => {
+      const f = fixture(entry);
+      const error = new Error('Bound profile unavailable');
+      let observed: unknown;
+      try {
+        vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => {
+          vi.mocked(f.ctx.profileStore.get).mockImplementationOnce(() => {
+            throw error;
+          });
+          try {
+            config.assertReviewerCurrent?.();
+          } catch (failure) {
+            observed = failure;
+          }
+          return f.result;
+        });
+        await f.run();
+        expect(observed).toBe(error);
+        expect(f.rows()).toHaveLength(1);
+        expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      } finally {
+        f.close();
+      }
+    },
+  );
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s projects skipped probe inputs but hashes the original contract',
+    async (entry) => {
+      const f = fixture(entry);
+      try {
+        const inspector = vi.spyOn(
+          await import('./execution-preflight.js'),
+          'inspectExecutionPreflight',
+        );
+        f.ctx.db
+          .prepare("UPDATE profiles SET skip_validation_phases = ? WHERE name = 'test-profile'")
+          .run(
+            JSON.stringify(['setup', 'build', 'test', 'lint', 'sast', 'health', 'pages', 'facts']),
+          );
+        const contract = {
+          contractVersion: 1 as const,
+          title: 'Original contract',
+          dependsOn: [],
+          scenarios: [],
+          requiredFacts: [
+            {
+              id: 'proof',
+              proves: [],
+              kind: 'custom-command' as const,
+              artifact: { path: 'proof.txt', change: 'create' as const },
+              command: 'node verify.js',
+            },
+          ],
+          humanReview: [],
+        };
+        f.ctx.podRepo.update(f.pod.id, { contract });
+        let config: Config | undefined;
+        vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (current) => {
+          config = current;
+          return f.result;
+        });
+        await f.run();
+        expect(inspector).toHaveBeenCalledTimes(1);
+        expect(inspector.mock.calls[0]?.[2]).toMatchObject({
+          skipValidation: false,
+          options: { validate: true },
+          contract: { ...contract, requiredFacts: [] },
+        });
+        expect(inspector.mock.calls[0]?.[3]).toMatchObject({
+          buildCommand: '',
+          startCommand: '',
+          testCommand: undefined,
+          lintCommand: undefined,
+          sastCommand: undefined,
+          validationSetupCommand: undefined,
+        });
+        expect(config?.contract).toEqual(contract);
+        expect(f.rows()[0]?.contractHash).toBe(
+          createHash('sha256').update(JSON.stringify(contract)).digest('hex'),
+        );
+      } finally {
+        f.close();
+      }
+    },
+  );
+});
