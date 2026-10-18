@@ -1,6 +1,6 @@
 # Slice 27: complete delivery and merge ownership
 
-Status: PLANNED — implementation is the next authorized phase.
+Status: IMPLEMENTED — expanded regression and frozen qualification in progress.
 Date: 2026-10-19. Baseline: 9c9d220e44b8175edbf9860d6189b8c74dd96e33.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -174,9 +174,9 @@ Record allowed statement-group/return/type/await/delegate transforms and complet
 expected file recipes. Compare parsed tokens, not a summary list of selected calls.
 
 Automated:
-- [ ] Qualified predecessor hashes/root controls and public bytes match.
-- [ ] Baseline bodies/state/complete branch and stage recipes saved before edits.
-- [ ] Same baseline public suite established with unchanged assertions.
+- [x] Qualified predecessor hashes/root controls and public bytes match.
+- [x] Baseline bodies/state/complete branch and stage recipes saved before edits.
+- [x] Same baseline public suite established with unchanged assertions.
 Manual: none for this compatibility boundary under standing continuation authority.
 
 ## Phase 2: implement and directly exercise all owned boundaries
@@ -230,11 +230,11 @@ inline PR/publication/merge algorithms in approval entry/validation callers. New
 owners and modified trigger all <1,000 lines. Do not mistake line count for ownership.
 
 Automated:
-- [ ] Exact source/state/startup and whole statement-group recipes match.
-- [ ] Public 1,192 names/statuses/assertion bytes unchanged and all pass.
-- [ ] All new/direct inherited suites pass, including three real SQLite reopen cases.
-- [ ] Scoped lint/build/declarations pass; no new source/test semantic diagnostic.
-- [ ] Complete delivery owners, same public interface/state references; size exception ends.
+- [x] Exact source/state/startup and whole statement-group recipes match.
+- [x] Public 1,192 names/statuses/assertion bytes unchanged and all pass.
+- [x] All new/direct inherited suites pass, including three real SQLite reopen cases.
+- [x] Scoped lint/build/declarations pass; no new source/test semantic diagnostic.
+- [x] Complete delivery owners, same public interface/state references; size exception ends.
 Manual: none; no live external acceptance claimed.
 
 ## Phase 3: qualify frozen revision and continue the roadmap
@@ -276,3 +276,36 @@ concurrency isolation. No additional polling/provider call/retry is introduced.
 Revert the manager, changed workflows/contracts/fixture and new owners together.
 Predecessor and final hashes plus complete recipes make the bounded diff reviewable.
 No unresolved design questions remain.
+
+## Implementation checkpoint — 2026-10-19
+
+Complete delivery ownership is implemented. The movement audit matches 12 manager
+bodies/parameters, four state initializers, both complete validation success branches,
+two approval statement groups and the unchanged entry remainder. Four original outer
+void returns become explicit halted results; nested callback returns remain unchanged.
+All 18 full source/fixture recipes match, with recorded type-only import annotations.
+All 2,053 other predecessor package/script files and six root controls are unchanged.
+Same 73 public members. Manager 7,399 →6,916 lines; trigger 1,273 →970; approval entry
+835 →103. New source owners are 23–479 lines and the trigger size exception is closed.
+
+All unchanged 1,192 public names/statuses/assertion bytes match and pass. Nine new
+direct suites plus five unchanged inherited approval suites pass 67 cases (42 new,
+25 inherited), including four actual private SQLite reopen cases. Those cover host
+credential parking for both services, retained merge intent on restart, and source-
+bound merge confirmation after restart with completed state/history across a second
+reopen. External receipts/status remain synthetic; no live provider/container proof.
+
+Corrected build/declarations and final scoped lint/whitespace pass. All ten new test/
+fixture files have zero semantic diagnostics; 32 changed-source diagnostics are each
+present in the original baseline (33 original). No original policy/type repair.
+Retained initial failures concern generated narrow-contract imports, import-annotation
+audit parsing, unused fixture fields, real scan enums/escalation accessor, immutable
+fix membership, complete closed-PR identity evidence and terminal historical versus
+live journal lookup. Test fixture corrections preserve behavioral assertions and
+original product bodies. Biome's variable-declaration/format passes are retained.
+
+Evidence is under .autopod-data/delivery-merge/: extraction-recipe.json, movement.json,
+baseline-type-comparison.json, public-comparison.json, named reports/commands/exits
+and frozen-manifest.json. The expanded set records 216 suites including all 196
+inherited paths. Its completion, the full frozen uncached pipeline, proof verdict,
+clean pushed revision and Slice 28 research remain required before 27 is complete.

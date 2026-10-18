@@ -41,7 +41,6 @@ import type {
   PublicProviderCatalog,
   RequestCredentialPayload,
   ReviewFeedbackResponseItem,
-  ScanFinding,
   SpawnFixResponse,
   TaskRetryIdentity,
   UpdateFromBaseResponse,
@@ -52,7 +51,6 @@ import type {
 import {
   AutopodError,
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
-  generateId,
   generatePodId,
   outputModeFromPodOptions,
   podOptionsFromOutputMode,
@@ -121,20 +119,11 @@ import { cleanupCodexState } from '../runtimes/codex-state-store.js';
 import { authenticatedGitEnvironment } from '../worktrees/authenticated-git-environment.js';
 
 import {
-  closedPrRecoveryReason,
-  inspectRetainedMergeSource,
-  mergePublishedSource,
-  reconcileMerge,
-} from '../worktrees/durable-merge.js';
-import { createDurablePrManagerFactory } from '../worktrees/durable-pr-manager.js';
-
-import {
   DeletionGuardError,
   GitCredentialError,
   type GitTransientFetchError,
 } from '../worktrees/local-worktree-manager.js';
-import { MergeQueue } from '../worktrees/merge-queue.js';
-import { mergeReconciliation } from '../worktrees/merge-source-identity.js';
+
 import type {
   SandboxWorkspaceCheckpointArgs,
   WorkspaceCheckpointResult,
@@ -153,7 +142,7 @@ import { AgentContinuationSupersededError } from './continuation-preflight.js';
 import { runDeletionCleanup } from './deletion-cleanup.js';
 import { deletionOwnershipError } from './deletion-ownership.js';
 import { dispatchRequestHash } from './dispatch-preflight-ledger.js';
-import { persistCompletionReply, persistEscalation } from './escalation-coordinator.js';
+import { persistCompletionReply } from './escalation-coordinator.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
@@ -167,7 +156,7 @@ import { prefilterMemories, selectRelevantMemories } from './memory-selector.js'
 import type { MemoryUsageRepository } from './memory-usage-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import type { PodRepository, PodStats, PodUpdates } from './pod-repository.js';
-import { type PollOwnership, createPollingCoordinator } from './polling-coordinator.js';
+import { createPollingCoordinator } from './polling-coordinator.js';
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
 import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
@@ -226,6 +215,8 @@ import { createAgentProcessWorkflow } from './agent-process-workflow.js';
 import { createAgentRunRegistry } from './agent-run-registry.js';
 import type { ApproveAllSkippedPod, ApproveSessionOptions } from './approval-contracts.js';
 import { createApprovalControls } from './approval-controls.js';
+import { createApprovalDeliveryExecution } from './approval-delivery-execution.js';
+import { createApprovalDeliveryPreparation } from './approval-delivery-preparation.js';
 import {
   actorLabel,
   buildValidationWaiver,
@@ -246,7 +237,24 @@ import { createCompletionDiagnostics } from './completion-diagnostics.js';
 import { createCompletionEvents } from './completion-events.js';
 import { createCompletionGuards } from './completion-guards.js';
 import { createCompletionOwners, createCompletionWorkflow } from './completion-workflow.js';
+import { createDeliveryCredentials } from './delivery-credentials.js';
+import {
+  formatRebaseConflictReason,
+  isSinglePrSeriesPod,
+  resolvePrBaseBranch,
+} from './delivery-policy.js';
+import { createDeliveryPolling } from './delivery-polling.js';
+import { createDeliveryPr } from './delivery-pr.js';
+import { createDeliveryScan } from './delivery-scan.js';
+import {
+  createDeliveryMergeQueue,
+  createDeliveryPollingState,
+  createDeliveryProvider,
+} from './delivery-state.js';
+import { createRevalidationPassDelivery } from './revalidation-pass-delivery.js';
+import { createValidationPassDelivery } from './validation-pass-delivery.js';
 import { createWorkspaceTransfer } from './workspace-transfer.js';
+
 export type { ApproveSessionOptions, ApproveAllSkippedPod } from './approval-contracts.js';
 
 function buildDetachedMcpFallbackMessage(
@@ -261,15 +269,6 @@ function buildDetachedMcpFallbackMessage(
     '',
     'The original MCP response stream closed before this answer could be delivered. If you already received the same answer directly from the tool call, ignore this duplicate.',
   ].join('\n');
-}
-
-/** Format a `mergeBlockReason` string for a rebase that produced conflicts.
- * Caps the conflict-file preview at 5 entries (with `…` if truncated) and
- * falls back to `(see logs)` when the conflict list itself isn't available. */
-function formatRebaseConflictReason(baseBranch: string, conflicts: readonly string[]): string {
-  const preview = conflicts.slice(0, 5).join(', ');
-  const ellipsis = conflicts.length > 5 ? '…' : '';
-  return `Rebase conflicts on ${baseBranch}: ${preview || '(see logs)'}${ellipsis}`;
 }
 
 /** Allocate a random host port in range 10000–48999 for container port mapping.
@@ -486,18 +485,6 @@ function warnIfSinglePrSeriesMissingSeriesMeta(pod: Pod, logger: Logger): void {
     },
     'Single-PR series pod is missing seriesName or seriesDescription — PR title and "Why" will fall back to the brief task. Verify the client forwarded purpose.md when creating the series.',
   );
-}
-
-function resolvePrBaseBranch(pod: Pod, profile: PodExecutionSettings): string {
-  const fallback = profile.defaultBranch ?? 'main';
-  const candidate = pod.baseBranch ?? fallback;
-  if (candidate !== pod.branch) return candidate;
-  if (fallback !== pod.branch) return fallback;
-  return pod.branch === 'main' ? candidate : 'main';
-}
-
-function isSinglePrSeriesPod(pod: Pick<Pod, 'prMode' | 'seriesId'>): boolean {
-  return pod.prMode === 'single' && Boolean(pod.seriesId);
 }
 
 /** Merge new overrides into existing ones, deduplicating by findingId (latest wins). */
@@ -1088,10 +1075,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       ? { mcpServers: [], claudeMdSections: [], skills: [] }
       : daemonConfig;
   }
-  const prManagerFactory =
-    rawPrManagerFactory && podRepo.deliveryLedger
-      ? createDurablePrManagerFactory(podRepo.deliveryLedger, rawPrManagerFactory)
-      : rawPrManagerFactory;
+  const { prManagerFactory } = createDeliveryProvider(rawPrManagerFactory, podRepo);
+
   const hostFetchRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   function scheduleHostFetchRetry(pod: Pod, error: GitTransientFetchError): void {
@@ -1364,20 +1349,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     buildCodeIntelligenceServers,
     resolvedReasoningEffort,
   });
-
-  /**
-   * Sequential merge queue keyed by `repo+baseBranch`.
-   *
-   * The "rebase HEAD onto origin/<base> → push → merge" critical section runs
-   * inside this queue so two pods targeting the same base never race: pod B's
-   * rebase always happens against the branch pod A just pushed, eliminating the
-   * "both rebases looked clean, B's became stale before push" failure mode.
-   *
-   * Different repos and different base branches don't conflict, so we key on
-   * both — concurrency stays high in the common case where pods target different
-   * targets.
-   */
-  const mergeQueue = new MergeQueue();
+  const { mergeQueue } = createDeliveryMergeQueue();
 
   /** Per-pod HAProxy denial log receivers. Started after container spawn in
    *  restricted mode; stopped from `cleanupContainer`. Map is the source of
@@ -1550,75 +1522,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     if (mode === 'kill' && ownsSharedResources) {
       deps.launchConfiguration?.pim?.release(pod.id);
       forgetMaxCredentialLineage(pod.id);
-    }
-  }
-
-  /** Pre-push security scan helper. Runs the repo scanner at the `push`
-   *  checkpoint and acts on the decision:
-   *   - `block` (non-workspace) → throws AutopodError; the pod's outer handler
-   *     fails the pod and the operator sees the findings in the audit table.
-   *   - `block` for workspace pods → engine rewrites to `escalate`; we log
-   *     loudly but do not fail the push.
-   *   - `warn`/`escalate` → emit a status event; PR-body integration picks up
-   *     the persisted findings via scanRepo at createPr time.
-   *  No-ops when the scanner is not wired or the pod has no worktree. */
-  async function runPushCheckpointScan(pod: Pod, profile: PodExecutionSettings): Promise<void> {
-    if (!repoScanner || !pod.worktreePath) return;
-    try {
-      const baseRef = `origin/${pod.baseBranch ?? profile.defaultBranch ?? 'main'}`;
-      const isWorkspacePod = pod.options.agentMode === 'interactive';
-      emitActivityStatus(pod.id, 'Running pre-push security scan…');
-      const scan = await repoScanner.scan('push', {
-        podId: pod.id,
-        workdir: pod.worktreePath,
-        baseRef,
-        profile,
-        isWorkspacePod,
-      });
-      logger.info(
-        {
-          podId: pod.id,
-          decision: scan.decision,
-          findings: scan.findings.length,
-          filesScanned: scan.filesScanned,
-          filesSkipped: scan.filesSkipped,
-        },
-        'Pre-push security scan completed',
-      );
-      if (scan.decision === 'block') {
-        emitBlockingSecurityScanFindings(pod.id, scan.findings);
-        throw new AutopodError(
-          `Pre-push security scan blocked (${scan.findings.length} finding(s))`,
-          'SECURITY_SCAN_BLOCKED',
-          400,
-        );
-      }
-      if (scan.decision === 'escalate') {
-        logger.warn(
-          { podId: pod.id, findings: scan.findings.length },
-          'Pre-push security scan flagged content; review the PR body and security_scans table',
-        );
-      }
-    } catch (err) {
-      if (err instanceof AutopodError) throw err;
-      // Fail open — scanner errors must not gate validation entry.
-      logger.warn({ err, podId: pod.id }, 'Pre-push security scan errored — proceeding');
-    }
-  }
-
-  /** Look up persisted security findings from the most recent push-checkpoint
-   *  scan for a pod, for inclusion in the PR body. Returns [] when the scanRepo
-   *  is not wired or no scan ran. */
-  function getLatestPushFindings(podId: string): import('@autopod/shared').ScanFinding[] {
-    if (!scanRepo) return [];
-    try {
-      const scans = scanRepo.getForPod(podId);
-      const pushScans = scans.filter((s) => s.checkpoint === 'push');
-      const latest = pushScans[pushScans.length - 1];
-      return latest?.findings ?? [];
-    } catch (err) {
-      logger.warn({ err, podId }, 'Failed to load security findings for PR body');
-      return [];
     }
   }
 
@@ -1869,12 +1772,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   );
 
   const COMMIT_POLL_INTERVAL_MS = 60_000;
-
-  const mergePolling = createPollingCoordinator((err, podId) =>
-    logger.debug({ err, podId }, 'Merge polling operation failed'),
-  );
-
-  const DEFAULT_MERGE_POLL_INTERVAL_MS = 60_000;
+  const { mergePolling, DEFAULT_MERGE_POLL_INTERVAL_MS } = createDeliveryPollingState(logger);
 
   /** Active AbortControllers for in-progress validation runs, keyed by podId. */
   const { validationAbortControllers, attemptExtensionRuns, pendingUpdateFromBaseIntents } =
@@ -1997,6 +1895,34 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     });
 
   const { emitBlockingSecurityScanFindings } = createCompletionDiagnostics({ emitActivityError });
+  const { runPushCheckpointScan, getLatestPushFindings } = createDeliveryScan({
+    repoScanner,
+    emitActivityStatus,
+    logger,
+    emitBlockingSecurityScanFindings,
+    scanRepo,
+  });
+
+  const { parkOnCredentialFailure } = createDeliveryCredentials({
+    podRepo,
+    escalationRepo,
+    transition,
+    emitActivityStatus,
+    logger,
+  });
+
+  const { ensurePrBaseBranchOnOrigin, pushAndCreatePr, retryCreatePr } = createDeliveryPr({
+    worktreeManager,
+    logger,
+    resolveGitCredential,
+    emitActivityStatus,
+    assertGuidanceCollected,
+    executionForPod,
+    prManagerFactory,
+    handleDeletionGuardError,
+    getLatestPushFindings,
+    podRepo,
+  });
 
   /** Stuck-running watchdog interval handle (single global timer). */
   let stuckPodWatchdog: ReturnType<typeof setInterval> | null = null;
@@ -2604,254 +2530,25 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
   const { runUpdateFromBaseAfterAbort, applySkipValidationDecision, claimValidation } =
     validationWorkflowControls;
-
-  /** Start polling PR merge status for a pod in merge_pending state. */
-  function startMergePolling(podId: string): void {
-    const generation = podRepo.getOrThrow(podId).lifecycleGeneration;
-
-    const poll = async (ownership: PollOwnership) => {
-      try {
-        const pod = podRepo.getOrThrow(podId);
-        if (pod.status !== 'merge_pending' || pod.lifecycleGeneration !== generation) {
-          ownership.stop();
-          return;
-        }
-
-        if (!pod.prUrl) {
-          ownership.stop();
-          return;
-        }
-
-        const assertCurrent = (
-          options: { allowRemovedContainer?: boolean; status?: PodStatus } = {},
-        ) => {
-          if (!ownership.isCurrent())
-            throw new AutopodError('Merge polling ownership was replaced.', 'STALE_APPROVAL', 409);
-          assertApprovalCurrent(
-            { ...pod, status: options.status ?? pod.status },
-            { allowRemovedContainer: options.allowRemovedContainer },
-          );
-          if (podRepo.getOrThrow(podId).prUrl !== pod.prUrl)
-            throw new AutopodError(
-              'Merge polling was superseded by another PR.',
-              'STALE_APPROVAL',
-              409,
-            );
-        };
-        const pollOperation = async <T>(operation: () => Promise<T>): Promise<T> => {
-          assertCurrent();
-          try {
-            return await operation();
-          } finally {
-            assertCurrent();
-          }
-        };
-        assertCurrent();
-        const profile = executionForPod(pod);
-        const prManager = prManagerFactory ? prManagerFactory(profile) : null;
-        if (!prManager) {
-          ownership.stop();
-          return;
-        }
-
-        const journal = podRepo.mergeJournal;
-        const entry = journal?.find(pod);
-        if (!journal || !entry) {
-          assertCurrent();
-          const reason =
-            'Delivery history is unavailable. Original resources retained. Use Resume to revalidate the retained source before approving delivery.';
-          transition(pod, 'failed', { failureReason: reason, mergeBlockReason: reason });
-          assertCurrent({ status: 'failed' });
-          emitActivityStatus(podId, reason);
-          ownership.stop();
-          return;
-        }
-
-        const status = await pollOperation(async () =>
-          prManager.getPrStatus({
-            prUrl: pod.prUrl,
-          }),
-        );
-
-        // Reconcile the planned or admitted source before any subsequent mutation.
-        try {
-          if (status.merged) {
-            await pollOperation(() => reconcileMerge(journal, pod, entry, prManager, status));
-            await pollOperation(() =>
-              inspectRetainedMergeSource(
-                journal,
-                podRepo.sourcePublications,
-                pod,
-                entry,
-                worktreeManager,
-              ),
-            );
-          } else {
-            if (status.open === false) {
-              journal.observeStatus(entry.id, status);
-              assertCurrent();
-              const reason = closedPrRecoveryReason(entry);
-              transition(pod, 'failed', { failureReason: reason, mergeBlockReason: reason });
-              assertCurrent({ status: 'failed' });
-              emitActivityStatus(podId, reason);
-              ownership.stop();
-              return;
-            }
-            if (entry.prDisposition === 'closed') journal.observeStatus(entry.id, status);
-            if (
-              (entry.state !== 'pending' && entry.state !== 'planned') ||
-              entry.result?.autoMergeScheduled ||
-              !status.open
-            )
-              mergeReconciliation(
-                'The earlier merge requires source-bound provider reconciliation; original resources retained.',
-              );
-            const source = await pollOperation(() =>
-              inspectRetainedMergeSource(
-                journal,
-                podRepo.sourcePublications,
-                pod,
-                entry,
-                worktreeManager,
-              ),
-            );
-            if (!status.ciFailures.length && !status.reviewComments.length) {
-              const reviewOk = !status.reviewDecision || status.reviewDecision === 'APPROVED';
-              if (reviewOk)
-                await mergeQueue.enqueueMerge(
-                  entry.request.config.expectedTarget.repository,
-                  entry.request.config.expectedTarget.baseBranch,
-                  async () => {
-                    assertCurrent();
-                    const result = await pollOperation(() =>
-                      mergePublishedSource(
-                        journal,
-                        pod,
-                        { ...pod, prUrl: entry.request.publicationPrUrl },
-                        source,
-                        prManager,
-                        {
-                          ...entry.request.config,
-                          worktreePath: pod.worktreePath,
-                          onPrepared: () => assertCurrent(),
-                        },
-                      ),
-                    );
-                    return result.merged;
-                  },
-                );
-              // A later poll confirms cleanup. Never rebase or push over an
-              // admitted request; a changed source needs its own validation.
-              return;
-            }
-          }
-        } catch (error) {
-          assertCurrent();
-          const reason = `Merge reconciliation required. ${error instanceof Error ? error.message : String(error)}`;
-          if (pod.mergeBlockReason !== reason) {
-            podRepo.update(podId, { mergeBlockReason: reason });
-            emitActivityStatus(podId, reason);
-          }
-          return;
-        }
-
-        if (status.merged) {
-          emitActivityStatus(podId, 'PR merged successfully');
-          await cleanupContainer(pod, 'pr-merged-complete', 'kill', () =>
-            assertCurrent({ allowRemovedContainer: true }),
-          );
-          assertCurrent({ allowRemovedContainer: true });
-          const mergedPod = transition(pod, 'complete', {
-            completedAt: new Date().toISOString(),
-            mergeBlockReason: null,
-          });
-
-          assertCurrent({ allowRemovedContainer: true, status: 'complete' });
-          eventBus.emit({
-            type: 'pod.completed',
-            timestamp: new Date().toISOString(),
-            podId,
-            finalStatus: 'complete',
-            summary: {
-              id: podId,
-              profileName: pod.profileName,
-              task: pod.task,
-              status: 'complete',
-              model: pod.model,
-              runtime: pod.runtime,
-              duration: pod.startedAt ? Date.now() - new Date(pod.startedAt).getTime() : null,
-              filesChanged: pod.filesChanged,
-              createdAt: pod.createdAt,
-            },
-          });
-
-          logger.info({ podId, prUrl: pod.prUrl }, 'Merge polling: PR merged — pod complete');
-          assertCurrent({ allowRemovedContainer: true, status: 'complete' });
-          ownership.stop();
-          maybeTriggerDependents(mergedPod);
-          return;
-        }
-
-        // Still pending — update block reason if it changed
-        if (status.blockReason !== pod.mergeBlockReason) {
-          podRepo.update(podId, { mergeBlockReason: status.blockReason });
-          emitActivityStatus(podId, `Merge pending: ${status.blockReason}`);
-        }
-
-        // Actionable failures → enqueue a sanitized summary, then ensure the
-        // canonical fix pod is alive to drain it. The queue carries the
-        // content so the drain at fix-pod start can build the task from a
-        // minimal status (see processPod).
-        //
-        // Idempotency: a stuck PR re-emits the same failure signature on every
-        // 60s tick. Without this guard the queue grows unboundedly (~one row
-        // per minute) until the fix pod finally recycles — we've seen it hit
-        // 391 rows across ~46h. Skip the enqueue when the latest queued summary
-        // is byte-identical to the one we'd add. A new failure signature still
-        // gets through.
-        assertCurrent();
-        if (status.ciFailures.length > 0 || status.reviewComments.length > 0) {
-          const summary = buildActionableFailureSummary(status, profile);
-          const latest = fixFeedbackRepo.peekLatest(podId);
-          if (latest?.message !== summary) {
-            fixFeedbackRepo.enqueue(podId, summary);
-          }
-          await pollOperation(async () => maybeSpawnFixSession(podId, status));
-        }
-      } catch (err) {
-        logger.debug({ err, podId }, 'Merge polling failed, skipping cycle');
-      }
-    };
-
-    // Resolve per-profile poll interval once. Falls back to the default when
-    // unset; clamped at 5s by the validator so this is safe to use directly.
-    let pollIntervalMs = DEFAULT_MERGE_POLL_INTERVAL_MS;
-    try {
-      const pod = podRepo.getOrThrow(podId);
-      const profile = executionForPod(pod);
-      if (profile.mergePollIntervalSec) {
-        pollIntervalMs = profile.mergePollIntervalSec * 1_000;
-      }
-    } catch {
-      // Pod or profile gone — let poll() decide what to do on its first tick.
-    }
-
-    mergePolling.start(podId, pollIntervalMs, poll);
-  }
-
-  /** Stop merge polling for a pod. */
-  function stopMergePolling(podId: string): void {
-    mergePolling.stop(podId);
-  }
-
-  /** Resume merge polling for any pods left in merge_pending state (e.g. after daemon restart). */
-  function resumeMergePolling(): void {
-    const pendingSessions = podRepo.list({ status: 'merge_pending' as PodStatus });
-    for (const pod of pendingSessions) {
-      logger.info({ podId: pod.id, prUrl: pod.prUrl }, 'Resuming merge polling after restart');
-      startMergePolling(pod.id);
-    }
-  }
+  const { startMergePolling, stopMergePolling, resumeMergePolling } = createDeliveryPolling({
+    podRepo,
+    assertApprovalCurrent,
+    executionForPod,
+    prManagerFactory,
+    transition,
+    emitActivityStatus,
+    worktreeManager,
+    mergeQueue,
+    cleanupContainer,
+    eventBus,
+    logger,
+    maybeTriggerDependents,
+    buildActionableFailureSummary,
+    fixFeedbackRepo,
+    maybeSpawnFixSession,
+    DEFAULT_MERGE_POLL_INTERVAL_MS,
+    mergePolling,
+  });
 
   // Resume merge polling on startup
   resumeMergePolling();
@@ -3269,53 +2966,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityStatus,
   });
 
-  /**
-   * If `err` is a DeletionGuardError, mark the pod as worktree-compromised so the desktop
-   * disables Create PR / merge actions until a human reconciles the state. Emits an event
-   * plus an activity-status line. Returns true if the error was a guard trip so callers can
-   * skip redundant warnings about the same condition.
-   */
-  /**
-   * Park a pod in `awaiting_input` after a daemon-side git push failed on
-   * credentials. The operator repairs the daemon identity and replies/nudges; the
-   * resume handler picks up the escalation, retries the push from
-   * `validating`, and continues to PR creation — no agent re-run, no lost
-   * validation work. Returns true so the call site can `return` cleanly.
-   */
-  function parkOnCredentialFailure(podId: string, err: GitCredentialError): true {
-    const pod = podRepo.getOrThrow(podId);
-    const escalation: EscalationRequest = {
-      id: generateId(12),
-      podId,
-      type: 'request_credential',
-      timestamp: new Date().toISOString(),
-      payload: {
-        service: err.service,
-        reason:
-          err.service === 'github'
-            ? `git ${err.op} was rejected by GitHub. Authenticate the daemon service account with gh auth login and ensure it has write access to the target repo, then resume the pod.`
-            : `git ${err.op} was rejected by ADO. Sign the daemon host into the correct Azure CLI identity, verify that identity has repository access, then resume the pod.`,
-        source: 'host_push',
-      },
-      response: null,
-    };
-    persistEscalation(podRepo, escalationRepo, escalation, () => {
-      transition(pod, 'awaiting_input', {
-        pendingEscalation: escalation,
-        escalationCount: pod.escalationCount + 1,
-      });
-    });
-    emitActivityStatus(
-      podId,
-      `Push blocked — ${err.service} credentials missing or unauthorized. Repair daemon authentication and resume.`,
-    );
-    logger.warn(
-      { podId, service: err.service, op: err.op, escalationId: escalation.id },
-      'Daemon-side git push parked in awaiting_input on credential failure',
-    );
-    return true;
-  }
-
   function handleDeletionGuardError(podId: string, err: unknown): boolean {
     if (!(err instanceof DeletionGuardError)) return false;
     try {
@@ -3430,167 +3080,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     const current = podRepo.getOrThrow(podId);
     if (current.status === 'running' || current.status === 'validating') {
       transition(current, 'failed');
-    }
-  }
-
-  async function ensurePrBaseBranchOnOrigin(
-    pod: Pod,
-    profile: PodExecutionSettings,
-    baseBranch: string,
-    callerLabel: string,
-  ): Promise<void> {
-    if (!pod.worktreePath) return;
-    const defaultBranch = profile.defaultBranch ?? 'main';
-    if (baseBranch === pod.branch || baseBranch === defaultBranch) return;
-
-    const ensureRemoteBranch = worktreeManager.ensureRemoteBranch?.bind(worktreeManager);
-    if (!ensureRemoteBranch) {
-      logger.warn(
-        { podId: pod.id, baseBranch, callerLabel },
-        'Worktree manager cannot ensure PR base branch exists on origin',
-      );
-      return;
-    }
-
-    try {
-      const result = await ensureRemoteBranch({
-        worktreePath: pod.worktreePath,
-        branch: baseBranch,
-        sourceRef: `refs/heads/${baseBranch}`,
-        pat: await resolveGitCredential(profile),
-      });
-      if (result.created) {
-        emitActivityStatus(pod.id, `Base branch published: ${baseBranch}`);
-      }
-    } catch (err) {
-      // Best effort: if the branch already exists but the check/push failed for a
-      // transient reason, PR creation can still succeed. If it truly is absent,
-      // the PR provider will return the authoritative error below.
-      logger.warn(
-        { err, podId: pod.id, baseBranch, callerLabel },
-        'Failed to ensure PR base branch exists on origin',
-      );
-    }
-  }
-
-  /**
-   * Shared push-then-open-PR flow used by both `retryCreatePr` (post-complete) and
-   * `resumePod` (post-failure). Caller is responsible for the status preconditions
-   * and any post-success state transition; this helper only does the side effects
-   * + returns the new PR URL on success.
-   */
-  async function pushAndCreatePr(pod: Pod, callerLabel: string): Promise<string> {
-    if (pod.options.output !== 'pr') {
-      throw new AutopodError(
-        'PR delivery requires explicit PR output.',
-        'INVALID_OUTPUT_MODE',
-        409,
-      );
-    }
-    assertGuidanceCollected(pod.id);
-    const podId = pod.id;
-    if (!pod.worktreePath) {
-      throw new AutopodError(
-        `Pod ${podId} has no worktree — cannot push branch`,
-        'INVALID_STATE',
-        409,
-      );
-    }
-    const profile = executionForPod(pod);
-    const prManager = prManagerFactory ? prManagerFactory(profile) : null;
-    if (!prManager) {
-      throw new AutopodError(
-        `No PR manager configured for profile ${pod.profileName}`,
-        'INVALID_STATE',
-        409,
-      );
-    }
-
-    const baseBranch = resolvePrBaseBranch(pod, profile);
-    const pat = await resolveGitCredential(profile);
-    try {
-      await worktreeManager.mergeBranch({
-        worktreePath: pod.worktreePath,
-        // Push the feature branch up so PR creation can reference it. Using the
-        // feature branch (not baseBranch) avoids force-pushing the work onto main.
-        targetBranch: pod.branch,
-        pat,
-        // Block auto-commit deletions: this helper runs post-container with no
-        // fresh sync-back, so any "missing files" almost certainly means a sync
-        // ghost rather than the operator wanting to ship a mass-delete.
-        maxDeletions: 0,
-        podTask: pod.task,
-        profile,
-        podModel: pod.model,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.warn({ podId, err, callerLabel }, 'pushAndCreatePr: branch push failed');
-      // Bubble GitCredentialError up untouched so the caller can park the pod
-      // in awaiting_input instead of failing terminally on a fixable PAT issue.
-      if (err instanceof GitCredentialError) {
-        throw err;
-      }
-      if (handleDeletionGuardError(podId, err)) {
-        throw new AutopodError(message, 'WORKTREE_COMPROMISED', 409);
-      }
-      emitActivityStatus(podId, `Branch push failed: ${message}`);
-      throw new AutopodError(message, 'BRANCH_PUSH_FAILED', 502);
-    }
-
-    try {
-      await ensurePrBaseBranchOnOrigin(pod, profile, baseBranch, callerLabel);
-      const result = await prManager.createPr({
-        worktreePath: pod.worktreePath,
-        repoUrl: profile.repoUrl ?? undefined,
-        branch: pod.branch,
-        baseBranch,
-        podId,
-        task: pod.task,
-        profileName: pod.profileName,
-        profile,
-        podModel: pod.model,
-        handoffInstructions: pod.handoffInstructions ?? undefined,
-        validationResult: pod.lastValidationResult ?? null,
-        validationWaiver: pod.validationWaiver,
-        filesChanged: pod.filesChanged,
-        linesAdded: pod.linesAdded,
-        linesRemoved: pod.linesRemoved,
-        previewUrl: pod.previewUrl,
-        screenshots: [],
-        taskSummary: pod.taskSummary ?? undefined,
-        seriesDescription: pod.seriesDescription ?? undefined,
-        seriesName: pod.seriesName ?? undefined,
-        securityFindings: getLatestPushFindings(podId),
-      });
-      if (result.usedFallback) {
-        const which = result.narrativeUsedFallback
-          ? result.titleUsedFallback
-            ? 'title + body'
-            : 'body'
-          : 'title';
-        const reason = result.fallbackReason ?? 'unknown';
-        logger.error(
-          {
-            podId,
-            callerLabel,
-            profile: profile.name,
-            modelProvider: profile.modelProvider,
-            fallbackReason: reason,
-            fallbackDetail: result.fallbackDetail,
-            titleUsedFallback: result.titleUsedFallback,
-            narrativeUsedFallback: result.narrativeUsedFallback,
-          },
-          'PR description used template fallback — daemon-side LLM helper failed',
-        );
-        emitActivityStatus(podId, `PR ${which} used template fallback: ${reason}`);
-      }
-      return result.url;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.warn({ podId, err, callerLabel }, 'pushAndCreatePr: PR creation failed');
-      emitActivityStatus(podId, `PR creation failed: ${message}`);
-      throw new AutopodError(message, 'PR_CREATION_FAILED', 502);
     }
   }
 
@@ -3712,32 +3201,48 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       logger.info({ podId: dep.id, parentIds, baseBranch }, 'Series: dependent pod enqueued');
     }
   }
-
-  const validationTriggerWorkflow = createValidationTriggerWorkflow(deps, {
-    buildManualReworkReason,
+  const { completeValidationPass } = createValidationPassDelivery({
     warnIfSinglePrSeriesMissingSeriesMeta,
     resolvePrBaseBranch,
+    podRepo,
+    containerManagerFactory,
+    worktreeManager,
+    validationEngine,
+    logger,
+    prManagerFactory,
+    resolveGitCredential,
+    refreshReadiness,
+    getLatestPushFindings,
+    stopSandboxPreviewProxy,
+    pendingUpdateFromBaseIntents,
+    completeFixPodAfterPush,
+    emitActivityStatus,
+    advisoryPublicationOwnership,
+    runAdvisoryAfterValidation,
+    parkOnCredentialFailure,
+    handleDeletionGuardError,
+    ensurePrBaseBranchOnOrigin,
+    transition,
+    maybeTriggerDependents,
+  });
+  const validationTriggerWorkflow = createValidationTriggerWorkflow(deps, {
+    buildManualReworkReason,
     mergeOverrides,
     podRepo,
     escalationRepo,
     eventBus,
     containerManagerFactory,
-    worktreeManager,
     validationEngine,
     enqueueSession,
     logger,
     validationRepo,
     scanRepo,
-    prManagerFactory,
     assertExecutionTerminationVerified,
     resolveEffectiveBoundProfile,
-    resolveGitCredential,
     beginGoalTaskRework,
     taskFeedbackEvents,
-    refreshReadiness,
     destroyPodNetwork,
     cleanupContainer,
-    getLatestPushFindings,
     stopSandboxPreviewProxy,
     killSidecarsForPod,
     cleanupTestRunBranches,
@@ -3746,7 +3251,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     pendingUpdateFromBaseIntents,
     parkFixPodDeliveryFailure,
     isParkedHostPushRecovery,
-    completeFixPodAfterPush,
     runUpdateFromBaseAfterAbort,
     persistRuntimeCredentialsForPod,
     prepareWorkspaceForValidation,
@@ -3768,21 +3272,36 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityError,
     sanitizeFailureReason,
     tryRecoverAfterWorkspaceSyncFailure,
-    advisoryPublicationOwnership,
-    runAdvisoryAfterValidation,
-    parkOnCredentialFailure,
-    handleDeletionGuardError,
     parkOnWorktreeSyncFailure,
-    ensurePrBaseBranchOnOrigin,
     transition,
     applySkipValidationDecision,
     claimValidation,
     maybeTriggerDependents,
+    completeValidationPass,
+  });
+
+  const { completeRevalidationPass } = createRevalidationPassDelivery({
+    warnIfSinglePrSeriesMissingSeriesMeta,
+    resolvePrBaseBranch,
+    podRepo,
+    containerManagerFactory,
+    worktreeManager,
+    validationEngine,
+    logger,
+    prManagerFactory,
+    resolveGitCredential,
+    refreshReadiness,
+    getLatestPushFindings,
+    emitActivityStatus,
+    advisoryPublicationOwnership,
+    runAdvisoryAfterValidation,
+    handleDeletionGuardError,
+    ensurePrBaseBranchOnOrigin,
+    transition,
+    maybeTriggerDependents,
   });
   const validationRevalidationWorkflow = createValidationRevalidationWorkflow(deps, {
     CONTAINER_APP_PORT,
-    warnIfSinglePrSeriesMissingSeriesMeta,
-    resolvePrBaseBranch,
     podRepo,
     eventBus,
     containerManagerFactory,
@@ -3793,13 +3312,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     validationRepo,
     executionForPod,
     validationEnvironmentForPod,
-    prManagerFactory,
     assertExecutionTerminationVerified,
     assertGuidanceCollected,
     resolveGitCredential,
-    refreshReadiness,
     runPushCheckpointScan,
-    getLatestPushFindings,
     validationAbortControllers,
     buildReviewerExecEnv,
     getEffectiveReviewerConfig,
@@ -3815,16 +3331,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityError,
     sanitizeFailureReason,
     tryRecoverAfterWorkspaceSyncFailure,
-    advisoryPublicationOwnership,
-    runAdvisoryAfterValidation,
-    handleDeletionGuardError,
     parkOnWorktreeSyncFailure,
-    ensurePrBaseBranchOnOrigin,
     transition,
     applySkipValidationDecision,
     claimValidation,
     maybeTriggerDependents,
+    completeRevalidationPass,
   });
+
   const provisioningWorkflow = createProvisioningWorkflow(deps, {
     materializeSpecFiles,
     captureDeployBaselineHashes,
@@ -3933,9 +3447,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     prepareSourceForCompletion,
     applyCompletionDecision,
   });
-  const approvalWorkflow = createApprovalWorkflow({
+  const { prepareApprovalDelivery } = createApprovalDeliveryPreparation({
     podRepo,
-    resolveApprovalReadiness,
     assertApprovalCurrent,
     executionForPod,
     worktreeManager,
@@ -3951,6 +3464,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     cleanupContainerAfterAdvisorySettles,
     eventBus,
     maybeTriggerDependents,
+  });
+  const { executeApprovalDelivery } = createApprovalDeliveryExecution({
+    podRepo,
+    assertApprovalCurrent,
+    executionForPod,
+    worktreeManager,
+    emitActivityError,
+    logger,
+    prManagerFactory,
+    emitActivityStatus,
+    forceWithLeaseAllowances,
+    transition,
     resolveGitCredential,
     mergeQueue,
     formatRebaseConflictReason,
@@ -3959,6 +3484,20 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     ensurePrBaseBranchOnOrigin,
     getLatestPushFindings,
     handleDeletionGuardError,
+  });
+  const approvalWorkflow = createApprovalWorkflow({
+    podRepo,
+    resolveApprovalReadiness,
+    assertApprovalCurrent,
+    logger,
+    emitActivityStatus,
+    transition,
+    persistReadinessApproval,
+    cleanupContainerAfterAdvisorySettles,
+    eventBus,
+    maybeTriggerDependents,
+    prepareApprovalDelivery,
+    executeApprovalDelivery,
   });
 
   const approvalControls = createApprovalControls({
@@ -6933,30 +6472,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       };
     },
 
-    async retryCreatePr(podId: string): Promise<void> {
-      const pod = podRepo.getOrThrow(podId);
-      if (pod.status !== 'complete' && pod.status !== 'validated') {
-        throw new AutopodError(
-          `Cannot retry PR creation for ${podId} in status ${pod.status} — only validated or complete pods`,
-          'INVALID_STATE',
-          409,
-        );
-      }
-      if (pod.prUrl) {
-        throw new AutopodError(`Pod ${podId} already has a PR: ${pod.prUrl}`, 'INVALID_STATE', 409);
-      }
-      if (!pod.worktreePath) {
-        throw new AutopodError(
-          `Pod ${podId} has no worktree — cannot create PR`,
-          'INVALID_STATE',
-          409,
-        );
-      }
-      emitActivityStatus(podId, 'Retrying PR creation…');
-      const newPrUrl = await pushAndCreatePr(pod, 'retryCreatePr');
-      podRepo.update(podId, { prUrl: newPrUrl });
-      emitActivityStatus(podId, `PR created: ${newPrUrl}`);
-      logger.info({ podId, prUrl: newPrUrl }, 'PR created via retryCreatePr');
+    retryCreatePr(podId: string): Promise<void> {
+      return retryCreatePr(podId);
     },
 
     getArtifactResumeObservation(podId: string): ArtifactResumeObservation {

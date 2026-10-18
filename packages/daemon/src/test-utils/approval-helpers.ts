@@ -6,6 +6,8 @@ import type {
   ApprovalWorkflowCaptured,
 } from '../pods/approval-contracts.js';
 import { createApprovalControls } from '../pods/approval-controls.js';
+import { createApprovalDeliveryExecution } from '../pods/approval-delivery-execution.js';
+import { createApprovalDeliveryPreparation } from '../pods/approval-delivery-preparation.js';
 import { createApprovalReadiness, createReadinessRefresh } from '../pods/approval-readiness.js';
 import { createApprovalWorkflow } from '../pods/approval-workflow.js';
 import { createCompletionEvents } from '../pods/completion-events.js';
@@ -117,7 +119,12 @@ export function createApprovalFixture(disk = false) {
     controlsCaptured,
     calls,
     isSinglePrSeriesPod,
-    workflow: () => createApprovalWorkflow(mainCaptured),
+    workflow: () =>
+      createApprovalWorkflow({
+        ...mainCaptured,
+        ...createApprovalDeliveryPreparation(mainCaptured),
+        ...createApprovalDeliveryExecution(mainCaptured),
+      }),
     controls: () => createApprovalControls(controlsCaptured),
     validated() {
       const result = createPassingValidationResult('prepare');

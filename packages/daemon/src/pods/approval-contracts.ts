@@ -14,6 +14,8 @@ import type { ContainerManager, PrManager, WorktreeManager } from '../interfaces
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ScanRepository } from '../security/scan-repository.js';
 import type { MergeQueue } from '../worktrees/merge-queue.js';
+import type { createApprovalDeliveryExecution } from './approval-delivery-execution.js';
+import type { createApprovalDeliveryPreparation } from './approval-delivery-preparation.js';
 import type { createApprovalReadiness, createReadinessRefresh } from './approval-readiness.js';
 import type { createCompletionEvents } from './completion-events.js';
 import type { createCompletionGuards } from './completion-guards.js';
@@ -134,3 +136,66 @@ export interface ApprovalControlsCaptured {
   maybeTriggerDependents: (completedPod: Pod) => void;
   refreshReadiness: ReturnType<typeof createReadinessRefresh>['refreshReadiness'];
 }
+
+export type ApprovalDeliveryPreparationCaptured = Pick<
+  ApprovalWorkflowCaptured,
+  | 'podRepo'
+  | 'assertApprovalCurrent'
+  | 'executionForPod'
+  | 'worktreeManager'
+  | 'emitActivityError'
+  | 'containerManagerFactory'
+  | 'logger'
+  | 'prManagerFactory'
+  | 'emitActivityStatus'
+  | 'failBranchPreservation'
+  | 'forceWithLeaseAllowances'
+  | 'transition'
+  | 'persistReadinessApproval'
+  | 'cleanupContainerAfterAdvisorySettles'
+  | 'eventBus'
+  | 'maybeTriggerDependents'
+>;
+
+export type ApprovalDeliveryExecutionCaptured = Pick<
+  ApprovalWorkflowCaptured,
+  | 'podRepo'
+  | 'assertApprovalCurrent'
+  | 'executionForPod'
+  | 'worktreeManager'
+  | 'emitActivityError'
+  | 'logger'
+  | 'prManagerFactory'
+  | 'emitActivityStatus'
+  | 'forceWithLeaseAllowances'
+  | 'transition'
+  | 'resolveGitCredential'
+  | 'mergeQueue'
+  | 'formatRebaseConflictReason'
+  | 'startMergePolling'
+  | 'resolvePrBaseBranch'
+  | 'ensurePrBaseBranchOnOrigin'
+  | 'getLatestPushFindings'
+  | 'handleDeletionGuardError'
+>;
+
+export type ApprovalEntryCaptured = Pick<
+  ApprovalWorkflowCaptured,
+  | 'podRepo'
+  | 'resolveApprovalReadiness'
+  | 'assertApprovalCurrent'
+  | 'logger'
+  | 'emitActivityStatus'
+  | 'transition'
+  | 'persistReadinessApproval'
+  | 'cleanupContainerAfterAdvisorySettles'
+  | 'eventBus'
+  | 'maybeTriggerDependents'
+> & {
+  prepareApprovalDelivery: ReturnType<
+    typeof createApprovalDeliveryPreparation
+  >['prepareApprovalDelivery'];
+  executeApprovalDelivery: ReturnType<
+    typeof createApprovalDeliveryExecution
+  >['executeApprovalDelivery'];
+};

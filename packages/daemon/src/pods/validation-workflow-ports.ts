@@ -27,6 +27,7 @@ import type { NudgeRepository } from './nudge-repository.js';
 import type { PendingOverrideRepository } from './pending-override-repository.js';
 import type { PodGoalService } from './pod-goal-service.js';
 import type { PodRepository, PodUpdates } from './pod-repository.js';
+import type { createRevalidationPassDelivery } from './revalidation-pass-delivery.js';
 import type { createReviewerContext } from './reviewer-context.js';
 import type { createValidationAttemptStart } from './validation-attempt-start.js';
 import type { createValidationEnvironment } from './validation-environment.js';
@@ -34,6 +35,7 @@ import type { createValidationEvidence } from './validation-evidence.js';
 import type { createValidationExecution } from './validation-execution.js';
 import type { createValidationInfrastructure } from './validation-infrastructure.js';
 import type { createValidationInputs } from './validation-inputs.js';
+import type { createValidationPassDelivery } from './validation-pass-delivery.js';
 import type { createValidationProgress } from './validation-progress.js';
 import type { createValidationProvenance } from './validation-provenance.js';
 import type { createValidationPublication } from './validation-publication.js';
@@ -53,6 +55,10 @@ export interface ValidationWorkflowLiveDependencies {
 }
 
 export interface ValidationWorkflowDependencies {
+  completeValidationPass: ReturnType<typeof createValidationPassDelivery>['completeValidationPass'];
+  completeRevalidationPass: ReturnType<
+    typeof createRevalidationPassDelivery
+  >['completeRevalidationPass'];
   podRepo: PodRepository;
   transition: (pod: Pod, to: PodStatus, extraUpdates?: Partial<PodUpdates> | undefined) => Pod;
   executionForPod: (pod: Pod) => PodExecutionSettings;
@@ -222,3 +228,161 @@ export interface ValidationWorkflowCalls {
   ): Promise<AgentRunOutcome>;
   handleCompletion(podId: string): Promise<void>;
 }
+
+export interface ValidationPassContext {
+  podId: string;
+  pod: Pod;
+  profile: PodExecutionSettings;
+  s2: Pod;
+  result: ValidationResult;
+  validationSyncOk: boolean;
+  attempt: number;
+  validationConfig: Parameters<ValidationEngine['validate']>[0];
+  validationRecord: ReturnType<ValidationWorkflowDependencies['publishValidationResult']>;
+}
+export type RevalidationPassContext = Omit<
+  ValidationPassContext,
+  'validationSyncOk' | 'attempt'
+> & { revalDefaultBranch: string; newCommits: boolean };
+
+export type ValidationPassCaptured = Pick<
+  ValidationWorkflowDependencies,
+  | 'warnIfSinglePrSeriesMissingSeriesMeta'
+  | 'resolvePrBaseBranch'
+  | 'podRepo'
+  | 'containerManagerFactory'
+  | 'worktreeManager'
+  | 'validationEngine'
+  | 'logger'
+  | 'prManagerFactory'
+  | 'resolveGitCredential'
+  | 'refreshReadiness'
+  | 'getLatestPushFindings'
+  | 'stopSandboxPreviewProxy'
+  | 'pendingUpdateFromBaseIntents'
+  | 'completeFixPodAfterPush'
+  | 'emitActivityStatus'
+  | 'advisoryPublicationOwnership'
+  | 'runAdvisoryAfterValidation'
+  | 'parkOnCredentialFailure'
+  | 'handleDeletionGuardError'
+  | 'ensurePrBaseBranchOnOrigin'
+  | 'transition'
+  | 'maybeTriggerDependents'
+>;
+export type ValidationTriggerCaptured = Pick<
+  ValidationWorkflowDependencies,
+  | 'buildManualReworkReason'
+  | 'mergeOverrides'
+  | 'podRepo'
+  | 'escalationRepo'
+  | 'eventBus'
+  | 'containerManagerFactory'
+  | 'validationEngine'
+  | 'enqueueSession'
+  | 'logger'
+  | 'validationRepo'
+  | 'scanRepo'
+  | 'assertExecutionTerminationVerified'
+  | 'resolveEffectiveBoundProfile'
+  | 'beginGoalTaskRework'
+  | 'taskFeedbackEvents'
+  | 'destroyPodNetwork'
+  | 'cleanupContainer'
+  | 'stopSandboxPreviewProxy'
+  | 'killSidecarsForPod'
+  | 'cleanupTestRunBranches'
+  | 'validationAbortControllers'
+  | 'ownsLifecycle'
+  | 'pendingUpdateFromBaseIntents'
+  | 'parkFixPodDeliveryFailure'
+  | 'isParkedHostPushRecovery'
+  | 'runUpdateFromBaseAfterAbort'
+  | 'persistRuntimeCredentialsForPod'
+  | 'prepareWorkspaceForValidation'
+  | 'preservePodWorkspace'
+  | 'checkpointSandboxWorkspaceForPod'
+  | 'startValidationAttempt'
+  | 'prepareValidationInputs'
+  | 'buildPhaseEventCallbacks'
+  | 'ownedValidationCallbacks'
+  | 'recordValidationProvenance'
+  | 'withReviewerLaunchPreflight'
+  | 'validateWithInfrastructureRetries'
+  | 'collectValidationEvidence'
+  | 'publishValidationResult'
+  | 'parkOnRetryAdmission'
+  | 'parkOnValidationInfrastructureFailure'
+  | 'parkOnReviewInfrastructureFailure'
+  | 'emitActivityStatus'
+  | 'emitActivityError'
+  | 'sanitizeFailureReason'
+  | 'tryRecoverAfterWorkspaceSyncFailure'
+  | 'parkOnWorktreeSyncFailure'
+  | 'transition'
+  | 'applySkipValidationDecision'
+  | 'claimValidation'
+  | 'maybeTriggerDependents'
+  | 'completeValidationPass'
+>;
+
+export type RevalidationPassCaptured = Pick<
+  ValidationWorkflowDependencies,
+  | 'warnIfSinglePrSeriesMissingSeriesMeta'
+  | 'resolvePrBaseBranch'
+  | 'podRepo'
+  | 'containerManagerFactory'
+  | 'worktreeManager'
+  | 'validationEngine'
+  | 'logger'
+  | 'prManagerFactory'
+  | 'resolveGitCredential'
+  | 'refreshReadiness'
+  | 'getLatestPushFindings'
+  | 'emitActivityStatus'
+  | 'advisoryPublicationOwnership'
+  | 'runAdvisoryAfterValidation'
+  | 'handleDeletionGuardError'
+  | 'ensurePrBaseBranchOnOrigin'
+  | 'transition'
+  | 'maybeTriggerDependents'
+>;
+export type ValidationRevalidationCaptured = Pick<
+  ValidationWorkflowDependencies,
+  | 'CONTAINER_APP_PORT'
+  | 'podRepo'
+  | 'eventBus'
+  | 'containerManagerFactory'
+  | 'worktreeManager'
+  | 'validationEngine'
+  | 'enqueueSession'
+  | 'logger'
+  | 'validationRepo'
+  | 'executionForPod'
+  | 'validationEnvironmentForPod'
+  | 'assertExecutionTerminationVerified'
+  | 'assertGuidanceCollected'
+  | 'resolveGitCredential'
+  | 'runPushCheckpointScan'
+  | 'validationAbortControllers'
+  | 'buildReviewerExecEnv'
+  | 'getEffectiveReviewerConfig'
+  | 'getReviewerExecutor'
+  | 'prepareWorkspaceForValidation'
+  | 'buildPhaseEventCallbacks'
+  | 'validateWithInfrastructureRetries'
+  | 'publishValidationResult'
+  | 'parkOnRetryAdmission'
+  | 'parkOnValidationInfrastructureFailure'
+  | 'parkOnReviewInfrastructureFailure'
+  | 'emitActivityStatus'
+  | 'emitActivityError'
+  | 'sanitizeFailureReason'
+  | 'tryRecoverAfterWorkspaceSyncFailure'
+  | 'parkOnWorktreeSyncFailure'
+  | 'transition'
+  | 'applySkipValidationDecision'
+  | 'claimValidation'
+  | 'maybeTriggerDependents'
+  | 'completeRevalidationPass'
+>;
