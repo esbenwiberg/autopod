@@ -1,6 +1,6 @@
 # Slice 21: provider attempts and binding
 
-Status: IN PROGRESS — extraction and affected regression complete; full qualification next.
+Status: COMPLETE — Slice 21 implemented, locally proven and qualified.
 Date: 2026-10-18. Baseline: 939f19a2deaa855f181f2a464d95ae30bf265224.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -166,10 +166,10 @@ and verify clean remote identity. Complete this plan and update roadmap, then st
 Slice 22. The goal remains the entire remaining sequence through final Slice 34.
 
 Automated:
-- [ ] All 99 affected suites pass with SQLite and no newly skipped tests.
-- [ ] Full uncached pipeline passes; actual results and existing skips recorded.
-- [ ] Source scope, frozen hashes and clean pushed revision verified.
-- [ ] Plan/roadmap record this milestone and next incomplete work.
+- [x] All 99 affected suites pass with SQLite and no newly skipped tests.
+- [x] Full uncached pipeline passes; actual results and existing skips recorded.
+- [x] Source scope, frozen hashes and clean pushed revision verified.
+- [x] Plan/roadmap record this milestone and next incomplete work.
 Manual: none.
 
 ## Compatibility and rollback
@@ -210,3 +210,45 @@ type fragments are parsed in a type wrapper. Initial logs/reports remain retaine
 Final 1,995 package/script hashes and six root controls are frozen before the full
 uncached pipeline. Next: qualify, record completion, then continue Slice 22 under the
 existing remaining-slices goal. No manual gate is outstanding for this milestone.
+
+## Phase 3 final qualification
+
+Verdict: PROVEN for this local compatibility extraction. The complete remaining-slices
+goal stays active; 13 numbered milestones remain, next Slice 22.
+
+| Check | Final result |
+|---|---|
+| Full unchanged manager suite | 1,192 cases pass with identical names/statuses/assertion bytes |
+| Direct policy/context tests | 44 pass; three private encrypted SQLite reopen cases |
+| Affected regression | 99 suites, 3,450 cases, no skips |
+| Full uncached pipeline | Frozen install, lint, build/declarations, typecheck, tests, audit, secret scan pass |
+| Vitest | 8,621 cases in 510 passing files; same 10 existing gated skips |
+| Standalone script tests | 35 pass, no failures |
+| Source movement | All 19 bodies/parameter lists, map initializer, selection type and full recipes match |
+| Source integrity | 1,995 package/script hashes plus six root controls match frozen source |
+| Scoped checks | Clean Biome/whitespace and both new-test semantic boundaries |
+
+Tested implementation: 9976fa6d6446a5e0fc7d9244eacae319c58be564. A following documentation-only checkpoint records
+completion without changing tested source. Final clean pushed identity is recorded
+in ignored .autopod-data/provider-attempt-context/ after push. Actual full command:
+
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+Node22.23.3/pnpm9.15.4 uses actual SQLite3.49.2. Build/typecheck/test task groups
+ran uncached; frozen install needed no fallback or lock mutation. Root lint retains
+82 existing warnings and the established 2 MiB processing limit. No rules/selection/
+repository/global config change. maintenance.auto=false is process-only.
+
+The manager is 13,833 lines; both new owners (91/552 lines) remain below the roadmap's
+size threshold. All 1,990 other baseline package/script files and public assertions
+remain unchanged. Factory construction performs no service calls; account/catalog/
+profile/execution references are captured, attempt/launch services remain live.
+Current owner ordinal mutation and MAX lineage value identity/cleanup are tested.
+
+Tests use synthetic credentials, actual local repositories and real auth/launch
+resolution, including persisted launch configuration and account identity denial.
+Provider/runtime/container/worktree execution remains controlled. No live/paid
+provider, browser, Docker/Azure, stronger isolation/atomicity/authorization/replay,
+PR/main integration or deployment claim. No manual gate remains for this slice.
+Initial import/fixture/probe/audit diagnostics remain beside final evidence.
+Continue Slice 22 under the already authorized remaining sequence.
