@@ -24,7 +24,11 @@ struct VillageWebViewTests {
         defer { VillageWebView.dismantleNSView(webView, coordinator: coordinator) }
         var count = 0
         for _ in 0..<100 {
-            count = (try? await webView.evaluateJavaScript("document.querySelectorAll('button.actor').length")) as? Int ?? 0
+            // Do not evaluate in the initial blank document while the bundled
+            // navigation is provisional. The app sends JS only after its handshake.
+            if !webView.isLoading, webView.url?.standardizedFileURL == VillageWebView.entryURL?.standardizedFileURL {
+                count = (try? await webView.evaluateJavaScript("document.querySelectorAll('button.actor').length")) as? Int ?? 0
+            }
             if count == 3 || failure != nil { break }
             try await Task.sleep(for: .milliseconds(100))
         }
@@ -116,7 +120,9 @@ struct VillageWebViewTests {
             managedDataFresh: false, reducedMotion: true, selectedActorId: nil, actors: [actor]))
         var renderedTitle: String?
         for _ in 0..<100 {
-            renderedTitle = (try? await webView.evaluateJavaScript("document.querySelector('.actor-title')?.textContent")) as? String
+            if !webView.isLoading, webView.url?.standardizedFileURL == VillageWebView.entryURL?.standardizedFileURL {
+                renderedTitle = (try? await webView.evaluateJavaScript("document.querySelector('.actor-title')?.textContent")) as? String
+            }
             if renderedTitle == title || failure != nil { break }
             try await Task.sleep(for: .milliseconds(100))
         }
