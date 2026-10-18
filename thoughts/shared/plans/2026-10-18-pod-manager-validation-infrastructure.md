@@ -1,6 +1,6 @@
 # Slice 12: validation infrastructure classification and parking extraction
 
-Status: APPROVED — Phases 1 and 2 complete; final qualification running.
+Status: COMPLETE — all three approved phases implemented and locally verified.
 Date: 2026-10-18.
 Baseline: 86380d0ff76f126f8e60d245447f4a2718f8c4a5.
 Branch: codex/pod-manager-workspace.
@@ -240,9 +240,9 @@ results/limits, commit/push verified increments and confirm remote identity/clea
 
 Automated:
 - [x] All 60 affected suites pass with SQLite and no new skips.
-- [ ] Full uncached pipeline passes under the documented qualification environment.
-- [ ] Scoped lint/whitespace, new-test semantic diagnostics, movement and hashes pass.
-- [ ] Completed plan/proof records actual results, limitations and pushed identities.
+- [x] Full uncached pipeline passes under the documented qualification environment.
+- [x] Scoped lint/whitespace, new-test semantic diagnostics, movement and hashes pass.
+- [x] Completed plan/proof records actual results, limitations and pushed identities.
 
 Manual: None required. Approval covers all three phases together.
 
@@ -264,7 +264,8 @@ Predecessor: 2026-10-18-pod-manager-validation-publication.md (complete).
 Sources: pod-manager.ts:956–1006, :6775–6842, :3804 and transition; state-machine.ts;
 task-retry-ledger.ts and existing infrastructure/Resume/ownership tests.
 
-Next action: qualify the frozen implementation with the full uncached pipeline.
+All three approved phases are complete. No manual acceptance remains.
+Integration, PR creation and deployment remain separate work.
 
 ## Phase 1 observed results
 
@@ -307,3 +308,62 @@ final passing receipts are retained privately.
 
 Final source is frozen with 1,969 package/script hashes and six unchanged root
 controls before full qualification. No new dependency/configuration/schema change.
+
+## Phase 3: final qualification
+
+Verdict: PROVEN for the approved local compatibility extraction under the documented
+qualification environment. All phases are complete; no manual acceptance remains.
+
+| Claim/check | Observed final evidence | Result |
+|---|---|---|
+| Public compatibility | 90 selected before/after checks, 28 new; assertions byte-identical | Passed |
+| Classification and parking contracts | 94 direct cases: 36 classifier/label and 58 file-backed SQLite parking fixtures; SQL aborts, reopen/integrity/FK and controlled failure boundaries | Passed |
+| Surrounding orchestration | 60 affected suites; 2,182 passed; zero skipped | Passed |
+| Full uncached pipeline | Frozen install, lint, build, supported declaration typecheck, tests, audit and secret scan | Passed under documented environment |
+| Vitest | 7,951 passed across 499 passing files; 10 existing gated skips | Passed with existing skips |
+| Standalone Node scripts | 35 passed; zero failed/skipped | Passed |
+| Source integrity | 1,969 package/script hashes plus 6 root control hashes unchanged through qualification | Passed |
+| Exact movement and scope | Seven original bodies; eight unchanged awaited calls; complete manager recipe; two product/two test paths | Passed |
+| Scoped quality | Biome/whitespace clean; zero semantic diagnostics in both new test boundaries | Passed |
+
+Tested implementation: 4c61a36aa85644d3ecf939447ed673eac1596331. A following documentation-only commit
+records qualification without changing qualified source/test bytes. Final remote
+identity and clean-worktree confirmation are recorded privately after push.
+
+Actual full command using the existing task-local npx launcher:
+
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+Actual Node 22.23.3 opens SQLite 3.49.2; pnpm 9.15.4. Build/typecheck/test groups
+ran uncached. Frozen install succeeded without fallback or lockfile mutation.
+Root lint retained 82 existing warnings while processing the large manager test
+with only --files-max-size=2097152 added. Scoped files are clean; no rule/file
+selection was disabled and no repository/global configuration changed. The inherited
+maintenance.auto=false is process-only. The default-environment Git maintenance
+metadata-scan race and audit-clock flake remain outside this extraction. The 10
+existing gated skips remain; no new case was skipped. No source/test change was made
+during final qualification. Initial characterization/lint/harness diagnostics and
+final passing results are retained with raw logs/exits.
+
+The manager is 17,244 lines, 99 fewer. validation-infrastructure.ts is 154 lines.
+Parsed TypeScript comparison proves all seven unchanged bodies and the complete
+remaining manager. Eight awaited parking calls retain arguments/order; pure uses
+and execution injections are unchanged. Adjacent inline review shutdown paths,
+Resume/admission/ownership, ledger policy, manager transition/readiness and preview
+maps/teardown remain under their original authority. All 1,965 other baseline
+package/script paths are unchanged. No product correction followed extraction.
+
+Evidence is retained under ignored .autopod-data/validation-infrastructure/: proof.json,
+movement.json, baseline/frozen/root-control manifests, frozen public assertions,
+before-source, exact-recipe/original-region copies and scripts, actual runtime and
+qualification commands, before/after/build/direct/affected/full/scoped-Biome/type
+logs and exits, initial diagnostics and pushed identities.
+
+Real SQLite files/repositories/events substantiate saved state and partial effects
+following controlled SQL failure. The direct transition fixture uses real state
+validation, repository and event operations for the injected contract; it does not
+stand in for actual manager readiness/transition. Public tests substantiate those
+actual caller integrations and preserve the existing refund-failure outer-handler
+quirk. Controlled engine/container/provider seams establish local behavior, without
+claiming live Docker/Azure/provider availability or new atomicity, outbox delivery,
+fencing, crash recovery, cross-process safety or idempotency.
