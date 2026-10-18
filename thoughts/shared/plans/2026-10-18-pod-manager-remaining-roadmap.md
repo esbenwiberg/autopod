@@ -1,19 +1,19 @@
 # Pod-manager rewrite: remaining roadmap, slices 19–34
 
-Status: Slices 19–26 COMPLETE. Slices 1–26 complete; 8 milestones remain (27–34).
+Status: Slices 19–27 COMPLETE. Slices 1–27 complete; 7 milestones remain (28–34).
 Date: 2026-10-18. Baseline: ecc324ca4a403d49397dd63cecb1a881e653ad06.
 Branch: codex/pod-manager-workspace.
 
 ## Finite scope and count
 
-8 remaining delivery milestones: Slice 27 through final qualification at 34.
-The bounded baseline roadmap below included 16 (19–34); Slices 19–26 are complete.
+7 remaining delivery milestones: Slice 28 through final qualification at 34.
+The bounded baseline roadmap below included 16 (19–34); Slices 19–27 are complete.
 The milestones define scope; their effort varies, and they do not provide a time estimate. Recent slices moved small helpers;
 future milestones deliberately complete whole responsibilities and can contain
 multiple independently tested implementation phases within their numbered slice.
 
 At roadmap baseline the manager had 16,521 total lines and 73 public object members.
-After Slice 26 it has 7,399 lines and the same public interface. A TypeScript
+After Slice 27 it has 6,916 lines and the same public interface. A TypeScript
 AST inventory below assigns every one of 327 non-import top-level declarations,
 manager-closure declarations/statements and public members to an owning milestone.
 Nested implementation blocks inherit their containing workflow; processPod has an
@@ -39,7 +39,7 @@ corrections and unrelated bugs have their own work, outside this compatibility r
 | 24 | Agent dispatch and event consumption — COMPLETE | Own the remaining processPod execution loop, spawn/resume/recovery, consumeAgentEvents, activity and terminal-event accounting. | Complete process/stream owners preserve eleven bodies, four initializers, shared map identity and replay accounting; 1,192 public cases, 23 direct cases and full qualification pass. |
 | 25 | Completion orchestration and shared transitions — COMPLETE | Compose the existing completion owners; own completion entry, transition/event helpers, termination/guidance checks and failure reporting. | Complete entry and original three owner constructors delegate through domain workflows;15 bodies, guards/reporting,1,192 public cases,37 direct cases and full qualification pass. |
 | 26 | Approval and readiness — COMPLETE | Own approveSession, readiness waits/approvals, fact waivers, forced/bulk approval and approval snapshots. | Complete approval lifetime/readiness/controls retain17 bodies, shared references and decisions;1,192 public cases,25 direct cases and full qualification pass. |
-| 27 | Delivery and merge polling | Own push/checkpoint scan, PR base/create/retry, merge queue and poller state/startup. | Branch/PR delivery and resumed pollers preserve push/merge order, credentials and failure parking. |
+| 27 | Delivery and merge polling — COMPLETE | Own manager delivery/scan/PR retry, shared queue/poller construction/startup and full inline approval/validation delivery. | Twelve bodies/four bindings and full stage recipes match; trigger size exception ends. 1,192 public cases,42 new direct cases and full frozen qualification pass. |
 | 28 | Fix cycles | Own fix task/binding, feedback replies, recyclable fix sessions, delivery failure handling and attempt extension. | Parent/fix ownership and retry ceilings remain covered; fixes do not take over the parent PR. |
 | 29 | Operator lifecycle controls | Own messages, rejection, pause/nudge/kill, escalation notification, credential injection and tool installation. | Public commands delegate through narrow workflow ports and retain quiescence, admission and error behavior. |
 | 30 | Resources, network and preview | Own cleanup, sidecars, network/deny handles, preview and commit polling, advisory semaphore/run tracking and deferred cleanup. | Each timer/map/semaphore has one explicit owner; cleanup preserves guidance and waits for owned advisory work. |

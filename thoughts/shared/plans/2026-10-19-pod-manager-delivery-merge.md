@@ -1,6 +1,6 @@
 # Slice 27: complete delivery and merge ownership
 
-Status: IMPLEMENTED — expanded regression and frozen qualification in progress.
+Status: COMPLETE — full frozen qualification passed; goal continues through34.
 Date: 2026-10-19. Baseline: 9c9d220e44b8175edbf9860d6189b8c74dd96e33.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -261,10 +261,10 @@ and proceed. Goal stays active through 34. Final gates remain facade <=1,500 lin
 full frozen uncached qualification and a clean pushed integration-ready revision.
 
 Automated:
-- [ ] Complete affected set passes with real SQLite and no new skips.
-- [ ] Full frozen uncached validation passes with actual environment/counts recorded.
-- [ ] Frozen bytes and clean pushed tested revision verified.
-- [ ] Plan/roadmap updated with proved 27 completion and next 28 research.
+- [x] Complete affected set passes with real SQLite and no new skips.
+- [x] Full frozen uncached validation passes with actual environment/counts recorded.
+- [x] Frozen bytes and clean pushed tested revision verified.
+- [x] Plan/roadmap updated with proved 27 completion and next 28 research.
 Manual: none; live production/integration work remains separately scoped.
 
 ## Compatibility, cost and rollback
@@ -309,3 +309,48 @@ baseline-type-comparison.json, public-comparison.json, named reports/commands/ex
 and frozen-manifest.json. The expanded set records 216 suites including all 196
 inherited paths. Its completion, the full frozen uncached pipeline, proof verdict,
 clean pushed revision and Slice 28 research remain required before 27 is complete.
+
+## Final qualification — 2026-10-19
+
+Verdict: PROVEN for the complete local compatibility boundary. Tested implementation:
+4e7bfaa36679fe8a8c3cb4c87f13e2a3f0920a81, pushed before full qualification. Evidence:
+.autopod-data/delivery-merge/proof.json and its named commands/reports/scripts.
+
+All 216 affected suites pass: 4,955 tests and four unchanged inherited infrastructure
+gates. Full frozen uncached validation passes frozen install without fallback or
+lockfile mutation, lint, build/declarations, typecheck, workspace tests, audit and
+secret scan. 8,835 Vitest tests pass across 547 passing files, plus all 35 Node script
+tests. The same ten full gated cases remain; no new skip. Observed runtime is Node
+22.23.3/pnpm 9.15.4/SQLite 3.49.2. All 15 Turbo tasks are uncached. The inherited
+task-local 2 MiB lint processing limit and 82 existing warnings remain; no rule/config/
+dependency/selection relaxation.
+
+All 2,081 frozen package/script hashes and six root controls match after the full
+pipeline. All 1,192 public names/statuses/assertion bytes match. The exact final
+14-suite direct run passes 67 cases: 42 new cases across nine delivery suites plus
+the 25 unchanged direct approval cases. Four private-file SQLite reopen cases prove
+both service credential escalations, restart of a retained review-blocked merge
+intent, and confirmed source-bound merge/completion history after restart and a
+second close/reopen. Provider/transport receipts and container/worktree effects are
+controlled; actual local repositories/SQLite/native ledgers and snapshots are real.
+No paid/live external provider/container acceptance or stronger replay/isolation/
+transaction/termination guarantee is claimed.
+
+Movement proof matches all 12 complete manager bodies/parameters/defaults, four
+initializers, both full validation pass branches, two approval statement groups,
+entry remainder and 18 full file recipes, with recorded type-only import annotations.
+The four outer return conversions and two approval-stage awaits are explicit; nested
+callbacks and existing fences remain. Same 73 public members and shared original
+state instances/startup site. Manager 7,399→6,916 lines; trigger 1,273→970 and approval
+entry 835→103. New source owners are 23–479 lines. All ten new test/fixture files have
+zero semantic diagnostics; all 32 changed-source diagnostics match the original
+33-diagnostic baseline. One new revalidation test received a formatting-only pass
+after expanded regression; its exact final bytes passed a targeted rerun, final
+67-case direct run and full frozen pipeline.
+
+This completes 27. Seven milestones remain, 28–34. Complete fix-cycle research is
+saved at ../research/2026-10-19-pod-manager-fix-cycles.md; its next action is the full
+28 plan covering canonical admission/recycling, delivery/replies, three controls,
+static exports/live dependencies and poller startup timing. The goal remains active
+through all facade<=1,500-line,327-unit/73-member/mutable-owner and final34 gates.
+PR/main integration and deployment remain separately scoped.
