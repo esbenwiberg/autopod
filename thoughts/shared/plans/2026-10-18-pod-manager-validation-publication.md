@@ -1,6 +1,6 @@
 # Slice 11: validation result publication extraction
 
-Status: APPROVED — all three phases authorized; characterization in progress.
+Status: APPROVED — Phases 1 and 2 complete; final qualification running.
 Date: 2026-10-18.
 Baseline: 37d968d1f95beefba300b20df87eb98e695a4f75.
 Branch: codex/pod-manager-workspace.
@@ -187,9 +187,9 @@ actual line counts and all unchanged baseline package/script paths.
 ### Success criteria
 
 Automated:
-- [ ] Frozen public checks pass unchanged after extraction.
-- [ ] Direct synchronous contracts and real close/reopen/SQL-failure persistence checks pass.
-- [ ] Exact movement, preserved adjacent paths and two-product/two-test scope pass.
+- [x] Frozen public checks pass unchanged after extraction.
+- [x] Direct synchronous contracts and real close/reopen/SQL-failure persistence checks pass.
+- [x] Exact movement, preserved adjacent paths and two-product/two-test scope pass.
 
 Manual: None required. No live container/provider claim.
 
@@ -231,7 +231,7 @@ results/limits, commit/push verified increments and confirm remote identity/clea
 ### Success criteria
 
 Automated:
-- [ ] All 56 affected suites pass with SQLite and no new skips.
+- [x] All 56 affected suites pass with SQLite and no new skips.
 - [ ] Full uncached pipeline passes under the documented qualification environment.
 - [ ] Scoped lint/whitespace, new-test semantic diagnostics, movement and hashes pass.
 - [ ] Completed plan/proof records actual results, limitations and pushed identities.
@@ -257,7 +257,7 @@ Sources: pod-manager.ts:13612–13645 and :14708–14740; validation-repository.
 event-bus.ts; event-repository.ts and their existing tests.
 
 The user explicitly approved this concrete plan and all three phases together.
-Next action: characterize the unchanged product before extraction.
+Next action: qualify the frozen implementation with the full uncached pipeline.
 
 ## Phase 1 evidence
 
@@ -274,3 +274,33 @@ Actual Node 22.23.3 opens SQLite 3.49.2; pnpm 9.15.4. Baseline scoped Biome and
 supplemental semantic checks pass cleanly. All new cases passed on their first run;
 no baseline assertion correction was required. Raw commands/results are retained
 under ignored .autopod-data/validation-publication/.
+
+## Phase 2 evidence
+
+All 48 selected public checks pass with the frozen assertions byte-identical.
+33 direct cases exercise the actual factory using real migrated file-backed SQLite,
+pod/validation/event repositories and event bus. Close/reopen plus integrity and
+foreign-key checks verify final and intermediate durable effects. SQL triggers
+fail result updates, usage updates, history inserts and event inserts; AFTER triggers
+on usage/history prove their local rollback while earlier pod writes remain.
+
+Direct observations pin synchronous return, native timestamp timing, exact returned
+record/result identity, original argument forwarding, usage priority and optional
+field shape, zero usage writes, current-state reads, retained references/late method
+lookup, repeated-attempt sequence/cycle, and subscriber inspection/mutation/isolation.
+Controlled read/insert/emit errors preserve identity and preceding effects.
+
+The explicit 56-suite affected set passes: 1,950 tests, zero skips. Daemon/dependency
+ESM and supported declaration builds pass. Four-file scoped Biome and supplemental
+semantic checks of both new test boundaries are clean. Parsed TypeScript proof
+verifies the ordinary body unchanged, original manual equivalence after two local
+renames, two synchronous delegations and complete remaining manager. The new module
+is 65 lines; manager is 17,343 lines, 56 fewer. All 1,963 other baseline package/script
+paths are unchanged. The final 1,967-file and six-root-control manifests are frozen.
+
+Initial direct assertions passed 29/32 cases. Three persisted-event expectations
+incorrectly required explicit undefined-valued keys, which JSON omits. Corrected
+assertions compare the entire persisted pod/history/event result to its exact JSON
+serialized shape; no fields beyond JSON serialization are ignored. Added the zero
+usage write-count check before final freeze. Raw initial output/exit and final
+passing output are retained. No product correction followed the exact extraction.

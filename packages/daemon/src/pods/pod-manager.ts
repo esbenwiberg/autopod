@@ -293,6 +293,7 @@ import { createValidationEvidence } from './validation-evidence.js';
 import { createValidationExecution } from './validation-execution.js';
 import { createValidationInputs } from './validation-inputs.js';
 import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
+import { createValidationPublication } from './validation-publication.js';
 import type { ValidationRepository } from './validation-repository.js';
 import {
   ValidationWorkspaceReconcileError,
@@ -5574,6 +5575,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     hostScreenshotDir,
     emitActivityStatus,
     formatElapsedDuration,
+  });
+
+  const { publishValidationResult } = createValidationPublication({
+    podRepo,
+    validationRepo,
+    eventBus,
   });
 
   async function preserveSandboxAfterAgentFailure(podId: string, reason: string): Promise<void> {
@@ -13609,39 +13616,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         validationSyncOk = await collectValidationEvidence(podId, pod, result, validationSyncOk);
 
-        podRepo.update(podId, { lastValidationResult: result });
-
-        // Accumulate phase-level token usage for harness cost attribution
-        const reviewTokenUsage = result.taskReview?.tokenUsage ?? result.reviewTokenUsage;
-        if (reviewTokenUsage) {
-          const currentPod = podRepo.getOrThrow(podId);
-          const existing = currentPod.phaseTokenUsage ?? {};
-          const prev = existing.review ?? { inputTokens: 0, outputTokens: 0 };
-          const cachedInputTokens =
-            (prev.cachedInputTokens ?? 0) + (reviewTokenUsage.cachedInputTokens ?? 0);
-          const costUsd = (prev.costUsd ?? 0) + (reviewTokenUsage.costUsd ?? 0);
-          podRepo.update(podId, {
-            phaseTokenUsage: {
-              ...existing,
-              review: {
-                inputTokens: prev.inputTokens + reviewTokenUsage.inputTokens,
-                outputTokens: prev.outputTokens + reviewTokenUsage.outputTokens,
-                ...(cachedInputTokens > 0 && { cachedInputTokens }),
-                ...(costUsd > 0 && { costUsd }),
-              },
-            },
-          });
-        }
-
-        // Persist every attempt to validation history
-        const validationRecord = validationRepo?.insert(podId, attempt, result);
-
-        eventBus.emit({
-          type: 'pod.validation_completed',
-          timestamp: new Date().toISOString(),
-          podId,
-          result,
-        });
+        const validationRecord = publishValidationResult(podId, attempt, result);
 
         let s2 = podRepo.getOrThrow(podId);
 
@@ -14705,38 +14680,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
         emitActivityStatus(podId, 'Validation checks finished — finalizing result…');
 
-        podRepo.update(podId, { lastValidationResult: result });
-
-        // Accumulate phase-level token usage for harness cost attribution
-        const reviewTokenUsage = result.taskReview?.tokenUsage ?? result.reviewTokenUsage;
-        if (reviewTokenUsage) {
-          const currentPod = podRepo.getOrThrow(podId);
-          const existingUsage = currentPod.phaseTokenUsage ?? {};
-          const prevReview = existingUsage.review ?? { inputTokens: 0, outputTokens: 0 };
-          const cachedInputTokens =
-            (prevReview.cachedInputTokens ?? 0) + (reviewTokenUsage.cachedInputTokens ?? 0);
-          const costUsd = (prevReview.costUsd ?? 0) + (reviewTokenUsage.costUsd ?? 0);
-          podRepo.update(podId, {
-            phaseTokenUsage: {
-              ...existingUsage,
-              review: {
-                inputTokens: prevReview.inputTokens + reviewTokenUsage.inputTokens,
-                outputTokens: prevReview.outputTokens + reviewTokenUsage.outputTokens,
-                ...(cachedInputTokens > 0 && { cachedInputTokens }),
-                ...(costUsd > 0 && { costUsd }),
-              },
-            },
-          });
-        }
-
-        const validationRecord = validationRepo?.insert(podId, attempt, result);
-
-        eventBus.emit({
-          type: 'pod.validation_completed',
-          timestamp: new Date().toISOString(),
-          podId,
-          result,
-        });
+        const validationRecord = publishValidationResult(podId, attempt, result);
 
         const s2 = podRepo.getOrThrow(podId);
 
