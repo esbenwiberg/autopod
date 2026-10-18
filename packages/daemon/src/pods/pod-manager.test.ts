@@ -30677,3 +30677,260 @@ describe('worker runtime credential compatibility', () => {
     }
   });
 });
+
+describe('validation environment compatibility', () => {
+  beforeEach(() => mockExecFileSuccess());
+  afterEach(() => vi.restoreAllMocks());
+
+  async function fixture(launchBacked = true, profile: Partial<Profile> = {}) {
+    const ctx = createTestContext();
+    const getProfile = vi.mocked(ctx.profileStore.get).getMockImplementation();
+    if (!getProfile) throw new Error('Missing profile fixture');
+    vi.mocked(ctx.profileStore.get).mockImplementation((name) => ({
+      ...getProfile(name),
+      defaultModel: 'claude-sonnet-4-6',
+      ...profile,
+    }));
+    const accounts = createProviderAccountStore(ctx.db);
+    accounts.create({
+      id: 'account',
+      name: 'Environment account',
+      provider: 'anthropic',
+      credentials: { provider: 'anthropic', apiKey: 'fixture-environment-key' },
+    });
+    linkProfileToProviderAccount(ctx.db, 'test-profile', 'account');
+    ctx.deps.providerAccountStore = accounts;
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Validation environment compatibility' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, { status: 'running', containerId: 'env-container' });
+    const { createTestConfiguration } = await import('../test-utils/configuration-helpers.js');
+    const { resolveLaunch } = await import('../configuration/launch-resolver.js');
+    const { services } = createTestConfiguration(ctx.db);
+    const { resolveLaunchAgentRoute } = await import('../configuration/agent-route-resolution.js');
+    services.resolveAgentRoute = async (route) => resolveLaunchAgentRoute(route, accounts);
+    const config = await resolveLaunch({ repositoryId: 'repo-a', task: 'Prepare env' }, services);
+    const events: string[] = [];
+    const checks = vi.fn(async () => {
+      events.push('check');
+    });
+    const read = vi.fn(() => config);
+    const build = vi.fn(async () => {
+      events.push('build');
+      return { FIXTURE_BUILD: 'ready', VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE: 'wrong' };
+    });
+    const material = {
+      files: [
+        { path: '/home/autopod/.npmrc', content: 'fixture-npm' },
+        { path: '/home/autopod/.nuget/NuGet/NuGet.Config', content: 'fixture-config' },
+      ],
+      nugetSecret: {
+        path: '/run/autopod/nuget-endpoints',
+        content: 'fixture-nuget',
+        envKey: 'VSS_NUGET_EXTERNAL_FEED_ENDPOINTS',
+        envFileKey: 'VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE',
+      },
+    };
+    const registries = vi.fn(async () => {
+      events.push('registries');
+      return material;
+    });
+    const credentials = {
+      agent: async () => ({ buildEnv: {}, mcpServers: [] }),
+      buildEnvironment: build,
+      deployment: async () => null,
+      httpServer: async () => {
+        throw new Error('Unused HTTP fixture');
+      },
+      registries,
+    };
+    if (launchBacked)
+      ctx.deps.launchConfiguration = {
+        read,
+        executionSettings: () => ctx.profileStore.get('test-profile'),
+        assertCurrentCapabilities: checks,
+        prepareEnvironment: async () => 'fixture',
+        credentials,
+      };
+    vi.mocked(ctx.containerManager.writeFile).mockImplementation(async (_id, file) => {
+      events.push(file);
+    });
+    const run = () => {
+      if (!manager.getValidationEnvironment) throw new Error('Missing environment method');
+      return manager.getValidationEnvironment(pod.id);
+    };
+    return { ctx, manager, pod, config, events, checks, read, build, registries, material, run };
+  }
+
+  it.each([null, undefined, 'fixture-pat'])(
+    'keeps legacy PAT=%s env precedence without writes',
+    async (pat) => {
+      const f = await fixture(false, {
+        privateRegistries: [{ type: 'nuget', url: 'https://nuget.example.test/feed/' }],
+        registryPat: pat,
+        buildEnv: { DO_NOT_TRACK: 'custom', VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE: 'explicit' },
+      });
+      try {
+        expect(await f.run()).toMatchObject({
+          DO_NOT_TRACK: 'custom',
+          VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE: 'explicit',
+        });
+        expect(f.ctx.containerManager.writeFile).not.toHaveBeenCalled();
+        expect(f.checks).not.toHaveBeenCalled();
+        expect(f.build).not.toHaveBeenCalled();
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it('keeps the no-adapter launch fallback and its one capability check', async () => {
+    const f = await fixture(true, {
+      registryPat: 'legacy-fixture-pat',
+      privateRegistries: [{ type: 'nuget', url: 'https://nuget.example.test/feed/' }],
+      buildEnv: { DO_NOT_TRACK: 'override', CUSTOM: 'kept' },
+    });
+    try {
+      if (!f.ctx.deps.launchConfiguration) throw new Error('Missing launch fixture');
+      f.ctx.deps.launchConfiguration.credentials = undefined;
+      expect(await f.run()).toMatchObject({ CUSTOM: 'kept', DO_NOT_TRACK: 'override' });
+      expect(await f.run()).not.toHaveProperty('VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE');
+      expect(f.checks).toHaveBeenCalledTimes(2);
+      expect(f.ctx.containerManager.writeFile).not.toHaveBeenCalled();
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it('fails a referenced launch without an adapter before capability checks', async () => {
+    const f = await fixture();
+    try {
+      if (!f.ctx.deps.launchConfiguration) throw new Error('Missing launch fixture');
+      f.ctx.deps.launchConfiguration.credentials = undefined;
+      f.config.credentialReferences.service = {
+        secretId: 'service',
+        createdAt: '2026-10-18T00:00:00Z',
+        purposes: ['build-env'],
+        origins: [],
+      };
+      await expect(f.run()).rejects.toMatchObject({
+        code: 'SECRET_EXECUTION_ADAPTER_REQUIRED',
+        statusCode: 503,
+        message: 'Scoped execution credentials are unavailable',
+      });
+      expect(f.checks).not.toHaveBeenCalled();
+      expect(f.ctx.containerManager.writeFile).not.toHaveBeenCalled();
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it.each([true, false])(
+    'preserves launch material, final env precedence and container=%s',
+    async (container) => {
+      const f = await fixture();
+      try {
+        if (!container) f.ctx.podRepo.update(f.pod.id, { containerId: null });
+        expect(await f.run()).toMatchObject({
+          FIXTURE_BUILD: 'ready',
+          DO_NOT_TRACK: '1',
+          VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE: '/run/autopod/nuget-endpoints',
+        });
+        expect(f.events).toEqual([
+          'check',
+          'build',
+          'registries',
+          ...(container
+            ? f.material.files.map((x) => x.path).concat(f.material.nugetSecret.path)
+            : []),
+          'check',
+        ]);
+        expect(vi.mocked(f.ctx.containerManager.writeFile).mock.calls).toEqual(
+          container
+            ? [...f.material.files, f.material.nugetSecret].map((file) => [
+                'env-container',
+                file.path,
+                file.content,
+                { mode: 0o600 },
+              ])
+            : [],
+        );
+        expect(f.ctx.containerManager.execInContainer).not.toHaveBeenCalled();
+        expect(f.build).toHaveBeenCalledWith(f.config);
+        expect(f.registries).toHaveBeenCalledWith(f.config);
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each([1, 2])(
+    'retains the completed effect prefix on capability check %s denial',
+    async (position) => {
+      const f = await fixture();
+      try {
+        const error = new Error('Controlled environment capability denial');
+        f.checks.mockImplementation(async () => {
+          f.events.push('check');
+          if (f.checks.mock.calls.length === position) throw error;
+        });
+        await expect(f.run()).rejects.toBe(error);
+        expect(f.events).toEqual(
+          position === 1
+            ? ['check']
+            : [
+                'check',
+                'build',
+                'registries',
+                ...f.material.files.map((x) => x.path),
+                f.material.nugetSecret.path,
+                'check',
+              ],
+        );
+        expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+        expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it('propagates the second write failure after its completed prefix and before the final check', async () => {
+    const f = await fixture();
+    try {
+      const error = new Error('Controlled registry write');
+      vi.mocked(f.ctx.containerManager.writeFile).mockImplementation(async (_id, file) => {
+        f.events.push(file);
+        if (file === f.material.files[1]?.path) throw error;
+      });
+      await expect(f.run()).rejects.toBe(error);
+      expect(f.events).toEqual([
+        'check',
+        'build',
+        'registries',
+        ...f.material.files.map((x) => x.path),
+      ]);
+      expect(f.checks).toHaveBeenCalledOnce();
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it('ordinary validation stops before diff and engine when environment material rejects', async () => {
+    const f = await fixture();
+    try {
+      const error = new Error('Controlled material failure');
+      f.build.mockRejectedValue(error);
+      await f.manager.triggerValidation(f.pod.id);
+      expect(f.build).toHaveBeenCalledOnce();
+      expect(f.ctx.worktreeManager.getDiff).not.toHaveBeenCalled();
+      expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(f.manager.getSession(f.pod.id).status).toBe('failed');
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+});

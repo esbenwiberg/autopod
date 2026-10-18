@@ -1,6 +1,6 @@
 # Slice 17: validation environment extraction
 
-Status: PROPOSED — awaiting explicit plan approval.
+Status: APPROVED — implementation in progress (all three phases).
 Date: 2026-10-18.
 Baseline: 321ceb07d13f459242289a2f069b49e5e2ddf754.
 Branch: codex/pod-manager-workspace.
@@ -145,9 +145,9 @@ Retain failures and any justified fixture corrections without altering product.
 ### Success criteria
 
 Automated:
-- [ ] New and selected public tests pass against unchanged product.
-- [ ] Existing composed rotation test passes unchanged.
-- [ ] Frozen public bytes/filter, baseline source/hashes/runtime and raw evidence saved.
+- [x] New and selected public tests pass against unchanged product.
+- [x] Existing composed rotation test passes unchanged.
+- [x] Frozen public bytes/filter, baseline source/hashes/runtime and raw evidence saved.
 
 Manual: None required for the local headless compatibility boundary.
 
@@ -269,5 +269,19 @@ configuration/credential-references.ts; runtime-env.ts;
 configuration/components.test.ts; configuration/credential-store.test.ts;
 pods/pod-manager.test.ts public compatibility groups.
 
-Next: review the illustrated boundary and explicitly approve this plan before any
-implementation. Plan approval authorizes characterize, extract and qualify together.
+User approved proceeding with Slice17. Next: characterize unchanged product, extract,
+then qualify; all three phases are authorized together.
+
+## Phase 1 observed results
+
+11 new public cases and 77 selected existing cases pass against unchanged product:
+88 selected tests; 1075 unrelated cases excluded only by this name filter.
+The unchanged composed-service rotation suite passes (one test). New cases pin
+legacy fallback, missing-adapter error precedence, npm/NuGet mode0600 writes,
+no container, env precedence, first/final capability denial, write failure prefixes
+and ordinary validation stopping before diff/engine on preparation failure.
+The initial ordinary validation fixture was rejected earlier by existing provider
+binding checks; its account/route data now match through actual account resolution.
+Initial and corrected results are retained. Product bytes stayed unchanged.
+Public assertions/filter and before-source are frozen. Next: extract the approved
+single function and run the unchanged public assertions plus direct contracts.
