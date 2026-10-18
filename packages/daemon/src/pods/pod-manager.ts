@@ -1,7 +1,23 @@
+import { isAcrQualifiedImage } from './provisioning-image-policy.js';
+import { createProvisioningMaterials, dataDir } from './provisioning-materials.js';
+import {
+  AGENT_ENV_PATH,
+  AGENT_SHIM_PATH,
+  AGENT_SHIM_SCRIPT,
+  buildCodeIntelligenceServers,
+} from './provisioning-runtime-files.js';
+import { createProvisioningSandboxState } from './provisioning-sandbox-state.js';
+import { createProvisioningToolInstallation } from './provisioning-tool-installation.js';
+import { createProvisioningWorkflow } from './provisioning-workflow.js';
+export {
+  AGENT_SHIM_PATH,
+  AGENT_ENV_PATH,
+  AGENT_SHIM_SCRIPT,
+} from './provisioning-runtime-files.js';
 import { execFile } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
-import { access, chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { createHash } from 'node:crypto';
+import { readFile, rm } from 'node:fs/promises';
+
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
@@ -16,7 +32,6 @@ import type {
   FactCheckResult,
   HistoryQuery,
   InjectedMcpServer,
-  McpServerConfig,
   MemoryEntry,
   NetworkPolicy,
   OperatorActor,
@@ -36,8 +51,6 @@ import type {
   ReviewFeedbackResponseItem,
   ScanFinding,
   SpawnFixResponse,
-  SpecFile,
-  StdioInjectedMcpServer,
   TaskRetryIdentity,
   TaskSummary,
   UpdateFromBaseResponse,
@@ -48,37 +61,25 @@ import type {
   ValidationWaiver,
 } from '@autopod/shared';
 import {
-  AUTOPOD_INSTRUCTIONS_PATH,
   AutopodError,
-  CONTAINER_HOME_DIR,
-  DEFAULT_CONTAINER_MEMORY_GB,
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
   PROVIDER_FAILOVER_HANDOFF_PATH,
-  WORKSPACE_PI_HANDOFF_PATH,
   generateId,
   generatePodId,
   outputModeFromPodOptions,
   podOptionsFromOutputMode,
   processContent,
-  resolveContainerNanoCpus,
   resolvePodOptions,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
-import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
+
 import { assertLaunchAgentAccount } from '../configuration/agent-route-resolution.js';
-import type {
-  LaunchExecutionCredentials,
-  LaunchRegistryMaterial,
-} from '../configuration/execution-credentials.js';
+import type { LaunchExecutionCredentials } from '../configuration/execution-credentials.js';
 import { launchPodOptions } from '../configuration/launch-pod-options.js';
 import { createContinuationContext } from './continuation-context.js';
 import { createContinuationControls } from './continuation-controls.js';
-import {
-  REWORK_IN_PROGRESS_PREFIX,
-  buildManualReworkReason,
-  renderPiHandoffFile,
-} from './continuation-policy.js';
+import { REWORK_IN_PROGRESS_PREFIX, buildManualReworkReason } from './continuation-policy.js';
 import { createProviderAttemptContext } from './provider-attempt-context.js';
 import { nativeSessionId, resolvedReasoningEffort } from './provider-attempt-policy.js';
 import { createProviderContinuation } from './provider-continuation.js';
@@ -105,24 +106,15 @@ import {
   type HaproxyDenyStreamHandle,
   streamHaproxyDenials,
 } from '../containers/haproxy-deny-stream.js';
-import { launchSidecarSpec } from '../containers/launch-sidecars.js';
+
 import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import { sandboxEgressRefreshPayload } from '../containers/sandbox-container-manager.js';
 import type { SidecarManager } from '../containers/sidecar-manager.js';
-import {
-  getAutoAttachedSidecars,
-  resolveSidecarSpec,
-  sidecarPodEnv,
-} from '../containers/sidecar-resolver.js';
+import { getAutoAttachedSidecars, resolveSidecarSpec } from '../containers/sidecar-resolver.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
 import { atomicPodChange } from '../db/unit-of-work.js';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
-import { createHistoryExporter } from '../history/history-exporter.js';
-import {
-  generateHistoryInstructions,
-  getHistoryInstructionTarget,
-} from '../history/instructions-generator.js';
-import { getBaseImage } from '../images/dockerfile-generator.js';
+
 import type {
   ContainerManager,
   PrManager,
@@ -136,27 +128,15 @@ import type { ProfileStore } from '../profiles/index.js';
 import { assertNoExpiredPat } from '../profiles/pat-expiry.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
 
-import { buildClaudeConfigFiles, buildProviderEnv } from '../providers/index.js';
 import type { ProfileLlmClientResult } from '../providers/index.js';
-import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
-import { RUNTIME_TELEMETRY_OPT_OUT_ENV } from '../runtime-env.js';
-import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
-import {
-  claudeStateDirForPod,
-  cleanupClaudeState,
-  ensureClaudeStateDir,
-} from '../runtimes/claude-state-store.js';
-import type { CodexRuntime } from '../runtimes/codex-runtime.js';
-import {
-  cleanupCodexState,
-  codexStateDirForPod,
-  ensureCodexStateDir,
-} from '../runtimes/codex-state-store.js';
-import { shellQuote } from '../util/shell-quote.js';
 
-import { buildValidationContextEnv } from '../validation/validation-context-env.js';
+import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
+import { cleanupClaudeState } from '../runtimes/claude-state-store.js';
+import type { CodexRuntime } from '../runtimes/codex-runtime.js';
+import { cleanupCodexState } from '../runtimes/codex-state-store.js';
+
 import { authenticatedGitEnvironment } from '../worktrees/authenticated-git-environment.js';
-import { deriveBareRepoPath } from '../worktrees/bare-push.js';
+
 import {
   closedPrRecoveryReason,
   inspectRetainedMergeSource,
@@ -178,7 +158,6 @@ import type {
   WorkspaceCheckpointResult,
 } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { createAdvisoryValidation } from './advisory-validation.js';
-import { agentToolingCachePaths } from './agent-tooling-cache-paths.js';
 
 import { createArtifactFinalizer } from './artifact-finalizer.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
@@ -203,7 +182,7 @@ import type { EventRepository } from './event-repository.js';
 import { inspectExecutionPreflight } from './execution-preflight.js';
 import { formatFeedback } from './feedback-formatter.js';
 import type { FixFeedbackRepository } from './fix-feedback-repository.js';
-import { mergeClaudeMdSections, mergeMcpServers, mergeSkills } from './injection-merger.js';
+import { mergeMcpServers } from './injection-merger.js';
 import { createInteractiveCompletionCoordinator } from './interactive-completion-coordinator.js';
 import { reconcileLocalSessions } from './local-reconciler.js';
 import type { MemoryRepository } from './memory-repository.js';
@@ -215,7 +194,7 @@ import { type PollOwnership, createPollingCoordinator } from './polling-coordina
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
 import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
-import { memoryMatchesProjectSetup, projectMemoryScope } from './project-memory-scope.js';
+import { projectMemoryScope } from './project-memory-scope.js';
 import {
   type ProviderAttemptRepository,
   ProviderAttemptSupersededError,
@@ -223,18 +202,9 @@ import {
 import { resolveProviderPreflight } from './provider-preflight.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import { createReadinessService } from './readiness-review.js';
-import { hasPendingProviderContinuation } from './recovery-context.js';
-import { deriveReferenceRepos, resolveRefRepoPat } from './reference-repos.js';
-import { installReferenceSnapshots, stageReferenceSnapshots } from './reference-snapshots.js';
-import {
-  CREDENTIAL_GUARD_HOOK,
-  buildNuGetCredentialEnv,
-  buildNuGetSecretFile,
-  buildRegistryFiles,
-  ensureNuGetCredentialProvider,
-  validateRegistryFiles,
-} from './registry-injector.js';
-import { prepareLaunchRepository } from './repository-preparation.js';
+
+import { deriveReferenceRepos } from './reference-repos.js';
+
 import { waitForRetryBackoff } from './retry-backoff-wait.js';
 import { createReviewerContext } from './reviewer-context.js';
 import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
@@ -242,8 +212,7 @@ import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
 import { createRuntimeResumeContext } from './runtime-resume-context.js';
 import { type SandboxPreviewProxy, startSandboxPreviewProxy } from './sandbox-preview-proxy.js';
 import { sandboxStartupRetryInput } from './sandbox-startup-admission.js';
-import { resolveSections } from './section-resolver.js';
-import { resolveSkills } from './skill-resolver.js';
+
 import {
   canFail,
   canKill,
@@ -254,7 +223,7 @@ import {
   isTerminalState,
   validateTransition,
 } from './state-machine.js';
-import { generateSystemInstructions } from './system-instructions-generator.js';
+
 import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import { createValidationAttemptStart } from './validation-attempt-start.js';
@@ -282,17 +251,9 @@ import {
 } from './worker-retry-history.js';
 import { createWorkerRuntimeCredentials } from './worker-runtime-credentials.js';
 import type { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
-import {
-  WORKSPACE_RUNTIME_CACHE_EXCLUDES,
-  WORKSPACE_SYNC_EXCLUDES,
-  buildWorkspaceMirrorCopyScript,
-} from './workspace-mirror.js';
+import { WORKSPACE_SYNC_EXCLUDES } from './workspace-mirror.js';
 import { createWorkspacePreservation } from './workspace-preservation.js';
-import {
-  buildBashrcHintBlock,
-  buildWorkspaceToolsDoc,
-  mergeBashrcHint,
-} from './workspace-tools-doc.js';
+
 import { createWorkspaceTransfer } from './workspace-transfer.js';
 
 function buildDetachedMcpFallbackMessage(
@@ -358,106 +319,6 @@ function formatRebaseConflictReason(baseBranch: string, conflicts: readonly stri
   return `Rebase conflicts on ${baseBranch}: ${preview || '(see logs)'}${ellipsis}`;
 }
 
-function resolveSpecFilePath(worktreePath: string, filePath: string): string {
-  const resolved = path.resolve(worktreePath, filePath);
-  const root = path.resolve(worktreePath);
-  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
-    throw new AutopodError(
-      `Spec file path escapes worktree: ${filePath}`,
-      'INVALID_SPEC_FILE_PATH',
-      400,
-    );
-  }
-  return resolved;
-}
-
-const SPEC_CONTEXT_CONTAINER_DIR = '/autopod/spec';
-const POD_ARTIFACTS_CONTAINER_DIR = '/autopod/artifacts';
-
-function dataDir(): string {
-  return process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
-}
-
-function safeFsSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]/g, '_') || 'unknown';
-}
-
-async function materializeSpecContextFiles(
-  podId: string,
-  specContextFiles: readonly SpecFile[] | null | undefined,
-  logger: Logger,
-): Promise<string | null> {
-  if (!specContextFiles || specContextFiles.length === 0) return null;
-
-  const contextRoot = path.join(dataDir(), 'spec-context', safeFsSegment(podId));
-  await rm(contextRoot, { recursive: true, force: true });
-  await mkdir(contextRoot, { recursive: true });
-
-  for (const file of specContextFiles) {
-    const targetPath = resolveSpecFilePath(contextRoot, file.path);
-    await mkdir(path.dirname(targetPath), { recursive: true });
-    await writeFile(targetPath, file.content, 'utf8');
-  }
-
-  logger.info(
-    { podId, contextRoot, fileCount: specContextFiles.length },
-    'Spec context files materialized',
-  );
-  return contextRoot;
-}
-
-async function ensureSeriesArtifactsDir(pod: Pod, logger: Logger): Promise<string | null> {
-  if (!pod.seriesId) return null;
-
-  const artifactsRoot = path.join(dataDir(), 'pod-artifacts', safeFsSegment(pod.seriesId));
-  const handoversRoot = path.join(artifactsRoot, 'handovers');
-  await mkdir(handoversRoot, { recursive: true });
-  await chmod(artifactsRoot, 0o777).catch(() => {});
-  await chmod(handoversRoot, 0o777).catch(() => {});
-  logger.debug({ podId: pod.id, seriesId: pod.seriesId, artifactsRoot }, 'Series artifacts ready');
-  return artifactsRoot;
-}
-
-async function materializeSpecFiles(
-  worktreePath: string,
-  specFiles: readonly SpecFile[] | null | undefined,
-  worktreeManager: WorktreeManager,
-  logger: Logger,
-): Promise<string | null> {
-  if (!specFiles || specFiles.length === 0) return null;
-
-  const changedPaths: string[] = [];
-  for (const file of specFiles) {
-    const targetPath = resolveSpecFilePath(worktreePath, file.path);
-    let existing: string | null = null;
-    try {
-      existing = await readFile(targetPath, 'utf8');
-    } catch {
-      existing = null;
-    }
-    if (existing === file.content) continue;
-    await mkdir(path.dirname(targetPath), { recursive: true });
-    await writeFile(targetPath, file.content, 'utf8');
-    changedPaths.push(file.path);
-  }
-
-  if (changedPaths.length > 0) {
-    await worktreeManager.commitFiles(worktreePath, changedPaths, 'docs(spec): add pod spec files');
-    logger.info(
-      { worktreePath, fileCount: changedPaths.length },
-      'Materialized spec files onto pod branch',
-    );
-  }
-
-  try {
-    const { stdout } = await execFileAsync('git', ['-C', worktreePath, 'rev-parse', 'HEAD']);
-    return stdout.trim() || null;
-  } catch (err) {
-    logger.warn({ err, worktreePath }, 'Failed to resolve HEAD after spec materialization');
-    return null;
-  }
-}
-
 // Approval snapshots exist to keep git-ignored reports after the sandbox is deleted.
 // Git history is published separately and dependency/build caches are regenerable;
 // archiving them through the sandbox data plane overran the approval copy budget.
@@ -473,16 +334,6 @@ const APPROVAL_SNAPSHOT_EXCLUDES = [
   '.mypy_cache',
   '.gradle',
 ];
-
-/** Normalize a JWT preferred_username into something that looks like an email.
- * Dev mode emits `developer` (no `@`); git accepts it but commits look weird.
- * Real Entra tokens already carry a UPN-shaped email here. */
-function normalizeCommitEmail(email: string | null | undefined): string | null {
-  if (!email) return null;
-  const trimmed = email.trim();
-  if (!trimmed) return null;
-  return trimmed.includes('@') ? trimmed : `${trimmed}@autopod.local`;
-}
 
 /** Allocate a random host port in range 10000–48999 for container port mapping.
  * Capped at 48999 to avoid the Windows/Hyper-V ephemeral port reservation range (49152+). */
@@ -505,108 +356,6 @@ function nativePreviewEmails(): string[] {
     .split(/[,\s]+/)
     .map((email) => email.trim())
     .filter(Boolean);
-}
-
-/** Path to the agent shim script inside every pod container. */
-export const AGENT_SHIM_PATH = '/run/autopod/agent-shim.sh';
-export const AGENT_ENV_PATH = '/run/autopod/agent-env.sh';
-
-/**
- * Shim script written to every pod container before the agent exec.
- * Reads *_FILE env vars and exports the real credential values so that SDKs
- * without native _FILE support still get the secret — but the raw value is
- * never present in the exec's initial environment visible to `docker inspect`
- * or a process-level env dump of the container's main entrypoint.
- */
-// NOTE: this is a JS template literal. Bare `${...}` gets interpolated by JS at
-// compile time, so every occurrence the shell needs to see literally must be
-// escaped (`\${...}`). Likewise, when the shell needs to see a literal
-// backslash before a `$`, the source needs `\\` (one for JS, one survives).
-export const AGENT_SHIM_SCRIPT = `#!/bin/sh
-# Autopod agent shim — expand *_FILE env vars before exec-ing the agent
-if [ -f ${AGENT_ENV_PATH} ]; then
-  . ${AGENT_ENV_PATH}
-fi
-
-# Persist the worker PID so daemon restart recovery can terminate the orphaned
-# streaming process before resuming the durable CLI session in this sandbox.
-# Provisioning creates this one user-owned control file. Failure means restart
-# recovery cannot safely quiesce the worker, so do not hide it and start anyway.
-pid_path="\${AUTOPOD_AGENT_PID_PATH:-/run/autopod/agent.pid}"
-printf '%s\n' "$$" > "$pid_path" || {
-  echo 'Autopod could not record the agent PID for restart recovery' >&2
-  exit 1
-}
-
-_read_file_var() {
-  local var_name="$1" file_var="\${1}_FILE"
-  local path
-  eval "path=\\\${$file_var:-}"
-  [ -n "$path" ] && [ -f "$path" ] && export "$var_name=$(cat "$path")" && unset "$file_var"
-}
-_read_file_var ANTHROPIC_API_KEY
-_read_file_var ANTHROPIC_FOUNDRY_API_KEY
-_read_file_var ANTHROPIC_FOUNDRY_AUTH_TOKEN
-_read_file_var OPENAI_API_KEY
-_read_file_var CLAUDE_CODE_OAUTH_TOKEN
-_read_file_var COPILOT_GITHUB_TOKEN
-_read_file_var VSS_NUGET_EXTERNAL_FEED_ENDPOINTS
-exec "$@"
-`;
-
-function buildAgentEnvFile(env: Record<string, string>): string {
-  return `${Object.entries(env)
-    .map(([key, value]) => {
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-        throw new Error(`Invalid agent env var name: ${key}`);
-      }
-      return `export ${key}=${shellQuote(value)}`;
-    })
-    .join('\n')}\n`;
-}
-
-const SANDBOX_AGENT_HOME_DIRS = ['.claude', '.autopod', '.codex', '.config'].map(
-  (dir) => `${CONTAINER_HOME_DIR}/${dir}`,
-);
-
-const SANDBOX_AGENT_HOME_FILES = [`${CONTAINER_HOME_DIR}/.claude.json`];
-
-async function repairSandboxAgentHomeOwnership(
-  containerManager: ContainerManager,
-  containerId: string,
-  executionTarget: ExecutionTarget,
-): Promise<void> {
-  if (executionTarget !== 'sandbox') return;
-
-  const quotedDirs = SANDBOX_AGENT_HOME_DIRS.map(shellQuote).join(' ');
-  const quotedFiles = SANDBOX_AGENT_HOME_FILES.map(shellQuote).join(' ');
-  const script = [
-    'set -eu',
-    `mkdir -p ${quotedDirs}`,
-    `chown -R autopod:autopod ${quotedDirs}`,
-    `for f in ${quotedFiles}; do [ ! -e "$f" ] || chown autopod:autopod "$f"; done`,
-  ].join(' && ');
-
-  let result: { stdout: string; stderr: string; exitCode: number };
-  try {
-    result = await containerManager.execInContainer(containerId, ['sh', '-c', script], {
-      timeout: 10_000,
-      user: 'root',
-    });
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    if (err instanceof SandboxInfrastructureError) {
-      err.message = `Sandbox startup could not repair agent home ownership: ${detail}`;
-      throw err;
-    }
-    throw new Error(`Sandbox startup could not repair agent home ownership: ${detail}`);
-  }
-
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `Sandbox startup could not repair agent home ownership (exit ${result.exitCode}): ${result.stderr.slice(0, 500)}`,
-    );
-  }
 }
 
 /**
@@ -782,108 +531,6 @@ const PREVIEW_AUTO_STOP_MS = 10 * 60 * 1000;
 
 const execFileAsync = promisify(execFile);
 
-// Compact Python script that performs a real MCP JSON-RPC initialize handshake
-// against a stdio MCP server. Called at pod startup to verify each code-intel
-// server actually starts and responds — not just that the binary exists.
-// Usage: python3 <script> <command> [arg...]
-// Exit 0 = server responded with a valid result; Exit 1 = timeout or error.
-const MCP_INIT_PROBE_SCRIPT = `import subprocess,json,sys,select as sel
-if len(sys.argv)<2:sys.exit(1)
-cmd=sys.argv[1]
-msg=json.dumps({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"1.0"}}})
-frame=b"Content-Length: "+str(len(msg.encode())).encode()+b"\\r\\n\\r\\n"+msg.encode()
-p=subprocess.Popen(sys.argv[1:],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-try:
-  p.stdin.write(frame);p.stdin.flush()
-  h=b""
-  while b"\\r\\n\\r\\n" not in h:
-    if not sel.select([p.stdout],[],[],50)[0]:print(f"timeout: {cmd} did not respond to initialize",file=sys.stderr);sys.exit(1)
-    c=p.stdout.read(1)
-    if not c:print(f"eof: {cmd} closed stdout",file=sys.stderr);sys.exit(1)
-    h+=c
-  n=int(h.split(b"Content-Length: ")[1].split(b"\\r\\n")[0])
-  b=b""
-  while len(b)<n:
-    if not sel.select([p.stdout],[],[],50)[0]:print(f"timeout: {cmd} did not send body",file=sys.stderr);sys.exit(1)
-    chunk=p.stdout.read(n-len(b))
-    if not chunk:print(f"eof: {cmd} closed during body",file=sys.stderr);sys.exit(1)
-    b+=chunk
-  r=json.loads(b)
-  sys.exit(0 if "result" in r else 1)
-finally:
-  p.terminate();p.wait()
-`;
-
-/**
- * Snapshot SHA-256 hashes of every script in `profile.deployment.allowedScripts`
- * read from the bare repo at the base ref. The deploy handler refuses to run a
- * script whose live container content does not hash to its baseline — without
- * this capture the agent could edit a deploy script and immediately invoke it.
- *
- * Glob patterns in `allowedScripts` (single-segment `*`) are expanded against
- * the file list at the base ref. Returns `null` when no patterns are
- * configured — caller treats that as "no baseline enforcement".
- */
-async function captureDeployBaselineHashes(
-  bareRepoPath: string,
-  baseRef: string,
-  allowedScripts: string[] | undefined,
-  log: Logger,
-): Promise<Record<string, string> | null> {
-  if (!allowedScripts || allowedScripts.length === 0) return null;
-
-  let files: string[];
-  try {
-    const { stdout } = await execFileAsync('git', [
-      '--git-dir',
-      bareRepoPath,
-      'ls-tree',
-      '-r',
-      '--name-only',
-      baseRef,
-    ]);
-    files = stdout.split('\n').filter((l) => l.length > 0);
-  } catch (err) {
-    log.warn(
-      { err: err instanceof Error ? err.message : String(err), bareRepoPath, baseRef },
-      'deploy baseline: could not list files at base ref',
-    );
-    return {};
-  }
-
-  const matches = new Set<string>();
-  for (const pattern of allowedScripts) {
-    if (!pattern.includes('*')) {
-      if (files.includes(pattern)) matches.add(pattern);
-      continue;
-    }
-    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`^${escaped.replace(/\*/g, '[^/]*')}$`);
-    for (const f of files) {
-      if (re.test(f)) matches.add(f);
-    }
-  }
-
-  const hashes: Record<string, string> = {};
-  for (const scriptPath of matches) {
-    try {
-      const { stdout } = await execFileAsync(
-        'git',
-        ['--git-dir', bareRepoPath, 'show', `${baseRef}:${scriptPath}`],
-        { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 },
-      );
-      hashes[scriptPath] = createHash('sha256').update(stdout, 'utf8').digest('hex');
-    } catch (err) {
-      log.warn(
-        { err: err instanceof Error ? err.message : String(err), scriptPath, baseRef },
-        'deploy baseline: could not read script at base ref',
-      );
-    }
-  }
-
-  return hashes;
-}
-
 /**
  * Parses a human's response to a validation_override escalation.
  * Supports:
@@ -967,67 +614,6 @@ function resolvePrBaseBranch(pod: Pod, profile: PodExecutionSettings): string {
   if (candidate !== pod.branch) return candidate;
   if (fallback !== pod.branch) return fallback;
   return pod.branch === 'main' ? candidate : 'main';
-}
-
-function resolvePodSpawnImage(
-  profile: PodExecutionSettings,
-  template: string,
-  executionTarget: ExecutionTarget,
-): string {
-  if (executionTarget !== 'sandbox') {
-    return profile.warmImageTag ?? getBaseImage(template);
-  }
-
-  if (!profile.warmImageTag) {
-    throw new AutopodError(
-      `Sandbox execution for profile "${profile.name}" requires a warm image. Run \`ap profile warm <profile> --rebuild\` with ACR_REGISTRY_URL configured first.`,
-      'SANDBOX_WARM_IMAGE_REQUIRED',
-      400,
-    );
-  }
-
-  if (!isAcrQualifiedImage(profile.warmImageTag)) {
-    throw new AutopodError(
-      `Sandbox warm image for profile "${profile.name}" must be an ACR-qualified image tag, got "${profile.warmImageTag}". Rebuild the warm image with ACR_REGISTRY_URL so profile.warmImageTag is stored as <registry>.azurecr.io/...`,
-      'SANDBOX_WARM_IMAGE_REQUIRED',
-      400,
-    );
-  }
-
-  return profile.warmImageTag;
-}
-
-function isAcrQualifiedImage(image: string): boolean {
-  const [registry = ''] = image.split('/');
-  return image.includes('/') && registry.endsWith('.azurecr.io');
-}
-
-async function verifySandboxWarmImageAccess(
-  profile: PodExecutionSettings,
-  image: string,
-  warmImageExists?: (tag: string) => Promise<boolean>,
-): Promise<void> {
-  if (!warmImageExists) return;
-
-  let exists = false;
-  try {
-    exists = await warmImageExists(image);
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    throw new AutopodError(
-      `Could not verify sandbox warm image "${image}" for profile "${profile.name}" in ACR: ${detail}`,
-      'SANDBOX_WARM_IMAGE_INACCESSIBLE',
-      400,
-    );
-  }
-
-  if (!exists) {
-    throw new AutopodError(
-      `Sandbox warm image "${image}" for profile "${profile.name}" was not found in the configured ACR or is not accessible to the daemon identity.`,
-      'SANDBOX_WARM_IMAGE_INACCESSIBLE',
-      400,
-    );
-  }
 }
 
 function isSinglePrSeriesPod(pod: Pick<Pod, 'prMode' | 'seriesId'>): boolean {
@@ -1683,6 +1269,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     safetyEventsRepo,
     qualityScoreRepo,
   } = deps;
+  const { materializeSpecFiles, captureDeployBaselineHashes } =
+    createProvisioningMaterials(execFileAsync);
+  const {
+    assertSandboxAgentStreamingExecSupported,
+    syncSandboxRuntimeSessionState,
+    syncSandboxSeriesHandover,
+  } = createProvisioningSandboxState(deps, { podRepo, containerManagerFactory, logger });
+  const { installGhBinary, installAzViaPip } = createProvisioningToolInstallation({ logger });
+
   function executionForPod(pod: Pod): PodExecutionSettings {
     const resolved = deps.launchConfiguration?.read(pod.id);
     if (resolved && deps.launchConfiguration)
@@ -2000,26 +1595,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return (await deps.githubAuth?.resolveCredential())?.token;
   }
 
-  function assertSandboxAgentStreamingExecSupported(
-    profile: Pick<PodExecutionSettings, 'name'>,
-    executionTarget: ExecutionTarget,
-    options: PodOptions,
-  ): void {
-    if (executionTarget !== 'sandbox' || options.agentMode === 'interactive') return;
-
-    const cm = containerManagerFactory.get('sandbox');
-    if (cm.supportsStreamingExec === false) {
-      const message = [
-        `Sandbox execution for profile "${profile.name}" cannot run agent pods because the`,
-        'configured sandbox backend does not support native streaming exec.',
-        'Azure Sandboxes currently expose only buffered exec, which is safe for short commands',
-        'but not Claude/Codex/Copilot runtimes. Use executionTarget=local for agent pods',
-        'until sandbox streaming is available.',
-      ].join(' ');
-      throw new AutopodError(message, 'UNSUPPORTED_SANDBOX_STREAMING_EXEC', 400);
-    }
-  }
-
   const { primeRuntimeForResume } = createRuntimeResumeContext(deps, {
     executionForPod,
     executionCredentialsFor,
@@ -2028,92 +1603,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     buildCodeIntelligenceServers,
     resolvedReasoningEffort,
   });
-
-  async function syncSandboxRuntimeSessionState(pod: Pod, ownsRun: () => boolean): Promise<void> {
-    const podId = pod.id;
-    if (pod.executionTarget !== 'sandbox' || !pod.containerId) return;
-
-    const statePaths =
-      pod.runtime === 'claude'
-        ? {
-            container: `${CONTAINER_HOME_DIR}/.claude/projects`,
-            host: claudeStateDirForPod(podId),
-          }
-        : pod.runtime === 'codex'
-          ? {
-              container: `${CONTAINER_HOME_DIR}/.codex/sessions`,
-              host: codexStateDirForPod(podId),
-            }
-          : null;
-    if (!statePaths) return;
-
-    const controller = new AbortController();
-    const assertCurrent = () => {
-      if (!ownsRun()) throw new ProviderAttemptSupersededError();
-    };
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const cm = containerManagerFactory.get(pod.executionTarget);
-      const timeoutMs = deps.sandboxRuntimeSessionSyncTimeoutMs ?? 30_000;
-      await Promise.race([
-        cm.extractDirectoryFromContainer(
-          pod.containerId,
-          statePaths.container,
-          statePaths.host,
-          undefined,
-          { signal: controller.signal, assertCurrent },
-        ),
-        new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => {
-            const error = new Error(
-              `Sandbox runtime session state sync timed out after ${timeoutMs}ms`,
-            );
-            controller.abort(error);
-            reject(error);
-          }, timeoutMs);
-        }),
-      ]);
-    } catch (err) {
-      logger.warn(
-        { err, podId, runtime: pod.runtime },
-        'Failed to sync sandbox runtime session state — future recovery may restart fresh',
-      );
-    } finally {
-      controller.abort();
-      if (timer) clearTimeout(timer);
-    }
-  }
-
-  async function syncSandboxSeriesHandover(podId: string): Promise<void> {
-    const pod = podRepo.getOrThrow(podId);
-    if (pod.executionTarget !== 'sandbox' || !pod.seriesId || !pod.containerId) return;
-
-    const handoverFileName = `${safeFsSegment(pod.id)}.md`;
-    const containerPath = `${POD_ARTIFACTS_CONTAINER_DIR}/handovers/${handoverFileName}`;
-    const hostPath = path.join(
-      dataDir(),
-      'pod-artifacts',
-      safeFsSegment(pod.seriesId),
-      'handovers',
-      handoverFileName,
-    );
-
-    const cm = containerManagerFactory.get(pod.executionTarget);
-    let content: string;
-    try {
-      content = await cm.readFile(pod.containerId, containerPath);
-    } catch (err) {
-      logger.warn(
-        { err, podId, seriesId: pod.seriesId, containerPath },
-        'Sandbox series handover missing or unreadable — continuing without it',
-      );
-      return;
-    }
-
-    await mkdir(path.dirname(hostPath), { recursive: true });
-    await writeFile(hostPath, content, 'utf8');
-    logger.info({ podId, seriesId: pod.seriesId, hostPath }, 'Sandbox series handover synced');
-  }
 
   /**
    * Sequential merge queue keyed by `repo+baseBranch`.
@@ -4160,66 +3649,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
   }
 
-  // Download the gh CLI binary from GitHub releases. No apt, no GPG keys —
-  // it's a single Go binary. Throws on failure.
-  async function installGhBinary(
-    cm: ContainerManager,
-    containerId: string,
-    podId: string,
-  ): Promise<void> {
-    logger.info({ podId, containerId }, 'Installing gh CLI from github.com/cli/cli/releases');
-    const result = await cm.execInContainer(
-      containerId,
-      [
-        'sh',
-        '-c',
-        [
-          'ARCH=$(uname -m | sed "s/x86_64/amd64/;s/aarch64/arm64/")',
-          'VERSION=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest' +
-            " | node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).tag_name.slice(1)))\")",
-          'curl -fsSL "https://github.com/cli/cli/releases/download/v${VERSION}/gh_${VERSION}_linux_${ARCH}.tar.gz" | tar xz -C /tmp',
-          'mv /tmp/gh_${VERSION}_linux_${ARCH}/bin/gh /usr/local/bin/gh',
-          'chmod +x /usr/local/bin/gh',
-        ].join(' && '),
-      ],
-      { timeout: 120_000, user: 'root' },
-    );
-    if (result.exitCode !== 0) {
-      const detail = (result.stdout + result.stderr).slice(-300).trimStart();
-      throw new Error(`gh binary install failed (exit ${result.exitCode}): ${detail}`);
-    }
-  }
-
-  // Install az CLI via pip. Uses get-pip.py because Debian/Ubuntu strip ensurepip from python3
-  // (you'd normally need apt-get install python3-pip, but apt is broken on ARM Noble).
-  // Throws on failure.
-  async function installAzViaPip(
-    cm: ContainerManager,
-    containerId: string,
-    podId: string,
-  ): Promise<void> {
-    logger.info({ podId, containerId }, 'Installing az CLI via pip (bootstrap.pypa.io get-pip.py)');
-    const result = await cm.execInContainer(
-      containerId,
-      [
-        'sh',
-        '-c',
-        [
-          // Bootstrap pip using get-pip.py — the canonical workaround when ensurepip is stripped
-          'curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py',
-          'python3 /tmp/get-pip.py --quiet --break-system-packages 2>&1',
-          // Now install azure-cli
-          'python3 -m pip install --quiet --break-system-packages azure-cli 2>&1',
-        ].join(' && '),
-      ],
-      { timeout: 300_000, user: 'root' },
-    );
-    if (result.exitCode !== 0) {
-      const detail = (result.stdout + result.stderr).slice(-300).trimStart();
-      throw new Error(`pip install azure-cli failed (exit ${result.exitCode}): ${detail}`);
-    }
-  }
-
   function emitActivityStatus(podId: string, message: string): void {
     eventBus.emit({
       type: 'pod.agent_activity',
@@ -5042,6 +4471,48 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     claimValidation,
     maybeTriggerDependents,
   });
+  const provisioningWorkflow = createProvisioningWorkflow(deps, {
+    materializeSpecFiles,
+    captureDeployBaselineHashes,
+    podRepo,
+    profileStore,
+    providerAccountStore,
+    providerCatalog,
+    containerManagerFactory,
+    worktreeManager,
+    logger,
+    repoScanner,
+    executionCredentialsFor,
+    resolveGitCredential,
+    assertSandboxAgentStreamingExecSupported,
+    destroyPodNetwork,
+    stopSandboxPreviewProxy,
+    killSidecarsForPod,
+    closeProviderAttempt,
+    resolveEffectiveBoundProfile,
+    openProviderTargetAttempt,
+    persistRuntimeCredentialsForPod,
+    syncWorkspaceBack,
+    transition,
+    allocateHostPort,
+    CONTAINER_APP_PORT,
+    execFileAsync,
+    networkManager,
+    sidecarManager,
+    mcpBaseUrl,
+    injectionsForPod,
+    startHaproxyDenyReceiver,
+    hostnameFromUrl,
+    portFromUrl,
+    buildPrFixTask,
+    fixFeedbackRepo,
+    escalationRepo,
+    validationRepo,
+    progressEventRepo,
+    safetyEventsRepo,
+    rememberMaxCredentialLineage,
+    emitActivityStatus,
+  });
 
   return {
     getLaunchConfiguration(podId: string): EffectiveLaunchConfig | null {
@@ -5619,2149 +5090,41 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       };
 
       try {
-        if (launchConfig && deps.launchConfiguration)
-          await deps.launchConfiguration.assertCurrentCapabilities(launchConfig);
-        const retryNotBefore = pod.infrastructureFailure?.retryNotBefore;
-        if (
-          !podRepo.sandboxStartupRetries &&
-          pod.infrastructureFailure?.source === 'azure-sandbox' &&
-          pod.infrastructureFailure.recoveryDisposition === 'automatic_retry_scheduled' &&
-          retryNotBefore
-        ) {
-          if (Date.parse(retryNotBefore) > Date.now())
-            emitStatus('Waiting for Azure sandbox recovery cooldown…');
-          await waitForRetryBackoff(
-            retryNotBefore,
-            deps.sandboxInfrastructureRecoveryDelay ?? sleep,
-            assertStartupCurrent,
-          );
-          assertStartupCurrent();
-          pod = podRepo.getOrThrow(podId);
-          if (pod.status !== 'queued') return;
-        }
-        // Fetched inside the try so a missing profile (or broken extends chain) is caught
-        // and transitions the pod to 'failed' instead of orphaning it as 'queued' forever —
-        // the queue's finally block frees activeIds, and without a status update nothing
-        // ever re-enqueues the pod.
-        let profile = resolveEffectiveBoundProfile(pod);
-        let queuedProviderAttempt = deps.providerAttemptRepo?.getActive(podId);
-        let reasoningEffort = resolvedReasoningEffort(
-          profile,
-          pod.profileSnapshot as unknown as Record<string, unknown> | null,
-        );
-        profile = { ...profile, reasoningEffort };
-
-        // For handoff pods the interactive container is still running. Persist
-        // the human's work before stopping that container; if we cannot prove the
-        // work is durable, park the pod and keep the live workspace available.
-        if (pod.status === 'handoff' && pod.containerId && pod.worktreePath) {
-          const cm = containerManagerFactory.get(pod.executionTarget);
-          const interactiveRecoveryOptions: PodOptions = {
-            agentMode: 'interactive',
-            output: 'branch',
-            validate: false,
-            promotable: true,
-          };
-          const blockHandoff = (reason: string, err?: unknown): void => {
-            logger.warn({ err, podId }, `Workspace handoff blocked: ${reason}`);
-            emitStatus(`Workspace handoff blocked: ${reason}`);
-            const current = podRepo.getOrThrow(podId);
-            if (current.status === 'handoff') {
-              transition(current, 'failed', {
-                lastCorrectionMessage: `Workspace handoff failed: ${reason}`,
-                options: interactiveRecoveryOptions,
-                skipAgent: false,
-              });
-            }
-          };
-
-          try {
-            await syncWorkspaceBack(
-              pod.containerId,
-              pod.worktreePath,
-              cm,
-              pod.id,
-              pod.executionTarget,
-            );
-          } catch (err) {
-            blockHandoff('could not sync the interactive workspace back to the host worktree', err);
-            return;
-          }
-
-          let hasDurableHandoffDelta = false;
-          try {
-            const committed = await worktreeManager.commitPendingChanges(
-              pod.worktreePath,
-              'chore: sync human session',
-              { maxDeletions: 100 },
-            );
-            if (committed) {
-              logger.info({ podId }, 'Auto-committed human session changes during handoff');
-            }
-
-            const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
-            const stats = await worktreeManager.getDiffStats(
-              pod.worktreePath,
-              baseBranch,
-              pod.startCommitSha ?? undefined,
-            );
-            hasDurableHandoffDelta =
-              stats.filesChanged > 0 || stats.linesAdded > 0 || stats.linesRemoved > 0;
-          } catch (err) {
-            blockHandoff('could not commit or verify the synced workspace changes', err);
-            return;
-          }
-
-          const hasInstructions =
-            !!pod.handoffInstructions && pod.handoffInstructions.trim().length > 0;
-          if (!hasDurableHandoffDelta && (pod.skipAgent || !hasInstructions)) {
-            blockHandoff('no committed workspace changes were found after sync');
-            return;
-          }
-
-          // Recover runtime credentials before tearing down the workspace
-          // container. MAX rotates refresh tokens; Codex may update auth.json.
-          await persistRuntimeCredentialsForPod(
-            podId,
-            'Failed to persist runtime credentials before handoff stop — auth may be stale',
-          );
-          try {
-            await stopSandboxPreviewProxy(podId);
-            await cm.stop(pod.containerId);
-            if (launchConfig) {
-              assertStartupCurrent();
-              const stopped = await cm.getStatus(pod.containerId);
-              if (stopped !== 'stopped' && stopped !== 'deleted')
-                throw new Error('Workspace termination is unconfirmed');
-              await cm.kill(pod.containerId);
-              await killSidecarsForPod(podId, true, assertStartupCurrent);
-              await destroyPodNetwork(podId, true);
-              assertStartupCurrent();
-            }
-          } catch (err) {
-            logger.warn({ err, podId }, 'Failed to stop interactive container during handoff');
-            if (launchConfig) {
-              blockHandoff('workspace termination or resource cleanup is unconfirmed', err);
-              return;
-            }
-          }
-          podRepo.update(podId, { containerId: null });
-          pod = podRepo.getOrThrow(podId);
-
-          // Compose the agent-facing handoff context now that the worktree
-          // reflects the human's in-flight work. Reads the human's typed
-          // instructions (captured by promoteToAuto) plus the live commit log
-          // and diff stats; the system-instructions-generator renders this as
-          // the `## Handoff` section in the agent's CLAUDE.md.
-          //
-          // Skip when `skipAgent` is set — the agent will never read this.
-          if (!pod.skipAgent) {
-            try {
-              const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
-              const [stats, commitLog] = await Promise.all([
-                worktreeManager.getDiffStats(
-                  pod.worktreePath,
-                  baseBranch,
-                  pod.startCommitSha ?? undefined,
-                ),
-                worktreeManager.getCommitLog(
-                  pod.worktreePath,
-                  baseBranch,
-                  30,
-                  pod.startCommitSha ?? undefined,
-                ),
-              ]);
-
-              const hasInstructions =
-                !!pod.handoffInstructions && pod.handoffInstructions.trim().length > 0;
-              const hasWork =
-                stats.filesChanged > 0 || stats.linesAdded > 0 || stats.linesRemoved > 0;
-
-              if (hasInstructions || hasWork) {
-                const sections: string[] = [
-                  "You're picking up after a human-driven interactive session on this branch. " +
-                    'Treat the human as a collaborator, not noise — their commits encode intent, ' +
-                    'and their instructions (if any) take precedence over inferences from the diff alone.',
-                  '',
-                  // Three clearly-separated parts so the agent can tell the human's
-                  // authoritative handoff apart from the machine-generated activity
-                  // summary. Per the documented replacement rule, "Handoff
-                  // instructions" is the initial handoff captured at creation (the
-                  // Pi → workspace flow) UNLESS a promotion-time `--instructions`
-                  // correction replaced it in `promoteToAuto` — either way it is the
-                  // single authoritative instruction, never a blend of both.
-                  '### Handoff instructions',
-                  hasInstructions
-                    ? (pod.handoffInstructions as string)
-                    : '(none provided — infer the remaining work from the session summary and original brief)',
-                  '',
-                  '### Session summary',
-                  hasWork
-                    ? `${stats.filesChanged} file(s) changed, +${stats.linesAdded}/-${stats.linesRemoved} lines.`
-                    : 'No diff against base — the human may have explored without committing changes yet.',
-                ];
-
-                if (commitLog && commitLog.length > 0) {
-                  sections.push('', '### Commit log', '```', commitLog, '```');
-                }
-
-                const handoffContext = sections.join('\n');
-                podRepo.update(podId, { handoffContext });
-                pod = podRepo.getOrThrow(podId);
-                logger.info(
-                  {
-                    podId,
-                    hasInstructions,
-                    filesChanged: stats.filesChanged,
-                    contextLength: handoffContext.length,
-                  },
-                  'Composed handoff context for promoted pod',
-                );
-              }
-            } catch (err) {
-              logger.warn(
-                { err, podId },
-                'Failed to compose handoff context — agent will run without it',
-              );
-            }
-          }
-        }
-
-        if (launchConfig && pod.status === 'handoff' && !pod.containerId) {
-          const configuration = deps.launchConfiguration;
-          if (!configuration?.activateWorker)
-            throw new AutopodError(
-              'Frozen worker activation is unavailable',
-              'CONFIG_EXECUTION_UNAVAILABLE',
-              503,
-            );
-          const activated = await configuration.activateWorker(
-            podId,
-            lifecycleGeneration,
-            (config) => {
-              closeProviderAttempt(podId, 'completed');
-              const account = config.agentAccounts[config.ai.main.providerAccountId];
-              if (!account)
-                throw new AutopodError(
-                  'Worker account identity is missing',
-                  'SNAPSHOT_CORRUPT',
-                  500,
-                );
-              podRepo.update(podId, {
-                profileSnapshot: null,
-                runtime: config.ai.main.runtime,
-                model: config.ai.main.model,
-                providerAccountIdSnapshot: account.accountId,
-                providerIdSnapshot: account.providerId,
-                executionTarget: config.execution.target,
-                requireSidecars: Object.keys(config.resolvedExecution.sidecars),
-                maxValidationAttempts: config.workflow.maxValidationAttempts,
-                skipValidation: config.workflow.validationPhases.length === 0,
-                networkPolicyResolved: null,
-                tokenBudget:
-                  config.workflow.tokenBudget === null
-                    ? pod.tokenBudget
-                    : pod.tokenBudget === null
-                      ? config.workflow.tokenBudget
-                      : Math.min(pod.tokenBudget, config.workflow.tokenBudget),
-                claudeSessionId: null,
-                codexSessionId: null,
-                piSessionId: null,
-                autoApprove: !pod.skipAgent && config.workflow.completion === 'merge',
-              });
-              if (deps.providerAttemptRepo)
-                openProviderTargetAttempt(podRepo.getOrThrow(podId), config.ai.main);
+        const provisioning = await provisioningWorkflow.preparePodExecution({
+          podId,
+          pod,
+          launchConfig,
+          lifecycleGeneration,
+          run: {
+            get startupAdmission() {
+              return startupAdmission;
             },
-          );
-          if (activated) {
-            pod = podRepo.getOrThrow(podId);
-            launchConfig = configuration.read(podId);
-            profile = resolveEffectiveBoundProfile(pod);
-            queuedProviderAttempt = deps.providerAttemptRepo?.getActive(podId);
-            reasoningEffort = resolvedReasoningEffort(profile);
-            profile = { ...profile, reasoningEffort };
-          }
-        }
-
-        // Detect recovery mode before any provisioning work
-        const isRecovery = !!pod.recoveryWorktreePath;
-        const isInfrastructureRecovery =
-          pod.infrastructureFailure?.source === 'azure-sandbox' &&
-          pod.infrastructureFailure.recoveryDisposition === 'automatic_retry_scheduled';
-        const isRework = isRecovery && !!pod.reworkReason;
-        const isFreshContainerValidationOnly =
-          isRecovery && pod.skipAgent && pod.status === 'queued';
-
-        // Fresh provisioning gets a fresh worktree, so any prior deletion-guard
-        // trip is moot. (Recovery reuses the existing worktree — leave the flag
-        // intact; recoverWorktree() owns clearing it on that path.)
-        const provisioningUpdates: Partial<PodUpdates> = {
-          startedAt: new Date().toISOString(),
-          failureReason: null,
-        };
-        if (!isRecovery && pod.worktreeCompromised) {
-          provisioningUpdates.worktreeCompromised = false;
-        }
-
-        const providerPreflight = resolveProviderPreflight(profile, pod.runtime, pod.model, {
-          profileStore,
-          providerAccountStore,
-          manifest: providerCatalog,
-          ...(queuedProviderAttempt?.providerAccountId || pod.providerIdSnapshot
-            ? {
-                expectedBinding: {
-                  accountId:
-                    queuedProviderAttempt?.providerAccountId ?? pod.providerAccountIdSnapshot,
-                  providerId: queuedProviderAttempt?.providerAccountId
-                    ? (providerAccountStore?.get(queuedProviderAttempt.providerAccountId)
-                        .provider ?? pod.providerIdSnapshot)
-                    : pod.providerIdSnapshot,
-                },
-              }
-            : {}),
-        });
-        assertSandboxAgentStreamingExecSupported(profile, pod.executionTarget, pod.options);
-
-        // Worktree is optional — artifact-mode profiles may have no repoUrl.
-        let worktreePath: string | null = null;
-        let bareRepoPath: string | null = null;
-
-        if (profile.repoUrl) {
-          // Validate recovery worktree is still a usable git directory.
-          // It may have been cleaned up by another pod's kill (e.g. shared worktree path).
-          let recoveryViable = false;
-          if (isRecovery && pod.recoveryWorktreePath) {
-            try {
-              const gitlinkPath = path.join(pod.recoveryWorktreePath, '.git');
-              await access(gitlinkPath);
-              // Also verify the bare-repo worktree metadata directory still exists.
-              // `git worktree prune` can remove it while the on-disk directory survives,
-              // leaving the worktree in a broken state where the container gitdir repointing
-              // script would fail trying to write to a non-existent path.
-              const gitlinkContent = await readFile(gitlinkPath, 'utf8');
-              const bareWorktreeDir = path.resolve(
-                pod.recoveryWorktreePath,
-                gitlinkContent.trim().replace(/^gitdir:\s*/, ''),
-              );
-              await access(bareWorktreeDir);
-              recoveryViable = true;
-            } catch {
-              logger.warn(
-                { podId, worktreePath: pod.recoveryWorktreePath },
-                'Recovery worktree missing or bare-repo metadata gone — falling back to fresh worktree',
-              );
-              podRepo.update(podId, { recoveryWorktreePath: null });
-            }
-          }
-
-          if (recoveryViable && pod.recoveryWorktreePath) {
-            worktreePath = pod.recoveryWorktreePath;
-            bareRepoPath = await deriveBareRepoPath(worktreePath);
-            // Clear recovery flag now that we've captured the path
-            podRepo.update(podId, { recoveryWorktreePath: null });
-            emitStatus('Recovering pod — reusing existing worktree…');
-            logger.info({ podId, worktreePath }, 'Recovery mode: reusing worktree');
-          } else {
-            // Normal path: create worktree
-            emitStatus('Creating worktree…');
-            if (!profile.repoUrl) {
-              throw new AutopodError(
-                `Launch '${profile.name}' has no repository`,
-                'INVALID_PROFILE',
-                400,
-              );
-            }
-            const result = await worktreeManager.create({
-              repoUrl: profile.repoUrl,
-              branch: pod.branch,
-              baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
-              startBranch: pod.startBranch ?? undefined,
-              pat: await resolveGitCredential(profile),
-              sessionId: pod.id,
-            });
-            worktreePath = result.worktreePath;
-            bareRepoPath = result.bareRepoPath;
-            if (pod.infrastructureFailure?.source === 'git-fetch') {
-              // Only clear the incident after create has fetched every required
-              // remote ref and materialized the worktree successfully.
-              podRepo.update(podId, { infrastructureFailure: null });
-              pod = podRepo.getOrThrow(podId);
-            }
-            if (!isRecovery && !pod.skipAgent && pod.options.agentMode !== 'interactive') {
-              emitStatus('Checking contract declarations against fetched base…');
-              const baseEvidence = await worktreeManager.inspectContractBase(
-                worktreePath,
-                pod.baseBranch ?? profile.defaultBranch ?? 'main',
-                pod.contract?.requiredFacts ?? [],
-              );
-              const dispatchEvidence = podRepo.dispatchPreflight?.inspect(
-                podId,
-                pod.lifecycleGeneration,
-                profile.repoUrl,
-                pod.baseBranch ?? profile.defaultBranch ?? 'main',
-                baseEvidence.baseCommitSha,
-              );
-              if (dispatchEvidence?.status === 'review_required')
-                throw new AutopodError(
-                  `Equivalent active or recent work requires review: ${dispatchEvidence.conflicts.map((entry) => entry.podId).join(', ')}. Reconcile the existing execution or create an intentional rerun with a recorded reason.`,
-                  'EQUIVALENT_WORK_REVIEW_REQUIRED',
-                  409,
-                );
-            }
-            const materializedStartSha = await materializeSpecFiles(
-              worktreePath,
-              pod.specFiles,
-              worktreeManager,
-              logger,
-            );
-            const startCommitSha = materializedStartSha ?? result.startCommitSha;
-            // Persist startCommitSha now — before the container starts and before
-            // any /diff request can land. Without this, the diff route falls back
-            // to merge-base(HEAD, baseBranch), which for fix pods on a PR branch
-            // surfaces the entire PR's prior sibling commits as the fix pod's
-            // "work". captureStartSha (run later from agent-event consumption)
-            // early-returns when this is already set, and re-tries when this is empty.
-            if (!pod.startCommitSha && startCommitSha) {
-              podRepo.update(podId, { startCommitSha });
-              pod = podRepo.getOrThrow(podId);
-            }
-
-            if (profile.deployment?.enabled && bareRepoPath) {
-              const baseRef = pod.baseBranch ?? profile.defaultBranch ?? 'main';
-              const baselineHashes = await captureDeployBaselineHashes(
-                bareRepoPath,
-                baseRef,
-                profile.deployment.allowedScripts,
-                logger,
-              );
-              if (baselineHashes !== null) {
-                podRepo.update(podId, { deployBaselineHashes: baselineHashes });
-                pod = podRepo.getOrThrow(podId);
-                logger.info(
-                  { podId, count: Object.keys(baselineHashes).length, baseRef },
-                  'deploy baseline hashes captured',
-                );
-              }
-            }
-          }
-        }
-
-        // A fresh repository must be materialized from authenticated remote refs
-        // before entering provisioning. Recovery pods intentionally retain their
-        // surviving worktree semantics and do not pass through this gate.
-        if (pod.executionTarget === 'sandbox' && podRepo.sandboxStartupRetries) {
-          const ledger = podRepo.sandboxStartupRetries;
-          const input = sandboxStartupRetryInput(pod);
-          const admission = ledger.admit(
-            podId,
-            lifecycleGeneration,
-            input.identity,
-            input.bindingHash,
-            [...(deps.sandboxInfrastructureRetryBackoffMs ?? [30_000])],
-          );
-          startupAdmission = { id: admission.id, started: null };
-          if (Date.parse(admission.notBefore) > Date.now())
-            emitStatus('Waiting for task-wide sandbox startup cooldown…');
-          await waitForRetryBackoff(
-            admission.notBefore,
-            deps.sandboxInfrastructureRecoveryDelay ?? sleep,
+            set startupAdmission(value) {
+              startupAdmission = value;
+            },
+            finishStartup,
+            emitStatus,
             assertStartupCurrent,
-          );
-          assertStartupCurrent();
-          ledger.start(admission.id);
-          startupAdmission.started = performance.now();
-        }
-        if (launchConfig?.pim.some((selection) => selection.timing === 'startup')) {
-          if (!deps.launchConfiguration?.pim)
-            throw new AutopodError(
-              'PIM startup integration is unavailable',
-              'PIM_UNAVAILABLE',
-              503,
-            );
-          await deps.launchConfiguration.pim.startup(podId, launchConfig);
-        }
-        pod = transition(podRepo.getOrThrow(podId), 'provisioning', provisioningUpdates);
-        if (!launchConfig)
-          podRepo.update(podId, { profileSnapshot: profileStore.get(pod.profileName) });
-        if (launchConfig) {
-          const credentials = executionCredentialsFor(launchConfig);
-          if (credentials) profile = { ...profile, ...(await credentials.agent(launchConfig)) };
-        }
-        if (!pod.networkPolicyResolved) {
-          const resolvedNetworkPolicy = profile.networkPolicy?.enabled
-            ? (profile.networkPolicy.mode ?? 'restricted')
-            : 'allow-all';
-          podRepo.update(podId, { networkPolicyResolved: resolvedNetworkPolicy });
-        }
-
-        // Security scan: inspect cloned worktree for secrets / PII / prompt
-        // injection before the container starts. The scanner is best-effort —
-        // when not wired (older deployments / tests), we proceed silently.
-        if (repoScanner && worktreePath) {
-          try {
-            const baseRef = `origin/${pod.baseBranch ?? profile.defaultBranch ?? 'main'}`;
-            const isWorkspacePod = pod.options.agentMode === 'interactive';
-            emitStatus('Running security scan…');
-            const scan = await repoScanner.scan('provisioning', {
-              podId,
-              workdir: worktreePath,
-              baseRef,
-              profile,
-              isWorkspacePod,
-            });
-            logger.info(
-              {
-                podId,
-                decision: scan.decision,
-                findings: scan.findings.length,
-                filesScanned: scan.filesScanned,
-                filesSkipped: scan.filesSkipped,
-                scanIncomplete: scan.scanIncomplete,
-              },
-              'Security scan completed',
-            );
-            if (scan.decision === 'block') {
-              throw new AutopodError(
-                `Security scan blocked pod creation (${scan.findings.length} finding(s))`,
-                'SECURITY_SCAN_BLOCKED',
-                400,
-              );
-            }
-            // For warn / escalate, inject the warning section so the agent sees
-            // the flagged regions in its CLAUDE.md. Escalation as a true pause
-            // ships in a later phase — for now the agent gets the warning
-            // and an instruction to ask_human if a flagged region is relevant.
-            if (scan.warningSection) {
-              profile.claudeMdSections = [...profile.claudeMdSections, scan.warningSection];
-            }
-          } catch (err) {
-            if (err instanceof AutopodError) throw err;
-            // Fail open: scanner errors must not block pod creation.
-            logger.warn({ err, podId }, 'Security scan errored — proceeding without scan');
-          }
-        }
-
-        // Select container manager based on execution target
-        const containerManager = containerManagerFactory.get(pod.executionTarget);
-
-        // Compute initial network config — this creates the per-pod bridge
-        // so sidecars can join it. The firewall script built here does NOT
-        // yet include sidecar IPs; we rebuild it below once sidecars are up
-        // and their bridge IPs are known.
-        let networkName: string | undefined;
-        let firewallScript: string | undefined;
-        let initialMergedMcpServers: import('@autopod/shared').InjectedMcpServer[] | undefined;
-        let daemonGatewayIp: string | undefined;
-        let sandboxAllowedHosts: string[] | undefined;
-        const runtimeNetworkPolicy = addRuntimeNetworkDefaults(
-          launchConfig && pod.requireSidecars.length > 0 && !profile.networkPolicy?.enabled
-            ? { enabled: true, mode: 'allow-all', allowedHosts: [] }
-            : profile.networkPolicy,
-          profile,
-          pod.runtime,
-          providerPreflight.manifestProvider,
-          providerPreflight.account,
-        );
-        const runtimeNetworkPolicyMode = runtimeNetworkPolicy?.enabled
-          ? (runtimeNetworkPolicy.mode ?? 'restricted')
-          : undefined;
-        if (pod.executionTarget === 'sandbox' && runtimeNetworkPolicy?.enabled) {
-          initialMergedMcpServers = mergeMcpServers(
-            injectionsForPod(pod).mcpServers,
-            profile.mcpServers,
-          );
-          sandboxAllowedHosts = computeNetworkPolicyAllowlist(
-            runtimeNetworkPolicy,
-            initialMergedMcpServers,
-            hostnameFromUrl(mcpBaseUrl),
-            profile.privateRegistries,
-          );
-        }
-        if (networkManager && pod.executionTarget === 'local' && runtimeNetworkPolicy?.enabled) {
-          initialMergedMcpServers ??= mergeMcpServers(
-            injectionsForPod(pod).mcpServers,
-            profile.mcpServers,
-          );
-          daemonGatewayIp = await networkManager.getGatewayIp(podId);
-          const netConfig = await networkManager.buildNetworkConfig(
-            runtimeNetworkPolicy,
-            initialMergedMcpServers,
-            daemonGatewayIp,
-            profile.privateRegistries,
-            podId,
-            [],
-            [hostnameFromUrl(mcpBaseUrl)],
-            portFromUrl(mcpBaseUrl),
-          );
-          if (netConfig) {
-            networkName = netConfig.networkName;
-            firewallScript = netConfig.firewallScript;
-          }
-        }
-
-        // Allocate a host port for the container's app server
-        const hostPort = allocateHostPort();
-
-        // For .NET templates, cap MSBuild node count to half the available CPUs
-        // (min 2, max 4) to prevent dozens of MSBuild workers from exhausting memory.
-        const template = profile.template ?? 'node22';
-        const isDotnet = template.startsWith('dotnet');
-
-        // Registry authentication is independent from Azure DevOps Git/REST auth.
-        const effectiveRegistryPat = profile.registryPat ?? null;
-        const launchCredentials = launchConfig ? executionCredentialsFor(launchConfig) : undefined;
-        const launchRegistry: LaunchRegistryMaterial | null =
-          launchConfig && launchCredentials
-            ? await launchCredentials.registries(launchConfig)
-            : null;
-
-        // Resolve sidecar specs up front so their env vars (e.g. Dagger's
-        // _EXPERIMENTAL_DAGGER_RUNNER_HOST) can be baked into the pod container
-        // env before spawn. Sidecar validation already ran at createSession, so
-        // a null spec here is a config change between create and spawn; treat
-        // as a hard error rather than silently skipping.
-        const sidecarSpecs: { name: string; spec: import('@autopod/shared').SidecarSpec }[] = [];
-        const sidecarEnv: Record<string, string> = {};
-        for (const name of pod.requireSidecars) {
-          if (launchConfig) {
-            const resolved = launchSidecarSpec(launchConfig, name, randomBytes(32).toString('hex'));
-            sidecarSpecs.push({ name, spec: resolved.spec });
-            Object.assign(sidecarEnv, resolved.podEnv);
-            continue;
-          }
-          const spec = resolveSidecarSpec(profile, name);
-          if (!spec) {
-            throw new AutopodError(
-              `Sidecar '${name}' is no longer available on profile '${profile.name}'`,
-              'INVALID_SIDECAR',
-              409,
-            );
-          }
-          sidecarSpecs.push({ name, spec });
-        }
-        for (const { spec } of sidecarSpecs) {
-          Object.assign(sidecarEnv, sidecarPodEnv(spec));
-        }
-        if (sidecarSpecs.length > 0 && !sidecarManager) {
-          throw new AutopodError(
-            `Pod ${podId} requires sidecars but no SidecarManager is configured on the daemon`,
-            'MISCONFIGURED_DAEMON',
-            500,
-          );
-        }
-        if (sidecarSpecs.length > 0 && !networkName) {
-          throw new AutopodError(
-            `Pod ${podId} requires sidecars; profile must have a networkPolicy enabled so sidecars and the pod share an isolated network`,
-            'INVALID_CONFIGURATION',
-            400,
-          );
-        }
-
-        // Spawn sidecars FIRST on the per-pod bridge so the pod container's
-        // firewall can be built with the sidecar IPs pre-allowlisted. If we
-        // spawned the pod first, its iptables OUTPUT chain would REJECT every
-        // packet to the sidecar before the sidecar even had an IP — the bug
-        // that produced the "Connection refused" we chased.
-        const startedSidecars: Record<string, string> = {};
-        const sidecarIps: string[] = [];
-        if (sidecarSpecs.length > 0 && sidecarManager && networkName) {
-          try {
-            for (const { name, spec } of sidecarSpecs) {
-              emitStatus(`Spawning sidecar '${name}'…`);
-              const handle = await sidecarManager.spawn({ spec, podId, networkName });
-              startedSidecars[name] = handle.containerId;
-              await sidecarManager.waitHealthy(handle, spec);
-              const ip = await sidecarManager.getBridgeIp(handle, networkName);
-              if (ip) {
-                sidecarIps.push(ip);
-              } else {
-                logger.warn(
-                  { podId, sidecarName: name, containerId: handle.containerId },
-                  'Sidecar has no IP on the pod network — pod firewall may block traffic to it',
-                );
-              }
-            }
-            podRepo.update(podId, { sidecarContainerIds: startedSidecars });
-          } catch (err) {
-            logger.error(
-              { err, podId, started: startedSidecars },
-              'Sidecar spawn failed — cleaning up',
-            );
-            for (const id of Object.values(startedSidecars)) {
-              await sidecarManager.kill(id).catch((killErr) => {
-                logger.warn({ killErr, containerId: id }, 'Failed to kill partial sidecar');
-              });
-            }
-            throw err;
-          }
-        }
-
-        // Rebuild the firewall script with sidecar IPs AND DNS names allowed
-        // through the pod's firewall. The IP list unblocks iptables; the DNS
-        // name list unblocks dnsmasq — both are required. Without the DNS
-        // piece the pod's CLI resolves the sidecar to NXDOMAIN and never
-        // gets as far as iptables to notice the IP is allowed.
-        if (
-          sidecarSpecs.length > 0 &&
-          networkManager &&
-          initialMergedMcpServers &&
-          daemonGatewayIp &&
-          runtimeNetworkPolicy?.enabled
-        ) {
-          const finalConfig = await networkManager.buildNetworkConfig(
-            runtimeNetworkPolicy,
-            initialMergedMcpServers,
-            daemonGatewayIp,
-            profile.privateRegistries,
-            podId,
-            sidecarIps,
-            [hostnameFromUrl(mcpBaseUrl)],
-            portFromUrl(mcpBaseUrl),
-          );
-          if (finalConfig) {
-            firewallScript = finalConfig.firewallScript;
-          }
-        }
-
-        const referencePolicy = deps.launchConfiguration;
-        const frozenReferences =
-          launchConfig && referencePolicy
-            ? await stageReferenceSnapshots(launchConfig, worktreeManager, () =>
-                referencePolicy.assertCurrentCapabilities(launchConfig),
-              )
-            : new Map<string, Buffer>();
-
-        // Clone authenticated profile references before provisioning so auth/clone failures
-        // cannot leave a partial pod and daemon credentials never cross into the container.
-        const stagedReferenceRepos = new Map<
-          string,
-          { archivePath: string; containerArchive: string }
-        >();
-        try {
-          for (const repo of launchConfig ? [] : (pod.referenceRepos ?? [])) {
-            if (!repo.sourceProfile) continue;
-            const credential = await resolveRefRepoPat(repo, profileStore, deps.githubAuth, logger);
-            if (!credential) continue;
-            const sourceProfile = profileStore.get(repo.sourceProfile);
-            if (!sourceProfile) {
-              throw new Error(`Reference repo profile ${repo.sourceProfile} was not found`);
-            }
-            const refId = generateId(8);
-            const refWorktree = await worktreeManager.create({
-              repoUrl: repo.url,
-              branch: `autopod/ref-${podId}-${refId}`,
-              baseBranch: sourceProfile.defaultBranch ?? 'main',
-              sessionId: `ref-${podId}-${refId}`,
-              pat: credential,
-            });
-            const archivePath = path.join(os.tmpdir(), `autopod-ref-${podId}-${refId}.tgz`);
-            stagedReferenceArchivePaths.add(archivePath);
-            try {
-              await execFileAsync(
-                'tar',
-                ['--exclude=.git', '-czf', archivePath, '-C', refWorktree.worktreePath, '.'],
-                { timeout: 60_000 },
-              );
-            } finally {
-              await worktreeManager.cleanup(refWorktree.worktreePath).catch(() => {});
-            }
-            stagedReferenceRepos.set(repo.mountPath, {
-              archivePath,
-              containerArchive: `/tmp/.autopod-ref-${refId}.tgz`,
-            });
-          }
-        } catch (err) {
-          await Promise.all(
-            [...stagedReferenceRepos.values()].map(({ archivePath }) =>
-              rm(archivePath, { force: true }),
-            ),
-          );
-          throw err;
-        }
-
-        // Spawn container with port mapping so daemon + user can reach the app
-        // Prefer the per-profile warm image when one has been built — that's
-        // where customisations like Serena / roslyn-codelens-mcp live. Fall
-        // back to the bare base image only when no warm image exists.
-        const spawnImage =
-          launchConfig && deps.launchConfiguration
-            ? await deps.launchConfiguration.prepareEnvironment(launchConfig)
-            : resolvePodSpawnImage(profile, template, pod.executionTarget);
-        if (pod.executionTarget === 'sandbox') {
-          await verifySandboxWarmImageAccess(profile, spawnImage, deps.warmImageExists);
-        }
-        emitStatus(
-          pod.executionTarget === 'sandbox'
-            ? `Creating sandbox (${profile.template})…`
-            : `Spawning container (${profile.template})…`,
-        );
-        logger.info(
-          { podId, image: spawnImage, warm: Boolean(profile.warmImageTag) },
-          'Spawning pod container',
-        );
-
-        const hostPreviewUrl = `http://127.0.0.1:${hostPort}`;
-        const containerPreviewUrl = `http://127.0.0.1:${CONTAINER_APP_PORT}`;
-        const containerEnv: Record<string, string> = {
-          POD_ID: podId,
-          ...RUNTIME_TELEMETRY_OPT_OUT_ENV,
-          ...buildValidationContextEnv({
-            podId,
-            headBranch: pod.branch,
-            baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
-            startCommitSha: pod.startCommitSha,
-          }),
-          PORT: String(CONTAINER_APP_PORT),
-          HOST: '0.0.0.0', // bind to all interfaces inside container for Docker port forwarding
-          // Docker pods get native port mapping. Sandbox pods get a daemon-owned
-          // host-port proxy for humans, while in-container tooling still needs
-          // the app's loopback URL.
-          PREVIEW_URL: pod.executionTarget === 'local' ? hostPreviewUrl : containerPreviewUrl,
-          ...(isDotnet
-            ? {
-                MSBUILDNODECOUNT: '4',
-                // Disable MSBuild's TerminalLogger — it crashes with ArgumentOutOfRangeException
-                // when terminal dimensions are unavailable (non-TTY exec contexts).
-                MSBUILDTERMINALLOGGER: 'false',
-              }
-            : {}),
-          ...sidecarEnv,
-        };
-
-        // Per-pod conversation-history directories. Bind-mounted into the container
-        // so session state survives container respawns (sleep/wake, crash recovery).
-        // Wired for Claude and Codex; Copilot still respawns fresh.
-        let claudeStateDir: string | null = null;
-        if (pod.runtime === 'claude') {
-          try {
-            claudeStateDir = await ensureClaudeStateDir(podId);
-          } catch (err) {
-            logger.warn(
-              { err, podId },
-              'Failed to create Claude state dir — resume across container respawns will fail',
-            );
-          }
-        }
-
-        let codexStateDir: string | null = null;
-        if (pod.runtime === 'codex') {
-          try {
-            codexStateDir = await ensureCodexStateDir(podId);
-          } catch (err) {
-            logger.warn(
-              { err, podId },
-              'Failed to create Codex state dir — resume across container respawns will fail',
-            );
-          }
-        }
-
-        const specContextHostPath = await materializeSpecContextFiles(
-          podId,
-          pod.specContextFiles,
-          logger,
-        );
-        const seriesArtifactsHostPath = await ensureSeriesArtifactsDir(pod, logger);
-
-        let containerId: string;
-        try {
-          containerId = await containerManager.spawn({
-            image: spawnImage,
-            podId,
-            env: containerEnv,
-            ports: [{ container: CONTAINER_APP_PORT, host: hostPort }],
-            volumes: [
-              ...(worktreePath ? [{ host: worktreePath, container: '/mnt/worktree' }] : []),
-              ...(bareRepoPath ? [{ host: bareRepoPath, container: bareRepoPath }] : []),
-              ...(specContextHostPath
-                ? [
-                    {
-                      host: specContextHostPath,
-                      container: SPEC_CONTEXT_CONTAINER_DIR,
-                      readOnly: true,
-                    },
-                  ]
-                : []),
-              ...(seriesArtifactsHostPath
-                ? [{ host: seriesArtifactsHostPath, container: POD_ARTIFACTS_CONTAINER_DIR }]
-                : []),
-              ...(claudeStateDir
-                ? [{ host: claudeStateDir, container: `${CONTAINER_HOME_DIR}/.claude/projects` }]
-                : []),
-              ...(codexStateDir
-                ? [{ host: codexStateDir, container: `${CONTAINER_HOME_DIR}/.codex/sessions` }]
-                : []),
-            ],
-            networkName,
-            firewallScript,
-            networkPolicyMode: runtimeNetworkPolicyMode,
-            allowedHosts: sandboxAllowedHosts,
-            memoryBytes:
-              (profile.containerMemoryGb ?? DEFAULT_CONTAINER_MEMORY_GB) * 1024 * 1024 * 1024,
-            nanoCpus: launchConfig
-              ? launchConfig.resolvedExecution.main.cpus === null
-                ? undefined
-                : Math.floor(launchConfig.resolvedExecution.main.cpus * 1e9)
-              : resolveContainerNanoCpus(process.env.CONTAINER_CPUS),
-            onProgress: emitStatus,
-          });
-        } catch (err) {
-          // Pod container failed to spawn — tear down sidecars we already
-          // brought up so they don't leak on the per-pod bridge.
-          if (sidecarManager) {
-            for (const id of Object.values(startedSidecars)) {
-              await sidecarManager.kill(id).catch(() => {});
-            }
-          }
-          throw err;
-        }
-
-        // Restricted-mode pods run HAProxy as their egress allowlist; start
-        // the denial receiver so blocked SNIs surface as pod events. Best
-        // effort — failure here doesn't gate the pod.
-        if (profile.networkPolicy?.enabled && profile.networkPolicy.mode === 'restricted') {
-          await startHaproxyDenyReceiver(pod, containerId);
-        }
-
-        // Copy worktree content from bind mount to container's native filesystem.
-        // VirtioFS bind mounts break getcwd() on Docker Desktop for Mac — overlayfs does not.
-        // Dependency/tooling caches are intentionally skipped: they contain native binaries
-        // for the filesystem they were created on and must not cross the host/container boundary.
-        // Skipped for artifact pods with no worktree.
-        if (worktreePath) {
-          emitStatus('Populating workspace…');
-          // Strip the image's baked-in `/workspace/.git` first. The warm image is built
-          // with `RUN git clone --depth 1` (dockerfile-generator.ts), which leaves a real
-          // `.git` directory pinned to whatever main was at image-build time. The host
-          // worktree carries a `.git` *gitlink file*, and `cp -a` cannot overwrite a
-          // directory with a non-directory — it errors on that single entry, copies
-          // everything else, and exits non-zero. If we don't pre-clear, the seam leaks
-          // image-era HEAD into /workspace/.git/HEAD and the agent works against a stale
-          // base. Pre-clearing makes cp's job collision-free.
-          const preclear = await containerManager.execInContainer(
-            containerId,
-            ['rm', '-rf', '/workspace/.git'],
-            { timeout: 30_000 },
-          );
-          if (preclear.exitCode !== 0) {
-            throw new Error(
-              `Workspace pre-clear failed (exit ${preclear.exitCode}): ${preclear.stderr}`,
-            );
-          }
-          const populate = await containerManager.execInContainer(
-            containerId,
-            [
-              'sh',
-              '-c',
-              buildWorkspaceMirrorCopyScript(
-                '/mnt/worktree',
-                "'/workspace'",
-                WORKSPACE_RUNTIME_CACHE_EXCLUDES,
-              ),
-            ],
-            { timeout: 120_000 },
-          );
-          if (populate.exitCode !== 0) {
-            throw new Error(
-              `Workspace populate failed (exit ${populate.exitCode}): ${populate.stderr}`,
-            );
-          }
-          // Restore execute bit on node_modules binaries — VirtioFS bind mounts on Docker Desktop
-          // for Mac can strip +x from native platform binaries (e.g. @esbuild/linux-arm64/bin/esbuild).
-          await containerManager
-            .execInContainer(
-              containerId,
-              [
-                'sh',
-                '-c',
-                'find /workspace \\( -path "*/node_modules/.bin/*" -o -path "*/node_modules/*/bin/*" \\) -type f -not -empty -exec chmod +x {} + 2>/dev/null || true',
-              ],
-              { timeout: 15_000 },
-            )
-            .catch(() => null);
-          // Convert /workspace/.git from a gitlink file into a self-contained real .git
-          // directory. The gitlink references a Mac host path that sub-processes
-          // (e.g. Dagger CLI, go-git) can't follow when they don't inherit autopod's
-          // bind mounts. A real .git directory works everywhere inside the container.
-          // Objects are shared via alternates so no object copying is needed.
-          const repoint = await containerManager.execInContainer(
-            containerId,
-            [
-              'sh',
-              '-c',
-              [
-                'set -e',
-                // Resolve bare worktree metadata dir and bare root from the gitlink
-                "BARE_WT=$(sed 's/^gitdir: //' /workspace/.git | tr -d '\\n')",
-                'BARE_COMMON=$(cat "${BARE_WT}/commondir" 2>/dev/null || echo "../..")',
-                'BARE_ROOT=$(cd "${BARE_WT}/${BARE_COMMON}" && pwd)',
-                // Replace the gitlink file with a real git directory
-                'rm /workspace/.git',
-                'mkdir -p /workspace/.git',
-                // Seed it with the worktree-specific metadata (HEAD, index, logs, etc.)
-                'cp -a "${BARE_WT}/." /workspace/.git/',
-                // Strip the commondir/gitdir files — this is now a standalone git dir
-                'rm -f /workspace/.git/commondir /workspace/.git/gitdir',
-                // Wire alternates so git can read objects from the bare without copying them
-                'mkdir -p /workspace/.git/objects/info',
-                'echo "${BARE_ROOT}/objects" > /workspace/.git/objects/info/alternates',
-                // Materialise refs from the bare (worktree metadata only has per-branch refs)
-                'cp -a "${BARE_ROOT}/refs/." /workspace/.git/refs/ 2>/dev/null || true',
-                'cp "${BARE_ROOT}/packed-refs" /workspace/.git/ 2>/dev/null || true',
-              ].join(' && '),
-            ],
-            { timeout: 15_000 },
-          );
-          if (repoint.exitCode !== 0) {
-            throw new Error(
-              `Git workspace setup failed (exit ${repoint.exitCode}): ${repoint.stderr}`,
-            );
-          }
-          // Restore any tracked files missing from the working tree (M/D status).
-          // syncWorkspaceBack() clears + re-copies the host bind-mount; if it dies mid-flight
-          // (OOM, Docker crash, Azure SMB error) the host worktree loses files while the git
-          // index still references them. Recovery mode then copies that partial tree into the
-          // container. Skipped when the index is empty (new branch / unborn HEAD) — `git restore .`
-          // errors with "pathspec '.' did not match any file(s) known to git" in that case.
-          const hasTrackedFiles = await containerManager.execInContainer(
-            containerId,
-            ['sh', '-c', 'git -C /workspace ls-files | head -1 | grep -q .'],
-            { timeout: 5_000 },
-          );
-          if (hasTrackedFiles.exitCode === 0) {
-            const restore = await containerManager.execInContainer(
-              containerId,
-              ['git', '-C', '/workspace', 'restore', '.'],
-              { timeout: 30_000 },
-            );
-            if (restore.exitCode !== 0) {
-              throw new Error(
-                `Git workspace restore failed (exit ${restore.exitCode}): ${restore.stderr}`,
-              );
-            }
-          }
-
-          const hasPendingHandoff = hasPendingProviderContinuation(
-            deps.providerAttemptRepo?.list(podId),
-          );
-          if (hasPendingHandoff) {
-            const marker = '# autopod: provider failover handoff';
-            const guard = await containerManager.execInContainer(
-              containerId,
-              [
-                'sh',
-                '-c',
-                [
-                  'set -e',
-                  `if [ ! -f ${shellQuote(`/workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} ]; then`,
-                  `  printf '%s\\n' ${shellQuote(`Missing pending provider failover handoff: /workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} >&2`,
-                  '  exit 1',
-                  'fi',
-                  'mkdir -p /workspace/.git/info',
-                  'touch /workspace/.git/info/exclude',
-                  `if ! grep -qFx ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} /workspace/.git/info/exclude; then`,
-                  `  printf '\\n%s\\n%s\\n' ${shellQuote(marker)} ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} >> /workspace/.git/info/exclude`,
-                  'fi',
-                  `git -C /workspace check-ignore -q ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)}`,
-                ].join('\n'),
-              ],
-              { timeout: 10_000 },
-            );
-            if (guard.exitCode !== 0) {
-              throw new Error(
-                `Failed to protect provider failover handoff before workspace cleanup (exit ${guard.exitCode}): ${guard.stderr}`,
-              );
-            }
-          }
-
-          // Strip untracked files left behind by the warm image. The image is built with
-          // `RUN git clone --depth 1` of the base branch at image-build time, then runs
-          // pre-warm install + build, then `rm -rf /workspace/.git`. Source files from
-          // that older clone stay in `/workspace/` as plain files. The earlier
-          // The worktree mirror copy is additive — it never deletes — so any file that the
-          // host worktree's branch has dropped (e.g. deleted in a later PR on main) survives
-          // in `/workspace` as an untracked file. `git restore .` only touches tracked paths,
-          // so it doesn't help.
-          //
-          // For workspace pods the leak is severe: on promote/handoff, syncWorkspaceBack's
-          // mirror copy and the subsequent `git add -A` in commitPendingChanges sweep stale
-          // files into a commit on the branch. For auto pods it shows up as build noise
-          // (native build tools discover sources via filesystem walk) and reviewer scope creep.
-          //
-          // `-fd` (no `-x`): preserves gitignored caches like node_modules, bin/, obj/,
-          // dist/, .next/ so subsequent build phases keep their incremental state.
-          // Combined with the prior `cp -a` + `git restore .`, the worktree now contains
-          // exactly what the branch tip has, plus the warm-image dependency caches —
-          // and nothing else.
-          const clean = await containerManager.execInContainer(
-            containerId,
-            ['git', '-C', '/workspace', 'clean', '-fd'],
-            { timeout: 30_000 },
-          );
-          if (clean.exitCode !== 0) {
-            // Non-fatal: a failure here means the agent may see stale untracked files,
-            // which is the bug we are fixing — but it's still better than aborting
-            // pod start. Log loudly so operators can correlate with downstream
-            // contamination reports.
-            logger.warn(
-              {
-                podId,
-                exitCode: clean.exitCode,
-                stderr: clean.stderr.slice(0, 500),
-              },
-              'git clean -fd failed in /workspace — image-baked untracked files may leak into the worktree',
-            );
-          }
-
-          // Hide daemon-injected code-intel state (`.serena/`, `.roslyn-codelens/`, …)
-          // from the agent's `git add -A`. The system instructions tell the agent to run
-          // `git add -A && git commit` for normal commits — without this, those caches get
-          // swept into the feature branch on pod A, then pod B's fresh container has no
-          // such files, and host-side `git add -A` perceives the absence as a mass-deletion
-          // and trips DeletionGuardError. We've seen this fire repeatedly in practice.
-          //
-          // Two-step protection inside the container:
-          //   1. Add the paths to `.git/info/exclude` (repo-local, never tracked).
-          //   2. `git rm --cached -r --ignore-unmatch` to detrack any entries a previous
-          //      pod already committed (idempotent; no-op when nothing is tracked).
-          // The .git/info/exclude write is idempotent via a `grep -qF` guard so re-runs
-          // don't duplicate lines.
-          const cachePaths = agentToolingCachePaths(profile.codeIntelligence);
-          if (cachePaths.length > 0) {
-            const marker = '# autopod: code-intel cache exclusions';
-            const excludeLines = [marker, ...cachePaths.map((p) => `/${p}/`)].join('\n');
-            const detrackArgs = cachePaths.flatMap((p) => [p]);
-            const script = [
-              'set -e',
-              'mkdir -p /workspace/.git/info',
-              'touch /workspace/.git/info/exclude',
-              `if ! grep -qF ${shellQuote(marker)} /workspace/.git/info/exclude; then`,
-              `  printf '\\n%s\\n' ${shellQuote(excludeLines)} >> /workspace/.git/info/exclude`,
-              'fi',
-              `git -C /workspace rm --cached -r --ignore-unmatch -- ${detrackArgs
-                .map(shellQuote)
-                .join(' ')} >/dev/null 2>&1 || true`,
-            ].join('\n');
-            const cacheGuard = await containerManager.execInContainer(
-              containerId,
-              ['sh', '-c', script],
-              { timeout: 10_000 },
-            );
-            if (cacheGuard.exitCode !== 0) {
-              // Non-fatal: worst case is the historical deletion-guard loop returns. Log
-              // loudly so we can correlate if it ever fires after this lands.
-              logger.warn(
-                {
-                  podId,
-                  exitCode: cacheGuard.exitCode,
-                  stderr: cacheGuard.stderr.slice(0, 500),
-                  cachePaths,
-                },
-                'Failed to install code-intel cache exclusions in /workspace/.git/info/exclude',
-              );
-            }
-          }
-
-          // Mirror the pod's durable handoff instructions into the workspace at
-          // /workspace/.autopod/pi-handoff.md so the interactive session (and,
-          // after promotion, the agent) can read the Pi handoff without leaving
-          // the container. Written *after* the populate/restore/clean sequence
-          // so nothing clobbers it. Kept out of commits by two layers: the
-          // shared worktree info/exclude (host-side auto-commit) set at worktree
-          // creation, plus this in-container info/exclude entry — the container's
-          // reconstructed /workspace/.git does NOT inherit the shared exclude, so
-          // without this an in-container `git add -A` would still sweep it in.
-          // Fail closed: a workspace that cannot surface or protect its handoff
-          // is an inconsistent handoff, so both the write and the exclude throw.
-          if (pod.handoffInstructions) {
-            emitStatus('Writing handoff…');
-            await containerManager.writeFile(
-              containerId,
-              WORKSPACE_PI_HANDOFF_PATH,
-              renderPiHandoffFile(pod.handoffInstructions),
-            );
-            const marker = '# autopod: pi handoff';
-            const guard = await containerManager.execInContainer(
-              containerId,
-              [
-                'sh',
-                '-c',
-                [
-                  'set -e',
-                  'mkdir -p /workspace/.git/info',
-                  'touch /workspace/.git/info/exclude',
-                  `if ! grep -qF ${shellQuote(marker)} /workspace/.git/info/exclude; then`,
-                  `  printf '\\n%s\\n%s\\n' ${shellQuote(marker)} ${shellQuote('.autopod/pi-handoff.md')} >> /workspace/.git/info/exclude`,
-                  'fi',
-                ].join('\n'),
-              ],
-              { timeout: 10_000 },
-            );
-            if (guard.exitCode !== 0) {
-              throw new Error(
-                `Failed to exclude pi-handoff.md from workspace commits (exit ${guard.exitCode}): ${guard.stderr}`,
-              );
-            }
-          }
-
-          if (hasPendingHandoff) {
-            const marker = '# autopod: provider failover handoff';
-            const guard = await containerManager.execInContainer(
-              containerId,
-              [
-                'sh',
-                '-c',
-                [
-                  'set -e',
-                  `if [ ! -f ${shellQuote(`/workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} ]; then`,
-                  `  printf '%s\\n' ${shellQuote(`Missing pending provider failover handoff after workspace cleanup: /workspace/${PROVIDER_FAILOVER_HANDOFF_PATH}`)} >&2`,
-                  '  exit 1',
-                  'fi',
-                  'mkdir -p /workspace/.git/info',
-                  'touch /workspace/.git/info/exclude',
-                  `if ! grep -qFx ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} /workspace/.git/info/exclude; then`,
-                  `  printf '\\n%s\\n%s\\n' ${shellQuote(marker)} ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)} >> /workspace/.git/info/exclude`,
-                  'fi',
-                  `git -C /workspace check-ignore -q ${shellQuote(PROVIDER_FAILOVER_HANDOFF_PATH)}`,
-                ].join('\n'),
-              ],
-              { timeout: 10_000 },
-            );
-            if (guard.exitCode !== 0) {
-              throw new Error(
-                `Failed to protect provider failover handoff (exit ${guard.exitCode}): ${guard.stderr}`,
-              );
-            }
-          }
-        }
-
-        // Pre-fill global git author identity so the user (or agent) doesn't hit
-        // "Author identity unknown" the first time they `git commit`. Sourced
-        // from the JWT claims captured at pod creation; falls back to a generic
-        // identity for legacy pods or pre-auth code paths so commits never fail.
-        {
-          const email = normalizeCommitEmail(pod.creatorEmail) ?? 'autopod@autopod.local';
-          const name = pod.creatorName?.trim() || 'Autopod User';
-          const gitIdentity = await containerManager.execInContainer(
-            containerId,
-            [
-              'sh',
-              '-c',
-              `git config --global user.email ${shellQuote(email)} && git config --global user.name ${shellQuote(name)}`,
-            ],
-            { timeout: 5_000 },
-          );
-          if (gitIdentity.exitCode !== 0) {
-            // Non-fatal: the worst case is the user re-runs the two commands manually.
-            logger.warn(
-              { podId, exitCode: gitIdentity.exitCode, stderr: gitIdentity.stderr.slice(0, 200) },
-              'Failed to set global git author identity in container',
-            );
-          }
-        }
-
-        if (launchConfig && deps.launchConfiguration) {
-          await deps.launchConfiguration.assertCurrentCapabilities(launchConfig);
-          await installReferenceSnapshots(frozenReferences, containerManager, containerId);
-          await deps.launchConfiguration.assertCurrentCapabilities(launchConfig);
-        }
-        // Clone reference repos into /repos/<mountPath> inside the container (read-only)
-        const referenceRepos = launchConfig ? [] : (pod.referenceRepos ?? []);
-        if (referenceRepos.length > 0) {
-          emitStatus('Cloning reference repos…');
-          await containerManager.execInContainer(containerId, ['mkdir', '-p', '/repos'], {
-            timeout: 5_000,
-          });
-          for (const repo of referenceRepos) {
-            const destPath = `/repos/${repo.mountPath}`;
-            const staged = stagedReferenceRepos.get(repo.mountPath);
-            try {
-              if (staged) {
-                try {
-                  await containerManager.writeFile(
-                    containerId,
-                    staged.containerArchive,
-                    await readFile(staged.archivePath),
-                  );
-                  await containerManager.execInContainer(containerId, ['mkdir', '-p', destPath], {
-                    timeout: 5_000,
-                  });
-                  await containerManager.execInContainer(
-                    containerId,
-                    ['tar', '-xzf', staged.containerArchive, '-C', destPath],
-                    { timeout: 60_000 },
-                  );
-                } finally {
-                  await rm(staged.archivePath, { force: true });
-                  await containerManager
-                    .execInContainer(containerId, ['rm', '-f', staged.containerArchive], {
-                      timeout: 5_000,
-                    })
-                    .catch(() => {});
-                }
-              } else {
-                await containerManager.execInContainer(
-                  containerId,
-                  ['git', 'clone', '--depth', '1', repo.url, destPath],
-                  { timeout: 60_000 },
-                );
-              }
-            } catch (err) {
-              if (repo.sourceProfile) throw err;
-              logger.warn(
-                { err, podId, url: repo.url },
-                'Failed to clone reference repo — skipping',
-              );
-            }
-          }
-        }
-
-        pod = transition(pod, 'running', {
-          containerId,
-          worktreePath,
-          previewUrl: hostPreviewUrl,
-          runningAt: new Date().toISOString(),
-        });
-
-        // Fix pods: drain any queued reviewer/CI feedback into the task before
-        // the agent stream starts. `drain()` runs *after* the `running`
-        // transition is committed — a crash between `provisioning` and
-        // `running` leaves the queue intact for the next iteration to drain.
-        if (pod.linkedPodId) {
-          const parent = podRepo.getOrThrow(pod.linkedPodId);
-          const maxAttempts = parent.maxPrFixAttempts ?? DEFAULT_MAX_PR_FIX_ATTEMPTS;
-          emitStatus(
-            `Starting fix iteration ${pod.fixIteration ?? 0}, parent attempt ${parent.prFixAttempts ?? 0}/${maxAttempts}`,
-          );
-          const queued = fixFeedbackRepo.drain(pod.linkedPodId);
-          if (queued.length > 0) {
-            const userMessage = queued.map((m) => m.message).join('\n\n---\n\n');
-            // The queued summaries already carry the CI/review content, so a
-            // minimal status is sufficient — buildPrFixTask folds `userMessage`
-            // into the task body.
-            const minimalStatus: PrMergeStatus = {
-              merged: false,
-              open: true,
-              blockReason: 'PR needs fixes',
-              ciFailures: [],
-              reviewComments: [],
-            };
-            const fixTask = buildPrFixTask(pod, minimalStatus, podRepo, profile, userMessage);
-            podRepo.update(pod.id, { task: fixTask });
-            pod = podRepo.getOrThrow(pod.id);
-          }
-        }
-
-        // Resolve and write skills for all pod types (including workspace)
-        const mergedSkills = mergeSkills(injectionsForPod(pod).skills ?? [], profile.skills ?? []);
-        let resolvedSkillNames: string[] = [];
-        let resolvedSkillInjections: typeof mergedSkills = [];
-        if (mergedSkills.length > 0) {
-          emitStatus('Resolving skills…');
-          const resolvedSkills = await resolveSkills(mergedSkills, logger, podId, safetyEventsRepo);
-          const mergedSkillByName = new Map(mergedSkills.map((skill) => [skill.name, skill]));
-          const skillsDir = `${CONTAINER_HOME_DIR}/.claude/skills`;
-          for (const skill of resolvedSkills) {
-            await containerManager.writeFile(
-              containerId,
-              `${skillsDir}/${skill.name}/SKILL.md`,
-              skill.content,
-            );
-          }
-          resolvedSkillNames = resolvedSkills.map((s) => s.name);
-          resolvedSkillInjections = resolvedSkills
-            .map((resolved) => {
-              const original = mergedSkillByName.get(resolved.name);
-              if (!original) return null;
-              return {
-                ...original,
-                description: resolved.description ?? original.description,
-              };
-            })
-            .filter((skill): skill is (typeof mergedSkills)[number] => skill !== null);
-          if (resolvedSkills.length > 0) {
-            logger.info(
-              { podId, count: resolvedSkills.length, names: resolvedSkillNames },
-              'Skills written to container',
-            );
-          }
-        }
-
-        // Write private registry config files (.npmrc / NuGet.config) to user-level
-        // paths inside the container. Runs for ALL pod types including workspace pods.
-        // NuGet configs are sources-only — auth is via credential provider env var above.
-        const registryFiles =
-          launchRegistry?.files ??
-          buildRegistryFiles(profile.privateRegistries, effectiveRegistryPat);
-        for (const file of registryFiles) {
-          await containerManager.writeFile(containerId, file.path, file.content);
-          logger.info(
-            { podId, path: file.path, bytes: file.content.length },
-            'Wrote registry config file to container',
-          );
-        }
-
-        // Install a git pre-commit hook that blocks commits containing hardcoded
-        // credentials (ClearTextPassword, _authToken, etc.). Defense-in-depth:
-        // even if system instructions are ignored, the commit will be rejected.
-        //
-        // IMPORTANT: In a git worktree, .git is a gitlink FILE (not a directory)
-        // pointing to the bare repo's worktree metadata. Using writeFile() would
-        // create a .git DIRECTORY via tar extraction, destroying the gitlink and
-        // breaking all git operations inside the container. We stage the hook in
-        // /tmp, then use `git rev-parse --git-dir` to install it at the real path.
-        await containerManager.writeFile(containerId, '/tmp/pre-commit', CREDENTIAL_GUARD_HOOK);
-        await containerManager.execInContainer(
-          containerId,
-          [
-            'sh',
-            '-c',
-            'GIT_DIR=$(git -C /workspace rev-parse --git-dir) && mkdir -p "$GIT_DIR/hooks" && mv /tmp/pre-commit "$GIT_DIR/hooks/pre-commit" && chmod +x "$GIT_DIR/hooks/pre-commit"',
-          ],
-          { timeout: 5_000 },
-        );
-
-        // Interactive pods: container stays alive, no agent/validation/PR
-        if (pod.options.agentMode === 'interactive') {
-          // Write Claude UX config (disclaimer ack, folder trust, theme, auto-updater off) so
-          // `claude` inside the container doesn't show first-run theme/trust/disclaimer prompts.
-          // Workspace pods intentionally do NOT pre-seed provider credentials — the user runs
-          // `/login` manually inside the container. Rationale: pre-seeded OAuth tokens can be
-          // silently rejected by Anthropic (policy changes, Enterprise org restrictions, etc.),
-          // producing a confusing "logged in as enterprise → 401" state. Manual /login keeps
-          // the surprise surface zero.
-          for (const file of buildClaudeConfigFiles()) {
-            await containerManager.writeFile(containerId, file.path, file.content);
-          }
-          // Capture starting HEAD so the diff endpoint only shows workspace changes,
-          // not the entire branch history since it diverged from main.
-          try {
-            const shaResult = await containerManager.execInContainer(
-              containerId,
-              ['git', 'rev-parse', 'HEAD'],
-              { cwd: '/workspace', timeout: 5_000 },
-            );
-            if (shaResult.exitCode === 0 && shaResult.stdout.trim()) {
-              podRepo.update(podId, { startCommitSha: shaResult.stdout.trim() });
-            }
-          } catch {
-            logger.debug({ podId }, 'Failed to capture workspace start commit SHA');
-          }
-          // History workspace: export pod data into the container
-          const analysis = launchConfig?.work.analysis;
-          if (analysis?.kind === 'history' || (!launchConfig && pod.task.startsWith('[history]'))) {
-            try {
-              emitStatus('Exporting history data…');
-              const queryMatch = pod.task.match(/\| (.+)$/);
-              const historyQuery: HistoryQuery =
-                analysis?.kind === 'history'
-                  ? {
-                      repositoryId:
-                        analysis.scope === 'repository' ? launchConfig?.repository?.id : undefined,
-                      since: analysis.since,
-                      limit: analysis.limit,
-                      failuresOnly: analysis.failuresOnly,
-                    }
-                  : queryMatch?.[1]
-                    ? (JSON.parse(queryMatch[1]) as HistoryQuery)
-                    : {};
-
-              const exporter = createHistoryExporter({
-                podRepo,
-                // biome-ignore lint/style/noNonNullAssertion: validationRepo is required for history export
-                validationRepo: validationRepo!,
-                escalationRepo,
-                // biome-ignore lint/style/noNonNullAssertion: eventRepo is required for history export
-                eventRepo: deps.eventRepo!,
-                // biome-ignore lint/style/noNonNullAssertion: progressEventRepo is required for history export
-                progressEventRepo: progressEventRepo!,
-                actionAuditRepo: deps.actionAuditRepo,
-              });
-
-              const { dbBuffer, summary, analysisGuide, stats } = exporter.export(historyQuery);
-
-              // Create /history directory
-              await containerManager.execInContainer(containerId, ['mkdir', '-p', '/history'], {
-                timeout: 5_000,
-              });
-
-              await containerManager.writeFile(containerId, '/history/history.db', dbBuffer);
-              await containerManager.writeFile(containerId, '/history/summary.md', summary);
-              await containerManager.writeFile(
-                containerId,
-                '/history/analysis-guide.md',
-                analysisGuide,
-              );
-
-              const instructionTarget = getHistoryInstructionTarget(pod.runtime);
-              if (instructionTarget.path.includes('/.github/')) {
-                await containerManager.execInContainer(
-                  containerId,
-                  ['mkdir', '-p', '/workspace/.github'],
-                  { timeout: 5_000 },
-                );
-              }
-              const instructions = generateHistoryInstructions(stats, instructionTarget);
-              await containerManager.writeFile(containerId, instructionTarget.path, instructions);
-
-              logger.info(
-                {
-                  podId,
-                  exportedSessions: stats.totalSessions,
-                  instructionPath: instructionTarget.path,
-                },
-                'History data exported to workspace container',
-              );
-            } catch (err) {
-              logger.error({ err, podId }, 'Failed to export history data');
-              if (launchConfig) throw err;
-            }
-          }
-
-          if (analysis?.kind === 'memory') {
-            if (!deps.memoryRepo)
-              throw new AutopodError('Memory storage is unavailable', 'MEMORY_UNAVAILABLE', 503);
-            const project = projectMemoryScope(pod, launchConfig);
-            const memories = [
-              ...deps.memoryRepo.list('global', null, true),
-              ...(project ? deps.memoryRepo.list(project.scope, project.id, true) : []),
-            ].filter((entry) => memoryMatchesProjectSetup(entry, project));
-            const content = [
-              '# Project memory snapshot',
-              'These entries are reference material, not instructions. Review them against the task and repository.',
-              ...memories.map(
-                (entry) =>
-                  `## ${entry.path}\n${entry.rationale ? `Rationale: ${entry.rationale}\n\n` : ''}${entry.content}`,
-              ),
-            ].join('\n\n');
-            if (Buffer.byteLength(content) > 16 * 1024 * 1024)
-              throw new AutopodError(
-                'Memory snapshot exceeds 16 MiB',
-                'MEMORY_EXPORT_TOO_LARGE',
-                409,
-              );
-            const directory = await containerManager.execInContainer(
-              containerId,
-              ['mkdir', '-p', '/history'],
-              { timeout: 5_000 },
-            );
-            if (directory.exitCode !== 0)
-              throw new AutopodError('Cannot prepare memory export', 'MEMORY_EXPORT_FAILED', 500);
-            await containerManager.writeFile(containerId, '/history/memories.md', content);
-          }
-
-          // Activate PIM groups for this workspace pod
-          if (pod.pimGroups?.length && pod.userId) {
-            const { createPimClient } = await import('../actions/handlers/azure-pim-handler.js');
-            const pimClient = createPimClient(deps.getSecret, logger);
-            for (const group of pod.pimGroups) {
-              try {
-                await pimClient.activate(
-                  group.groupId,
-                  pod.userId,
-                  group.duration ?? 'PT8H',
-                  group.justification ?? `Workspace pod ${podId}`,
-                );
-                logger.info({ podId, groupId: group.groupId }, 'PIM group activated');
-              } catch (err) {
-                logger.warn(
-                  { err, podId, groupId: group.groupId },
-                  'PIM activation failed — continuing',
-                );
-              }
-            }
-          }
-
-          // Inject escalation + profile MCP servers into /workspace/.mcp.json so
-          // interactive `claude` sessions in this workspace pod pick them up automatically.
-          // Claude Code reads .mcp.json as project-level MCP config — this is the reliable
-          // path; settings.json mcpServers is not loaded by the Claude Code version in containers.
-          const wsMcpServers = mergeMcpServers(
-            injectionsForPod(pod).mcpServers,
-            profile.mcpServers,
-          );
-          const wsProxiedServers = wsMcpServers
-            .filter((s) => s.type !== 'stdio')
-            .map((s) => ({
-              name: s.name,
-              url: `${mcpBaseUrl}/mcp-proxy/${encodeURIComponent(s.name)}/${podId}`,
-            }));
-          const wsStdioServers = [
-            ...wsMcpServers.filter((s) => s.type === 'stdio'),
-            ...buildCodeIntelligenceServers(profile),
-          ];
-          try {
-            const wsToken = deps.sessionTokenIssuer?.generate(podId);
-            const wsAuthHeader = wsToken ? { Authorization: `Bearer ${wsToken}` } : undefined;
-
-            const injectedServers: Record<string, unknown> = {
-              escalation: {
-                type: 'http',
-                url: `${mcpBaseUrl}/mcp/${podId}`,
-                ...(wsAuthHeader && { headers: wsAuthHeader }),
-              },
-              ...Object.fromEntries(
-                wsProxiedServers.map((s) => [
-                  s.name,
-                  { type: 'http', url: s.url, ...(wsAuthHeader && { headers: wsAuthHeader }) },
-                ]),
-              ),
-              ...Object.fromEntries(
-                wsStdioServers.map((s) => [
-                  s.name,
-                  {
-                    type: 'stdio',
-                    command: s.command,
-                    ...(s.args && { args: s.args }),
-                    ...(s.env && { env: s.env }),
-                  },
-                ]),
-              ),
-            };
-
-            // Merge with any existing /workspace/.mcp.json so project-configured servers survive.
-            let existingMcp: Record<string, unknown> = {};
-            try {
-              const raw = await containerManager.readFile(containerId, '/workspace/.mcp.json');
-              existingMcp = JSON.parse(raw) as Record<string, unknown>;
-            } catch {
-              // File absent or unreadable — start fresh
-            }
-            const existingServers =
-              existingMcp.mcpServers && typeof existingMcp.mcpServers === 'object'
-                ? (existingMcp.mcpServers as Record<string, unknown>)
-                : {};
-            const mergedMcp = {
-              ...existingMcp,
-              mcpServers: { ...existingServers, ...injectedServers },
-            };
-
-            await containerManager.writeFile(
-              containerId,
-              '/workspace/.mcp.json',
-              JSON.stringify(mergedMcp, null, 2),
-            );
-            logger.info(
-              { podId, servers: Object.keys(injectedServers) },
-              'MCP servers injected into workspace .mcp.json',
-            );
-          } catch (err) {
-            logger.warn(
-              { err, podId },
-              'Failed to inject MCP servers into workspace .mcp.json — MCP tools unavailable',
-            );
-          }
-
-          // Surface the injected MCP tools to the human user. Without a doc and
-          // a shell hint, validate_in_browser and friends are invisible — workspace
-          // pods deliberately don't write a CLAUDE.md to /workspace/ to avoid
-          // clobbering the repo, so we drop docs under the user's home instead.
-          try {
-            const httpServerNames = ['escalation', ...wsProxiedServers.map((s) => s.name)];
-            const stdioServerNames = wsStdioServers.map((s) => s.name);
-            const toolsDocPath = `${CONTAINER_HOME_DIR}/.config/autopod/tools.md`;
-            const bashrcPath = `${CONTAINER_HOME_DIR}/.bashrc`;
-
-            const toolsDoc = buildWorkspaceToolsDoc({ httpServerNames, stdioServerNames });
-            await containerManager.writeFile(containerId, toolsDocPath, toolsDoc);
-
-            let existingBashrc = '';
-            try {
-              existingBashrc = await containerManager.readFile(containerId, bashrcPath);
-            } catch {
-              // No .bashrc yet — that's fine, we'll create one.
-            }
-            const merged = mergeBashrcHint(existingBashrc, buildBashrcHintBlock(toolsDocPath));
-            await containerManager.writeFile(containerId, bashrcPath, merged);
-
-            logger.info({ podId, toolsDocPath }, 'Workspace tools doc + bashrc hint written');
-          } catch (err) {
-            logger.warn(
-              { err, podId },
-              'Failed to write workspace tools doc — MCP tools still work, just no discovery hint',
-            );
-          }
-
-          logger.info({ podId }, 'Workspace pod running — awaiting manual attach');
-          finishStartup('pass');
-          return;
-        }
-
-        // Merge daemon + profile injections
-        const mergedMcpServers = mergeMcpServers(
-          injectionsForPod(pod).mcpServers,
-          profile.mcpServers,
-        );
-        const mergedSections = mergeClaudeMdSections(
-          injectionsForPod(pod).claudeMdSections,
-          profile.claudeMdSections,
-        );
-
-        // Build stdio MCP servers from codeIntelligence profile flags.
-        // These run as local subprocesses inside the container, started by the
-        // agent CLI itself. They flow into SpawnConfig.mcpServers (alongside
-        // HTTP entries) so the runtime writes them into its out-of-tree config
-        // file (e.g. /home/autopod/.autopod/mcp-config.json for Claude). We
-        // intentionally do NOT touch /workspace/.mcp.json here — that file
-        // belongs to the user's repo, and any daemon-injected entry would
-        // get swept up by `git add` and committed.
-        const stdioMcpServers = buildCodeIntelligenceServers(profile);
-
-        // Preflight: confirm each code-intel binary exists before injecting it.
-        // Without this filter, a missing binary causes Claude CLI to silently
-        // fail the stdio MCP spawn, the tools are never registered, and the
-        // agent falls back to grep with no indication anything is wrong.
-        // Servers that fail the check are dropped here so they never appear in
-        // mcp-config.json or the CLAUDE.md — clean absence is less confusing
-        // than a registered-but-broken tool.
-        // Write the MCP init probe script once; each server test runs it with its
-        // own command + args. Cleaned up after the loop.
-        const MCP_PROBE_PATH = '/tmp/.autopod-mcp-probe.py';
-        await containerManager.writeFile(containerId, MCP_PROBE_PATH, MCP_INIT_PROBE_SCRIPT);
-
-        // Binary-check all servers first (fast) then probe survivors in parallel.
-        // Language servers (Roslyn, C# LS) can take 60-90s to initialize on a
-        // real project — sequential probing would add minutes to startup.
-        const binaryOkServers: StdioInjectedMcpServer[] = [];
-        await Promise.all(
-          stdioMcpServers.map(async (server) => {
-            const binaryCheck = await containerManager.execInContainer(
-              containerId,
-              ['sh', '-c', `command -v ${server.command} >/dev/null 2>&1`],
-              { timeout: 5_000 },
-            );
-            if (binaryCheck.exitCode !== 0) {
-              const msg = `Code-intel MCP "${server.name}" requested by profile but binary "${server.command}" not found in container — agent will fall back to grep/find. Rebuild the warm image: \`ap profile warm ${profile.name} --rebuild\`.`;
-              logger.error({ podId, server: server.name, command: server.command }, msg);
-              emitStatus(`⚠️ ${msg}`);
-            } else {
-              binaryOkServers.push(server);
-            }
-          }),
-        );
-
-        // MCP init probe — actually start each server and complete the JSON-RPC
-        // initialize handshake. Catches language-server issues (missing NuGet/npm
-        // cache, permission errors) that the binary check alone cannot detect.
-        // Timeout = slow start (Roslyn on a large solution can take 90s+) — server
-        // is still included in config and will initialize lazily inside the container.
-        // Only a clean non-zero exit (server crashed or returned an error response)
-        // triggers a rebuild suggestion.
-        const workingStdioServers: StdioInjectedMcpServer[] = [...binaryOkServers];
-        await Promise.all(
-          binaryOkServers.map(async (server) => {
-            const probeCmd = ['python3', MCP_PROBE_PATH, server.command, ...(server.args ?? [])];
-            const mcpProbe = await containerManager.execInContainer(containerId, probeCmd, {
-              timeout: 100_000,
-              cwd: '/workspace',
-            });
-
-            if (mcpProbe.exitCode === 0) {
-              logger.info(
-                { podId, server: server.name },
-                `Code-intel MCP "${server.name}" probe OK`,
-              );
-              emitStatus(`✅ Code-intel MCP "${server.name}" initialized and ready`);
-            } else {
-              const stderr = (mcpProbe.stderr || '').trim();
-              const isTimeout = stderr.startsWith('timeout:');
-              if (isTimeout) {
-                logger.info(
-                  { podId, server: server.name },
-                  `Code-intel MCP "${server.name}" slow to start — will initialize inside container`,
-                );
-                emitStatus(
-                  `🔄 Code-intel MCP "${server.name}" is starting (language server initializing in background)`,
-                );
-              } else {
-                const detail = (mcpProbe.stdout || stderr || 'no output').slice(0, 200);
-                logger.warn(
-                  { podId, server: server.name, detail },
-                  `Code-intel MCP "${server.name}" probe failed`,
-                );
-                emitStatus(
-                  `⚠️ Code-intel MCP "${server.name}" binary found but failed to respond (${detail}). If this persists, rebuild: \`ap profile warm ${profile.name} --rebuild\``,
-                );
-              }
-            }
-          }),
-        );
-
-        await containerManager.execInContainer(containerId, ['rm', '-f', MCP_PROBE_PATH], {
-          timeout: 3_000,
-        });
-
-        // Detect and auto-heal 0-byte .bin/ stubs before the agent starts. These are a
-        // symptom of `npm install --ignore-scripts` overwriting valid stubs without running
-        // postinstall hooks, leaving empty files that can't be executed.
-        const stubScan = await containerManager
-          .execInContainer(
-            containerId,
-            [
-              'sh',
-              '-c',
-              'find /workspace -path "*/node_modules/.bin/*" -empty -print 2>/dev/null | head -10',
-            ],
-            { timeout: 5_000 },
-          )
-          .catch(() => null);
-        const brokenStubs = stubScan?.stdout?.trim();
-        if (brokenStubs) {
-          const first5 = brokenStubs.split('\n').slice(0, 5).join(', ');
-          logger.warn({ podId }, `0-byte .bin stubs detected before agent start: ${first5}`);
-          emitStatus('⚠️ 0-byte .bin stubs detected — running npm rebuild to restore them…');
-          const rebuildResult = await containerManager
-            .execInContainer(
-              containerId,
-              [
-                'sh',
-                '-c',
-                "find /workspace -path '*/node_modules/.bin/*' -empty -print 2>/dev/null | awk -F'/node_modules/' '{print $1}' | sort -u | while read -r dir; do [ -f \"$dir/package.json\" ] && (cd \"$dir\" && npm rebuild 2>&1); done",
-              ],
-              { timeout: 120_000 },
-            )
-            .catch((err: unknown) => ({
-              stdout: '',
-              stderr: err instanceof Error ? err.message : String(err),
-              exitCode: 1,
-            }));
-          if (rebuildResult.exitCode === 0) {
-            logger.info({ podId }, 'npm rebuild completed — bin stubs restored');
-            emitStatus('✅ npm rebuild completed — bin stubs restored');
-          } else {
-            logger.warn({ podId }, `npm rebuild failed: ${rebuildResult.stdout?.slice(0, 300)}`);
-            emitStatus(
-              `⚠️ npm rebuild failed. Agent may encounter "Permission denied" errors for node_modules/.bin tools.`,
-            );
-          }
-        }
-
-        // Rewrite injected MCP server URLs to route through daemon proxy.
-        // Only HTTP servers go through the proxy — stdio servers run as local
-        // subprocesses in the container and are appended to mcpServers below.
-        // Agent sees proxy URLs, daemon handles auth injection + PII stripping.
-        const httpMcpServers = mergedMcpServers.filter((s) => s.type !== 'stdio');
-        const proxiedMcpServers = httpMcpServers.map((s) => ({
-          ...s,
-          url: `${mcpBaseUrl}/mcp-proxy/${encodeURIComponent(s.name)}/${podId}`,
-          // Don't expose auth headers to agent — proxy injects them
-          headers: undefined,
-        }));
-
-        // Resolve available actions from profile's action policy.
-        // resolveEffectiveActionPolicy auto-injects the 'deploy' group when
-        // profile.deployment.enabled is true so users only have to flip one switch.
-        const effectivePolicy = resolveEffectiveActionPolicy(profile);
-        const availableActions = effectivePolicy
-          ? (deps.actionEngine?.getAvailableActions(effectivePolicy) ?? [])
-          : [];
-
-        // Resolve runtime-fetched sections (fetches URLs, respects token budgets)
-        if (mergedSections.some((s) => s.fetch)) {
-          emitStatus('Fetching runtime CLAUDE.md sections…');
-        }
-        const resolvedSections = await resolveSections(mergedSections, logger, {
-          podId,
-          safetyEventsRepo,
-        });
-
-        // Generate system instructions and deliver based on runtime
-        const mcpUrl = `${mcpBaseUrl}/mcp/${podId}`;
-
-        // Build provider-aware env (API keys, OAuth creds, Foundry config) before memory
-        // ranking so automatic review can use the same prepared pod/container auth path
-        // as the agent runtime.
-        emitStatus('Building provider credentials…');
-        const providerResult = await buildProviderEnv(profile, podId, logger, {
-          profileStore,
-          providerAccountStore,
-          providerCatalog,
-          runtime: pod.runtime,
-          ...(queuedProviderAttempt?.providerAccountId || pod.providerIdSnapshot
-            ? {
-                providerBinding: {
-                  accountId:
-                    queuedProviderAttempt?.providerAccountId ?? pod.providerAccountIdSnapshot,
-                  providerId: queuedProviderAttempt?.providerAccountId
-                    ? (providerAccountStore?.get(queuedProviderAttempt.providerAccountId)
-                        .provider ?? pod.providerIdSnapshot)
-                    : pod.providerIdSnapshot,
-                },
-              }
-            : {}),
-        });
-        rememberMaxCredentialLineage(podId, providerResult);
-        const secretEnv: Record<string, string> = {
-          POD_ID: podId,
-          ...providerResult.env,
-          ...buildValidationContextEnv({
-            podId,
-            headBranch: pod.branch,
-            baseBranch: pod.baseBranch ?? profile.defaultBranch ?? 'main',
-            startCommitSha: pod.startCommitSha,
-          }),
-        };
-
-        // Codex runtime: write OPENAI_API_KEY to a secret file, pass file path in env.
-        if (!launchConfig && pod.runtime === 'codex' && process.env.OPENAI_API_KEY) {
-          const oaiFilePath = '/run/autopod/openai-api-key';
-          providerResult.secretFiles.push({
-            path: oaiFilePath,
-            content: process.env.OPENAI_API_KEY,
-          });
-          secretEnv.OPENAI_API_KEY_FILE = oaiFilePath;
-        }
-
-        // NuGet PAT: write to a 0400 secret file instead of passing in exec env.
-        const nugetSecret =
-          launchRegistry?.nugetSecret ??
-          buildNuGetSecretFile(profile.privateRegistries, effectiveRegistryPat);
-        if (nugetSecret) {
-          providerResult.secretFiles.push({ path: nugetSecret.path, content: nugetSecret.content });
-          secretEnv[nugetSecret.envFileKey] = nugetSecret.path;
-        }
-
-        // Write provider credential files to container (e.g., OAuth .credentials.json for MAX)
-        for (const file of providerResult.containerFiles) {
-          await containerManager.writeFile(containerId, file.path, file.content);
-          logger.info(
-            { podId, path: file.path, bytes: file.content.length },
-            'Wrote provider credential file to container',
-          );
-        }
-        await repairSandboxAgentHomeOwnership(containerManager, containerId, pod.executionTarget);
-
-        // Write secret files (API keys, tokens) to /run/autopod/ with restrictive modes.
-        // The sandbox file API currently materializes uploads as root-owned files even
-        // when the warm image runs as the non-root autopod user, so sandbox shims need
-        // owner-neutral read/execute bits.
-        const secretFileMode = pod.executionTarget === 'sandbox' ? '0444' : '0400';
-        const shimMode = pod.executionTarget === 'sandbox' ? '0555' : '0500';
-        // These are referenced by *_FILE env vars in secretEnv — the exec shim reads
-        // them and sets the real env var before starting the agent process.
-        if (pod.executionTarget === 'sandbox') {
-          const pidFile = await containerManager.execInContainer(
-            containerId,
-            [
-              'sh',
-              '-c',
-              [
-                'install -d -o root -g root -m 0755 /run/autopod',
-                'install -o autopod -g autopod -m 0600 /dev/null /run/autopod/agent.pid',
-              ].join(' && '),
-            ],
-            { timeout: 5_000, user: 'root' },
-          );
-          if (pidFile.exitCode !== 0) {
-            throw new Error(
-              `Failed to arm sandbox agent PID recovery: ${pidFile.stderr || pidFile.stdout}`,
-            );
-          }
-        } else {
-          await containerManager.execInContainer(containerId, ['mkdir', '-p', '/run/autopod'], {
-            timeout: 5_000,
-          });
-        }
-        for (const sf of providerResult.secretFiles) {
-          await containerManager.writeFile(containerId, sf.path, sf.content);
-          await containerManager.execInContainer(containerId, ['chmod', secretFileMode, sf.path], {
-            timeout: 5_000,
-          });
-          logger.info(
-            { podId, path: sf.path, mode: secretFileMode },
-            'Wrote secret file to container',
-          );
-        }
-        // Write the agent shim that reads *_FILE env vars and sets the real env var
-        // before exec-ing the runtime. SDKs that don't support the _FILE convention
-        // get the value via this shim so the raw secret is never in the exec's initial env.
-        await containerManager.writeFile(containerId, AGENT_ENV_PATH, buildAgentEnvFile(secretEnv));
-        await containerManager.execInContainer(
-          containerId,
-          ['chmod', secretFileMode, AGENT_ENV_PATH],
-          {
-            timeout: 5_000,
+            stagedReferenceArchivePaths,
           },
-        );
-        await containerManager.writeFile(containerId, AGENT_SHIM_PATH, AGENT_SHIM_SCRIPT);
-        await containerManager.execInContainer(containerId, ['chmod', shimMode, AGENT_SHIM_PATH], {
-          timeout: 5_000,
         });
-
-        // Select approved memories before agent start. Reviewer ranking is best-effort:
-        // if it is unavailable, the pod still starts with deterministic fallback context.
-        let memorySelection: Awaited<ReturnType<typeof selectRelevantMemories>> | undefined;
-        if (deps.memoryRepo && pod.options.agentMode === 'auto') {
-          const reviewerModelId =
-            profile.reviewerModel || profile.defaultModel || pod.model || 'claude-haiku-4-5';
-          const reviewerResult = launchConfig
-            ? {
-                ok: false as const,
-                reason: 'Repository memory uses deterministic selection during provisioning',
-              }
-            : await createProfileMemoryReviewer(profile, reviewerModelId, logger, {
-                container: {
-                  podId,
-                  containerId,
-                  containerManager,
-                  env: secretEnv,
-                  timeoutMs: 20_000,
-                },
-              });
-          memorySelection = await selectRelevantMemories({
-            pod,
-            profile,
-            deps: {
-              memoryRepo: deps.memoryRepo,
-              projectScope: projectMemoryScope(pod, launchConfig),
-              usageRepo: deps.memoryUsageRepo,
-              reviewer: reviewerResult.ok ? reviewerResult.reviewer : undefined,
-              reviewerModel: reviewerResult.ok ? reviewerResult.model : undefined,
-              reviewerUnavailableReason: reviewerResult.ok ? undefined : reviewerResult.reason,
-              logger,
-            },
-          });
-          if (memorySelection.unavailableReason && memorySelection.selected.length > 0) {
-            emitActivityStatus(
-              podId,
-              `Memory reviewer unavailable (${memorySelection.unavailableReason}); using deterministic keyword fallback.`,
-            );
-          }
-        }
-
-        const instructionPod = deps.providerAttemptRepo
-          ? { ...pod, providerAttempts: deps.providerAttemptRepo.list(podId) }
-          : pod;
-        const systemInstructions = generateSystemInstructions(profile, instructionPod, mcpUrl, {
-          referenceRevisions: Object.fromEntries(
-            (deps.launchConfiguration?.read(podId)?.references ?? []).map((reference, index) => [
-              `${index + 1}-${reference.id}`,
-              reference.revision,
-            ]),
-          ),
-          injectedSections: resolvedSections,
-          injectedMcpServers: [...proxiedMcpServers, ...workingStdioServers],
-          availableActions,
-          injectedSkills: resolvedSkillInjections,
-          relevantMemories: memorySelection?.selected,
-          memoryUnavailableReason: memorySelection?.unavailableReason,
-        });
-
-        // Write system instructions to a path outside /workspace so the repo's own
-        // CLAUDE.md / copilot-instructions.md is never overwritten.
-        // Claude CLI reads this via --append-system-prompt-file; Copilot via customInstructions.
-        emitStatus('Writing system instructions to container…');
-        await containerManager.writeFile(
+        if (provisioning.kind === 'halted') return;
+        ({ pod, launchConfig } = provisioning.prepared);
+        const {
+          containerManager,
           containerId,
-          AUTOPOD_INSTRUCTIONS_PATH,
+          profile,
+          isFreshContainerValidationOnly,
+          isRecovery,
+          isInfrastructureRecovery,
+          isRework,
           systemInstructions,
-        );
-
-        // Generate a pod-scoped token so the container can authenticate its MCP calls.
-        // The token is passed as Authorization: Bearer on the escalation MCP server config
-        // and verified by the /mcp/:podId route handler.
-        const mcpSessionToken = deps.sessionTokenIssuer?.generate(podId);
-        const escalationHeaders = mcpSessionToken
-          ? { Authorization: `Bearer ${mcpSessionToken}` }
-          : undefined;
-
-        // Build MCP server list for runtime.
-        // The pod token authenticates BOTH the escalation endpoint and the
-        // proxied-MCP endpoints — without it a pod on another pod could
-        // impersonate this pod and abuse its injected MCP credentials.
-        // Stdio servers (serena, roslyn-codelens) are included here so the
-        // runtime emits them into its out-of-tree config file. They never
-        // touch the user's working tree.
-        const mcpServers: McpServerConfig[] = [
-          { type: 'http', name: 'escalation', url: mcpUrl, headers: escalationHeaders },
-          ...proxiedMcpServers.map(
-            (s) =>
-              ({
-                type: 'http',
-                name: s.name,
-                url: s.url,
-                headers: escalationHeaders,
-              }) satisfies McpServerConfig,
-          ),
-          ...workingStdioServers.map(
-            (s) =>
-              ({
-                type: 'stdio',
-                name: s.name,
-                command: s.command,
-                ...(s.args && { args: s.args }),
-                ...(s.env && { env: s.env }),
-              }) satisfies McpServerConfig,
-          ),
-        ];
-
-        // Verify credential files are readable by the container user
-        if (providerResult.containerFiles.length > 0) {
-          const verifyResult = await containerManager.execInContainer(containerId, [
-            'sh',
-            '-c',
-            providerResult.containerFiles.map((f) => `ls -la ${f.path}`).join(' && '),
-          ]);
-          logger.info(
-            { podId, stdout: verifyResult.stdout.trim(), stderr: verifyResult.stderr.trim() },
-            'Credential file verification',
-          );
-        }
-
-        // Ensure NuGet credential provider is installed (base image install can fail silently)
-        const hasNugetRegistries = registryFiles.some((f) =>
-          f.path.toLowerCase().endsWith('nuget.config'),
-        );
-        if (hasNugetRegistries) {
-          try {
-            await ensureNuGetCredentialProvider(containerManager, containerId);
-            logger.info({ podId }, 'NuGet credential provider verified');
-          } catch (cpErr) {
-            logger.error({ podId, err: cpErr }, 'Failed to ensure NuGet credential provider');
-            emitActivityStatus(
-              podId,
-              `⚠ Credential provider install failed: ${(cpErr as Error).message}`,
-            );
-          }
-        }
-
-        // Early validation: verify registry configs are parseable before agent starts.
-        // Pass the NuGet credential env so the auth probe (`dotnet nuget search`) can
-        // actually authenticate against the private feed — execInContainer otherwise
-        // inherits an empty VSS_NUGET_EXTERNAL_FEED_ENDPOINTS from the image and
-        // silently 401s.
-        if (registryFiles.length > 0) {
-          const probeEnv = launchRegistry?.nugetSecret
-            ? { [launchRegistry.nugetSecret.envKey]: launchRegistry.nugetSecret.content }
-            : buildNuGetCredentialEnv(profile.privateRegistries, effectiveRegistryPat);
-          try {
-            await validateRegistryFiles(
-              containerManager,
-              containerId,
-              registryFiles,
-              Object.keys(probeEnv).length > 0 ? probeEnv : undefined,
-            );
-            logger.info({ podId }, 'Registry config validation passed');
-          } catch (regErr) {
-            logger.error(
-              { podId, err: regErr },
-              'Registry config validation failed — pod will likely fail at build time',
-            );
-            emitActivityStatus(
-              podId,
-              `⚠ Registry config check failed: ${(regErr as Error).message}`,
-            );
-          }
-        }
-
-        if (launchConfig?.repository?.setup.prepareCommand) {
-          emitStatus('Preparing repository dependencies…');
-          await prepareLaunchRepository(launchConfig, containerManager, containerId, {
-            ...profile.buildEnv,
-            ...(launchRegistry?.nugetSecret
-              ? { [launchRegistry.nugetSecret.envKey]: launchRegistry.nugetSecret.content }
-              : buildNuGetCredentialEnv(profile.privateRegistries, effectiveRegistryPat)),
-          });
-        }
+          secretEnv,
+          worktreePath,
+          mcpServers,
+          reasoningEffort,
+          providerResult,
+        } = provisioning.prepared;
 
         // skipAgent bypasses the runtime spawn. A queued recovery originates
         // from Resume's fresh-container validation-only path and must enter
@@ -12930,66 +10293,4 @@ function portFromUrl(url: string): number {
   } catch {
     return 3100;
   }
-}
-
-/**
- * Translate profile.codeIntelligence flags into StdioInjectedMcpServer entries.
- * These are written directly to /workspace/.mcp.json — they bypass the daemon proxy
- * because they are local subprocesses inside the container, not remote HTTP servers.
- */
-function buildCodeIntelligenceServers(profile: PodExecutionSettings): StdioInjectedMcpServer[] {
-  const servers: StdioInjectedMcpServer[] = [];
-  if (profile.codeIntelligence?.serena) {
-    // Upstream contract: `serena start-mcp-server --context=claude-code --project=<dir>`.
-    // The bare `--project /workspace` form (the previous version) silently failed
-    // because it skips the `start-mcp-server` subcommand entirely.
-    servers.push({
-      type: 'stdio',
-      name: 'serena',
-      command: 'serena',
-      args: ['start-mcp-server', '--context=claude-code', '--project=/workspace'],
-      description:
-        'LSP-backed semantic code navigation. Provides go-to-definition, find-references, ' +
-        'type hierarchy, and barrel-export resolution for TypeScript (tsserver) and C# (Roslyn).',
-      toolHints: [
-        'ALWAYS use instead of grep for symbol navigation — tsserver resolves path aliases and declaration merging that grep misses',
-        'Finding a symbol definition or all callers: use find_symbol / find_referencing_symbols — NOT grep',
-        'Resolving a barrel export or path-aliased import: use symbol_overview — NOT file reads',
-        'Understanding a class hierarchy: use type_hierarchy — NOT manual directory traversal',
-      ],
-      toolNames: [
-        'mcp__serena__find_symbol',
-        'mcp__serena__find_referencing_symbols',
-        'mcp__serena__find_implementations',
-        'mcp__serena__symbol_overview',
-        'mcp__serena__type_hierarchy',
-        'mcp__serena__search_for_pattern',
-      ],
-    });
-  }
-  if (profile.codeIntelligence?.roslynCodeLens) {
-    servers.push({
-      type: 'stdio',
-      name: 'roslyn-codelens',
-      command: 'roslyn-codelens-mcp',
-      description:
-        'Roslyn-backed C# DI analysis. Use get_di_registrations to trace which concrete type ' +
-        'the DI container injects for an interface, and find_implementations for interface resolution.',
-      toolHints: [
-        'ALWAYS call get_di_registrations before reading service registration files — do NOT trace registrations manually',
-        'Resolving interface → concrete type: use find_implementations — NOT grep for class names',
-        'Finding all callers of a method: use find_callers — NOT grep',
-        'Navigating to a definition: use go_to_definition — NOT file reads',
-      ],
-      toolNames: [
-        'mcp__roslyn-codelens__get_di_registrations',
-        'mcp__roslyn-codelens__find_implementations',
-        'mcp__roslyn-codelens__find_references',
-        'mcp__roslyn-codelens__find_callers',
-        'mcp__roslyn-codelens__go_to_definition',
-        'mcp__roslyn-codelens__get_type_hierarchy',
-      ],
-    });
-  }
-  return servers;
 }

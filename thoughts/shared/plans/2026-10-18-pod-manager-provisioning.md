@@ -170,11 +170,11 @@ manager/module recipes. Verify all source outside scope and public assertions fr
 Preserve initial failures and correct scaffolding/fixtures without original-policy edits.
 
 Automated:
-- [ ] Nineteen helpers/eight bindings and140-statement recipes preserve allowed changes.
-- [ ] Full public manager suite passes with identical1,192 names/statuses/assertions.
-- [ ] Direct stage/helper/workflow cases and three private file SQLite cases pass.
-- [ ] Build/declarations, scoped lint/whitespace and supplemental test semantics pass.
-- [ ] No provisioning algorithm remains inline in processPod; prepared context feeds dispatch.
+- [x] Nineteen helpers/eight bindings and140-statement recipes preserve allowed changes.
+- [x] Full public manager suite passes with identical1,192 names/statuses/assertions.
+- [x] Direct stage/helper/workflow cases and three private file SQLite cases pass.
+- [x] Build/declarations, scoped lint/whitespace and supplemental test semantics pass.
+- [x] No provisioning algorithm remains inline in processPod; prepared context feeds dispatch.
 Manual: none.
 
 ## Phase 3: frozen qualification and continuation
@@ -208,3 +208,30 @@ credential/account boundaries, original event/order/error semantics and mutable 
 ownership. Revert manager and all new modules together to roll back. Evidence stays
 ignored under .autopod-data/provisioning/. Remaining process dispatch/error/resource
 owners and final architecture gates stay required; this is not whole-goal completion.
+
+## Implementation checkpoint (before full qualification)
+
+The complete boundary is implemented: 19 unchanged helper bodies, eight unchanged
+constant initializers and all 140 ordered statements are anchored to the original
+AST and match the documented transformations. All thirteen complete file recipes
+match; 2,003 other baseline package/script files and six root controls are unchanged.
+Manager: 12,995 → 10,296 lines; the twelve new source owners are 65–605 lines.
+
+The unchanged 1,192-case public suite has identical names/statuses and frozen bytes.
+All 37 new direct cases across nine suites pass, including three actual private-file
+SQLite close/reopen cases, local Git/spec operations, shared startup admission on
+throw, sidecar and reference-worktree failure cleanup, interactive shared materials,
+workspace Git failures and local/sandbox credential modes. Container/provider commands
+are controlled mocks. No live Docker/Azure/provider acceptance is claimed.
+
+Daemon/dependency build and declarations pass, scoped Biome passes without warnings,
+and all ten new test/fixture files have zero supplemental semantic diagnostics.
+A stronger source semantic audit finds seven diagnostics already present in the
+original manager; an exact code/message comparison proves no new diagnostics. These
+inherited nullable provider/worktree, template and skill-predicate diagnostics are
+retained under compatibility scope; the repository build/declaration checks pass.
+
+Evidence: .autopod-data/provisioning/ (movement.json, public-comparison.json,
+public-after.json, packages/daemon/.autopod-data/provisioning/direct-final.json,
+baseline-type-comparison.json and named command logs/exits). The affected/full frozen
+pipeline and pushed revision checks remain required before this slice is complete.
