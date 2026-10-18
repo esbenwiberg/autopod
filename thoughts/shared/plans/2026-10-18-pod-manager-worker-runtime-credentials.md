@@ -1,6 +1,6 @@
 # Slice 16: worker runtime credential extraction
 
-Status: APPROVED — implementing all three phases after explicit user approval.
+Status: APPROVED — Phases 1 and 2 complete; final qualification running.
 Date: 2026-10-18.
 Baseline: b10a505a6c479fec4ea6225ac6c983a386008fd9.
 Branch: codex/pod-manager-workspace.
@@ -224,9 +224,9 @@ Do not claim a new transaction or atomic credential/lineage/container update.
 ### Success criteria
 
 Automated:
-- [ ] Frozen public checks pass unchanged after extraction.
-- [ ] Direct resume/persistence and real SQLite/account/readback/reopen checks pass.
-- [ ] Two-body recipe, ten unchanged callers and two-product/two-test scope pass.
+- [x] Frozen public checks pass unchanged after extraction.
+- [x] Direct resume/persistence and real SQLite/account/readback/reopen checks pass.
+- [x] Two-body recipe, ten unchanged callers and two-product/two-test scope pass.
 
 Manual: None required. Live paid providers, Docker and Azure remain outside scope.
 
@@ -272,7 +272,7 @@ increments; confirm remote identity and clean isolated checkout.
 ### Success criteria
 
 Automated:
-- [ ] All 84 affected suites pass with SQLite and no new skips.
+- [x] All 84 affected suites pass with SQLite and no new skips.
 - [ ] Full uncached validation passes under the documented qualification environment.
 - [ ] Scoped lint/whitespace/types, exact movement and frozen hashes pass.
 - [ ] Complete plan/proof records actual results, limits and final pushed identities.
@@ -299,8 +299,7 @@ providers/credential-refresh.ts; providers/azure-token.ts;
 configuration/execution-credentials.ts; pods/continuation-preflight.ts;
 pods/provider-attempt-repository.ts and existing manager worker tests.
 
-Next action: user reviews the illustrated plan and explicitly approves all three
-implementation phases. No product/test changes or implementation tests in planning.
+Next action: qualify the frozen implementation with the full uncached pipeline.
 
 ## Phase 1 observed results
 
@@ -321,3 +320,34 @@ through the actual worker ledger. A failing runtime stream emits its observed st
 before throwing. No product correction, suppressed gate or weakened assertion.
 Actual Node22.23.3 opens SQLite3.49.2; pnpm9.15.4. Baseline source and six root hashes
 are retained under ignored .autopod-data/worker-runtime-credentials/.
+
+## Phase 2 observed results
+
+createWorkerRuntimeCredentials contains both complete original bodies and the
+unchanged resume documentation. It retains the original live dependency object
+and ten captured collaborators; adjacent reviewer composition remains unchanged.
+Parsed TypeScript verifies the complete manager/module recipe and all ten awaited
+external calls (2 resume / 8 persistence), preserving caller messages/arguments.
+The manager is 16,635 lines, 185 fewer; the new module is 251 lines. All 1,973 other
+baseline package/script paths are unchanged. No product correction followed extraction.
+
+All 89 frozen public checks pass after extraction with byte-identical assertions.
+All 80 direct cases pass, using private migrated file SQLite, actual account/attempt/
+pod repositories and actual local env/readback/refresh helpers. Cases establish
+provider/Foundry gates, current profile-derived owner, no profile re-read across
+held recovery, launch/legacy modes, set/delete lineage timing, sequential writes,
+late capability service replacement/removal, error/warning identity and real SQL
+abort behavior. Actual OpenAI/Pi/MAX rotations, nonexpired MAX and controlled OAuth/
+Foundry token boundaries pass without external auth. Reopen integrity/FK and other
+account/profile/attempt invariants pass; durable auth survives later write/capability
+failure. Direct lineage callback tests prove a narrow collaborator contract; public
+tests establish the actual manager map integration. All 84 affected suites pass:
+2,968 tests, zero skipped. Scoped Biome/whitespace are clean; semantic diagnostics
+are zero for both new test boundaries.
+
+The initial direct run had one fixture expectation error: a failing chmod retains
+its preceding secret-file write. That exact prefix is now asserted. An unused copied
+test helper was removed after semantic diagnostics. Initial logs and final passing
+results are retained. Frozen source/root hashes and actual commands/runtime are
+recorded under ignored .autopod-data/worker-runtime-credentials/.
+Full uncached qualification remains; no new atomicity/isolation/dispatch guarantee.
