@@ -1,6 +1,6 @@
 # Slice 26: complete approval and readiness
 
-Status: PLANNED — authorized by the standing remaining-slices goal.
+Status: IN PROGRESS — complete extraction implemented; frozen qualification pending.
 Date:2026-10-19. Baseline:e25082d4bbf51e89d304c31309c38dd7cfdb106e.
 Branch:codex/pod-manager-workspace.
 Worktree:/Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -98,8 +98,8 @@ Allowed transforms: import/export/type/factory scaffolding, explicit this typing
 original instance composition and thin delegates. Bodies/defaults/initializers stay.
 
 Automated:
-- [ ] Qualified hashes/root controls/public bytes/provenance match.
-- [ ] Complete17-body/three-type/two-binding and source/constructor recipes saved.
+- [x] Qualified hashes/root controls/public bytes/provenance match.
+- [x] Complete17-body/three-type/two-binding and source/constructor recipes saved.
 Manual:none under standing continuation authority.
 
 ## Phase2: implement and prove the whole boundary
@@ -141,11 +141,11 @@ broad manager imports and all new source files<1,000 lines. Preserve prior domai
 owners and exact mutable-state references/construction sites.
 
 Automated:
-- [ ] Complete bodies/types/initializers/constructor and full recipes preserved.
-- [ ] Full public1,192 names/statuses/assertion bytes match; thin delegates pass.
-- [ ] Five direct suites and three actual private-file SQLite reopen cases pass.
-- [ ] Build/declarations, lint/whitespace and test semantics pass; no new source diagnostic.
-- [ ] Complete26 boundary is domain-owned, retaining original references/initialization.
+- [x] Complete bodies/types/initializers/constructor and full recipes preserved.
+- [x] Full public1,192 names/statuses/assertion bytes match; thin delegates pass.
+- [x] Five direct suites and three actual private-file SQLite reopen cases pass.
+- [x] Build/declarations, lint/whitespace and test semantics pass; no new source diagnostic.
+- [x] Complete26 boundary is domain-owned, retaining original references/initialization.
 Manual:none for the bounded compatibility extraction.
 
 ## Phase3: frozen qualification and continuation
@@ -180,3 +180,37 @@ Manual:none; integration/production acceptance remains separately authorized.
 No migration, public contract or policy change, or stronger transaction/replay/
 termination guarantee. Revert manager and all five new owners together. Local proof
 is bounded to controlled external infrastructure and actual local repositories/files.
+
+## Implementation checkpoint
+
+All17 complete body/parameter/default recipes, three types, both original binding
+initializers and the readiness construction statement match the original AST. Six
+full manager/module recipes match;2,048 other predecessor package/script files and
+six root controls remain unchanged. Manager8,591 →7,399 lines. Five new owners are
+135–835 lines; full approval lifetime is in scope. Service/refresh and later context
+construction retain original dependency timing, shared maps/queue and callback identity.
+Promise-returning public delegates return owner promises directly, retaining original
+owner async bodies/defaults without redundant proxy promises.
+
+The unchanged public suite passes all1,192 names/statuses/assertion bytes. Five new
+direct suites pass25 cases, including four real private-file SQLite reopen cases for
+confirmed publication/readiness/events, blocked approval retaining identity/resources,
+historical fact waiver and force-approved escalation/waiver audit. Real private report
+snapshot/receipt construction, advisory waiting, constructor dependency capture,
+identity guards, automation/reason/waiver rules, actor defaults and dynamic control
+calls are exercised. External provider/container/worktree/launch paths are controlled;
+publication uses actual local ledger admission with synthetic transport receipts.
+No live container/cloud/model acceptance is claimed.
+
+Daemon/dependency build/declarations and scoped lint/whitespace pass. Six new test/
+fixture files have zero semantic diagnostics. Six supplemental source diagnostics
+match original baseline code/messages exactly (including the existing unexported
+FactCheckResult type and nullable callback inputs); no new diagnostic. Those original
+type/policy repairs remain outside scope. Initial audit-parser, type-import, snapshot
+fixture-order and incomplete fixture-shape failures are retained. Corrections change
+only scaffolding or fixture setup, not original bodies/public assertions.
+
+Evidence:.autopod-data/approval-readiness/ including movement-final.log/movement.json,
+baseline-type-comparison.json, public-comparison.json and named reports/exits;
+direct JSON is packages/daemon/.autopod-data/approval-readiness/direct-final.json.
+Expanded regression and full frozen qualification remain required before26 is done.

@@ -1,5 +1,5 @@
 import { isAcrQualifiedImage } from './provisioning-image-policy.js';
-import { createProvisioningMaterials, dataDir } from './provisioning-materials.js';
+import { createProvisioningMaterials } from './provisioning-materials.js';
 import {
   AGENT_ENV_PATH,
   AGENT_SHIM_PATH,
@@ -27,7 +27,6 @@ import type {
   EffectiveLaunchConfig,
   EscalationRequest,
   ExecutionTarget,
-  FactCheckResult,
   HistoryQuery,
   InjectedMcpServer,
   MemoryEntry,
@@ -40,21 +39,15 @@ import type {
   ProviderCredentials,
   ProviderFailoverTarget,
   PublicProviderCatalog,
-  ReadinessApproval,
-  ReadinessReview,
-  ReadinessStatus,
   RequestCredentialPayload,
   ReviewFeedbackResponseItem,
   ScanFinding,
   SpawnFixResponse,
   TaskRetryIdentity,
-  TaskSummary,
   UpdateFromBaseResponse,
-  ValidationFinding,
   ValidationOverride,
   ValidationOverridePayload,
   ValidationResult,
-  ValidationWaiver,
 } from '@autopod/shared';
 import {
   AutopodError,
@@ -83,8 +76,6 @@ import { createValidationTriggerWorkflow } from './validation-trigger-workflow.j
 import { createValidationWorkflowControls } from './validation-workflow-controls.js';
 import {
   assertProtectedOperationalPathsInScope,
-  failedFactIds,
-  failedValidationPhases,
   getPodValidationSkipPhases,
   getPodValidationSuite,
   loadCodeReviewSkill,
@@ -136,7 +127,7 @@ import {
   reconcileMerge,
 } from '../worktrees/durable-merge.js';
 import { createDurablePrManagerFactory } from '../worktrees/durable-pr-manager.js';
-import { publishCommittedSource, publishSource } from '../worktrees/durable-source-publication.js';
+
 import {
   DeletionGuardError,
   GitCredentialError,
@@ -151,7 +142,6 @@ import type {
 import { createAdvisoryValidation } from './advisory-validation.js';
 
 import { createArtifactFinalizer } from './artifact-finalizer.js';
-import { collectArtifactSnapshot } from './artifact-preservation.js';
 import {
   type ArtifactResumeObservation,
   observeArtifactResume,
@@ -185,7 +175,6 @@ import { projectMemoryScope } from './project-memory-scope.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import { resolveProviderPreflight } from './provider-preflight.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
-import { createReadinessService } from './readiness-review.js';
 
 import { deriveReferenceRepos } from './reference-repos.js';
 import { createReviewerContext } from './reviewer-context.js';
@@ -202,7 +191,6 @@ import {
   canPromote,
   canReceiveMessage,
   isTerminalState,
-  validateTransition,
 } from './state-machine.js';
 
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
@@ -225,7 +213,6 @@ import type { ValidationRepository } from './validation-repository.js';
 import { createValidationWorkspace } from './validation-workspace.js';
 import { createWorkerRuntimeCredentials } from './worker-runtime-credentials.js';
 import type { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
-import { WORKSPACE_SYNC_EXCLUDES } from './workspace-mirror.js';
 import { createWorkspacePreservation } from './workspace-preservation.js';
 
 import { createAgentActivity } from './agent-activity.js';
@@ -237,6 +224,16 @@ import {
 } from './agent-execution-policy.js';
 import { createAgentProcessWorkflow } from './agent-process-workflow.js';
 import { createAgentRunRegistry } from './agent-run-registry.js';
+import type { ApproveAllSkippedPod, ApproveSessionOptions } from './approval-contracts.js';
+import { createApprovalControls } from './approval-controls.js';
+import {
+  actorLabel,
+  buildValidationWaiver,
+  legacyRespondedBy,
+  parseValidationOverrideResponse,
+} from './approval-policy.js';
+import { createApprovalReadiness, createReadinessRefresh } from './approval-readiness.js';
+import { createApprovalWorkflow } from './approval-workflow.js';
 import {
   describeSyncFailure,
   formatElapsedDuration,
@@ -250,6 +247,7 @@ import { createCompletionEvents } from './completion-events.js';
 import { createCompletionGuards } from './completion-guards.js';
 import { createCompletionOwners, createCompletionWorkflow } from './completion-workflow.js';
 import { createWorkspaceTransfer } from './workspace-transfer.js';
+export type { ApproveSessionOptions, ApproveAllSkippedPod } from './approval-contracts.js';
 
 function buildDetachedMcpFallbackMessage(
   escalationType: string | undefined,
@@ -265,32 +263,6 @@ function buildDetachedMcpFallbackMessage(
   ].join('\n');
 }
 
-function actorLabel(actor: OperatorActor): string {
-  if (actor.type === 'human') return actor.displayName?.trim() || actor.userId;
-  if (actor.type === 'podsitter') return `Podsitter decision ${actor.decisionId}`;
-  return `automation:${actor.id}`;
-}
-
-function legacyRespondedBy(actor: OperatorActor): 'human' | 'ai' {
-  return actor.type === 'human' ? 'human' : 'ai';
-}
-
-function buildValidationWaiver(
-  result: ValidationResult | null,
-  reason: string | undefined,
-  actor: OperatorActor,
-): ValidationWaiver {
-  return {
-    waivedAt: new Date().toISOString(),
-    waivedBy: actorLabel(actor),
-    actor,
-    reason: reason?.trim() || 'Approved anyway by operator',
-    attempt: result?.attempt ?? null,
-    failedPhases: failedValidationPhases(result),
-    failedFactIds: failedFactIds(result),
-  };
-}
-
 /** Format a `mergeBlockReason` string for a rebase that produced conflicts.
  * Caps the conflict-file preview at 5 entries (with `…` if truncated) and
  * falls back to `(see logs)` when the conflict list itself isn't available. */
@@ -299,22 +271,6 @@ function formatRebaseConflictReason(baseBranch: string, conflicts: readonly stri
   const ellipsis = conflicts.length > 5 ? '…' : '';
   return `Rebase conflicts on ${baseBranch}: ${preview || '(see logs)'}${ellipsis}`;
 }
-
-// Approval snapshots exist to keep git-ignored reports after the sandbox is deleted.
-// Git history is published separately and dependency/build caches are regenerable;
-// archiving them through the sandbox data plane overran the approval copy budget.
-const APPROVAL_SNAPSHOT_EXCLUDES = [
-  ...WORKSPACE_SYNC_EXCLUDES,
-  '.pnpm-store',
-  '.turbo',
-  '.next',
-  '.nuxt',
-  '.venv',
-  '__pycache__',
-  '.pytest_cache',
-  '.mypy_cache',
-  '.gradle',
-];
 
 /** Allocate a random host port in range 10000–48999 for container port mapping.
  * Capped at 48999 to avoid the Windows/Hyper-V ephemeral port reservation range (49152+). */
@@ -510,62 +466,6 @@ function formatReviewFeedbackReply(response: ReviewFeedbackResponseItem): string
 const PREVIEW_AUTO_STOP_MS = 10 * 60 * 1000;
 
 const execFileAsync = promisify(execFile);
-
-/**
- * Parses a human's response to a validation_override escalation.
- * Supports:
- *   - "dismiss" / "dismiss all" → dismiss all findings
- *   - "dismiss 1,3" → dismiss specific findings by 1-based index
- *   - Any other text → treat as guidance for all findings
- */
-function parseValidationOverrideResponse(
-  message: string,
-  findings: ValidationFinding[],
-): ValidationOverride[] {
-  const trimmed = message.trim().toLowerCase();
-  const now = new Date().toISOString();
-
-  // "dismiss" or "dismiss all" → dismiss everything
-  if (trimmed === 'dismiss' || trimmed === 'dismiss all') {
-    return findings.map((f) => ({
-      findingId: f.id,
-      description: f.description,
-      action: 'dismiss' as const,
-      reason: message.trim(),
-      createdAt: now,
-    }));
-  }
-
-  // "dismiss 1,2,3" → dismiss specific indices
-  const dismissMatch = trimmed.match(/^dismiss\s+([\d,\s]+)$/);
-  if (dismissMatch) {
-    // biome-ignore lint/style/noNonNullAssertion: dismissMatch[1] is guaranteed by regex capture group
-    const indices = dismissMatch[1]!
-      .split(/[,\s]+/)
-      .map((s) => Number.parseInt(s, 10) - 1) // 1-based → 0-based
-      .filter((i) => i >= 0 && i < findings.length);
-
-    const indexSet = new Set(indices);
-    return findings
-      .filter((_, i) => indexSet.has(i))
-      .map((f) => ({
-        findingId: f.id,
-        description: f.description,
-        action: 'dismiss' as const,
-        reason: message.trim(),
-        createdAt: now,
-      }));
-  }
-
-  // Anything else → guidance for all findings
-  return findings.map((f) => ({
-    findingId: f.id,
-    description: f.description,
-    action: 'guidance' as const,
-    guidance: message.trim(),
-    createdAt: now,
-  }));
-}
 
 /**
  * Warn when a single-PR series pod is about to create a PR without the
@@ -765,19 +665,6 @@ export interface PodCreator {
 }
 
 export type { AgentRunOutcome } from './agent-execution-contracts.js';
-
-export interface ApproveSessionOptions {
-  squash?: boolean;
-  reason?: string;
-  automation?: boolean;
-  actor?: OperatorActor;
-}
-
-export interface ApproveAllSkippedPod {
-  podId: string;
-  status: ReadinessStatus;
-  reason: string;
-}
 
 export interface PodManager {
   getLaunchConfiguration?(podId: string): EffectiveLaunchConfig | null;
@@ -1497,155 +1384,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
    *  truth — any cleanup path that goes through `cleanupContainer` reaps the
    *  handle. */
   const haproxyDenyHandles = new Map<string, HaproxyDenyStreamHandle>();
-  const readinessService = createReadinessService({
+  const { readinessService, refreshReadiness } = createReadinessRefresh(deps, {
     podRepo,
     validationRepo,
     scanRepo,
-    actionAuditRepo: deps.actionAuditRepo,
-    eventRepo: deps.eventRepo,
     escalationRepo,
-    providerAttemptRepo: deps.providerAttemptRepo,
     qualityScoreRepo,
+    logger,
   });
-
-  function refreshReadiness(
-    podId: string,
-    options: { advisoryQaInFlight?: boolean } = {},
-  ): boolean {
-    try {
-      const pod = podRepo.getOrThrow(podId);
-      const allowPostDecision = options.advisoryQaInFlight === false;
-      const refreshableStatuses = allowPostDecision
-        ? [
-            'validated',
-            'review_required',
-            'failed',
-            'approved',
-            'merging',
-            'merge_pending',
-            'complete',
-            'killed',
-          ]
-        : ['validated', 'review_required', 'failed'];
-      if (!refreshableStatuses.includes(pod.status)) {
-        return true;
-      }
-      readinessService.refreshPodReadiness(podId, options);
-      return true;
-    } catch (err) {
-      logger.warn({ err, podId }, 'Failed to refresh Readiness Review');
-      return false;
-    }
-  }
-
-  type ApprovalReadiness = {
-    status: ReadinessStatus;
-    summary: string;
-    scope: ReadinessApproval['scope'];
-    seriesId?: string;
-    podReview: ReadinessReview;
-  };
-
-  async function resolveApprovalReadiness(
-    pod: Pod,
-    options: { waitForAdvisory?: boolean } = {},
-  ): Promise<ApprovalReadiness> {
-    assertGuidanceCollected(pod.id);
-    const advisoryRun = advisoryRuns.get(pod.id);
-    let podReview = readinessService.refreshPodReadiness(pod.id, {
-      advisoryQaInFlight: Boolean(advisoryRun),
-    });
-    if (options.waitForAdvisory && advisoryRun) {
-      emitActivityStatus(pod.id, 'Waiting for advisory browser QA before approval…');
-      await advisoryRun;
-      podReview = readinessService.refreshPodReadiness(pod.id, { advisoryQaInFlight: false });
-    }
-
-    if (isSinglePrSeriesPod(pod) && pod.prUrl && pod.seriesId) {
-      const seriesReview = readinessService.computeSeriesReadiness(pod.seriesId);
-      return {
-        status: seriesReview.status,
-        summary: seriesReview.summary,
-        scope: 'series',
-        seriesId: pod.seriesId,
-        podReview,
-      };
-    }
-
-    return {
-      status: podReview.status,
-      summary: podReview.summary,
-      scope: 'pod',
-      podReview,
-    };
-  }
-
-  function normalizeApprovalReason(reason?: string): string | undefined {
-    const trimmed = reason?.trim();
-    return trimmed && trimmed.length > 0 ? trimmed : undefined;
-  }
-
-  function readinessSkipReason(readiness: Pick<ApprovalReadiness, 'status' | 'summary'>): string {
-    return readiness.status === 'ready'
-      ? 'Readiness Review is ready.'
-      : `Readiness Review is ${readiness.status}: ${readiness.summary}`;
-  }
-
-  function assertApprovalAllowed(
-    podId: string,
-    readiness: Pick<ApprovalReadiness, 'status' | 'summary'>,
-    options: ApproveSessionOptions = {},
-  ): string | undefined {
-    const reason = normalizeApprovalReason(options.reason);
-    if (options.automation && readiness.status !== 'ready') {
-      throw new AutopodError(readinessSkipReason(readiness), 'READINESS_NOT_READY', 409);
-    }
-    if ((readiness.status === 'risky' || readiness.status === 'waived') && !reason) {
-      throw new AutopodError(
-        `Approval reason is required for ${readiness.status} Readiness Review on pod ${podId}`,
-        'READINESS_REASON_REQUIRED',
-        400,
-      );
-    }
-    return reason;
-  }
-
-  function persistReadinessApproval(
-    podId: string,
-    readiness: ApprovalReadiness,
-    actor: OperatorActor,
-    reason?: string,
-  ): void {
-    const approval: ReadinessApproval = {
-      approvedAt: new Date().toISOString(),
-      statusAtApproval: readiness.status,
-      scope: readiness.scope,
-      approvedBy: actorLabel(actor),
-      actor,
-      ...(readiness.seriesId ? { seriesId: readiness.seriesId } : {}),
-      ...(reason ? { reason } : {}),
-    };
-    podRepo.update(podId, {
-      readinessReview: {
-        ...readiness.podReview,
-        approval,
-      },
-    });
-
-    if (readiness.status !== 'ready') {
-      eventBus.emit({
-        type: 'pod.readiness_approved',
-        timestamp: approval.approvedAt,
-        podId,
-        status: readiness.status,
-        scope: readiness.scope,
-        summary: readiness.summary,
-        ...(readiness.seriesId ? { seriesId: readiness.seriesId } : {}),
-        ...(reason ? { reason } : {}),
-        actor,
-      });
-    }
-  }
 
   /** Best-effort: start the HAProxy deny log receiver for a restricted-mode
    *  pod and wire each denied SNI to a `pod.firewall_denied` event. Failures
@@ -2237,6 +1983,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       recordNotReportedMemoryUsage,
       podRepo,
       refreshReadiness,
+    });
+  const { resolveApprovalReadiness, persistReadinessApproval, assertApprovalCurrent } =
+    createApprovalReadiness({
+      assertGuidanceCollected,
+      advisoryRuns,
+      readinessService,
+      emitActivityStatus,
+      isSinglePrSeriesPod,
+      podRepo,
+      eventBus,
+      assertExecutionTerminationVerified,
     });
 
   const { emitBlockingSecurityScanFindings } = createCompletionDiagnostics({ emitActivityError });
@@ -3497,37 +3254,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return true;
   }
 
-  function taskSummaryWithApprovedFactWaiver(
-    summary: TaskSummary | null,
-    fact: FactCheckResult,
-    reason?: string,
-    actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
-  ): TaskSummary {
-    const existingSummary = summary ?? {
-      actualSummary: `${actorLabel(actor)} approved required fact waiver for ${fact.factId}.`,
-      deviations: [],
-    };
-    const existingDeviations = existingSummary.factDeviations ?? [];
-    const existing = existingDeviations.find((d) => d.factId === fact.factId);
-    const approvalReason = reason?.trim() || existing?.reason || fact.reasoning;
-    const whyImpossible = existing?.whyImpossible || fact.reasoning;
-
-    return {
-      ...existingSummary,
-      factDeviations: [
-        ...existingDeviations.filter((d) => d.factId !== fact.factId),
-        {
-          factId: fact.factId,
-          action: 'waive',
-          decision: 'approved_waive',
-          actor,
-          reason: approvalReason,
-          whyImpossible,
-        },
-      ],
-    };
-  }
-
   const { advisoryPublicationOwnership, runAdvisoryAfterValidation } = createAdvisoryValidation({
     podRepo,
     nudgeRepo,
@@ -3634,39 +3360,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       emitActivityError(pod.id, failureReason, false);
     }
     throw new AutopodError(failureReason, 'WORKSPACE_PRESERVATION_FAILED', 502);
-  }
-
-  function assertApprovalCurrent(
-    pod: Pod,
-    options: { allowRemovedContainer?: boolean; allowComplete?: boolean } = {},
-  ): void {
-    assertExecutionTerminationVerified(pod.id);
-    const current = podRepo.getOrThrow(pod.id);
-    if (
-      current.lifecycleGeneration !== pod.lifecycleGeneration ||
-      (current.status !== pod.status &&
-        !(options.allowComplete && current.status === 'complete')) ||
-      current.options.agentMode !== pod.options.agentMode ||
-      current.options.output !== pod.options.output ||
-      current.branch !== pod.branch ||
-      current.baseBranch !== pod.baseBranch ||
-      current.executionTarget !== pod.executionTarget ||
-      current.worktreePath !== pod.worktreePath ||
-      (current.containerId !== pod.containerId &&
-        !(options.allowRemovedContainer && current.containerId === null))
-    )
-      throw new AutopodError(
-        'Approval was superseded; the current lifecycle and resources are retained.',
-        'STALE_APPROVAL',
-        409,
-      );
-    assertGuidanceCollected(pod.id);
-    if (podRepo.hasUnansweredDecision?.(pod.id))
-      throw new AutopodError(
-        'An unanswered human decision blocks approval.',
-        'PENDING_HUMAN_DECISION',
-        409,
-      );
   }
 
   function failBranchPreservation(pod: Pod): never {
@@ -4239,6 +3932,46 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     finalizeArtifactPod,
     prepareSourceForCompletion,
     applyCompletionDecision,
+  });
+  const approvalWorkflow = createApprovalWorkflow({
+    podRepo,
+    resolveApprovalReadiness,
+    assertApprovalCurrent,
+    executionForPod,
+    worktreeManager,
+    emitActivityError,
+    containerManagerFactory,
+    logger,
+    prManagerFactory,
+    emitActivityStatus,
+    failBranchPreservation,
+    forceWithLeaseAllowances,
+    transition,
+    persistReadinessApproval,
+    cleanupContainerAfterAdvisorySettles,
+    eventBus,
+    maybeTriggerDependents,
+    resolveGitCredential,
+    mergeQueue,
+    formatRebaseConflictReason,
+    startMergePolling,
+    resolvePrBaseBranch,
+    ensurePrBaseBranchOnOrigin,
+    getLatestPushFindings,
+    handleDeletionGuardError,
+  });
+
+  const approvalControls = createApprovalControls({
+    podRepo,
+    resolveApprovalReadiness,
+    logger,
+    nudgeRepo,
+    validationRepo,
+    emitActivityStatus,
+    escalationRepo,
+    transition,
+    maybeTriggerDependents,
+    refreshReadiness,
   });
 
   return {
@@ -5276,799 +5009,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
     },
 
-    async approveSession(podId: string, options: ApproveSessionOptions = {}): Promise<void> {
-      const actor =
-        options.actor ??
-        (options.automation
-          ? { type: 'automation' as const, id: 'auto-approve' }
-          : { type: 'automation' as const, id: 'direct-pod-manager' });
-      const pod = podRepo.getOrThrow(podId);
-      validateTransition(pod.id, pod.status, 'approved');
-      const readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
-      const approvalReason = assertApprovalAllowed(podId, readiness, options);
-      const isWorkspacePod = pod.options?.agentMode === 'interactive';
-      const publishApprovalBranch = async (
-        anchor: Pod,
-        pushOptions?: { force?: boolean; pat?: string },
-      ) => {
-        assertApprovalCurrent(anchor);
-        const ledger = podRepo.sourcePublications;
-        const repository = executionForPod(anchor).repoUrl;
-        if (!ledger || !repository)
-          throw new AutopodError(
-            'Durable source publication is unavailable; retain resources and reconcile delivery.',
-            'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
-            409,
-          );
-        return publishSource(ledger, anchor, repository, worktreeManager, pushOptions);
-      };
-      const commitAndPublishApprovalBranch = (
-        anchor: Pod,
-        config: Parameters<WorktreeManager['mergeBranch']>[0],
-      ) => {
-        assertApprovalCurrent(anchor);
-        const ledger = podRepo.sourcePublications;
-        const repository = executionForPod(anchor).repoUrl;
-        if (!ledger || !repository)
-          throw new AutopodError(
-            'Durable source publication is unavailable; retain resources and reconcile delivery.',
-            'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
-            409,
-          );
-        return publishCommittedSource(ledger, anchor, repository, worktreeManager, config);
-      };
-      assertApprovalCurrent(pod);
-      if (pod.options.output === 'pr' || pod.options.output === 'branch') {
-        const missingIdentity = !pod.worktreePath?.trim()
-          ? 'Worktree identity is unavailable.'
-          : !pod.branch?.trim()
-            ? 'Branch identity is unavailable.'
-            : null;
-        if (missingIdentity) {
-          const reason = `Approval delivery failed. ${missingIdentity} Original resources retained; repair delivery and retry approval.`;
-          podRepo.update(podId, { failureReason: reason });
-          emitActivityError(podId, reason, false);
-          throw new AutopodError(reason, 'DELIVERY_RECONCILIATION_REQUIRED', 409);
-        }
-      }
-
-      // Git checkpoints omit ignored reports. Preserve the complete sandbox
-      // workspace before publication or either approval cleanup path removes it.
-      if (
-        pod.executionTarget === 'sandbox' &&
-        pod.containerId &&
-        (pod.options.output === 'branch' || pod.options.output === 'pr')
-      ) {
-        const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
-        const isCurrent = () => {
-          try {
-            assertApprovalCurrent(pod);
-            return true;
-          } catch {
-            return false;
-          }
-        };
-        try {
-          const artifactsPath = await collectArtifactSnapshot({
-            containerManager: containerManagerFactory.get(pod.executionTarget),
-            containerId: pod.containerId,
-            artifactRoot: path.join(dataDir, 'artifacts', pod.id),
-            generation: pod.lifecycleGeneration,
-            cycle: pod.finalization?.cycle ?? 0,
-            isCurrent,
-            excludes: APPROVAL_SNAPSHOT_EXCLUDES,
-          });
-          assertApprovalCurrent(pod);
-          podRepo.update(podId, { artifactsPath });
-        } catch (error) {
-          logger.error(
-            { err: error, cause: error instanceof Error ? error.cause : undefined, podId },
-            'Approval workspace preservation failed; resources retained',
-          );
-          assertApprovalCurrent(pod);
-          const reason =
-            'Approval delivery failed. Workspace reports could not be preserved. Original resources retained; repair preservation and retry approval.';
-          podRepo.update(podId, { failureReason: reason });
-          emitActivityError(podId, reason, false);
-          throw error;
-        }
-      }
-
-      let recoveredMerge = false;
-      if (pod.prUrl && podRepo.mergeJournal) {
-        try {
-          const entry = podRepo.mergeJournal.find(pod);
-          const provider = entry ? prManagerFactory?.(executionForPod(pod)) : null;
-          const observedStatus =
-            entry &&
-            provider &&
-            (entry.state === 'planned' ||
-              (entry.state === 'pending' && !entry.result?.autoMergeScheduled))
-              ? await provider.getPrStatus({
-                  prUrl: entry.request.config.prUrl,
-                  worktreePath: pod.worktreePath ?? undefined,
-                })
-              : undefined;
-          assertApprovalCurrent(pod);
-          if (
-            entry &&
-            observedStatus?.merged === false &&
-            (observedStatus.open === false || entry.prDisposition === 'closed')
-          ) {
-            podRepo.mergeJournal.observeStatus(entry.id, observedStatus);
-            if (!observedStatus.open)
-              mergeReconciliation(closedPrRecoveryReason(entry, pod.status));
-          }
-          if (
-            entry &&
-            (observedStatus?.merged ||
-              (entry.state !== 'pending' && entry.state !== 'planned') ||
-              entry.result?.autoMergeScheduled)
-          ) {
-            if (options.squash !== undefined && entry.request.config.squash !== options.squash)
-              mergeReconciliation('An earlier admitted merge uses a different method.');
-            if (!provider) mergeReconciliation('The original merge provider is unavailable.');
-            const result = await reconcileMerge(
-              podRepo.mergeJournal,
-              pod,
-              entry,
-              provider,
-              observedStatus,
-            );
-            assertApprovalCurrent(pod);
-            await inspectRetainedMergeSource(
-              podRepo.mergeJournal,
-              podRepo.sourcePublications,
-              pod,
-              entry,
-              worktreeManager,
-            );
-            assertApprovalCurrent(pod);
-            recoveredMerge = result.merged;
-          }
-        } catch (error) {
-          assertApprovalCurrent(pod);
-          const reason = `Approval delivery failed. ${error instanceof Error ? error.message : String(error)} Original resources retained; reconcile delivery before retrying approval.`;
-          podRepo.update(podId, { failureReason: reason });
-          emitActivityError(podId, reason, false);
-          throw new AutopodError(reason, 'APPROVAL_DELIVERY_FAILED', 502);
-        }
-      }
-
-      // No-change fast-path: skip PR creation and complete directly.
-      // Workspace pods are excluded — their human edits live in the container until
-      // mergeBranch() runs container→host sync-back, so they MUST take the normal
-      // merge path. Re-check stats from the worktree (cached pod.filesChanged is
-      // stale after force-approve / human-fix). A pod can have zero new changes
-      // since startCommitSha while still carrying older work on its branch after
-      // a failed/reworked run, so only suppress the branch push when the whole
-      // branch is proven empty against its base.
-      if (!isWorkspacePod && pod.worktreePath && !pod.prUrl) {
-        assertApprovalCurrent(pod);
-        let trulyNoChanges = false;
-        let branchHasAccumulatedChanges: boolean | null = null;
-        try {
-          const profile = executionForPod(pod);
-          const defaultBranch = profile.defaultBranch ?? 'main';
-          const sinceCommit = pod.startCommitSha ?? undefined;
-          const baseBranchForStats = pod.baseBranch ?? defaultBranch;
-          const stats = await worktreeManager.getDiffStats(
-            pod.worktreePath,
-            baseBranchForStats,
-            sinceCommit,
-          );
-          assertApprovalCurrent(pod);
-          if (
-            stats.filesChanged !== pod.filesChanged ||
-            stats.linesAdded !== pod.linesAdded ||
-            stats.linesRemoved !== pod.linesRemoved
-          ) {
-            podRepo.update(podId, {
-              filesChanged: stats.filesChanged,
-              linesAdded: stats.linesAdded,
-              linesRemoved: stats.linesRemoved,
-            });
-          }
-          trulyNoChanges = stats.filesChanged === 0;
-          if (trulyNoChanges && worktreeManager.hasChangesAgainstBase) {
-            try {
-              branchHasAccumulatedChanges = await worktreeManager.hasChangesAgainstBase(
-                pod.worktreePath,
-                baseBranchForStats,
-              );
-            } catch (err) {
-              logger.warn(
-                { err, podId, baseBranch: baseBranchForStats },
-                'Failed to prove no-change branch is empty; preserving branch push',
-              );
-            }
-          }
-        } catch (err) {
-          assertApprovalCurrent(pod);
-          logger.warn(
-            { err, podId },
-            'getDiffStats failed in approveSession; falling back to normal merge path',
-          );
-          trulyNoChanges = false;
-        }
-
-        assertApprovalCurrent(pod);
-        if (trulyNoChanges) {
-          const shouldPushBranch = branchHasAccumulatedChanges !== false;
-          emitActivityStatus(
-            podId,
-            shouldPushBranch
-              ? 'No new changes to merge — pushing existing branch and completing pod'
-              : 'No changes to merge — completing without branch push',
-          );
-          if (shouldPushBranch) {
-            if (!pod.branch) failBranchPreservation(pod);
-            try {
-              const useForce = forceWithLeaseAllowances.has(podId);
-              if (useForce) {
-                await publishApprovalBranch(pod, { force: true });
-              } else {
-                await publishApprovalBranch(pod);
-              }
-            } catch (err) {
-              logger.warn(
-                { err, podId },
-                'Branch preservation failed in no-changes approval; retaining resources',
-              );
-              failBranchPreservation(pod);
-            }
-            assertApprovalCurrent(pod);
-            forceWithLeaseAllowances.delete(podId);
-          } else {
-            forceWithLeaseAllowances.delete(podId);
-          }
-          // transition publishes status synchronously and returns the current row.
-          // A listener can replace that row; retain the original approval identity.
-          const approvedAnchor: Pod = { ...pod, status: 'approved' };
-          const mergingAnchor: Pod = { ...pod, status: 'merging' };
-          const s1 = transition(pod, 'approved');
-          assertApprovalCurrent(approvedAnchor);
-          persistReadinessApproval(podId, readiness, actor, approvalReason);
-          assertApprovalCurrent(approvedAnchor);
-          const s2 = transition(s1, 'merging');
-          assertApprovalCurrent(mergingAnchor);
-          await cleanupContainerAfterAdvisorySettles(s2, 'approve-no-changes', 'kill', () =>
-            assertApprovalCurrent(mergingAnchor, {
-              allowRemovedContainer: true,
-              allowComplete: true,
-            }),
-          );
-          assertApprovalCurrent(mergingAnchor, { allowRemovedContainer: true });
-          const noChangePod = transition(s2, 'complete', {
-            completedAt: new Date().toISOString(),
-            ...(pod.failureReason?.startsWith('Branch preservation failed.') ||
-            pod.failureReason?.startsWith('Approval delivery failed.')
-              ? { failureReason: null }
-              : {}),
-          });
-          assertApprovalCurrent({ ...pod, status: 'complete' }, { allowRemovedContainer: true });
-          eventBus.emit({
-            type: 'pod.completed',
-            timestamp: new Date().toISOString(),
-            podId,
-            finalStatus: 'complete',
-            summary: {
-              id: podId,
-              profileName: pod.profileName,
-              task: pod.task,
-              status: 'complete',
-              model: pod.model,
-              runtime: pod.runtime,
-              duration: pod.startedAt ? Date.now() - new Date(pod.startedAt).getTime() : null,
-              filesChanged: 0,
-              createdAt: pod.createdAt,
-            },
-          });
-          logger.info(
-            { podId, branchPushed: shouldPushBranch },
-            'Pod approved with no changes — completed without PR',
-          );
-          assertApprovalCurrent({ ...pod, status: 'complete' }, { allowRemovedContainer: true });
-          maybeTriggerDependents(noChangePod);
-          return;
-        }
-      }
-
-      assertApprovalCurrent(pod);
-      emitActivityStatus(podId, 'Approved — merging changes…');
-      assertApprovalCurrent(pod);
-      const approvedAnchor: Pod = { ...pod, status: 'approved' };
-      const mergingAnchor: Pod = { ...pod, status: 'merging' };
-      const s1 = transition(pod, 'approved');
-      assertApprovalCurrent(approvedAnchor);
-      persistReadinessApproval(podId, readiness, actor, approvalReason);
-      assertApprovalCurrent(approvedAnchor);
-      const s2 = transition(s1, 'merging');
-      assertApprovalCurrent(mergingAnchor);
-
-      // Keep the captured generation across waits, including rejected operations.
-      // A stale callback must not enter a recovery catch for a replacement pod.
-      const deliveryOperation = async <T>(operation: () => Promise<T>): Promise<T> => {
-        assertApprovalCurrent(mergingAnchor);
-        try {
-          return await operation();
-        } finally {
-          assertApprovalCurrent(mergingAnchor);
-        }
-      };
-      const deliveryCredential = (profile: PodExecutionSettings) =>
-        deliveryOperation(() => resolveGitCredential(profile));
-      const failDelivery = (detail: string): never => {
-        assertApprovalCurrent(mergingAnchor);
-        const reason = `Approval delivery failed. ${detail} Original resources retained; repair delivery and retry approval.`;
-        transition(mergingAnchor, 'validated', { failureReason: reason });
-        assertApprovalCurrent({ ...pod, status: 'validated' });
-        emitActivityError(podId, reason, false);
-        throw new AutopodError(reason, 'APPROVAL_DELIVERY_FAILED', 502);
-      };
-
-      // Merge the PR if one was created, otherwise fall back to branch push
-      const approveProfile = executionForPod(pod);
-      const prManager = prManagerFactory ? prManagerFactory(approveProfile) : null;
-      const mergeApprovalSource = (
-        publication: Awaited<ReturnType<typeof publishApprovalBranch>>,
-        provider: PrManager,
-        config: Parameters<PrManager['mergePr']>[0],
-      ) => {
-        if (!podRepo.mergeJournal) mergeReconciliation('Durable merge admission is unavailable.');
-        return mergePublishedSource(
-          podRepo.mergeJournal,
-          podRepo.getOrThrow(podId),
-          mergingAnchor,
-          publication,
-          provider,
-          config,
-        );
-      };
-      const planApprovalSource = (
-        publication: Awaited<ReturnType<typeof publishApprovalBranch>>,
-        prUrl: string,
-        baseBranch: string,
-      ) => {
-        assertApprovalCurrent(mergingAnchor);
-        if (!podRepo.mergeJournal) mergeReconciliation('Durable merge planning is unavailable.');
-        return podRepo.mergeJournal.plan(
-          podRepo.getOrThrow(podId),
-          mergingAnchor,
-          publication.publicationId,
-          {
-            prUrl,
-            expectedHeadSha: publication.commitSha,
-            expectedTarget: {
-              repository: publication.repository,
-              branch: publication.branch,
-              baseBranch,
-            },
-            squash: options.squash,
-          },
-        );
-      };
-      if (recoveredMerge) {
-        emitActivityStatus(
-          podId,
-          'Earlier merge confirmed from durable source and target evidence',
-        );
-      } else if (pod.prUrl && prManager && pod.worktreePath) {
-        const mergeBaseBranch = pod.baseBranch ?? approveProfile.defaultBranch ?? 'main';
-        const queueKey = MergeQueue.keyFor(approveProfile.repoUrl, mergeBaseBranch);
-        const worktreePath = pod.worktreePath;
-        const prUrl = pod.prUrl;
-
-        try {
-          const initialStatus = await deliveryOperation(() =>
-            prManager.getPrStatus({ prUrl, worktreePath }),
-          );
-          if (initialStatus.merged || !initialStatus.open)
-            failDelivery(
-              'The PR has an external disposition without a confirmed daemon merge. Reconcile it before publishing retained source.',
-            );
-        } catch (error) {
-          // failDelivery already moved the original lifecycle back to validated.
-          if (error instanceof AutopodError && error.code === 'APPROVAL_DELIVERY_FAILED')
-            throw error;
-          assertApprovalCurrent(mergingAnchor);
-          failDelivery('The current PR disposition is unavailable.');
-        }
-
-        // Outcome of the queued critical section. We do state transitions outside
-        // the queue so the lock is released as quickly as possible.
-        type MergeOutcome =
-          | { kind: 'merged' }
-          | { kind: 'merge_pending'; blockReason: string }
-          | { kind: 'merge_failed'; reason: string };
-
-        const outcome = await mergeQueue
-          .run<MergeOutcome>(queueKey, async () => {
-            assertApprovalCurrent(mergingAnchor);
-            // Fix pods make commits in the container but rely on the agent to push.
-            // Push explicitly here before attempting to complete the PR so any local
-            // commits the agent forgot (or failed) to push are flushed to the remote.
-            // Pass the PAT so we don't depend on the in-memory cache, which is
-            // evicted whenever any sibling worktree on the same bare repo is
-            // cleaned up (local-worktree-manager.ts cleanup()).
-            let publishedSource: Awaited<ReturnType<typeof publishApprovalBranch>>;
-            const useForce = forceWithLeaseAllowances.has(podId);
-            try {
-              publishedSource = await deliveryOperation(async () =>
-                publishApprovalBranch(mergingAnchor, {
-                  pat: await deliveryCredential(approveProfile),
-                  ...(useForce ? { force: true } : {}),
-                }),
-              );
-              forceWithLeaseAllowances.delete(podId);
-              emitActivityStatus(podId, 'Branch pushed');
-            } catch (pushErr) {
-              assertApprovalCurrent(mergingAnchor);
-              const reason = pushErr instanceof Error ? pushErr.message : String(pushErr);
-              const blockReason = `Push to origin failed: ${reason}`;
-              logger.warn(
-                { err: pushErr, podId },
-                'Pre-merge push failed — retaining source for explicit approval retry',
-              );
-              return { kind: 'merge_failed', reason: blockReason };
-            }
-
-            // Pre-merge rebase onto latest origin/<base>. Catches conflicts
-            // *before* the PR merge attempt so an agent (or fix pod) gets to
-            // resolve them while it still has full task context, instead of
-            // discovering the conflict via GitHub's merge gate after the fact.
-            // Runs inside the merge queue so the rebase always sees the freshly
-            // merged state of any preceding pod on the same base.
-            emitActivityStatus(podId, `Rebasing onto origin/${mergeBaseBranch}…`);
-            const rebaseResult = await deliveryOperation(async () =>
-              worktreeManager.rebaseOntoBase({
-                worktreePath,
-                baseBranch: mergeBaseBranch,
-                pat: await deliveryCredential(approveProfile),
-              }),
-            );
-
-            if (!rebaseResult.rebased) {
-              const blockReason = formatRebaseConflictReason(
-                mergeBaseBranch,
-                rebaseResult.conflicts,
-              );
-              logger.info(
-                {
-                  podId,
-                  prUrl,
-                  baseBranch: mergeBaseBranch,
-                  conflicts: rebaseResult.conflicts,
-                },
-                'Pre-merge rebase produced conflicts — retaining source for manual resolution',
-              );
-              return { kind: 'merge_failed', reason: blockReason };
-            }
-
-            // Rebase rewrote history → force-push so origin/<branch> matches our
-            // new HEAD. Skip the push when the rebase was a no-op (already up to
-            // date) since we already pushed above.
-            if (!rebaseResult.alreadyUpToDate) {
-              try {
-                publishedSource = await deliveryOperation(async () =>
-                  publishApprovalBranch(mergingAnchor, {
-                    force: true,
-                    pat: await deliveryCredential(approveProfile),
-                  }),
-                );
-                emitActivityStatus(podId, 'Rebased branch pushed');
-              } catch (pushErr) {
-                assertApprovalCurrent(mergingAnchor);
-                const reason = pushErr instanceof Error ? pushErr.message : String(pushErr);
-                const blockReason = `Force-push after rebase failed: ${reason}`;
-                logger.warn(
-                  { err: pushErr, podId },
-                  'Force-push after rebase failed — retaining source for explicit approval retry',
-                );
-                return { kind: 'merge_failed', reason: blockReason };
-              }
-            }
-
-            planApprovalSource(publishedSource, prUrl, mergeBaseBranch);
-
-            // Daemon-side approval gate: check the PR's review decision before attempting
-            // to merge. If the platform reports that a review is still required or changes
-            // were requested, enter merge_pending and let the poller wait for approval.
-            // This ensures the daemon never bypasses required review gates even when
-            // GitHub auto-merge is enabled.
-            try {
-              const prStatus = await deliveryOperation(async () =>
-                prManager.getPrStatus({ prUrl, worktreePath }),
-              );
-              if (prStatus.merged || !prStatus.open)
-                return {
-                  kind: 'merge_failed',
-                  reason:
-                    'The PR changed external disposition before merge admission; reconcile the retained source.',
-                };
-              if (prStatus.reviewDecision && prStatus.reviewDecision !== 'APPROVED') {
-                const blockReason = `Waiting for PR review approval (current decision: ${prStatus.reviewDecision})`;
-                logger.info(
-                  { podId, prUrl, reviewDecision: prStatus.reviewDecision },
-                  'Merge deferred — PR requires explicit approval before daemon will merge',
-                );
-                return { kind: 'merge_pending', blockReason };
-              }
-            } catch (statusErr) {
-              assertApprovalCurrent(mergingAnchor);
-              // Unknown review evidence cannot authorize a merge.
-              logger.warn(
-                { err: statusErr, podId, prUrl },
-                'Failed to check PR review decision before merge — retaining resources',
-              );
-              return { kind: 'merge_failed', reason: 'PR review status is unavailable.' };
-            }
-
-            emitActivityStatus(podId, `Merging PR: ${prUrl}`);
-            try {
-              const mergeResult = await deliveryOperation(async () =>
-                mergeApprovalSource(publishedSource, prManager, {
-                  onPrepared: () => assertApprovalCurrent(mergingAnchor),
-                  expectedHeadSha: publishedSource.commitSha,
-                  expectedTarget: {
-                    repository: publishedSource.repository,
-                    branch: publishedSource.branch,
-                    baseBranch: mergeBaseBranch,
-                  },
-                  worktreePath,
-                  prUrl,
-                  squash: options?.squash,
-                }),
-              );
-
-              if (mergeResult.merged) {
-                return { kind: 'merged' };
-              }
-              // Merge didn't complete immediately — enter merge_pending state
-              const initialStatus = await deliveryOperation(async () =>
-                prManager.getPrStatus({ prUrl, worktreePath }),
-              );
-              const blockReason = initialStatus.blockReason ?? 'Waiting for merge conditions';
-              logger.info(
-                {
-                  podId,
-                  prUrl,
-                  blockReason,
-                  autoMerge: mergeResult.autoMergeScheduled,
-                },
-                'Pod approved — merge pending',
-              );
-              return { kind: 'merge_pending', blockReason };
-            } catch (err) {
-              assertApprovalCurrent(mergingAnchor);
-              logger.error({ err, podId, prUrl }, 'Failed to merge PR');
-              return { kind: 'merge_failed', reason: 'PR merge could not be confirmed.' };
-            }
-          })
-          .catch((err): MergeOutcome => {
-            assertApprovalCurrent(mergingAnchor);
-            logger.error({ err, podId }, 'Approval delivery operation failed; retaining resources');
-            return { kind: 'merge_failed', reason: 'PR preparation did not complete.' };
-          });
-
-        assertApprovalCurrent(mergingAnchor);
-        if (outcome.kind === 'merged') {
-          emitActivityStatus(podId, 'PR merged successfully');
-        } else if (outcome.kind === 'merge_pending') {
-          emitActivityStatus(podId, `Merge pending: ${outcome.blockReason}`);
-          assertApprovalCurrent(mergingAnchor);
-          transition(s2, 'merge_pending', { mergeBlockReason: outcome.blockReason });
-          assertApprovalCurrent({ ...pod, status: 'merge_pending' });
-          startMergePolling(podId);
-          return;
-        } else {
-          failDelivery(outcome.reason);
-        }
-      } else if (!pod.prUrl && prManager && pod.worktreePath && pod.options.output === 'pr') {
-        // PR creation failed during validation — retry it now
-        emitActivityStatus(podId, 'No PR found — creating PR before merging…');
-        let retryPrUrl: string | null = null;
-        try {
-          const retryProfile = executionForPod(pod);
-          const publishedSource = await deliveryOperation(async () =>
-            commitAndPublishApprovalBranch(mergingAnchor, {
-              worktreePath: pod.worktreePath,
-              // Push the feature branch up so the PR can be opened against the resolved base.
-              targetBranch: pod.branch,
-              // Pass the PAT explicitly — approval retry runs post-container, so the
-              // in-memory PAT cache may be cold after a daemon restart.
-              pat: await deliveryCredential(retryProfile),
-              // Post-container retry: sync-back already happened (or failed silently) upstream;
-              // belt-and-suspenders autocommit here must not commit a phantom mass-deletion.
-              maxDeletions: 0,
-              // Provide pod task as context for any auto-generated commit message.
-              podTask: pod.task,
-              profile: retryProfile,
-              podModel: pod.model,
-            }),
-          );
-          const baseBranch = resolvePrBaseBranch(pod, retryProfile);
-          await deliveryOperation(async () =>
-            ensurePrBaseBranchOnOrigin(pod, retryProfile, baseBranch, 'approval_retry'),
-          );
-          const createResult = await deliveryOperation(async () =>
-            prManager.createPr({
-              // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null in approval retry — pods reach approved only after successful validation which requires a worktree
-              worktreePath: pod.worktreePath!,
-              repoUrl: retryProfile.repoUrl ?? undefined,
-              branch: pod.branch,
-              baseBranch,
-              podId,
-              task: pod.task,
-              profileName: pod.profileName,
-              profile: retryProfile,
-              podModel: pod.model,
-              handoffInstructions: pod.handoffInstructions ?? undefined,
-              validationResult: null,
-              validationWaiver: pod.validationWaiver,
-              filesChanged: pod.filesChanged,
-              linesAdded: pod.linesAdded,
-              linesRemoved: pod.linesRemoved,
-              previewUrl: pod.previewUrl,
-              screenshots: [],
-              taskSummary: pod.taskSummary ?? undefined,
-              seriesDescription: pod.seriesDescription ?? undefined,
-              seriesName: pod.seriesName ?? undefined,
-              securityFindings: getLatestPushFindings(podId),
-            }),
-          );
-          const newPrUrl = createResult.url;
-          retryPrUrl = newPrUrl;
-          if (createResult.usedFallback) {
-            const which = createResult.narrativeUsedFallback
-              ? createResult.titleUsedFallback
-                ? 'title + body'
-                : 'body'
-              : 'title';
-            const reason = createResult.fallbackReason ?? 'unknown';
-            logger.error(
-              {
-                podId,
-                profile: retryProfile.name,
-                modelProvider: retryProfile.modelProvider,
-                fallbackReason: reason,
-                fallbackDetail: createResult.fallbackDetail,
-              },
-              'PR description used template fallback during approval retry',
-            );
-            emitActivityStatus(podId, `PR ${which} used template fallback: ${reason}`);
-          }
-          assertApprovalCurrent(mergingAnchor);
-          podRepo.update(podId, { prUrl: newPrUrl });
-          emitActivityStatus(podId, `PR created: ${newPrUrl}`);
-          planApprovalSource(publishedSource, newPrUrl, baseBranch);
-          const reviewStatus = await deliveryOperation(async () =>
-            prManager.getPrStatus({ prUrl: newPrUrl, worktreePath: pod.worktreePath }),
-          );
-          if (reviewStatus.merged || !reviewStatus.open)
-            mergeReconciliation(
-              'The PR has an external disposition without a recorded daemon merge.',
-            );
-          if (reviewStatus.reviewDecision && reviewStatus.reviewDecision !== 'APPROVED') {
-            const blockReason = `Waiting for PR review approval (current decision: ${reviewStatus.reviewDecision})`;
-            transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
-            assertApprovalCurrent({ ...pod, status: 'merge_pending' });
-            startMergePolling(podId);
-            return;
-          }
-          const retryMergeResult = await deliveryOperation(async () =>
-            mergeApprovalSource(publishedSource, prManager, {
-              onPrepared: () => assertApprovalCurrent(mergingAnchor),
-              expectedHeadSha: publishedSource.commitSha,
-              expectedTarget: {
-                repository: publishedSource.repository,
-                branch: publishedSource.branch,
-                baseBranch,
-              },
-              worktreePath: pod.worktreePath,
-              prUrl: newPrUrl,
-              squash: options?.squash,
-            }),
-          );
-          if (retryMergeResult.merged) {
-            emitActivityStatus(podId, 'PR merged successfully');
-          } else {
-            const retryStatus = await deliveryOperation(async () =>
-              prManager.getPrStatus({
-                prUrl: newPrUrl,
-                worktreePath: pod.worktreePath,
-              }),
-            );
-            const blockReason = retryStatus.blockReason ?? 'Waiting for merge conditions';
-            emitActivityStatus(podId, `Merge pending: ${blockReason}`);
-            assertApprovalCurrent(mergingAnchor);
-            transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
-            assertApprovalCurrent({ ...pod, status: 'merge_pending' });
-            startMergePolling(podId);
-            return;
-          }
-        } catch (err) {
-          assertApprovalCurrent(mergingAnchor);
-          logger.error({ err, podId }, 'Failed to create/merge PR during approval');
-          if (handleDeletionGuardError(podId, err)) {
-            failDelivery('Source synchronization was rejected by the deletion guard.');
-          }
-          const message = err instanceof Error ? err.message : String(err);
-          if (retryPrUrl)
-            failDelivery(`Merge after PR creation could not be confirmed: ${message}`);
-          emitActivityStatus(podId, `PR creation failed: ${message} — pod returned to validated`);
-          failDelivery('PR creation did not complete.');
-        }
-      } else if (pod.worktreePath) {
-        // Fallback: no PR manager configured — push branch directly
-        emitActivityStatus(podId, 'Pushing branch…');
-        try {
-          const profile = executionForPod(pod);
-          await deliveryOperation(async () =>
-            commitAndPublishApprovalBranch(mergingAnchor, {
-              worktreePath: pod.worktreePath,
-              // Push the feature branch up to origin — no PR manager configured, so this is the
-              // last step. Pushing onto profile.defaultBranch would force-push the feature work
-              // straight onto main, which is never what we want.
-              targetBranch: pod.branch,
-              // Pass the PAT explicitly — fallback push runs post-container, so the
-              // in-memory PAT cache may be cold after a daemon restart.
-              pat: await deliveryCredential(profile),
-              // Post-container fallback push: don't let a stale worktree commit a phantom mass-delete.
-              maxDeletions: 0,
-              podTask: pod.task,
-              profile,
-              podModel: pod.model,
-            }),
-          );
-          emitActivityStatus(podId, 'Branch pushed successfully');
-        } catch (err) {
-          assertApprovalCurrent(mergingAnchor);
-          logger.error({ err, podId }, 'Failed to push branch during approval');
-          if (!handleDeletionGuardError(podId, err)) {
-            const message = err instanceof Error ? err.message : String(err);
-            emitActivityStatus(podId, `Branch push failed: ${message} — resources retained`);
-          }
-          failDelivery('Branch push did not complete.');
-        }
-      }
-
-      assertApprovalCurrent(mergingAnchor);
-      await cleanupContainerAfterAdvisorySettles(s2, 'approve-complete', 'kill', () =>
-        assertApprovalCurrent(mergingAnchor, { allowRemovedContainer: true, allowComplete: true }),
-      );
-      assertApprovalCurrent(mergingAnchor, { allowRemovedContainer: true });
-      const completedPod = transition(s2, 'complete', {
-        completedAt: new Date().toISOString(),
-        ...(pod.failureReason?.startsWith('Approval delivery failed.')
-          ? { failureReason: null }
-          : {}),
-      });
-      assertApprovalCurrent({ ...pod, status: 'complete' }, { allowRemovedContainer: true });
-
-      emitActivityStatus(podId, 'Pod complete');
-      assertApprovalCurrent({ ...pod, status: 'complete' }, { allowRemovedContainer: true });
-      eventBus.emit({
-        type: 'pod.completed',
-        timestamp: new Date().toISOString(),
-        podId,
-        finalStatus: 'complete',
-        summary: {
-          id: podId,
-          profileName: pod.profileName,
-          task: pod.task,
-          status: 'complete',
-          model: pod.model,
-          runtime: pod.runtime,
-          duration: pod.startedAt ? Date.now() - new Date(pod.startedAt).getTime() : null,
-          filesChanged: pod.filesChanged,
-          createdAt: pod.createdAt,
-        },
-      });
-
-      logger.info({ podId, prUrl: pod.prUrl }, 'Pod approved and completed');
-      assertApprovalCurrent({ ...pod, status: 'complete' }, { allowRemovedContainer: true });
-      maybeTriggerDependents(completedPod);
+    approveSession(podId: string, options: ApproveSessionOptions = {}): Promise<void> {
+      return approvalWorkflow.approveSession(podId, options);
     },
 
     async rejectSession(
@@ -7477,7 +6419,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     refreshReadinessAfterQualityScore(podId: string): boolean {
-      return refreshReadiness(podId, { advisoryQaInFlight: false });
+      return approvalControls.refreshReadinessAfterQualityScore(podId);
     },
 
     async getValidationEnvironment(podId) {
@@ -7625,28 +6567,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return validationRepo?.getForSession(podId) ?? [];
     },
 
-    async approveAllValidated(): Promise<{ approved: string[]; skipped: ApproveAllSkippedPod[] }> {
-      const validated = podRepo.list({ status: 'validated' });
-      const approved: string[] = [];
-      const skipped: ApproveAllSkippedPod[] = [];
-      for (const pod of validated) {
-        try {
-          const readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
-          if (readiness.status !== 'ready') {
-            skipped.push({
-              podId: pod.id,
-              status: readiness.status,
-              reason: readinessSkipReason(readiness),
-            });
-            continue;
-          }
-          await this.approveSession(pod.id, { automation: true });
-          approved.push(pod.id);
-        } catch (err) {
-          logger.warn({ err, podId: pod.id }, 'Failed to approve pod in bulk');
-        }
-      }
-      return { approved, skipped };
+    approveAllValidated(): Promise<{ approved: string[]; skipped: ApproveAllSkippedPod[] }> {
+      return approvalControls.approveAllValidated.call(this);
     },
 
     async killAllFailed(): Promise<{ killed: string[] }> {
@@ -7673,135 +6595,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return validationWorkflowControls.applyOverridesInstant(podId);
     },
 
-    async approveFactWaiver(
+    approveFactWaiver(
       podId: string,
       factId: string,
       reason?: string,
       actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
-      const pod = podRepo.getOrThrow(podId);
-      const isSettled = pod.status === 'failed' || pod.status === 'review_required';
-      const canRevalidateImmediately =
-        isSettled &&
-        !nudgeRepo.hasPending(podId) &&
-        !podRepo.taskExecutions?.hasUnverifiedTermination(podId);
-      const canRecordForActiveRun = pod.status === 'running' || pod.status === 'validating';
-      if (!isSettled && !canRecordForActiveRun) {
-        throw new AutopodError(
-          `Cannot approve fact waiver for pod ${podId} in status ${pod.status} — only running, validating, failed, or review_required pods`,
-          'INVALID_STATE',
-          409,
-        );
-      }
-
-      const latestFact = pod.lastValidationResult?.factValidation?.results.find(
-        (result) => result.factId === factId,
-      );
-      const historicalFact = validationRepo
-        ? [...validationRepo.getForSession(podId)]
-            .reverse()
-            .map((validation) =>
-              validation.result.factValidation?.results.find((result) => result.factId === factId),
-            )
-            .find((result) => result !== undefined)
-        : undefined;
-      // Operator interruption/kick can replace lastValidationResult with a
-      // partial snapshot whose fact phase is skipped. The completed attempt is
-      // still durable in validation history and remains the waiver authority.
-      const fact = latestFact ?? historicalFact;
-      if (!fact) {
-        throw new AutopodError(
-          `Required fact ${factId} was not found in validation results for pod ${podId}`,
-          'NOT_FOUND',
-          404,
-        );
-      }
-      // A later agent summary can overwrite the decision field even though a
-      // completed validation already persisted the human-approved waiver.
-      // Re-approving that durable waived result is idempotent: rebuild the
-      // decision in the current summary and revalidate the same worktree.
-      if (fact.status !== 'pending_human' && fact.status !== 'waived') {
-        throw new AutopodError(
-          `Required fact ${factId} is ${fact.status ?? (fact.passed ? 'pass' : 'fail')}, not pending_human`,
-          'INVALID_STATE',
-          409,
-        );
-      }
-
-      const nextTaskSummary = taskSummaryWithApprovedFactWaiver(
-        pod.taskSummary,
-        fact,
-        reason,
-        actor,
-      );
-      podRepo.update(podId, { taskSummary: nextTaskSummary });
-      emitActivityStatus(
-        podId,
-        canRevalidateImmediately
-          ? `${actorLabel(actor)} approved waiver for required fact ${factId} — revalidating existing worktree`
-          : `${actorLabel(actor)} approved waiver for required fact ${factId} — next validation will use the decision`,
-      );
-
-      if (!canRevalidateImmediately) {
-        return { newCommits: false, result: 'fail' };
-      }
-
-      return this.revalidateSession(podId, { force: true });
+      return approvalControls.approveFactWaiver.call(this, podId, factId, reason, actor);
     },
 
-    async forceApprove(
+    forceApprove(
       podId: string,
       reason?: string,
       actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
     ): Promise<void> {
-      const pod = podRepo.getOrThrow(podId);
-      const allowed =
-        pod.status === 'failed' ||
-        pod.status === 'review_required' ||
-        pod.status === 'awaiting_input';
-      if (!allowed) {
-        throw new AutopodError(
-          `Cannot force-approve pod ${podId} in status ${pod.status} — only failed, review_required, or awaiting_input pods`,
-          'INVALID_STATE',
-          409,
-        );
-      }
-      const note = reason
-        ? `[FORCE APPROVED] ${reason}`
-        : `[FORCE APPROVED] ${actorLabel(actor)} overrode validation — no further agent run needed`;
-      const validationWaiver =
-        pod.lastValidationResult?.overall === 'fail'
-          ? buildValidationWaiver(pod.lastValidationResult, reason, actor)
-          : null;
-      const forceApprovalMessage = validationWaiver
-        ? `Force approved with validation waiver — failed phases: ${validationWaiver.failedPhases.join(', ') || 'unknown'}`
-        : pod.lastValidationResult?.overall === 'pass'
-          ? `Force approved — existing validation pass accepted by ${actorLabel(actor)}`
-          : `Force approved — validation bypassed by ${actorLabel(actor)}`;
-      podRepo.update(podId, {
-        lastCorrectionMessage: note,
-        ...(validationWaiver ? { validationWaiver } : {}),
-      });
-
-      // Resolve any pending escalation so it doesn't dangle in the audit trail
-      // and pendingEscalation gets cleared on the transition.
-      const updates: Partial<PodUpdates> = {};
-      if (pod.pendingEscalation) {
-        escalationRepo.update(pod.pendingEscalation.id, {
-          respondedAt: new Date().toISOString(),
-          respondedBy: legacyRespondedBy(actor),
-          actor,
-          response: `[force-approve] ${reason ?? `${actorLabel(actor)} override`}`,
-        });
-        updates.pendingEscalation = null;
-      }
-      const approvedPod = transition(pod, 'validated', updates);
-      emitActivityStatus(podId, forceApprovalMessage);
-      logger.info(
-        { podId, reason, validationWaiver },
-        'Pod force-approved, transitioning to validated',
-      );
-      maybeTriggerDependents(approvedPod);
+      return approvalControls.forceApprove(podId, reason, actor);
     },
 
     async extendPrAttempts(podId: string, additionalAttempts: number): Promise<void> {
