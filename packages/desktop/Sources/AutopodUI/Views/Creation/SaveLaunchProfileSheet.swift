@@ -56,7 +56,8 @@ struct SaveLaunchProfileSheet: View {
           .buttonStyle(.borderedProminent).disabled(busy || proposal == nil)
       }
     }
-    .padding(24).frame(width: 620)
+    .padding(24).frame(width: 620).background(DesktopTheme.canvas).tint(DesktopTheme.accent)
+    .interactiveDismissDisabled(busy)
     .onChange(of: name) { _, _ in proposal = nil }
     .onChange(of: presetNames) { _, _ in proposal = nil }
   }

@@ -2,6 +2,12 @@ import AutopodClient
 import SwiftUI
 
 public struct ComposableCreatePodSheet: View {
+  @Environment(\.desktopRedesign) private var redesign
+  @State private var stage: LaunchComposerStage = .compose
+  @State private var jsonDirty = false
+  @State private var dirty = false
+  @State private var confirmClose = false
+  @State private var confirmDifferent = false
   @Binding var isPresented: Bool
   public var actions: LaunchConfigurationActions
   @State private var request = ComposableLaunchRequest()
@@ -15,6 +21,13 @@ public struct ComposableCreatePodSheet: View {
   @State private var advanced = ""
   @State private var showAdvanced = false
   public init(isPresented: Binding<Bool>, actions: LaunchConfigurationActions) { self._isPresented = isPresented; self.actions = actions }
+  internal init(isPresented: Binding<Bool>, actions: LaunchConfigurationActions, initialRequest: ComposableLaunchRequest,
+    stage: LaunchComposerStage = .compose, preview: EffectiveLaunchPreview? = nil, pending: ComposableLaunchRequest? = nil) {
+    self.init(isPresented: isPresented, actions: actions)
+    self._request = State(initialValue: initialRequest); self._stage = State(initialValue: stage)
+    self._preview = State(initialValue: preview); self._previewRequest = State(initialValue: preview == nil ? nil : initialRequest)
+    self._pendingRequest = State(initialValue: pending)
+  }
   private var repository: ConfigurationDocument? { actions.list(.repository).first { $0.id == request.repositoryId } }
   private var profileID: String? { request.profileId ?? repository?.payload["usualProfileId"]?.string }
   private var profile: ConfigurationDocument? { actions.list(.profile).first { $0.id == profileID } }
@@ -36,6 +49,126 @@ public struct ComposableCreatePodSheet: View {
   }
   private var canPreview: Bool { !request.task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (request.repositoryId != nil || request.emptyWorkspace == true) && (profileID != nil) }
   public var body: some View {
+    Group { if redesign { composer } else { legacyBody } }
+  }
+  private var composer: some View {
+    LaunchComposerLayout(series: false, stage: $stage, locked: pendingRequest != nil, busy: busy,
+      ready: preview != nil && previewRequest == request && !jsonDirty, close: close) {
+      if let loadError = actions.loadError {
+        Text(loadError).foregroundStyle(.red).textSelection(.enabled)
+        Button("Reload configuration") { Task { await actions.reload() } }.disabled(busy)
+      }
+      if let pendingRequest {
+        LaunchRetainedRequest(id: pendingRequest.requestId ?? "", payload: LaunchComposerJSON.value(pendingRequest))
+      } else {
+        Group {
+          switch stage {
+          case .compose: taskComposer
+          case .configure: LaunchConfigurationEditor(request: $request, actions: actions, jsonDirty: $jsonDirty, advanced: $advanced)
+          case .review:
+            if let preview, previewRequest == request, !jsonDirty {
+              LaunchResolvedReview(preview: preview)
+              Text(request.task).font(.body).textSelection(.enabled)
+            } else {
+              Text("Inspect before you launch.").font(.title2.weight(.semibold))
+              Text("Preview resolves the effective configuration and its value sources. Any change needs a fresh preview.")
+                .foregroundStyle(.secondary)
+            }
+          }
+        }.disabled(busy)
+      }
+    } summary: {
+      LaunchComposerSummary(context: .init(request: request, actions: actions, preview: previewRequest == request && !jsonDirty ? preview : nil),
+        status: pendingRequest != nil ? "Result unconfirmed" : preview != nil && previewRequest == request && !jsonDirty ? "Preview ready" : "Needs preview")
+    } footer: {
+      composerFooter
+    }
+    .onChange(of: request) { _, _ in preview = nil; previewRequest = nil; dirty = true }
+    .interactiveDismissDisabled(busy || dirty || jsonDirty || pendingRequest != nil)
+    .confirmationDialog("Leave this launch draft?", isPresented: $confirmClose) {
+      Button("Leave draft", role: .destructive) { isPresented = false }
+      Button("Keep working", role: .cancel) {}
+    } message: { Text(pendingRequest == nil ? "Unsaved choices will be discarded." : "The request’s result is still unconfirmed. Keep this composer open to retry its exact identity.") }
+    .confirmationDialog("Start a different launch?", isPresented: $confirmDifferent) {
+      Button("Edit a different launch", role: .destructive) { pendingRequest = nil; preview = nil; previewRequest = nil; stage = .compose }
+      Button("Keep saved request", role: .cancel) {}
+    } message: { Text("The earlier request may already have created a pod. A different launch will use a new identity.") }
+    .sheet(isPresented: $showSaveProfile) {
+      if let preview {
+        SaveLaunchProfileSheet(request: request, preview: preview, actions: actions) { id in
+          request.profileId = id; request.selections = nil; request.overrides = nil; request.requiredSidecarIds = nil
+        }
+      }
+    }
+  }
+  private func close() { if dirty || jsonDirty || pendingRequest != nil { confirmClose = true } else { isPresented = false } }
+  private var composerFooter: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      if let error { Text(error).foregroundStyle(.red).font(.caption).textSelection(.enabled) }
+      if jsonDirty { Text("Apply or reload unapplied JSON before previewing or launching.").font(.caption).foregroundStyle(.orange) }
+      if !launchAvailable { Text(actions.capabilities["launchUnavailableReason"]?.string ?? "Launch is unavailable until daemon configuration and execution checks are complete.").font(.caption).foregroundStyle(.secondary) }
+      ViewThatFits(in: .horizontal) {
+        HStack { footerStatus; Spacer(); composerButtons }
+        VStack(alignment: .leading, spacing: 10) { footerStatus; HStack { Spacer(); composerButtons } }
+      }
+    }
+  }
+  private var footerStatus: some View {
+    HStack(spacing: 10) {
+      if busy { ProgressView().controlSize(.small) }
+      Text(pendingRequest != nil ? "Result unconfirmed · exact request retained" : preview != nil && previewRequest == request && !jsonDirty ? "Preview ready · edits need a fresh preview" : "Preview before launch").font(.caption).foregroundStyle(.secondary)
+    }
+  }
+  @ViewBuilder private var composerButtons: some View {
+    if pendingRequest != nil {
+      Button("Start a different launch") { confirmDifferent = true }.disabled(busy)
+      Button("Retry saved launch") { Task { await submit() } }.buttonStyle(.borderedProminent).disabled(busy)
+        .accessibilityIdentifier("launch-retry")
+    } else {
+      if stage == .compose { Button("Inspect configuration →") { stage = .configure }.disabled(busy) }
+      if preview != nil { Button("Save as profile…") { showSaveProfile = true }.disabled(busy || jsonDirty || previewRequest != request) }
+      Button(preview == nil ? "Preview launch" : "Refresh preview") { Task { await resolve() } }
+        .disabled(busy || !canPreview || jsonDirty).accessibilityIdentifier("launch-preview")
+      Button("Launch pod") { Task { await submit() } }.buttonStyle(.borderedProminent)
+        .disabled(busy || jsonDirty || preview == nil || previewRequest != request || !launchAvailable)
+        .accessibilityIdentifier("launch-submit")
+    }
+  }
+  private var taskComposer: some View {
+    VStack(alignment: .leading, spacing: 18) {
+      Text("What should this pod do?").font(.title2.weight(.semibold))
+      Text("The repository’s usual profile gives you a starting point. Change the combination for this launch when needed.").font(.callout).foregroundStyle(.secondary)
+      Picker("Repository", selection: Binding(get: { request.emptyWorkspace == true ? "__empty" : request.repositoryId ?? "" }, set: { id in
+        if id == "__empty" { request.select(.repository, id: nil); request.emptyWorkspace = true }
+        else { request.select(.repository, id: id.isEmpty ? nil : id) }
+      })) {
+        Text("Select repository").tag("")
+        ForEach(actions.list(.repository)) { Text($0.name).tag($0.id) }
+        Text("Empty workspace").tag("__empty")
+      }.accessibilityIdentifier("launch-repository")
+      if let setups = repository?.payload["setups"]?.array, !setups.isEmpty {
+        Picker("Project setup", selection: Binding(get: { request.repositorySetupId ?? "" }, set: { request.repositorySetupId = $0.isEmpty ? nil : $0 })) {
+          Text("Repository default").tag("")
+          ForEach(Array(setups.enumerated()), id: \.offset) { _, setup in Text(setup["name"]?.string ?? "Setup").tag(setup["id"]?.string ?? "") }
+        }
+      }
+      Picker("Profile", selection: Binding(get: { request.profileId ?? "" }, set: { request.select(.profile, id: $0.isEmpty ? nil : $0) })) {
+        Text(repository == nil ? "Select profile" : "Repository usual profile · \(profile?.name ?? "not selected")").tag("")
+        ForEach(actions.list(.profile)) { Text($0.name).tag($0.id) }
+      }
+      Picker("Intent", selection: Binding(get: { request.intent ?? "" }, set: { request.intent = $0.isEmpty ? nil : $0 })) {
+        Text("Workflow default").tag(""); Text("Task").tag("task"); Text("Native Goal").tag("goal").disabled(!nativeGoalAvailable)
+      }.pickerStyle(.segmented)
+      if !nativeGoalAvailable { Text("Native Goal is unavailable until verified for the selected AI account and execution backend.").font(.caption).foregroundStyle(.secondary) }
+      Text(request.intent == "goal" ? "Objective" : "Task or objective").font(.headline)
+      TextEditor(text: $request.task).font(.body).scrollContentBackground(.hidden).frame(minHeight: 180)
+        .padding(12).background(DesktopTheme.surface, in: RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(DesktopTheme.line)).accessibilityIdentifier("launch-task")
+      Text("Describe the outcome, boundaries and evidence you expect. The profile supplies tools, workflow and delivery rules.")
+        .font(.callout).foregroundStyle(.secondary)
+    }
+  }
+  private var legacyBody: some View {
     VStack(alignment: .leading, spacing: 0) {
       HStack { Text("New pod").font(.title2.bold()); Spacer(); Button("Close") { isPresented = false }.disabled(busy) }.padding()
       Divider()
@@ -290,13 +423,17 @@ public struct ComposableCreatePodSheet: View {
   }
   private func updateAdvanced() { let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; advanced = (try? String(decoding: encoder.encode(request), as: UTF8.self)) ?? "{}" }
   private func resolve() async {
+    guard !busy, !jsonDirty, canPreview else { return }
+    if request.intent == "goal" && !nativeGoalAvailable { error = "Native Goal is not verified for this account and execution backend."; return }
     busy = true; error = nil; let candidate = request
     defer { busy = false }
-    do { let resolved = try await actions.resolve(candidate); guard request == candidate else { return }; preview = resolved; previewRequest = candidate }
+    do { let resolved = try await actions.resolve(candidate); guard request == candidate else { return }; preview = resolved; previewRequest = candidate; stage = .review }
     catch { self.error = error.localizedDescription }
   }
   private func submit() async {
+    guard !busy else { return }
     if pendingRequest == nil {
+      guard !jsonDirty, launchAvailable else { return }
       guard let preview, previewRequest == request, !preview.digest.isEmpty else { return }
       var candidate = request; candidate.expectedDigest = preview.digest; candidate.requestId = UUID().uuidString
       pendingRequest = candidate
