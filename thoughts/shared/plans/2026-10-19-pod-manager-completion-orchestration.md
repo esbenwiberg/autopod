@@ -1,6 +1,6 @@
 # Slice 25: complete completion orchestration and shared transitions
 
-Status: PLANNED — authorized continuation of the remaining-slices goal.
+Status: IN PROGRESS — complete extraction implemented; frozen qualification pending.
 Date: 2026-10-19. Baseline: ab7166dd4ba56679d8dd7667cbd929aaab225e83.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -111,8 +111,8 @@ factory/capture scaffolding, original constructor composition and thin delegates
 No original body/default/initializer or constructor argument changes.
 
 Automated:
-- [ ] All predecessor hashes/root controls/public assertion bytes match.
-- [ ] Complete15-body/constant/type/three-constructor and initialization recipes saved.
+- [x] All predecessor hashes/root controls/public assertion bytes match.
+- [x] Complete15-body/constant/type/three-constructor and initialization recipes saved.
 Manual: none under standing continuation authority.
 
 ## Phase 2: implement and qualify the full boundary
@@ -159,11 +159,11 @@ transition/guard/reporting algorithm remains, no broad manager imports or new>=1
 module, and the existing three completion owner files remain byte-identical.
 
 Automated:
-- [ ] All15 bodies, constant/type, three constructors and full file recipes preserved.
-- [ ] Full1,192 public names/statuses/assertion bytes match and delegates pass.
-- [ ] Five direct suites and three actual private-file SQLite reopen cases pass.
-- [ ] Build/declarations, scoped lint/whitespace and test semantics pass; no new source diagnostic.
-- [ ] Complete milestone25 algorithms/composition are domain-owned with original references.
+- [x] All15 bodies, constant/type, three constructors and full file recipes preserved.
+- [x] Full1,192 public names/statuses/assertion bytes match and delegates pass.
+- [x] Five direct suites and three actual private-file SQLite reopen cases pass.
+- [x] Build/declarations, scoped lint/whitespace and test semantics pass; no new source diagnostic.
+- [x] Complete milestone25 algorithms/composition are domain-owned with original references.
 Manual: none for this local compatibility extraction.
 
 ## Phase 3: frozen regression qualification and continuation
@@ -205,3 +205,32 @@ Preserve public paths, union values, receiver semantics and exact callback timin
 Revert manager, type-only agent contract edit and all five new owners together for
 rollback. Local proof does not claim provider/cloud/container acceptance. Final
 manager<=1,500 lines and full327-unit/73-member/ownership reconciliation remain33/34.
+
+## Implementation checkpoint
+
+Complete extraction is implemented. All15 body/parameter recipes, the original
+constant and phase union, and all three existing constructor statements match the
+original AST. Seven full manager/module/type-only-contract recipes match. The2,036
+other predecessor package/script files and six root controls remain unchanged.
+Manager8,812 →8,591 lines. Five new owners are30–144 lines. Original completion
+owner modules are unchanged; their exact constructors/functions/callback references
+are composed through the new domain boundary. Construction preserves hoisted callback
+availability and artifact finalizer ordering.
+
+All1,192 public names/statuses/assertion bytes match. All37 direct cases across five
+suites pass, including three actual private-file SQLite reopen cases for complete
+source/journal/events, held human guidance and rolled-back status/event persistence.
+Direct cases also cover commit/readiness timing, scan bounds, termination/ownership,
+native Goal state from real SQLite, artifact coalescing/replacement/generation cleanup
+and dynamic validation dispatch. The launch intent callback and infrastructure ports
+are controlled; no live provider/container/cloud acceptance is claimed.
+
+Daemon/dependency build/declarations and scoped Biome/whitespace pass. Six new test/
+fixture files have zero semantic diagnostics. All five new source owners have zero
+supplemental source diagnostics; existing unrelated baseline diagnostics remain out
+of scope. Initial duplicate-import/scanning-type and journal-less fixture failures
+are retained; corrections affected only scaffolding or fixture setup, with no original
+body/public assertion change. Evidence: .autopod-data/completion-orchestration/,
+including movement.json, public-comparison.json, baseline-type-comparison.json and
+packages/daemon/.autopod-data/completion-orchestration/direct-final.json. Expanded
+regression/full frozen qualification remains required before milestone25 is complete.

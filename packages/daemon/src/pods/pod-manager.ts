@@ -87,7 +87,6 @@ import {
   failedValidationPhases,
   getPodValidationSkipPhases,
   getPodValidationSuite,
-  isPodValidationDisabled,
   loadCodeReviewSkill,
   makeUnexpectedValidationFailureResult,
 } from './validation-workflow-policy.js';
@@ -158,9 +157,6 @@ import {
   observeArtifactResume,
 } from './artifact-resume-observation.js';
 
-import { createCompletionDecision } from './completion-decision.js';
-import { createCompletionHumanGate } from './completion-human-gate.js';
-import { createCompletionSource } from './completion-source.js';
 import { admitComposablePod } from './composable-pod-admission.js';
 import { AgentContinuationSupersededError } from './continuation-preflight.js';
 
@@ -209,7 +205,6 @@ import {
   validateTransition,
 } from './state-machine.js';
 
-import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import { createValidationAttemptStart } from './validation-attempt-start.js';
 import { createValidationEnvironment } from './validation-environment.js';
@@ -242,6 +237,18 @@ import {
 } from './agent-execution-policy.js';
 import { createAgentProcessWorkflow } from './agent-process-workflow.js';
 import { createAgentRunRegistry } from './agent-run-registry.js';
+import {
+  describeSyncFailure,
+  formatElapsedDuration,
+  operatorErrorMessage,
+  sanitizeFailureReason,
+  summarizeAgentCompletionBlocker,
+} from './completion-diagnostics.js';
+import type { OperatorFailurePhase } from './completion-diagnostics.js';
+import { createCompletionDiagnostics } from './completion-diagnostics.js';
+import { createCompletionEvents } from './completion-events.js';
+import { createCompletionGuards } from './completion-guards.js';
+import { createCompletionOwners, createCompletionWorkflow } from './completion-workflow.js';
 import { createWorkspaceTransfer } from './workspace-transfer.js';
 
 function buildDetachedMcpFallbackMessage(
@@ -256,20 +263,6 @@ function buildDetachedMcpFallbackMessage(
     '',
     'The original MCP response stream closed before this answer could be delivered. If you already received the same answer directly from the tool call, ignore this duplicate.',
   ].join('\n');
-}
-
-function summarizeAgentCompletionBlocker(result: string): string | null {
-  const normalized = result.toLowerCase();
-  if (normalized.includes('bwrap: no permissions to create a new namespace')) {
-    return 'Agent could not run shell commands: bwrap cannot create a namespace.';
-  }
-  if (normalized.includes('blocked by the execution environment')) {
-    return 'Agent reported it was blocked by the execution environment.';
-  }
-  if (normalized.includes("can't inspect files") && normalized.includes('edit code')) {
-    return 'Agent reported it could not inspect or edit files.';
-  }
-  return null;
 }
 
 function actorLabel(actor: OperatorActor): string {
@@ -501,7 +494,6 @@ export function buildActionableFailureSummary(
 }
 
 const REVIEW_FEEDBACK_REPLY_MAX_CHARS = 2000;
-const SECURITY_SCAN_FINDING_LOG_LIMIT = 20;
 
 function formatReviewFeedbackReply(response: ReviewFeedbackResponseItem): string {
   const outcomeLabel: Record<ReviewFeedbackResponseItem['outcome'], string> = {
@@ -1162,6 +1154,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     safetyEventsRepo,
     qualityScoreRepo,
   } = deps;
+  const { assertExecutionTerminationVerified, assertGuidanceCollected, ownsLifecycle } =
+    createCompletionGuards({ podRepo, nudgeRepo });
+
   const { materializeSpecFiles, captureDeployBaselineHashes } =
     createProvisioningMaterials(execFileAsync);
   const {
@@ -1260,20 +1255,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       pod.id,
       `Remote ${error.purpose} branch fetch failed; retrying automatically.`,
     );
-  }
-
-  function assertExecutionTerminationVerified(podId: string): void {
-    podRepo.deletionOwnership?.assertTaskAvailable(podId);
-    assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
-  }
-
-  function assertGuidanceCollected(podId: string): void {
-    if (nudgeRepo.hasPending(podId))
-      throw new AutopodError(
-        'This pod has uncollected human guidance. Use Rework to let a worker read check_messages, acknowledge its receipt, and apply the saved guidance before validation or delivery.',
-        'UNCOLLECTED_HUMAN_GUIDANCE',
-        409,
-      );
   }
 
   function hasDurableAgentExecutionEvidence(pod: Pod): boolean {
@@ -2188,15 +2169,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   const PAUSE_QUIESCENCE_TIMEOUT_MS = 10_000;
 
-  /** A continuation may only affect the lifecycle epoch and sandbox it captured. */
-  function ownsLifecycle(podId: string, generation: number, containerId: string | null): boolean {
-    const current = podRepo.getOrThrow(podId);
-    return (
-      current.lifecycleGeneration === generation &&
-      (containerId === null || current.containerId === containerId)
-    );
-  }
-
   /** Active post-validation advisory QA runs, keyed by podId.
    *  These are nonblocking for validation outcome, but approval must not cut
    *  off the preview/container before screenshot-backed advisory QA finishes. */
@@ -2258,6 +2230,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const forceWithLeaseAllowances = new Set<string>();
   const { lastEventWriteAt, bumpActivityTimestamp, touchHeartbeat, recordNotReportedMemoryUsage } =
     createAgentActivity(deps, { podRepo, logger });
+  const { emitActivityStatus, emitActivityError, transition, emitPodCompletedEvent } =
+    createCompletionEvents({
+      eventBus,
+      bumpActivityTimestamp,
+      recordNotReportedMemoryUsage,
+      podRepo,
+      refreshReadiness,
+    });
+
+  const { emitBlockingSecurityScanFindings } = createCompletionDiagnostics({ emitActivityError });
 
   /** Stuck-running watchdog interval handle (single global timer). */
   let stuckPodWatchdog: ReturnType<typeof setInterval> | null = null;
@@ -3354,47 +3336,29 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     logger,
     emitActivityStatus,
   });
-
-  const { holdCompletionForHumanWork } = createCompletionHumanGate({
-    podRepo,
-    nudgeRepo,
-    preservePodWorkspace,
-    ownsArtifactCompletion,
-    transition,
-    logger,
-    emitActivityStatus,
-  });
-
-  const { prepareSourceForCompletion } = createCompletionSource({
-    podRepo,
-    getContainerManager: (target) => containerManagerFactory.get(target),
-    worktreeManager,
-    checkpointSandboxWorkspaceForPod,
-    syncSandboxSeriesHandover,
-    syncWorkspaceBack,
-    tryRecoverAfterWorkspaceSyncFailure,
-    recoverWorktreeFromContainer,
-    parkOnWorktreeSyncFailure,
-    handleDeletionGuardError,
-    transition,
-    executionForPod,
-    emitActivityStatus,
-    logger,
-  });
-
-  const { applyCompletionDecision } = createCompletionDecision({
-    podRepo,
-    executionForPod,
-    isPodValidationDisabled,
-    getPodValidationSuite,
-    reworkInProgressPrefix: REWORK_IN_PROGRESS_PREFIX,
-    cleanupContainer,
-    transition,
-    emitPodCompletedEvent,
-    maybeTriggerDependents,
-    emitActivityStatus,
-    logger,
-  });
+  const { holdCompletionForHumanWork, prepareSourceForCompletion, applyCompletionDecision } =
+    createCompletionOwners({
+      podRepo,
+      nudgeRepo,
+      preservePodWorkspace,
+      ownsArtifactCompletion,
+      transition,
+      logger,
+      emitActivityStatus,
+      containerManagerFactory,
+      worktreeManager,
+      checkpointSandboxWorkspaceForPod,
+      syncSandboxSeriesHandover,
+      syncWorkspaceBack,
+      tryRecoverAfterWorkspaceSyncFailure,
+      recoverWorktreeFromContainer,
+      parkOnWorktreeSyncFailure,
+      handleDeletionGuardError,
+      executionForPod,
+      cleanupContainer,
+      emitPodCompletedEvent,
+      maybeTriggerDependents,
+    });
 
   const { startValidationAttempt } = createValidationAttemptStart({
     assertGuidanceCollected,
@@ -3496,100 +3460,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'Failed to preserve workspace after agent failure',
       );
     }
-  }
-
-  function emitActivityStatus(podId: string, message: string): void {
-    eventBus.emit({
-      type: 'pod.agent_activity',
-      timestamp: new Date().toISOString(),
-      podId,
-      event: { type: 'status', timestamp: new Date().toISOString(), message },
-    });
-    // Status emissions are also liveness signals — bootstrap/recovery progress
-    // would otherwise be invisible to the watchdog and trigger a false auto-fail
-    // before the agent process has even spawned.
-    bumpActivityTimestamp(podId);
-  }
-
-  function formatElapsedDuration(durationMs: number): string {
-    return `${(durationMs / 1_000).toFixed(1)}s`;
-  }
-
-  function emitActivityError(podId: string, message: string, fatal = true): void {
-    const timestamp = new Date().toISOString();
-    eventBus.emit({
-      type: 'pod.agent_activity',
-      timestamp,
-      podId,
-      event: { type: 'error', timestamp, message, fatal },
-    });
-    bumpActivityTimestamp(podId);
-  }
-
-  function emitBlockingSecurityScanFindings(podId: string, findings: ScanFinding[]): void {
-    const findingLabel = findings.length === 1 ? 'finding' : 'findings';
-    emitActivityError(
-      podId,
-      `Pre-push security scan blocked: ${findings.length} ${findingLabel}.`,
-      false,
-    );
-    const visibleFindings = findings.slice(0, SECURITY_SCAN_FINDING_LOG_LIMIT);
-    for (const [index, finding] of visibleFindings.entries()) {
-      const rule = sanitizeSecurityScanLogValue(finding.ruleId, 'unknown');
-      const file = sanitizeSecurityScanLogValue(finding.file, 'unknown');
-      const location = finding.line ? `${file}:${finding.line}` : file;
-      emitActivityError(
-        podId,
-        `Security finding ${index + 1}/${findings.length}: severity=${finding.severity} ` +
-          `detector=${finding.detector} rule=${rule} location=${location}`,
-        false,
-      );
-    }
-
-    const omitted = findings.length - visibleFindings.length;
-    if (omitted > 0) {
-      const omittedSummary = `${omitted} additional security ${
-        omitted === 1 ? 'finding was' : 'findings were'
-      } omitted from logs; inspect the security evidence for the complete result.`;
-      emitActivityError(podId, omittedSummary, false);
-    }
-  }
-
-  function sanitizeSecurityScanLogValue(value: string | undefined, fallback: string): string {
-    const normalized = value?.replace(/\s+/g, ' ').trim().slice(0, 400);
-    if (!normalized) return fallback;
-    const sanitized = processContent(normalized, {
-      sanitization: { preset: 'standard' },
-    }).text.trim();
-    return sanitized || fallback;
-  }
-
-  type OperatorFailurePhase = 'setup' | 'agent' | 'completion';
-
-  function sanitizeFailureReason(raw: unknown, prefix: string): string {
-    const message =
-      raw instanceof Error && raw.message.trim().length > 0 ? raw.message : String(raw);
-    const sanitized = processContent(message.slice(0, 1200), {
-      sanitization: { preset: 'standard' },
-    }).text.trim();
-    return `${prefix}: ${sanitized || 'unknown error'}`;
-  }
-
-  function operatorErrorMessage(err: unknown, phase: OperatorFailurePhase): string {
-    const prefix =
-      phase === 'setup'
-        ? 'Pod setup failed before the agent could finish'
-        : phase === 'completion'
-          ? 'Pod failed while finalizing after the agent run'
-          : 'Pod failed while the agent was running';
-    return sanitizeFailureReason(err, prefix);
-  }
-
-  function describeSyncFailure(err: unknown): string {
-    if (err instanceof Error && err.message.trim()) {
-      return `${err.name}: ${err.message}`;
-    }
-    return String(err);
   }
 
   async function tryRecoverAfterWorkspaceSyncFailure(
@@ -4031,60 +3901,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     }
   }
 
-  function transition(pod: Pod, to: PodStatus, extraUpdates?: Partial<PodUpdates>): Pod {
-    validateTransition(pod.id, pod.status, to);
-    const previousStatus = pod.status;
-    const updates: PodUpdates = { status: to, ...extraUpdates };
-    // Successful completion implicitly resolves any prior worktree-compromised
-    // warning — the pod finished, branch was pushed, no recovery needed. Don't
-    // clear on failed/killed/rejected; those are real bad-state terminals where
-    // the banner is still actionable.
-    if (to === 'complete' && pod.worktreeCompromised && updates.worktreeCompromised === undefined) {
-      updates.worktreeCompromised = false;
-    }
-    if (isTerminalState(to)) {
-      recordNotReportedMemoryUsage(pod.id);
-    }
-    podRepo.update(pod.id, updates);
-    if (to === 'complete') podRepo.completionJournal?.mark(pod, 'finished');
-    else if (to === 'validating') podRepo.completionJournal?.mark(pod, 'finalizing');
-    const publish = () => {
-      eventBus.emit({
-        type: 'pod.status_changed',
-        timestamp: new Date().toISOString(),
-        podId: pod.id,
-        previousStatus,
-        newStatus: to,
-      });
-    };
-    if (podRepo.afterCommit) podRepo.afterCommit(publish);
-    else publish();
-    if (to === 'validated' || to === 'review_required' || to === 'failed') {
-      refreshReadiness(pod.id);
-    }
-    return podRepo.getOrThrow(pod.id);
-  }
-
-  function emitPodCompletedEvent(pod: Pod, filesChanged = pod.filesChanged): void {
-    eventBus.emit({
-      type: 'pod.completed',
-      timestamp: new Date().toISOString(),
-      podId: pod.id,
-      finalStatus: 'complete',
-      summary: {
-        id: pod.id,
-        profileName: pod.profileName,
-        task: pod.task,
-        status: 'complete',
-        model: pod.model,
-        runtime: pod.runtime,
-        duration: pod.startedAt ? Date.now() - new Date(pod.startedAt).getTime() : null,
-        filesChanged,
-        createdAt: pod.createdAt,
-      },
-    });
-  }
-
   /**
    * After a pod reaches `validated`, enqueue any dependents whose *all*
    * parents have now reached a completed-success state. Single-parent pods
@@ -4415,6 +4231,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     handleProviderLimit,
     stopCommitPolling,
     lastEventWriteAt,
+  });
+  const completionWorkflow = createCompletionWorkflow(deps, {
+    podRepo,
+    holdCompletionForHumanWork,
+    artifactCompletionRuns,
+    finalizeArtifactPod,
+    prepareSourceForCompletion,
+    applyCompletionDecision,
   });
 
   return {
@@ -4960,52 +4784,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     async handleCompletion(podId: string): Promise<void> {
-      const pod = podRepo.getOrThrow(podId);
-      if (deps.launchConfiguration?.read(podId)?.intent === 'goal') {
-        const goal = deps.launchConfiguration.goals?.get(podId);
-        if (goal?.state !== 'achieved' || !goal.executionStopped)
-          throw new AutopodError(
-            'Native Goal achievement and confirmed termination are required before completion',
-            'GOAL_NOT_ACHIEVED',
-            409,
-          );
-      }
-      // Bail out if pod is already past the running stage (could happen when
-      // processPod's spawn unblocks after sendMessage already drove completion)
-      if (
-        isTerminalState(pod.status) ||
-        pod.status === 'killing' ||
-        pod.status === 'paused' ||
-        pod.status === 'validating' ||
-        pod.status === 'validated' ||
-        pod.status === 'failed' ||
-        pod.status === 'review_required'
-      ) {
-        return;
-      }
-
-      const heldCompletion = holdCompletionForHumanWork(pod);
-      if (heldCompletion) {
-        await heldCompletion;
-        return;
-      }
-
-      if (pod.options.output === 'artifact') {
-        const key = `${pod.id}:${pod.lifecycleGeneration}:${pod.finalization?.cycle ?? 0}`;
-        const pending = artifactCompletionRuns.get(key);
-        if (pending) return pending;
-        const completion = Promise.resolve().then(() => finalizeArtifactPod(pod));
-        artifactCompletionRuns.set(key, completion);
-        try {
-          await completion;
-        } finally {
-          if (artifactCompletionRuns.get(key) === completion) artifactCompletionRuns.delete(key);
-        }
-        return;
-      }
-      const preparedSource = await prepareSourceForCompletion(pod);
-      if (!preparedSource) return;
-      await applyCompletionDecision(pod, preparedSource, (id) => this.triggerValidation(id));
+      return completionWorkflow.handleCompletion.call(this, podId);
     },
 
     async sendMessage(

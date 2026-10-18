@@ -1,3 +1,5 @@
+import type { OperatorFailurePhase } from './completion-diagnostics.js';
+export type { OperatorFailurePhase } from './completion-diagnostics.js';
 import type {
   AgentEvent,
   EffectiveLaunchConfig,
@@ -22,8 +24,6 @@ import type { createProvisioningSandboxState } from './provisioning-sandbox-stat
 import type { createProvisioningWorkflow } from './provisioning-workflow.js';
 import type { createRuntimeResumeContext } from './runtime-resume-context.js';
 import type { createWorkerRuntimeCredentials } from './worker-runtime-credentials.js';
-
-export type OperatorFailurePhase = 'setup' | 'agent' | 'completion';
 
 export type AgentRunOutcome = 'completed' | 'failed' | 'paused' | 'stopped';
 
