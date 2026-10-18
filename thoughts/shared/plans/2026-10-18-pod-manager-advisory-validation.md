@@ -1,6 +1,6 @@
 # Slice 19: advisory validation execution and publication
 
-Status: APPROVED — all three phases authorized; Phase 1 in progress.
+Status: APPROVED — Phases 1 and 2 complete; final qualification next.
 Date: 2026-10-18. Baseline: ecc324ca4a403d49397dd63cecb1a881e653ad06.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -204,11 +204,11 @@ controls must match. No behavior correction after movement.
 ### Success criteria
 
 Automated:
-- [ ] Original bodies/call sites and full manager/module recipe match parsed TypeScript.
-- [ ] Frozen public checks have identical assertions and selected names/statuses.
-- [ ] Direct and real local repository/reopen contracts pass with no new skips.
-- [ ] Exactly two product/two test paths change; other source/control hashes match.
-- [ ] Scoped Biome/whitespace and supplemental test semantic checks pass.
+- [x] Original bodies/call sites and full manager/module recipe match parsed TypeScript.
+- [x] Frozen public checks have identical assertions and selected names/statuses.
+- [x] Direct and real local repository/reopen contracts pass with no new skips.
+- [x] Exactly two product/two test paths change; other source/control hashes match.
+- [x] Scoped Biome/whitespace and supplemental test semantic checks pass.
 
 Manual: None required; no live infrastructure acceptance claim.
 
@@ -282,3 +282,38 @@ Node22.23.3 opens SQLite3.49.2; new-group semantic diagnostics are zero. Initial
 output requested explicit undefined instead of delete for the absent-method fixture;
 that fixture-only style correction is applied and diagnostics retained. No product
 bytes changed. Next: exact extraction and direct/repository contracts.
+
+## Phase 2 observed results
+
+Both whole functions are byte-identical to baseline, including their signatures and
+comments. The full parsed manager/module recipe matches; both awaited runner calls,
+both external ownership checks and the internal ownership call remain unchanged.
+All other existing imports and manager implementation are unchanged. Twelve original
+collaborators are captured at the approved original definition site. No production
+behavior or policy correction followed extraction. The manager is 16,369 lines
+(152 fewer); the new module is 224 lines. All 1,979 other baseline package/script
+paths and six root controls match.
+
+All 33 frozen public checks pass before/after with identical assertions and selected
+names/statuses. All 59 direct tests pass, including three private migrated file SQLite
+reopen cases. They establish initial/queued/final ownership, optional decision/history
+fallbacks, invocation identity, slot release/error order, exact references/receiver,
+callback merge-before-event, duplicate callback/final writes, retained earlier effects,
+additive/optional usage, stale history and usage without live publication, replacement
+registry retention, live engine method replacement/removal, captured collaborators
+and review progress suppression. Real pod/nudge/validation/event repositories and
+readiness run locally; current, newer same-attempt history and human-decision cases
+retain exact evidence/usage/pending decisions through integrity/FK-checked reopen.
+Each reopen also verifies a nonempty persisted human waiver unchanged.
+Engine/container execution remains controlled.
+
+Supplemental semantic checks for both new boundaries report zero diagnostics; scoped
+Biome and whitespace pass. Initial direct fixtures needed the actual numeric event
+emit result, declared agent_initial usage key and removal of an unused test-only type
+import. The explicit-waiver actor also required its declared userId rather than id;
+the premature regression restart was stopped, its diagnostics retained, and only the
+final fully typed fixture was frozen for the completed rerun. These fixture corrections and diagnostics are retained; product code did not
+change after exact extraction.
+
+All 95 affected suites pass unfiltered: 3,368 tests, zero skipped. Next is the full
+uncached pipeline on the frozen final 1,983 package/script hashes and six controls.
