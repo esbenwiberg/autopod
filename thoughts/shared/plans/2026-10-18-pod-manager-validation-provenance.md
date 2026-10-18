@@ -1,6 +1,6 @@
 # Slice 14: validation launch provenance extraction
 
-Status: APPROVED — implementing all three phases after explicit user approval.
+Status: APPROVED — Phases 1 and 2 complete; final qualification running.
 Date: 2026-10-18.
 Baseline: d2404eb69759c318703f62f5d89e5a1f09136394.
 Branch: codex/pod-manager-workspace.
@@ -206,9 +206,9 @@ provider binding and council integration. Do not claim a new atomicity/dispatch 
 ### Success criteria
 
 Automated:
-- [ ] Frozen public checks pass unchanged after extraction.
-- [ ] Direct recorder/hooks and actual SQLite/ledger/preflight/reopen checks pass.
-- [ ] Two-body recipe, unchanged calls/injections and two-product/two-test scope pass.
+- [x] Frozen public checks pass unchanged after extraction.
+- [x] Direct recorder/hooks and actual SQLite/ledger/preflight/reopen checks pass.
+- [x] Two-body recipe, unchanged calls/injections and two-product/two-test scope pass.
 
 Manual: None required. Live Docker/Azure/provider execution is outside this slice.
 
@@ -254,7 +254,7 @@ verified increments and confirm remote identity and clean checkout.
 ### Success criteria
 
 Automated:
-- [ ] All 70 affected suites pass with SQLite and no new skips.
+- [x] All 70 affected suites pass with SQLite and no new skips.
 - [ ] Full uncached validation passes under the documented qualification environment.
 - [ ] Scoped lint/whitespace/types, exact movement and frozen hashes pass.
 - [ ] Complete plan/proof records actual results, limits and final pushed identities.
@@ -281,8 +281,7 @@ interfaces/reviewer-launch.ts; validation/reviewer-launch-preflight.ts;
 validation/container-reviewer-runner.ts; providers/llm-client.ts;
 validation/review-tool-runner.ts and the existing provenance/launch tests.
 
-Next action: user reviews the illustrated plan and explicitly approves implementation.
-No product code changed or implementation tests ran in this planning turn.
+Next action: qualify the frozen implementation with the full uncached pipeline.
 
 ## Phase 1 observed results
 
@@ -301,3 +300,34 @@ the added skip-projection checks. Public semantics are clean. No product changes
 Before source, frozen public bytes/filter, 1,971 baseline package/script hashes, six
 root controls and raw logs/exits are retained under .autopod-data/validation-provenance/.
 Actual Node 22.23.3 opens SQLite 3.49.2 using the existing pinned pnpm launcher.
+
+## Phase 2 observed results
+
+The two complete original bodies now live in createValidationProvenance, composed
+immediately before createValidationExecution. Parsed TypeScript verifies both bodies
+including all nested hooks, the complete manager/module recipe, one unchanged external
+recorder call, one wrapper call and two unchanged execution injections. The internal
+awaited recorder call is included in body equality. All 1,969 other baseline
+package/script paths are unchanged. The manager is 16,995 lines (159 fewer); the
+new module is 198 lines. No product correction followed the exact extraction.
+
+The frozen 90 public checks pass after extraction with byte-identical assertions.
+All 65 direct cases pass using private migrated file SQLite with actual repository,
+task identity, provenance ledger, ownership helper, inspector/resolvers/receipt
+builders and close/reopen integrity/FK checks. Tests cover skip/identity/receipt
+projection, record-before-block persistence, late references, error identity and
+held preflight supersession. All 70 affected suites pass: 2,647 tests, zero skipped.
+Both new test boundaries have zero semantic diagnostics; scoped Biome is clean.
+
+The initial direct run had one table fixture failure: array rows were spread into
+arguments. Object rows now explicitly exercise neither/health/pages/both skipped.
+Initial type diagnostics caught that table and optional mock method narrowing; the
+fixture uses a checked method reference. A further case pins the forced-validation
+copy and original pod snapshot across the inspector await. Initial diagnostics and
+corrected passing runs are retained. No public assertion or product behavior changed.
+
+Final package/script and six root hashes, actual commands/environment, extraction
+and verification scripts and raw before/after/direct/affected/type/lint/build logs
+are retained under ignored .autopod-data/validation-provenance/. Full uncached
+qualification is the remaining phase; local provider/container seams do not establish
+live remote execution or a new atomicity/fencing/recovery guarantee.
