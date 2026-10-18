@@ -1,6 +1,6 @@
 # Slice 18: runtime resume context extraction
 
-Status: APPROVED — implementing all three phases after explicit user approval.
+Status: APPROVED — Phases 1 and 2 complete; final qualification running.
 Date: 2026-10-18.
 Baseline: f09e687bc338aac1c10bff80d88315a8b02e74c8.
 Branch: codex/pod-manager-workspace.
@@ -195,9 +195,9 @@ provider/MCP/registry traffic, real runtime subprocess or new authorization clai
 ### Success criteria
 
 Automated:
-- [ ] Frozen public checks pass unchanged after extraction.
-- [ ] Direct config/order/token/setter/error/timing and real local SQLite checks pass.
-- [ ] Exact original body, all three callers, full recipe and source scope pass.
+- [x] Frozen public checks pass unchanged after extraction.
+- [x] Direct config/order/token/setter/error/timing and real local SQLite checks pass.
+- [x] Exact original body, all three callers, full recipe and source scope pass.
 
 Manual: None required. Live providers/containers/MCP and deployment are outside scope.
 
@@ -244,7 +244,7 @@ remote identity. Final documentation-only commit must retain qualified source by
 ### Success criteria
 
 Automated:
-- [ ] All 92 affected suites pass with SQLite and no newly skipped tests.
+- [x] All 92 affected suites pass with SQLite and no newly skipped tests.
 - [ ] Full uncached pipeline passes under the documented qualification environment.
 - [ ] Scoped lint/whitespace/types, exact movement and frozen hashes pass.
 - [ ] Completed plan/proof records actual results, limits and pushed identities.
@@ -294,3 +294,41 @@ exercises fresh spawn without bypassing that policy. Initial diagnostics are ret
 Node22.23.3/pnpm9.15.4 opens SQLite3.49.2; new public semantic diagnostics are zero.
 Next: extract the approved function and verify unchanged public assertions plus direct
 config, token, credential and runtime-setter contracts.
+
+## Minor implementation clarification
+
+PiRuntime's manager type import was used only by primeRuntimeForResume, contrary to
+the planning claim that every current import had other consumers. Remove exactly
+that now-unused type import; retain all other current imports. This is a compile-time
+cleanup within the approved two-product-file scope, with no intent/interface/policy/
+behavior change. The full recipe proof includes this precise allowance. The direct
+late-snapshot fixture was also completed to the declared Profile type after semantic
+diagnostics; no production type was widened. The illustrated proposal stays unchanged.
+
+## Phase 2 observed results
+
+createRuntimeResumeContext contains the complete original primeRuntimeForResume body.
+Its live dependency view and six captured collaborators match the approved recipe;
+only the now-unused PiRuntime manager type import needed the documented compile-time
+cleanup. All three awaited external calls, the five captured helper bodies, other
+imports and separate inline recovery logic are unchanged. Parsed TypeScript matches
+the complete explicit manager/module recipe. The manager is 16,521 lines (81 fewer);
+the new module is 149 lines. All 1,977 other baseline package/script hashes and six
+root controls match. No behavioral correction followed extraction.
+
+All 36 frozen public checks pass, with byte-identical assertions and identical
+selected names/statuses before/after. All 44 direct tests pass: ordered configuration,
+HTTP proxy/name/header behavior, explicit versus conditional keys, category collisions,
+legacy/launch stdio, no material, Goal guard, exact error identities, mandatory/guarded
+runtime setters and retained effects, same returned-list reference, live service/
+issuer replacement/removal across awaits, captured functions/base URL and late reads.
+Three private file SQLite cases use actual scoped agent material, encrypted credentials,
+real pod-token signing/verification, rotation/revocation, secret-free launch snapshot,
+nonempty provider attempt and other credential/profile/pod/attempt invariants through
+close/reopen integrity/FK. Runtime/capability/enrollment interfaces remain controlled;
+existing actual runtime suites retain their independent stored-state/invocation scope.
+Both new boundaries have zero supplemental semantic diagnostics; scoped Biome and
+whitespace are clean. Initial public/typing fixture diagnostics are retained.
+
+All 92 affected suites pass: 3,239 tests, zero skipped. Next: full uncached
+qualification on frozen final source; no live provider/MCP execution claim.

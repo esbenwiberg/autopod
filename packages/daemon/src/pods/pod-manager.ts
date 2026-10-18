@@ -140,7 +140,6 @@ import {
   codexStateDirForPod,
   ensureCodexStateDir,
 } from '../runtimes/codex-state-store.js';
-import type { PiRuntime } from '../runtimes/pi-runtime.js';
 import { shellQuote } from '../util/shell-quote.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
@@ -246,6 +245,7 @@ import {
   resolveReviewerModel,
   resolveReviewerProvider,
 } from './runtime-resolver.js';
+import { createRuntimeResumeContext } from './runtime-resume-context.js';
 import { type SandboxPreviewProxy, startSandboxPreviewProxy } from './sandbox-preview-proxy.js';
 import { sandboxStartupRetryInput } from './sandbox-startup-admission.js';
 import { resolveSections } from './section-resolver.js';
@@ -3009,95 +3009,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     });
   }
 
-  async function primeRuntimeForResume(
-    pod: Pod,
-    runtime: Runtime,
-    containerId: string,
-    env: Record<string, string> | undefined,
-  ): Promise<McpServerConfig[]> {
-    const frozenProfile = executionForPod(pod);
-    const launch = deps.launchConfiguration?.read(pod.id);
-    if (launch?.intent === 'goal')
-      throw new AutopodError(
-        'Resume this Goal through its native controls',
-        'GOAL_NATIVE_RESUME_REQUIRED',
-        409,
-      );
-    if (launch) await deps.launchConfiguration?.assertCurrentCapabilities(launch);
-    const material = launch ? await executionCredentialsFor(launch)?.agent(launch) : undefined;
-    const profile = material ? { ...frozenProfile, ...material } : frozenProfile;
-    const mcpUrl = `${mcpBaseUrl}/mcp/${pod.id}`;
-    const mcpSessionToken = deps.sessionTokenIssuer?.generate(pod.id);
-    const escalationHeaders = mcpSessionToken
-      ? { Authorization: `Bearer ${mcpSessionToken}` }
-      : undefined;
-    const httpMcpServers = mergeMcpServers(
-      injectionsForPod(pod).mcpServers,
-      profile.mcpServers,
-    ).filter((server) => server.type !== 'stdio');
-    const mcpServers: McpServerConfig[] = [
-      { type: 'http', name: 'escalation', url: mcpUrl, headers: escalationHeaders },
-      ...httpMcpServers.map(
-        (server) =>
-          ({
-            type: 'http',
-            name: server.name,
-            url: `${mcpBaseUrl}/mcp-proxy/${encodeURIComponent(server.name)}/${pod.id}`,
-            headers: escalationHeaders,
-          }) satisfies McpServerConfig,
-      ),
-      ...buildCodeIntelligenceServers(profile).map(
-        (server) =>
-          ({
-            type: 'stdio',
-            name: server.name,
-            command: server.command,
-            ...(server.args && { args: server.args }),
-            ...(server.env && { env: server.env }),
-          }) satisfies McpServerConfig,
-      ),
-      ...(launch
-        ? profile.mcpServers
-            .filter((server) => server.type === 'stdio')
-            .map((server) => ({
-              type: 'stdio' as const,
-              name: server.name,
-              command: server.command,
-              args: server.args,
-              env: server.env,
-            }))
-        : []),
-    ];
-    if (launch) await deps.launchConfiguration?.assertCurrentCapabilities(launch);
-
-    const reasoningEffort = resolvedReasoningEffort(
-      profile,
-      pod.profileSnapshot as unknown as Record<string, unknown> | null,
-    );
-    if (pod.runtime === 'pi') {
-      const piRuntime = runtime as PiRuntime;
-      if (pod.piSessionId) piRuntime.setPiSessionId(pod.id, pod.piSessionId);
-      piRuntime.setPiResumeConfig({
-        podId: pod.id,
-        task: '',
-        model: pod.model,
-        reasoningEffort,
-        workDir: '/workspace',
-        containerId,
-        customInstructions: 'resume',
-        env: env ?? {},
-        mcpServers,
-      });
-    } else if (pod.runtime === 'claude' && 'setClaudeResumeConfig' in runtime) {
-      if (pod.claudeSessionId) {
-        (runtime as ClaudeRuntime).setClaudeSessionId(pod.id, pod.claudeSessionId);
-      }
-      (runtime as ClaudeRuntime).setClaudeResumeConfig(pod.id, mcpServers, reasoningEffort);
-    } else if (pod.runtime === 'codex' && 'setCodexResumeConfig' in runtime) {
-      (runtime as CodexRuntime).setCodexResumeConfig(pod.id, mcpServers, reasoningEffort);
-    }
-    return mcpServers;
-  }
+  const { primeRuntimeForResume } = createRuntimeResumeContext(deps, {
+    executionForPod,
+    executionCredentialsFor,
+    injectionsForPod,
+    mcpBaseUrl,
+    buildCodeIntelligenceServers,
+    resolvedReasoningEffort,
+  });
 
   async function syncSandboxRuntimeSessionState(pod: Pod, ownsRun: () => boolean): Promise<void> {
     const podId = pod.id;
