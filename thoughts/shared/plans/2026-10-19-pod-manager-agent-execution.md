@@ -1,6 +1,6 @@
 # Slice 24: agent dispatch, stream consumption and run ownership
 
-Status: PLANNED — authorized by the standing remaining-slices goal.
+Status: IN PROGRESS — complete extraction implemented; expanded/frozen qualification pending.
 Date: 2026-10-19. Qualified source implementation: 38d70d53bf437e7920e92569a39143ddeae21c13.
 Qualification/roadmap checkpoint: c0fef80b (same package/script bytes).
 Branch: codex/pod-manager-workspace.
@@ -123,8 +123,8 @@ module/import/export/type/factory scaffolding, explicit this typing, original in
 composition and thin delegates; original bodies/parameters/constant expressions stay.
 
 Automated:
-- [ ] Qualified predecessor hashes/public bytes and report provenance match.
-- [ ] Complete eleven-body/four-binding/type/receiver/state recipe is saved.
+- [x] Qualified predecessor hashes/public bytes and report provenance match.
+- [x] Complete eleven-body/four-binding/type/receiver/state recipe is saved.
 Manual: none; standing continuation authority applies.
 
 ## Phase 2: implement and prove the complete boundary
@@ -172,11 +172,11 @@ all2,025 other predecessor package/script files and six root controls stay froze
 Check no stream/process algorithm remains inline and all new source files<1,000.
 
 Automated:
-- [ ] Whole bodies/defaults/initializers/type and complete recipes preserved.
-- [ ] Public1,192 names/statuses and assertion bytes identical; facade delegates pass.
-- [ ] Five direct suites and three actual file-reopen cases pass with owner cleanup.
-- [ ] Build/declarations, lint/whitespace and test semantics pass; no new source diagnostics.
-- [ ] Same shared run/activity map instances; no process/stream loop remains in manager.
+- [x] Whole bodies/defaults/initializers/type and complete recipes preserved.
+- [x] Public1,192 names/statuses and assertion bytes identical; facade delegates pass.
+- [x] Five direct suites and three actual file-reopen cases pass with owner cleanup.
+- [x] Build/declarations, lint/whitespace and test semantics pass; no new source diagnostics.
+- [x] Same shared run/activity map instances; no process/stream loop remains in manager.
 Manual: none for this bounded compatibility extraction.
 
 ## Phase 3: frozen regression qualification and continuation
@@ -220,3 +220,30 @@ No migrations or stronger atomicity/replay/termination guarantee. Revert manager
 all six new modules together for rollback. Tests and proof establish the local
 compatibility boundary only. Final manager<=1,500 lines and full327-unit/73-member/
 mutable-owner reconciliation are still required at33/34.
+
+## Implementation checkpoint
+
+The two complete method bodies, nine helper bodies, four initializers and exported
+outcome union match the original AST. All seven full manager/module recipes match;
+2,025 other predecessor package/script files and six root controls are unchanged.
+Manager: 10,296 → 8,812 lines. Six new owners are14–813 lines. Constructors allocate
+only the original maps/functions at their two original composition points; the exact
+shared instances continue to provider/continuation/process/consumer/control users.
+
+The unchanged public suite passes all1,192 cases with identical names/statuses and
+assertion bytes. Five direct suites pass all23 cases, including three actual private
+SQLite close/reopen cases. These prove terminal/usage/provider/task history, retained
+unverified admission, failed sandbox startup, run settlement and replacement-token
+cleanup, dynamic process commands, archive cleanup and activity/replay contracts.
+Daemon/dependency build/declarations and scoped Biome pass. Six new test/fixture files
+have zero supplemental semantic diagnostics. Two moved source diagnostics match the
+original manager code/messages exactly (the existing failure-phase union and nullable
+provider classification); no new source diagnostic. Original-policy fixes remain out
+of scope. Type-only OperatorFailurePhase scaffolding copies the original union without
+passing a type as a runtime dependency; its original manager alias stays assigned25.
+
+Evidence: .autopod-data/agent-execution/ including movement.json, public-comparison.json,
+packages/daemon/.autopod-data/agent-execution/direct-final.json and named logs/exits.
+Initial incorrect mock stream/lifecycle expectations and type/lint failures are retained;
+fixtures were corrected without changing original bodies or existing public assertions.
+Expanded affected/full frozen qualification still required before milestone24 is done.

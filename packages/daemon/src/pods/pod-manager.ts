@@ -16,10 +16,8 @@ export {
 } from './provisioning-runtime-files.js';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFile, rm } from 'node:fs/promises';
 
 import path from 'node:path';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import type {
@@ -35,14 +33,12 @@ import type {
   MemoryEntry,
   NetworkPolicy,
   OperatorActor,
-  PhaseTokenUsage,
   Pod,
   PodOptions,
   PodStatus,
   PrivateRegistry,
   ProviderCredentials,
   ProviderFailoverTarget,
-  ProviderFailureClassification,
   PublicProviderCatalog,
   ReadinessApproval,
   ReadinessReview,
@@ -63,7 +59,6 @@ import type {
 import {
   AutopodError,
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
-  PROVIDER_FAILOVER_HANDOFF_PATH,
   generateId,
   generatePodId,
   outputModeFromPodOptions,
@@ -107,12 +102,11 @@ import {
   streamHaproxyDenials,
 } from '../containers/haproxy-deny-stream.js';
 
-import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
+import type { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import { sandboxEgressRefreshPayload } from '../containers/sandbox-container-manager.js';
 import type { SidecarManager } from '../containers/sidecar-manager.js';
 import { getAutoAttachedSidecars, resolveSidecarSpec } from '../containers/sidecar-resolver.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
-import { atomicPodChange } from '../db/unit-of-work.js';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 
 import type {
@@ -130,9 +124,8 @@ import type { ProviderAccountStore } from '../provider-accounts/index.js';
 
 import type { ProfileLlmClientResult } from '../providers/index.js';
 
-import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
+import { ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import { cleanupClaudeState } from '../runtimes/claude-state-store.js';
-import type { CodexRuntime } from '../runtimes/codex-runtime.js';
 import { cleanupCodexState } from '../runtimes/codex-state-store.js';
 
 import { authenticatedGitEnvironment } from '../worktrees/authenticated-git-environment.js';
@@ -148,8 +141,7 @@ import { publishCommittedSource, publishSource } from '../worktrees/durable-sour
 import {
   DeletionGuardError,
   GitCredentialError,
-  GitMissingRemoteBranchError,
-  GitTransientFetchError,
+  type GitTransientFetchError,
 } from '../worktrees/local-worktree-manager.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
 import { mergeReconciliation } from '../worktrees/merge-source-identity.js';
@@ -179,7 +171,6 @@ import { persistCompletionReply, persistEscalation } from './escalation-coordina
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
-import { inspectExecutionPreflight } from './execution-preflight.js';
 import { formatFeedback } from './feedback-formatter.js';
 import type { FixFeedbackRepository } from './fix-feedback-repository.js';
 import { mergeMcpServers } from './injection-merger.js';
@@ -195,17 +186,12 @@ import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
 import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
 import { projectMemoryScope } from './project-memory-scope.js';
-import {
-  type ProviderAttemptRepository,
-  ProviderAttemptSupersededError,
-} from './provider-attempt-repository.js';
+import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import { resolveProviderPreflight } from './provider-preflight.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import { createReadinessService } from './readiness-review.js';
 
 import { deriveReferenceRepos } from './reference-repos.js';
-
-import { waitForRetryBackoff } from './retry-backoff-wait.js';
 import { createReviewerContext } from './reviewer-context.js';
 import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
 
@@ -214,7 +200,6 @@ import { type SandboxPreviewProxy, startSandboxPreviewProxy } from './sandbox-pr
 import { sandboxStartupRetryInput } from './sandbox-startup-admission.js';
 
 import {
-  canFail,
   canKill,
   canNudge,
   canPause,
@@ -243,17 +228,20 @@ import { createValidationProvenance } from './validation-provenance.js';
 import { createValidationPublication } from './validation-publication.js';
 import type { ValidationRepository } from './validation-repository.js';
 import { createValidationWorkspace } from './validation-workspace.js';
-import { workerRetryDeadline } from './worker-retry-deadline.js';
-import {
-  WORKER_RETRY_BACKOFFS_MS,
-  unavailableWorkerInputs,
-  workerBindingHash,
-} from './worker-retry-history.js';
 import { createWorkerRuntimeCredentials } from './worker-runtime-credentials.js';
 import type { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
 import { WORKSPACE_SYNC_EXCLUDES } from './workspace-mirror.js';
 import { createWorkspacePreservation } from './workspace-preservation.js';
 
+import { createAgentActivity } from './agent-activity.js';
+import { createAgentEventConsumption } from './agent-event-consumption.js';
+import type { AgentRunOutcome } from './agent-execution-contracts.js';
+import {
+  deriveAgentAttempt,
+  hasLatestPersistedAgentTerminalEventComplete,
+} from './agent-execution-policy.js';
+import { createAgentProcessWorkflow } from './agent-process-workflow.js';
+import { createAgentRunRegistry } from './agent-run-registry.js';
 import { createWorkspaceTransfer } from './workspace-transfer.js';
 
 function buildDetachedMcpFallbackMessage(
@@ -784,7 +772,7 @@ export interface PodCreator {
   name?: string | null;
 }
 
-export type AgentRunOutcome = 'completed' | 'failed' | 'paused' | 'stopped';
+export type { AgentRunOutcome } from './agent-execution-contracts.js';
 
 export interface ApproveSessionOptions {
   squash?: boolean;
@@ -1075,101 +1063,6 @@ export interface PodManager {
     blockers?: Array<{ status: string; path: string }>;
     checkpoint?: WorkspaceCheckpointResult;
   }>;
-}
-
-/**
- * Derive the agent attempt counter from an existing phaseTokenUsage snapshot.
- * Used at the top of processPod() so a recovered/re-queued pod continues its
- * rework sequence instead of resetting to agent_initial.
- *
- * Returns the *next* attempt to write to:
- *   - 0 when no agent buckets are present (fresh or legacy pod)
- *   - 1 + highest rework N present (e.g. {agent_initial, agent_rework_2} → 3)
- */
-function deriveAgentAttempt(phaseTokenUsage: PhaseTokenUsage | null): number {
-  if (!phaseTokenUsage || !('agent_initial' in phaseTokenUsage)) return 0;
-  let highestRework = 0;
-  for (const key of Object.keys(phaseTokenUsage)) {
-    if (key.startsWith('agent_rework_')) {
-      const n = Number.parseInt(key.slice('agent_rework_'.length), 10);
-      if (n > highestRework) highestRework = n;
-    }
-  }
-  return 1 + highestRework;
-}
-
-function agentPhaseBucketKey(attempt: number): 'agent_initial' | `agent_rework_${number}` {
-  return attempt === 0 ? 'agent_initial' : `agent_rework_${attempt}`;
-}
-
-function hasLatestPersistedAgentTerminalEventComplete(
-  eventRepo: EventRepository | undefined,
-  podId: string,
-  afterEventId = 0,
-): boolean {
-  if (!eventRepo) return false;
-  let latestTerminalEvent: 'complete' | 'error' | null = null;
-  let terminalEventId = 0;
-  for (const event of eventRepo.getForSession(podId)) {
-    if (event.payload.type !== 'pod.agent_activity') continue;
-    const agentEvent = event.payload.event;
-    if (agentEvent.type === 'complete') {
-      latestTerminalEvent = 'complete';
-      terminalEventId = event.id;
-    } else if (agentEvent.type === 'error' && agentEvent.fatal) {
-      latestTerminalEvent = 'error';
-    }
-  }
-  return latestTerminalEvent === 'complete' && terminalEventId > afterEventId;
-}
-
-function agentCompleteEventKey(event: Extract<AgentEvent, { type: 'complete' }>): string {
-  return createHash('sha256')
-    .update(
-      JSON.stringify({
-        timestamp: event.timestamp,
-        result: event.result,
-        totalInputTokens: event.totalInputTokens ?? null,
-        totalOutputTokens: event.totalOutputTokens ?? null,
-        cachedInputTokens: event.cachedInputTokens ?? null,
-        cacheCreationInputTokens: event.cacheCreationInputTokens ?? null,
-        costUsd: event.costUsd ?? null,
-      }),
-    )
-    .digest('hex');
-}
-
-function persistedAgentCompleteEventKeys(
-  eventRepo: EventRepository | undefined,
-  podId: string,
-): Set<string> {
-  const keys = new Set<string>();
-  if (!eventRepo) return keys;
-  for (const event of eventRepo.getForSession(podId, { type: 'pod.agent_activity' })) {
-    if (event.payload.type !== 'pod.agent_activity') continue;
-    const agentEvent = event.payload.event;
-    if (agentEvent.type === 'complete') {
-      keys.add(agentCompleteEventKey(agentEvent));
-    }
-  }
-  return keys;
-}
-
-function hasAlreadyCountedCompleteEvent(
-  pod: Pod,
-  attempt: number,
-  event: Extract<AgentEvent, { type: 'complete' }>,
-): boolean {
-  const inputTokens = event.totalInputTokens ?? 0;
-  const outputTokens = event.totalOutputTokens ?? 0;
-  const hasTokenTelemetry =
-    event.totalInputTokens !== undefined || event.totalOutputTokens !== undefined;
-  const bucket = pod.phaseTokenUsage?.[agentPhaseBucketKey(attempt)];
-  const tokensAlreadyCounted =
-    !hasTokenTelemetry ||
-    ((bucket?.inputTokens ?? 0) >= inputTokens && (bucket?.outputTokens ?? 0) >= outputTokens);
-  const costAlreadyCounted = event.costUsd === undefined || pod.costUsd >= event.costUsd;
-  return tokensAlreadyCounted && costAlreadyCounted;
 }
 
 function podMemoryScopeIds(pod: Pod): string[] {
@@ -2267,17 +2160,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const coordinateInteractiveCompletion =
     createInteractiveCompletionCoordinator<Awaited<ReturnType<PodManager['completeSession']>>>();
   const pauseIntents = new Map<string, symbol>();
-  const activeAgentRuns = new Map<
-    string,
-    {
-      token: symbol;
-      settled: Promise<void>;
-      providerOrdinal?: number;
-      taskRunId?: string;
-      isCurrent?: () => boolean;
-    }
-  >();
-  const activeAgentRunResolvers = new Map<string, { token: symbol; resolve: () => void }>();
+  const { activeAgentRuns, activeAgentRunResolvers } = createAgentRunRegistry();
   const {
     providerForAttempt,
     ensureProviderAttempt,
@@ -2373,34 +2256,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   /** Pods whose branch was cleanly rebased by update-from-base.
    *  The next pushBranch call for these pods may use --force-with-lease; cleared after one use. */
   const forceWithLeaseAllowances = new Set<string>();
-
-  /**
-   * Per-pod throttle for `last_agent_event_at` DB writes. Bumped on any liveness
-   * signal — agent stream events AND system status emissions during bootstrap
-   * or recovery — but persisted at most once per `EVENT_TIMESTAMP_WRITE_THROTTLE_MS`
-   * to avoid hammering SQLite. The watchdog threshold is in the tens of minutes
-   * so 10 s granularity is fine.
-   */
-  const lastEventWriteAt = new Map<string, number>();
-  const EVENT_TIMESTAMP_WRITE_THROTTLE_MS = 10_000;
-
-  /**
-   * Throttled write of `last_agent_event_at`. Called from both the agent stream
-   * loop and `emitActivityStatus` so that bootstrap/recovery progress messages
-   * count as liveness — without this, the watchdog only sees the agent SSE
-   * stream and kills pods that are still mid-provisioning.
-   */
-  function bumpActivityTimestamp(podId: string): void {
-    const eventNow = Date.now();
-    const lastWrite = lastEventWriteAt.get(podId) ?? 0;
-    if (eventNow - lastWrite < EVENT_TIMESTAMP_WRITE_THROTTLE_MS) return;
-    lastEventWriteAt.set(podId, eventNow);
-    try {
-      podRepo.update(podId, { lastAgentEventAt: new Date(eventNow).toISOString() });
-    } catch (err) {
-      logger.warn({ err, podId }, 'Failed to bump lastAgentEventAt');
-    }
-  }
+  const { lastEventWriteAt, bumpActivityTimestamp, touchHeartbeat, recordNotReportedMemoryUsage } =
+    createAgentActivity(deps, { podRepo, logger });
 
   /** Stuck-running watchdog interval handle (single global timer). */
   let stuckPodWatchdog: ReturnType<typeof setInterval> | null = null;
@@ -3408,14 +3265,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       resolveEffectiveBoundProfile,
     });
 
-  function touchHeartbeat(podId: string): void {
-    try {
-      podRepo.update(podId, { lastHeartbeatAt: new Date().toISOString() });
-    } catch {
-      // Best-effort — don't crash on heartbeat failures
-    }
-  }
-
   const { syncWorkspaceBack, recoverWorktreeFromContainer } = createWorkspaceTransfer({ logger });
 
   const continuationContext = createContinuationContext(deps, {
@@ -4236,10 +4085,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     });
   }
 
-  function recordNotReportedMemoryUsage(podId: string): void {
-    deps.memoryUsageRepo?.recordNotReportedForPod(podId);
-  }
-
   /**
    * After a pod reaches `validated`, enqueue any dependents whose *all*
    * parents have now reached a completed-success state. Single-parent pods
@@ -4512,6 +4357,64 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     safetyEventsRepo,
     rememberMaxCredentialLineage,
     emitActivityStatus,
+  });
+  const processWorkflow = createAgentProcessWorkflow(deps, {
+    podRepo,
+    logger,
+    emitActivityStatus,
+    resolveEffectiveBoundProfile,
+    provisioningWorkflow,
+    runtimeRegistry,
+    ensureProviderAttempt,
+    activeAgentRuns,
+    touchHeartbeat,
+    rotateProviderAttemptForFreshSegment,
+    buildReworkTask,
+    buildContinuationPrompt,
+    buildRecoveryTask,
+    recordContinuationProvenance,
+    primeRuntimeForResume,
+    appendDecisionContext,
+    ownsLifecycle,
+    persistRuntimeCredentialsForPod,
+    preserveSandboxAfterAgentFailure,
+    hasDurableAgentExecutionEvidence,
+    tryRecoverTransientSandboxFailure,
+    closeProviderAttempt,
+    scheduleHostFetchRetry,
+    emitActivityError,
+    transition,
+    escalationRepo,
+    operatorErrorMessage,
+    containerManagerFactory,
+    CONTAINER_CLEANUP_TIMEOUT_MS,
+  });
+
+  const agentEventConsumption = createAgentEventConsumption(deps, {
+    podRepo,
+    activeAgentRunResolvers,
+    activeAgentRuns,
+    resolveEffectiveBoundProfile,
+    ensureProviderAttempt,
+    startCommitPolling,
+    pauseIntents,
+    logger,
+    eventBus,
+    bumpActivityTimestamp,
+    emitActivityStatus,
+    transition,
+    progressEventRepo,
+    rotateProviderAttemptForFreshSegment,
+    summarizeAgentCompletionBlocker,
+    executionForPod,
+    sanitizeFailureReason,
+    touchHeartbeat,
+    hasDurableAgentExecutionEvidence,
+    syncSandboxRuntimeSessionState,
+    closeProviderAttempt,
+    handleProviderLimit,
+    stopCommitPolling,
+    lastEventWriteAt,
   });
 
   return {
@@ -5044,757 +4947,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return continuationControls.resumeNativeGoal(podId, revision);
     },
     async processPod(podId: string): Promise<void> {
-      let pod = podRepo.getOrThrow(podId);
-      let launchConfig = deps.launchConfiguration?.read(podId) ?? null;
-      const lifecycleGeneration = pod.lifecycleGeneration;
-      const startingAttempt = deriveAgentAttempt(pod.phaseTokenUsage);
-      let visibleFailurePhase: OperatorFailurePhase = 'setup';
-      let runtimeEventObserved = false;
-      const stagedReferenceArchivePaths = new Set<string>();
-      let startupAdmission: { id: string; started: number | null } | undefined;
-      const finishStartup = (outcome: import('@autopod/shared').TaskRetryOutcome): void => {
-        if (!startupAdmission) return;
-        podRepo.sandboxStartupRetries?.finish(
-          startupAdmission.id,
-          outcome,
-          startupAdmission.started === null || outcome === 'unknown'
-            ? null
-            : Math.round(performance.now() - startupAdmission.started),
-        );
-        startupAdmission = undefined;
-      };
-
-      // Defense-in-depth: processPod must only run for pods in queued/handoff state.
-      // The queue's activeIds dedup prevents most races, but this guard ensures
-      // a stale processPod call can never kill a pod that's already running.
-      if (pod.status !== 'queued' && pod.status !== 'handoff') {
-        logger.warn(
-          { podId, status: pod.status },
-          'processPod skipped — pod not in queued/handoff state',
-        );
-        return;
-      }
-
-      function emitStatus(message: string): void {
-        emitActivityStatus(podId, message);
-      }
-
-      const assertStartupCurrent = (): void => {
-        const current = podRepo.getOrThrow(podId);
-        if (
-          current.lifecycleGeneration !== lifecycleGeneration ||
-          (current.status !== 'queued' && current.status !== 'handoff')
-        )
-          throw new AgentContinuationSupersededError();
-        resolveEffectiveBoundProfile(current);
-      };
-
-      try {
-        const provisioning = await provisioningWorkflow.preparePodExecution({
-          podId,
-          pod,
-          launchConfig,
-          lifecycleGeneration,
-          run: {
-            get startupAdmission() {
-              return startupAdmission;
-            },
-            set startupAdmission(value) {
-              startupAdmission = value;
-            },
-            finishStartup,
-            emitStatus,
-            assertStartupCurrent,
-            stagedReferenceArchivePaths,
-          },
-        });
-        if (provisioning.kind === 'halted') return;
-        ({ pod, launchConfig } = provisioning.prepared);
-        const {
-          containerManager,
-          containerId,
-          profile,
-          isFreshContainerValidationOnly,
-          isRecovery,
-          isInfrastructureRecovery,
-          isRework,
-          systemInstructions,
-          secretEnv,
-          worktreePath,
-          mcpServers,
-          reasoningEffort,
-          providerResult,
-        } = provisioning.prepared;
-
-        // skipAgent bypasses the runtime spawn. A queued recovery originates
-        // from Resume's fresh-container validation-only path and must enter
-        // validation directly; a handoff originates from `--skip-agent` and
-        // still uses handleCompletion to evaluate and deliver the human work.
-        // Clear the one-shot flag *before* handing off so a future failed →
-        // resume cycle re-runs the agent normally.
-        if (pod.skipAgent) {
-          const preservedProvenance = await inspectExecutionPreflight(
-            containerManager,
-            containerId,
-            pod,
-            profile,
-            'completion',
-          );
-          podRepo.executionProvenance?.record(podId, pod.lifecycleGeneration, preservedProvenance);
-          finishStartup('pass');
-          podRepo.update(podId, { skipAgent: false });
-          if (isFreshContainerValidationOnly) {
-            emitStatus('Skipping agent — running validation only…');
-            logger.info({ podId }, 'skipAgent: fresh-container recovery entering validation');
-            visibleFailurePhase = 'validation';
-            await this.triggerValidation(podId, { validationOnly: true });
-            return;
-          }
-          emitStatus('Skipping agent — going straight to completion…');
-          logger.info(
-            { podId, output: pod.options.output },
-            'skipAgent: bypassing runtime spawn, proceeding to handleCompletion',
-          );
-          visibleFailurePhase = 'completion';
-          await this.handleCompletion(podId);
-          return;
-        }
-
-        if (
-          isRecovery &&
-          !isInfrastructureRecovery &&
-          !isRework &&
-          (launchConfig?.intent === 'goal'
-            ? (() => {
-                const goal = deps.launchConfiguration?.goals?.get(podId);
-                return goal?.state === 'achieved' && goal.executionStopped;
-              })()
-            : hasLatestPersistedAgentTerminalEventComplete(
-                deps.eventRepo,
-                podId,
-                podRepo.completionJournal?.replyWatermark(podId) ?? 0,
-              ))
-        ) {
-          const recoveredProvenance = await inspectExecutionPreflight(
-            containerManager,
-            containerId,
-            pod,
-            profile,
-            'completion',
-          );
-          podRepo.executionProvenance?.record(podId, pod.lifecycleGeneration, recoveredProvenance);
-          finishStartup('pass');
-          emitStatus('Agent already finished before recovery — resuming completion…');
-          logger.info(
-            { podId, worktreePath },
-            'Recovery found persisted agent complete event — skipping agent spawn',
-          );
-          visibleFailurePhase = 'completion';
-          await this.handleCompletion(podId);
-          return;
-        }
-
-        // Start the agent — recovery mode uses resume for Claude, fresh spawn for others
-        emitStatus(
-          `Starting worker: provider=${profile.modelProvider ?? 'anthropic'}, runtime=${pod.runtime}, model=${pod.model}`,
-        );
-        const provenance = await inspectExecutionPreflight(
-          containerManager,
-          containerId,
-          pod,
-          profile,
-        );
-        const recordedProvenance = podRepo.executionProvenance?.record(
-          podId,
-          pod.lifecycleGeneration,
-          provenance,
-        );
-        if (provenance.status === 'blocked') {
-          const failure = provenance.diagnostics.find(
-            (item) =>
-              item.code.startsWith('PREFLIGHT_') || item.code === 'STREAMING_EXEC_UNSUPPORTED',
-          );
-          const message = failure?.detail ?? 'Execution preflight requires reconciliation';
-          emitStatus(message);
-          throw new AutopodError(message, failure?.code ?? 'EXECUTION_PREFLIGHT_BLOCKED', 409);
-        }
-        logger.info(
-          {
-            podId,
-            runtime: pod.runtime,
-            cliPath: provenance.cliPath,
-            cliVersion: provenance.cliVersion,
-          },
-          'Agent CLI preflight passed',
-        );
-
-        emitStatus('Spawning agent…');
-        const runtime = runtimeRegistry.get(pod.runtime);
-        let events: AsyncIterable<AgentEvent>;
-        const activeProviderAttemptBeforeStart = deps.providerAttemptRepo?.getActive(podId);
-        const hadActiveProviderAttempt = !!activeProviderAttemptBeforeStart;
-        let providerAttemptRotated = false;
-        ensureProviderAttempt(pod, profile);
-
-        // Codex and Copilot need the generated Autopod instructions passed through the
-        // runtime adapter. Claude reads the same file via --append-system-prompt-file.
-        let runtimeInstructions: string | undefined =
-          pod.runtime === 'codex' || pod.runtime === 'copilot' ? systemInstructions : undefined;
-
-        // For Copilot, defensively merge the repo's own instructions (if any) with ours.
-        // We can't be sure Copilot CLI reads both $COPILOT_HOME/copilot-instructions.md
-        // and .github/copilot-instructions.md, so prepend the repo's file to be safe.
-        if (pod.runtime === 'copilot') {
-          try {
-            const repoInstructions = await containerManager.readFile(
-              containerId,
-              '/workspace/.github/copilot-instructions.md',
-            );
-            if (repoInstructions.trim()) {
-              runtimeInstructions = `${repoInstructions}\n\n---\n\n${systemInstructions}`;
-              logger.info(
-                { podId },
-                'Merged repo copilot-instructions.md with autopod system instructions',
-              );
-            }
-          } catch {
-            // No repo-level copilot instructions — use ours as-is
-          }
-        }
-
-        if (launchConfig?.intent === 'goal') {
-          const goals = deps.launchConfiguration?.goals;
-          if (!goals || !runtime.nativeGoalSession || !recordedProvenance)
-            throw new AutopodError('Native Goal execution is unavailable', 'GOAL_UNAVAILABLE', 503);
-          if (isRework)
-            throw new AutopodError(
-              'An achieved native Goal cannot be replaced by validation rework',
-              'GOAL_REWORK_REQUIRES_TASK',
-              409,
-            );
-          const config = launchConfig;
-          const nativeSession = runtime.nativeGoalSession(
-            {
-              podId,
-              task: config.task,
-              model: pod.model,
-              reasoningEffort,
-              workDir: '/workspace',
-              containerId,
-              customInstructions: runtimeInstructions,
-              env: secretEnv,
-              mcpServers,
-              executionTarget: pod.executionTarget,
-            },
-            goals.processHooks(podId, config),
-          );
-          events = (async function* () {
-            const owner = activeAgentRuns.get(podId);
-            if (!owner?.taskRunId)
-              throw new AutopodError(
-                'Native Goal requires a durable execution attempt',
-                'GOAL_ATTEMPT_MISSING',
-                409,
-              );
-            const assertCurrent = () => {
-              if (activeAgentRuns.get(podId)?.token !== owner.token || !owner.isCurrent?.())
-                throw new AutopodError(
-                  'Native Goal execution was superseded',
-                  'GOAL_SUPERSEDED',
-                  409,
-                );
-            };
-            try {
-              const goal = await goals.run({
-                pod: podRepo.getOrThrow(podId),
-                config,
-                provenance: recordedProvenance,
-                fence: { generation: lifecycleGeneration, attemptId: owner.taskRunId },
-                session: nativeSession,
-                assertCurrent,
-                onState(goal) {
-                  if (!owner.isCurrent?.()) return;
-                  touchHeartbeat(podId);
-                  emitActivityStatus(
-                    podId,
-                    `Native Goal ${goal.state}: ${goal.observedTokens} tokens including evaluation`,
-                  );
-                },
-              });
-              assertCurrent();
-              if (goal.state === 'achieved' && goal.executionStopped)
-                yield {
-                  type: 'complete' as const,
-                  timestamp: goal.updatedAt,
-                  result: 'Native Goal achieved',
-                };
-              else
-                yield {
-                  type: 'error' as const,
-                  timestamp: goal.updatedAt,
-                  fatal: true,
-                  message: `Native Goal ${goal.state}; continuation requires operator review`,
-                };
-            } catch (error) {
-              const goal = goals.get(podId);
-              yield {
-                type: 'error' as const,
-                timestamp: new Date().toISOString(),
-                fatal: true,
-                message:
-                  error instanceof AutopodError
-                    ? error.message
-                    : 'Native Goal requires reconciliation',
-                ...(!goal?.executionStopped ? { executionTermination: 'unverified' as const } : {}),
-              };
-            }
-          })();
-        } else if (isRework) {
-          // Rework: always a fresh spawn with rework-specific framing.
-          // claudeSessionId was already cleared by triggerValidation so we never
-          // resume a stale/broken pod context.
-          providerAttemptRotated = rotateProviderAttemptForFreshSegment(
-            pod,
-            profile,
-            hadActiveProviderAttempt,
-          );
-          emitStatus('Reworking pod…');
-          // biome-ignore lint/style/noNonNullAssertion: reworkReason is always set when isRework=true; worktreePath is non-null when isRework=true (rework requires a prior run with a worktree)
-          const reworkTask = await buildReworkTask(pod, worktreePath!, pod.reworkReason!);
-          events = runtime.spawn({
-            podId,
-            task: reworkTask,
-            model: pod.model,
-            reasoningEffort,
-            workDir: '/workspace',
-            containerId,
-            customInstructions: runtimeInstructions,
-            env: secretEnv,
-            mcpServers,
-            executionTarget: pod.executionTarget,
-          });
-
-          // Clear rework reason now that it's been consumed (one-shot)
-          podRepo.update(podId, {
-            reworkReason: null,
-            lastCorrectionMessage: `${REWORK_IN_PROGRESS_PREFIX} ${pod.reworkReason}`,
-          });
-        } else if (
-          isRecovery &&
-          !isInfrastructureRecovery &&
-          pod.runtime === 'claude' &&
-          pod.claudeSessionId
-        ) {
-          // Crash recovery: attempt Claude --resume with persisted pod ID
-          if (
-            activeProviderAttemptBeforeStart?.nativeSessionId &&
-            activeProviderAttemptBeforeStart.nativeSessionId !== pod.claudeSessionId
-          ) {
-            providerAttemptRotated = rotateProviderAttemptForFreshSegment(
-              pod,
-              profile,
-              hadActiveProviderAttempt,
-            );
-          }
-          emitStatus('Resuming Claude pod…');
-
-          // Rehydrate the in-memory pod ID map so resume() can find it
-          if ('setClaudeSessionId' in runtime) {
-            (runtime as ClaudeRuntime).setClaudeSessionId(podId, pod.claudeSessionId);
-          }
-          if ('setClaudeResumeConfig' in runtime) {
-            (runtime as ClaudeRuntime).setClaudeResumeConfig(podId, mcpServers, reasoningEffort);
-          }
-
-          // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods (recovery requires a prior run with a worktree)
-          const continuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
-          // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
-          const safeWorktreePath = worktreePath!;
-
-          // The resume call returns the iterator synchronously — the failure
-          // (Claude printing "No conversation found with session ID" and exiting)
-          // surfaces mid-iteration as a thrown ResumeSessionNotFoundError. Wrap
-          // in a generator so we can catch the throw, clear the stale session
-          // ID, and fall through to a fresh spawn in the same container without
-          // dying silently. (The container is still alive after Claude's exit.)
-          const podRepoRef = podRepo;
-          const runtimeRef = runtime;
-          const containerIdRef = containerId;
-          const podModel = pod.model;
-          const podRef = pod;
-          const mcpServersRef = mcpServers;
-          const customInstructionsRef = runtimeInstructions;
-          const secretEnvRef = secretEnv;
-          const loggerRef = logger;
-          const profileRef = profile;
-          events = (async function* resumeWithFallback() {
-            const fallbackRunToken = activeAgentRuns.get(podId)?.token;
-            try {
-              yield* runtimeRef.resume(podId, continuationPrompt, containerIdRef, secretEnvRef);
-            } catch (err) {
-              if (!(err instanceof ResumeSessionNotFoundError)) throw err;
-              loggerRef.warn(
-                { podId, claudeSessionId: err.claudeSessionId },
-                'Claude --resume found no conversation on disk — falling back to fresh spawn',
-              );
-              // Clear the stale ID so any future recovery on this pod doesn't
-              // loop trying to resume the same nonexistent conversation.
-              if (
-                !fallbackRunToken ||
-                activeAgentRuns.get(podId)?.token !== fallbackRunToken ||
-                !activeAgentRuns.get(podId)?.isCurrent?.()
-              )
-                throw new ProviderAttemptSupersededError();
-              if (!providerAttemptRotated) {
-                rotateProviderAttemptForFreshSegment(
-                  podRef,
-                  profileRef,
-                  hadActiveProviderAttempt,
-                  fallbackRunToken,
-                );
-              }
-              podRepoRef.update(podId, { claudeSessionId: null });
-              const recoveryTask = await buildRecoveryTask(podRef, safeWorktreePath);
-              await recordContinuationProvenance(podRef, containerIdRef);
-              if (
-                activeAgentRuns.get(podId)?.token !== fallbackRunToken ||
-                !activeAgentRuns.get(podId)?.isCurrent?.()
-              )
-                throw new ProviderAttemptSupersededError();
-              yield* runtimeRef.spawn({
-                podId,
-                task: recoveryTask,
-                model: podModel,
-                reasoningEffort,
-                workDir: '/workspace',
-                containerId: containerIdRef,
-                customInstructions: customInstructionsRef,
-                env: secretEnvRef,
-                mcpServers: mcpServersRef,
-                executionTarget: podRef.executionTarget,
-              });
-            }
-          })();
-        } else if (
-          isRecovery &&
-          !isInfrastructureRecovery &&
-          pod.runtime === 'codex' &&
-          pod.codexSessionId
-        ) {
-          // Codex crash recovery: continue the existing session
-          if (
-            activeProviderAttemptBeforeStart?.nativeSessionId &&
-            activeProviderAttemptBeforeStart.nativeSessionId !== pod.codexSessionId
-          ) {
-            rotateProviderAttemptForFreshSegment(pod, profile, hadActiveProviderAttempt);
-          }
-          emitStatus('Resuming Codex pod…');
-          if ('setCodexResumeConfig' in runtime) {
-            (runtime as CodexRuntime).setCodexResumeConfig(podId, mcpServers, reasoningEffort);
-          }
-          // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
-          const codexContinuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
-          events = runtime.resume(podId, codexContinuationPrompt, containerId, secretEnv);
-        } else if (
-          isRecovery &&
-          !isInfrastructureRecovery &&
-          pod.runtime === 'pi' &&
-          pod.piSessionId
-        ) {
-          if (
-            activeProviderAttemptBeforeStart?.nativeSessionId &&
-            activeProviderAttemptBeforeStart.nativeSessionId !== pod.piSessionId
-          ) {
-            rotateProviderAttemptForFreshSegment(pod, profile, hadActiveProviderAttempt);
-          }
-          emitStatus('Resuming Pi pod…');
-          await primeRuntimeForResume(pod, runtime, containerId, secretEnv);
-          // biome-ignore lint/style/noNonNullAssertion: recovery pods have a worktree
-          const piContinuationPrompt = await buildContinuationPrompt(pod, worktreePath!);
-          events = runtime.resume(podId, piContinuationPrompt, containerId, secretEnv);
-        } else if (isRecovery && !isInfrastructureRecovery) {
-          // Non-Claude/Codex runtime or no session ID — fresh spawn with recovery context
-          rotateProviderAttemptForFreshSegment(pod, profile, hadActiveProviderAttempt);
-          // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null for recovery pods
-          let recoveryTask = await buildRecoveryTask(pod, worktreePath!);
-          // For non-Claude runtimes recovering after host wake, append a postscript so the
-          // agent checks git history before redoing work already on disk.
-          if (pod.runtime !== 'claude' && pod.lastRecoveryTrigger === 'wake') {
-            recoveryTask +=
-              '\n\nNote: this run was interrupted by a host sleep and restarted. Some' +
-              ' work may already be on disk — check `git log` and `git diff main`' +
-              ' before continuing.';
-          }
-          events = runtime.spawn({
-            podId,
-            task: recoveryTask,
-            model: pod.model,
-            reasoningEffort,
-            workDir: '/workspace',
-            containerId,
-            customInstructions: runtimeInstructions,
-            env: secretEnv,
-            mcpServers,
-            executionTarget: pod.executionTarget,
-          });
-        } else {
-          // Normal path
-          events = runtime.spawn({
-            podId,
-            task: appendDecisionContext(pod, pod.task),
-            model: pod.model,
-            reasoningEffort,
-            workDir: '/workspace',
-            containerId,
-            customInstructions: runtimeInstructions,
-            env: secretEnv,
-            mcpServers,
-            executionTarget: pod.executionTarget,
-          });
-        }
-
-        visibleFailurePhase = 'agent';
-        const observedEvents = (async function* () {
-          for await (const event of events) {
-            if (!runtimeEventObserved) {
-              finishStartup('pass');
-              podRepo.update(podId, { infrastructureFailure: null });
-            }
-            runtimeEventObserved = true;
-            yield event;
-          }
-        })();
-        const outcome = await this.consumeAgentEvents(podId, observedEvents, startingAttempt, {
-          generation: lifecycleGeneration,
-          containerId,
-          nativeGoal: launchConfig?.intent === 'goal',
-        });
-
-        if (!ownsLifecycle(podId, lifecycleGeneration, containerId)) {
-          logger.info(
-            { podId, containerId, generation: lifecycleGeneration },
-            'Discarded stale agent continuation',
-          );
-          return;
-        }
-
-        // Persist any runtime credentials if provider requires it (MAX token rotation, Codex auth.json)
-        if (providerResult.requiresPostExecPersistence) {
-          await persistRuntimeCredentialsForPod(
-            podId,
-            'Failed to persist refreshed credentials — pod still succeeded',
-          );
-        }
-
-        if (outcome === 'completed') {
-          visibleFailurePhase = 'completion';
-          await this.handleCompletion(podId);
-        } else if (outcome === 'failed') {
-          await preserveSandboxAfterAgentFailure(podId, 'fatal agent exit');
-        }
-      } catch (err) {
-        if (err instanceof AgentContinuationSupersededError) return;
-        if (startupAdmission) {
-          const current = podRepo.getOrThrow(podId);
-          const safeTransient =
-            err instanceof SandboxInfrastructureError &&
-            !runtimeEventObserved &&
-            (current.skipAgent || !hasDurableAgentExecutionEvidence(current));
-          finishStartup(
-            startupAdmission.started === null
-              ? 'cancelled'
-              : safeTransient
-                ? 'transient'
-                : 'nonretryable',
-          );
-        }
-        if (!ownsLifecycle(podId, lifecycleGeneration, null)) {
-          logger.info(
-            { podId, generation: lifecycleGeneration },
-            'Discarded stale lifecycle error',
-          );
-          return;
-        }
-        if (err instanceof SandboxInfrastructureError) {
-          const recovered = await tryRecoverTransientSandboxFailure(
-            podId,
-            podRepo.getOrThrow(podId),
-            runtimeEventObserved,
-            err,
-            visibleFailurePhase,
-          );
-          if (recovered) return;
-          if (
-            !runtimeEventObserved &&
-            !hasDurableAgentExecutionEvidence(podRepo.getOrThrow(podId))
-          ) {
-            closeProviderAttempt(podId, 'aborted');
-          }
-        }
-        if (err instanceof GitTransientFetchError) {
-          const current = podRepo.getOrThrow(podId);
-          if (current.status === 'queued') scheduleHostFetchRetry(current, err);
-          return;
-        }
-        if (err instanceof GitMissingRemoteBranchError) {
-          const current = podRepo.getOrThrow(podId);
-          const message = `Required remote ${err.purpose} branch "${err.branch}" is missing.`;
-          emitActivityError(podId, message, true);
-          if (current.status === 'queued')
-            transition(current, 'failed', { failureReason: message });
-          return;
-        }
-        if (err instanceof GitCredentialError && (err.op === 'fetch' || err.op === 'clone')) {
-          const current = podRepo.getOrThrow(podId);
-          if (current.status === 'queued') {
-            const escalation: EscalationRequest = {
-              id: generateId(12),
-              podId,
-              type: 'request_credential',
-              timestamp: new Date().toISOString(),
-              payload: {
-                service: err.service,
-                reason:
-                  err.service === 'github'
-                    ? 'The daemon could not fetch the required remote branch. Authenticate the daemon GitHub account with gh auth login, then resume this pod.'
-                    : 'The daemon could not fetch the required remote branch. Repair the daemon Azure CLI/managed identity access to this Azure DevOps repository, then resume this pod.',
-                source: 'host_fetch',
-              },
-              response: null,
-            };
-            persistEscalation(podRepo, escalationRepo, escalation, () => {
-              transition(current, 'awaiting_input', {
-                pendingEscalation: escalation,
-                escalationCount: current.escalationCount + 1,
-              });
-            });
-            emitActivityStatus(
-              podId,
-              'Remote fetch needs repaired host credentials before provisioning.',
-            );
-            return;
-          }
-        }
-        logger.error({ err, podId }, 'Pod processing error');
-        const failureReason = operatorErrorMessage(err, visibleFailurePhase);
-        emitActivityError(podId, failureReason, true);
-        // Best-effort: recover runtime credentials before the failure path
-        // tears the container down. The happy-path persist at the end of the
-        // try block was bypassed, so without this latest auth state can die
-        // with the container.
-        try {
-          await persistRuntimeCredentialsForPod(
-            podId,
-            'Failed to persist rotated credentials after pod error — proceeding',
-          );
-        } catch (persistErr) {
-          logger.warn(
-            { err: persistErr, podId },
-            'Failed to persist rotated credentials after pod error — proceeding',
-          );
-        }
-        if (
-          visibleFailurePhase === 'agent' &&
-          !(err instanceof SandboxInfrastructureError && !runtimeEventObserved)
-        ) {
-          await preserveSandboxAfterAgentFailure(podId, 'agent processing error');
-        }
-        const attemptHistory = deps.providerAttemptRepo?.list(podId) ?? [];
-        const activeContinuityAttempt = deps.providerAttemptRepo?.getActive(podId);
-        const precedingAttempt = activeContinuityAttempt
-          ? attemptHistory.find(
-              (attempt) => attempt.ordinal === activeContinuityAttempt.ordinal - 1,
-            )
-          : undefined;
-        const followsProviderLimit =
-          !!activeContinuityAttempt &&
-          precedingAttempt?.handoffReference === PROVIDER_FAILOVER_HANDOFF_PATH;
-        if (followsProviderLimit) {
-          try {
-            closeProviderAttempt(
-              podId,
-              'failed',
-              {
-                category: 'unknown',
-                definitive: false,
-                sanitizedMessage: failureReason,
-                retryAfter: null,
-              },
-              PROVIDER_FAILOVER_HANDOFF_PATH,
-            );
-            pod = podRepo.getOrThrow(podId);
-            if (pod.containerId) {
-              const cm = containerManagerFactory.get(pod.executionTarget);
-              let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
-              try {
-                await Promise.race([
-                  cm.kill(pod.containerId),
-                  new Promise<never>((_resolve, reject) => {
-                    cleanupTimer = setTimeout(
-                      () => reject(new Error('Continuation startup cleanup timed out')),
-                      CONTAINER_CLEANUP_TIMEOUT_MS,
-                    );
-                  }),
-                ]);
-                podRepo.update(podId, { containerId: null });
-                pod = podRepo.getOrThrow(podId);
-              } catch (cleanupErr) {
-                logger.warn(
-                  { err: cleanupErr, podId, containerId: pod.containerId },
-                  'Continuation startup container cleanup could not be proven',
-                );
-              } finally {
-                if (cleanupTimer) clearTimeout(cleanupTimer);
-              }
-            }
-            if (pod.status === 'queued') {
-              pod = transition(pod, 'provisioning');
-            }
-            if (pod.status === 'provisioning' || pod.status === 'running') {
-              transition(pod, 'paused', {
-                pauseReason: 'provider_limit',
-                failureReason,
-              });
-            }
-            emitActivityStatus(
-              podId,
-              'Provider target failed to start — source work and continuation history preserved',
-            );
-            return;
-          } catch (continuityErr) {
-            logger.warn(
-              { err: continuityErr, podId },
-              'Failed to park provider continuation startup failure',
-            );
-          }
-        }
-        // Transition to failed — keeps series dependents queued so they can run once the parent
-        // is recovered/retried. 'killed' is reserved for explicit user termination only.
-        try {
-          closeProviderAttempt(podId, 'failed');
-          pod = podRepo.getOrThrow(podId);
-          if (!isTerminalState(pod.status)) {
-            if (canFail(pod.status)) {
-              transition(pod, 'failed', {
-                completedAt: new Date().toISOString(),
-                failureReason,
-              });
-            } else if (canKill(pod.status)) {
-              // Fallback for states not yet reachable via 'failed' (validated, review_required, etc.)
-              transition(pod, 'killing', { failureReason });
-              pod = podRepo.getOrThrow(podId);
-              transition(pod, 'killed', { completedAt: new Date().toISOString() });
-            }
-          }
-        } catch {
-          /* swallow — best effort */
-        }
-      } finally {
-        finishStartup('unknown');
-        await Promise.all(
-          [...stagedReferenceArchivePaths].map((archivePath) => rm(archivePath, { force: true })),
-        );
-      }
+      return processWorkflow.processPod.call(this, podId);
     },
 
     async consumeAgentEvents(
@@ -5803,644 +4956,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       attempt = 0,
       lifecycle?: { generation: number; containerId: string | null; nativeGoal?: boolean },
     ): Promise<AgentRunOutcome> {
-      const initialPod = podRepo.getOrThrow(podId);
-      if (deps.launchConfiguration?.read(podId)?.intent === 'goal' && !lifecycle?.nativeGoal)
-        throw new AutopodError(
-          'Native Goals must resume through their native lifecycle',
-          'GOAL_NATIVE_RESUME_REQUIRED',
-          409,
-        );
-      const expected = lifecycle
-        ? { ...lifecycle }
-        : {
-            generation: initialPod.lifecycleGeneration,
-            containerId: initialPod.containerId,
-          };
-      const ownsExpectedLifecycle = (): boolean => {
-        try {
-          const current = podRepo.getOrThrow(podId);
-          return (
-            current.lifecycleGeneration === expected.generation &&
-            current.containerId === expected.containerId &&
-            current.runtime === initialPod.runtime &&
-            current.model === initialPod.model &&
-            current.providerIdSnapshot === initialPod.providerIdSnapshot &&
-            current.providerAccountIdSnapshot === initialPod.providerAccountIdSnapshot &&
-            current.executionTarget === initialPod.executionTarget &&
-            current.worktreePath === initialPod.worktreePath
-          );
-        } catch {
-          return false;
-        }
-      };
-      if (!ownsExpectedLifecycle()) return 'stopped';
-      const runToken = Symbol(podId);
-      let resolveRunSettled: () => void = () => {};
-      const runSettled = new Promise<void>((resolve) => {
-        resolveRunSettled = resolve;
-      });
-      const runOwner: {
-        token: symbol;
-        settled: Promise<void>;
-        providerOrdinal?: number;
-        taskRunId?: string;
-        isCurrent?: () => boolean;
-      } = {
-        token: runToken,
-        settled: runSettled,
-      };
-      const settleActiveRun = (): void => {
-        resolveRunSettled();
-        const activeResolver = activeAgentRunResolvers.get(podId);
-        if (activeResolver?.token !== runToken) return;
-        activeAgentRunResolvers.delete(podId);
-        activeAgentRuns.delete(podId);
-      };
-      const ownsRun = () =>
-        activeAgentRuns.get(podId)?.token === runToken &&
-        ownsExpectedLifecycle() &&
-        (!deps.providerAttemptRepo ||
-          (runOwner.providerOrdinal !== undefined &&
-            deps.providerAttemptRepo.getActive(podId)?.ordinal === runOwner.providerOrdinal));
-      runOwner.isCurrent = ownsRun;
-      let superseded = false;
-      let eventError: unknown;
-      let hasEventError = false;
-      let attemptPod: Pod;
-      let attemptProfile: PodExecutionSettings;
-      let seenCompleteEvents: Set<string>;
-      let taskRunId: string | undefined;
-      let workerAdmissionId: string | undefined;
-      let workerStartedAt: number | undefined;
-      let workerNotBefore: string | undefined;
-      try {
-        const initialized = atomicPodChange(podRepo, () => {
-          const currentPod = podRepo.getOrThrow(podId);
-          const currentProfile = resolveEffectiveBoundProfile(currentPod);
-          podRepo.completionJournal?.begin(currentPod);
-          let runId: string | undefined;
-          if (podRepo.taskExecutions) {
-            podRepo.taskExecutions.register(podId);
-            const cycle = podRepo.completionJournal?.get(
-              podId,
-              currentPod.lifecycleGeneration,
-            )?.cycle;
-            if (cycle === undefined)
-              throw new Error('Task execution requires a durable completion cycle');
-            runId = podRepo.taskExecutions.beginRun(podId, currentPod.lifecycleGeneration, cycle, {
-              runtime: currentPod.runtime,
-              model: currentPod.model,
-              providerAccountId: currentProfile.providerAccountId ?? null,
-              resource: {
-                containerId: currentPod.containerId,
-                executionTarget: currentPod.executionTarget,
-              },
-            });
-          }
-          const workerAdmission = runId
-            ? podRepo.workerRetries?.admit(
-                podId,
-                currentPod.lifecycleGeneration,
-                unavailableWorkerInputs,
-                workerBindingHash({
-                  runtime: currentPod.runtime,
-                  model: currentPod.model,
-                  providerAccountId: currentProfile.providerAccountId ?? null,
-                }),
-                [...(deps.workerInfrastructureRetryBackoffMs ?? WORKER_RETRY_BACKOFFS_MS)],
-                runId,
-              )
-            : undefined;
-          const providerOrdinal = ensureProviderAttempt(currentPod, currentProfile)?.ordinal;
-          return { currentPod, currentProfile, runId, providerOrdinal, workerAdmission };
-        });
-        attemptPod = initialized.currentPod;
-        attemptProfile = initialized.currentProfile;
-        taskRunId = initialized.runId;
-        runOwner.taskRunId = taskRunId;
-        workerAdmissionId = initialized.workerAdmission?.id;
-        workerNotBefore = initialized.workerAdmission?.notBefore;
-        runOwner.providerOrdinal = initialized.providerOrdinal;
-        seenCompleteEvents = persistedAgentCompleteEventKeys(deps.eventRepo, podId);
-        activeAgentRuns.set(podId, runOwner);
-        activeAgentRunResolvers.set(podId, { token: runToken, resolve: resolveRunSettled });
-        startCommitPolling(podId);
-      } catch (err) {
-        if (taskRunId) podRepo.taskExecutions?.finishRun(taskRunId, 'failed', 'initialization');
-        if (workerAdmissionId) podRepo.workerRetries?.finish(workerAdmissionId, 'unknown', null);
-        settleActiveRun();
-        throw err;
-      }
-      // Legacy/injected managers without the ledger retain the historical empty-stream
-      // completion behavior. Production always injects the ledger and fails closed.
-      let outcome: AgentRunOutcome = deps.providerAttemptRepo ? 'failed' : 'completed';
-      let observedTerminalOutcome: 'completed' | 'failed' | null = null;
-      let terminalClassification: ProviderFailureClassification | null = null;
-      let executionTerminationUnverified = false;
-      let workerEventObserved = false;
-      let providerRetryNotBefore: string | null = null;
-      const retainUnverifiedTermination = () => {
-        executionTerminationUnverified = true;
-        if (taskRunId) podRepo.taskExecutions?.retainUnverifiedRun(taskRunId);
-      };
-      try {
-        if (!ownsRun()) {
-          outcome = 'stopped';
-          return outcome;
-        }
-        if (workerNotBefore && Date.parse(workerNotBefore) > Date.now()) {
-          await waitForRetryBackoff(
-            workerNotBefore,
-            deps.workerInfrastructureRetryDelay ?? sleep,
-            () => {
-              if (!ownsRun() || pauseIntents.has(podId))
-                throw new TaskRetryBlockedError(
-                  'Worker admission was cancelled or superseded during cooldown',
-                );
-            },
-          );
-          if (!ownsRun() || pauseIntents.has(podId))
-            throw new TaskRetryBlockedError(
-              'Worker admission was cancelled or superseded before execution',
-            );
-          resolveEffectiveBoundProfile(podRepo.getOrThrow(podId));
-        }
-        if (workerAdmissionId) podRepo.workerRetries?.start(workerAdmissionId);
-        workerStartedAt = performance.now();
-        for await (const event of events) {
-          workerEventObserved = true;
-          if (!ownsRun()) {
-            logger.info(
-              { podId, containerId: expected.containerId, generation: expected.generation },
-              'Stopped processing stale lifecycle agent events',
-            );
-            outcome = 'stopped';
-            return outcome;
-          }
-          if (pauseIntents.has(podId)) {
-            outcome = 'paused';
-            continue;
-          }
-          if (event.type === 'complete') {
-            const completeKey = agentCompleteEventKey(event);
-            if (
-              seenCompleteEvents.has(completeKey) &&
-              hasAlreadyCountedCompleteEvent(podRepo.getOrThrow(podId), attempt, event)
-            ) {
-              logger.info(
-                { podId, timestamp: event.timestamp },
-                'Skipping duplicate agent complete event replay',
-              );
-              continue;
-            }
-            seenCompleteEvents.add(completeKey);
-          }
-
-          eventBus.emit({
-            type: 'pod.agent_activity',
-            timestamp: event.timestamp,
-            podId,
-            event,
-          });
-
-          bumpActivityTimestamp(podId);
-
-          if (event.type === 'escalation') {
-            const pod = podRepo.getOrThrow(podId);
-            if (pod.status === 'running') {
-              const escalationPayload = event.payload.payload;
-              const escalationSummary =
-                'question' in escalationPayload
-                  ? escalationPayload.question
-                  : 'description' in escalationPayload
-                    ? escalationPayload.description
-                    : 'Agent requested input';
-              emitActivityStatus(
-                podId,
-                `Waiting for human input [${event.escalationType}]: ${escalationSummary}`,
-              );
-              transition(pod, 'awaiting_input', {
-                pendingEscalation: event.payload,
-                escalationCount: pod.escalationCount + 1,
-              });
-            }
-          } else if (event.type === 'plan') {
-            podRepo.update(podId, {
-              plan: { summary: event.summary, steps: event.steps },
-            });
-          } else if (event.type === 'progress') {
-            podRepo.update(podId, {
-              progress: {
-                phase: event.phase,
-                description: event.description,
-                currentPhase: event.currentPhase,
-                totalPhases: event.totalPhases,
-              },
-            });
-            progressEventRepo?.insert(
-              podId,
-              event.phase,
-              event.description,
-              event.currentPhase,
-              event.totalPhases,
-            );
-          } else if (event.type === 'task_summary') {
-            podRepo.update(podId, {
-              taskSummary: {
-                actualSummary: event.actualSummary,
-                how: event.how,
-                deviations: event.deviations,
-                factEvidence: event.factEvidence,
-                memoryOutcomes: event.memoryOutcomes,
-              },
-            });
-          } else if (event.type === 'status' && event.sessionId) {
-            // Persist session ID to DB for pause/resume survival across daemon restarts
-            const sessionPod = podRepo.getOrThrow(podId);
-            const activeAttemptBeforeSessionUpdate = deps.providerAttemptRepo?.getActive(podId);
-            if (
-              activeAttemptBeforeSessionUpdate?.nativeSessionId &&
-              activeAttemptBeforeSessionUpdate.nativeSessionId !== event.sessionId
-            ) {
-              // Provider-attempt identity is append-and-close only. A recovered
-              // runtime can accept the requested resume yet report a replacement
-              // native session. Close the old segment before recording the new ID
-              // instead of attempting to rewrite historical execution identity.
-              rotateProviderAttemptForFreshSegment(sessionPod, attemptProfile, true, runToken);
-            }
-            const sessionUpdate: PodUpdates = {};
-            if (sessionPod.runtime === 'claude') sessionUpdate.claudeSessionId = event.sessionId;
-            else if (sessionPod.runtime === 'codex') sessionUpdate.codexSessionId = event.sessionId;
-            else if (sessionPod.runtime === 'pi') sessionUpdate.piSessionId = event.sessionId;
-            if (Object.keys(sessionUpdate).length > 0) podRepo.update(podId, sessionUpdate);
-            const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
-            if (activeAttempt) {
-              deps.providerAttemptRepo?.updateActive(podId, {
-                expectedOrdinal: runOwner.providerOrdinal,
-                nativeSessionId: event.sessionId,
-                inputTokens: activeAttempt.inputTokens,
-                outputTokens: activeAttempt.outputTokens,
-                costUsd: activeAttempt.costUsd,
-              });
-            }
-          } else if (event.type === 'complete') {
-            outcome = 'completed';
-            observedTerminalOutcome = 'completed';
-            podRepo.completionJournal?.settle(podRepo.getOrThrow(podId), event.result);
-            // Accumulate token counts and cost cumulatively across all runs in this pod
-            const currentSession = podRepo.getOrThrow(podId);
-            const newInputTokens = currentSession.inputTokens + (event.totalInputTokens ?? 0);
-            const newOutputTokens = currentSession.outputTokens + (event.totalOutputTokens ?? 0);
-            const tokenUpdates: PodUpdates = {};
-            if (event.totalInputTokens !== undefined || event.totalOutputTokens !== undefined) {
-              tokenUpdates.inputTokens = newInputTokens;
-              tokenUpdates.outputTokens = newOutputTokens;
-              const bucketKey = agentPhaseBucketKey(attempt);
-              const existing = currentSession.phaseTokenUsage ?? {};
-              const prev = existing[bucketKey] ?? { inputTokens: 0, outputTokens: 0 };
-              const phaseCostUsd = (prev.costUsd ?? 0) + (event.costUsd ?? 0);
-              const phaseCachedInputTokens =
-                (prev.cachedInputTokens ?? 0) + (event.cachedInputTokens ?? 0);
-              const phaseCacheCreationInputTokens =
-                (prev.cacheCreationInputTokens ?? 0) + (event.cacheCreationInputTokens ?? 0);
-              tokenUpdates.phaseTokenUsage = {
-                ...existing,
-                [bucketKey]: {
-                  inputTokens: prev.inputTokens + (event.totalInputTokens ?? 0),
-                  outputTokens: prev.outputTokens + (event.totalOutputTokens ?? 0),
-                  ...(phaseCachedInputTokens > 0 && {
-                    cachedInputTokens: phaseCachedInputTokens,
-                  }),
-                  ...(phaseCacheCreationInputTokens > 0 && {
-                    cacheCreationInputTokens: phaseCacheCreationInputTokens,
-                  }),
-                  ...(phaseCostUsd > 0 && { costUsd: phaseCostUsd }),
-                },
-              };
-            }
-            if (event.costUsd !== undefined) {
-              tokenUpdates.costUsd = currentSession.costUsd + event.costUsd;
-            }
-            if (
-              event.totalInputTokens !== undefined ||
-              event.totalOutputTokens !== undefined ||
-              event.costUsd !== undefined
-            ) {
-              const hasPriorTelemetry =
-                currentSession.inputTokens > 0 ||
-                currentSession.outputTokens > 0 ||
-                currentSession.costUsd > 0;
-              tokenUpdates.tokenTelemetryAccuracy =
-                currentSession.tokenTelemetryAccuracy === 'repaired'
-                  ? 'repaired'
-                  : currentSession.tokenTelemetryAccuracy === 'partial' && hasPriorTelemetry
-                    ? 'partial'
-                    : 'complete';
-            }
-            if (Object.keys(tokenUpdates).length > 0) {
-              podRepo.update(podId, tokenUpdates);
-            }
-            const activeAttempt = deps.providerAttemptRepo?.getActive(podId);
-            if (activeAttempt) {
-              deps.providerAttemptRepo?.updateActive(podId, {
-                expectedOrdinal: runOwner.providerOrdinal,
-                nativeSessionId: nativeSessionId(podRepo.getOrThrow(podId)),
-                inputTokens: activeAttempt.inputTokens + (event.totalInputTokens ?? 0),
-                outputTokens: activeAttempt.outputTokens + (event.totalOutputTokens ?? 0),
-                costUsd: activeAttempt.costUsd + (event.costUsd ?? 0),
-              });
-            }
-
-            const blockerSummary = summarizeAgentCompletionBlocker(event.result);
-            if (blockerSummary) {
-              const s = podRepo.getOrThrow(podId);
-              if (s.status === 'running') {
-                emitActivityStatus(podId, `Agent reported blocker: ${blockerSummary}`);
-                transition(s, 'failed', {
-                  completedAt: new Date().toISOString(),
-                  lastCorrectionMessage: blockerSummary,
-                });
-              }
-              outcome = 'failed';
-              observedTerminalOutcome = 'failed';
-              break;
-            }
-
-            // Token budget enforcement — only when token data is available
-            const taskUsage = podRepo.taskExecutions?.snapshot(podId);
-            const effectiveBudget = taskUsage ? taskUsage.tokenBudget : currentSession.tokenBudget;
-            const totalUsed = taskUsage
-              ? (taskUsage.recordedTotalTokens ??
-                taskUsage.recordedInputTokens + taskUsage.recordedOutputTokens)
-              : newInputTokens + newOutputTokens;
-            const nativeAchievement =
-              lifecycle?.nativeGoal &&
-              deps.launchConfiguration?.goals?.get(podId)?.state === 'achieved';
-            if (
-              !nativeAchievement &&
-              effectiveBudget !== null &&
-              effectiveBudget > 0 &&
-              totalUsed > 0
-            ) {
-              const profile = executionForPod(currentSession);
-              const warnAt = profile.tokenBudgetWarnAt ?? 0.8;
-
-              if (
-                totalUsed >= Math.floor(effectiveBudget * warnAt) &&
-                totalUsed < effectiveBudget
-              ) {
-                eventBus.emit({
-                  type: 'pod.token_budget_warning',
-                  timestamp: new Date().toISOString(),
-                  podId,
-                  tokensUsed: totalUsed,
-                  tokenBudget: effectiveBudget,
-                  percentUsed: totalUsed / effectiveBudget,
-                });
-              }
-
-              if (totalUsed >= effectiveBudget) {
-                const maxExtensions = profile.maxBudgetExtensions;
-                const extensionsUsed = currentSession.budgetExtensionsUsed;
-                const canExtend = maxExtensions === null || extensionsUsed < maxExtensions;
-                const policy = profile.tokenBudgetPolicy ?? 'soft';
-
-                emitActivityStatus(
-                  podId,
-                  `Token budget exceeded (${totalUsed}/${effectiveBudget} tokens used).${canExtend && policy === 'soft' ? ' Waiting for user approval to continue.' : ' Pod will be stopped.'}`,
-                );
-                eventBus.emit({
-                  type: 'pod.token_budget_exceeded',
-                  timestamp: new Date().toISOString(),
-                  podId,
-                  tokensUsed: totalUsed,
-                  tokenBudget: effectiveBudget,
-                  budgetExtensionsUsed: extensionsUsed,
-                  maxBudgetExtensions: maxExtensions,
-                });
-
-                if (policy === 'hard' || !canExtend) {
-                  emitActivityStatus(podId, 'Token budget hard limit reached — failing pod');
-                  const s = podRepo.getOrThrow(podId);
-                  if (s.status === 'running') {
-                    transition(s, 'failed', {
-                      completedAt: new Date().toISOString(),
-                      failureReason: `Token budget exceeded (${totalUsed}/${effectiveBudget} tokens used).`,
-                    });
-                  }
-                  outcome = 'failed';
-                  observedTerminalOutcome = 'failed';
-                } else {
-                  // Soft policy: pause and await user approval
-                  const s = podRepo.getOrThrow(podId);
-                  if (s.status === 'running') {
-                    transition(s, 'paused', { pauseReason: 'budget' });
-                    logger.info(
-                      { podId, totalUsed, effectiveBudget },
-                      'Pod paused: token budget exceeded',
-                    );
-                  }
-                  outcome = 'paused';
-                }
-                break;
-              }
-            } else if (effectiveBudget !== null && effectiveBudget > 0 && totalUsed === 0) {
-              logger.warn(
-                { podId, runtime: currentSession.runtime },
-                'Token budget set but runtime emits no token data — budget not enforced',
-              );
-            }
-          } else if (
-            event.type === 'error' &&
-            (event.fatal || event.executionTermination === 'unverified')
-          ) {
-            if (event.executionTermination === 'unverified') retainUnverifiedTermination();
-            const pod = podRepo.getOrThrow(podId);
-            terminalClassification =
-              event.classification ??
-              ({
-                category: 'unknown',
-                definitive: false,
-                sanitizedMessage: sanitizeFailureReason(event.message, 'Agent failed'),
-                retryAfter: null,
-              } satisfies ProviderFailureClassification);
-            if (
-              terminalClassification.category === 'transient' ||
-              terminalClassification.category === 'provider_unavailable'
-            )
-              providerRetryNotBefore = workerRetryDeadline(
-                terminalClassification.retryAfter,
-                Date.now(),
-              );
-            if (canFail(pod.status)) {
-              const failureReason = sanitizeFailureReason(event.message, 'Agent failed');
-              emitActivityStatus(podId, failureReason);
-              if (
-                terminalClassification.category === 'quota_exhausted' &&
-                terminalClassification.definitive
-              ) {
-                transition(pod, 'paused', {
-                  pauseReason: 'provider_limit',
-                  failureReason,
-                });
-              } else {
-                transition(pod, 'failed', {
-                  completedAt: new Date().toISOString(),
-                  failureReason,
-                });
-              }
-            }
-            outcome = 'failed';
-            observedTerminalOutcome = 'failed';
-            break;
-          } else if (event.type === 'tool_use' || event.type === 'file_change') {
-            touchHeartbeat(podId);
-          }
-        }
-      } catch (err) {
-        if (err instanceof AutopodError && err.code === 'EXEC_EXIT_UNVERIFIED')
-          retainUnverifiedTermination();
-        if (!ownsRun()) {
-          outcome = 'stopped';
-          return outcome;
-        }
-        outcome = 'failed';
-        observedTerminalOutcome = 'failed';
-        terminalClassification = {
-          // Preserve the typed pre-agent sandbox recovery path. Other thrown
-          // failures do not acquire an automatic worker retry allowance.
-          category:
-            err instanceof SandboxInfrastructureError &&
-            !workerEventObserved &&
-            !hasDurableAgentExecutionEvidence(attemptPod)
-              ? 'transient'
-              : 'unknown',
-          definitive: false,
-          sanitizedMessage: sanitizeFailureReason(
-            err instanceof Error ? err.message : String(err),
-            'Agent failed',
-          ),
-          retryAfter: null,
-        };
-        providerRetryNotBefore = null;
-        eventError = err;
-        hasEventError = true;
-      } finally {
-        if (!ownsRun()) {
-          superseded = true;
-          // No terminal event was accepted for this run after it lost ownership.
-          outcome = 'stopped';
-        } else if (pauseIntents.has(podId)) outcome = 'paused';
-        // An accepted old completion is historical evidence even when control
-        // must stop before touching a replacement lifecycle.
-        const recordedOutcome = superseded ? (observedTerminalOutcome ?? outcome) : outcome;
-        try {
-          if (!superseded && !executionTerminationUnverified)
-            await syncSandboxRuntimeSessionState(attemptPod, ownsRun);
-        } finally {
-          try {
-            if (!ownsRun()) superseded = true;
-            if (!superseded) {
-              const current = podRepo.getOrThrow(podId);
-              const providerLimit =
-                current.pauseReason === 'provider_limit' &&
-                terminalClassification?.category === 'quota_exhausted' &&
-                terminalClassification.definitive;
-              if (providerLimit) {
-                closeProviderAttempt(
-                  podId,
-                  'quota_exhausted',
-                  terminalClassification,
-                  PROVIDER_FAILOVER_HANDOFF_PATH,
-                  runOwner.providerOrdinal,
-                );
-                await handleProviderLimit(podId, terminalClassification);
-              } else if (
-                current.pauseReason === 'provider_limit' &&
-                outcome === 'failed' &&
-                terminalClassification
-              ) {
-                closeProviderAttempt(
-                  podId,
-                  'failed',
-                  terminalClassification,
-                  null,
-                  runOwner.providerOrdinal,
-                );
-              } else if (outcome === 'paused' || current.status === 'paused') {
-                closeProviderAttempt(podId, 'aborted', null, null, runOwner.providerOrdinal);
-              } else if (outcome === 'completed' || outcome === 'failed') {
-                const classification =
-                  outcome === 'failed'
-                    ? (terminalClassification ?? {
-                        category: 'unknown',
-                        definitive: false,
-                        sanitizedMessage: 'Provider attempt ended without classified evidence',
-                        retryAfter: null,
-                      })
-                    : null;
-                closeProviderAttempt(
-                  podId,
-                  outcome,
-                  classification,
-                  null,
-                  runOwner.providerOrdinal,
-                );
-              }
-            }
-          } catch (err) {
-            if (err instanceof ProviderAttemptSupersededError) superseded = true;
-            else {
-              eventError = err;
-              hasEventError = true;
-            }
-          } finally {
-            try {
-              if (taskRunId) {
-                if (executionTerminationUnverified)
-                  podRepo.taskExecutions?.retainUnverifiedRun(taskRunId);
-                else
-                  podRepo.taskExecutions?.finishRun(
-                    taskRunId,
-                    recordedOutcome,
-                    terminalClassification?.category ?? null,
-                  );
-              }
-              if (workerAdmissionId)
-                podRepo.workerRetries?.finish(
-                  workerAdmissionId,
-                  executionTerminationUnverified
-                    ? 'unknown'
-                    : recordedOutcome === 'completed'
-                      ? 'pass'
-                      : recordedOutcome === 'paused' || recordedOutcome === 'stopped'
-                        ? 'cancelled'
-                        : terminalClassification?.category === 'auth'
-                          ? 'nonretryable'
-                          : terminalClassification?.category === 'transient' ||
-                              terminalClassification?.category === 'provider_unavailable'
-                            ? 'transient'
-                            : 'unknown',
-                  workerStartedAt === undefined || executionTerminationUnverified
-                    ? null
-                    : Math.max(0, Math.round(performance.now() - workerStartedAt)),
-                  executionTerminationUnverified || recordedOutcome !== 'failed'
-                    ? null
-                    : providerRetryNotBefore,
-                );
-            } finally {
-              if (activeAgentRuns.get(podId)?.token === runToken) {
-                stopCommitPolling(podId);
-                lastEventWriteAt.delete(podId);
-              }
-              settleActiveRun();
-            }
-          }
-        }
-      }
-      if (superseded) return 'stopped';
-      if (hasEventError) throw eventError;
-      return outcome;
+      return agentEventConsumption.consumeAgentEvents(podId, events, attempt, lifecycle);
     },
 
     async handleCompletion(podId: string): Promise<void> {
