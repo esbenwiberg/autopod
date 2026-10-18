@@ -1,6 +1,6 @@
 # Slice 13: validation progress events extraction
 
-Status: APPROVED — Phases 1 and 2 complete; final qualification running.
+Status: COMPLETE — all three approved phases implemented and locally verified.
 Date: 2026-10-18.
 Baseline: 338c2476c76369a89130e7b3e044f1280b757efa.
 Branch: codex/pod-manager-workspace.
@@ -236,9 +236,9 @@ Slice 12 results are baseline context, not substitute evidence for slice 13.
 
 Automated:
 - [x] All 63 affected suites pass with SQLite and no new skips.
-- [ ] Full uncached validation and desktop source contract pass.
-- [ ] Scoped lint/whitespace/types, exact movement and frozen hashes pass.
-- [ ] Complete plan/proof records actual results, limits and final pushed identities.
+- [x] Full uncached validation and desktop source contract pass.
+- [x] Scoped lint/whitespace/types, exact movement and frozen hashes pass.
+- [x] Complete plan/proof records actual results, limits and final pushed identities.
 
 Manual: None required. Approval covers all three phases together.
 
@@ -260,7 +260,8 @@ interfaces/validation-engine.ts; pods/validation-ownership.ts; pods/event-bus.ts
 pods/event-repository.ts; shared/src/types/events.ts:199–237; API WebSocket and
 local-validation-engine tests; desktop review-progress-contract.mjs.
 
-Next action: qualify the frozen implementation with the full uncached pipeline.
+All three approved phases are complete. No manual acceptance remains.
+Integration, PR creation and deployment remain separate work.
 
 ## Phase 1 observed results
 
@@ -303,3 +304,66 @@ All 63 affected suites pass: 2,493 tests, zero skips. Scoped Biome/whitespace an
 semantic diagnostics in both new boundaries are clean. The existing desktop progress
 source contract passes (no Swift/rendered UI claim). Final source is frozen with
 1,971 package/script hashes and six unchanged root controls before qualification.
+
+## Phase 3: final qualification
+
+Verdict: PROVEN for the approved local compatibility extraction under the documented
+qualification environment. All phases are complete; no manual acceptance remains.
+
+| Claim/check | Observed final evidence | Result |
+|---|---|---|
+| Public compatibility | 106 selected before/after checks, 36 new; assertions byte-identical | Passed |
+| Event/callback/persistence contracts | 90 direct cases: 77 memory contract cases and 13 private file-backed SQLite/bus/ownership fixtures | Passed |
+| Surrounding orchestration | 63 affected suites; 2,493 passed; zero skipped | Passed |
+| Full uncached pipeline | Frozen install, lint, build, supported declaration typecheck, tests, audit and secret scan | Passed under documented environment |
+| Vitest | 8,077 passed across 500 passing files; 10 existing gated skips | Passed with existing skips |
+| Standalone Node scripts | 35 passed; zero failed/skipped | Passed |
+| Desktop progress source contract | Review progress desktop contract OK; no Swift build/rendered UI claim | Passed |
+| Source integrity | 1,971 package/script hashes plus 6 root control hashes unchanged through qualification | Passed |
+| Exact movement and scope | Two original bodies, four builder calls, two direct wrappers and one execution injection; complete manager recipe; two product/two test paths | Passed |
+| Scoped quality | Biome/whitespace clean; zero semantic diagnostics in both new test boundaries | Passed |
+
+Tested implementation: e283f479357af99072a06a9b5ae9d7763a63732c. A following documentation-only commit
+records qualification without changing qualified source/test bytes. Final remote
+identity and clean-worktree confirmation are recorded privately after push.
+
+Actual full command using the existing task-local npx launcher:
+
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+Actual Node 22.23.3 opens SQLite 3.49.2; pnpm 9.15.4. Build/typecheck/test groups
+ran uncached. Frozen install succeeded without fallback or lockfile mutation.
+Root lint retained 82 existing warnings while processing the large manager test
+with only --files-max-size=2097152 added. Scoped files are clean; no rule/file
+selection was disabled and no repository/global configuration changed. The inherited
+maintenance.auto=false is process-only. The default-environment Git maintenance
+metadata-scan race and audit-clock flake remain outside this extraction. The 10
+existing gated skips remain; no new case was skipped. No source/test change was made
+during final qualification. Initial direct-fixture diagnostics and final passing
+results are retained with raw logs/exits.
+
+The manager is 17,154 lines, 90 fewer. validation-progress.ts is 122 lines.
+Parsed TypeScript comparison proves both unchanged bodies and the complete remaining
+manager against the explicit recipe. Four builder calls, two direct wrapper calls
+and the existing execution injection retain arguments/order. Ownership capture,
+controller maps, advisory completion merge-before-guard order, history/cost/readiness,
+engine policy and bus/WebSocket behavior remain under their original authority.
+All 1,967 other baseline package/script paths are unchanged. No product correction
+followed extraction.
+
+Evidence is retained under ignored .autopod-data/validation-progress/: proof.json,
+movement.json, baseline/frozen/root-control manifests, frozen public assertions,
+before-source, exact-recipe/original-region copies and scripts, actual runtime and
+qualification commands, before/after/build/direct/affected/full/scoped-Biome/type/
+desktop-contract logs and exits, initial diagnostics and pushed identities.
+
+Tests establish original live references/status/timestamp inputs, optional callback
+and receiver behavior, fresh ownership checks, real event persistence before
+notification, SQL abort prefixes, close/reopen integrity/FK checks and subscriber
+isolation. Persisted branch/target drift is simulated explicitly in private SQLite;
+read errors and external engine/container boundaries are controlled. Actual ownership
+logic backs direct guards; actual manager tests cover controller/advisory policies.
+The desktop check inspects its existing source contract; it does not prove rendered
+UI or a Swift build. Local evidence does not establish live Docker/Azure/provider
+availability or new atomicity, outbox delivery, fencing, crash recovery, cross-process
+safety or event delivery guarantees.
