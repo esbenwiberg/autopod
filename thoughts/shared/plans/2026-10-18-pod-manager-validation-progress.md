@@ -1,6 +1,6 @@
 # Slice 13: validation progress events extraction
 
-Status: PROPOSED — awaiting explicit approval before implementation.
+Status: APPROVED — implementing all three phases after explicit user approval.
 Date: 2026-10-18.
 Baseline: 338c2476c76369a89130e7b3e044f1280b757efa.
 Branch: codex/pod-manager-workspace.
@@ -146,8 +146,8 @@ root-control hashes under ignored .autopod-data/validation-progress/.
 ### Success criteria
 
 Automated:
-- [ ] New and selected existing public checks pass against unchanged product.
-- [ ] Frozen public assertions, before-source/runtime/hashes and raw results recorded.
+- [x] New and selected existing public checks pass against unchanged product.
+- [x] Frozen public assertions, before-source/runtime/hashes and raw results recorded.
 
 Manual: None required for this local headless extraction.
 
@@ -262,3 +262,17 @@ local-validation-engine tests; desktop review-progress-contract.mjs.
 
 Next action: user reviews the illustrated plan and explicitly approves implementation.
 No product code changed or implementation tests ran in this planning turn.
+
+## Phase 1 observed results
+
+36 new public cases and 70 selected existing cases pass against unchanged product
+(106 selected total; 982 unrelated cases excluded by this selection only). Tests
+exercise both public entries, all ten payload mappings, independent status forwarding,
+review snapshot timestamps/reference identity, generation/container/status/decision
+supersession, advisory merge-before-event visibility, event-insert failure prefixes
+and bus subscriber isolation. Engine outer error outcomes remain distinct between
+ordinary/manual entry. The first run passed; semantic diagnostics are zero.
+
+Frozen public bytes/filter, unchanged manager source, 1,969 baseline package/script
+hashes and six root controls are retained under .autopod-data/validation-progress/.
+Actual child Node 22.23.3 opens SQLite 3.49.2; pnpm uses the existing pinned launcher.

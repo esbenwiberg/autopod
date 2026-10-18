@@ -29044,3 +29044,385 @@ describe('validation infrastructure compatibility', () => {
     },
   );
 });
+
+describe('validation progress compatibility', () => {
+  type Callbacks = NonNullable<Parameters<ValidationEngine['validate']>[3]>;
+  type Phase = Parameters<NonNullable<Callbacks['onPhaseStarted']>>[0];
+  type Progress = Parameters<NonNullable<Callbacks['onReviewProgress']>>[0];
+  type Event = Parameters<Parameters<TestContext['eventBus']['subscribe']>[0]>[0];
+  const mappings = [
+    ['setup', 'setupResult'],
+    ['build', 'buildResult'],
+    ['test', 'testResult'],
+    ['lint', 'lintResult'],
+    ['sast', 'sastResult'],
+    ['health', 'healthResult'],
+    ['pages', 'pageResults'],
+    ['facts', 'factResult'],
+    ['review', 'reviewResult'],
+    ['advisory', 'advisoryResult'],
+  ] as const;
+  const progress: Progress = {
+    attempt: 1,
+    startedAt: '2000-01-01T00:00:00.000Z',
+    updatedAt: '2000-01-01T00:00:03.000Z',
+    elapsedMs: 3000,
+    guardrailMs: 300000,
+    stage: 'axes',
+    axes: [],
+  };
+  beforeEach(() => mockExecFileSuccess());
+  afterEach(() => vi.restoreAllMocks());
+
+  function fixture(entry: 'trigger' | 'revalidate', advisory = false) {
+    const ctx = createTestContext();
+    const result = makeValidationResult(advisory ? {} : ordinaryTestFailureResult());
+    vi.mocked(ctx.validationEngine.validate).mockResolvedValue(result);
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      {
+        profileName: 'test-profile',
+        task: 'Progress compatibility',
+        options: { advisoryBrowserQaEnabled: advisory },
+      },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: entry === 'trigger' ? 'running' : 'failed',
+      containerId: 'progress-container',
+      worktreePath: '/tmp/validation-progress',
+      validationAttempts: 0,
+      maxValidationAttempts: 1,
+    });
+    const events: Event[] = [];
+    const unsubscribe = ctx.eventBus.subscribe((event) => {
+      if (
+        'podId' in event &&
+        event.podId === pod.id &&
+        [
+          'pod.validation_phase_started',
+          'pod.validation_phase_completed',
+          'pod.review_progress',
+        ].includes(event.type)
+      )
+        events.push(event);
+    });
+    return {
+      ctx,
+      manager,
+      pod,
+      result,
+      events,
+      run: () =>
+        entry === 'trigger'
+          ? manager.triggerValidation(pod.id)
+          : manager.revalidateSession(pod.id, { force: true }),
+      close: () => {
+        unsubscribe();
+        ctx.db.close();
+      },
+    };
+  }
+  function payload(phase: Phase): unknown {
+    const values = {
+      setup: { status: 'pass', output: 'Setup', duration: 1 },
+      build: { status: 'pass', output: 'Build', duration: 1 },
+      test: { status: 'fail', duration: 1, stdout: 'A test failed' },
+      lint: { status: 'skip', output: '', duration: 0 },
+      sast: { status: 'skip', output: '', duration: 0 },
+      health: { status: 'pass', url: '', responseCode: 200, duration: 1 },
+      pages: [],
+      facts: { status: 'pending_human', results: [] },
+      review: {
+        status: 'uncertain',
+        reasoning: '',
+        issues: [],
+        model: 'reviewer',
+        diff: '',
+        screenshots: [],
+      },
+      advisory: { status: 'pass', reasoning: '', observations: [], screenshots: [], durationMs: 1 },
+    };
+    return values[phase];
+  }
+
+  it.each(
+    (['trigger', 'revalidate'] as const).flatMap((entry) =>
+      mappings.map(([phase, key]) => ({ entry, phase, key })),
+    ),
+  )(
+    '$entry publishes $phase with the exact result key and persisted prefix',
+    async ({ entry, phase, key }) => {
+      const f = fixture(entry);
+      const value = payload(phase);
+      try {
+        vi.mocked(f.ctx.validationEngine.validate).mockImplementation(
+          async (_config, _progress, _signal, callbacks) => {
+            callbacks?.onPhaseStarted?.(phase);
+            callbacks?.onPhaseCompleted?.(phase, 'pending_human', value);
+            return f.result;
+          },
+        );
+        await f.run();
+        expect(f.events).toHaveLength(2);
+        const started = f.events[0];
+        const completed = f.events[1];
+        expect(started).toEqual({
+          type: 'pod.validation_phase_started',
+          timestamp: expect.any(String),
+          podId: f.pod.id,
+          phase,
+          _eventId: expect.any(Number),
+        });
+        expect(completed).toEqual({
+          type: 'pod.validation_phase_completed',
+          timestamp: expect.any(String),
+          podId: f.pod.id,
+          phase,
+          phaseStatus: 'pending_human',
+          [key]: value,
+          _eventId: expect.any(Number),
+        });
+        if (!completed || completed.type !== 'pod.validation_phase_completed')
+          throw new Error('Missing completion');
+        expect(Reflect.get(completed, key)).toBe(value);
+        const stored = f.ctx.eventRepo.getForSession(f.pod.id, {
+          types: ['pod.validation_phase_started', 'pod.validation_phase_completed'],
+        });
+        expect(stored.map((row) => row.payload)).toEqual([
+          {
+            type: 'pod.validation_phase_started',
+            timestamp: started?.timestamp,
+            podId: f.pod.id,
+            phase,
+          },
+          {
+            type: 'pod.validation_phase_completed',
+            timestamp: completed.timestamp,
+            podId: f.pod.id,
+            phase,
+            phaseStatus: 'pending_human',
+            [key]: value,
+          },
+        ]);
+        expect(f.ctx.validationRepo.getForSession(f.pod.id)).toHaveLength(1);
+        expect(f.ctx.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+          status: entry === 'trigger' ? 'review_required' : 'failed',
+          validationAttempts: 1,
+        });
+        expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+        expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      } finally {
+        f.close();
+      }
+    },
+  );
+
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s keeps review snapshot identity and its own timestamp',
+    async (entry) => {
+      const f = fixture(entry);
+      try {
+        vi.mocked(f.ctx.validationEngine.validate).mockImplementation(
+          async (_config, _progress, _signal, callbacks) => {
+            callbacks?.onReviewProgress?.(progress);
+            return f.result;
+          },
+        );
+        await f.run();
+        expect(f.events).toHaveLength(1);
+        const event = f.events[0];
+        expect(event).toEqual({
+          type: 'pod.review_progress',
+          timestamp: progress.updatedAt,
+          podId: f.pod.id,
+          progress,
+          _eventId: expect.any(Number),
+        });
+        if (!event || event.type !== 'pod.review_progress') throw new Error('Missing progress');
+        expect(event.progress).toBe(progress);
+        expect(
+          f.ctx.eventRepo.getForSession(f.pod.id, { type: 'pod.review_progress' })[0]?.payload,
+        ).toEqual({
+          type: 'pod.review_progress',
+          timestamp: progress.updatedAt,
+          podId: f.pod.id,
+          progress,
+        });
+      } finally {
+        f.close();
+      }
+    },
+  );
+
+  it.each(
+    (['trigger', 'revalidate'] as const).flatMap((entry) =>
+      ['generation', 'container', 'status', 'decision'].map((change) => ({ entry, change })),
+    ),
+  )(
+    '$entry suppresses all three late callbacks after $change ownership changes',
+    async ({ entry, change }) => {
+      const f = fixture(entry);
+      try {
+        vi.mocked(f.ctx.validationEngine.validate).mockImplementation(
+          async (_config, _progress, _signal, callbacks) => {
+            callbacks?.onPhaseStarted?.('build');
+            if (change === 'generation') f.ctx.podRepo.incrementLifecycleGeneration(f.pod.id);
+            if (change === 'container')
+              f.ctx.podRepo.update(f.pod.id, { containerId: 'replacement-container' });
+            if (change === 'status') f.ctx.podRepo.update(f.pod.id, { status: 'running' });
+            if (change === 'decision')
+              createNudgeRepository(f.ctx.db).queue(f.pod.id, 'New decision');
+            callbacks?.onPhaseStarted?.('test');
+            callbacks?.onPhaseCompleted?.('test', 'pass', payload('test'));
+            callbacks?.onReviewProgress?.(progress);
+            return f.result;
+          },
+        );
+        await f.run();
+        expect(f.events).toEqual([
+          expect.objectContaining({ type: 'pod.validation_phase_started', phase: 'build' }),
+        ]);
+        expect(
+          f.ctx.eventRepo.getForSession(f.pod.id, {
+            types: [
+              'pod.validation_phase_started',
+              'pod.validation_phase_completed',
+              'pod.review_progress',
+            ],
+          }),
+        ).toHaveLength(1);
+        expect(f.ctx.validationRepo.getForSession(f.pod.id)).toHaveLength(0);
+        expect(f.ctx.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+          status: change === 'status' ? 'running' : 'validating',
+          containerId: change === 'container' ? 'replacement-container' : 'progress-container',
+          lastValidationResult: null,
+        });
+        expect(f.ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+        expect(f.ctx.podRepo.taskRetries?.state(f.pod.id)).toMatchObject({
+          executedCount: 1,
+          latest: { outcome: 'nonretryable' },
+        });
+      } finally {
+        f.close();
+      }
+    },
+  );
+
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s merges advisory completion before notifying event subscribers',
+    async (entry) => {
+      const f = fixture(entry, true);
+      const advisory = f.ctx.validationEngine.runAdvisoryBrowserQa;
+      if (!advisory) throw new Error('Missing advisory fixture');
+      const value = {
+        status: 'pass' as const,
+        reasoning: 'Advisory complete',
+        observations: [],
+        screenshots: [],
+        durationMs: 1,
+      };
+      const observations: unknown[] = [];
+      const unsubscribe = f.ctx.eventBus.subscribe((event) => {
+        if (
+          event.type === 'pod.validation_phase_completed' &&
+          event.podId === f.pod.id &&
+          event.phase === 'advisory'
+        )
+          observations.push({
+            current: f.ctx.podRepo.getOrThrow(f.pod.id).lastValidationResult?.advisoryBrowserQa,
+            history: f.ctx.validationRepo.getLatest(f.pod.id)?.result.advisoryBrowserQa,
+          });
+      });
+      try {
+        vi.mocked(advisory).mockImplementation(
+          async (_config, _result, _progress, _signal, callbacks) => {
+            callbacks?.onPhaseCompleted?.('advisory', 'pass', value);
+            return value;
+          },
+        );
+        await f.run();
+        expect(observations).toEqual([{ current: value, history: value }]);
+        expect(f.events).toContainEqual(
+          expect.objectContaining({
+            type: 'pod.validation_phase_completed',
+            phase: 'advisory',
+            advisoryResult: value,
+          }),
+        );
+      } finally {
+        unsubscribe();
+        f.close();
+      }
+    },
+  );
+
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s preserves earlier phase events when completion insert fails',
+    async (entry) => {
+      const f = fixture(entry);
+      try {
+        const error = new Error('Completion event insert failed');
+        const insert = f.ctx.eventRepo.insert.bind(f.ctx.eventRepo);
+        vi.spyOn(f.ctx.eventRepo, 'insert').mockImplementation((event) => {
+          if (event.type === 'pod.validation_phase_completed') throw error;
+          return insert(event);
+        });
+        vi.mocked(f.ctx.validationEngine.validate).mockImplementation(
+          async (_config, _progress, _signal, callbacks) => {
+            callbacks?.onPhaseStarted?.('build');
+            callbacks?.onPhaseCompleted?.('build', 'pass', payload('build'));
+            return f.result;
+          },
+        );
+        await f.run();
+        expect(f.events).toEqual([
+          expect.objectContaining({ type: 'pod.validation_phase_started', phase: 'build' }),
+        ]);
+        expect(f.ctx.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+          status: entry === 'trigger' ? 'review_required' : 'failed',
+          validationAttempts: 1,
+          lastValidationResult: {
+            overall: 'fail',
+            smoke: { build: { output: expect.stringContaining(error.message) } },
+          },
+        });
+        expect(f.ctx.validationRepo.getForSession(f.pod.id)).toHaveLength(1);
+        expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      } finally {
+        f.close();
+      }
+    },
+  );
+
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s retains bus subscriber-error isolation',
+    async (entry) => {
+      const f = fixture(entry);
+      const unsubscribe = f.ctx.eventBus.subscribe((event) => {
+        if (event.type === 'pod.validation_phase_started') throw new Error('Subscriber failed');
+      });
+      const later: string[] = [];
+      const unsubscribeLater = f.ctx.eventBus.subscribe((event) => {
+        if (event.type === 'pod.validation_phase_started') later.push(event.phase);
+      });
+      try {
+        vi.mocked(f.ctx.validationEngine.validate).mockImplementation(
+          async (_config, _progress, _signal, callbacks) => {
+            callbacks?.onPhaseStarted?.('setup');
+            return f.result;
+          },
+        );
+        await f.run();
+        expect(later).toEqual(['setup']);
+        expect(f.ctx.eventRepo.countForSession(f.pod.id, 'pod.validation_phase_started')).toBe(1);
+        expect(f.ctx.podRepo.getOrThrow(f.pod.id).lastValidationResult).toEqual(f.result);
+      } finally {
+        unsubscribeLater();
+        unsubscribe();
+        f.close();
+      }
+    },
+  );
+});
