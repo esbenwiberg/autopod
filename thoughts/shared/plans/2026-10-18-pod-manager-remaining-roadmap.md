@@ -1,19 +1,19 @@
 # Pod-manager rewrite: remaining roadmap, slices 19–34
 
-Status: Slice 19 COMPLETE. Slices 1–19 complete; 15 milestones remain (20–34).
+Status: Slices 19–20 COMPLETE. Slices 1–20 complete; 14 milestones remain (21–34).
 Date: 2026-10-18. Baseline: ecc324ca4a403d49397dd63cecb1a881e653ad06.
 Branch: codex/pod-manager-workspace.
 
 ## Finite scope and count
 
-15 remaining delivery milestones: Slice 20 through final qualification at 34.
-The bounded baseline roadmap below included 16 (19–34); Slice 19 is now complete.
+14 remaining delivery milestones: Slice 21 through final qualification at 34.
+The bounded baseline roadmap below included 16 (19–34); Slices 19–20 are complete.
 The milestones define scope; their effort varies, and they do not provide a time estimate. Recent slices moved small helpers;
 future milestones deliberately complete whole responsibilities and can contain
 multiple independently tested implementation phases within their numbered slice.
 
 At roadmap baseline the manager had 16,521 total lines and 73 public object members.
-After Slice 19 it has 16,369 lines and the same public interface. A TypeScript
+After Slice 20 it has 14,371 lines and the same public interface. A TypeScript
 AST inventory below assigns every one of 327 non-import top-level declarations,
 manager-closure declarations/statements and public members to an owning milestone.
 Nested implementation blocks inherit their containing workflow; processPod has an
@@ -32,7 +32,7 @@ corrections and unrelated bugs have their own work, outside this compatibility r
 | Slice | Responsibility | Scope | Done when |
 |---|---|---|---|
 | 19 | Advisory execution and publication — COMPLETE | Moved both original functions; retained ownership checks, history, usage and slot behavior. | 33 public checks, 59 direct tests and final uncached qualification passed. |
-| 20 | Validation workflows | Move triggerValidation/revalidateSession coordination, retry/override/abort admission and update-from-base intent. Compose the validation modules already extracted. | Both validation entry points delegate; no validation orchestration branches remain in the facade. |
+| 20 | Validation workflows — COMPLETE | Move triggerValidation/revalidateSession coordination, retry/override/abort admission and update-from-base intent. Compose the validation modules already extracted. | Both validation entry points and five controls delegate; 1,192 public cases, 34 direct cases and full qualification pass. |
 | 21 | Provider attempts and binding | Own attempt identity, captured profiles/reasoning, target selection and attempt open/close. | Attempt/provenance tests cover original accounts and failure selection; manager holds no provider selection logic. |
 | 22 | Continuation and Goal rework | Own provider limit handoff, resume/continue, task feedback and native Goal rework through narrow dispatch/admission ports. | Legacy and immutable-launch continuation, rejection feedback and native Goal guards retain their effects and errors. |
 | 23 | Provisioning | Extract the provisioning portion of processPod, image/capability checks, materialized files, instructions/tools and sandbox session handover. | Provisioning returns an explicit prepared execution context; queued/provisioning/failed recovery paths remain covered. |
@@ -90,10 +90,14 @@ slice's plan, never a hidden replacement for pod-manager.ts.
 
 ## Execution and approval
 
-Each slice uses the established characterize → extract → qualify structure and receives
-one concrete plan approval covering its phases. This document is the finite roadmap;
-it does not preapprove implementation designs for 20–34. Slice 19 has a complete plan:
-2026-10-18-pod-manager-advisory-validation.md. Planning changes no product/test bytes.
+The later user goal “the rest of the slices” authorizes continuing the remaining
+roadmap sequence together. Retain a concrete research/plan before implementation and
+the established characterize → extract → qualify checkpoints for each numbered outcome.
+These checkpoints now record progress without repetitive per-slice confirmation.
+Preserve the agreed compatibility scope; ask for a decision when changing product/API/
+persistence/credential policy or integration/deployment scope. The full goal remains
+active until all Slice-34 finish gates pass. This continuation interpretation is also
+recorded in the Slice 20 plan; earlier per-slice approval cadence is historical.
 
 ## Baseline declaration-to-milestone inventory
 
@@ -441,3 +445,17 @@ Exact movement and frozen-source checks pass. See the completed Slice 19 plan fo
 qualification revision, limits and evidence. Next: prepare Slice 20's validation
 workflow plan. The baseline declaration inventory remains anchored to ecc324ca; the
 two advisory declarations are now delivered, with composition retained in manager.
+
+## Slice 20 completion and remaining size review
+
+Validation trigger/revalidation, five controls, shared abort/recovery state and policy
+helpers have explicit owners. All 22 original bodies/parameter lists and full recipes
+match; the manager is 14,371 lines. Qualification passes: 1,192 full manager cases
+before/after, 34 direct cases with two private SQLite reopen cases, 97 affected suites
+(3,406 cases), full uncached 8,577 Vitest cases plus 35 script checks, ten existing skips.
+
+The trigger owner is temporarily 1,273 lines to preserve original await/fence timing.
+Slice 27 must extract its inline PR-delivery policy from trigger and revalidation and
+review its size before final architecture qualification. This is recorded scope for
+that numbered milestone, not an additional slice. Other new Slice-20 owners are below
+1,000 lines. Next: Slice 21, provider attempts and binding.

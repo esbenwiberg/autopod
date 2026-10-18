@@ -1,6 +1,6 @@
 # Slice 20: validation workflows
 
-Status: IN PROGRESS — Phases 1 and 2 complete; full qualification next.
+Status: COMPLETE — Slice 20 implemented, locally verified and qualified.
 Baseline: 5c20dde639cd5c7297bc861952cb6a3ab87fb820.
 Date: 2026-10-18. Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -150,10 +150,10 @@ failures before unchanged reruns. Compare all package/script and six root contro
 hashes before/after qualification. Commit/push checkpoints and final clean identity.
 
 Automated:
-- [ ] Complete affected set passes with SQLite and no new skips.
-- [ ] Full uncached pipeline passes; actual counts and existing skips recorded.
-- [ ] Frozen source, exact movement and pushed clean revision verified.
-- [ ] Plan and roadmap record completion and the next incomplete milestone.
+- [x] Complete affected set passes with SQLite and no new skips.
+- [x] Full uncached pipeline passes; actual counts and existing skips recorded.
+- [x] Frozen source, exact movement and pushed clean revision verified.
+- [x] Plan and roadmap record completion and the next incomplete milestone.
 Manual: none. No live infrastructure, PR/main merge or deployment acceptance claim.
 
 ## Compatibility, performance and rollback
@@ -207,3 +207,47 @@ No original policy/algorithm correction or new await boundary was introduced.
 
 Next: full uncached pipeline on final frozen 1,991 package/script hashes and six
 root controls, then record completion and continue Slice 21 under the full user goal.
+
+## Phase 3 final qualification
+
+Verdict: PROVEN for Slice 20's local compatibility extraction. The complete
+remaining-slices goal stays active; 14 milestones remain, next Slice 21.
+
+| Check | Final evidence | Result |
+|---|---|---|
+| Full public manager baseline/after | 1,192 cases each; frozen assertions/names/statuses | Passed |
+| New owner/policy/state contracts | 34 direct cases, including 2 private SQLite reopen cases | Passed |
+| Affected regression | 97 suites; 3,406 cases; no skips | Passed |
+| Full uncached pipeline | Frozen install, lint, build, declarations, all tests, audit and secret scan | Passed |
+| Vitest | 8,577 passing cases in 508 passing files; 10 existing gated skips | Passed with existing skips |
+| Standalone scripts | 35 checks; zero failures/skips | Passed |
+| Exact source movement/scope | 22 bodies/parameter lists and complete recipes; seven product/three test paths | Passed |
+| Frozen source | 1,991 package/script hashes and six root controls retained | Passed |
+| Scoped quality | Biome/whitespace clean, all three supplemental semantic boundaries clean | Passed |
+
+Tested implementation: 2bec5edbb558e313b72645e517db38558db75ac0. A following docs-only checkpoint records completion
+without changing qualified source. Final pushed identity and clean checkout are
+recorded privately after push. Actual full command:
+
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+Node22.23.3/pnpm9.15.4 opens real SQLite3.49.2. Build/typecheck/test groups ran
+uncached; frozen install passed without fallback/lock mutation. Root lint retains
+82 existing warnings and the 2 MiB processing limit only. No rules/file selection/
+repository/global config changes. maintenance.auto=false is process-only.
+
+The manager is 14,371 lines, 1,998 fewer. The complete trigger/revalidation and five
+control algorithms, twelve policy helpers and three control helpers moved with
+original bodies/parameters/awaits. Lazy forwarding retains exact argument arity
+and late method/receiver lookup. Collections retain shared instance identity. All
+1,981 other baseline package/script paths and six root controls match. The 1,273-line
+trigger owner's reviewed intermediate exception remains assigned to Slice 27; this
+numbered outcome is complete, while that later delivery boundary is still required.
+
+Private file cases use actual pod/escalation/pending-override repositories, retained
+waiver provenance, cached override evaluation and integrity/FK-checked reopen.
+Transition/worktree/Goal/provider/container boundaries remain controlled. No live
+provider/browser/Docker/Azure, stronger atomicity/isolation/authorization/replay,
+PR/main integration or deployment claim. Initial receiver/fixture/audit-formatting
+diagnostics are retained alongside final passing logs and exact recipes in ignored
+.autopod-data/validation-workflows/. No manual gate remains for this slice.
