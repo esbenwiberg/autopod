@@ -5,8 +5,10 @@ Reviewed 2026-10-18 against freshly fetched `origin/main`
 `7151cc6654939c5195e55c33c87d68de94fb96b9`, branch `codex/desktop-redesign`.
 
 This is a source review plus the named automated checks. It does not substitute
-for operating the connected Preview app. That walkthrough is deferred because
-the user's Mac is locked. Keep PR #439 draft until live acceptance is completed.
+for operating the connected Preview app. Native access resumed on 2026-10-18,
+but profile configuration gaps were then identified; see the
+[profile configuration audit](profile-configuration-audit.md). Keep PR #439 draft
+until those repairs and live acceptance are completed.
 
 ## Reviewed routes and controls
 
@@ -23,7 +25,7 @@ the user's Mac is locked. Keep PR #439 draft until live acceptance is completed.
 | Logs | Existing filtering/search, loading, copy and auto-scroll behavior retained in new chrome. | EventStream tests; connected scrolling remains a live check |
 | Terminal | Existing SwiftTerm/data pipe and session controls retained; only toolbar label added. | Source review; connected terminal input remains a live check |
 | Series | Standalone Series list and pipeline retained, including purpose/design, summary, member quality/activity, PR links and delete confirmation. Drill-through opens full pod details or Validation. | DesktopSeriesTests, PipelineDAGLayout tests |
-| Profiles | Profile library, building blocks, repositories, watchers and deployments retained. Shared editor covers every configuration kind, full JSON, reference navigation, stale revisions, save/discard and provider-account routing. | ConfigurationEditorLayoutTests, LaunchConfigurationTests |
+| Profiles | Library routes, configuration kinds, full JSON and revision/draft controls exist, but form completeness FAILED the follow-up audit: network, sidecar defaults, scan policy and other fields lack usable controls. See [confirmed gaps](profile-configuration-audit.md). | Existing layout tests establish fit, not field completeness. |
 | Settings | Appearance, Connections, Provider Accounts, Podsitter, Notifications, Logs and About remain reachable. Embedded settings use real AppRootView callbacks. Profiles has its own workspace and deep links. | DesktopSettingsLayoutTests, provider catalog and connection tests |
 | Schedules | Create/edit/enable/disable/run/delete, templates, launch settings, last-pod navigation and scan policy/report routes remain wired. | ScheduledJobDraftTests, DesktopSchedulesLayoutTests, ScheduledScanTests |
 | History / Analytics | Existing drill loaders, date-window propagation, charts and pod links remain wired. | DesktopInsightsLayoutTests, AnalyticsWiringTests |
@@ -62,5 +64,7 @@ weakened to establish parity.
 - Verify theme changes, window resizing and Village list/map/detail navigation.
 - Confirm current-app and Preview isolation before deciding whether to merge.
 
-Source review found no additional missing controls in the reviewed surfaces.
-This is not an exhaustive assertion that every connected interaction works.
+The earlier review missed configuration fields and controls for absent/empty
+values. That conclusion is superseded by the
+[profile configuration audit](profile-configuration-audit.md). Connected behavior
+remains unverified; passing layout tests do not establish field completeness.
