@@ -20,7 +20,7 @@ import Testing
     let summary = try #require(DesktopKnowledgeFixtures.managedPods.first)
     let detail = try JSONDecoder().decode(ManagedPodDetailResponse.self, from: DesktopKnowledgeFixtures.detailData())
     for tab in ["Overview", "Validation", "Delivery", "Artifacts", "Activity"] {
-        try await renderKnowledge(ManagedPodDetailView(pod: summary, initialDetail: detail, initialTab: tab), width: 900, output: output, name: "managed-\(tab.lowercased())")
+        try await renderKnowledge(ManagedPodDetailView(pod: summary, api: tab == "Artifacts" ? DesktopKnowledgeFixtures.makeAPI() : nil, initialDetail: detail, initialTab: tab), width: 900, output: output, name: "managed-\(tab.lowercased())")
     }
     let api = DesktopKnowledgeFixtures.makeAPI(), artifact = try #require(summary.artifacts.first)
     for path in ["summary.md", "report.html", "results.json", "trace.bin", "large.log"] {
