@@ -48,10 +48,10 @@ struct WorkTab: View {
     var body: some View {
         Group {
             if redesign {
-                VStack(spacing: 0) {
-                    DesktopSectionPicker(title: "Work", items: WorkSection.allCases, selection: $selectedSection, label: { $0.label })
+                HStack(spacing: 0) {
+                    sectionRail.frame(width: 166)
                     Divider()
-                    workContent
+                    workContent.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .background(DesktopTheme.surface)
             } else {
@@ -120,11 +120,13 @@ struct WorkTab: View {
                     .padding(.vertical, 7)
                     .background(
                         RoundedRectangle(cornerRadius: 7)
-                            .fill(selectedSection == section ? Color.white.opacity(0.08) : .clear)
+                            .fill(selectedSection == section ? (redesign ? DesktopTheme.selection : Color.white.opacity(0.08)) : .clear)
                     )
                     .contentShape(RoundedRectangle(cornerRadius: 7))
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("work-section-\(section.rawValue)")
+                .accessibilityAddTraits(selectedSection == section ? .isSelected : [])
             }
 
             Spacer(minLength: 0)

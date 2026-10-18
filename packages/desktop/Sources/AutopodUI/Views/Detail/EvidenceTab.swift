@@ -96,11 +96,8 @@ public struct EvidenceTab: View {
   public var body: some View {
     Group {
       if redesign {
-        VStack(spacing: 0) {
-          DesktopSectionPicker(title: "Evidence", items: visibleSections, selection: $selectedSection, label: { section in
-            if let count = sectionBadgeCount(section) { return "\(section.label) · \(count)" }
-            return section.label
-          })
+        HStack(spacing: 0) {
+          sectionRail.frame(width: 174)
           Divider()
           content.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -160,11 +157,13 @@ public struct EvidenceTab: View {
           .padding(.vertical, 7)
           .background(
             RoundedRectangle(cornerRadius: 7)
-              .fill(selectedSection == section ? Color.white.opacity(0.08) : .clear)
+              .fill(selectedSection == section ? (redesign ? DesktopTheme.selection : Color.white.opacity(0.08)) : .clear)
           )
           .contentShape(RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("evidence-section-\(section.rawValue)")
+        .accessibilityAddTraits(selectedSection == section ? .isSelected : [])
       }
 
       Spacer(minLength: 0)

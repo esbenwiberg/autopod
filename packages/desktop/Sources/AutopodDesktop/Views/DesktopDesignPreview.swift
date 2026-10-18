@@ -89,7 +89,7 @@ public struct DesktopDesignPreview: View {
   private var configurationActions: LaunchConfigurationActions {
     let unavailable = DaemonError.badRequest("This fixture has no daemon or provider connection.")
     var actions = LaunchConfigurationActions(
-      documents: configurationDocuments, capabilities: .object([:]),
+      documents: configurationDocuments, capabilities: DesktopConfigurationFixtures.capabilities,
       reload: {}, resolve: { _ in throw unavailable }, launch: { _ in throw unavailable },
       save: { kind, request in
         let id = request.id ?? UUID().uuidString

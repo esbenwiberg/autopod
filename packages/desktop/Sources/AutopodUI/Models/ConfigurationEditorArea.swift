@@ -4,6 +4,7 @@ import Foundation
 enum ConfigurationEditorArea: String, Identifiable, CaseIterable {
     case composition = "Composition"
     case execution = "Execution"
+    case network = "Network"
     case access = "Access & worker"
     case main = "Main agent"
     case reviewer = "Reviewer"
@@ -27,7 +28,7 @@ enum ConfigurationEditorArea: String, Identifiable, CaseIterable {
     var id: String { rawValue }
     static func areas(for kind: ConfigurationKind) -> [Self] {
         switch kind {
-        case .profile: [.composition, .execution, .access, .advanced]
+        case .profile: [.composition, .execution, .network, .sidecars, .access, .advanced]
         case .ai: [.main, .reviewer, .failover, .advanced]
         case .workflow: [.run, .validation, .budgets, .escalation, .delivery, .advanced]
         case .environment: [.runtime, .software, .sidecars, .capabilities, .advanced]

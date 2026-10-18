@@ -623,8 +623,7 @@ public struct ValidationTab: View {
   public var body: some View {
     Group {
       if redesign {
-        GeometryReader { geometry in
-          VStack(spacing: 0) {
+        VStack(spacing: 0) {
             HStack {
               Text("Validation").font(.title3.weight(.semibold))
               Spacer(minLength: 12)
@@ -634,19 +633,11 @@ public struct ValidationTab: View {
             ScrollView {
               VStack(alignment: .leading, spacing: 20) {
                 validationSummaryPanel
-                if geometry.size.width >= 620 {
-                  HStack(alignment: .top, spacing: 22) {
-                    desktopPhaseNavigation(vertical: true).frame(width: 150)
-                    phaseDetailPanel.frame(maxWidth: .infinity, alignment: .leading)
-                  }
-                } else {
-                  desktopPhaseNavigation(vertical: false)
-                  phaseDetailPanel.frame(maxWidth: .infinity, alignment: .leading)
-                }
+                desktopPhaseNavigation
+                phaseDetailPanel.frame(maxWidth: .infinity, alignment: .leading)
               }.padding(20)
             }
-          }.background(DesktopTheme.surface)
-        }
+        }.background(DesktopTheme.surface)
       } else {
     VStack(alignment: .leading, spacing: 0) {
       headerView
@@ -998,34 +989,22 @@ public struct ValidationTab: View {
     }
   }
 
-  @ViewBuilder
-  private func desktopPhaseNavigation(vertical: Bool) -> some View {
-    if vertical {
-      VStack(spacing: 4) { desktopPhaseButtons }
-    } else {
-      ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: 4) { desktopPhaseButtons }
-      }
-    }
-  }
-
-  private var desktopPhaseButtons: some View {
-    ForEach(displayedPhases, id: \.self) { phase in
-      let result = phaseState(phase)
-      Button { selectedPhase = selectedPhase == phase ? nil : phase } label: {
-        HStack(spacing: 8) {
-          Text(phase.displayName).font(.caption).fixedSize()
-          Spacer(minLength: 8)
-          Image(systemName: result.status.icon).foregroundStyle(result.status.color).font(.caption2)
+  private var desktopPhaseNavigation: some View {
+    ScrollViewReader { reader in
+      ScrollView(.horizontal) {
+        HStack(spacing: 10) {
+          ForEach(displayedPhases, id: \.self) { phase in
+            DesktopValidationPhaseCard(
+              phase: phase, state: phaseState(phase), isSelected: displayPhase == phase,
+              subLabel: chipSubLabel(phase)
+            ) { selectedPhase = phase }
+            .id(phase)
+          }.padding(.vertical, 2)
         }
-        .padding(.horizontal, 10).padding(.vertical, 10)
-        .foregroundStyle(displayPhase == phase ? DesktopTheme.accent : .secondary)
-        .background(displayPhase == phase ? DesktopTheme.selection : .clear, in: RoundedRectangle(cornerRadius: 6))
+        .onChange(of: displayPhase) { _, phase in
+          if let phase { withAnimation { reader.scrollTo(phase, anchor: .center) } }
+        }
       }
-      .buttonStyle(.plain)
-      .help(chipSubLabel(phase) ?? phase.displayName)
-      .accessibilityIdentifier("validation-phase-\(phase.rawValue)")
-      .accessibilityAddTraits(displayPhase == phase ? .isSelected : [])
     }
   }
 

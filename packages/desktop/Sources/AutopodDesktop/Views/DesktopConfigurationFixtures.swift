@@ -34,7 +34,14 @@ enum DesktopConfigurationFixtures {
           .environment, "env-backend", ".NET 10 + Go",
           [
             "template": .string("dotnet10-go"), "tools": .array([]),
-            "prepareCommands": .array([.string("dotnet restore")]), "sidecars": .array([]),
+            "prepareCommands": .array([.string("dotnet restore")]), "sidecars": .array([
+              .object(["id": .string("database"), "type": .string("postgres"),
+                "image": .string("postgres@sha256:" + String(repeating: "a", count: 64)), "version": .string("17"),
+                "startup": .string("on-demand"), "port": .number(5432), "healthTimeoutMs": .number(60000)]),
+              .object(["id": .string("cache"), "type": .string("redis"),
+                "image": .string("redis@sha256:" + String(repeating: "b", count: 64)), "version": .string("7"),
+                "startup": .string("always"), "port": .number(6379), "healthTimeoutMs": .number(60000)]),
+            ]),
             "capabilities": .array([.string("dotnet"), .string("go")]),
           ]
         ),
@@ -150,6 +157,27 @@ enum DesktopConfigurationFixtures {
         ])
       ]),
     ]
+  }
+
+  static var capabilities: ConfigurationJSON {
+    .object(["execution": .array([
+      .object([
+        "target": .string("local"), "available": .bool(true), "sidecars": .bool(true),
+        "privilegedSidecars": .bool(false), "sidecarStorageLimit": .bool(false),
+        "maxMemoryGb": .number(16), "maxCpus": .number(8), "maxStorageGb": .null,
+        "maxTotalMemoryGb": .number(16), "maxTotalCpus": .number(8),
+        "sidecarDefaults": .object([
+          "postgres": .object(["memoryGb": .number(1), "cpus": .number(1)]),
+          "redis": .object(["memoryGb": .number(0.5), "cpus": .number(0.5)]),
+        ]),
+      ]),
+      .object([
+        "target": .string("sandbox"), "available": .bool(true), "sidecars": .bool(false),
+        "privilegedSidecars": .bool(false), "sidecarStorageLimit": .bool(false),
+        "maxMemoryGb": .number(16), "maxCpus": .null, "maxStorageGb": .null,
+        "maxTotalMemoryGb": .number(16), "memoryTiersGb": .array([2, 4, 8, 16].map { .number(Double($0)) }),
+      ]),
+    ])])
   }
 
   static var accounts: [PublicProviderAccountResponse] {

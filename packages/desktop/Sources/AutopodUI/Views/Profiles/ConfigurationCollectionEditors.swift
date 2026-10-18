@@ -47,10 +47,12 @@ struct ConfigurationStringListEditor: View {
         ForEach(values.indices, id: \.self) { index in
           HStack {
             TextField("Value", text: Binding(get: { values.indices.contains(index) ? values[index].string ?? "" : "" }, set: { if values.indices.contains(index) { values[index] = .string($0) } }))
+              .accessibilityIdentifier("configuration-list-\(title)-\(index)")
             Button("Remove", systemImage: "minus.circle") { values.remove(at: index) }.labelStyle(.iconOnly)
           }
         }
         Button("Add", systemImage: "plus") { values.append(.string("")) }
+          .accessibilityIdentifier("configuration-list-\(title)-add")
       }.padding(6)
     }
   }
@@ -127,7 +129,7 @@ struct ProfileExecutionDefaultsEditor: View {
     VStack(alignment: .leading, spacing: 10) {
       Picker("Run in", selection: Binding(get: { target }, set: {
         fields["target"] = .string($0)
-        if $0 == "sandbox" { main.wrappedValue["cpus"] = .null; main.wrappedValue["storageGb"] = .null }
+        // Retain saved allocations when switching targets; show unsupported values for explicit reset.
       })) { Text("Docker").tag("local"); Text("Hosted sandbox").tag("sandbox") }
       if let tiers = backend?["memoryTiersGb"]?.array?.compactMap(\.number) {
         Picker("Memory", selection: Binding(get: { main.wrappedValue["memoryGb"]?.number ?? 0 }, set: { main.wrappedValue["memoryGb"] = $0 == 0 ? .null : .number($0) })) {
@@ -136,10 +138,16 @@ struct ProfileExecutionDefaultsEditor: View {
           if let current = main.wrappedValue["memoryGb"]?.number, !tiers.contains(current) { Text("\(current.formatted()) GB · unavailable").tag(current) }
         }
       } else { ConfigurationNumberValue(title: "Memory (GB)", fields: main, key: "memoryGb", fallback: 4) }
-      if target == "local" { ConfigurationNumberValue(title: "CPUs", fields: main, key: "cpus", fallback: 2) }
+      ConfigurationAllocationLimit(
+        title: "CPUs", fields: main, key: "cpus", fallback: 2,
+        supported: backend?["maxCpus"]?.number != nil,
+        unavailable: "This backend does not support independent CPU allocation.")
       if let reason = backend?["unavailableReason"]?.string { Text(reason).font(.caption).foregroundStyle(.secondary) }
       Text("These are launch defaults. The daemon checks the selected backend's capacity before starting a pod.").font(.caption).foregroundStyle(.secondary)
-      DisclosureGroup("Network and sidecar allocations") { ConfigurationFieldsEditor(fields: $fields, excluded: ["target", "main"]) }
+      ConfigurationAllocationLimit(
+        title: "Storage (GB)", fields: main, key: "storageGb", fallback: 10,
+        supported: backend?["maxStorageGb"]?.number != nil,
+        unavailable: "This backend cannot enforce a main-container storage limit.")
     }
   }
 }
@@ -262,6 +270,12 @@ struct EnvironmentSidecarEditor: View {
         Text("When selected at launch").tag("on-demand"); Text("Always").tag("always"); Text("Disabled").tag("disabled")
       }
       TextField("Port", value: Binding(get: { fields["port"]?.number ?? 5432 }, set: { fields["port"] = .number($0) }), format: .number.precision(.fractionLength(0)))
+      LabeledContent("Health timeout (ms)") {
+        TextField("Health timeout (ms)", value: Binding(
+          get: { fields["healthTimeoutMs"]?.number ?? 60000 },
+          set: { fields["healthTimeoutMs"] = .number($0) }),
+          format: .number.precision(.fractionLength(0))).frame(width: 120)
+      }
       Text("Resource limits are selected in the profile or at launch.").font(.caption).foregroundStyle(.secondary)
     }
   }

@@ -50,6 +50,7 @@ public struct ConfigurationLibraryView: View {
     let kind: ConfigurationKind
     let document: ConfigurationDocument?
     let draft: ConfigurationDocument?
+    var area: ConfigurationEditorArea? = nil
   }
   public init(
     actions: LaunchConfigurationActions, initialKind: ConfigurationKind = .profile,
@@ -77,7 +78,8 @@ public struct ConfigurationLibraryView: View {
           onClose: {
             editor = nil; onDirtyChanged(false)
           },
-          onDirtyChanged: onDirtyChanged, onBusyChanged: onBusyChanged, onOpenDocument: { edit($0) }
+          onDirtyChanged: onDirtyChanged, onBusyChanged: onBusyChanged, onOpenDocument: { edit($0) },
+          onOpenSidecarDefinitions: { document in edit(document, area: .sidecars) }, initialArea: target.area
         ).id(target.id)
       } else {
         libraryBody
@@ -580,8 +582,8 @@ public struct ConfigurationLibraryView: View {
     editor = EditorTarget(kind: targetKind, document: nil, draft: nil)
   }
 
-  private func edit(_ document: ConfigurationDocument) {
-    editor = EditorTarget(kind: document.kind, document: document, draft: nil)
+  private func edit(_ document: ConfigurationDocument, area: ConfigurationEditorArea? = nil) {
+    editor = EditorTarget(kind: document.kind, document: document, draft: nil, area: area)
   }
 
   private func duplicate(_ document: ConfigurationDocument) {
@@ -861,6 +863,7 @@ struct ConfigurationEditorSheet: View {
   private var onDirtyChanged: (Bool) -> Void
   private var onBusyChanged: (Bool) -> Void
   private var onOpenDocument: ((ConfigurationDocument) -> Void)?
+  private var onOpenSidecarDefinitions: ((ConfigurationDocument) -> Void)?
   private let initialName: String
   private let initialPayload: [String: ConfigurationJSON]
   @State private var area: ConfigurationEditorArea
@@ -891,11 +894,13 @@ struct ConfigurationEditorSheet: View {
     onDirtyChanged: @escaping (Bool) -> Void = { _ in },
     onBusyChanged: @escaping (Bool) -> Void = { _ in },
     onOpenDocument: ((ConfigurationDocument) -> Void)? = nil,
+    onOpenSidecarDefinitions: ((ConfigurationDocument) -> Void)? = nil,
     initialArea: ConfigurationEditorArea? = nil
   ) {
     self.kind = kind; self.document = document; self.draft = draft; self.actions = actions
     self.onClose = onClose; self.onDirtyChanged = onDirtyChanged; self.onBusyChanged = onBusyChanged;
     self.onOpenDocument = onOpenDocument
+    self.onOpenSidecarDefinitions = onOpenSidecarDefinitions
     initialName = document?.name ?? draft.map { "\($0.libraryTitle) copy" } ?? ""
     initialPayload = document?.payload ?? draft?.payload ?? Self.initial(kind)
     self._area = State(initialValue: initialArea ?? ConfigurationEditorArea.areas(for: kind)[0])
@@ -1135,7 +1140,8 @@ struct ConfigurationEditorSheet: View {
             .foregroundStyle(area == candidate ? DesktopTheme.accent : .secondary)
             .background(
               area == candidate ? DesktopTheme.selection : .clear, in: RoundedRectangle(cornerRadius: 6))
-        }.buttonStyle(.plain).accessibilityAddTraits(area == candidate ? .isSelected : [])
+        }.buttonStyle(.plain).accessibilityIdentifier("configuration-area-\(candidate.id)")
+          .accessibilityAddTraits(area == candidate ? .isSelected : [])
       }
       Spacer()
     }.padding(16).frame(width: 178).background(DesktopTheme.canvas)
@@ -1240,6 +1246,18 @@ struct ConfigurationEditorSheet: View {
           ProfileExecutionDefaultsEditor(
             fields: objectBinding("execution"), capabilities: actions.capabilities)
         }
+      }
+      if visible(.network) {
+        ConfigurationNetworkPolicyEditor(fields: objectBinding("execution"))
+      }
+      if visible(.sidecars) {
+        ConfigurationProfileSidecarsEditor(
+          payload: $payload,
+          environment: actions.list(.environment).first { $0.id == payload["environmentId"]?.string },
+          capabilities: actions.capabilities,
+          editDefinitions: onOpenSidecarDefinitions.map { open in
+            { document in requestClose { onDirtyChanged(false); open(document) } }
+          })
       }
       if visible(.access) {
         Button("Choose PIM access · \(payload["pim"]?.array?.count ?? 0) selected") { showPim = true }

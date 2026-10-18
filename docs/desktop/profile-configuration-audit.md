@@ -3,11 +3,45 @@
 Reviewed 2026-10-18. Implementation: `6eb5addf42b390859e8782e6a87725c65a968d82`.
 Freshly fetched main: `6e51d1ce9495235e6aac2e498393cd2dd9a0e66b`.
 
-**Verdict: FAILED for configuration form completeness.** The redesigned library
+**Original audit verdict: FAILED for configuration form completeness.** The redesigned library
 has all configuration kinds, but that does not establish field parity. The
 previous source parity review missed controls that cannot create absent values,
 empty dictionaries and collections. Keep PR #439 draft pending repairs and
-interaction checks. This audit changes documentation only; the gaps below remain.
+interaction checks. The original audit was documentation-only; the follow-up below records subsequent repairs.
+
+## First repair slice
+
+The follow-up implements Profile's Network and Sidecars areas. Network can start
+from absent/null policy and edit isolation, mode, host rows, package-manager and
+default-host flags. Sidecars shows definitions from the selected Environment,
+required instances, always/disabled states, allocations, unavailable saved IDs,
+and an Environment sidecar-editor link through the existing discard guard.
+Main CPU/storage limits and sidecar limits retain unsupported saved values for
+explicit reset. Environment health timeout has a numeric field.
+
+Native interaction tests exercise policy creation from absent/null, host editing,
+save/reopen, preservation of unrelated policy/execution fields, sidecar selection
+from an empty map, allocation save/reset/reopen, missing IDs, definition links and
+unsupported limits. These are owned native views with in-memory actions; they do
+not establish saving to a real daemon or launching a real sidecar.
+
+Work and Evidence now use left section rails. Validation uses one horizontal
+phase-card strip with icons/status and selected phase content below. Tests click
+the real controls and check rail/card geometry at 680 and 1400 points in dark and
+light appearance. The full Preview's detail navigation was also operated through
+computer use. Native access then failed again at profile editing with `native
+pipe closed before response`; profile evidence uses the owned native test views.
+
+Validation for this slice: `./scripts/test-desktop.sh` passes 560 Swift Testing
+tests (355 Client, 11 Desktop, 194 UI) and 13 XCTest tests. The eight new test
+functions include parameterized empty/null and dark/light compact/wide cases.
+`./scripts/build-desktop-preview.sh --fixtures` builds the separate signed
+`com.autopod.desktop.preview` app. These results do not include a real daemon
+profile save or real sidecar launch.
+
+**Overall form completeness remains partial.** Workflow scan/budget/escalation,
+repository validation/registries, value/credential maps and skill description
+remain open. This slice does not close the whole gap matrix or connected acceptance.
 
 ## Evidence boundary
 

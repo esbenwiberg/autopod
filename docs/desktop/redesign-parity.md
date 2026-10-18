@@ -6,7 +6,8 @@ Reviewed 2026-10-18 against freshly fetched `origin/main`
 
 This is a source review plus the named automated checks. It does not substitute
 for operating the connected Preview app. Native access resumed on 2026-10-18,
-but profile configuration gaps were then identified; see the
+but profile configuration gaps were then identified. The first Network/Sidecars
+repair slice is now implemented and checked in owned native views; see the
 [profile configuration audit](profile-configuration-audit.md). Keep PR #439 draft
 until those repairs and live acceptance are completed.
 
@@ -18,14 +19,14 @@ until those repairs and live acceptance are completed.
 | Explicit pod navigation | History, Schedules, Analytics, palette and Series share a destination that clears stale search/repository filters. A selected archived pod survives the recent-results limit. Ordinary card and Village selections retain context. | FleetPodNavigationTests, AnalyticsWiringTests |
 | Pod details | Overview, Work, Validation, Readiness, Evidence, Diff and Logs retained; Terminal remains conditional on interactive mode. Invalid old tab selection falls back. | DetailPanelTabSelectionTests |
 | Pod actions | Redesigned header menu reuses `headerActions`; fleet context menu reuses `cardMenuActions`. Compared action references against main, then inspected the composition. Status-specific pause/resume/kill/retry/rework/approve/merge/manual repair/fork/delete/PR feedback paths remain wired. | ConfirmedActionRenderingTests, InlineControlRenderingTests, ConnectionOwnershipRenderingTests |
-| Validation | One redesigned phase navigator; phase details use the existing data and current/history selection. Legacy phase chips are in the legacy branch. Review infrastructure unavailability remains distinct from a failed verdict. | ValidationHistoryIdentityTests, ValidationHistoryRefreshTests, ValidationProgressTests |
+| Validation | One horizontal icon/status card strip; phase details retain current/history selection. Legacy phase chips remain in the legacy branch. Review infrastructure unavailability remains distinct from a failed verdict. | DetailSectionNavigationTests, ValidationHistoryIdentityTests, ValidationHistoryRefreshTests, ValidationProgressTests |
 | Readiness | Existing findings, source references and waiver actions remain in shared sections. | FactWaiverRefreshTests (client); source review |
 | Evidence | Screenshots, files, artifacts, markdown and lightbox reuse existing content/loaders; only section navigation and chrome change. | ValidationPageScreenshotTests; shared evidence content source review |
 | Diff | Unified/split/file modes, refresh, file expansion, notes and parsing remain shared. | DiffTabExpansionTests; shared parser source review |
 | Logs | Existing filtering/search, loading, copy and auto-scroll behavior retained in new chrome. | EventStream tests; connected scrolling remains a live check |
 | Terminal | Existing SwiftTerm/data pipe and session controls retained; only toolbar label added. | Source review; connected terminal input remains a live check |
 | Series | Standalone Series list and pipeline retained, including purpose/design, summary, member quality/activity, PR links and delete confirmation. Drill-through opens full pod details or Validation. | DesktopSeriesTests, PipelineDAGLayout tests |
-| Profiles | Library routes, configuration kinds, full JSON and revision/draft controls exist, but form completeness FAILED the follow-up audit: network, sidecar defaults, scan policy and other fields lack usable controls. See [confirmed gaps](profile-configuration-audit.md). | Existing layout tests establish fit, not field completeness. |
+| Profiles | Library routes, configuration kinds, full JSON and revision/draft controls exist, but form completeness FAILED the follow-up audit. Network and sidecar defaults now have explicit controls; scan policy and other fields remain open. See [confirmed gaps](profile-configuration-audit.md). | ConfigurationExecutionInteractionTests checks the repaired fields; older layout tests establish fit only. |
 | Settings | Appearance, Connections, Provider Accounts, Podsitter, Notifications, Logs and About remain reachable. Embedded settings use real AppRootView callbacks. Profiles has its own workspace and deep links. | DesktopSettingsLayoutTests, provider catalog and connection tests |
 | Schedules | Create/edit/enable/disable/run/delete, templates, launch settings, last-pod navigation and scan policy/report routes remain wired. | ScheduledJobDraftTests, DesktopSchedulesLayoutTests, ScheduledScanTests |
 | History / Analytics | Existing drill loaders, date-window propagation, charts and pod links remain wired. | DesktopInsightsLayoutTests, AnalyticsWiringTests |
