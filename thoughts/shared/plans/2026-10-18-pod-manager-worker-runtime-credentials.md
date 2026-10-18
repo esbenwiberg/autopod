@@ -1,6 +1,6 @@
 # Slice 16: worker runtime credential extraction
 
-Status: APPROVED — Phases 1 and 2 complete; final qualification running.
+Status: COMPLETE — all three approved phases implemented and locally verified.
 Date: 2026-10-18.
 Baseline: b10a505a6c479fec4ea6225ac6c983a386008fd9.
 Branch: codex/pod-manager-workspace.
@@ -273,9 +273,9 @@ increments; confirm remote identity and clean isolated checkout.
 
 Automated:
 - [x] All 84 affected suites pass with SQLite and no new skips.
-- [ ] Full uncached validation passes under the documented qualification environment.
-- [ ] Scoped lint/whitespace/types, exact movement and frozen hashes pass.
-- [ ] Complete plan/proof records actual results, limits and final pushed identities.
+- [x] Full uncached validation passes under the documented qualification environment.
+- [x] Scoped lint/whitespace/types, exact movement and frozen hashes pass.
+- [x] Complete plan/proof records actual results, limits and final pushed identities.
 
 Manual: None required. Approval covers all three phases together.
 
@@ -299,7 +299,8 @@ providers/credential-refresh.ts; providers/azure-token.ts;
 configuration/execution-credentials.ts; pods/continuation-preflight.ts;
 pods/provider-attempt-repository.ts and existing manager worker tests.
 
-Next action: qualify the frozen implementation with the full uncached pipeline.
+All three approved phases are complete. No manual acceptance remains.
+Integration, PR creation and deployment remain separate work.
 
 ## Phase 1 observed results
 
@@ -351,3 +352,61 @@ test helper was removed after semantic diagnostics. Initial logs and final passi
 results are retained. Frozen source/root hashes and actual commands/runtime are
 recorded under ignored .autopod-data/worker-runtime-credentials/.
 Full uncached qualification remains; no new atomicity/isolation/dispatch guarantee.
+
+## Phase 3: final qualification
+
+Verdict: PROVEN for the approved local worker runtime credential compatibility
+extraction under the documented qualification environment. All three phases complete.
+
+| Claim/check | Observed final evidence | Result |
+|---|---|---|
+| Public compatibility | 89 selected before/after checks, 18 new; assertions byte-identical | Passed |
+| Resume/readback/persistence contracts | 80 direct cases with private migrated file SQLite and actual local account/auth/env helpers | Passed |
+| Surrounding orchestration | 84 affected suites; 2,968 tests passed; zero skipped | Passed |
+| Full uncached pipeline | Frozen install, lint, build, supported declaration typecheck, all tests, audit and secret scan | Passed under documented environment |
+| Vitest | 8,358 passed across 503 passing files; 10 existing gated skips | Passed with existing skips |
+| Standalone Node scripts | 35 passed; zero failed/skipped | Passed |
+| Source integrity | 1,977 package/script hashes and six root controls unchanged through qualification | Passed |
+| Exact movement/scope | Both original bodies and resume comment, ten external calls, full manager/module recipe; two product/two test paths | Passed |
+| Scoped quality | Biome/whitespace clean; zero semantic diagnostics in both new test boundaries | Passed |
+
+Tested implementation: cc4ca8770689aa4f0f4117835be293f1276bb94b. A following documentation-only commit
+records qualification without changing qualified source/test bytes. Final pushed
+identity and clean-checkout confirmation are recorded privately after push.
+
+Actual full command through the task-local pinned launcher:
+
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+Actual child Node22.23.3 opens SQLite3.49.2; pnpm9.15.4. Build/typecheck/test groups
+ran uncached. Frozen install succeeded without fallback or lockfile mutation.
+Root lint retained 82 existing warnings, processing the large manager test with
+only --files-max-size=2097152 added. Scoped files are clean. No rule/file selection
+or repository/global configuration changed. maintenance.auto=false is process-only.
+Known unrelated Git metadata-scan race/audit-clock flake remain outside scope.
+No source/test changes occurred during final qualification; the 10 existing
+gated skips remain, with no newly skipped cases.
+
+The manager is 16,635 lines, 185 fewer; worker-runtime-credentials.ts is 251 lines.
+Both original bodies/internal calls/awaits and the resume doc comment are unchanged.
+All ten callers keep their awaits, conditions, messages and arguments. Reviewer
+composition, profile/failover authority, initial provisioning, validation/registry env,
+launch credential resolution, manager lineage map/callbacks, lifecycle/provenance,
+continuation and cleanup dispatch retain their original ownership. All 1,973 other
+baseline package/script files match. No product correction followed extraction.
+
+Evidence is retained under ignored .autopod-data/worker-runtime-credentials/:
+proof.json, claims.json, movement.json, manifests, frozen public assertions/filter,
+before-source, original regions/recipes and scripts, runtime/commands, raw public/
+build/direct/affected/full/lint/type logs/exits, initial diagnostics and identities.
+The illustrated approval document remains the original proposal snapshot.
+
+Public tests exercise actual worker entry points and manager-owned lineage behavior.
+Direct tests establish local provider gates/owner selection, retained initial profile,
+real OpenAI/Pi/MAX rotation, warning/catch boundaries, set/delete callback timing,
+launch/legacy file modes, sequential failure prefixes, late capability replacement/
+removal, SQL abort and reopen integrity/FK. Direct lineage callbacks prove only their
+narrow collaborator contract. Token and expiring OAuth acquisition plus container/
+runtime interfaces are controlled. This evidence does not establish paid provider
+authorization/execution, live Docker/Azure or stronger atomicity, isolation, dispatch
+fencing, replay safety, cross-process locking, crash recovery or remote completion.
