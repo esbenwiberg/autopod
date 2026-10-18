@@ -1,6 +1,6 @@
 # Slice 12: validation infrastructure classification and parking extraction
 
-Status: PROPOSED — awaiting explicit approval before implementation.
+Status: APPROVED — implementing all three phases after explicit user approval.
 Date: 2026-10-18.
 Baseline: 86380d0ff76f126f8e60d245447f4a2718f8c4a5.
 Branch: codex/pod-manager-workspace.
@@ -152,8 +152,8 @@ control hashes, actual Node/pnpm/SQLite and raw before results under ignored
 ### Success criteria
 
 Automated:
-- [ ] New and selected existing public checks pass against unchanged product.
-- [ ] Frozen assertions/source/runtime and raw before evidence are recorded.
+- [x] New and selected existing public checks pass against unchanged product.
+- [x] Frozen assertions/source/runtime and raw before evidence are recorded.
 
 Manual: None required for this local headless extraction.
 
@@ -266,3 +266,17 @@ task-retry-ledger.ts and existing infrastructure/Resume/ownership tests.
 
 Next action: user reviews the illustrated plan and explicitly approves implementation.
 No product code changed or implementation tests ran in this planning turn.
+
+## Phase 1 observed results
+
+28 new public cases and 62 selected existing cases pass (90 selected total) against
+unchanged product. The selection run excludes 962 unrelated cases; the affected/full
+runs will run complete suites. Runtime is Node 22.23.3 and SQLite 3.49.2. Baseline
+1,967 package/script hashes, six root controls, before manager, frozen public bytes,
+filter and raw logs/exits are retained privately.
+
+Initial baseline expectations had eight failures: six manual entry cases already
+clear failureReason before parking; two refund failures persist review_required and
+the caller then throws InvalidStateTransitionError attempting review_required→failed.
+Assertions now capture those observed contracts. One event-union type guard was
+corrected. No product behavior was changed. Public semantic diagnostics are zero.

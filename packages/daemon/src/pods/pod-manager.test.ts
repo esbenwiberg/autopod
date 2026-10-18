@@ -28774,3 +28774,273 @@ describe('validation publication compatibility', () => {
     }
   });
 });
+
+describe('validation infrastructure compatibility', () => {
+  beforeEach(() => mockExecFileSuccess());
+  afterEach(() => vi.restoreAllMocks());
+
+  function fixture(
+    entry: 'trigger' | 'revalidate',
+    kind: string,
+    target: 'local' | 'sandbox' = 'local',
+  ) {
+    const ctx = createTestContext(undefined, {
+      executionTarget: target,
+      warmImageTag: target === 'sandbox' ? 'registry.azurecr.io/autopod/test:latest' : null,
+    });
+    ctx.deps.validationInfrastructureRetryBackoffMs = [];
+    const result = kind.startsWith('typed')
+      ? validationInfrastructureFailureResult()
+      : makeValidationResult(
+          reviewInfrastructureFailureResult(
+            kind === 'timeout' ? 'review-timeout' : 'review-failed',
+          ),
+        );
+    if (result.infrastructureFailure)
+      result.infrastructureFailure.retryable = kind !== 'typed-nonretryable';
+    if (kind === 'council' || kind === 'closure') {
+      const batch = makeTestReviewBatch('infrastructure', 'Retained finding', 'semantic', true);
+      if (kind === 'council') batch.infrastructureUnavailable = true;
+      else
+        batch.closureVerification = { status: 'unavailable', decisions: [], reason: 'Unavailable' };
+      result.taskReview = {
+        status: 'fail',
+        reasoning: 'Infrastructure unavailable',
+        issues: [],
+        model: 'reviewer',
+        screenshots: [],
+        diff: '',
+        reviewBatch: batch,
+      };
+    }
+    if (kind === 'deterministic')
+      result.test = { status: 'fail', duration: 1, stdout: 'Broken test', stderr: '' };
+    vi.mocked(ctx.validationEngine.validate).mockResolvedValue(result);
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Infrastructure compatibility' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: entry === 'trigger' ? 'running' : 'failed',
+      containerId: 'infrastructure-container',
+      worktreePath: '/tmp/validation-infrastructure',
+      validationAttempts: 0,
+      maxValidationAttempts: 1,
+      lastCorrectionMessage: 'Retained correction',
+      failureReason: 'Retained failure',
+    });
+    return {
+      ctx,
+      manager,
+      pod,
+      result,
+      run: () =>
+        entry === 'trigger'
+          ? manager.triggerValidation(pod.id)
+          : manager.revalidateSession(pod.id, { force: true }),
+    };
+  }
+
+  it.each(
+    (['trigger', 'revalidate'] as const).flatMap((entry) =>
+      ['typed', 'typed-nonretryable', 'timeout', 'review-failed', 'council', 'closure'].map(
+        (kind) => ({ entry, kind }),
+      ),
+    ),
+  )(
+    '$entry parks $kind with its existing accounting and publication order',
+    async ({ entry, kind }) => {
+      const f = fixture(entry, kind);
+      const order: string[] = [];
+      const unsubscribe = f.ctx.eventBus.subscribe((event) => {
+        if (!('podId' in event) || event.podId !== f.pod.id) return;
+        if (event.type === 'pod.validation_completed') order.push('published');
+        if (event.type === 'pod.status_changed' && event.newStatus === 'review_required')
+          order.push('parked');
+      });
+      const stop = vi.mocked(f.ctx.containerManager.stop).mockImplementation(async () => {
+        order.push('stopped');
+      });
+      try {
+        const returned = await f.run();
+        expect(f.ctx.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+          status: 'review_required',
+          validationAttempts: kind.startsWith('typed') ? 0 : 1,
+          lastCorrectionMessage: kind.startsWith('typed') ? null : 'Retained correction',
+          failureReason: entry === 'trigger' ? 'Retained failure' : null,
+          lastValidationResult: f.result,
+        });
+        expect(order).toEqual(['published', 'parked', 'stopped']);
+        expect(stop).toHaveBeenCalledExactlyOnceWith('infrastructure-container');
+        expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+        expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+        expect(f.ctx.validationRepo.getForSession(f.pod.id)).toHaveLength(1);
+        if (entry === 'revalidate') expect(returned).toEqual({ newCommits: false, result: 'fail' });
+      } finally {
+        unsubscribe();
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s keeps deterministic test failure outside review infrastructure parking',
+    async (entry) => {
+      const f = fixture(entry, 'deterministic');
+      try {
+        await f.run();
+        const stored = f.ctx.podRepo.getOrThrow(f.pod.id);
+        expect(stored.status).toBe(entry === 'trigger' ? 'review_required' : 'failed');
+        expect(stored.validationAttempts).toBe(1);
+        expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+        const activities = f.ctx.eventRepo.getForSession(f.pod.id, { type: 'pod.agent_activity' });
+        expect(JSON.stringify(activities)).not.toContain('Review infrastructure failure after');
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(
+    (['trigger', 'revalidate'] as const).flatMap((entry) =>
+      (['local', 'sandbox'] as const).map((target) => ({ entry, target })),
+    ),
+  )('$entry keeps $target infrastructure parked when stop rejects', async ({ entry, target }) => {
+    const f = fixture(entry, 'typed', target);
+    try {
+      vi.mocked(f.ctx.containerManager.stop).mockRejectedValue(new Error('Stop unavailable'));
+      const warn = vi.spyOn(logger, 'warn');
+      await f.run();
+      expect(f.ctx.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+        status: 'review_required',
+        validationAttempts: 0,
+        lastCorrectionMessage: null,
+      });
+      expect(f.ctx.containerManager.stop).toHaveBeenCalledExactlyOnceWith(
+        'infrastructure-container',
+      );
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({ podId: f.pod.id, err: expect.any(Error) }),
+        'Failed to stop container after validation infrastructure failure',
+      );
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it.each(
+    (['trigger', 'revalidate'] as const).flatMap((entry) =>
+      ['transition', 'refund', 'activity'].map((stage) => ({ entry, stage })),
+    ),
+  )(
+    '$entry retains the outer error boundary after parking $stage fails',
+    async ({ entry, stage }) => {
+      const f = fixture(entry, 'typed');
+      try {
+        const error = new Error(`Parking ${stage} failed`);
+        let armed = true;
+        const update = f.ctx.podRepo.update.bind(f.ctx.podRepo);
+        vi.spyOn(f.ctx.podRepo, 'update').mockImplementation((id, changes) => {
+          if (
+            armed &&
+            ((stage === 'transition' && changes.status === 'review_required') ||
+              (stage === 'refund' &&
+                changes.validationAttempts === 0 &&
+                changes.lastCorrectionMessage === null))
+          ) {
+            armed = false;
+            throw error;
+          }
+          update(id, changes);
+        });
+        const insert = f.ctx.eventRepo.insert.bind(f.ctx.eventRepo);
+        vi.spyOn(f.ctx.eventRepo, 'insert').mockImplementation((event) => {
+          if (
+            armed &&
+            stage === 'activity' &&
+            event.type === 'pod.agent_activity' &&
+            event.event.type === 'status' &&
+            event.event.message.includes('parked for explicit Resume')
+          ) {
+            armed = false;
+            throw error;
+          }
+          return insert(event);
+        });
+        if (stage === 'refund')
+          await expect(f.run()).rejects.toThrow('from review_required to failed');
+        else await f.run();
+        expect(armed).toBe(false);
+        expect(f.ctx.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+          status: stage === 'refund' ? 'review_required' : 'failed',
+          validationAttempts: 1,
+          lastCorrectionMessage: 'Retained correction',
+          failureReason:
+            stage === 'refund'
+              ? entry === 'trigger'
+                ? 'Retained failure'
+                : null
+              : expect.stringContaining(error.message),
+        });
+        expect(f.ctx.validationRepo.getForSession(f.pod.id)).toHaveLength(1);
+        expect(f.ctx.containerManager.stop).toHaveBeenCalledTimes(
+          entry === 'trigger' && stage !== 'refund' ? 1 : 0,
+        );
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s skips shutdown when a completion subscriber removes the container',
+    async (entry) => {
+      const f = fixture(entry, 'typed');
+      const unsubscribe = f.ctx.eventBus.subscribe((event) => {
+        if (event.type === 'pod.validation_completed' && event.podId === f.pod.id)
+          f.ctx.podRepo.update(f.pod.id, { containerId: null });
+      });
+      try {
+        await f.run();
+        expect(f.ctx.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+          status: 'review_required',
+          validationAttempts: 0,
+          containerId: null,
+        });
+        expect(f.ctx.containerManager.stop).not.toHaveBeenCalled();
+      } finally {
+        unsubscribe();
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s catches success-log failure after a completed stop',
+    async (entry) => {
+      const f = fixture(entry, 'typed');
+      try {
+        const error = new Error('Success logger failed');
+        const info = logger.info.bind(logger);
+        vi.spyOn(logger, 'info').mockImplementation((...args: Parameters<typeof logger.info>) => {
+          if (args[1] === 'Container stopped after validation infrastructure failure') throw error;
+          info(...args);
+        });
+        const warn = vi.spyOn(logger, 'warn');
+        await f.run();
+        expect(f.ctx.podRepo.getOrThrow(f.pod.id).status).toBe('review_required');
+        expect(f.ctx.containerManager.stop).toHaveBeenCalledExactlyOnceWith(
+          'infrastructure-container',
+        );
+        expect(warn).toHaveBeenCalledWith(
+          { err: error, podId: f.pod.id },
+          'Failed to stop container after validation infrastructure failure',
+        );
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+});
