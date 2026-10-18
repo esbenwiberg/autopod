@@ -1,6 +1,6 @@
 # Slice 19: advisory validation execution and publication
 
-Status: PLANNED — awaits explicit approval; no implementation tests have run.
+Status: APPROVED — all three phases authorized; Phase 1 in progress.
 Date: 2026-10-18. Baseline: ecc324ca4a403d49397dd63cecb1a881e653ad06.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -165,9 +165,9 @@ identically. Filter-excluded cases are not newly skipped; final affected run is 
 ### Success criteria
 
 Automated:
-- [ ] New and selected existing public checks pass with unchanged product bytes.
-- [ ] Selection/filter and characterization bytes are frozen; no new test skips.
-- [ ] SQLite loads under the pinned runtime; appended test group has no semantic errors.
+- [x] New and selected existing public checks pass with unchanged product bytes.
+- [x] Selection/filter and characterization bytes are frozen; no new test skips.
+- [x] SQLite loads under the pinned runtime; appended test group has no semantic errors.
 
 Manual: None required; one approval covers all three phases together.
 
@@ -267,3 +267,18 @@ browser QA runner tests retain their controlled engine scope. No faster executio
 stronger authorization, atomicity, isolation, replay/crash safety or live browser
 quality claim. No migration. Roll back manager composition and new module together.
 No unresolved design choice. Next action: explicit approval, then all three phases.
+
+## Phase 1 observed results
+
+All 33 selected public checks pass on unchanged product source: 13 new and
+20 existing advisory checks. 1155 unrelated tests were excluded only by the approved
+name filter. The new group pins absent/null/rejected advisory outcomes for both entry
+points; attempt, same-attempt newer history and pending-decision supersession; retained
+history/usage without replacement publication/release; and two-pod slot serialization.
+Existing selected cases retain approval waiting, lifecycle/queued supersession and
+callback merge-before-subscriber evidence. Public bytes/filter/names are frozen.
+
+Node22.23.3 opens SQLite3.49.2; new-group semantic diagnostics are zero. Initial Biome
+output requested explicit undefined instead of delete for the absent-method fixture;
+that fixture-only style correction is applied and diagnostics retained. No product
+bytes changed. Next: exact extraction and direct/repository contracts.

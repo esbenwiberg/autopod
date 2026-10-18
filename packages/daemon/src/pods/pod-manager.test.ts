@@ -31312,3 +31312,190 @@ describe('runtime resume context compatibility', () => {
     }
   });
 });
+
+describe('advisory validation compatibility', () => {
+  beforeEach(() => mockExecFileSuccess());
+  afterEach(() => vi.restoreAllMocks());
+
+  function fixture(entry: 'trigger' | 'revalidate') {
+    const ctx = createTestContext({ overall: 'pass' });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      {
+        profileName: 'test-profile',
+        task: 'Advisory compatibility',
+        options: { advisoryBrowserQaEnabled: true },
+      },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status: entry === 'trigger' ? 'running' : 'failed',
+      containerId: 'advisory-container',
+      worktreePath: '/tmp/advisory-compatibility',
+    });
+    return {
+      ctx,
+      manager,
+      pod,
+      run: () =>
+        entry === 'trigger'
+          ? manager.triggerValidation(pod.id)
+          : manager.revalidateSession(pod.id, { force: true }),
+    };
+  }
+
+  it.each(
+    (['trigger', 'revalidate'] as const).flatMap((entry) =>
+      (['absent', 'null', 'reject'] as const).map((mode) => ({ entry, mode })),
+    ),
+  )(
+    '$entry keeps blocking evidence and stops its container when advisory is $mode',
+    async ({ entry, mode }) => {
+      const f = fixture(entry);
+      try {
+        const runner = f.ctx.validationEngine.runAdvisoryBrowserQa;
+        if (!runner) throw new Error('Missing advisory fixture');
+        if (mode === 'absent') f.ctx.validationEngine.runAdvisoryBrowserQa = undefined;
+        else if (mode === 'null') vi.mocked(runner).mockResolvedValueOnce(null);
+        else vi.mocked(runner).mockRejectedValueOnce(new Error('Controlled advisory failure'));
+        await f.run();
+        const pod = f.manager.getSession(f.pod.id);
+        expect(pod.status).toBe('validated');
+        expect(pod.lastValidationResult?.overall).toBe('pass');
+        expect(pod.lastValidationResult?.advisoryBrowserQa).toBeUndefined();
+        expect(f.ctx.validationRepo.getLatest(pod.id)?.result.overall).toBe('pass');
+        expect(f.ctx.containerManager.stop).toHaveBeenCalledWith('advisory-container');
+        expect(f.ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+        expect(runner).toHaveBeenCalledTimes(mode === 'absent' ? 0 : 1);
+        expect(
+          f.ctx.eventRepo.getForSession(pod.id, { type: 'pod.validation_completed' }),
+        ).toHaveLength(1);
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(
+    (['trigger', 'revalidate'] as const).flatMap((entry) =>
+      (['attempt', 'history', 'decision'] as const).map((change) => ({ entry, change })),
+    ),
+  )(
+    '$entry retains old advisory evidence without publishing after $change changes',
+    async ({ entry, change }) => {
+      const f = fixture(entry);
+      const value = {
+        status: 'pass' as const,
+        reasoning: 'Old advisory evidence',
+        observations: [],
+        screenshots: [],
+        durationMs: 10,
+        tokenUsage: { inputTokens: 11, outputTokens: 3 },
+      };
+      let originalId = '';
+      let replacement: ValidationResult | undefined;
+      try {
+        const runner = f.ctx.validationEngine.runAdvisoryBrowserQa;
+        if (!runner) throw new Error('Missing advisory fixture');
+        vi.mocked(runner).mockImplementationOnce(
+          async (_config, blocking, progress, _signal, callbacks) => {
+            const row = f.ctx.validationRepo.getLatest(f.pod.id);
+            if (!row) throw new Error('Missing original validation');
+            originalId = row.id;
+            replacement = { ...blocking, attempt: change === 'attempt' ? 2 : blocking.attempt };
+            f.ctx.podRepo.update(f.pod.id, { lastValidationResult: replacement });
+            if (change === 'history')
+              f.ctx.validationRepo.insert(f.pod.id, blocking.attempt, replacement);
+            if (change === 'decision')
+              f.ctx.deps.nudgeRepo.queue(f.pod.id, 'Retain this human decision');
+            progress?.('Obsolete advisory progress');
+            callbacks?.onPhaseStarted?.('advisory');
+            callbacks?.onPhaseCompleted?.('advisory', 'pass', value);
+            return value;
+          },
+        );
+        await f.run();
+        const current = f.manager.getSession(f.pod.id);
+        expect(current.status).toBe('validated');
+        expect(current.lastValidationResult).toEqual(replacement);
+        expect(current.phaseTokenUsage?.advisory).toEqual(value.tokenUsage);
+        expect(
+          f.ctx.validationRepo.getForSession(f.pod.id).find((v) => v.id === originalId)?.result
+            .advisoryBrowserQa,
+        ).toEqual(value);
+        if (change === 'history')
+          expect(f.ctx.validationRepo.getLatest(f.pod.id)?.result).toEqual(replacement);
+        if (change === 'decision') expect(f.ctx.deps.nudgeRepo.hasPending(f.pod.id)).toBe(true);
+        expect(f.ctx.containerManager.stop).not.toHaveBeenCalled();
+        expect(f.ctx.containerManager.kill).not.toHaveBeenCalled();
+        expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+        expect(
+          f.ctx.eventRepo
+            .getForSession(f.pod.id, { type: 'pod.validation_phase_completed' })
+            .some((v) => (v.payload as { phase?: string }).phase === 'advisory'),
+        ).toBe(false);
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it('shares one advisory slot across pods and launches the waiting pod after the first settles', async () => {
+    const f = fixture('trigger');
+    const hold = deferred<NonNullable<ValidationResult['advisoryBrowserQa']>>();
+    const value = {
+      status: 'pass' as const,
+      reasoning: 'Finished',
+      observations: [],
+      screenshots: [],
+      durationMs: 1,
+    };
+    const second = f.manager.createSession(
+      {
+        profileName: 'test-profile',
+        task: 'Second advisory',
+        options: { advisoryBrowserQaEnabled: true },
+      },
+      'operator',
+    );
+    f.ctx.podRepo.update(second.id, {
+      status: 'running',
+      containerId: 'second-container',
+      worktreePath: '/tmp/second-advisory',
+    });
+    const runner = f.ctx.validationEngine.runAdvisoryBrowserQa;
+    if (!runner) throw new Error('Missing advisory fixture');
+    vi.mocked(runner)
+      .mockImplementationOnce(() => hold.promise)
+      .mockResolvedValueOnce(value);
+    let firstRun: ReturnType<typeof f.run> | undefined;
+    let secondRun: Promise<void> | undefined;
+    try {
+      firstRun = f.run();
+      await waitForAssertion(() => expect(runner).toHaveBeenCalledTimes(1));
+      secondRun = f.manager.triggerValidation(second.id);
+      await waitForAssertion(() =>
+        expect(f.manager.getSession(second.id).status).toBe('validated'),
+      );
+      expect(runner).toHaveBeenCalledTimes(1);
+      expect(f.ctx.containerManager.stop).not.toHaveBeenCalled();
+      hold.resolve(value);
+      await Promise.all([firstRun, secondRun]);
+      expect(vi.mocked(runner).mock.calls.map(([config]) => config.podId)).toEqual([
+        f.pod.id,
+        second.id,
+      ]);
+      for (const pod of [f.pod, second]) {
+        expect(f.manager.getSession(pod.id).lastValidationResult?.advisoryBrowserQa).toEqual(value);
+        expect(f.ctx.validationRepo.getLatest(pod.id)?.result.advisoryBrowserQa).toEqual(value);
+      }
+      expect(f.ctx.containerManager.stop).toHaveBeenCalledWith('advisory-container');
+      expect(f.ctx.containerManager.stop).toHaveBeenCalledWith('second-container');
+    } finally {
+      hold.resolve(value);
+      await Promise.allSettled([firstRun, secondRun]);
+      f.ctx.db.close();
+    }
+  });
+});
