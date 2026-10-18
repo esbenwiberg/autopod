@@ -1,6 +1,6 @@
 # Slice 15: reviewer context extraction
 
-Status: PROPOSED — awaiting explicit approval of all three phases.
+Status: APPROVED — implementing all three phases after explicit user approval.
 Date: 2026-10-18.
 Baseline: 2cdb48e56551f69f235585c9b12316d3e8409eee.
 Branch: codex/pod-manager-workspace.
@@ -168,8 +168,8 @@ work in finally, restore mocks/env/clocks and remove only private fixture files.
 ### Success criteria
 
 Automated:
-- [ ] New and selected existing public checks pass against unchanged product.
-- [ ] Frozen assertions/filter, before-source/hashes/runtime and raw results recorded.
+- [x] New and selected existing public checks pass against unchanged product.
+- [x] Frozen assertions/filter, before-source/hashes/runtime and raw results recorded.
 
 Manual: None required for local headless setup compatibility.
 
@@ -301,3 +301,24 @@ configuration/pod-snapshot-integration.test.ts and existing manager reviewer tes
 
 Next action: user reviews the illustrated plan and explicitly approves all three
 implementation phases. No product/test changes or implementation tests in planning.
+
+## Phase 1 observed results
+
+16 new public cases plus 82 selected existing cases pass against unchanged product:
+98 selected, with 1,036 unrelated tests excluded only by this name-filter run.
+The new group covers real composed admission/snapshots/account stores, independent
+and follow-main identity, review/memory selection, isolated env, account revocation,
+missing launch/reviewer, absent/empty/open/closed legacy history, actual Codex
+rotation and retained account update on later write failure, both validation entry
+configs, and captured store/live property behavior. Public semantic diagnostics
+are clean. Assertions/filter and before-source are frozen before extraction.
+
+Initial diagnostics caught fixture requirements: composed admission needs its legacy
+profile FK row; attempt references require the actual snapshot hash format; memory
+calls require maxTokens; manual revalidation with no new commits requires force.
+The write-failure fixture now fails specifically on auth.json after earlier config
+files. Existing callers capture reviewerProviderCredentials before env recovery:
+the engine config therefore retains that earlier snapshot while the account and
+written auth are fresh. Tests explicitly pin both observations. This extraction
+preserves that order; no product correction or assertion weakening was made.
+Initial logs/exits are retained alongside the passing baseline.

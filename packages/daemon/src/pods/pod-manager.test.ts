@@ -29817,3 +29817,374 @@ describe('validation provenance compatibility', () => {
     },
   );
 });
+
+describe('reviewer context compatibility', () => {
+  beforeEach(() => mockExecFileSuccess());
+  afterEach(() => vi.restoreAllMocks());
+
+  function legacy(provider: 'anthropic' | 'openai' = 'anthropic') {
+    const ctx = createTestContext(undefined, {
+      modelProvider: provider,
+      defaultRuntime: provider === 'openai' ? 'codex' : 'claude',
+      defaultModel: provider === 'openai' ? 'auto' : 'sonnet',
+    });
+    const accounts = createProviderAccountStore(ctx.db);
+    accounts.create({
+      id: 'review-source',
+      name: 'Review source',
+      provider,
+      credentials:
+        provider === 'openai'
+          ? { provider, authJson: '{"token":"old-fixture"}', authMode: 'chatgpt' }
+          : { provider, apiKey: 'fixture-source-key' },
+    });
+    linkProfileToProviderAccount(ctx.db, 'test-profile', 'review-source');
+    ctx.deps.providerAccountStore = accounts;
+    const manager = createPodManager(ctx.deps);
+    const created = manager.createSession(
+      { profileName: 'test-profile', task: 'Reviewer context' },
+      'operator',
+    );
+    ctx.podRepo.update(created.id, { containerId: 'review-context-container' });
+    return { ctx, accounts, manager, pod: ctx.podRepo.getOrThrow(created.id) };
+  }
+
+  async function composed(mode: 'independent' | 'follow-main') {
+    const ctx = createTestContext();
+    insertTestProfile(ctx.db, 'profile');
+    const { createTestConfiguration } = await import('../test-utils/configuration-helpers.js');
+    const { resolveLaunchAgentRoute } = await import('../configuration/agent-route-resolution.js');
+    const { createLaunchSnapshotRepository } = await import('../configuration/launch-snapshot.js');
+    const { resolveLaunchExecutionSettings } = await import(
+      '../configuration/launch-execution-settings.js'
+    );
+    const { admitLaunch } = await import('../configuration/launch-admission.js');
+    const { IsolatedReviewer } = await import('../validation/isolated-reviewer.js');
+    const { ReviewerRunRepository } = await import('../validation/reviewer-run-repository.js');
+    const { services, store } = createTestConfiguration(ctx.db);
+    const accounts = createProviderAccountStore(ctx.db);
+    for (const id of ['account', 'review-account'])
+      accounts.create({
+        id,
+        name: id,
+        provider: 'anthropic',
+        credentials: { provider: 'anthropic', apiKey: `fixture-${id}` },
+      });
+    services.resolveAgentRoute = async (route) => resolveLaunchAgentRoute(route, accounts);
+    if (mode === 'independent')
+      store.write({
+        kind: 'ai',
+        id: 'ai',
+        name: 'Independent',
+        expectedRevision: 1,
+        payload: {
+          main: { providerAccountId: 'account', runtime: 'claude', model: 'claude-sonnet-4-6' },
+          reviewer: {
+            mode,
+            route: {
+              providerAccountId: 'review-account',
+              runtime: 'claude',
+              model: 'claude-haiku-4-5',
+              reasoningEffort: 'high',
+            },
+          },
+        },
+      });
+    const snapshots = createLaunchSnapshotRepository(ctx.db, store);
+    const executor = vi.fn(async () => ({ stdout: 'Local review' }));
+    const service = new IsolatedReviewer({
+      runs: new ReviewerRunRepository(ctx.db),
+      accounts,
+      logger,
+      manager: () => ctx.containerManager,
+      image: () => `fixture@sha256:${'a'.repeat(64)}`,
+      readPod: (id) => ctx.podRepo.getOrThrow(id),
+      assertAllowed: async () => {},
+    });
+    const select = vi.spyOn(service, 'executor').mockReturnValue(executor);
+    ctx.deps.providerAccountStore = accounts;
+    ctx.deps.launchConfiguration = {
+      read: snapshots.get,
+      executionSettings: (config) =>
+        resolveLaunchExecutionSettings(config, { image: `sha256:${'a'.repeat(64)}` }),
+      assertCurrentCapabilities: async () => {},
+      prepareEnvironment: async () => 'fixture',
+      reviewer: service,
+    };
+    const manager = createPodManager(ctx.deps);
+    const admitted = await admitLaunch({
+      request: { repositoryId: 'repo-a', task: 'Review context' },
+      actorId: 'operator',
+      services,
+      snapshots,
+      createPod: (config) => {
+        if (!manager.createResolvedSession) throw new Error('Missing launch admission');
+        return manager.createResolvedSession(config, 'operator').id;
+      },
+    });
+    await new Promise<void>((done) => setImmediate(done));
+    return {
+      ctx,
+      accounts,
+      manager,
+      pod: ctx.podRepo.getOrThrow(admitted.podId),
+      select,
+      executor,
+      service,
+    };
+  }
+
+  it.each(['independent', 'follow-main'] as const)(
+    '%s preserves config, route selection, purpose and isolated env',
+    async (mode) => {
+      const f = await composed(mode);
+      try {
+        const expectedId = mode === 'independent' ? 'review-account' : 'account';
+        expect(f.manager.getReviewerConfig(f.pod)).toMatchObject({
+          profile: {
+            providerAccountId: expectedId,
+            modelProvider: 'anthropic',
+            reviewerModel: mode === 'independent' ? 'claude-haiku-4-5' : 'claude-sonnet-4-6',
+          },
+          credentials: { provider: 'anthropic', apiKey: `fixture-${expectedId}` },
+        });
+        expect(f.manager.getReviewerExecutor(f.pod)).toBe(f.executor);
+        const call = f.select.mock.calls[0];
+        if (!call) throw new Error('Missing executor selection');
+        expect(call[0]).toBe(f.pod);
+        expect(call[3]).toBe('review');
+        const selected =
+          call[1].ai.reviewer.mode === 'independent' ? call[1].ai.reviewer.route : call[1].ai.main;
+        expect(call[2]).toEqual(expect.objectContaining({ providerAccountId: expectedId }));
+        if (mode === 'independent') expect(call[2]).toBe(selected);
+        else expect(call[2]).not.toBe(selected);
+        expect(f.select.mock.contexts[0]).toBe(f.service);
+        expect(f.executor).not.toHaveBeenCalled();
+        await expect(f.manager.getReviewerExecEnv(f.pod)).resolves.toBeUndefined();
+        expect(f.ctx.containerManager.writeFile).not.toHaveBeenCalled();
+        const memory = f.manager.getLaunchMemoryContext(f.pod);
+        expect(f.select.mock.calls.at(-1)?.[3]).toBe('memory');
+        expect(f.executor).not.toHaveBeenCalled();
+        await expect(
+          memory.reviewer.generateText({
+            systemPrompt: 'System',
+            userMessage: 'Question',
+            maxTokens: 100,
+          }),
+        ).resolves.toBe('Local review');
+        expect(f.executor).toHaveBeenCalledWith({ prompt: 'System\n\nQuestion', timeout: 20_000 });
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['independent', 'follow-main'] as const)(
+    '%s retains account revocation boundaries',
+    async (mode) => {
+      const f = await composed(mode);
+      try {
+        f.accounts.updateCredentials('account', null);
+        if (mode === 'independent') {
+          expect(f.manager.getReviewerConfig(f.pod).profile.providerAccountId).toBe(
+            'review-account',
+          );
+          f.accounts.updateCredentials('review-account', null);
+        }
+        expect(() => f.manager.getReviewerConfig(f.pod)).toThrow(/not authenticated/i);
+        expect(f.select).not.toHaveBeenCalled();
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['missing-launch', 'missing-reviewer'] as const)(
+    'digest rejects %s before env writes or executor invocation',
+    async (failure) => {
+      const f = await composed('independent');
+      try {
+        const launch = f.ctx.deps.launchConfiguration;
+        if (!launch) throw new Error('Missing launch fixture');
+        if (failure === 'missing-launch') launch.read = () => null;
+        else launch.reviewer = undefined;
+        expect(() => f.manager.getReviewerExecutor(f.pod)).toThrow(
+          'Isolated reviewer execution is unavailable',
+        );
+        await expect(f.manager.getReviewerExecEnv(f.pod)).rejects.toMatchObject({
+          code: 'REVIEWER_ISOLATION_REQUIRED',
+          statusCode: 503,
+        });
+        expect(f.select).not.toHaveBeenCalled();
+        expect(f.executor).not.toHaveBeenCalled();
+        expect(f.ctx.containerManager.writeFile).not.toHaveBeenCalled();
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it('no digest skips executor lookup even if live launch read would throw', () => {
+    const f = legacy();
+    try {
+      const read = vi.fn(() => {
+        throw new Error('No read');
+      });
+      f.ctx.deps.launchConfiguration = {
+        read,
+        executionSettings: () => {
+          throw new Error('No execution');
+        },
+        assertCurrentCapabilities: async () => {},
+        prepareEnvironment: async () => '',
+      };
+      expect(f.manager.getReviewerExecutor(f.pod)).toBeUndefined();
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it.each(['absent', 'empty', 'open', 'closed'] as const)(
+    'legacy history=%s retains its profile authority',
+    (history) => {
+      const f = legacy();
+      try {
+        f.accounts.create({
+          id: 'alternate',
+          name: 'Alternate',
+          provider: 'openai',
+          credentials: { provider: 'openai', authJson: '{"token":"alternate"}' },
+        });
+        const snapshot = {
+          ...f.ctx.profileStore.get('test-profile'),
+          modelProvider: 'openai' as const,
+          providerAccountId: 'alternate',
+          defaultRuntime: 'codex' as const,
+          defaultModel: 'auto',
+          reviewerModel: 'auto',
+        };
+        f.ctx.podRepo.update(f.pod.id, { profileSnapshot: snapshot });
+        if (history !== 'absent')
+          f.ctx.deps.providerAttemptRepo = createProviderAttemptRepository(f.ctx.db);
+        if (history === 'open' || history === 'closed') {
+          f.ctx.deps.providerAttemptRepo?.open({
+            podId: f.pod.id,
+            provider: 'anthropic',
+            providerAccountId: 'review-source',
+            runtime: f.pod.runtime,
+            model: f.pod.model,
+            profileReference: testProfileReference(f.pod.id, {}),
+            profileSnapshot: {},
+          });
+          if (history === 'closed')
+            f.ctx.deps.providerAttemptRepo?.close(f.pod.id, {
+              nativeSessionId: null,
+              outcome: 'completed',
+              inputTokens: 0,
+              outputTokens: 0,
+              costUsd: 0,
+            });
+        }
+        const config = f.manager.getReviewerConfig(f.ctx.podRepo.getOrThrow(f.pod.id));
+        expect(config.profile.providerAccountId).toBe(
+          ['open', 'closed'].includes(history) ? 'review-source' : 'alternate',
+        );
+        expect(config.credentials?.provider).toBe(
+          ['open', 'closed'].includes(history) ? 'anthropic' : 'openai',
+        );
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each([false, true])(
+    'actual Codex rotation retains earlier account update when write fails=%s',
+    async (fails) => {
+      const f = legacy('openai');
+      try {
+        const fresh = '{"token":"rotated-fixture"}';
+        vi.mocked(f.ctx.containerManager.readFile).mockResolvedValue(fresh);
+        const error = new Error('Reviewer write failed');
+        if (fails)
+          vi.mocked(f.ctx.containerManager.writeFile).mockImplementation(async (_id, file) => {
+            if (file.endsWith('/auth.json')) throw error;
+          });
+        const pending = f.manager.getReviewerExecEnv(f.pod);
+        if (fails) await expect(pending).rejects.toBe(error);
+        else await expect(pending).resolves.toMatchObject({ POD_ID: f.pod.id });
+        expect(f.accounts.get('review-source').credentials).toMatchObject({
+          provider: 'openai',
+          authJson: fresh,
+        });
+        expect(f.ctx.containerManager.writeFile).toHaveBeenCalledWith(
+          'review-context-container',
+          '/home/autopod/.codex/auth.json',
+          fresh,
+        );
+        expect(f.ctx.deps.providerAttemptRepo?.list(f.pod.id) ?? []).toEqual([]);
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s preserves pre-refresh config credentials alongside refreshed reviewer env',
+    async (entry) => {
+      const f = legacy('openai');
+      try {
+        const fresh = '{"token":"engine-fixture"}';
+        vi.mocked(f.ctx.containerManager.readFile).mockResolvedValue(fresh);
+        f.ctx.podRepo.update(f.pod.id, {
+          status: entry === 'trigger' ? 'running' : 'failed',
+          worktreePath: '/tmp/reviewer-context',
+          validationAttempts: 0,
+        });
+        if (entry === 'trigger') await f.manager.triggerValidation(f.pod.id);
+        else await f.manager.revalidateSession(f.pod.id, { force: true });
+        expect(f.ctx.validationEngine.validate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            reviewerProvider: 'openai',
+            reviewerProviderAccountId: 'review-source',
+            reviewerModel: 'auto',
+            reviewerProviderCredentials: expect.objectContaining({
+              provider: 'openai',
+              authJson: '{"token":"old-fixture"}',
+            }),
+            reviewerExecEnv: expect.objectContaining({ POD_ID: f.pod.id }),
+            reviewerExecutor: undefined,
+          }),
+          expect.any(Function),
+          expect.any(AbortSignal),
+          expect.any(Object),
+        );
+        expect(f.accounts.get('review-source').credentials).toMatchObject({ authJson: fresh });
+        expect(f.ctx.containerManager.writeFile).toHaveBeenCalledWith(
+          'review-context-container',
+          '/home/autopod/.codex/auth.json',
+          fresh,
+        );
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it('legacy unhandled provider returns no env and retains captured account store after dependency replacement', async () => {
+    const f = legacy();
+    try {
+      f.ctx.deps.providerAccountStore = undefined;
+      expect(f.manager.getReviewerConfig(f.pod).credentials).toMatchObject({
+        provider: 'anthropic',
+        apiKey: 'fixture-source-key',
+      });
+      await expect(f.manager.getReviewerExecEnv(f.pod)).resolves.toBeUndefined();
+      expect(f.ctx.containerManager.readFile).not.toHaveBeenCalled();
+      expect(f.ctx.containerManager.writeFile).not.toHaveBeenCalled();
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+});
