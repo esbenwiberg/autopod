@@ -31499,3 +31499,104 @@ describe('advisory validation compatibility', () => {
     }
   });
 });
+
+describe('validation workflow compatibility', () => {
+  beforeEach(() => mockExecFileSuccess());
+  afterEach(() => vi.restoreAllMocks());
+  function fixture(status: 'running' | 'failed' | 'review_required' = 'running') {
+    const ctx = createTestContext({ overall: 'pass' });
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Validation workflows' },
+      'operator',
+    );
+    ctx.podRepo.update(pod.id, {
+      status,
+      containerId: 'workflow-container',
+      worktreePath: '/tmp/workflow',
+    });
+    return { ctx, manager, pod };
+  }
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s resolves the public approval method at deferred dispatch time',
+    async (entry) => {
+      const f = fixture(entry === 'trigger' ? 'running' : 'failed');
+      const hold = deferred<ValidationResult>();
+      const original = vi.fn(async () => {});
+      const replacement = vi.fn(async () => {});
+      f.manager.approveSession = original;
+      f.ctx.podRepo.update(f.pod.id, { autoApprove: true });
+      vi.mocked(f.ctx.validationEngine.validate).mockImplementationOnce(() => hold.promise);
+      const operation =
+        entry === 'trigger'
+          ? f.manager.triggerValidation(f.pod.id)
+          : f.manager.revalidateSession(f.pod.id, { force: true });
+      try {
+        await waitForAssertion(() => expect(f.ctx.validationEngine.validate).toHaveBeenCalled());
+        f.manager.approveSession = replacement;
+        hold.resolve(makeValidationResult({ podId: f.pod.id }));
+        await operation;
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(original).not.toHaveBeenCalled();
+        expect(replacement).toHaveBeenCalledWith(f.pod.id, { automation: true });
+        expect(f.manager.getSession(f.pod.id).status).toBe('validated');
+        expect(f.ctx.prManager.mergePr).not.toHaveBeenCalled();
+      } finally {
+        hold.resolve(makeValidationResult({ podId: f.pod.id }));
+        await operation.catch(() => {});
+        f.ctx.db.close();
+      }
+    },
+  );
+  it('coalesces active attempt extensions and uses the current validation method after recovery settles', async () => {
+    const f = fixture('review_required');
+    const hold = deferred<void>();
+    const first = vi.fn(() => hold.promise);
+    const next = vi.fn(async () => {});
+    f.manager.triggerValidation = first;
+    const initial = f.manager.getSession(f.pod.id).maxValidationAttempts;
+    try {
+      await f.manager.extendAttempts(f.pod.id, 1);
+      f.manager.triggerValidation = next;
+      await f.manager.extendAttempts(f.pod.id, 1);
+      expect(first).toHaveBeenCalledOnce();
+      expect(next).not.toHaveBeenCalled();
+      expect(f.manager.getSession(f.pod.id).maxValidationAttempts).toBe(initial + 1);
+      hold.resolve();
+      await new Promise((resolve) => setImmediate(resolve));
+      await f.manager.extendAttempts(f.pod.id, 1);
+      expect(next).toHaveBeenCalledWith(f.pod.id, { force: true });
+      expect(f.manager.getSession(f.pod.id).maxValidationAttempts).toBe(initial + 2);
+    } finally {
+      hold.resolve();
+      await new Promise((resolve) => setImmediate(resolve));
+      f.ctx.db.close();
+    }
+  });
+  it('looks up the public validation method when the deferred clean-rebase follow-up actually starts', async () => {
+    const f = fixture('failed');
+    const original = vi.fn(async () => {});
+    const replacement = vi.fn(async () => {});
+    f.manager.triggerValidation = original;
+    vi.mocked(f.ctx.worktreeManager.rebaseOntoBase).mockResolvedValueOnce({
+      rebased: true,
+      alreadyUpToDate: false,
+      conflicts: [],
+      baseCommitSha: 'b'.repeat(40),
+    });
+    try {
+      await expect(f.manager.updateFromBase(f.pod.id)).resolves.toMatchObject({
+        ok: true,
+        action: 'rebased',
+      });
+      f.manager.triggerValidation = replacement;
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(original).not.toHaveBeenCalled();
+      expect(replacement).toHaveBeenCalledWith(f.pod.id);
+      expect(f.manager.getSession(f.pod.id).startCommitSha).toBe('b'.repeat(40));
+    } finally {
+      await new Promise((resolve) => setImmediate(resolve));
+      f.ctx.db.close();
+    }
+  });
+});
