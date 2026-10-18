@@ -38,7 +38,7 @@ jobs:
           xcodebuild -version
 
       - name: Test Swift package
-        run: swift test --package-path packages/desktop --no-parallel
+        run: ./scripts/test-desktop.sh
 
       - uses: actions/setup-node@v4
         with:
