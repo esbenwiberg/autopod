@@ -1,6 +1,6 @@
 # Slice 11: validation result publication extraction
 
-Status: PROPOSED — awaiting explicit approval before implementation.
+Status: APPROVED — all three phases authorized; characterization in progress.
 Date: 2026-10-18.
 Baseline: 37d968d1f95beefba300b20df87eb98e695a4f75.
 Branch: codex/pod-manager-workspace.
@@ -145,8 +145,8 @@ control hashes, actual Node/pnpm/SQLite and raw before results in ignored
 ### Success criteria
 
 Automated:
-- [ ] New and selected existing public checks pass against unchanged product.
-- [ ] Frozen assertions/source/runtime and raw before evidence are recorded.
+- [x] New and selected existing public checks pass against unchanged product.
+- [x] Frozen assertions/source/runtime and raw before evidence are recorded.
 
 Manual: None required for this headless local extraction.
 
@@ -256,5 +256,21 @@ Predecessor: 2026-10-18-pod-manager-validation-evidence.md (complete).
 Sources: pod-manager.ts:13612–13645 and :14708–14740; validation-repository.ts;
 event-bus.ts; event-repository.ts and their existing tests.
 
-Next action: user reviews the illustrated plan and explicitly approves implementation.
-No product code or implementation tests have changed in this planning turn.
+The user explicitly approved this concrete plan and all three phases together.
+Next action: characterize the unchanged product before extraction.
+
+## Phase 1 evidence
+
+26 new public cases and 22 selected existing cases pass against unchanged product:
+48 passed, 976 name-filtered. Both entry paths cover usage priority/fallback/zero,
+state visible in real synchronous completion subscribers, optional history capture,
+late insert lookup, terminal status changes in subscribers, and five failure stages
+with preserved prior result/usage/history effects and original caller handling.
+Selected evidence/council/advisory cases preserve returned-history consumers.
+
+All 1,965 baseline package/script and six root control identities are recorded.
+Only the planned public test file changed. Assertions are frozen byte-for-byte.
+Actual Node 22.23.3 opens SQLite 3.49.2; pnpm 9.15.4. Baseline scoped Biome and
+supplemental semantic checks pass cleanly. All new cases passed on their first run;
+no baseline assertion correction was required. Raw commands/results are retained
+under ignored .autopod-data/validation-publication/.

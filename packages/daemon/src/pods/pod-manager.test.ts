@@ -28539,3 +28539,238 @@ describe('validation evidence compatibility', () => {
     }
   });
 });
+
+describe('validation publication compatibility', () => {
+  beforeEach(() => mockExecFileSuccess());
+  afterEach(() => vi.restoreAllMocks());
+
+  function fixture(entry: 'trigger' | 'revalidate', history = true) {
+    const ctx = createTestContext();
+    const result = makeValidationResult(ordinaryTestFailureResult());
+    vi.mocked(ctx.validationEngine.validate).mockImplementation(async () => result);
+    if (!history) ctx.deps.validationRepo = undefined;
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Publication compatibility' },
+      'operator',
+    );
+    const prior = {
+      agent_initial: { inputTokens: 100, outputTokens: 50 },
+      review: { inputTokens: 5, outputTokens: 7, cachedInputTokens: 2, costUsd: 0.25 },
+    };
+    ctx.podRepo.update(pod.id, {
+      status: entry === 'trigger' ? 'running' : 'failed',
+      containerId: 'publication-container',
+      worktreePath: '/tmp/validation-publication',
+      validationAttempts: 0,
+      maxValidationAttempts: 1,
+      phaseTokenUsage: prior,
+    });
+    return {
+      ctx,
+      result,
+      manager,
+      pod,
+      prior,
+      run: () =>
+        entry === 'trigger'
+          ? manager.triggerValidation(pod.id)
+          : manager.revalidateSession(pod.id, { force: true }),
+      close: () => ctx.db.close(),
+    };
+  }
+  const metered = { inputTokens: 10, outputTokens: 20, cachedInputTokens: 3, costUsd: 0.5 };
+  function review(
+    result: ValidationResult,
+    tokenUsage: NonNullable<ValidationResult['reviewTokenUsage']>,
+  ) {
+    result.taskReview = {
+      status: 'pass',
+      reasoning: 'Synthetic review',
+      issues: [],
+      model: 'reviewer',
+      screenshots: [],
+      diff: '',
+      tokenUsage,
+    };
+  }
+
+  it.each(
+    (['trigger', 'revalidate'] as const).flatMap((entry) =>
+      ['none', 'task', 'fallback', 'both', 'zero'].map((usage) => ({ entry, usage })),
+    ),
+  )(
+    '$entry publishes $usage usage with saved state visible to listeners',
+    async ({ entry, usage }) => {
+      const f = fixture(entry);
+      let unsubscribe = () => {};
+      try {
+        if (usage === 'task' || usage === 'both') review(f.result, metered);
+        if (usage === 'fallback' || usage === 'both' || usage === 'zero')
+          f.result.reviewTokenUsage =
+            usage === 'both' || usage === 'zero'
+              ? { inputTokens: 90, outputTokens: 80, cachedInputTokens: 5, costUsd: 1 }
+              : metered;
+        if (usage === 'zero') review(f.result, { inputTokens: 0, outputTokens: 0 });
+        const observations: Array<{
+          result: ValidationResult;
+          stored: ValidationResult | null;
+          usage: typeof f.prior | null;
+          history: number;
+          events: number;
+        }> = [];
+        unsubscribe = f.ctx.eventBus.subscribe((event) => {
+          if (event.type !== 'pod.validation_completed' || event.podId !== f.pod.id) return;
+          const stored = f.ctx.podRepo.getOrThrow(f.pod.id);
+          observations.push({
+            result: event.result,
+            stored: stored.lastValidationResult,
+            usage: stored.phaseTokenUsage as typeof f.prior | null,
+            history: f.ctx.validationRepo.getForSession(f.pod.id).length,
+            events: f.ctx.eventRepo.countForSession(f.pod.id, event.type),
+          });
+        });
+        await f.run();
+        expect(observations).toHaveLength(1);
+        const observation = observations[0];
+        expect(observation?.result).toBe(f.result);
+        expect(observation?.stored).toEqual(f.result);
+        expect(observation).toMatchObject({ history: 1, events: 1 });
+        const expectedReview =
+          usage === 'none' || usage === 'zero'
+            ? f.prior.review
+            : { inputTokens: 15, outputTokens: 27, cachedInputTokens: 5, costUsd: 0.75 };
+        expect(observation?.usage).toEqual({ ...f.prior, review: expectedReview });
+        expect(f.ctx.validationRepo.getLatest(f.pod.id)?.result).toEqual(f.result);
+      } finally {
+        unsubscribe();
+        f.close();
+      }
+    },
+  );
+
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s retains optional history absence captured at construction',
+    async (entry) => {
+      const f = fixture(entry, false);
+      try {
+        f.result.reviewTokenUsage = metered;
+        f.ctx.deps.validationRepo = f.ctx.validationRepo;
+        await f.run();
+        expect(f.ctx.validationRepo.getForSession(f.pod.id)).toEqual([]);
+        expect(f.ctx.eventRepo.countForSession(f.pod.id, 'pod.validation_completed')).toBe(1);
+        expect(f.ctx.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+          lastValidationResult: f.result,
+          phaseTokenUsage: { review: { inputTokens: 15, outputTokens: 27 } },
+        });
+      } finally {
+        f.close();
+      }
+    },
+  );
+
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s uses a retained history object with a newly replaced insert method',
+    async (entry) => {
+      const f = fixture(entry);
+      try {
+        const insert = vi.spyOn(f.ctx.validationRepo, 'insert');
+        await f.run();
+        expect(insert).toHaveBeenCalledExactlyOnceWith(f.pod.id, 1, f.result);
+      } finally {
+        f.close();
+      }
+    },
+  );
+
+  it.each(['trigger', 'revalidate'] as const)(
+    '%s reloads terminal status changed synchronously by a completion subscriber',
+    async (entry) => {
+      const f = fixture(entry);
+      let unsubscribe = () => {};
+      try {
+        unsubscribe = f.ctx.eventBus.subscribe((event) => {
+          if (event.type === 'pod.validation_completed' && event.podId === f.pod.id)
+            f.ctx.podRepo.update(f.pod.id, { status: 'killed' });
+        });
+        const returned = await f.run();
+        expect(f.ctx.podRepo.getOrThrow(f.pod.id).status).toBe('killed');
+        expect(f.ctx.validationRepo.getForSession(f.pod.id)).toHaveLength(1);
+        expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(f.ctx.containerManager.stop).not.toHaveBeenCalled();
+        if (entry === 'revalidate') expect(returned).toEqual({ newCommits: false, result: 'fail' });
+      } finally {
+        unsubscribe();
+        f.close();
+      }
+    },
+  );
+
+  it.each(
+    (['trigger', 'revalidate'] as const).flatMap((entry) =>
+      (['result', 'usage-read', 'usage-write', 'history', 'event'] as const).map((stage) => ({
+        entry,
+        stage,
+      })),
+    ),
+  )('$entry retains earlier publication effects after $stage failure', async ({ entry, stage }) => {
+    const f = fixture(entry);
+    try {
+      f.result.reviewTokenUsage = metered;
+      const error = new Error(`publication ${stage} failed`);
+      const update = f.ctx.podRepo.update.bind(f.ctx.podRepo);
+      let publicationWritten = false;
+      let armed = true;
+      vi.spyOn(f.ctx.podRepo, 'update').mockImplementation((id, changes) => {
+        if (changes.lastValidationResult === f.result) {
+          if (stage === 'result' && armed) {
+            armed = false;
+            throw error;
+          }
+          update(id, changes);
+          publicationWritten = true;
+          return;
+        }
+        if (publicationWritten && stage === 'usage-write' && changes.phaseTokenUsage && armed) {
+          armed = false;
+          throw error;
+        }
+        update(id, changes);
+      });
+      const get = f.ctx.podRepo.getOrThrow.bind(f.ctx.podRepo);
+      vi.spyOn(f.ctx.podRepo, 'getOrThrow').mockImplementation((id) => {
+        if (publicationWritten && stage === 'usage-read' && armed) {
+          armed = false;
+          throw error;
+        }
+        return get(id);
+      });
+      if (stage === 'history')
+        vi.spyOn(f.ctx.validationRepo, 'insert').mockImplementationOnce(() => {
+          throw error;
+        });
+      if (stage === 'event') {
+        const insert = f.ctx.eventRepo.insert.bind(f.ctx.eventRepo);
+        vi.spyOn(f.ctx.eventRepo, 'insert').mockImplementation((event) => {
+          if (event.type === 'pod.validation_completed') throw error;
+          return insert(event);
+        });
+      }
+      const returned = await f.run();
+      const stored = f.ctx.podRepo.getOrThrow(f.pod.id);
+      expect(stored.status).toBe('failed');
+      expect(stored.failureReason).toContain(error.message);
+      expect(stored.lastValidationResult).toEqual(stage === 'result' ? null : f.result);
+      expect(stored.phaseTokenUsage?.review).toEqual(
+        ['result', 'usage-read', 'usage-write'].includes(stage)
+          ? f.prior.review
+          : { inputTokens: 15, outputTokens: 27, cachedInputTokens: 5, costUsd: 0.75 },
+      );
+      expect(f.ctx.validationRepo.getForSession(f.pod.id)).toHaveLength(stage === 'event' ? 1 : 0);
+      expect(f.ctx.eventRepo.countForSession(f.pod.id, 'pod.validation_completed')).toBe(0);
+      if (entry === 'revalidate') expect(returned).toEqual({ newCommits: false, result: 'fail' });
+    } finally {
+      f.close();
+    }
+  });
+});
