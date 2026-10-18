@@ -36,9 +36,7 @@ import type {
   ReadinessStatus,
   ReasoningEffort,
   RequestCredentialPayload,
-  ReviewBatchResult,
   ReviewFeedbackResponseItem,
-  Runtime,
   ScanFinding,
   SpawnFixResponse,
   SpecFile,
@@ -49,7 +47,6 @@ import type {
   ValidationFinding,
   ValidationOverride,
   ValidationOverridePayload,
-  ValidationPhase,
   ValidationResult,
   ValidationWaiver,
 } from '@autopod/shared';
@@ -64,7 +61,6 @@ import {
   WORKSPACE_PI_HANDOFF_PATH,
   generateId,
   generatePodId,
-  mergeValidationPhaseSkips,
   outputModeFromPodOptions,
   podOptionsFromOutputMode,
   processContent,
@@ -80,7 +76,21 @@ import type {
   LaunchRegistryMaterial,
 } from '../configuration/execution-credentials.js';
 import { launchPodOptions } from '../configuration/launch-pod-options.js';
-import { isExpectedDockerError } from '../containers/docker-helpers.js';
+import { createValidationRevalidationWorkflow } from './validation-revalidation-workflow.js';
+import { createValidationTriggerWorkflow } from './validation-trigger-workflow.js';
+import { createValidationWorkflowControls } from './validation-workflow-controls.js';
+import {
+  assertProtectedOperationalPathsInScope,
+  failedFactIds,
+  failedValidationPhases,
+  getPodValidationSkipPhases,
+  getPodValidationSuite,
+  isPodValidationDisabled,
+  loadCodeReviewSkill,
+  makeUnexpectedValidationFailureResult,
+} from './validation-workflow-policy.js';
+import { createValidationWorkflowState } from './validation-workflow-state.js';
+
 import {
   computeNetworkPolicyAllowlist,
   networkNameForPod,
@@ -141,12 +151,7 @@ import {
   ensureCodexStateDir,
 } from '../runtimes/codex-state-store.js';
 import { shellQuote } from '../util/shell-quote.js';
-import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
-import { applyOverrides } from '../validation/override-applicator.js';
-import { parseDiffFilePaths } from '../validation/review-context-builder.js';
-import { addTokenUsage } from '../validation/review-synthesizer.js';
-import { publishScreenshotArtifacts } from '../validation/screenshot-artifacts.js';
-import { buildGitHubImageUrl } from '../validation/screenshot-collector.js';
+
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
 import { authenticatedGitEnvironment } from '../worktrees/authenticated-git-environment.js';
 import { deriveBareRepoPath } from '../worktrees/bare-push.js';
@@ -188,7 +193,7 @@ import {
   AgentContinuationSupersededError,
   preflightAgentContinuation,
 } from './continuation-preflight.js';
-import { buildCorrectionMessage } from './correction-context.js';
+
 import { runDeletionCleanup } from './deletion-cleanup.js';
 import { deletionOwnershipError } from './deletion-ownership.js';
 import { dispatchRequestHash } from './dispatch-preflight-ledger.js';
@@ -240,12 +245,7 @@ import { prepareLaunchRepository } from './repository-preparation.js';
 import { waitForRetryBackoff } from './retry-backoff-wait.js';
 import { createReviewerContext } from './reviewer-context.js';
 import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
-import {
-  resolvePodModel,
-  resolvePodRuntime,
-  resolveReviewerModel,
-  resolveReviewerProvider,
-} from './runtime-resolver.js';
+
 import { createRuntimeResumeContext } from './runtime-resume-context.js';
 import { type SandboxPreviewProxy, startSandboxPreviewProxy } from './sandbox-preview-proxy.js';
 import { sandboxStartupRetryInput } from './sandbox-startup-admission.js';
@@ -271,20 +271,16 @@ import { createValidationExecution } from './validation-execution.js';
 import {
   createValidationInfrastructure,
   isReviewInfrastructureOnlyFailure,
-  isValidationInfrastructureOnlyFailure,
   reviewInfrastructureFailureLabel,
   validationInfrastructureFailureLabel,
 } from './validation-infrastructure.js';
 import { createValidationInputs } from './validation-inputs.js';
-import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
+
 import { createValidationProgress } from './validation-progress.js';
 import { createValidationProvenance } from './validation-provenance.js';
 import { createValidationPublication } from './validation-publication.js';
 import type { ValidationRepository } from './validation-repository.js';
-import {
-  ValidationWorkspaceReconcileError,
-  createValidationWorkspace,
-} from './validation-workspace.js';
+import { createValidationWorkspace } from './validation-workspace.js';
 import { workerRetryDeadline } from './worker-retry-deadline.js';
 import {
   WORKER_RETRY_BACKOFFS_MS,
@@ -304,43 +300,7 @@ import {
   buildWorkspaceToolsDoc,
   mergeBashrcHint,
 } from './workspace-tools-doc.js';
-import { createWorkspaceTransfer, waitForContainerReachable } from './workspace-transfer.js';
-
-/** Single-line per-phase summary used in activity log lines. Covers all active
- * phases the validation engine produces — partial summaries can otherwise
- * contradict an `overall: fail` (e.g. tests/pages failed but only build/health
- * shown). Order matches pipeline order so the first `fail` is the failing gate. */
-function summarizeValidationPhases(result: ValidationResult): string {
-  const setupStatus = result.setup?.status ?? 'skip';
-  const lintStatus = result.lint?.status ?? 'skip';
-  const sastStatus = result.sast?.status ?? 'skip';
-  const buildStatus = setupStatus === 'fail' ? 'skip' : result.smoke.build.status;
-  const infrastructurePhase = result.infrastructureFailure?.phase;
-  const setupDisplay = infrastructurePhase === 'setup' ? 'infrastructure_error' : setupStatus;
-  const lintDisplay = infrastructurePhase === 'lint' ? 'infrastructure_error' : lintStatus;
-  const sastDisplay = infrastructurePhase === 'sast' ? 'infrastructure_error' : sastStatus;
-  const buildDisplay = infrastructurePhase === 'build' ? 'infrastructure_error' : buildStatus;
-  const testStatus =
-    infrastructurePhase === 'test' ? 'infrastructure_error' : (result.test?.status ?? 'skip');
-  const healthStatus =
-    infrastructurePhase === 'health' ? 'infrastructure_error' : result.smoke.health.status;
-  const pagesStatus =
-    result.smoke.pages.length === 0
-      ? 'skip'
-      : result.smoke.pages.every((p) => p.status === 'pass')
-        ? 'pass'
-        : 'fail';
-  const factsStatus =
-    infrastructurePhase === 'facts'
-      ? 'infrastructure_error'
-      : (result.factValidation?.status ?? 'skip');
-  const reviewStatus = result.taskReview?.status ?? 'skip';
-  return (
-    `setup: ${setupDisplay}, lint: ${lintDisplay}, sast: ${sastDisplay}, build: ${buildDisplay}, ` +
-    `tests: ${testStatus}, health: ${healthStatus}, pages: ${pagesStatus}, ` +
-    `facts: ${factsStatus}, review: ${reviewStatus}`
-  );
-}
+import { createWorkspaceTransfer } from './workspace-transfer.js';
 
 function buildDetachedMcpFallbackMessage(
   escalationType: string | undefined,
@@ -354,29 +314,6 @@ function buildDetachedMcpFallbackMessage(
     '',
     'The original MCP response stream closed before this answer could be delivered. If you already received the same answer directly from the tool call, ignore this duplicate.',
   ].join('\n');
-}
-
-function failedValidationPhases(result: ValidationResult | null): string[] {
-  if (!result) return [];
-  const failed: string[] = [];
-  if (result.setup?.status === 'fail') failed.push('setup');
-  if (result.lint?.status === 'fail') failed.push('lint');
-  if (result.sast?.status === 'fail') failed.push('sast');
-  if (result.smoke.build.status === 'fail') failed.push('build');
-  if (result.test?.status === 'fail') failed.push('tests');
-  if (result.smoke.health.status === 'fail') failed.push('health');
-  if (result.smoke.pages.some((p) => p.status === 'fail')) failed.push('pages');
-  if (result.factValidation?.status === 'fail') failed.push('facts');
-  if (result.taskReview && result.taskReview.status !== 'pass') failed.push('review');
-  return failed;
-}
-
-function failedFactIds(result: ValidationResult | null): string[] {
-  return (
-    result?.factValidation?.results
-      .filter((fact) => fact.status === 'fail' || fact.passed === false)
-      .map((fact) => fact.factId) ?? []
-  );
 }
 
 const REWORK_IN_PROGRESS_PREFIX = '[REWORK IN PROGRESS]';
@@ -458,16 +395,6 @@ function summarizeAgentCompletionBlocker(result: string): string | null {
     return 'Agent reported it could not inspect or edit files.';
   }
   return null;
-}
-
-function hasPendingFactDecision(result: ValidationResult | null): boolean {
-  return (
-    result?.factValidation?.results.some(
-      // Exit 127 means the validator discovered a missing command/toolchain.
-      // Let the agent see that feedback so it can file the factDeviation request.
-      (fact) => fact.status === 'pending_human' && fact.exitCode !== 127,
-    ) === true
-  );
 }
 
 function actorLabel(actor: OperatorActor): string {
@@ -976,25 +903,6 @@ try:
 finally:
   p.terminate();p.wait()
 `;
-
-/** Load a repo-specific code-review skill from standard locations in the worktree. */
-async function loadCodeReviewSkill(
-  worktreePath: string,
-  log?: Logger,
-): Promise<string | undefined> {
-  const candidates = ['skills/code-review.md', '.claude/skills/code-review.md'];
-  for (const relative of candidates) {
-    const fullPath = path.join(worktreePath, relative);
-    try {
-      const content = await readFile(fullPath, 'utf-8');
-      log?.info({ path: fullPath }, 'loaded repo-specific code-review skill');
-      return content;
-    } catch {
-      // not found — try next
-    }
-  }
-  return undefined;
-}
 
 /**
  * Snapshot SHA-256 hashes of every script in `profile.deployment.allowedScripts`
@@ -1778,20 +1686,6 @@ function approvedMemoriesForPod(pod: Pod, memoryRepo: MemoryRepository): MemoryE
     ...(!pod.launchConfigDigest ? memoryRepo.list('profile', pod.profileName, true) : []),
     ...memoryRepo.list('global', null, true),
   ];
-}
-
-function getPodValidationSuite(pod: Pod): NonNullable<PodOptions['validationSuite']> {
-  return pod.options.validationSuite ?? (pod.options.validate === false ? 'off' : 'full');
-}
-
-function isPodValidationDisabled(pod: Pod): boolean {
-  return (
-    pod.skipValidation || pod.options.validate === false || getPodValidationSuite(pod) === 'off'
-  );
-}
-
-function getPodValidationSkipPhases(profile: PodExecutionSettings, pod: Pod): ValidationPhase[] {
-  return mergeValidationPhaseSkips(getPodValidationSuite(pod), profile.skipValidationPhases);
 }
 
 export async function selectMemoryBriefingForPod(opts: {
@@ -3771,9 +3665,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const DEFAULT_MERGE_POLL_INTERVAL_MS = 60_000;
 
   /** Active AbortControllers for in-progress validation runs, keyed by podId. */
-  const validationAbortControllers = new Map<string, AbortController>();
+  const { validationAbortControllers, attemptExtensionRuns, pendingUpdateFromBaseIntents } =
+    createValidationWorkflowState();
   /** Slow operator recovery is detached from HTTP and coalesced per pod. */
-  const attemptExtensionRuns = new Map<string, Promise<void>>();
+
   const infrastructureResumeRuns = new Map<string, Promise<void>>();
   const artifactResumeRuns = new Map<string, Promise<void>>();
   const artifactCompletionRuns = new Map<string, Promise<void>>();
@@ -3857,7 +3752,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   /** Pods whose operator triggered update-from-base while they were validating.
    *  Consumed by the validation unwind to run the rebase instead of retrying the agent. */
-  const pendingUpdateFromBaseIntents = new Set<string>();
 
   /** Pods whose branch was cleanly rebased by update-from-base.
    *  The next pushBranch call for these pods may use --force-with-lease; cleared after one use. */
@@ -4474,56 +4368,29 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       'Fix pod completed after push — parent merge poller will re-attempt merge',
     );
   }
-
-  /**
-   * Performs the rebase-and-revalidate flow for a pod whose update-from-base
-   * intent was consumed during validation unwind. Pod must be in `validating`
-   * state; this function handles all status transitions.
-   * `startFollowUpValidation` is called (fire-and-forget) when the rebase is clean.
-   */
-  async function runUpdateFromBaseAfterAbort(
-    podId: string,
-    startFollowUpValidation: () => void,
-  ): Promise<void> {
-    const pod = podRepo.getOrThrow(podId);
-    if (!pod.worktreePath) {
-      transition(pod, 'failed');
-      return;
-    }
-    const profile = executionForPod(pod);
-    const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
-
-    emitActivityStatus(podId, `Update from base: rebasing onto '${baseBranch}'…`);
-
-    const rebaseResult = await worktreeManager.rebaseOntoBase({
-      worktreePath: pod.worktreePath,
-      baseBranch,
-      pat: await resolveGitCredential(profile),
-    });
-
-    const freshPod = podRepo.getOrThrow(podId);
-
-    if (rebaseResult.alreadyUpToDate) {
-      emitActivityStatus(podId, `Branch already up to date with '${baseBranch}'`);
-      transition(freshPod, 'failed');
-      return;
-    }
-
-    if (!rebaseResult.rebased) {
-      emitActivityStatus(
-        podId,
-        `Rebase conflict with '${baseBranch}': ${rebaseResult.conflicts.join(', ')}`,
-      );
-      transition(freshPod, 'review_required');
-      return;
-    }
-
-    emitActivityStatus(podId, `Rebased onto '${baseBranch}' — restarting validation…`);
-    forceWithLeaseAllowances.add(podId);
-    transition(freshPod, 'failed');
-    podRepo.update(podId, { validationAttempts: 0 });
-    startFollowUpValidation();
-  }
+  const validationWorkflowControls = createValidationWorkflowControls(deps, {
+    actorLabel,
+    legacyRespondedBy,
+    buildValidationWaiver,
+    mergeOverrides,
+    podRepo,
+    escalationRepo,
+    nudgeRepo,
+    worktreeManager,
+    logger,
+    executionForPod,
+    assertExecutionTerminationVerified,
+    resolveGitCredential,
+    validationAbortControllers,
+    attemptExtensionRuns,
+    pendingUpdateFromBaseIntents,
+    forceWithLeaseAllowances,
+    emitActivityStatus,
+    transition,
+    maybeTriggerDependents,
+  });
+  const { runUpdateFromBaseAfterAbort, applySkipValidationDecision, claimValidation } =
+    validationWorkflowControls;
 
   /** Start polling PR merge status for a pod in merge_pending state. */
   function startMergePolling(podId: string): void {
@@ -5280,56 +5147,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return true;
   }
 
-  function protectedOperationalPathReason(pathname: string): string | null {
-    if (
-      pathname === '.mcp.json' ||
-      pathname.startsWith('.husky/') ||
-      pathname.startsWith('.githooks/') ||
-      pathname.startsWith('.git/hooks/') ||
-      pathname.startsWith('.claude/') ||
-      pathname.startsWith('.codex/')
-    ) {
-      return 'agent/runtime operational path';
-    }
-    return null;
-  }
-
-  function podExplicitlyScopesOperationalPaths(pod: Pod): boolean {
-    const haystack = [
-      pod.task,
-      pod.taskSummary?.actualSummary,
-      pod.taskSummary?.how,
-      ...(pod.touches ?? []),
-    ]
-      .filter(Boolean)
-      .join('\n')
-      .toLowerCase();
-    return [
-      '.husky',
-      '.githooks',
-      '.git/hooks',
-      '.claude',
-      '.codex',
-      '.mcp.json',
-      'pre-commit',
-      'commit-msg',
-      'git hook',
-      'agent config',
-      'agent tooling',
-      'mcp',
-    ].some((needle) => haystack.includes(needle));
-  }
-
-  function assertProtectedOperationalPathsInScope(pod: Pod, changedPaths: string[]): void {
-    const changed = changedPaths.filter((p) => protectedOperationalPathReason(p));
-    if (changed.length === 0 || podExplicitlyScopesOperationalPaths(pod)) return;
-    throw new AutopodError(
-      `Protected operational files changed without explicit task scope: ${changed.join(', ')}. Revert these hook/agent-config changes or disclose explicit scope for them before validation.`,
-      'PROTECTED_OPERATIONAL_PATHS_CHANGED',
-      422,
-    );
-  }
-
   function taskSummaryWithApprovedFactWaiver(
     summary: TaskSummary | null,
     fact: FactCheckResult,
@@ -5768,34 +5585,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return podRepo.getOrThrow(pod.id);
   }
 
-  function applySkipValidationDecision(pod: Pod, result: ValidationResult): Pod | null {
-    if (!pod.skipValidation) return null;
-
-    const skipActor = pod.skipValidationActor ?? {
-      type: 'automation' as const,
-      id: 'legacy-skip-validation',
-    };
-    const validationWaiver =
-      result.overall === 'fail'
-        ? buildValidationWaiver(result, 'Validation skipped by operator', skipActor)
-        : null;
-    emitActivityStatus(
-      pod.id,
-      validationWaiver
-        ? `Validation waived by ${actorLabel(skipActor)} — failed phases: ${validationWaiver.failedPhases.join(', ') || 'unknown'}`
-        : `Validation skipped by ${actorLabel(skipActor)} — marking as validated`,
-    );
-    logger.info(
-      { podId: pod.id, attempt: result.attempt, validationWaiver },
-      'skip_validation set — bypassing result',
-    );
-    pendingUpdateFromBaseIntents.delete(pod.id);
-    return transition(pod, 'validated', {
-      failureReason: null,
-      validationWaiver,
-    });
-  }
-
   function emitPodCompletedEvent(pod: Pod, filesChanged = pod.filesChanged): void {
     eventBus.emit({
       type: 'pod.completed',
@@ -5814,56 +5603,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         createdAt: pod.createdAt,
       },
     });
-  }
-
-  function makeUnexpectedValidationFailureResult(
-    podId: string,
-    attempt: number,
-    validateErr: unknown,
-  ): ValidationResult {
-    const isContainerStopped =
-      validateErr instanceof Error &&
-      (validateErr.message.includes('container stopped/paused') ||
-        (validateErr as NodeJS.ErrnoException & { statusCode?: number }).statusCode === 409);
-    const buildOutput = isContainerStopped
-      ? 'Container exited before validation could run — check agent logs for errors'
-      : String(validateErr);
-
-    return {
-      podId,
-      attempt,
-      timestamp: new Date().toISOString(),
-      overall: 'fail',
-      smoke: {
-        status: 'fail',
-        build: { status: 'fail', output: buildOutput, duration: 0 },
-        health: { status: 'fail', url: '', responseCode: null, duration: 0 },
-        pages: [],
-      },
-      taskReview: null,
-      duration: 0,
-    };
-  }
-
-  function claimValidation(expectedPod: Pod, validationController: AbortController) {
-    assertExecutionTerminationVerified(expectedPod.id);
-    let claimed = false;
-    const ownership = captureValidationOwnership(expectedPod, {
-      readCurrent: () => podRepo.getOrThrow(expectedPod.id),
-      isCurrentInvocation: () =>
-        !podRepo.taskExecutions?.hasUnverifiedTermination(expectedPod.id) &&
-        (claimed
-          ? validationAbortControllers.get(expectedPod.id) === validationController
-          : !validationAbortControllers.has(expectedPod.id)),
-      hasPendingDecision: () =>
-        nudgeRepo.hasPending(expectedPod.id) ||
-        (podRepo.hasUnansweredDecision?.(expectedPod.id) ??
-          Boolean(podRepo.getOrThrow(expectedPod.id).pendingEscalation)),
-    });
-    ownership.assertCurrent();
-    validationAbortControllers.set(expectedPod.id, validationController);
-    claimed = true;
-    return ownership;
   }
 
   function recordNotReportedMemoryUsage(podId: string): void {
@@ -5988,6 +5727,119 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       logger.info({ podId: dep.id, parentIds, baseBranch }, 'Series: dependent pod enqueued');
     }
   }
+
+  const validationTriggerWorkflow = createValidationTriggerWorkflow(deps, {
+    buildManualReworkReason,
+    warnIfSinglePrSeriesMissingSeriesMeta,
+    resolvePrBaseBranch,
+    mergeOverrides,
+    podRepo,
+    escalationRepo,
+    eventBus,
+    containerManagerFactory,
+    worktreeManager,
+    validationEngine,
+    enqueueSession,
+    logger,
+    validationRepo,
+    scanRepo,
+    prManagerFactory,
+    assertExecutionTerminationVerified,
+    resolveEffectiveBoundProfile,
+    resolveGitCredential,
+    beginGoalTaskRework,
+    taskFeedbackEvents,
+    refreshReadiness,
+    destroyPodNetwork,
+    cleanupContainer,
+    getLatestPushFindings,
+    stopSandboxPreviewProxy,
+    killSidecarsForPod,
+    cleanupTestRunBranches,
+    validationAbortControllers,
+    ownsLifecycle,
+    pendingUpdateFromBaseIntents,
+    parkFixPodDeliveryFailure,
+    isParkedHostPushRecovery,
+    completeFixPodAfterPush,
+    runUpdateFromBaseAfterAbort,
+    persistRuntimeCredentialsForPod,
+    prepareWorkspaceForValidation,
+    preservePodWorkspace,
+    checkpointSandboxWorkspaceForPod,
+    startValidationAttempt,
+    prepareValidationInputs,
+    buildPhaseEventCallbacks,
+    ownedValidationCallbacks,
+    recordValidationProvenance,
+    withReviewerLaunchPreflight,
+    validateWithInfrastructureRetries,
+    collectValidationEvidence,
+    publishValidationResult,
+    parkOnRetryAdmission,
+    parkOnValidationInfrastructureFailure,
+    parkOnReviewInfrastructureFailure,
+    emitActivityStatus,
+    emitActivityError,
+    sanitizeFailureReason,
+    tryRecoverAfterWorkspaceSyncFailure,
+    advisoryPublicationOwnership,
+    runAdvisoryAfterValidation,
+    parkOnCredentialFailure,
+    handleDeletionGuardError,
+    parkOnWorktreeSyncFailure,
+    ensurePrBaseBranchOnOrigin,
+    transition,
+    applySkipValidationDecision,
+    claimValidation,
+    maybeTriggerDependents,
+  });
+  const validationRevalidationWorkflow = createValidationRevalidationWorkflow(deps, {
+    CONTAINER_APP_PORT,
+    warnIfSinglePrSeriesMissingSeriesMeta,
+    resolvePrBaseBranch,
+    podRepo,
+    eventBus,
+    containerManagerFactory,
+    worktreeManager,
+    validationEngine,
+    enqueueSession,
+    logger,
+    validationRepo,
+    executionForPod,
+    validationEnvironmentForPod,
+    prManagerFactory,
+    assertExecutionTerminationVerified,
+    assertGuidanceCollected,
+    resolveGitCredential,
+    refreshReadiness,
+    runPushCheckpointScan,
+    getLatestPushFindings,
+    validationAbortControllers,
+    buildReviewerExecEnv,
+    getEffectiveReviewerConfig,
+    getReviewerExecutor,
+    prepareWorkspaceForValidation,
+    buildPhaseEventCallbacks,
+    validateWithInfrastructureRetries,
+    publishValidationResult,
+    parkOnRetryAdmission,
+    parkOnValidationInfrastructureFailure,
+    parkOnReviewInfrastructureFailure,
+    emitActivityStatus,
+    emitActivityError,
+    sanitizeFailureReason,
+    tryRecoverAfterWorkspaceSyncFailure,
+    advisoryPublicationOwnership,
+    runAdvisoryAfterValidation,
+    handleDeletionGuardError,
+    parkOnWorktreeSyncFailure,
+    ensurePrBaseBranchOnOrigin,
+    transition,
+    applySkipValidationDecision,
+    claimValidation,
+    maybeTriggerDependents,
+  });
 
   return {
     getLaunchConfiguration(podId: string): EffectiveLaunchConfig | null {
@@ -12313,1665 +12165,25 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         [...(deps.workerInfrastructureRetryBackoffMs ?? WORKER_RETRY_BACKOFFS_MS)],
       );
     },
-
-    async triggerValidation(
-      podId: string,
-      options?: { force?: boolean; validationOnly?: boolean },
-    ): Promise<void> {
-      assertExecutionTerminationVerified(podId);
-      let pod = podRepo.getOrThrow(podId);
-      if (deps.launchConfiguration?.read(podId)?.intent === 'goal') {
-        const goal = deps.launchConfiguration.goals?.get(podId);
-        if (goal?.state !== 'achieved' || !goal.executionStopped)
-          throw new AutopodError(
-            'Native Goal must be achieved before the delivery validation pipeline',
-            'GOAL_NOT_ACHIEVED',
-            409,
-          );
-      }
-      if (
-        options?.force &&
-        !options.validationOnly &&
-        ['failed', 'review_required', 'validated'].includes(pod.status)
-      ) {
-        await beginGoalTaskRework(pod, buildManualReworkReason(pod));
-        pod = podRepo.getOrThrow(podId);
-      }
-      const lifecycleGeneration = pod.lifecycleGeneration;
-      const lifecycleContainerId = pod.containerId;
-      const force = options?.force ?? false;
-
-      const triggerValidationFromUpdateIntent = () => {
-        setImmediate(() =>
-          this.triggerValidation(podId).catch((e: unknown) =>
-            logger.error({ err: e, podId }, 'update-from-base follow-up validation failed'),
-          ),
-        );
-      };
-      // Must be checked before sending correction feedback to the agent.
-      const tryConsumeUpdateIntent = (): boolean => {
-        if (!pendingUpdateFromBaseIntents.has(podId)) return false;
-        pendingUpdateFromBaseIntents.delete(podId);
-        runUpdateFromBaseAfterAbort(podId, triggerValidationFromUpdateIntent).catch((e: unknown) =>
-          logger.error({ err: e, podId }, 'update-from-base after abort failed'),
-        );
-        return true;
-      };
-
-      if (pod.worktreeCompromised) {
-        emitActivityStatus(
-          podId,
-          'Validation blocked — recover the worktree before retrying validation.',
-        );
-        throw new AutopodError(
-          `Pod ${podId} worktree is compromised — recover it before validation`,
-          'WORKTREE_COMPROMISED',
-          409,
-        );
-      }
-
-      const profile = resolveEffectiveBoundProfile(pod);
-
-      // When force-reworking from a terminal state, re-provision the pod from scratch
-      // instead of trying to restart a potentially stale container. Docker Desktop's VirtioFS
-      // mounts can break after long idle periods, making the old container unreachable.
-      const fromTerminal =
-        pod.status === 'failed' ||
-        pod.status === 'review_required' ||
-        pod.status === 'killed' ||
-        pod.status === 'validated';
-      // Interactive pods can always be re-provisioned: no agent, no validation, no worktree required.
-      const isInteractive = pod.options.agentMode === 'interactive';
-      if (force && fromTerminal && (pod.worktreePath || isInteractive || !pod.containerId)) {
-        this.assertCanRework(podId);
-        emitActivityStatus(podId, 'Re-provisioning pod with fresh container…');
-
-        // Fence stale validation and agent cleanup before awaiting any teardown.
-        podRepo.incrementLifecycleGeneration(podId);
-        validationAbortControllers.get(podId)?.abort();
-
-        if (
-          !isInteractive &&
-          pod.executionTarget === 'sandbox' &&
-          pod.containerId &&
-          pod.worktreePath
-        ) {
-          try {
-            await preservePodWorkspace(pod, 'forced Rework');
-          } catch (preserveErr) {
-            emitActivityStatus(
-              podId,
-              'Rework blocked — the old workspace could not be preserved. The container was retained for recovery.',
-            );
-            throw new AutopodError(
-              `Pod ${podId} workspace could not be preserved before Rework: ${preserveErr instanceof Error ? preserveErr.message : String(preserveErr)}`,
-              'WORKSPACE_SYNC_FAILED',
-              409,
-            );
-          }
-        }
-
-        // Kill the old container with the same hard ceiling used by terminal cleanup.
-        // Azure sandbox deletion can stall while polling the data plane; rework must
-        // still clear the stale container reference and return to the provisioning queue.
-        await killSidecarsForPod(podId);
-        await cleanupTestRunBranches(podId);
-        await cleanupContainer(pod, 'Rework');
-        // The new container will be attached to a freshly-created per-pod
-        // bridge below; blow away any stale bridge from the prior attempt.
-        await destroyPodNetwork(podId);
-
-        const failedBeforeAgentWork =
-          pod.status === 'failed' &&
-          // A recorded worker reservation is enough to retain its existing source.
-          // Missing session/token/summary telemetry does not prove no work happened.
-          (podRepo.workerRetries?.state(podId).admissionCount ?? 0) === 0 &&
-          pod.validationAttempts === 0 &&
-          pod.lastValidationResult === null &&
-          pod.taskSummary === null &&
-          pod.claudeSessionId === null &&
-          pod.codexSessionId === null &&
-          pod.piSessionId === null &&
-          pod.prUrl === null;
-        const recoveryWorktreePath = failedBeforeAgentWork ? null : (pod.worktreePath ?? null);
-
-        // Re-queue through processPod. Preserve the worktree only when the
-        // previous run got far enough that it may contain agent-authored work.
-        // Setup-only failures (image pull, provider auth, registry probes, etc.)
-        // need a fresh baseline; otherwise a persistent hosted daemon can
-        // resurrect stale VM worktree/branch state and show it as this run's diff.
-        // Clear claudeSessionId so the agent gets a fresh spawn instead of resuming
-        // a stale/broken pod context. Set reworkReason so processPod builds
-        // a rework-specific prompt instead of the generic "you were interrupted" recovery prompt.
-        // Interactive pods don't need a rework prompt — they get a fresh container.
-        let blockedPushScan: import('../security/index.js').StoredScan | undefined;
-        if (
-          !isInteractive &&
-          pod.status === 'failed' &&
-          pod.failureReason?.includes('Pre-push security scan blocked') &&
-          scanRepo
-        ) {
-          try {
-            const latestPushScan = scanRepo.getLatestForPod(pod.id, 'push');
-            if (latestPushScan?.decision === 'block') blockedPushScan = latestPushScan;
-          } catch (err) {
-            logger.warn(
-              { err, podId },
-              'Failed to load blocked push scan for manual rework context',
-            );
-          }
-        }
-        const reworkReason = isInteractive ? null : buildManualReworkReason(pod, blockedPushScan);
-        const runtime = resolvePodRuntime(profile, pod.runtime, logger);
-        const model = resolvePodModel(profile, pod.model, runtime, logger);
-        podRepo.update(podId, {
-          runtime,
-          model,
-          validationAttempts: 0,
-          lastValidationResult: null,
-          containerId: null,
-          worktreePath: recoveryWorktreePath,
-          claudeSessionId: null,
-          codexSessionId: null,
-          piSessionId: null,
-          recoveryWorktreePath,
-          reworkReason,
-          reworkCount: (pod.reworkCount ?? 0) + 1,
-          recoveryCount: 0,
-          preSubmitReview: null,
-          completedAt: null,
-          failureReason: null,
-          infrastructureFailure: null,
-          infrastructureRecoveryCount: pod.infrastructureRecoveryCount,
-          ...(failedBeforeAgentWork
-            ? {
-                filesChanged: 0,
-                linesAdded: 0,
-                linesRemoved: 0,
-                commitCount: 0,
-                lastCommitAt: null,
-                startCommitSha: null,
-              }
-            : {}),
-        });
-        transition(podRepo.getOrThrow(podId), 'queued');
-        enqueueSession(podId);
-
-        logger.info(
-          {
-            podId,
-            worktreePath: pod.worktreePath,
-            reworkReason,
-            isInteractive,
-            previousRuntime: pod.runtime,
-            runtime,
-            previousModel: pod.model,
-            model,
-          },
-          'Rework: re-queued with fresh container provisioning',
-        );
-        return;
-      }
-
-      const { s1, attempt, validationSuite } = await startValidationAttempt(
-        pod,
-        profile,
-        fromTerminal,
+    triggerValidation(podId: string, options?: { force?: boolean; validationOnly?: boolean }) {
+      return validationTriggerWorkflow.triggerValidation.call(
+        {
+          triggerValidation: (...args) => this.triggerValidation(...args),
+          assertCanRework: (...args) => this.assertCanRework(...args),
+          approveSession: (...args) => this.approveSession(...args),
+          consumeAgentEvents: (...args) => this.consumeAgentEvents(...args),
+          handleCompletion: (...args) => this.handleCompletion(...args),
+        },
+        podId,
+        options,
       );
-
-      try {
-        if (!pod.containerId) {
-          throw new Error(`Pod ${podId} has no container — cannot validate`);
-        }
-
-        // Restart the container if it was stopped (e.g. after max attempts exhausted)
-        if (force) {
-          const cm = containerManagerFactory.get(pod.executionTarget);
-          await cm.start(pod.containerId);
-        } else {
-          // Guard: if the container exited before we got here (e.g. agent gave up after a
-          // push rejection), fail fast with a human-readable message instead of getting a
-          // cryptic Docker 409 "container stopped/paused" error from the exec call below.
-          const cm = containerManagerFactory.get(pod.executionTarget);
-          const containerStatus = await cm.getStatus(pod.containerId);
-          if (containerStatus === 'unknown') {
-            emitActivityStatus(
-              podId,
-              'Sandbox status is unavailable before validation — waiting for recovery…',
-            );
-            const recovery = await waitForContainerReachable(pod.containerId, cm, 30_000);
-            if (recovery !== 'ready') {
-              const result = makeUnexpectedValidationFailureResult(
-                podId,
-                attempt,
-                new Error(`Sandbox status remained ${recovery} before validation could run`),
-              );
-              result.infrastructureFailure = {
-                phase: 'setup',
-                code: 'SANDBOX_STATUS_UNAVAILABLE',
-                message: `Sandbox status remained ${recovery} before validation could run`,
-                retryable: true,
-              };
-              podRepo.update(podId, { lastValidationResult: result });
-              validationRepo?.insert(podId, attempt, result);
-              eventBus.emit({
-                type: 'pod.validation_completed',
-                timestamp: new Date().toISOString(),
-                podId,
-                result,
-              });
-              await parkOnValidationInfrastructureFailure(podRepo.getOrThrow(podId), result);
-              return;
-            }
-          } else if (containerStatus !== 'running') {
-            throw new Error(
-              `Container exited before validation could run — check agent logs for errors (container status: ${containerStatus})`,
-            );
-          }
-        }
-
-        // Sync workspace back before reading diff/commit log from host worktree
-        emitActivityStatus(podId, 'Syncing workspace…');
-        let validationSyncOk = true;
-        if (pod.containerId && pod.worktreePath) {
-          try {
-            if (pod.executionTarget === 'sandbox') {
-              const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
-              validationSyncOk =
-                checkpoint.promoted && checkpoint.materialized && checkpoint.lineageVerified;
-            } else {
-              const cm = containerManagerFactory.get(pod.executionTarget);
-              await prepareWorkspaceForValidation(
-                pod.containerId,
-                pod.worktreePath,
-                cm,
-                podId,
-                pod.executionTarget,
-              );
-            }
-          } catch (err) {
-            logger.warn({ err, podId }, 'Failed to sync workspace before validation');
-            validationSyncOk =
-              err instanceof ValidationWorkspaceReconcileError
-                ? false
-                : await tryRecoverAfterWorkspaceSyncFailure(pod, err, 'validation');
-          }
-        }
-        if (!validationSyncOk) {
-          parkOnWorktreeSyncFailure(
-            podId,
-            'Workspace sync failed before validation — validation blocked.',
-          );
-          return;
-        }
-
-        const { validationConfig, previousValidation } = await prepareValidationInputs(
-          pod,
-          profile,
-          s1,
-          attempt,
-          validationSuite,
-        );
-
-        let result: Awaited<ReturnType<typeof validationEngine.validate>>;
-        const validationController = new AbortController();
-        const ownership = claimValidation(pod, validationController);
-        try {
-          result = await validateWithInfrastructureRetries(
-            validationConfig,
-            validationController,
-            buildPhaseEventCallbacks(podId),
-            'Validation engine threw unexpectedly',
-            ownership,
-          );
-          ownership.assertCurrent();
-        } finally {
-          if (validationAbortControllers.get(podId) === validationController)
-            validationAbortControllers.delete(podId);
-        }
-
-        if (!ownsLifecycle(podId, lifecycleGeneration, lifecycleContainerId)) {
-          logger.info(
-            { podId, containerId: lifecycleContainerId, generation: lifecycleGeneration },
-            'Discarded stale lifecycle validation result',
-          );
-          return;
-        }
-
-        emitActivityStatus(podId, 'Validation checks finished — finalizing result…');
-
-        validationSyncOk = await collectValidationEvidence(podId, pod, result, validationSyncOk);
-
-        const validationRecord = publishValidationResult(podId, attempt, result);
-
-        let s2 = podRepo.getOrThrow(podId);
-
-        // Pod may have been killed while validation was running — bail out
-        if (isTerminalState(s2.status) || s2.status === 'killing') {
-          logger.info(
-            { podId, status: s2.status },
-            'Pod killed during validation, skipping post-validation',
-          );
-          return;
-        }
-
-        // Emit detailed validation result
-        emitActivityStatus(
-          podId,
-          `Validation ${result.overall} — ${summarizeValidationPhases(result)}`,
-        );
-
-        // Surface review feedback so the user can see why it failed
-        if (result.taskReview && result.taskReview.status !== 'pass') {
-          if (result.taskReview.reasoning) {
-            emitActivityStatus(podId, `Review: ${result.taskReview.reasoning}`);
-          }
-          for (const issue of result.taskReview.issues) {
-            emitActivityStatus(podId, `  → ${issue}`);
-          }
-        }
-
-        // ── Validation overrides: apply existing dismissals, detect recurring findings ──
-        let effectiveResult = result;
-        if (s2.validationOverrides && s2.validationOverrides.length > 0) {
-          effectiveResult = applyOverrides(result, s2.validationOverrides);
-          if (effectiveResult.overall !== result.overall) {
-            logger.info(
-              {
-                podId,
-                originalOverall: result.overall,
-                patchedOverall: effectiveResult.overall,
-              },
-              'Validation overrides changed overall result',
-            );
-            emitActivityStatus(podId, 'Human overrides applied — re-evaluated result');
-          }
-        }
-
-        // Container/data-plane failures are daemon infrastructure, not agent work.
-        if (isValidationInfrastructureOnlyFailure(effectiveResult)) {
-          if (tryConsumeUpdateIntent()) return;
-          await parkOnValidationInfrastructureFailure(s2, effectiveResult);
-          return;
-        }
-
-        // Reviewer process failures are daemon infrastructure, not agent work.
-        if (isReviewInfrastructureOnlyFailure(effectiveResult)) {
-          if (tryConsumeUpdateIntent()) return;
-          await parkOnReviewInfrastructureFailure(s2);
-          return;
-        }
-
-        // Retry-cycle review findings need an independent council on the same
-        // frozen bytes before they can trigger another correction or escalation.
-        if (effectiveResult.overall === 'fail' && previousValidation) {
-          const previousResult = previousValidation.result;
-
-          if (previousResult) {
-            const currentFindings = extractFindings(effectiveResult);
-            const previousFindings = extractFindings(previousResult);
-            const reviewCandidates = currentFindings.filter(
-              (finding) => finding.source === 'task_review',
-            );
-            const recurring = detectRecurringFindings(reviewCandidates, previousFindings);
-            const retryBatchHealthy =
-              effectiveResult.taskReview?.reviewBatch?.quality === 'healthy';
-            const closureStatus =
-              effectiveResult.taskReview?.reviewBatch?.closureVerification?.status;
-            const closureConclusive = closureStatus === undefined || closureStatus === 'completed';
-
-            if (reviewCandidates.length > 0 && retryBatchHealthy && closureConclusive) {
-              logger.info(
-                {
-                  podId,
-                  candidateCount: reviewCandidates.length,
-                  recurringCount: recurring.length,
-                  attempt,
-                },
-                'Retry validation findings require independent confirmation',
-              );
-              emitActivityStatus(
-                podId,
-                `${reviewCandidates.length} retry finding(s) detected — confirming with an independent council`,
-              );
-
-              // Re-run only a fresh council. Deterministic evidence is already
-              // durable for this exact attempt; a second opinion must not execute
-              // the suite or revive the broad discovery reviewer.
-              let hoistedResult: typeof effectiveResult | null = null;
-              let hoistError: unknown;
-              let confirmedRecurring: ValidationFinding[] = [];
-              let confirmedNew: ValidationFinding[] = [];
-              let adjudicationReviewBatch: ReviewBatchResult | undefined;
-              const recurringIds = new Set(recurring.map((finding) => finding.id));
-              const candidateIds = new Set(reviewCandidates.map((finding) => finding.id));
-              const candidateFindingIds = [...candidateIds].sort();
-              const originalReviewBatchId = effectiveResult.taskReview?.reviewBatch?.id;
-              const councilController = new AbortController();
-              const councilOwnership = claimValidation(pod, councilController);
-              try {
-                const reviewConfig: Parameters<ValidationEngine['validate']>[0] = {
-                  ...validationConfig,
-                  reviewDepth: 'deep',
-                  reviewOnly: true,
-                  councilOnly: true,
-                  preSubmitReview: null,
-                  // This is an independent adjudication of the current bytes,
-                  // not another ledger-reconciliation pass. Reusing the prior
-                  // batch here can carry the same historical finding into both
-                  // opinions without either reviewer rediscovering the defect.
-                  priorReviewBatch: undefined,
-                  skipPhases: [
-                    'setup',
-                    'lint',
-                    'sast',
-                    'build',
-                    'test',
-                    'health',
-                    'pages',
-                    'facts',
-                  ],
-                };
-                await recordValidationProvenance(
-                  reviewConfig,
-                  'review',
-                  councilOwnership.assertCurrent,
-                );
-                councilOwnership.assertCurrent();
-                const reviewOnly = await validationEngine.validate(
-                  withReviewerLaunchPreflight(reviewConfig, councilOwnership),
-                  (phase) => {
-                    if (councilOwnership.isCurrent()) emitActivityStatus(podId, phase);
-                  },
-                  councilController.signal,
-                  ownedValidationCallbacks(councilOwnership, buildPhaseEventCallbacks(podId)),
-                );
-                councilOwnership.assertCurrent();
-                if (
-                  isReviewInfrastructureOnlyFailure(reviewOnly) ||
-                  reviewOnly.taskReview?.reviewBatch?.quality !== 'healthy'
-                ) {
-                  throw new Error('Independent retry-finding council did not complete healthily');
-                }
-                const independentFindings = extractFindings(reviewOnly);
-                const confirmed = independentFindings.filter((finding) =>
-                  candidateIds.has(finding.id),
-                );
-                const confirmedIds = new Set(confirmed.map((finding) => finding.id));
-                confirmedRecurring = confirmed.filter((finding) => recurringIds.has(finding.id));
-                confirmedNew = confirmed.filter((finding) => !recurringIds.has(finding.id));
-                adjudicationReviewBatch = reviewOnly.taskReview?.reviewBatch;
-                const primaryTaskReview = effectiveResult.taskReview;
-                const hasUnmetRequirements =
-                  primaryTaskReview?.requirementsCheck?.some((item) => !item.met) ?? false;
-                const combinedReviewUsage = addTokenUsage(
-                  primaryTaskReview?.tokenUsage,
-                  reviewOnly.taskReview?.tokenUsage,
-                );
-                const adjudicatedTaskReview = primaryTaskReview
-                  ? {
-                      ...primaryTaskReview,
-                      status:
-                        confirmed.length > 0 || hasUnmetRequirements
-                          ? ('fail' as const)
-                          : ('pass' as const),
-                      reasoning:
-                        confirmed.length > 0
-                          ? `Independent council confirmed ${confirmed.length} retry finding(s).`
-                          : 'Independent council did not reproduce any retry finding.',
-                      issues: reviewCandidates
-                        .filter((finding) => confirmedIds.has(finding.id))
-                        .map((finding) => finding.description),
-                      ...(combinedReviewUsage ? { tokenUsage: combinedReviewUsage } : {}),
-                      ...(primaryTaskReview.reviewBatch
-                        ? {
-                            reviewBatch: {
-                              ...primaryTaskReview.reviewBatch,
-                              ledger: primaryTaskReview.reviewBatch.ledger?.filter(
-                                (entry) =>
-                                  !candidateIds.has(entry.semanticId) ||
-                                  confirmedIds.has(entry.semanticId),
-                              ),
-                              adjudication: {
-                                kind: 'recurrence-hoist' as const,
-                                ...(originalReviewBatchId ? { originalReviewBatchId } : {}),
-                                candidateFindingIds,
-                                confirmedFindingIds: [...confirmedIds].sort(),
-                              },
-                            },
-                          }
-                        : {}),
-                    }
-                  : null;
-                const deterministicFailures = failedValidationPhases(effectiveResult).filter(
-                  (phase) => phase !== 'review',
-                );
-                hoistedResult = {
-                  ...effectiveResult,
-                  taskReview: adjudicatedTaskReview,
-                  reviewSkipReason: reviewOnly.reviewSkipReason,
-                  reviewSkipKind: reviewOnly.reviewSkipKind,
-                  reviewTokenUsage: combinedReviewUsage,
-                  duration: effectiveResult.duration + reviewOnly.duration,
-                  overall:
-                    deterministicFailures.length === 0 && adjudicatedTaskReview?.status === 'pass'
-                      ? 'pass'
-                      : 'fail',
-                };
-                if (s2.validationOverrides && s2.validationOverrides.length > 0) {
-                  hoistedResult = applyOverrides(hoistedResult, s2.validationOverrides);
-                }
-                // Persist the second opinion even when it remains blocking.
-                podRepo.update(podId, { lastValidationResult: hoistedResult });
-                // The first pass for this attempt is already recorded. Replace
-                // exactly that immutable history row with its adjudicated result.
-                if (validationRecord) {
-                  validationRepo?.updateResult(validationRecord.id, hoistedResult);
-                }
-              } catch (err) {
-                councilOwnership.assertCurrent();
-                hoistError = err;
-                logger.warn({ err, podId }, 'Auto-hoist deeper review failed');
-              } finally {
-                if (validationAbortControllers.get(podId) === councilController)
-                  validationAbortControllers.delete(podId);
-              }
-
-              // The review call is asynchronous: honor a concurrent kill or
-              // skip-validation update instead of continuing with stale s2.
-              s2 = podRepo.getOrThrow(podId);
-              if (isTerminalState(s2.status) || s2.status === 'killing') return;
-              if (hoistError && !s2.skipValidation) {
-                emitActivityStatus(
-                  podId,
-                  'Independent retry-finding review failed — moving to review required',
-                );
-                transition(s2, 'review_required');
-                return;
-              }
-              if (
-                hoistedResult &&
-                isReviewInfrastructureOnlyFailure(hoistedResult) &&
-                !s2.skipValidation
-              ) {
-                emitActivityStatus(
-                  podId,
-                  `${reviewInfrastructureFailureLabel(hoistedResult)} during deeper review — moving to review required`,
-                );
-                await parkOnReviewInfrastructureFailure(s2);
-                return;
-              }
-
-              if (hoistedResult && hoistedResult.overall === 'pass') {
-                // Independent review did not reproduce the candidates.
-                effectiveResult = hoistedResult;
-                emitActivityStatus(podId, 'Independent council cleared retry findings');
-                logger.info({ podId }, 'Independent council cleared retry findings');
-              } else {
-                // Recurring findings need a human decision; confirmed new
-                // findings continue through ordinary correction.
-                if (confirmedRecurring.length > 0) {
-                  emitActivityStatus(
-                    podId,
-                    `Deeper review still flagged ${confirmedRecurring.length} recurring finding(s) — escalating to human`,
-                  );
-
-                  const adjudicationBatch = adjudicationReviewBatch;
-
-                  const escalation: EscalationRequest = {
-                    id: generateId(12),
-                    podId,
-                    type: 'validation_override',
-                    timestamp: new Date().toISOString(),
-                    payload: {
-                      findings: confirmedRecurring,
-                      attempt,
-                      maxAttempts: s2.maxValidationAttempts,
-                      adjudication: {
-                        ...(adjudicationBatch?.reviewedHead
-                          ? { reviewedHead: adjudicationBatch.reviewedHead }
-                          : {}),
-                        ...(adjudicationBatch?.diffHash
-                          ? { diffHash: adjudicationBatch.diffHash }
-                          : {}),
-                        ...(originalReviewBatchId ? { originalReviewBatchId } : {}),
-                        ...(adjudicationBatch?.id
-                          ? { adjudicationReviewBatchId: adjudicationBatch.id }
-                          : {}),
-                        candidateFindingIds,
-                        confirmedFindingIds: confirmedRecurring.map((finding) => finding.id).sort(),
-                      },
-                    },
-                    response: null,
-                  };
-
-                  persistEscalation(podRepo, escalationRepo, escalation, () => {
-                    transition(s2, 'awaiting_input', {
-                      pendingEscalation: escalation,
-                      escalationCount: s2.escalationCount + 1,
-                    });
-                  });
-
-                  logger.info(
-                    {
-                      podId,
-                      escalationId: escalation.id,
-                      findingCount: confirmedRecurring.length,
-                    },
-                    'Validation override escalation created — waiting for human',
-                  );
-                  return; // Wait for human response via sendMessage()
-                }
-                if (confirmedNew.length > 0) {
-                  emitActivityStatus(
-                    podId,
-                    `Independent council confirmed ${confirmedNew.length} new retry finding(s)`,
-                  );
-                }
-                // Only primary retry findings reproduced by the independent
-                // council remain actionable. Findings first seen by the second
-                // opinion are evidence, never a fresh correction-cycle veto.
-                if (hoistedResult) effectiveResult = hoistedResult;
-              }
-            }
-          }
-        }
-
-        // Downstream persistence, PR metadata, and advisory QA must all use the
-        // independently adjudicated result rather than the pre-adjudication pass.
-        result = effectiveResult;
-
-        // Skip-validation may have been toggled while this run was in flight — bypass result.
-        const skipValidatedPod = applySkipValidationDecision(s2, result);
-        if (skipValidatedPod) {
-          maybeTriggerDependents(skipValidatedPod);
-          return;
-        }
-
-        if (hasPendingFactDecision(effectiveResult)) {
-          emitActivityStatus(
-            podId,
-            'Required fact pending human decision — moving to review required',
-          );
-          transition(s2, 'review_required');
-
-          if (s2.containerId) {
-            try {
-              emitActivityStatus(podId, 'Stopping post-validation container…');
-              await stopSandboxPreviewProxy(podId);
-              const cm = containerManagerFactory.get(s2.executionTarget);
-              await cm.stop(s2.containerId);
-              logger.info({ podId }, 'Container stopped while awaiting fact deviation decision');
-            } catch (stopErr) {
-              logger.warn({ err: stopErr, podId }, 'Failed to stop container post-validation');
-            }
-          }
-          return;
-        }
-
-        if (isReviewInfrastructureOnlyFailure(effectiveResult)) {
-          emitActivityStatus(
-            podId,
-            `${reviewInfrastructureFailureLabel(effectiveResult)} — retry budget exhausted, moving to review required`,
-          );
-          transition(s2, 'review_required');
-
-          if (s2.containerId) {
-            try {
-              emitActivityStatus(podId, 'Stopping post-validation container…');
-              await stopSandboxPreviewProxy(podId);
-              const cm = containerManagerFactory.get(s2.executionTarget);
-              await cm.stop(s2.containerId);
-              logger.info(
-                { podId },
-                'Container stopped after review infrastructure retries exhausted',
-              );
-            } catch (stopErr) {
-              logger.warn({ err: stopErr, podId }, 'Failed to stop container post-validation');
-            }
-          }
-          return;
-        }
-
-        if (effectiveResult.overall === 'pass') {
-          emitActivityStatus(podId, `Validation passed (attempt ${attempt})`);
-          const passDefaultBranch = profile.defaultBranch ?? 'main';
-          // Push branch and create PR before transitioning to validated.
-          // Fix pods already have prUrl set — carry it forward and skip PR creation.
-          let prUrl: string | null = s2.prUrl ?? null;
-          const prManager = prManagerFactory ? prManagerFactory(profile) : null;
-          if (prManager && s2.worktreePath && s2.options.output === 'pr') {
-            // Publish screenshots to their own ref so the PR body can embed them
-            // without the reviewed branch carrying a file the agent never wrote.
-            // ADO pods skip this entirely — they upload PR attachments instead.
-            const screenshotBranch =
-              profile.prProvider === 'ado'
-                ? null
-                : await publishScreenshotArtifacts({
-                    worktreeManager,
-                    logger,
-                    podId,
-                    worktreePath: s2.worktreePath,
-                    pat: await resolveGitCredential(profile),
-                  });
-
-            // Push branch so `gh pr create --head` can reference it. If sync-back failed
-            // earlier in this validation run, tighten the deletion guard so a ghost
-            // mass-deletion cannot ship as "chore: auto-commit …".
-            // Rethrow on non-guard errors: a swallowed push lets the carry-forward
-            // path approve & merge a PR whose tip never advanced (real bug from
-            // misrouted fix pods writing to the wrong branch).
-            emitActivityStatus(podId, 'Branch validated — pushing…');
-            try {
-              await worktreeManager.mergeBranch({
-                worktreePath: s2.worktreePath,
-                // Push the feature branch up so `gh pr create --head <branch>` can reference it.
-                // The PR is opened against passDefaultBranch separately by prManager.createPr.
-                targetBranch: s2.branch,
-                // Pass the PAT explicitly — the in-memory cache may be cold after a daemon
-                // restart or for recovery pods that mount an existing worktree without
-                // re-warming via create(). Without this, ADO URLs of the form
-                // https://<org>@dev.azure.com/... cause git to prompt for a password.
-                pat: await resolveGitCredential(profile),
-                maxDeletions: validationSyncOk ? 100 : 0,
-                podTask: pod.task,
-                profile,
-                podModel: pod.model,
-              });
-            } catch (err) {
-              const message = err instanceof Error ? err.message : String(err);
-              logger.warn({ err, podId }, 'Failed to push branch for PR');
-              // Credential-class failures are recoverable: park the pod in
-              // awaiting_input so the operator can update the PAT and resume,
-              // instead of burning the validated work on a fixable error.
-              if (err instanceof GitCredentialError) {
-                parkOnCredentialFailure(podId, err);
-                return;
-              }
-              if (handleDeletionGuardError(podId, err)) {
-                const compromised = podRepo.getOrThrow(podId);
-                if (compromised.status === 'validating') {
-                  transition(compromised, 'failed');
-                }
-                return;
-              }
-              emitActivityStatus(podId, `Branch push failed: ${message}`);
-              throw err;
-            }
-
-            // Re-compute diff stats now that auto-commit has run.
-            try {
-              const prSinceCommit = s2.startCommitSha ?? undefined;
-              const prBaseBranch = s2.baseBranch ?? passDefaultBranch;
-              const stats = await worktreeManager.getDiffStats(
-                s2.worktreePath,
-                prBaseBranch,
-                prSinceCommit,
-              );
-              podRepo.update(podId, {
-                filesChanged: stats.filesChanged,
-                linesAdded: stats.linesAdded,
-                linesRemoved: stats.linesRemoved,
-              });
-            } catch (err) {
-              logger.warn({ err, podId }, 'Failed to recompute diff stats after merge');
-            }
-
-            // Build screenshot refs for the PR body, provider-aware.
-            // GitHub: embed raw GitHub URLs against the artifact ref. Requires the
-            //         ref to exist — screenshotBranch is null when the push failed,
-            //         and linking to a missing ref would only render broken images.
-            // ADO: pass stored on-disk refs so AdoPrManager can upload them as
-            //      PR attachments and embed the returned attachment URLs instead
-            //      of GitHub URLs that would 404 on ADO reviewers.
-            const isAdoPod = profile.prProvider === 'ado';
-            const repoUrlForScreenshots = profile.repoUrl;
-            const screenshotRefs =
-              !isAdoPod && repoUrlForScreenshots && screenshotBranch
-                ? result.smoke.pages
-                    .filter((p) => p.screenshotPath)
-                    .map((p) => ({
-                      pagePath: p.path,
-                      imageUrl: buildGitHubImageUrl(
-                        repoUrlForScreenshots,
-                        screenshotBranch,
-                        p.screenshotPath.replace(/^\/workspace\//, ''),
-                      ),
-                    }))
-                : [];
-            // Raw refs for ADO: page.screenshot is set by collectScreenshots above.
-            const rawScreenshots = isAdoPod
-              ? result.smoke.pages.flatMap((p) =>
-                  p.screenshot != null ? [{ pagePath: p.path, ref: p.screenshot }] : [],
-                )
-              : undefined;
-
-            if (!prUrl) {
-              try {
-                emitActivityStatus(podId, 'Creating PR…');
-                const s3 = podRepo.getOrThrow(podId);
-                warnIfSinglePrSeriesMissingSeriesMeta(s2, logger);
-                const baseBranch = resolvePrBaseBranch(s2, profile);
-                await ensurePrBaseBranchOnOrigin(s2, profile, baseBranch, 'validation_pass');
-                const createResult = await prManager.createPr({
-                  // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null here — PR creation only occurs for non-artifact pods which always have a worktree
-                  worktreePath: s2.worktreePath!,
-                  repoUrl: profile.repoUrl ?? undefined,
-                  branch: s2.branch,
-                  baseBranch,
-                  podId,
-                  task: s2.task,
-                  profileName: s2.profileName,
-                  profile,
-                  podModel: s2.model,
-                  handoffInstructions: s2.handoffInstructions ?? undefined,
-                  validationResult: result,
-                  validationWaiver: s3.validationWaiver,
-                  filesChanged: s3.filesChanged,
-                  linesAdded: s3.linesAdded,
-                  linesRemoved: s3.linesRemoved,
-                  previewUrl: s2.previewUrl,
-                  screenshots: screenshotRefs,
-                  rawScreenshots,
-                  taskSummary: s3.taskSummary ?? undefined,
-                  seriesDescription: s2.seriesDescription ?? undefined,
-                  seriesName: s2.seriesName ?? undefined,
-                  securityFindings: getLatestPushFindings(podId),
-                });
-                prUrl = createResult.url;
-                if (createResult.usedFallback) {
-                  const which = createResult.narrativeUsedFallback
-                    ? createResult.titleUsedFallback
-                      ? 'title + body'
-                      : 'body'
-                    : 'title';
-                  const reason = createResult.fallbackReason ?? 'unknown';
-                  logger.error(
-                    {
-                      podId,
-                      profile: profile.name,
-                      modelProvider: profile.modelProvider,
-                      fallbackReason: reason,
-                      fallbackDetail: createResult.fallbackDetail,
-                    },
-                    'PR description used template fallback during validation',
-                  );
-                  emitActivityStatus(podId, `PR ${which} used template fallback: ${reason}`);
-                }
-                if (prUrl) {
-                  emitActivityStatus(podId, `PR created: ${prUrl}`);
-                }
-              } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
-                logger.warn({ err, podId }, 'Failed to create PR — pod still validated');
-                emitActivityStatus(podId, `PR creation failed: ${message} — pod still validated`);
-              }
-            } else {
-              emitActivityStatus(podId, `Carrying forward existing PR: ${prUrl}`);
-            }
-          }
-
-          podRepo.update(podId, { lastCorrectionMessage: null });
-          // Validation completed before the abort signal landed — stale update-from-base
-          // intent must not fire on a later revalidation for this pod.
-          pendingUpdateFromBaseIntents.delete(podId);
-          const validatedPod = transition(s2, 'validated', { prUrl });
-          refreshReadiness(podId, {
-            advisoryQaInFlight:
-              validationConfig.advisoryBrowserQaEnabled && !!validationEngine.runAdvisoryBrowserQa,
-          });
-          maybeTriggerDependents(validatedPod);
-          await runAdvisoryAfterValidation(
-            podId,
-            validationConfig,
-            result,
-            validationRecord?.id,
-            validatedPod,
-          );
-          advisoryPublicationOwnership(validatedPod, result, validationRecord?.id).assertCurrent();
-          const postAdvisoryPod = podRepo.getOrThrow(podId);
-          if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
-            return;
-          }
-
-          // Fix pods don't own the PR — their parent does. Once a fix pod
-          // validates, it rebases + pushes its branch and completes; the
-          // parent's merge poller re-attempts the merge with the new commits.
-          // This must run before the autoApprove check below: a fix pod must
-          // never walk the normal approve/merge path.
-          if (postAdvisoryPod.linkedPodId) {
-            await completeFixPodAfterPush(postAdvisoryPod);
-            return;
-          }
-
-          // Stop the container (not remove) so it can be restarted for preview
-          if (postAdvisoryPod.containerId) {
-            try {
-              emitActivityStatus(podId, 'Stopping post-validation container…');
-              await stopSandboxPreviewProxy(podId);
-              const cm = containerManagerFactory.get(postAdvisoryPod.executionTarget);
-              await cm.stop(postAdvisoryPod.containerId);
-              logger.info({ podId }, 'Container stopped post-validation');
-            } catch (err) {
-              logger.warn({ err, podId }, 'Failed to stop container post-validation');
-            }
-          }
-
-          if (postAdvisoryPod.autoApprove) {
-            emitActivityStatus(podId, 'Auto-approving…');
-            logger.info({ podId }, 'Auto-approving pod after validation');
-            setImmediate(() => {
-              this.approveSession(podId, { automation: true }).catch((err) =>
-                logger.warn({ err, podId }, 'Auto-approve failed'),
-              );
-            });
-          }
-        } else if (force || attempt < s2.maxValidationAttempts) {
-          if (tryConsumeUpdateIntent()) return;
-
-          if (options?.validationOnly) {
-            emitActivityStatus(
-              podId,
-              'Validation-only resume failed — agent rework was not started',
-            );
-            transition(s2, 'failed');
-            return;
-          }
-
-          emitActivityStatus(
-            podId,
-            `Validation failed (attempt ${attempt}/${s2.maxValidationAttempts}) — retrying`,
-          );
-          // Build correction message with structured feedback for the agent
-          emitActivityStatus(podId, 'Sending validation feedback to agent…');
-          const cm = containerManagerFactory.get(s2.executionTarget);
-          let correctionMessage = await buildCorrectionMessage(s2, profile, effectiveResult, cm);
-          const goalRework = await beginGoalTaskRework(s2, correctionMessage);
-
-          // Flush overrides that arrived during the await above (race window: pod was still
-          // `validating` so the override route couldn't queue a nudge for a running agent)
-          const raceOverrides = deps.pendingOverrideRepo?.flush(podId) ?? [];
-          if (raceOverrides.length > 0) {
-            const merged = mergeOverrides(s2.validationOverrides ?? [], raceOverrides);
-            podRepo.update(podId, { validationOverrides: merged });
-            const overrideLines = raceOverrides.map((o) => {
-              const detail =
-                o.action === 'guidance' && o.guidance
-                  ? `Guidance: ${o.guidance}`
-                  : `Dismissed${o.reason ? `: ${o.reason}` : ''}`;
-              return `- "${o.description}" — ${detail}`;
-            });
-            correctionMessage += `\n\n### Overridden Findings (a human reviewed these — do NOT address them)\n${overrideLines.join('\n')}`;
-          }
-
-          podRepo.update(podId, { lastCorrectionMessage: correctionMessage });
-
-          // Transition back to running for retry
-          transition(s2, 'running');
-
-          // Only the runtime may retry a known idempotent setup command.
-          // Replaying a whole turn after a timeout is unsafe even before the
-          // first event: the provider may have accepted execution already.
-          if (!s2.containerId) throw new Error(`Pod ${podId} has no container`);
-          let outcome: AgentRunOutcome;
-          emitActivityStatus(podId, 'Agent working on fixes…');
-          try {
-            const events = await taskFeedbackEvents(podId, correctionMessage, goalRework);
-            outcome = await this.consumeAgentEvents(podId, events, attempt);
-          } catch (error) {
-            if (error instanceof AutopodError && error.code === 'AZURE_SANDBOX_TIMEOUT')
-              throw new AutopodError(
-                'Agent continuation timed out with an unverified execution outcome. No automatic replay was started; retained workspace and provider history require reconciliation before another turn.',
-                'CONTINUATION_OUTCOME_UNVERIFIED',
-                409,
-              );
-            throw error;
-          }
-          if (outcome === 'stopped') return;
-          await persistRuntimeCredentialsForPod(
-            podId,
-            'Failed to persist rotated credentials after validation-feedback resume',
-          );
-          if (outcome !== 'completed') {
-            logger.info(
-              { podId, attempt, maxAttempts: s2.maxValidationAttempts, outcome },
-              'Validation retry agent run did not complete',
-            );
-            return;
-          }
-          emitActivityStatus(podId, 'Agent finished applying fixes');
-          await this.handleCompletion(podId);
-
-          logger.info(
-            {
-              podId,
-              attempt,
-              maxAttempts: s2.maxValidationAttempts,
-            },
-            'Retrying after validation failure',
-          );
-        } else {
-          if (tryConsumeUpdateIntent()) return;
-
-          emitActivityStatus(
-            podId,
-            `Validation failed — max attempts (${s2.maxValidationAttempts}) exhausted, needs review`,
-          );
-          transition(s2, 'review_required');
-
-          // Stop the container (not remove) so it can be restarted for preview
-          if (s2.containerId) {
-            try {
-              emitActivityStatus(podId, 'Stopping post-validation container…');
-              await stopSandboxPreviewProxy(podId);
-              const cm = containerManagerFactory.get(s2.executionTarget);
-              await cm.stop(s2.containerId);
-              logger.info({ podId }, 'Container stopped after max validation attempts');
-            } catch (stopErr) {
-              logger.warn({ err: stopErr, podId }, 'Failed to stop container post-validation');
-            }
-          }
-        }
-      } catch (err) {
-        if (
-          err instanceof AgentContinuationSupersededError ||
-          err instanceof ValidationSupersededError
-        )
-          return;
-        logger.error({ err, podId }, 'Validation error');
-        const s2 = podRepo.getOrThrow(podId);
-        if (err instanceof TaskRetryBlockedError) {
-          await parkOnRetryAdmission(s2, err);
-          return;
-        }
-
-        if (isParkedHostPushRecovery(s2)) {
-          logger.info({ podId, status: s2.status }, 'Validation error already parked for retry');
-          return;
-        }
-        if (s2.status === 'validated' && s2.linkedPodId) {
-          parkFixPodDeliveryFailure(s2, err);
-          return;
-        }
-
-        // Pod is still `validating`; runUpdateFromBaseAfterAbort handles status transitions.
-        if (tryConsumeUpdateIntent()) return;
-
-        const failureReason = sanitizeFailureReason(
-          err,
-          'Validation failed before checks could complete',
-        );
-        emitActivityError(podId, failureReason);
-        transition(s2, 'failed', { failureReason });
-
-        // Stop the container (not remove) so it can be restarted for preview
-        if (s2.containerId) {
-          try {
-            emitActivityStatus(podId, 'Stopping post-validation container…');
-            await stopSandboxPreviewProxy(podId);
-            const cm = containerManagerFactory.get(s2.executionTarget);
-            await cm.stop(s2.containerId);
-          } catch (stopErr) {
-            logger.warn({ err: stopErr, podId }, 'Failed to stop container post-validation');
-          }
-        }
-      }
     },
-
-    async revalidateSession(
-      podId: string,
-      options?: { force?: boolean },
-    ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
-      assertExecutionTerminationVerified(podId);
-      assertGuidanceCollected(podId);
-      const pod = podRepo.getOrThrow(podId);
-      const force = options?.force ?? false;
-      if (pod.status !== 'failed' && pod.status !== 'review_required') {
-        throw new AutopodError(
-          `Cannot revalidate pod ${podId} in status ${pod.status} — only failed or review_required pods can be revalidated`,
-          'INVALID_STATE',
-          409,
-        );
-      }
-      if (!pod.worktreePath) {
-        throw new AutopodError(
-          `Pod ${podId} has no worktree — cannot pull latest`,
-          'INVALID_STATE',
-          400,
-        );
-      }
-      const revalidationWorktreePath = pod.worktreePath;
-      let newCommits = false;
-      const requeueValidationOnly = (message: string): { newCommits: boolean; result: 'fail' } => {
-        emitActivityStatus(podId, message);
-        podRepo.update(podId, {
-          validationAttempts: 0,
-          containerId: null,
-          recoveryWorktreePath: revalidationWorktreePath,
-          skipAgent: true,
-          lastValidationResult: null,
-          failureReason: null,
-        });
-        transition(podRepo.getOrThrow(podId), 'queued');
-        enqueueSession(podId);
-        logger.info({ podId }, 'Revalidation queued with fresh container and skipAgent');
-        return { newCommits, result: 'fail' };
-      };
-
-      const profile = executionForPod(pod);
-      // Pull latest from remote branch (human may have pushed fixes). Failures are
-      // tolerated when force=true so a resume with no remote access (e.g. revoked
-      // PAT) still reaches the validation engine on the existing worktree.
-      emitActivityStatus(podId, 'Pulling latest changes from remote branch…');
-      try {
-        const pullResult = await worktreeManager.pullBranch(
-          pod.worktreePath,
-          await resolveGitCredential(profile),
-        );
-        newCommits = pullResult.newCommits;
-      } catch (err) {
-        if (!force) throw err;
-        logger.warn({ err, podId }, 'pullBranch failed — proceeding (force=true)');
-        emitActivityStatus(podId, 'Could not pull from remote — revalidating local worktree');
-      }
-
-      // Without `force`, no-new-commits is a fast-fail: the only legitimate caller is
-      // a human-fix workspace flow, where the human just pushed. With `force` (Resume),
-      // the operator is asserting that the prior failure was infra/transient and wants
-      // a fresh validation run against the same code.
-      if (!newCommits && !force) {
-        logger.info({ podId }, 'No new commits on branch — skipping revalidation');
-        emitActivityStatus(podId, 'No new commits found — nothing to revalidate');
-        return { newCommits: false, result: 'fail' };
-      }
-      if (!newCommits && force) {
-        logger.info({ podId }, 'Resume: revalidating without new commits (force=true)');
-        emitActivityStatus(podId, 'Resuming — revalidating with existing worktree');
-      }
-
-      const validationSuite = getPodValidationSuite(pod);
-      logger.info({ podId, newCommits, force, validationSuite }, 'Running revalidation');
-      if (newCommits) {
-        emitActivityStatus(podId, `New commits detected — starting ${validationSuite} validation…`);
-      } else {
-        emitActivityStatus(podId, `Starting ${validationSuite} validation-only resume…`);
-      }
-
-      // Reset validation attempts for the fresh human-driven validation
-      podRepo.update(podId, { validationAttempts: 0 });
-
-      // Pre-push security scan: human-pushed fixes also need to clear the gate.
-      await runPushCheckpointScan(pod, profile);
-
-      // Transition to validating
-      if (!pod.containerId && force) {
-        return requeueValidationOnly(
-          'Resume: container missing — re-provisioning for validation only',
-        );
-      }
-      transition(pod, 'validating', { failureReason: null });
-
-      // Re-run validation (force=true restarts container, but we don't want agent retry on failure)
-      const attempt = 1;
-      podRepo.update(podId, { validationAttempts: attempt });
-
-      // Reset the desktop Validation tab chips for this fresh attempt — without this,
-      // the UI keeps the previous run's stale ValidationProgress.
-      eventBus.emit({
-        type: 'pod.validation_started',
-        timestamp: new Date().toISOString(),
+    revalidateSession(podId: string, options?: { force?: boolean }) {
+      return validationRevalidationWorkflow.revalidateSession.call(
+        { approveSession: (...args) => this.approveSession(...args) },
         podId,
-        attempt,
-      });
-
-      emitActivityStatus(
-        podId,
-        newCommits ? 'Starting revalidation (human fix)…' : 'Starting revalidation…',
+        options,
       );
-
-      try {
-        if (!pod.containerId) {
-          throw new Error(`Pod ${podId} has no container — cannot validate`);
-        }
-
-        // Restart the container with updated worktree
-        const cm = containerManagerFactory.get(pod.executionTarget);
-        try {
-          await cm.start(pod.containerId);
-        } catch (err) {
-          if (isExpectedDockerError(err, [404])) {
-            podRepo.update(podId, { containerId: null });
-            if (force) {
-              transition(podRepo.getOrThrow(podId), 'failed');
-              return requeueValidationOnly(
-                'Resume: container no longer exists — re-provisioning for validation only',
-              );
-            }
-            throw new AutopodError(
-              `Container for pod ${podId} no longer exists — use "Retry" to re-provision`,
-              'CONTAINER_NOT_FOUND',
-              409,
-            );
-          }
-          throw err;
-        }
-
-        // Revalidation runs host-side browser facts from worktreePath, so the host
-        // worktree must reflect the live /workspace before reading diffs or facts.
-        emitActivityStatus(podId, 'Syncing workspace…');
-        let validationSyncOk = true;
-        if (pod.containerId && pod.worktreePath) {
-          try {
-            await prepareWorkspaceForValidation(
-              pod.containerId,
-              pod.worktreePath,
-              cm,
-              podId,
-              pod.executionTarget,
-            );
-          } catch (err) {
-            logger.warn({ err, podId }, 'Failed to sync workspace before revalidation');
-            // Under an explicit operator resume (force), a workspace-sync failure
-            // against the *reused* container is almost always a cold/expired sandbox
-            // that can no longer serve /workspace (or an in-place reconcile that can't
-            // engage). The committed work lives in the recovery worktree, so the robust
-            // move is to re-provision a fresh container from it and validate the existing
-            // commits — a fresh container starts at the worktree HEAD, so there is no
-            // divergence to reconcile — rather than parking the pod as compromised.
-            if (force) {
-              // Drop back to `failed` first — requeueValidationOnly re-queues from a
-              // terminal state, and `validating → queued` is not a legal transition.
-              transition(podRepo.getOrThrow(podId), 'failed');
-              return requeueValidationOnly(
-                'Resume: reused container could not serve workspace — re-provisioning fresh for validation only',
-              );
-            }
-            validationSyncOk =
-              err instanceof ValidationWorkspaceReconcileError
-                ? false
-                : await tryRecoverAfterWorkspaceSyncFailure(pod, err, 'validation');
-          }
-        }
-        if (!validationSyncOk) {
-          parkOnWorktreeSyncFailure(
-            podId,
-            'Workspace sync failed before revalidation — validation blocked.',
-          );
-          return { newCommits, result: 'fail' };
-        }
-
-        const revalDefaultBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
-        const revalidationExecEnv = {
-          ...((await validationEnvironmentForPod(pod, profile)) ?? {}),
-          ...buildValidationContextEnv({
-            podId,
-            headBranch: pod.branch,
-            baseBranch: revalDefaultBranch,
-            startCommitSha: pod.startCommitSha,
-          }),
-        };
-        const [diff, commitLog] = pod.worktreePath
-          ? await Promise.all([
-              worktreeManager.getDiff(
-                pod.worktreePath,
-                revalDefaultBranch,
-                undefined,
-                pod.startCommitSha ?? undefined,
-              ),
-              worktreeManager.getCommitLog(
-                pod.worktreePath,
-                revalDefaultBranch,
-                undefined,
-                pod.startCommitSha ?? undefined,
-              ),
-            ])
-          : ['', ''];
-        const changedPathsAgainstBase =
-          pod.worktreePath && worktreeManager.getChangedPathsAgainstBase
-            ? await worktreeManager.getChangedPathsAgainstBase(pod.worktreePath, revalDefaultBranch)
-            : parseDiffFilePaths(diff);
-        assertProtectedOperationalPathsInScope(pod, changedPathsAgainstBase);
-
-        const codeReviewSkill = pod.worktreePath
-          ? await loadCodeReviewSkill(pod.worktreePath, logger)
-          : undefined;
-
-        const { profile: reviewerProfile, credentials: reviewerProviderCredentials } =
-          getEffectiveReviewerConfig(pod);
-        const reviewerExecEnv = await buildReviewerExecEnv(pod);
-        const priorReviewBatch = validationRepo?.getLatestReviewBatch(podId);
-        const validationConfig = {
-          podId,
-          containerId: pod.containerId,
-          executionTarget: pod.executionTarget,
-          previewUrl: pod.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
-          containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
-          webProbeMode:
-            pod.executionTarget === 'sandbox' ? ('container' as const) : ('host' as const),
-          validationSetupCommand: profile.validationSetupCommand ?? undefined,
-          buildCommand: profile.buildCommand ?? '',
-          startCommand: profile.startCommand ?? '',
-          buildWorkDir: profile.buildWorkDir ?? undefined,
-          healthPath: profile.healthPath ?? '/',
-          healthTimeout: profile.healthTimeout ?? 120,
-          smokePages: profile.smokePages,
-          attempt,
-          validationSuite,
-          task: pod.task,
-          diff,
-          testCommand: profile.testCommand,
-          buildTimeout: (profile.buildTimeout ?? 300) * 1_000,
-          testTimeout: (profile.testTimeout ?? 600) * 1_000,
-          lintCommand: profile.lintCommand ?? undefined,
-          lintTimeout: (profile.lintTimeout ?? 120) * 1_000,
-          sastCommand: profile.sastCommand ?? undefined,
-          sastTimeout: (profile.sastTimeout ?? 300) * 1_000,
-          reviewerModel: resolveReviewerModel(reviewerProfile, logger),
-          reviewerProvider: resolveReviewerProvider(reviewerProfile),
-          reviewerProviderAccountId: reviewerProfile.providerAccountId ?? null,
-          reviewerProviderCredentials,
-          ...(reviewerExecEnv ? { reviewerExecEnv } : {}),
-          reviewerExecutor: getReviewerExecutor(pod),
-          contract: pod.contract ?? undefined,
-          codeReviewSkill,
-          commitLog: commitLog || undefined,
-          plan: pod.plan ?? undefined,
-          taskSummary: pod.taskSummary ?? undefined,
-          worktreePath: pod.worktreePath ?? undefined,
-          startCommitSha: pod.startCommitSha ?? undefined,
-          hasWebUi: profile.hasWebUi ?? true,
-          advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
-          preSubmitReview: pod.preSubmitReview ?? undefined,
-          skipPhases: getPodValidationSkipPhases(profile, pod),
-          priorReviewBatch,
-          extraExecEnv: revalidationExecEnv,
-        };
-
-        let result: Awaited<ReturnType<typeof validationEngine.validate>>;
-        const revalidateController = new AbortController();
-        const ownership = claimValidation(pod, revalidateController);
-        try {
-          result = await validateWithInfrastructureRetries(
-            validationConfig,
-            revalidateController,
-            buildPhaseEventCallbacks(podId),
-            'Revalidation engine threw unexpectedly',
-            ownership,
-          );
-          ownership.assertCurrent();
-        } finally {
-          if (validationAbortControllers.get(podId) === revalidateController)
-            validationAbortControllers.delete(podId);
-        }
-
-        emitActivityStatus(podId, 'Validation checks finished — finalizing result…');
-
-        const validationRecord = publishValidationResult(podId, attempt, result);
-
-        const s2 = podRepo.getOrThrow(podId);
-
-        if (isTerminalState(s2.status) || s2.status === 'killing') {
-          return { newCommits, result: 'fail' };
-        }
-
-        const skipValidatedPod = applySkipValidationDecision(s2, result);
-        if (skipValidatedPod) {
-          maybeTriggerDependents(skipValidatedPod);
-          if (skipValidatedPod.containerId) {
-            try {
-              emitActivityStatus(podId, 'Stopping post-validation container…');
-              const cm2 = containerManagerFactory.get(skipValidatedPod.executionTarget);
-              await cm2.stop(skipValidatedPod.containerId);
-            } catch (err) {
-              logger.warn({ err, podId }, 'Failed to stop container after waived revalidation');
-            }
-          }
-          return { newCommits, result: 'pass' };
-        }
-
-        if (isValidationInfrastructureOnlyFailure(result)) {
-          await parkOnValidationInfrastructureFailure(s2, result);
-          return { newCommits, result: 'fail' };
-        }
-
-        if (isReviewInfrastructureOnlyFailure(result)) {
-          await parkOnReviewInfrastructureFailure(s2);
-          return { newCommits, result: 'fail' };
-        }
-
-        if (result.overall === 'pass') {
-          emitActivityStatus(podId, 'Revalidation passed — human fix worked!');
-
-          // Push branch and create PR (same as triggerValidation pass path).
-          // Fix pods already have prUrl set — carry it forward and skip PR creation.
-          let prUrl: string | null = s2.prUrl ?? null;
-          const prManager = prManagerFactory ? prManagerFactory(profile) : null;
-          if (prManager && s2.worktreePath && s2.options.output === 'pr') {
-            // Same artifact ref as the validation-pass path — never the reviewed
-            // branch. This path builds no PR body, so the ref is simply where a
-            // reviewer can find the screenshots.
-            if (profile.prProvider !== 'ado') {
-              await publishScreenshotArtifacts({
-                worktreeManager,
-                logger,
-                podId,
-                worktreePath: s2.worktreePath,
-                pat: await resolveGitCredential(profile),
-              });
-            }
-
-            try {
-              // revalidateSession runs on a worktree just pushed by a human — nothing should
-              // be uncommitted. If git add -A finds phantom deletions, it's a sync artifact,
-              // not real work; block it.
-              await worktreeManager.mergeBranch({
-                worktreePath: s2.worktreePath,
-                // Push the feature branch up — the PR is opened against revalDefaultBranch
-                // separately by the PR manager.
-                targetBranch: s2.branch,
-                // Pass the PAT explicitly — revalidation often runs after a daemon restart,
-                // when the in-memory PAT cache for this bare repo is cold.
-                pat: await resolveGitCredential(profile),
-                maxDeletions: 0,
-                podTask: pod.task,
-                profile,
-                podModel: pod.model,
-              });
-            } catch (err) {
-              logger.warn({ err, podId }, 'Failed to push branch for PR');
-              if (!handleDeletionGuardError(podId, err)) {
-                throw err;
-              }
-            }
-
-            try {
-              const failSinceCommit = s2.startCommitSha ?? undefined;
-              const failBaseBranch = s2.baseBranch ?? revalDefaultBranch;
-              const stats = await worktreeManager.getDiffStats(
-                s2.worktreePath,
-                failBaseBranch,
-                failSinceCommit,
-              );
-              podRepo.update(podId, {
-                filesChanged: stats.filesChanged,
-                linesAdded: stats.linesAdded,
-                linesRemoved: stats.linesRemoved,
-              });
-            } catch (err) {
-              logger.warn({ err, podId }, 'Failed to recompute diff stats');
-            }
-
-            if (!prUrl) {
-              try {
-                emitActivityStatus(podId, 'Creating PR…');
-                const s3 = podRepo.getOrThrow(podId);
-                warnIfSinglePrSeriesMissingSeriesMeta(s2, logger);
-                const baseBranch = resolvePrBaseBranch(s2, profile);
-                await ensurePrBaseBranchOnOrigin(s2, profile, baseBranch, 'revalidation_pass');
-                const createResult = await prManager.createPr({
-                  // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null here — PR creation only occurs for non-artifact pods which always have a worktree
-                  worktreePath: s2.worktreePath!,
-                  repoUrl: profile.repoUrl ?? undefined,
-                  branch: s2.branch,
-                  baseBranch,
-                  podId,
-                  task: s2.task,
-                  profileName: s2.profileName,
-                  profile,
-                  podModel: s2.model,
-                  handoffInstructions: s2.handoffInstructions ?? undefined,
-                  validationResult: result,
-                  validationWaiver: s3.validationWaiver,
-                  filesChanged: s3.filesChanged,
-                  linesAdded: s3.linesAdded,
-                  linesRemoved: s3.linesRemoved,
-                  previewUrl: s2.previewUrl,
-                  screenshots: [],
-                  taskSummary: s3.taskSummary ?? undefined,
-                  seriesDescription: s2.seriesDescription ?? undefined,
-                  seriesName: s2.seriesName ?? undefined,
-                  securityFindings: getLatestPushFindings(podId),
-                });
-                prUrl = createResult.url;
-                if (createResult.usedFallback) {
-                  const which = createResult.narrativeUsedFallback
-                    ? createResult.titleUsedFallback
-                      ? 'title + body'
-                      : 'body'
-                    : 'title';
-                  const reason = createResult.fallbackReason ?? 'unknown';
-                  logger.error(
-                    {
-                      podId,
-                      profile: profile.name,
-                      modelProvider: profile.modelProvider,
-                      fallbackReason: reason,
-                      fallbackDetail: createResult.fallbackDetail,
-                    },
-                    'PR description used template fallback during revalidation',
-                  );
-                  emitActivityStatus(podId, `PR ${which} used template fallback: ${reason}`);
-                }
-                if (prUrl) emitActivityStatus(podId, `PR created: ${prUrl}`);
-              } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
-                logger.warn({ err, podId }, 'Failed to create PR — pod still validated');
-                emitActivityStatus(podId, `PR creation failed: ${message} — pod still validated`);
-              }
-            } else {
-              emitActivityStatus(podId, `Carrying forward existing PR: ${prUrl}`);
-            }
-          }
-
-          const revalidatedPod = transition(s2, 'validated', { prUrl });
-          refreshReadiness(podId, {
-            advisoryQaInFlight:
-              validationConfig.advisoryBrowserQaEnabled && !!validationEngine.runAdvisoryBrowserQa,
-          });
-          maybeTriggerDependents(revalidatedPod);
-          await runAdvisoryAfterValidation(
-            podId,
-            validationConfig,
-            result,
-            validationRecord?.id,
-            revalidatedPod,
-          );
-          advisoryPublicationOwnership(
-            revalidatedPod,
-            result,
-            validationRecord?.id,
-          ).assertCurrent();
-          const postAdvisoryPod = podRepo.getOrThrow(podId);
-          if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
-            return { newCommits, result: 'pass' };
-          }
-
-          // Stop the container
-          if (postAdvisoryPod.containerId) {
-            try {
-              emitActivityStatus(podId, 'Stopping post-validation container…');
-              const cm2 = containerManagerFactory.get(postAdvisoryPod.executionTarget);
-              await cm2.stop(postAdvisoryPod.containerId);
-            } catch (err) {
-              logger.warn({ err, podId }, 'Failed to stop container post-revalidation');
-            }
-          }
-
-          if (postAdvisoryPod.autoApprove) {
-            emitActivityStatus(podId, 'Auto-approving…');
-            logger.info({ podId }, 'Auto-approving pod after revalidation');
-            setImmediate(() => {
-              this.approveSession(podId, { automation: true }).catch((err) =>
-                logger.warn({ err, podId }, 'Auto-approve failed after revalidation'),
-              );
-            });
-          }
-
-          return { newCommits, result: 'pass' };
-        }
-
-        if (isReviewInfrastructureOnlyFailure(result)) {
-          emitActivityStatus(
-            podId,
-            `${reviewInfrastructureFailureLabel(result)} — retry budget exhausted, moving to review required`,
-          );
-          transition(s2, 'review_required');
-
-          if (s2.containerId) {
-            try {
-              emitActivityStatus(podId, 'Stopping post-validation container…');
-              const cm2 = containerManagerFactory.get(s2.executionTarget);
-              await cm2.stop(s2.containerId);
-            } catch (err) {
-              logger.warn({ err, podId }, 'Failed to stop container post-revalidation');
-            }
-          }
-
-          return { newCommits, result: 'fail' };
-        }
-
-        // Validation failed — stay in failed state, no agent rework
-        emitActivityStatus(podId, `Revalidation fail — ${summarizeValidationPhases(result)}`);
-        if (result.taskReview && result.taskReview.status !== 'pass') {
-          if (result.taskReview.reasoning) {
-            emitActivityStatus(podId, `Review: ${result.taskReview.reasoning}`);
-          }
-          for (const issue of result.taskReview.issues) {
-            emitActivityStatus(podId, `  → ${issue}`);
-          }
-        }
-        emitActivityStatus(podId, 'Revalidation failed — human fix did not resolve all issues');
-        transition(s2, 'failed', {
-          failureReason: `Revalidation failed — ${summarizeValidationPhases(result)}`,
-        });
-
-        if (s2.containerId) {
-          try {
-            emitActivityStatus(podId, 'Stopping post-validation container…');
-            const cm2 = containerManagerFactory.get(s2.executionTarget);
-            await cm2.stop(s2.containerId);
-          } catch (err) {
-            logger.warn({ err, podId }, 'Failed to stop container post-revalidation');
-          }
-        }
-
-        return { newCommits, result: 'fail' };
-      } catch (err) {
-        if (err instanceof ValidationSupersededError) return { newCommits, result: 'fail' };
-        logger.error({ err, podId }, 'Revalidation error');
-        const s2 = podRepo.getOrThrow(podId);
-        if (err instanceof TaskRetryBlockedError) {
-          await parkOnRetryAdmission(s2, err);
-          return { newCommits, result: 'fail' };
-        }
-        const failureReason = sanitizeFailureReason(
-          err,
-          'Validation failed before checks could complete',
-        );
-        emitActivityError(podId, failureReason);
-        transition(s2, 'failed', { failureReason });
-        return { newCommits, result: 'fail' };
-      }
     },
 
     async fixManually(
@@ -14666,98 +12878,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       }
       return { killed };
     },
-
-    async extendAttempts(podId: string, additionalAttempts: number): Promise<void> {
-      if (attemptExtensionRuns.has(podId)) {
-        logger.info({ podId }, 'Coalesced duplicate attempt extension during active recovery');
-        return;
-      }
-
-      const pod = podRepo.getOrThrow(podId);
-      if (pod.status !== 'review_required') {
-        throw new AutopodError(
-          `Cannot extend attempts for pod ${podId} in status ${pod.status} — only review_required pods`,
-          'INVALID_STATE',
-          409,
-        );
-      }
-      const newMax = pod.maxValidationAttempts + additionalAttempts;
-      if (newMax > 10) {
-        throw new AutopodError(
-          `Cannot exceed 10 total validation attempts (current: ${pod.maxValidationAttempts}, requested: +${additionalAttempts})`,
-          'VALIDATION_ERROR',
-          400,
-        );
-      }
-      podRepo.update(podId, { maxValidationAttempts: newMax });
-      logger.info(
-        { podId, oldMax: pod.maxValidationAttempts, newMax, additionalAttempts },
-        'Extended validation attempts',
+    extendAttempts(podId: string, additionalAttempts: number) {
+      return validationWorkflowControls.extendAttempts.call(
+        { triggerValidation: (...args) => this.triggerValidation(...args) },
+        podId,
+        additionalAttempts,
       );
-      emitActivityStatus(podId, `Validation attempts extended to ${newMax} — resuming validation`);
-      // Recovery can spend minutes preserving a hosted workspace and provisioning Azure.
-      // Detach it from the HTTP acknowledgement and keep one authoritative run per pod so a
-      // client retry after an ambiguous timeout cannot increment the budget or race cleanup.
-      const recovery = this.triggerValidation(podId, { force: true })
-        .catch((err: unknown) => {
-          logger.warn({ err, podId }, 'Attempt-extension recovery failed after acceptance');
-          emitActivityStatus(
-            podId,
-            `Attempt extension accepted, but recovery failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        })
-        .finally(() => {
-          attemptExtensionRuns.delete(podId);
-        });
-      attemptExtensionRuns.set(podId, recovery);
-      void recovery;
     },
-
-    async applyOverridesInstant(podId: string): Promise<{ advanced: boolean }> {
-      const pod = podRepo.getOrThrow(podId);
-      if (pod.status !== 'review_required' && pod.status !== 'failed') {
-        throw new AutopodError(
-          `Cannot apply overrides instantly for pod ${podId} in status ${pod.status} — only failed or review_required pods`,
-          'INVALID_STATE',
-          409,
-        );
-      }
-      if (!pod.lastValidationResult) {
-        return { advanced: false };
-      }
-
-      // Flush pending overrides and merge into permanent overrides
-      const pendingOverrides = deps.pendingOverrideRepo?.flush(podId) ?? [];
-      const existingOverrides = pod.validationOverrides ?? [];
-      const currentOverrides =
-        pendingOverrides.length > 0
-          ? mergeOverrides(existingOverrides, pendingOverrides)
-          : existingOverrides;
-
-      if (currentOverrides.length === 0) {
-        return { advanced: false };
-      }
-
-      podRepo.update(podId, { validationOverrides: currentOverrides });
-
-      // Re-evaluate the cached result with overrides applied
-      const patched = applyOverrides(pod.lastValidationResult, currentOverrides);
-      podRepo.update(podId, { lastValidationResult: patched });
-
-      emitActivityStatus(podId, 'Human overrides applied — re-evaluating cached result…');
-
-      if (patched.overall === 'pass') {
-        transition(pod, 'validated');
-        emitActivityStatus(podId, 'All findings resolved — validation passed');
-        logger.info(
-          { podId, overrideCount: currentOverrides.length },
-          'Instant override advanced pod to validated',
-        );
-        return { advanced: true };
-      }
-
-      emitActivityStatus(podId, 'Some findings remain — pod still needs review');
-      return { advanced: false };
+    applyOverridesInstant(podId: string) {
+      return validationWorkflowControls.applyOverridesInstant(podId);
     },
 
     async approveFactWaiver(
@@ -14938,148 +13067,21 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'Extended PR fix attempts',
       );
     },
-
-    interruptValidation(podId: string): void {
-      validationAbortControllers.get(podId)?.abort();
+    interruptValidation(podId: string) {
+      return validationWorkflowControls.interruptValidation(podId);
     },
-
-    async updateFromBase(podId: string): Promise<UpdateFromBaseResponse> {
-      const pod = podRepo.getOrThrow(podId);
-
-      const eligibleStatuses = ['validating', 'failed', 'review_required'] as const;
-      if (!(eligibleStatuses as readonly string[]).includes(pod.status)) {
-        throw new AutopodError(
-          `Cannot run update-from-base on pod ${podId} in status '${pod.status}'`,
-          'INVALID_STATE',
-          409,
-        );
-      }
-
-      if (!pod.worktreePath) {
-        throw new AutopodError(
-          `Pod ${podId} has no worktree — cannot update from base`,
-          'INVALID_STATE',
-          400,
-        );
-      }
-
-      if (pod.worktreeCompromised) {
-        throw new AutopodError(
-          `Pod ${podId} worktree is compromised — recover it before updating from base`,
-          'WORKTREE_COMPROMISED',
-          409,
-        );
-      }
-
-      // For validating pods: store the intent, abort current validation, return immediately.
-      // The validation unwind (retry or catch path) consumes the intent and runs the rebase.
-      if (pod.status === 'validating') {
-        pendingUpdateFromBaseIntents.add(podId);
-        validationAbortControllers.get(podId)?.abort();
-        return { ok: true, action: 'queued_after_abort' };
-      }
-
-      // For failed / review_required pods: run the rebase directly.
-      const profile = executionForPod(pod);
-      const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
-
-      emitActivityStatus(podId, `Update from base: rebasing onto '${baseBranch}'…`);
-
-      const rebaseResult = await worktreeManager.rebaseOntoBase({
-        worktreePath: pod.worktreePath,
-        baseBranch,
-        pat: await resolveGitCredential(profile),
-      });
-      const rebasedBaseCommitSha = rebaseResult.baseCommitSha?.trim() || null;
-
-      if (rebaseResult.alreadyUpToDate) {
-        if (rebasedBaseCommitSha && rebasedBaseCommitSha !== pod.startCommitSha) {
-          podRepo.update(podId, { startCommitSha: rebasedBaseCommitSha });
-        }
-        emitActivityStatus(podId, `Branch already up to date with '${baseBranch}'`);
-        return { ok: true, action: 'already_up_to_date', baseBranch };
-      }
-
-      if (!rebaseResult.rebased) {
-        emitActivityStatus(
-          podId,
-          `Rebase conflict with '${baseBranch}': ${rebaseResult.conflicts.join(', ')}`,
-        );
-        return { ok: false, action: 'conflict', baseBranch, conflicts: rebaseResult.conflicts };
-      }
-
-      // Clean rebase: mark for force-with-lease, reset attempts, start validation async.
-      emitActivityStatus(podId, `Rebased onto '${baseBranch}' — starting validation…`);
-      forceWithLeaseAllowances.add(podId);
-      podRepo.update(podId, {
-        validationAttempts: 0,
-        ...(rebasedBaseCommitSha ? { startCommitSha: rebasedBaseCommitSha } : {}),
-      });
-      setImmediate(() => {
-        this.triggerValidation(podId).catch((e: unknown) =>
-          logger.error({ err: e, podId }, 'update-from-base follow-up validation failed'),
-        );
-      });
-
-      return { ok: true, action: 'rebased', baseBranch, validation: 'started' };
+    updateFromBase(podId: string) {
+      return validationWorkflowControls.updateFromBase.call(
+        { triggerValidation: (...args) => this.triggerValidation(...args) },
+        podId,
+      );
     },
-
     setSkipValidation(
       podId: string,
       skip: boolean,
       actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
-    ): void {
-      const pod = podRepo.getOrThrow(podId);
-      podRepo.update(podId, {
-        skipValidation: skip,
-        skipValidationActor: skip ? actor : null,
-      });
-      const msg = skip
-        ? 'Skip-validation toggled on — next validation result will be bypassed'
-        : 'Skip-validation toggled off — validation will run normally';
-      emitActivityStatus(podId, msg);
-      logger.info({ podId, skip }, 'skip_validation updated by user');
-
-      // Pods parked in awaiting_input on a validation_override escalation never
-      // re-enter the validation flow on their own — the flag alone leaves them
-      // hung. Treat skip=true as "I don't care about validation, just approve":
-      // resolve the escalation and transition straight to validated.
-      if (
-        skip &&
-        pod.status === 'awaiting_input' &&
-        pod.pendingEscalation?.type === 'validation_override'
-      ) {
-        const escalationId = pod.pendingEscalation.id;
-        escalationRepo.update(escalationId, {
-          respondedAt: new Date().toISOString(),
-          respondedBy: legacyRespondedBy(actor),
-          actor,
-          response: `[skip-validation] dismissed by ${actorLabel(actor)}`,
-        });
-        const validationWaiver =
-          pod.lastValidationResult?.overall === 'fail'
-            ? buildValidationWaiver(
-                pod.lastValidationResult,
-                `Validation skipped — recurring findings dismissed by ${actorLabel(actor)}`,
-                actor,
-              )
-            : null;
-        const updated = transition(pod, 'validated', {
-          pendingEscalation: null,
-          ...(validationWaiver ? { validationWaiver } : {}),
-        });
-        emitActivityStatus(
-          podId,
-          validationWaiver
-            ? `Validation waived — recurring findings dismissed by ${actorLabel(actor)}`
-            : `Validation skipped — recurring findings dismissed by ${actorLabel(actor)}`,
-        );
-        logger.info(
-          { podId, escalationId },
-          'skip_validation resolved validation_override escalation',
-        );
-        maybeTriggerDependents(updated);
-      }
+    ) {
+      return validationWorkflowControls.setSkipValidation(podId, skip, actor);
     },
 
     async refreshNetworkPolicy(profileName: string): Promise<void> {

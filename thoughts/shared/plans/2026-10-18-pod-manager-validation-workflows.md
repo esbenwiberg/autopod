@@ -1,6 +1,6 @@
 # Slice 20: validation workflows
 
-Status: IN PROGRESS — user-directed continuation of the remaining roadmap.
+Status: IN PROGRESS — Phases 1 and 2 complete; full qualification next.
 Baseline: 5c20dde639cd5c7297bc861952cb6a3ab87fb820.
 Date: 2026-10-18. Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -127,10 +127,10 @@ asserted. Owner infrastructure and native Goal/provider/container execution rema
 controlled; public tests retain full workflow integration coverage.
 
 Automated:
-- [ ] Frozen full manager suite passes with identical names/statuses/assertions.
-- [ ] Direct owner/policy/state/local repository tests pass with no new skips.
-- [ ] Exact moved bodies, full recipe and source scope pass.
-- [ ] Scoped Biome/whitespace, supported declaration build and supplemental new-test
+- [x] Frozen full manager suite passes with identical names/statuses/assertions.
+- [x] Direct owner/policy/state/local repository tests pass with no new skips.
+- [x] Exact moved bodies, full recipe and source scope pass.
+- [x] Scoped Biome/whitespace, supported declaration build and supplemental new-test
   semantic checks pass.
 Manual: none.
 
@@ -177,3 +177,33 @@ fixture's missing Pod type reference was replaced by its exact three-status inpu
 union; this changed no runtime/assertion code. Supplemental diagnostics are zero.
 The entire public assertion bytes and names/statuses are frozen before extraction.
 All other baseline source/control hashes match.
+
+## Phase 2 evidence
+
+All 22 original algorithm/helper bodies and parameters match parsed TypeScript after
+scaffolding/export/receiver-type changes and formatting. The complete manager/module
+recipes match, with type-union layout, optional type-member terminators and attached
+JSDoc indentation normalized. Runtime statement tokens are compared strictly. All
+1,981 other baseline package/script hashes and six root controls match. The manager
+is 14,371 lines (1,998 fewer). New owners are policy 190, state 6, controls 412,
+contracts 224, revalidation 682 and trigger 1,273 lines. The trigger-size exception
+remains explicitly assigned to delivery extraction/size review in Slice 27.
+
+All 1,192 full manager cases pass before/after with frozen assertions/names/statuses.
+All 34 direct policy/state/control cases pass, including two private migrated file
+SQLite cases preserving a resolved human waiver and flushed queued overrides through
+integrity/FK-checked close/reopen. All 97 affected suites pass: 3,406 cases, no skips.
+The final scoped lint, build/declarations, whitespace and all three supplemental test
+boundaries pass. Node22.23.3 opens SQLite3.49.2; pnpm9.15.4.
+
+The initial forwarding scaffold passed an explicit undefined for omitted options;
+the frozen full suite caught three argument-arity failures. Eight forwarding ports
+now forward rest tuples exactly and retain late receiver lookup. Algorithm bodies
+and frozen public assertions were never changed. Initial direct fixtures needed
+complete reviewer fields/actor variants and a derived public fact type; explicit
+suite precedence was corrected in the test expectation and the absent-suite case
+was added. Initial diagnostics and recipe-audit formatting diagnostics are retained.
+No original policy/algorithm correction or new await boundary was introduced.
+
+Next: full uncached pipeline on final frozen 1,991 package/script hashes and six
+root controls, then record completion and continue Slice 21 under the full user goal.
