@@ -30188,3 +30188,492 @@ describe('reviewer context compatibility', () => {
     }
   });
 });
+
+describe('worker runtime credential compatibility', () => {
+  beforeEach(() => {
+    mockExecFileSuccess();
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      new Error('No external auth in worker credential fixture'),
+    );
+  });
+  afterEach(() => vi.restoreAllMocks());
+  type Provider = 'anthropic' | 'openai' | 'pi' | 'max' | 'foundry';
+  function fixture(provider: Provider = 'openai') {
+    const runtime = provider === 'openai' ? 'codex' : provider === 'pi' ? 'pi' : 'claude';
+    const ctx = createTestContext(undefined, {
+      modelProvider: provider,
+      defaultRuntime: runtime,
+      defaultModel: runtime === 'codex' ? 'auto' : 'sonnet',
+    });
+    const accounts = createProviderAccountStore(ctx.db);
+    const creds: ProviderCredentials =
+      provider === 'openai'
+        ? { provider, authMode: 'chatgpt', authJson: '{"token":"worker-old"}' }
+        : provider === 'pi'
+          ? { provider, providerId: 'anthropic', credential: { access: 'worker-old' } }
+          : provider === 'max'
+            ? { provider, authMode: 'setup-token', oauthToken: 'worker-setup' }
+            : provider === 'foundry'
+              ? {
+                  provider,
+                  endpoint: 'https://fixture.services.ai.azure.com',
+                  apiKey: 'worker-foundry',
+                }
+              : { provider, apiKey: 'worker-api-key' };
+    accounts.create({ id: 'worker-account', name: 'Worker account', provider, credentials: creds });
+    accounts.create({
+      id: 'other-account',
+      name: 'Other',
+      provider: 'anthropic',
+      credentials: { provider: 'anthropic', apiKey: 'untouched-worker-key' },
+    });
+    linkProfileToProviderAccount(ctx.db, 'test-profile', 'worker-account');
+    ctx.deps.providerAccountStore = accounts;
+    ctx.runtime.type = runtime;
+    if (runtime === 'pi')
+      Object.assign(ctx.runtime, { setPiResumeConfig: vi.fn(), setPiSessionId: vi.fn() });
+    const originalExec = vi.mocked(ctx.containerManager.execInContainer).getMockImplementation();
+    if (!originalExec) throw new Error('Missing container fixture');
+    vi.mocked(ctx.containerManager.execInContainer).mockImplementation(async (id, cmd, options) => {
+      const line = cmd.join(' ');
+      if (line.includes(`command -v ${runtime}`))
+        return { stdout: `/usr/local/bin/${runtime}\n`, stderr: '', exitCode: 0 };
+      if (line === `${runtime} --version`)
+        return { stdout: `${runtime} 1.0.0\n`, stderr: '', exitCode: 0 };
+      return originalExec(id, cmd, options);
+    });
+    ctx.containerManager.getExecutionMetadata = vi.fn(async () => ({
+      imageDigest: `sha256:${'a'.repeat(64)}`,
+      memoryLimitBytes: 16 * 1024 ** 3,
+      cpuLimit: 2,
+      networkMode: 'fixture',
+    }));
+    const manager = createPodManager(ctx.deps);
+    const created = manager.createSession(
+      {
+        profileName: 'test-profile',
+        task: 'Worker credential compatibility',
+        skipValidation: true,
+      },
+      'operator',
+    );
+    ctx.podRepo.update(created.id, {
+      status: 'awaiting_input',
+      containerId: 'worker-container',
+      worktreePath: '/tmp/worker-credential-fixture',
+    });
+    const pod = ctx.podRepo.getOrThrow(created.id);
+    vi.mocked(ctx.runtime.resume).mockImplementation(async function* () {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'Local worker fixture stops here',
+        fatal: true,
+      };
+    });
+    return {
+      ctx,
+      accounts,
+      manager,
+      pod,
+      creds,
+      run: (entry: 'message' | 'reject' = 'message') => {
+        if (entry === 'reject') {
+          ctx.podRepo.update(pod.id, { status: 'validated' });
+          return manager.rejectSession(pod.id, 'Local repair');
+        }
+        return manager.sendMessage(pod.id, 'Local answer');
+      },
+    };
+  }
+
+  it.each(
+    (['openai', 'pi'] as const).flatMap((provider) =>
+      (['message', 'reject'] as const).map((entry) => ({ provider, entry })),
+    ),
+  )(
+    '$entry resumes $provider only after actual rotated auth persistence and rewrite',
+    async ({ provider, entry }) => {
+      const f = fixture(provider);
+      try {
+        const fresh =
+          provider === 'openai'
+            ? '{"token":"worker-rotated"}'
+            : '{"anthropic":{"access":"worker-rotated"}}';
+        const authPath =
+          provider === 'openai'
+            ? '/home/autopod/.codex/auth.json'
+            : '/home/autopod/.pi/agent/auth.json';
+        vi.mocked(f.ctx.containerManager.readFile).mockResolvedValue(fresh);
+        const original = vi.mocked(f.ctx.runtime.resume).getMockImplementation();
+        if (!original) throw new Error('Missing runtime');
+        vi.mocked(f.ctx.runtime.resume).mockImplementation((...args) => {
+          expect(f.accounts.get('worker-account').credentials).toMatchObject(
+            provider === 'openai'
+              ? { provider, authJson: fresh }
+              : { provider, credential: { access: 'worker-rotated' } },
+          );
+          expect(f.ctx.containerManager.writeFile).toHaveBeenCalledWith(
+            'worker-container',
+            authPath,
+            expect.any(String),
+            undefined,
+          );
+          expect(args[3]).toMatchObject({ POD_ID: f.pod.id });
+          return original(...args);
+        });
+        await f.run(entry);
+        expect(f.ctx.runtime.resume).toHaveBeenCalledTimes(1);
+        expect(f.accounts.get('other-account').credentials).toMatchObject({
+          apiKey: 'untouched-worker-key',
+        });
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it.each(['anthropic', 'foundry'] as const)(
+    'legacy %s keeps its no-env resume branch',
+    async (provider) => {
+      const f = fixture(provider);
+      try {
+        await f.run();
+        expect(f.ctx.runtime.resume).toHaveBeenCalledWith(
+          f.pod.id,
+          expect.any(String),
+          'worker-container',
+          undefined,
+        );
+        expect(f.ctx.containerManager.readFile).not.toHaveBeenCalled();
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it('legacy MAX setup-token writes the secret then chmod before runtime resume', async () => {
+    const f = fixture('max');
+    try {
+      const original = vi.mocked(f.ctx.runtime.resume).getMockImplementation();
+      if (!original) throw new Error('Missing runtime');
+      vi.mocked(f.ctx.runtime.resume).mockImplementation((...args) => {
+        const write = vi
+          .mocked(f.ctx.containerManager.writeFile)
+          .mock.calls.find((call) => call[2] === 'worker-setup');
+        if (!write) throw new Error('Missing setup token write');
+        expect(write).toHaveLength(3);
+        expect(f.ctx.containerManager.execInContainer).toHaveBeenCalledWith(
+          'worker-container',
+          ['chmod', '0400', write[1]],
+          { timeout: 5_000 },
+        );
+        return original(...args);
+      });
+      await f.run();
+      expect(f.ctx.runtime.resume).toHaveBeenCalledOnce();
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it.each(['write', 'revoked', 'no-container'] as const)(
+    '%s prevents resume while preserving earlier auth effects',
+    async (stage) => {
+      const f = fixture();
+      try {
+        const fresh = '{"token":"worker-before-failure"}';
+        vi.mocked(f.ctx.containerManager.readFile).mockResolvedValue(fresh);
+        const error = new Error('Controlled worker write');
+        if (stage === 'write')
+          vi.mocked(f.ctx.containerManager.writeFile).mockImplementation(async (_id, file) => {
+            if (file.endsWith('/auth.json')) throw error;
+          });
+        if (stage === 'revoked') f.accounts.updateCredentials('worker-account', null);
+        if (stage === 'no-container') f.ctx.podRepo.update(f.pod.id, { containerId: null });
+        await expect(f.run()).rejects.toThrow();
+        expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+        if (stage === 'write')
+          expect(f.accounts.get('worker-account').credentials).toMatchObject({ authJson: fresh });
+        expect(f.accounts.get('other-account').credentials).toMatchObject({
+          apiKey: 'untouched-worker-key',
+        });
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+
+  it('post-run kill reads back selected auth before killing its container', async () => {
+    const f = fixture();
+    try {
+      const fresh = '{"token":"worker-kill"}';
+      vi.mocked(f.ctx.containerManager.readFile).mockResolvedValue(fresh);
+      vi.mocked(f.ctx.containerManager.kill).mockImplementation(async () => {
+        expect(f.accounts.get('worker-account').credentials).toMatchObject({ authJson: fresh });
+      });
+      await f.manager.killSession(f.pod.id);
+      expect(f.ctx.containerManager.kill).toHaveBeenCalledWith('worker-container');
+      expect(f.ctx.podRepo.getOrThrow(f.pod.id).status).toBe('killed');
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it('kill swallows account readback SQL failure and still tears down the selected container', async () => {
+    const f = fixture();
+    try {
+      vi.mocked(f.ctx.containerManager.readFile).mockResolvedValue('{"token":"unpersisted"}');
+      f.ctx.db.exec(
+        "CREATE TRIGGER reject_worker_auth BEFORE UPDATE OF credentials ON provider_accounts WHEN OLD.id='worker-account' BEGIN SELECT RAISE(ABORT,'worker auth rejected'); END",
+      );
+      await f.manager.killSession(f.pod.id);
+      expect(f.ctx.containerManager.kill).toHaveBeenCalledWith('worker-container');
+      expect(f.accounts.get('worker-account').credentials).toEqual(f.creds);
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it.each([false, true])(
+    'manager MAX lineage %s is retained before a failed write and cleared by setup-token reissue',
+    async (clear) => {
+      const f = fixture('max');
+      try {
+        const providers = await import('../providers/index.js');
+        const persist = vi.spyOn(providers, 'persistRefreshedCredentials');
+        f.accounts.updateCredentials('worker-account', {
+          provider: 'max',
+          accessToken: 'worker-access',
+          refreshToken: 'worker-refresh',
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        });
+        if (!clear)
+          vi.mocked(f.ctx.containerManager.writeFile).mockImplementation(async (_id, file) => {
+            if (file.endsWith('/.credentials.json')) throw new Error('After lineage');
+          });
+        if (clear) await f.run();
+        else await expect(f.run()).rejects.toThrow('After lineage');
+        if (clear) {
+          f.accounts.updateCredentials('worker-account', f.creds);
+          f.ctx.podRepo.update(f.pod.id, { status: 'awaiting_input' });
+          const { createTaskRetryLedger } = await import('./task-retry-ledger.js');
+          createTaskRetryLedger(f.ctx.db, 'worker').authorize(
+            f.pod.id,
+            'lineage-second-turn',
+            'Verify changed credential form in a separately authorized turn',
+            { type: 'human', userId: 'operator' },
+          );
+          await f.run();
+        }
+        await f.manager.killSession(f.pod.id);
+        expect(persist.mock.calls.at(-1)?.[5]).toEqual(
+          clear
+            ? undefined
+            : {
+                owner: { type: 'provider-account', id: 'worker-account' },
+                issuedRefreshToken: 'worker-refresh',
+              },
+        );
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+  async function composed(mode: 'independent' | 'follow-main') {
+    const ctx = createTestContext();
+    insertTestProfile(ctx.db, 'profile');
+    const { createTestConfiguration } = await import('../test-utils/configuration-helpers.js');
+    const { resolveLaunchAgentRoute } = await import('../configuration/agent-route-resolution.js');
+    const { createLaunchSnapshotRepository } = await import('../configuration/launch-snapshot.js');
+    const { resolveLaunchExecutionSettings } = await import(
+      '../configuration/launch-execution-settings.js'
+    );
+    const { admitLaunch } = await import('../configuration/launch-admission.js');
+    const { IsolatedReviewer } = await import('../validation/isolated-reviewer.js');
+    const { ReviewerRunRepository } = await import('../validation/reviewer-run-repository.js');
+    const { services, store } = createTestConfiguration(ctx.db);
+    const accounts = createProviderAccountStore(ctx.db);
+    for (const id of ['account', 'review-account'])
+      accounts.create({
+        id,
+        name: id,
+        provider: 'anthropic',
+        credentials: { provider: 'anthropic', apiKey: `fixture-${id}` },
+      });
+    services.resolveAgentRoute = async (route) => resolveLaunchAgentRoute(route, accounts);
+    if (mode === 'independent')
+      store.write({
+        kind: 'ai',
+        id: 'ai',
+        name: 'Independent',
+        expectedRevision: 1,
+        payload: {
+          main: { providerAccountId: 'account', runtime: 'claude', model: 'claude-sonnet-4-6' },
+          reviewer: {
+            mode,
+            route: {
+              providerAccountId: 'review-account',
+              runtime: 'claude',
+              model: 'claude-haiku-4-5',
+              reasoningEffort: 'high',
+            },
+          },
+        },
+      });
+    const snapshots = createLaunchSnapshotRepository(ctx.db, store);
+    const executor = vi.fn(async () => ({ stdout: 'Local review' }));
+    const service = new IsolatedReviewer({
+      runs: new ReviewerRunRepository(ctx.db),
+      accounts,
+      logger,
+      manager: () => ctx.containerManager,
+      image: () => `fixture@sha256:${'a'.repeat(64)}`,
+      readPod: (id) => ctx.podRepo.getOrThrow(id),
+      assertAllowed: async () => {},
+    });
+    const select = vi.spyOn(service, 'executor').mockReturnValue(executor);
+    ctx.deps.providerAccountStore = accounts;
+    ctx.deps.launchConfiguration = {
+      read: snapshots.get,
+      executionSettings: (config) =>
+        resolveLaunchExecutionSettings(config, { image: `sha256:${'a'.repeat(64)}` }),
+      assertCurrentCapabilities: async () => {},
+      prepareEnvironment: async () => 'fixture',
+      reviewer: service,
+    };
+    const manager = createPodManager(ctx.deps);
+    const admitted = await admitLaunch({
+      request: { repositoryId: 'repo-a', task: 'Review context' },
+      actorId: 'operator',
+      services,
+      snapshots,
+      createPod: (config) => {
+        if (!manager.createResolvedSession) throw new Error('Missing launch admission');
+        return manager.createResolvedSession(config, 'operator').id;
+      },
+    });
+    await new Promise<void>((done) => setImmediate(done));
+    return {
+      ctx,
+      accounts,
+      manager,
+      pod: ctx.podRepo.getOrThrow(admitted.podId),
+      select,
+      executor,
+      service,
+    };
+  }
+
+  it.each([false, true])(
+    'launch worker resume keeps env/file modes and stops on late capability denial=%s',
+    async (denied) => {
+      const f = await composed('follow-main');
+      try {
+        const launch = f.ctx.deps.launchConfiguration;
+        if (!launch) throw new Error('Missing launch');
+        launch.credentials = {
+          agent: async () => ({ buildEnv: {}, mcpServers: [] }),
+          buildEnvironment: async () => ({ FIXTURE_BUILD: 'ready' }),
+          deployment: async () => null,
+          httpServer: async () => {
+            throw new Error('Unused HTTP server');
+          },
+          registries: async () => ({
+            files: [{ path: '/fixture/registry', content: 'registry' }],
+            nugetSecret: null,
+          }),
+        };
+        let checks = 0;
+        const error = new Error('Late worker capabilities');
+        launch.assertCurrentCapabilities = async () => {
+          checks++;
+          if (denied && checks === 3) throw error;
+        };
+        f.ctx.podRepo.update(f.pod.id, { status: 'awaiting_input', containerId: 'launch-worker' });
+        vi.mocked(f.ctx.runtime.resume).mockImplementation(async function* () {
+          yield {
+            type: 'error',
+            timestamp: new Date().toISOString(),
+            message: 'Fixture stopped',
+            fatal: true,
+          };
+        });
+        const run = f.manager.sendMessage(f.pod.id, 'Local answer');
+        if (denied) await expect(run).rejects.toBe(error);
+        else await run;
+        expect(f.ctx.containerManager.writeFile).toHaveBeenCalledWith(
+          'launch-worker',
+          '/fixture/registry',
+          'registry',
+          { mode: 0o600 },
+        );
+        expect(f.ctx.containerManager.writeFile).toHaveBeenCalledWith(
+          'launch-worker',
+          expect.any(String),
+          'fixture-account',
+          { mode: 0o400 },
+        );
+        expect(checks).toBeGreaterThanOrEqual(3);
+        if (denied) expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+        else
+          expect(f.ctx.runtime.resume).toHaveBeenCalledWith(
+            f.pod.id,
+            expect.any(String),
+            'launch-worker',
+            expect.objectContaining({ FIXTURE_BUILD: 'ready', POD_ID: f.pod.id }),
+          );
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
+  it('keeps the admitted worker account when the reusable profile link changes before resume', async () => {
+    const f = fixture();
+    try {
+      linkProfileToProviderAccount(f.ctx.db, 'test-profile', 'other-account');
+      vi.mocked(f.ctx.containerManager.readFile).mockResolvedValue(
+        '{"token":"worker-after-profile-edit"}',
+      );
+      await f.run();
+      expect(f.ctx.runtime.resume).toHaveBeenCalledOnce();
+      expect(f.accounts.get('worker-account').credentials).toMatchObject({
+        authJson: '{"token":"worker-after-profile-edit"}',
+      });
+      expect(f.accounts.get('other-account').credentials).toMatchObject({
+        apiKey: 'untouched-worker-key',
+      });
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+
+  it('processing error reads back actual worker auth before container cleanup', async () => {
+    const f = fixture();
+    try {
+      f.ctx.podRepo.update(f.pod.id, { status: 'queued', containerId: null, worktreePath: null });
+      const fresh = '{"token":"worker-after-error"}';
+      vi.mocked(f.ctx.containerManager.readFile).mockResolvedValue(fresh);
+      let agentStarted = false;
+      vi.mocked(f.ctx.runtime.spawn).mockImplementation(async function* () {
+        agentStarted = true;
+        yield { type: 'status', timestamp: new Date().toISOString(), message: 'Worker started' };
+        throw new Error('Controlled worker transport');
+      });
+      vi.mocked(f.ctx.containerManager.kill).mockImplementation(async () => {
+        if (agentStarted)
+          expect(f.accounts.get('worker-account').credentials).toMatchObject({ authJson: fresh });
+      });
+      await f.manager.processPod(f.pod.id);
+      expect(agentStarted).toBe(true);
+      expect(f.accounts.get('worker-account').credentials).toMatchObject({ authJson: fresh });
+      expect(f.ctx.podRepo.getOrThrow(f.pod.id).status).toBe('failed');
+    } finally {
+      f.ctx.db.close();
+    }
+  });
+});

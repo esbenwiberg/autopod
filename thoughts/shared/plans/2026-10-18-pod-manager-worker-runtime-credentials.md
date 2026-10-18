@@ -1,6 +1,6 @@
 # Slice 16: worker runtime credential extraction
 
-Status: PROPOSED — awaiting explicit approval of all three phases.
+Status: APPROVED — implementing all three phases after explicit user approval.
 Date: 2026-10-18.
 Baseline: b10a505a6c479fec4ea6225ac6c983a386008fd9.
 Branch: codex/pod-manager-workspace.
@@ -168,8 +168,8 @@ release AND join held work in finally. Only private fixture files may be removed
 ### Success criteria
 
 Automated:
-- [ ] New and selected existing public checks pass against unchanged product.
-- [ ] Frozen assertions/filter, before-source/hashes/runtime and raw results recorded.
+- [x] New and selected existing public checks pass against unchanged product.
+- [x] Frozen assertions/filter, before-source/hashes/runtime and raw results recorded.
 
 Manual: None required for local headless credential compatibility.
 
@@ -301,3 +301,23 @@ pods/provider-attempt-repository.ts and existing manager worker tests.
 
 Next action: user reviews the illustrated plan and explicitly approves all three
 implementation phases. No product/test changes or implementation tests in planning.
+
+## Phase 1 observed results
+
+18 new public worker cases and 71 selected existing cases pass against unchanged
+product: 89 selected checks, with 1,063 unrelated tests excluded only by this name
+filter. Both message and rejection paths prove actual OpenAI/Pi rotation and rewrite
+before runtime.resume. Other cases cover legacy skips, MAX secret/chmod ordering,
+profile-account drift, missing container/revocation/write failure, processing-error
+and kill readback, real SQL update abort, manager-owned MAX lineage set-before-write
+and later deletion, and composed launch env/file modes/late capability denial.
+Public semantic diagnostics are clean; assertions/filter and before-source are frozen.
+
+Initial fixture diagnostics were preserved: continuation requires 10 GiB (the
+fixture now provides 16 GiB); Pi's controlled runtime needs its resume-config methods;
+and its second MAX worker turn needs real retry authorization after the first
+nonretryable fixture exit. The fixture records a separate human retry authorization
+through the actual worker ledger. A failing runtime stream emits its observed start
+before throwing. No product correction, suppressed gate or weakened assertion.
+Actual Node22.23.3 opens SQLite3.49.2; pnpm9.15.4. Baseline source and six root hashes
+are retained under ignored .autopod-data/worker-runtime-credentials/.
