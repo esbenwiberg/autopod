@@ -1,6 +1,6 @@
 # Slice 21: provider attempts and binding
 
-Status: IN PROGRESS — user-authorized continuation of the remaining roadmap.
+Status: IN PROGRESS — extraction and affected regression complete; full qualification next.
 Date: 2026-10-18. Baseline: 939f19a2deaa855f181f2a464d95ae30bf265224.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -138,11 +138,11 @@ Preserve failures and fix extraction/fixture faults without changing old asserti
 or original algorithm policy. Freeze final source before broader qualification.
 
 Automated:
-- [ ] All nineteen bodies/parameters, selection type, map constructor and complete
+- [x] All nineteen bodies/parameters, selection type, map constructor and complete
   recipe/call references match the original behavior.
-- [ ] Full manager names/statuses/assertions remain unchanged and pass.
-- [ ] Direct policy/context/local repository cases pass with no new skips.
-- [ ] Build/declarations, scoped lint/whitespace and new-test semantics pass.
+- [x] Full manager names/statuses/assertions remain unchanged and pass.
+- [x] Direct policy/context/local repository cases pass with no new skips.
+- [x] Build/declarations, scoped lint/whitespace and new-test semantics pass.
 Manual: none.
 
 ## Phase 3: qualification and continuation
@@ -180,3 +180,33 @@ atomicity, isolation, replay or live-execution guarantee. Revert manager composi
 and both new modules together to roll back. Evidence stays ignored under
 .autopod-data/provider-attempt-context/. The existing validation-trigger size debt
 still belongs to Slice 27; this milestone does not redefine that requirement.
+
+## Phase 2 evidence
+
+All nineteen original bodies and parameter lists, selection type and map initializer
+match parsed TypeScript. Complete explicit manager/module recipes match after
+formatting-only normalization. All 1,990 other baseline package/script paths, public
+assertions and six root controls remain byte-identical. The manager has 13,833 lines
+(538 fewer); new policy/context modules have 91/552 lines. Six captured references
+and original live deps retain the planned initialization order and service receivers.
+
+All 1,192 unchanged public manager cases pass with identical names/statuses. All 44
+direct policy/context cases pass, including three encrypted private file SQLite
+close/reopen cases for legacy usage, target snapshots and stale ordinal rejection.
+Actual migrated pod/attempt/account/profile repositories, auth/launch helpers and a
+real resolved immutable launch snapshot are exercised with synthetic credentials.
+The 99 affected suites pass 3,450 cases without skips. Build/declarations, scoped
+Biome, whitespace and both new-test semantic boundaries pass.
+
+Initial generated import duplicates/missing type were corrected in scaffolding only.
+Direct fixture diagnostics identified a duplicate policy account, invalid Pi auth
+shape and the account-store guard against deleting referenced accounts. Fixtures now
+use distinct accounts, a valid Pi credential and a controlled historical lookup
+failure; queued-account deletion remains exercised through the real store. No old
+assertion or algorithm body changed. A standalone runtime probe needed the daemon's
+actual dependency path; its corrected result is Node22.23.3/SQLite3.49.2. Source-audit
+type fragments are parsed in a type wrapper. Initial logs/reports remain retained.
+
+Final 1,995 package/script hashes and six root controls are frozen before the full
+uncached pipeline. Next: qualify, record completion, then continue Slice 22 under the
+existing remaining-slices goal. No manual gate is outstanding for this milestone.
