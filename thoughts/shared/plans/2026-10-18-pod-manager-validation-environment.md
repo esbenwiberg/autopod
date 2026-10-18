@@ -1,6 +1,6 @@
 # Slice 17: validation environment extraction
 
-Status: APPROVED — Phases 1 and 2 complete; final qualification running.
+Status: COMPLETE — all three approved phases implemented and locally verified.
 Date: 2026-10-18.
 Baseline: 321ceb07d13f459242289a2f069b49e5e2ddf754.
 Branch: codex/pod-manager-workspace.
@@ -242,9 +242,9 @@ remote identity. Main integration/PR/deploy remain separate work.
 
 Automated:
 - [x] All 86 affected suites pass with SQLite and no newly skipped tests.
-- [ ] Full uncached pipeline passes under the documented qualification environment.
-- [ ] Scoped lint/whitespace/types, exact movement and frozen hashes pass.
-- [ ] Completed plan/proof has actual results, limits and pushed revision identities.
+- [x] Full uncached pipeline passes under the documented qualification environment.
+- [x] Scoped lint/whitespace/types, exact movement and frozen hashes pass.
+- [x] Completed plan/proof has actual results, limits and pushed revision identities.
 
 Manual: None required. Approval covers all three phases together.
 
@@ -269,8 +269,8 @@ configuration/credential-references.ts; runtime-env.ts;
 configuration/components.test.ts; configuration/credential-store.test.ts;
 pods/pod-manager.test.ts public compatibility groups.
 
-User approved proceeding with Slice17. Next: characterize unchanged product, extract,
-then qualify; all three phases are authorized together.
+All three approved phases are complete. No manual acceptance remains.
+Integration, PR creation and deployment remain separate work.
 
 ## Phase 1 observed results
 
@@ -316,3 +316,60 @@ scoped Biome and whitespace are clean.
 
 All 86 affected suites pass: 3,022 tests, zero skipped, including the unchanged
 composed service rotation test. Next: full uncached qualification on frozen source.
+
+## Phase 3: final qualification
+
+Verdict: PROVEN for the approved local validation environment compatibility
+extraction under the documented qualification environment. All three phases complete.
+
+| Claim/check | Observed final evidence | Result |
+|---|---|---|
+| Public compatibility | 88 selected before/after checks, 11 new; frozen assertions and names/statuses identical | Passed |
+| Environment/file/order/error contracts | 42 direct tests, including 8 private migrated file SQLite credential/snapshot/reopen cases | Passed |
+| Surrounding orchestration | 86 affected suites; 3,022 tests passed; zero skipped | Passed |
+| Full uncached pipeline | Frozen install, lint, build, supported declaration typecheck, all tests, audit and secret scan | Passed under documented environment |
+| Vitest | 8,411 passed across 504 passing files; 10 existing gated skips | Passed with existing skips |
+| Standalone Node scripts | 35 passed; zero failed/skipped | Passed |
+| Source integrity | 1,979 package/script hashes and six root controls unchanged through qualification | Passed |
+| Exact movement/scope | One original body/comment; four incoming references; shared resolver body/six calls; complete recipe; two product/two test paths | Passed |
+| Scoped quality | Biome/whitespace clean; zero semantic diagnostics in both new test boundaries | Passed |
+
+Tested implementation: de8a6760cf40eed97aca23dcc8b75c5bf6d31e51. A following documentation-only commit
+records qualification without changing qualified source/test bytes. Final pushed
+identity and clean-checkout confirmation are recorded privately after push.
+
+Actual full command through the task-local pinned launcher:
+
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+Actual child Node22.23.3 opens SQLite3.49.2; pnpm9.15.4. Build/typecheck/test groups
+ran uncached. Frozen install succeeded without fallback or lockfile mutation.
+Root lint retained 82 existing warnings and only the established 2 MiB processing
+limit; scoped files are clean. No rule/file selection or repository/global config
+changed. maintenance.auto=false is process-only. Known unrelated Git metadata-scan
+race/audit-clock flake remain outside scope. Source/test bytes stayed frozen through
+qualification; the 10 existing gated skips remain with no newly skipped cases.
+
+The manager is 16,602 lines, 33 fewer. validation-environment.ts is 69 lines. The
+complete original function, its comment, both direct calls and both factory captures
+are unchanged. The shared execution credential resolver remains in manager, with its
+body and all six calls preserved. Lifecycle, validation/resume admission, context
+overlays, provider binding, dispatch, provisioning/deployment/MCP and credential
+policy retain their existing owners. All 1,975 other baseline package/script paths
+match. No product correction followed extraction.
+
+Evidence is retained under ignored .autopod-data/validation-environment/:
+proof.json, claims.json, movement.json, before/frozen manifests, original source and
+recipes, frozen public assertions/filter/names, actual runtime/commands, raw public/
+direct/affected/full/build/lint/type logs and exits, initial diagnostics and revision
+identities. The illustrated approval document remains the original proposal snapshot.
+
+Public tests establish manager integration and existing caller context/failure behavior.
+Direct tests establish the narrow collaborator contracts and actual local launch/env/
+registry/credential behavior. File SQLite cases prove current independent tokens,
+rotation/revocation/scope/identity rejection, secret-free retained snapshot and
+unchanged unrelated credential/profile/pod/attempt rows, including reopen integrity/FK.
+Container interfaces, capability callbacks and credential enrollment verification
+are controlled. This evidence does not establish live package-feed authentication,
+paid provider authorization/execution, live Docker/Azure or stronger atomicity,
+isolation, authorization, dispatch fencing, crash recovery or remote completion.
