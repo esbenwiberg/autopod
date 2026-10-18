@@ -8,23 +8,18 @@ import { promisify } from 'node:util';
 import type { PendingRequests } from '@autopod/escalation-mcp';
 import type {
   AgentEvent,
-  BuildResult,
   CreatePodRequest,
   DaemonConfig,
   EffectiveLaunchConfig,
   EscalationRequest,
   ExecutionTarget,
   FactCheckResult,
-  FactValidationResult,
-  HealthResult,
   HistoryQuery,
   InjectedMcpServer,
-  LintResult,
   McpServerConfig,
   MemoryEntry,
   NetworkPolicy,
   OperatorActor,
-  PageResult,
   PhaseTokenUsage,
   Pod,
   PodOptions,
@@ -43,16 +38,12 @@ import type {
   RequestCredentialPayload,
   ReviewBatchResult,
   ReviewFeedbackResponseItem,
-  ReviewProgressSnapshot,
   Runtime,
-  SastResult,
   ScanFinding,
-  SetupResult,
   SpawnFixResponse,
   SpecFile,
   StdioInjectedMcpServer,
   TaskRetryIdentity,
-  TaskReviewResult,
   TaskSummary,
   UpdateFromBaseResponse,
   ValidationFinding,
@@ -300,6 +291,7 @@ import {
 } from './validation-infrastructure.js';
 import { createValidationInputs } from './validation-inputs.js';
 import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
+import { createValidationProgress } from './validation-progress.js';
 import { createValidationPublication } from './validation-publication.js';
 import type { ValidationRepository } from './validation-repository.js';
 import {
@@ -5505,6 +5497,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityStatus,
   });
 
+  const { buildPhaseEventCallbacks, ownedValidationCallbacks } = createValidationProgress({
+    eventBus,
+  });
+
   const { validateWithInfrastructureRetries } = createValidationExecution({
     logger,
     containerManagerFactory,
@@ -5837,75 +5833,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           whyImpossible,
         },
       ],
-    };
-  }
-
-  /** Per-phase WebSocket events that drive the desktop Validation tab chips.
-   *  Pass to every `validationEngine.validate()` call — the engine no-ops on
-   *  missing callbacks, which silently freezes the UI. */
-  function buildPhaseEventCallbacks(podId: string) {
-    return {
-      onPhaseStarted: (phase: ValidationPhase) => {
-        eventBus.emit({
-          type: 'pod.validation_phase_started',
-          timestamp: new Date().toISOString(),
-          podId,
-          phase,
-        });
-      },
-      onPhaseCompleted: (
-        phase: ValidationPhase,
-        status: 'pass' | 'fail' | 'skip' | 'pending_human',
-        phaseResult: unknown,
-      ) => {
-        const base = {
-          type: 'pod.validation_phase_completed' as const,
-          timestamp: new Date().toISOString(),
-          podId,
-          phase,
-          phaseStatus: status,
-        };
-        if (phase === 'setup') {
-          eventBus.emit({ ...base, setupResult: phaseResult as SetupResult });
-        } else if (phase === 'build') {
-          eventBus.emit({ ...base, buildResult: phaseResult as BuildResult });
-        } else if (phase === 'test') {
-          eventBus.emit({
-            ...base,
-            testResult: phaseResult as {
-              status: 'pass' | 'fail' | 'skip';
-              duration: number;
-              stdout?: string;
-              stderr?: string;
-            },
-          });
-        } else if (phase === 'lint') {
-          eventBus.emit({ ...base, lintResult: phaseResult as LintResult });
-        } else if (phase === 'sast') {
-          eventBus.emit({ ...base, sastResult: phaseResult as SastResult });
-        } else if (phase === 'health') {
-          eventBus.emit({ ...base, healthResult: phaseResult as HealthResult });
-        } else if (phase === 'pages') {
-          eventBus.emit({ ...base, pageResults: phaseResult as PageResult[] });
-        } else if (phase === 'facts') {
-          eventBus.emit({ ...base, factResult: phaseResult as FactValidationResult | null });
-        } else if (phase === 'review') {
-          eventBus.emit({ ...base, reviewResult: phaseResult as TaskReviewResult | null });
-        } else if (phase === 'advisory') {
-          eventBus.emit({
-            ...base,
-            advisoryResult: phaseResult as ValidationResult['advisoryBrowserQa'],
-          });
-        }
-      },
-      onReviewProgress: (progress: ReviewProgressSnapshot) => {
-        eventBus.emit({
-          type: 'pod.review_progress',
-          timestamp: progress.updatedAt,
-          podId,
-          progress,
-        });
-      },
     };
   }
 
@@ -6722,23 +6649,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     validationAbortControllers.set(expectedPod.id, validationController);
     claimed = true;
     return ownership;
-  }
-
-  function ownedValidationCallbacks(
-    ownership: ReturnType<typeof captureValidationOwnership>,
-    callbacks: Parameters<ValidationEngine['validate']>[3],
-  ): NonNullable<Parameters<ValidationEngine['validate']>[3]> {
-    return {
-      onPhaseStarted: (...args) => {
-        if (ownership.isCurrent()) callbacks?.onPhaseStarted?.(...args);
-      },
-      onPhaseCompleted: (...args) => {
-        if (ownership.isCurrent()) callbacks?.onPhaseCompleted?.(...args);
-      },
-      onReviewProgress: (...args) => {
-        if (ownership.isCurrent()) callbacks?.onReviewProgress?.(...args);
-      },
-    };
   }
 
   function recordNotReportedMemoryUsage(podId: string): void {

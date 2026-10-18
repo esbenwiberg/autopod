@@ -1,6 +1,6 @@
 # Slice 13: validation progress events extraction
 
-Status: APPROVED — implementing all three phases after explicit user approval.
+Status: APPROVED — Phases 1 and 2 complete; final qualification running.
 Date: 2026-10-18.
 Baseline: 338c2476c76369a89130e7b3e044f1280b757efa.
 Branch: codex/pod-manager-workspace.
@@ -188,9 +188,9 @@ counts and all other baseline hashes. Do not claim a live desktop/rendered UI pr
 ### Success criteria
 
 Automated:
-- [ ] Frozen public checks pass unchanged after extraction.
-- [ ] Direct event/wrapper and real SQLite/bus/ownership/reopen checks pass.
-- [ ] Two-body recipe, unchanged calls/injection and two-product/two-test scope pass.
+- [x] Frozen public checks pass unchanged after extraction.
+- [x] Direct event/wrapper and real SQLite/bus/ownership/reopen checks pass.
+- [x] Two-body recipe, unchanged calls/injection and two-product/two-test scope pass.
 
 Manual: None required. No live Docker/Azure/provider call or Swift build required.
 
@@ -235,7 +235,7 @@ Slice 12 results are baseline context, not substitute evidence for slice 13.
 ### Success criteria
 
 Automated:
-- [ ] All 63 affected suites pass with SQLite and no new skips.
+- [x] All 63 affected suites pass with SQLite and no new skips.
 - [ ] Full uncached validation and desktop source contract pass.
 - [ ] Scoped lint/whitespace/types, exact movement and frozen hashes pass.
 - [ ] Complete plan/proof records actual results, limits and final pushed identities.
@@ -260,8 +260,7 @@ interfaces/validation-engine.ts; pods/validation-ownership.ts; pods/event-bus.ts
 pods/event-repository.ts; shared/src/types/events.ts:199–237; API WebSocket and
 local-validation-engine tests; desktop review-progress-contract.mjs.
 
-Next action: user reviews the illustrated plan and explicitly approves implementation.
-No product code changed or implementation tests ran in this planning turn.
+Next action: qualify the frozen implementation with the full uncached pipeline.
 
 ## Phase 1 observed results
 
@@ -276,3 +275,31 @@ ordinary/manual entry. The first run passed; semantic diagnostics are zero.
 Frozen public bytes/filter, unchanged manager source, 1,969 baseline package/script
 hashes and six root controls are retained under .autopod-data/validation-progress/.
 Actual child Node 22.23.3 opens SQLite 3.49.2; pnpm uses the existing pinned launcher.
+
+## Phase 2 observed results
+
+Extracted both unchanged bodies into the 122-line validation-progress.ts, with one
+eventBus dependency. Manager is 17,154 lines (90 fewer). Parsed TypeScript proves
+both exact original bodies, the complete manager against the explicit recipe, four
+unchanged builder calls, two direct wrapper calls and one execution injection. All
+1,967 other baseline package/script files are unchanged. No receiver substitutions
+or product corrections were needed. Advisory merge-before-guard stays in manager.
+
+Frozen 106 public checks pass unchanged after extraction. All 90 direct cases pass:
+77 memory contract cases and 13 private migrated file-backed SQLite/event-bus/actual
+ownership fixtures. These prove event keys/status/reference/timestamp forwarding,
+fresh guards, optional callbacks/receivers/late methods, synchronous errors and
+returns, persisted prefixes, SQL insert abort, reopen/integrity/FK and subscriber
+isolation. Actual manager controller/advisory policy remains covered publicly.
+
+Initial direct execution had two fixture failures: PodUpdates has no branch update
+and executionTarget cannot change with a container attached. Both cases now simulate
+persisted identity drift explicitly through private SQL and verify the changed field
+through the actual repository; target drift retains the container. One mock receiver
+needed its explicit TypeScript this annotation. Initial failures/diagnostics are
+retained. No assertion or production policy was relaxed.
+
+All 63 affected suites pass: 2,493 tests, zero skips. Scoped Biome/whitespace and
+semantic diagnostics in both new boundaries are clean. The existing desktop progress
+source contract passes (no Swift/rendered UI claim). Final source is frozen with
+1,971 package/script hashes and six unchanged root controls before qualification.
