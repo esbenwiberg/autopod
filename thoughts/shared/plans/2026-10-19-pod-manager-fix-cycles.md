@@ -1,6 +1,6 @@
 # Slice 28: complete fix-cycle ownership
 
-Status: IMPLEMENTED — expanded regression/frozen qualification in progress.
+Status: COMPLETE — full frozen qualification passed; goal continues through34.
 Date: 2026-10-19. Baseline: ae4af77283f0555bcbd19b6f5471e0c03c1282ac.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -223,10 +223,10 @@ active through34, including facade<=1,500 lines,327-unit/73-member/mutable-owner
 cleanup reconciliation, full frozen uncached pipeline and clean pushed final revision.
 
 Automated:
-- [ ] Full affected set passes with actual SQLite and no new skip.
-- [ ] Full frozen uncached pipeline passes with actual counts/environment recorded.
-- [ ] Frozen bytes/clean pushed revision verified and proof recorded.
-- [ ] Plan/roadmap mark28 after qualification and next29 research is recorded.
+- [x] Full affected set passes with actual SQLite and no new skip.
+- [x] Full frozen uncached pipeline passes with actual counts/environment recorded.
+- [x] Frozen bytes/clean pushed revision verified and proof recorded.
+- [x] Plan/roadmap mark28 after qualification and next29 research is recorded.
 Manual:none; production/integration work remains separately scoped.
 
 ## Compatibility, cost and rollback
@@ -280,3 +280,49 @@ bytes are frozen before expanded/full qualification. Evidence is in
 public-comparison.json, baseline-type-comparison.json and frozen-manifest.json.
 Full affected/full uncached qualification, proof, clean pushed revision and29 research
 remain required before28 is complete.
+
+## Final qualification — 2026-10-19
+
+Verdict: PROVEN for complete local compatibility extraction. Tested implementation:
+79b9f012befe7c84219b727df40799949a4d315c, pushed before full qualification. Evidence:
+.autopod-data/fix-cycles/proof.json and named reports/commands/scripts.
+
+All226 affected suites pass:5,011 tests and four unchanged inherited infrastructure
+gates. Full frozen uncached validation passes frozen install without fallback/lock
+mutation, lint, build/declarations, typecheck, workspace tests, audit and secret scan.
+8,865 Vitest tests pass across554 passing files, plus all35 Node script tests. Same
+ten inherited full gated cases, no new skip. Actual Node22.23.3/pnpm9.15.4/SQLite3.49.2;
+all observed Turbo groups are uncached, including all15 tasks in workspace testing.
+The inherited task-local2MiB root-lint input limit and82 existing warnings remain;
+no rule/config/dependency/selection relaxation.
+
+All2,097 final package/script hashes and six root controls still match. All1,192
+public names/statuses/assertion bytes match. Final direct21-suite run passes97 cases:
+30new fix cases across seven suites and67 unchanged inherited delivery/approval
+cases. Five actual private-file SQLite reopen cases cover canonical linkage/provider/
+feedback, recycle reset/iteration/attempts, native frozen derived configuration despite
+preset edits, completed fix/history and retained operator parking. Queue/parent-race/
+credential/reply/control/live-reference behavior is directly exercised with native
+local repositories and controlled external discovery/adapters. No paid/live provider,
+comment posting, Docker/Azure or installation acceptance is claimed.
+
+The complete12-body/parameter/default audit, canonical arrow/four other initializer
+audit and allnine full source recipes match. Both exported helper names, all73
+public members, same shared queue/state and original polling startup arguments/site
+remain. All25 current source diagnostics match the original25-diagnostic manager
+baseline; alleight new test/fixture files have zero diagnostics. Manager6,916→6,157
+lines; eight new source owners27–276 lines. No hidden replacement monolith.
+
+The current native fix insert's legacy repository-alias requirement is preserved and
+explicitly tested: the matching enrollment supports successful frozen native derived
+admission/reopen, while a missing alias throws the original TypeError with no child/
+snapshot/parent-attempt/queue mutation. The source/initializer/collaborator proofs
+establish compatibility, not successful alias-free fix admission or a fix for that
+existing behavior. No stronger atomicity/replay/isolation/termination claim is added.
+
+This completes28. Six milestones remain29–34. Complete operator-control research is
+saved at ../research/2026-10-19-pod-manager-operator-controls.md, covering allten
+original bodies/two bindings, message lifetime, pause/shared maps, native Goal/live
+fields and receiver calls. Next is the concrete29 plan. Goal remains active through
+facade<=1,500 lines,327-unit/73-member/mutable-owner reconciliation and final34 proof.
+PR/main integration and deployment remain separately scoped.
