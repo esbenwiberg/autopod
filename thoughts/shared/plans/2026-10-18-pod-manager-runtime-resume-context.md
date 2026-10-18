@@ -1,6 +1,6 @@
 # Slice 18: runtime resume context extraction
 
-Status: APPROVED — Phases 1 and 2 complete; final qualification running.
+Status: COMPLETE — all three approved phases implemented and locally verified.
 Date: 2026-10-18.
 Baseline: f09e687bc338aac1c10bff80d88315a8b02e74c8.
 Branch: codex/pod-manager-workspace.
@@ -245,9 +245,9 @@ remote identity. Final documentation-only commit must retain qualified source by
 
 Automated:
 - [x] All 92 affected suites pass with SQLite and no newly skipped tests.
-- [ ] Full uncached pipeline passes under the documented qualification environment.
-- [ ] Scoped lint/whitespace/types, exact movement and frozen hashes pass.
-- [ ] Completed plan/proof records actual results, limits and pushed identities.
+- [x] Full uncached pipeline passes under the documented qualification environment.
+- [x] Scoped lint/whitespace/types, exact movement and frozen hashes pass.
+- [x] Completed plan/proof records actual results, limits and pushed identities.
 
 Manual: None required. Approval covers all three phases together.
 
@@ -270,8 +270,8 @@ pods/injection-merger.ts; crypto/pod-tokens.ts; configuration/execution-credenti
 runtimes/claude-runtime.ts:327, codex-runtime.ts:501, pi-runtime.ts:119;
 pod-manager.test.ts:19401; existing runtime/injection/token suites.
 
-User approved all three phases. Next: characterize unchanged product, extract,
-and qualify frozen final source.
+All three approved phases are complete. No manual acceptance remains.
+Integration, PR creation and deployment remain separate work.
 
 ## Phase 1 observed results
 
@@ -332,3 +332,65 @@ whitespace are clean. Initial public/typing fixture diagnostics are retained.
 
 All 92 affected suites pass: 3,239 tests, zero skipped. Next: full uncached
 qualification on frozen final source; no live provider/MCP execution claim.
+
+## Phase 3: final qualification
+
+Verdict: PROVEN for the approved local runtime resume context compatibility
+extraction under the documented qualification environment. All three phases complete.
+
+| Claim/check | Observed final evidence | Result |
+|---|---|---|
+| Public callers | 36 selected before/after tests, 12 new; byte-identical assertions/names/statuses | Passed |
+| Config/token/setter contracts | 44 direct tests, including 3 private migrated file SQLite/token/credential/reopen cases | Passed |
+| Surrounding behavior | 92 affected suites; 3,239 tests; zero skipped | Passed |
+| Full uncached pipeline | Frozen install, lint, build, supported declaration typecheck, all tests, audit and secret scan | Passed under documented environment |
+| Vitest | 8,467 passed across 505 passing files; 10 existing gated skips | Passed with existing skips |
+| Standalone Node scripts | 35 passed; zero failed/skipped | Passed |
+| Source integrity | 1,981 package/script hashes and six root controls unchanged through qualification | Passed |
+| Exact movement/scope | Original body, three awaited calls, five supporting helper bodies and full recipe; two product/two test paths | Passed |
+| Scoped quality | Biome/whitespace clean; zero semantic diagnostics in both new test boundaries | Passed |
+
+Tested implementation: b80bd94fe44ea808436da16825c1bed8f0a1fbf3. A following documentation-only commit
+records qualification without changing qualified source/test bytes. Final pushed
+identity and clean-checkout confirmation are recorded privately after push.
+
+Actual command through the task-local pinned launcher:
+
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+Actual child Node22.23.3 opens SQLite3.49.2; pnpm9.15.4. Build/typecheck/test groups
+ran uncached. Frozen install succeeded without fallback or lockfile mutation.
+Root lint retains 82 existing warnings and only the established 2 MiB processing
+limit; scoped files are clean. No rules/file selection/repository/global config
+changed. maintenance.auto=false is process-only. Known unrelated Git metadata-scan
+race/audit-clock flake remain outside scope. Final source/test hashes stay frozen;
+no new skips were introduced.
+
+The manager is 16,521 lines, 81 fewer; runtime-resume-context.ts is 149 lines.
+The complete original function, all three awaited calls and five supporting helper
+bodies remain unchanged. Exactly the now-unused PiRuntime manager type import was
+removed as documented; all other existing imports and inline recovery remain.
+All 1,977 other baseline package/script paths match. No behavioral correction followed
+extraction. Manager retains admission/provenance, Goal rework authority, runtime dispatch,
+missing-session fallback, initial Claude/Codex inline recovery and cleanup. The new
+module retains the original live launch/token view and six captured collaborators.
+
+Evidence under ignored .autopod-data/runtime-resume-context/ includes proof.json,
+claims.json, movement.json, before/frozen manifests, complete original/expected source,
+frozen public bytes/filter/names, actual commands/runtime, raw test/build/types/lint/
+full logs and exits, initial fixture diagnostics and revision identities. The illustrated
+approval document remains the proposal snapshot.
+
+Public tests exercise message/rejection/fresh feedback and actual Pi recovery before
+mock dispatch, including snapshot reasoning and launch capability denial. Fresh Goal
+feedback uses real local Goal state/service with a controlled rework capability; it
+does not establish native Goal execution/authorization. Separate inline Claude/Codex
+recovery tests remain separate evidence. Direct tests prove MCP config/header/order/
+property-presence behavior, runtime setter/error/reference semantics, live issuer/
+service timing, real HMAC pod-token identity, scoped stdio rotation/revocation,
+secret-free retained snapshot and other credential/profile/pod/attempt invariants
+through private file SQLite reopen integrity/FK. Runtime setters, capability and
+enrollment boundaries are controlled; existing actual runtime suites retain their
+own local stored-state/invocation coverage. No live provider/MCP connections, paid
+execution, live Docker/Azure or stronger authorization, atomicity, isolation, dispatch
+fencing, replay/crash safety or remote completion claim follows.
