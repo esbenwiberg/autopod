@@ -90,6 +90,8 @@ public struct MainView: View {
     public var onDeleteJobTemplate: ((ScheduledJobTemplate) -> Void)?
 
     // Memory
+    public var memoryLoading: Bool
+    public var memoryWorkspaceActions: MemoryWorkspaceActions?
     public var memoryEntries: [MemoryEntry]
     public var activeMemories: [MemoryEntry]
     public var pendingMemoryCandidates: [MemoryCandidate]
@@ -217,7 +219,8 @@ public struct MainView: View {
         onSelectMemory: ((String) -> Void)? = nil,
         onSelectMemoryCandidate: ((String) -> Void)? = nil,
         onCreateMemory: ((MemoryScope, String?, String, String) -> Void)? = nil,
-        onLoadMemories: (() async -> Void)? = nil
+        onLoadMemories: (() async -> Void)? = nil,
+        memoryWorkspaceActions: MemoryWorkspaceActions? = nil, memoryLoading: Bool = false
     ) {
         self.pods = pods
         self.managedPods = managedPods
@@ -316,6 +319,8 @@ public struct MainView: View {
         self.onSelectMemory = onSelectMemory
         self.onSelectMemoryCandidate = onSelectMemoryCandidate
         self.onCreateMemory = onCreateMemory
+        self.memoryLoading = memoryLoading
+        self.memoryWorkspaceActions = memoryWorkspaceActions
         self.onLoadMemories = onLoadMemories
     }
 
@@ -570,7 +575,13 @@ public struct MainView: View {
     }
 
     @ViewBuilder private var configurationWorkspace: some View {
-        if sidebarSelection == .history {
+        if sidebarSelection == .managedPods {
+            DesktopManagedPodsWorkspace(pods: managedPods, selection: $selectedManagedPodId, api: managedPodAPI,
+                isLoading: managedPodsLoading, error: managedPodsError, isConnected: isConnected,
+                refresh: { await onRefreshManagedPods?() }).id(configurationReset)
+        } else if sidebarSelection == .memory {
+            memoryWorkspace.id(configurationReset)
+        } else if sidebarSelection == .history {
             DesktopHistoryWorkspace(pods: pods, configuration: configurationActions, refresh: onRefresh,
                 openPod: { id in selectedSessionId = id; sidebarSelection = .all },
                 isConnected: isConnected, isLoading: isLoading, loadError: loadError)
@@ -624,7 +635,7 @@ public struct MainView: View {
 
     public var body: some View {
         Group {
-            if redesign && ([.profilesWorkspace, .settingsWorkspace, .history, .analytics].contains(sidebarSelection) || (sidebarSelection == .scheduledJobs && scheduledWorkspaceActions != nil)) {
+            if redesign && ([.profilesWorkspace, .settingsWorkspace, .history, .analytics, .memory, .managedPods].contains(sidebarSelection) || (sidebarSelection == .scheduledJobs && scheduledWorkspaceActions != nil)) {
                 NavigationSplitView {
                     workspaceSidebar
                 } detail: {
@@ -868,50 +879,8 @@ public struct MainView: View {
                     )
     }
 
-    private var podNavigation: some View {
-        NavigationSplitView {
-            SidebarView(
-                pods: pods,
-                selection: sidebarBinding,
-                showCreateSheet: $showCreateSheet,
-                showCreateSeriesSheet: $showCreateSeriesSheet,
-                isConnected: isConnected,
-                connectionLabel: connectionLabel,
-                pendingMemoryCount: pendingMemoryCount,
-                scheduledJobCount: scheduledJobs.count,
-                catchupPendingCount: scheduledJobs.filter { $0.catchupPending }.count,
-                managedPodCount: managedPods.count,
-                onShowSettings: onShowSettings
-            )
-        } content: {
-            Group {
-            if sidebarSelection == .village {
-                VillageView(
-                    snapshotForDate: villageSnapshot,
-                    isConnected: isConnected, activityStreamConnected: activityStreamConnected,
-                    managedError: managedPodsError,
-                    refreshManaged: onRefreshManagedPods,
-                    onSelect: selectVillageActor,
-                    search: $villageSearch
-                )
-                .frame(minWidth: 600)
-            } else if sidebarSelection == .managedPods {
-                ManagedPodsView(
-                    pods: managedPods,
-                    selection: $selectedManagedPodId,
-                    isLoading: managedPodsLoading,
-                    error: managedPodsError,
-                    onRefresh: { await onRefreshManagedPods?() }
-                )
-                .frame(minWidth: 600)
-            } else if sidebarSelection == .analytics {
-                analyticsOverview
-                .frame(minWidth: 600)
-            } else if sidebarSelection == .history {
-                HistoryView(pods: pods, actions: wiredActions, profileNames: profileNames, configurationActions: configurationActions)
-                    .frame(minWidth: 600)
-            } else if sidebarSelection == .memory {
-                MemoryManagementView(
+    private var memoryWorkspace: some View {
+        MemoryManagementView(
                     entries: memoryEntries,
                     activeMemories: activeMemories,
                     pendingCandidates: pendingMemoryCandidates,
@@ -957,10 +926,57 @@ public struct MainView: View {
                         }
                     },
                     profileNames: profileNames,
-                    configurationActions: configurationActions
+                    configurationActions: configurationActions, workspaceActions: memoryWorkspaceActions,
+                    isConnected: isConnected, isLoading: memoryLoading, refresh: onLoadMemories
                 )
                 .frame(minWidth: 600)
                 .task { await onLoadMemories?() }
+    }
+
+    private var podNavigation: some View {
+        NavigationSplitView {
+            SidebarView(
+                pods: pods,
+                selection: sidebarBinding,
+                showCreateSheet: $showCreateSheet,
+                showCreateSeriesSheet: $showCreateSeriesSheet,
+                isConnected: isConnected,
+                connectionLabel: connectionLabel,
+                pendingMemoryCount: pendingMemoryCount,
+                scheduledJobCount: scheduledJobs.count,
+                catchupPendingCount: scheduledJobs.filter { $0.catchupPending }.count,
+                managedPodCount: managedPods.count,
+                onShowSettings: onShowSettings
+            )
+        } content: {
+            Group {
+            if sidebarSelection == .village {
+                VillageView(
+                    snapshotForDate: villageSnapshot,
+                    isConnected: isConnected, activityStreamConnected: activityStreamConnected,
+                    managedError: managedPodsError,
+                    refreshManaged: onRefreshManagedPods,
+                    onSelect: selectVillageActor,
+                    search: $villageSearch
+                )
+                .frame(minWidth: 600)
+            } else if sidebarSelection == .managedPods {
+                ManagedPodsView(
+                    pods: managedPods,
+                    selection: $selectedManagedPodId,
+                    isLoading: managedPodsLoading,
+                    error: managedPodsError,
+                    onRefresh: { await onRefreshManagedPods?() }
+                )
+                .frame(minWidth: 600)
+            } else if sidebarSelection == .analytics {
+                analyticsOverview
+                .frame(minWidth: 600)
+            } else if sidebarSelection == .history {
+                HistoryView(pods: pods, actions: wiredActions, profileNames: profileNames, configurationActions: configurationActions)
+                    .frame(minWidth: 600)
+            } else if sidebarSelection == .memory {
+                memoryWorkspace
             } else if sidebarSelection == .scheduledJobs {
                 ScheduledJobsView(
                     jobs: scheduledJobs,

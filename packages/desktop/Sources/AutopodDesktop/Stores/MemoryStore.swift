@@ -236,7 +236,7 @@ public final class MemoryStore {
             if let idx = entries.firstIndex(where: { $0.id == id }) {
                 let e = entries[idx]
                 entries[idx] = MemoryEntry(
-                    id: e.id, scope: e.scope, scopeId: e.scopeId,
+                    id: e.id, scope: e.scope, scopeId: e.scopeId, repositorySetupId: e.repositorySetupId,
                     path: e.path, content: e.content, contentSha256: e.contentSha256,
                     rationale: e.rationale,
                     kind: e.kind, tags: e.tags,
@@ -244,7 +244,7 @@ public final class MemoryStore {
                     confidence: e.confidence, sourceEvidence: e.sourceEvidence,
                     impactSummary: e.impactSummary,
                     version: e.version, approved: true,
-                    createdByPodId: e.createdByPodId,
+                    createdByPodId: e.createdByPodId, createdBySessionId: e.createdBySessionId,
                     createdAt: e.createdAt, updatedAt: e.updatedAt
                 )
             }
@@ -267,14 +267,15 @@ public final class MemoryStore {
         }
     }
 
-    public func update(_ id: String, content: String) async {
-        guard let api else { return }
+    @discardableResult
+    public func update(_ id: String, content: String) async -> Bool {
+        guard let api else { self.error = "Connect to a daemon before saving memory."; return false }
         do {
             try await api.updateMemory(id, content: content)
             if let idx = entries.firstIndex(where: { $0.id == id }) {
                 let e = entries[idx]
                 entries[idx] = MemoryEntry(
-                    id: e.id, scope: e.scope, scopeId: e.scopeId,
+                    id: e.id, scope: e.scope, scopeId: e.scopeId, repositorySetupId: e.repositorySetupId,
                     path: e.path, content: content, contentSha256: e.contentSha256,
                     rationale: e.rationale,
                     kind: e.kind, tags: e.tags,
@@ -282,14 +283,17 @@ public final class MemoryStore {
                     confidence: e.confidence, sourceEvidence: e.sourceEvidence,
                     impactSummary: e.impactSummary,
                     version: e.version + 1, approved: e.approved,
-                    createdByPodId: e.createdByPodId,
+                    createdByPodId: e.createdByPodId, createdBySessionId: e.createdBySessionId,
                     createdAt: e.createdAt, updatedAt: e.updatedAt
                 )
                 activeMemories = mergeEntries(activeMemories, with: [entries[idx]])
             }
+            self.error = nil
+            return true
         } catch {
             print("[MemoryStore] Failed to update memory \(id): \(error)")
             self.error = error.localizedDescription
+            return false
         }
     }
 
@@ -306,17 +310,21 @@ public final class MemoryStore {
         }
     }
 
-    public func create(scope: MemoryScope, scopeId: String?, path: String, content: String) async {
-        guard let api else { return }
+    @discardableResult
+    public func create(scope: MemoryScope, scopeId: String?, path: String, content: String) async -> Bool {
+        guard let api else { self.error = "Connect to a daemon before saving memory."; return false }
         do {
             let entry = try await api.createMemory(scope: scope.rawValue, scopeId: scopeId, path: path, content: content)
             entries.insert(entry, at: 0)
             if entry.approved {
                 activeMemories.insert(entry, at: 0)
             }
+            self.error = nil
+            return true
         } catch {
             print("[MemoryStore] Failed to create memory: \(error)")
             self.error = error.localizedDescription
+            return false
         }
     }
 
@@ -345,14 +353,18 @@ public final class MemoryStore {
         }
     }
 
-    public func updateCandidate(_ id: String, updates: MemoryCandidateUpdate) async {
-        guard let api else { return }
+    @discardableResult
+    public func updateCandidate(_ id: String, updates: MemoryCandidateUpdate) async -> Bool {
+        guard let api else { self.error = "Connect to a daemon before saving memory."; return false }
         do {
             let candidate = try await api.updateMemoryCandidate(id, updates: updates)
             upsertCandidate(candidate)
+            self.error = nil
+            return true
         } catch {
             print("[MemoryStore] Failed to update memory candidate \(id): \(error)")
             self.error = error.localizedDescription
+            return false
         }
     }
 

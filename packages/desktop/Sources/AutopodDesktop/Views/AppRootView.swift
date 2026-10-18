@@ -323,7 +323,17 @@ public struct AppRootView: View {
         await memoryStore.loadPendingCandidates(scopeIds: profileStore.profileNames + repositoryIds)
         await memoryStore.loadExtractionAttempts(profileNames: profileStore.profileNames)
         await memoryStore.loadAnalytics()
-      }
+      },
+      memoryWorkspaceActions: MemoryWorkspaceActions(
+        create: { scope, scopeID, path, content in
+          guard await memoryStore.create(scope: scope, scopeId: scopeID, path: path, content: content) else { throw DaemonError.badRequest(memoryStore.error ?? "Memory creation failed.") }
+        },
+        update: { id, content in
+          guard await memoryStore.update(id, content: content) else { throw DaemonError.badRequest(memoryStore.error ?? "Memory save failed.") }
+        },
+        updateCandidate: { id, update in
+          guard await memoryStore.updateCandidate(id, updates: update) else { throw DaemonError.badRequest(memoryStore.error ?? "Candidate save failed.") }
+        }), memoryLoading: memoryStore.isLoading
     )
     .environment(\.daemonAuthToken, connectionManager.activeToken ?? "")
     .environment(\.daemonBaseURL, connectionManager.api?.baseURL)

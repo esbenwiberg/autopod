@@ -4,6 +4,7 @@ import SwiftUI
 
 /// Explicit fixture mode for native visual review; never wires a daemon or provider.
 public struct DesktopDesignPreview: View {
+  @State private var knowledge = DesktopKnowledgeFixtures()
   @State private var scheduleFixtures = DesktopScheduleFixtures()
   @State private var simulateAnalyticsFailure = false
   @State private var scanFixtures = DesktopScanFixtures()
@@ -15,7 +16,7 @@ public struct DesktopDesignPreview: View {
   private let onConnect: () -> Void
   public init(onConnect: @escaping () -> Void = {}) { self.onConnect = onConnect }
   public var body: some View {
-    MainView(pods: Self.pods, scheduledJobs: scheduleFixtures.jobs, scheduledJobTemplates: scheduleFixtures.templates, selectedSessionId: $selectedID,
+    MainView(pods: Self.pods, managedPods: DesktopKnowledgeFixtures.managedPods, managedPodAPI: knowledge.api, selectedManagedPodId: $knowledge.selectedManagedID, scheduledJobs: scheduleFixtures.jobs, scheduledJobTemplates: scheduleFixtures.templates, selectedSessionId: $selectedID,
       isConnected: true, connectionLabel: "Design fixtures", connectionState: "Sample data",
       actions: Self.fixtureActions,
       profileNames: MockProfiles.all.map(\.name), profileDetails: MockProfiles.all,
@@ -48,7 +49,20 @@ public struct DesktopDesignPreview: View {
       scheduledWorkspaceActions: scheduleFixtures.actions,
       scanWorkspace: { job, presented in
         AnyView(ScanInboxView(job: job, api: scanFixtures, embedded: true, onClose: { presented.wrappedValue = false }))
-      })
+      },
+      memoryEntries: knowledge.entries, activeMemories: knowledge.entries.filter(\.approved),
+      pendingMemoryCandidates: knowledge.candidates, memoryExtractionAttempts: DesktopKnowledgeFixtures.attempts,
+      selectedMemoryUsage: knowledge.selectedMemoryID.map { DesktopKnowledgeFixtures.usage($0) } ?? [],
+      selectedMemorySourceEvidence: DesktopKnowledgeFixtures.evidence,
+      selectedMemoryStaleEvidence: knowledge.selectedMemoryID == "setup-note" ? DesktopKnowledgeFixtures.usage("setup-note").filter { $0.outcome == .harmfulStale } : [],
+      selectedMemoryDetailId: knowledge.selectedMemoryID, selectedMemoryCandidateDetailId: knowledge.selectedCandidateID,
+      pendingMemoryCount: knowledge.candidates.count + knowledge.entries.filter { !$0.approved }.count,
+      onApproveMemory: { knowledge.approve($0) }, onRejectMemory: { id in knowledge.entries.removeAll { $0.id == id } },
+      onDeleteMemory: { id in knowledge.entries.removeAll { $0.id == id } },
+      onApproveMemoryCandidate: { knowledge.approveCandidate($0) }, onRejectMemoryCandidate: { id in knowledge.candidates.removeAll { $0.id == id } },
+      onSelectMemory: { knowledge.selectedMemoryID = $0; knowledge.selectedCandidateID = nil },
+      onSelectMemoryCandidate: { knowledge.selectedCandidateID = $0; knowledge.selectedMemoryID = nil },
+      memoryWorkspaceActions: knowledge.actions)
       .toolbar {
         ToolbarItem(placement: .principal) {
         HStack {
@@ -56,6 +70,7 @@ public struct DesktopDesignPreview: View {
           Menu("Fixture options") {
             Toggle("Simulate configuration save conflict", isOn: $simulateConfigurationConflict)
             Toggle("Simulate schedule save failure", isOn: $scheduleFixtures.failWrites)
+            Toggle("Simulate memory save failure", isOn: $knowledge.failWrites)
             Toggle("Simulate analytics load failure", isOn: $simulateAnalyticsFailure)
           }.menuStyle(.borderlessButton).fixedSize()
         }.foregroundStyle(.secondary)
