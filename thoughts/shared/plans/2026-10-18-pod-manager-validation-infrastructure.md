@@ -1,6 +1,6 @@
 # Slice 12: validation infrastructure classification and parking extraction
 
-Status: APPROVED — implementing all three phases after explicit user approval.
+Status: APPROVED — Phases 1 and 2 complete; final qualification running.
 Date: 2026-10-18.
 Baseline: 86380d0ff76f126f8e60d245447f4a2718f8c4a5.
 Branch: codex/pod-manager-workspace.
@@ -196,9 +196,9 @@ unchanged eight parking calls and classifier/label uses, and all other baseline 
 ### Success criteria
 
 Automated:
-- [ ] Frozen public checks pass unchanged after extraction.
-- [ ] Direct classifier/contracts and real SQLite close/reopen/failure checks pass.
-- [ ] Seven-body movement, unchanged uses/calls and two-product/two-test scope pass.
+- [x] Frozen public checks pass unchanged after extraction.
+- [x] Direct classifier/contracts and real SQLite close/reopen/failure checks pass.
+- [x] Seven-body movement, unchanged uses/calls and two-product/two-test scope pass.
 
 Manual: None required. No live Docker/Azure/provider claim.
 
@@ -239,7 +239,7 @@ results/limits, commit/push verified increments and confirm remote identity/clea
 ### Success criteria
 
 Automated:
-- [ ] All 60 affected suites pass with SQLite and no new skips.
+- [x] All 60 affected suites pass with SQLite and no new skips.
 - [ ] Full uncached pipeline passes under the documented qualification environment.
 - [ ] Scoped lint/whitespace, new-test semantic diagnostics, movement and hashes pass.
 - [ ] Completed plan/proof records actual results, limitations and pushed identities.
@@ -264,8 +264,7 @@ Predecessor: 2026-10-18-pod-manager-validation-publication.md (complete).
 Sources: pod-manager.ts:956–1006, :6775–6842, :3804 and transition; state-machine.ts;
 task-retry-ledger.ts and existing infrastructure/Resume/ownership tests.
 
-Next action: user reviews the illustrated plan and explicitly approves implementation.
-No product code changed or implementation tests ran in this planning turn.
+Next action: qualify the frozen implementation with the full uncached pipeline.
 
 ## Phase 1 observed results
 
@@ -280,3 +279,31 @@ clear failureReason before parking; two refund failures persist review_required 
 the caller then throws InvalidStateTransitionError attempting review_required→failed.
 Assertions now capture those observed contracts. One event-union type guard was
 corrected. No product behavior was changed. Public semantic diagnostics are zero.
+
+## Phase 2 observed results
+
+Extracted four pure functions and three async parking helpers unchanged into the
+154-line validation-infrastructure.ts, with six narrow dependencies. Manager is
+17,244 lines (99 fewer). Parsed TypeScript proves all seven exact original bodies,
+the complete remaining manager against the explicit recipe, all eight unchanged
+awaited calls (3 validation, 3 review, 2 admission), and unchanged classifier/label
+uses. All 1,965 other baseline package/script files are unchanged.
+
+The frozen 90 public cases pass unchanged after extraction. All 94 direct cases pass:
+36 classifier/label cases and 58 parking contract cases use controlled collaborators
+and real migrated file-backed SQLite. Tests preserve the injected-transition fixture
+limit: real state validation/repository/events, not manager readiness implementation.
+Public tests cover actual manager integration. SQL aborts, durable prefixes, reopen,
+integrity/FK checks, held preview ordering, snapshot accounting, late methods, missing
+containers, stop/log/activity boundaries and error identity are exercised.
+
+All 60 affected suites pass: 2,182 tests, zero skips. Scoped Biome/whitespace and
+semantic diagnostics in both new test boundaries pass. The direct tests passed on
+first execution; six multiple variable declarations were split to satisfy Biome.
+The temporary source-audit harness was corrected to handle import specifiers/type
+signatures and to compare external classifier uses separately from exact moved
+bodies. Product helpers and frozen public tests did not change. Raw diagnostics and
+final passing receipts are retained privately.
+
+Final source is frozen with 1,969 package/script hashes and six unchanged root
+controls before full qualification. No new dependency/configuration/schema change.
