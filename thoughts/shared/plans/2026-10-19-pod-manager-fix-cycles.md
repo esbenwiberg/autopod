@@ -1,6 +1,6 @@
 # Slice 28: complete fix-cycle ownership
 
-Status: PLANNED — implementation is the next authorized phase.
+Status: IMPLEMENTED — expanded regression/frozen qualification in progress.
 Date: 2026-10-19. Baseline: ae4af77283f0555bcbd19b6f5471e0c03c1282ac.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -135,8 +135,8 @@ lazy stop forwarding, thin public delegates and the documented primitive placeme
 All complete bodies/defaults/arrow initializers stay identical after parsed formatting.
 
 Automated:
-- [ ] Qualified predecessor hashes/root controls and public bytes/provenance match.
-- [ ] All body/binding/reference/construction and whole source recipes saved before edits.
+- [x] Qualified predecessor hashes/root controls and public bytes/provenance match.
+- [x] All body/binding/reference/construction and whole source recipes saved before edits.
 Manual:none under standing continuation authority.
 
 ## Phase2: implement complete boundary and direct tests
@@ -193,11 +193,11 @@ in domain owners, every new owner<1,000 lines. No unowned callback algorithm or 
 allocated state is hidden in the facade.
 
 Automated:
-- [ ] Whole bodies/parameters/bindings/exports/startup and full recipes match.
-- [ ] Unchanged public1,192 names/statuses/assertion bytes pass; same73 interface.
-- [ ] Seven new direct suites and three real SQLite reopen cases pass.
-- [ ] Build/lint/whitespace and new-test semantics pass; no new moved-source diagnostic.
-- [ ] Complete fix-cycle boundary is domain-owned with original shared state.
+- [x] Whole bodies/parameters/bindings/exports/startup and full recipes match.
+- [x] Unchanged public1,192 names/statuses/assertion bytes pass; same73 interface.
+- [x] Seven new direct suites and three real SQLite reopen cases pass.
+- [x] Build/lint/whitespace and new-test semantics pass; no new moved-source diagnostic.
+- [x] Complete fix-cycle boundary is domain-owned with original shared state.
 Manual:none for bounded local compatibility; no live external acceptance claimed.
 
 ## Phase3: frozen qualification and continuation
@@ -239,3 +239,44 @@ exists only to retain construction timing, has one string argument and no async 
 Revert manager plus eight owners together. Local proof establishes native repository/
 queue behavior with controlled external adapters, not external delivery or stronger
 atomicity/isolation/termination guarantees. No unresolved design questions remain.
+
+## Implementation checkpoint — 2026-10-19
+
+All12 original complete function/method bodies/parameters/defaults, canonical async
+arrow and four other binding initializers match the original parsed source. Allnine
+full manager/module recipes match; both public helper exports, all73 public members
+and original polling construction arguments/startup call remain. The exact-one-argument
+lazy stop callback preserves construction timing without an async proxy. Two live
+fields remain live; all2,080 other predecessor package/script files and six root
+controls are unchanged. Manager6,916→6,157 lines. Eight new owners are27–276 lines.
+
+The unchanged1,192 public names/statuses/assertion bytes match and pass. Seven new
+fix suites plus fourteen inherited delivery/approval suites pass97 cases (30new,
+67inherited). Five real private-file SQLite close/reopen cases cover canonical
+linkage/provider/feedback, recycling resets/iteration/attempts, frozen native derived
+configuration despite preset edits, completed fix/history, and operator parking.
+Shared native MergeQueue, terminal-parent races, no parent merge, response filtering/
+bounds, credential identity, live provider/admission fields and control contracts
+are directly exercised. Alleight new test/fixture files have zero semantic diagnostics;
+all25 current source diagnostics match the original25-diagnostic manager baseline.
+Build/declarations, scoped lint and whitespace pass.
+
+Native derived admission uses actual configuration/snapshot admission and controlled
+discovery, with a matching legacy profile/repository alias. Current canonical fix
+insert still relies on legacy dispatch lookup when no explicit repository is passed.
+The new negative case proves the existing missing-alias TypeError rolls back the
+child/snapshot and leaves parent attempts/fix pointer/queue unchanged. It is preserved
+compatibility behavior, not a newly introduced error or a claim of successful
+alias-free native fix admission. Original body/initializer and unchanged collaborator
+proof delimit this limitation; correcting that policy is outside this rewrite.
+
+Initial audit/CommonJS naming and fixture failures are retained: actual task-summary/
+output fields, optional provider support, legal escalation state, native profile
+reference construction/typing, native repository dispatch binding and immutable
+selected reuse profile. Fixes adjust scaffolding/fixtures only, without weakening
+original public assertions or changing original source algorithms. All source/test
+bytes are frozen before expanded/full qualification. Evidence is in
+.autopod-data/fix-cycles/: extraction-recipe.json, movement.json, named reports/exits,
+public-comparison.json, baseline-type-comparison.json and frozen-manifest.json.
+Full affected/full uncached qualification, proof, clean pushed revision and29 research
+remain required before28 is complete.
