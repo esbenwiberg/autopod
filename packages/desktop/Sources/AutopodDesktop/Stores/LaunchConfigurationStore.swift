@@ -44,13 +44,28 @@ public final class LaunchConfigurationStore {
   private func connectedAPI() throws -> DaemonAPI {
     guard let api else { throw DaemonError.networkError("Connect to the daemon first") }; return api
   }
+  private func onConnection<T>(_ owner: UUID, operation: (DaemonAPI) async throws -> T) async throws -> T {
+    guard generation == owner else { throw DaemonError.networkError("Connection changed. Reopen this launch on the current daemon.") }
+    let api = try connectedAPI()
+    do {
+      let value = try await operation(api)
+      guard generation == owner else { throw DaemonError.networkError("Connection changed. The earlier daemon may have accepted the request.") }
+      return value
+    } catch {
+      guard generation == owner else { throw DaemonError.networkError("Connection changed. Check the earlier daemon before repeating the request.") }
+      throw error
+    }
+  }
   public func actions(onCreated: @escaping (String) async -> Void) -> LaunchConfigurationActions {
+    let owner = generation
     var actions = LaunchConfigurationActions(documents: documents, capabilities: capabilities, loadError: error,
       reload: { await self.load() },
-      resolve: { try await self.connectedAPI().resolveLaunch($0) },
+      resolve: { value in try await self.onConnection(owner) { try await $0.resolveLaunch(value) } },
       launch: { request in
-        _ = try LaunchRequestJournal.save(request)
-        let pod = try await self.connectedAPI().launchPod(request)
+        let pod = try await self.onConnection(owner) { api in
+          _ = try LaunchRequestJournal.save(request)
+          return try await api.launchPod(request)
+        }
         await onCreated(pod.id)
         return pod.id
       },
@@ -77,7 +92,8 @@ public final class LaunchConfigurationStore {
       saveFromLaunch: { try await self.connectedAPI().saveProfileFromLaunch($0) },
       listWatchers: { try await self.connectedAPI().listWatcherBindings() },
       saveWatcher: { try await self.connectedAPI().writeWatcherBinding($0) },
-      readLaunch: { try await self.connectedAPI().getLaunchConfiguration($0) })
+      readLaunch: { id in try await self.onConnection(owner) { try await $0.getLaunchConfiguration(id) } })
+    actions.connectionID = owner.uuidString
     actions.cachedPim = { self.pimDiscovery }
     actions.listDeployments = { try await self.connectedAPI().listDeployments() }
     actions.reviewDeployment = { try await self.connectedAPI().reviewDeployment($0) }

@@ -7,6 +7,7 @@ struct LaunchConfigurationEditor: View {
   let actions: LaunchConfigurationActions
   @Binding var jsonDirty: Bool
   var selectionOnly = false
+  var followUpSelectionOnly = false
   @State private var section: LaunchConfigurationSection?
   @Binding var advanced: String
   @State private var error: String?
@@ -90,7 +91,7 @@ struct LaunchConfigurationEditor: View {
       Text("Selections use the same account. Choosing access here does not activate it.").font(.caption).foregroundStyle(.secondary)
     case .references: references
     case .advanced:
-      Text(selectionOnly ? "Series supplies task, work and request identity. All shared configuration fields remain editable." : "Complete launch request, including structured work, source and category overrides.").font(.callout).foregroundStyle(.secondary)
+      Text(followUpSelectionOnly ? "Source, repository, profile, task and work are managed by this follow-up. Edit shared launch selections here." : selectionOnly ? "Series supplies task, work and request identity. All shared configuration fields remain editable." : "Complete launch request, including structured work, source and category overrides.").font(.callout).foregroundStyle(.secondary)
       TextEditor(text: Binding(get: { advanced }, set: { advanced = $0; jsonDirty = true }))
         .font(.system(.callout, design: .monospaced)).frame(minHeight: 300).scrollContentBackground(.hidden)
         .padding(10).background(DesktopTheme.surface, in: RoundedRectangle(cornerRadius: 6))
@@ -98,7 +99,7 @@ struct LaunchConfigurationEditor: View {
       if jsonDirty { Text("Unapplied JSON edits. Apply or reload before previewing or launching.").foregroundStyle(.orange).font(.caption) }
       HStack {
         Button("Apply JSON") {
-          do { request = try LaunchComposerJSON.decode(advanced, selectionOnly: selectionOnly, task: request.task); jsonDirty = false; error = nil }
+          do { request = try followUpSelectionOnly ? FollowUpSelectionJSON.decode(advanced, preserving: request) : LaunchComposerJSON.decode(advanced, selectionOnly: selectionOnly, task: request.task); jsonDirty = false; error = nil }
           catch { self.error = error.localizedDescription }
         }
         Button("Reload current values") { updateAdvanced(); jsonDirty = false; error = nil }
@@ -132,7 +133,7 @@ struct LaunchConfigurationEditor: View {
       }
     }
   }
-  private func updateAdvanced() { advanced = LaunchComposerJSON.value(request, selectionOnly: selectionOnly).formatted() }
+  private func updateAdvanced() { advanced = followUpSelectionOnly ? FollowUpSelectionJSON.value(request).formatted() : LaunchComposerJSON.value(request, selectionOnly: selectionOnly).formatted() }
   private func presetRow(_ kind: ConfigurationKind, key: String, selected: String?, edited: Bool) -> some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack {

@@ -1132,7 +1132,8 @@ public struct MainView: View {
                         onLoadAllLogs: onLoadAllLogs,
                         onLaunchSeriesFromPod: { seriesFromPod = $0 },
                         selectedTab: $selectedDetailTab,
-                        requestedTab: $requestedDetailTab
+                        requestedTab: $requestedDetailTab,
+                        configurationActions: configurationActions
                     )
                     .id(pod.id)
                 } else {

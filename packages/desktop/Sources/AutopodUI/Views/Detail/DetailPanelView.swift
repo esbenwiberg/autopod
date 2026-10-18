@@ -26,6 +26,7 @@ public struct DetailPanelView: View {
     @Environment(\.desktopRepositoryFilter) private var filterRepository
     public let pod: Pod
     public let events: [AgentEvent]
+    public var configurationActions: LaunchConfigurationActions?
     public var actions: PodActions
     /// All pods in the currently-selected pod's series, for the Series tab.
     /// Empty when the pod is standalone.
@@ -103,8 +104,10 @@ public struct DetailPanelView: View {
         onLoadAllLogs: (() -> Void)? = nil,
         onLaunchSeriesFromPod: ((Pod) -> Void)? = nil,
         selectedTab: Binding<DetailTab?> = .constant(nil),
-        requestedTab: Binding<DetailTab?> = .constant(nil)
+        requestedTab: Binding<DetailTab?> = .constant(nil),
+        configurationActions: LaunchConfigurationActions? = nil
     ) {
+        self.configurationActions = configurationActions
         self.pod = pod; self.events = events; self.actions = actions
         self.seriesPods = seriesPods
         self.qualityScores = qualityScores
@@ -419,14 +422,32 @@ public struct DetailPanelView: View {
             Text("This will permanently remove the pod record.")
         }
         .sheet(isPresented: $showSpawnFixSheet) {
-            SpawnFixSheet(
+            if redesign {
+              PodRepairSheet(isPresented: $showSpawnFixSheet, pod: pod, kind: .prFix, relatedPods: seriesPods,
+                actions: actions, configuration: configurationActions, onSelect: onSelectPod)
+            } else { SpawnFixSheet(
                 podId: pod.id,
                 message: $spawnFixMessage,
                 isPresented: $showSpawnFixSheet,
                 onSpawn: { message in
                     await actions.spawnFix(pod.id, message.isEmpty ? nil : message)
                 }
-            )
+            ) }
+        }
+        .sheet(item: $repairKind) { kind in
+          PodRepairSheet(isPresented: Binding(get: { repairKind != nil }, set: { if !$0 { repairKind = nil } }),
+            pod: pod, kind: kind, relatedPods: seriesPods, actions: actions, configuration: configurationActions, onSelect: onSelectPod)
+        }
+        .sheet(isPresented: $showForkComposer) {
+          if let configurationActions {
+            FollowUpLaunchSheet(isPresented: $showForkComposer, kind: .fork, initiator: pod, candidatePods: [],
+              actions: configurationActions, onCreated: onSelectPod)
+          } else {
+            VStack(spacing: 20) {
+              ContentUnavailableView("Connect to fork this pod", systemImage: "arrow.triangle.branch", description: Text("Source configuration must be available before reviewing a fork."))
+              Button("Close") { showForkComposer = false }
+            }.padding(24).frame(width: 500, height: 300)
+          }
         }
         .sheet(isPresented: $showForceCompleteSheet) {
             forceCompleteSheet
@@ -919,7 +940,7 @@ public struct DetailPanelView: View {
             case .awaitingInput:
                 if pod.isFixDeliveryFailure {
                     Button {
-                        Task { await actions.resume(pod.id) }
+                        routeRepair(.resume)
                     } label: {
                         Label("Retry Push", systemImage: "arrow.up.circle")
                     }
@@ -956,7 +977,7 @@ public struct DetailPanelView: View {
                 } else {
                     // Validation failed — rework/fix actions are primary
                     Button {
-                        Task { await actions.rework(pod.id) }
+                        routeRepair(.rework)
                     } label: {
                         Label(reworkActionTitle, systemImage: "arrow.clockwise")
                     }
@@ -965,7 +986,7 @@ public struct DetailPanelView: View {
                     .tint(.orange)
                     .help(reworkActionHelp)
                     Button {
-                        Task { await actions.fixManually(pod.id) }
+                        routeRepair(.manual)
                     } label: {
                         Label("Fix Manually", systemImage: "wrench.and.screwdriver")
                     }
@@ -989,7 +1010,7 @@ public struct DetailPanelView: View {
                             guard !isInfrastructureResumePending else { return }
                             isInfrastructureResumePending = true
                             defer { isInfrastructureResumePending = false }
-                            await actions.resume(pod.id)
+                            if redesign { repairKind = .resume } else { await actions.resume(pod.id) }
                         case .fixReview, .extendAttempts:
                             await actions.extendAttempts(pod.id, 2)
                         }
@@ -1012,7 +1033,7 @@ public struct DetailPanelView: View {
                         ? "Add retry budget and re-run the agent with the failed review findings as feedback."
                         : "Add retry budget and re-run validation.")
                 Button {
-                    Task { await actions.fixManually(pod.id) }
+                    routeRepair(.manual)
                 } label: {
                     Label("Fix Manually", systemImage: "wrench.and.screwdriver")
                 }
@@ -1059,7 +1080,7 @@ public struct DetailPanelView: View {
                     // endpoint re-provisions a fresh container against the
                     // existing worktree. No tokens spent.
                     Button {
-                        Task { await actions.rework(pod.id) }
+                        routeRepair(.rework)
                     } label: {
                         Label("Restart", systemImage: "arrow.clockwise")
                     }
@@ -1077,7 +1098,7 @@ public struct DetailPanelView: View {
                     // cheapest path: pushes/opens the PR if validation passed, otherwise
                     // re-runs validation only. Disabled when the worktree is unrecoverable.
                     Button {
-                        Task { await actions.resume(pod.id) }
+                        routeRepair(.resume)
                     } label: {
                         Label(pod.isFixDeliveryFailure ? "Retry Push" : "Resume",
                               systemImage: pod.isFixDeliveryFailure ? "arrow.up.circle" : "arrow.uturn.forward")
@@ -1094,7 +1115,7 @@ public struct DetailPanelView: View {
                         ? "Retry pushing the already-validated fix branch. No agent rework, no token spend."
                         : "Retry the cheapest recovery path — push + open PR if validation passed, otherwise re-run validation. No agent rework, no token spend.")
                     Button {
-                        Task { await actions.rework(pod.id) }
+                        routeRepair(.rework)
                     } label: {
                         Label(reworkActionTitle, systemImage: "arrow.clockwise")
                     }
@@ -1104,7 +1125,7 @@ public struct DetailPanelView: View {
                     .help(reworkActionHelp)
                 }
                 Button {
-                    Task { await actions.fixManually(pod.id) }
+                    routeRepair(.manual)
                 } label: {
                     Label("Fix Manually", systemImage: "wrench.and.screwdriver")
                 }
@@ -1145,7 +1166,7 @@ public struct DetailPanelView: View {
 
             case .killed:
                 Button {
-                    Task { await actions.rework(pod.id) }
+                    routeRepair(.rework)
                 } label: {
                     Label(pod.isWorkspace ? "Restart" : "Rework",
                           systemImage: "arrow.clockwise")
@@ -1252,6 +1273,8 @@ public struct DetailPanelView: View {
     @State private var showRejectFeedback = false
     @State private var rejectFeedbackText = ""
     @State private var showDeleteConfirmation = false
+    @State private var repairKind: PodRepairKind?
+    @State private var showForkComposer = false
     @State private var showSpawnFixSheet = false
     @State private var spawnFixMessage = ""
     @State private var showHandoffSheet = false
@@ -1742,9 +1765,22 @@ public struct DetailPanelView: View {
         .frame(minWidth: 380)
     }
 
+    private func routeRepair(_ kind: PodRepairKind) {
+      if redesign { repairKind = kind; return }
+      Task {
+        switch kind {
+        case .manual: _ = await actions.fixManually(pod.id)
+        case .rework: await actions.rework(pod.id)
+        case .resume: await actions.resume(pod.id)
+        case .revalidate: await actions.revalidate(pod.id)
+        case .prFix: showSpawnFixSheet = true
+        }
+      }
+    }
+
     private var forkButton: some View {
         Button {
-            Task { await actions.fork(pod.id) }
+            if redesign { showForkComposer = true } else { Task { await actions.fork(pod.id) } }
         } label: {
             Label("Fork", systemImage: "arrow.triangle.branch")
         }

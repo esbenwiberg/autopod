@@ -73,7 +73,7 @@ public final class ActionHandler {
 
   /// Build a PodActions struct wired to this handler.
   public var actions: PodActions {
-    PodActions(
+    var result = PodActions(
       approve: { [weak self] id, reason in await self?.approve(id, reason: reason) },
       reject: { [weak self] id, feedback in await self?.reject(id, feedback: feedback) },
       reply: { [weak self] id, message in await self?.reply(id, message: message) },
@@ -203,6 +203,47 @@ public final class ActionHandler {
         await self?.updateFromBase(id) ?? nil
       }
     )
+    result.repair = PodRepairActions(scope: replyContextID.uuidString, submit: { [weak self] id, kind, message in
+      guard let self else { throw DaemonError.networkError("Connection is unavailable") }
+      return try await self.submitRepair(id, kind: kind, message: message)
+    }, inspect: { [weak self] id in
+      guard let self else { throw DaemonError.networkError("Connection is unavailable") }
+      let source = try await self.perform { try await self.api.getPod(id) }
+      let pods = try await self.perform { try await self.api.listPods() }
+      let mapped = pods.map { PodMapper.map($0) }
+      self.podStore.upsertSession(PodMapper.map(source))
+      for pod in mapped where pod.linkedSessionId == id || pod.id == source.fixPodId { self.podStore.upsertSession(pod) }
+      return PodRepairObservation(source: PodMapper.map(source), related: mapped.filter {
+        $0.linkedSessionId == id || $0.id == source.fixPodId || (source.seriesId != nil && $0.seriesId == source.seriesId)
+      })
+    })
+    return result
+  }
+
+  public func submitRepair(_ id: String, kind: PodRepairKind, message: String?) async throws -> PodRepairReceipt {
+    pendingAction = "repair-\(kind.rawValue)-\(id)"
+    defer { pendingAction = nil }
+    switch kind {
+    case .manual:
+      let workspace = try await perform { try await api.fixManually(id) }
+      podStore.upsertSession(PodMapper.map(workspace))
+      return PodRepairReceipt(message: "Linked workspace admitted. Follow its observed state as it provisions.", podID: workspace.id)
+    case .rework:
+      try await perform { try await api.triggerValidation(id) }
+      return PodRepairReceipt(message: "Request accepted. Waiting for the pod’s observed execution state.")
+    case .revalidate:
+      _ = try await perform { try await api.revalidateSession(id) }
+      return PodRepairReceipt(message: "Validation request accepted. Follow the pod’s observed validation state.")
+    case .resume:
+      _ = try await perform { try await api.resumePod(id) }
+      return PodRepairReceipt(message: "Recovery request accepted. Follow observed delivery and validation state.")
+    case .prFix:
+      let response = try await perform { try await api.spawnFixSession(id, userMessage: message) }
+      guard response.ok else {
+        throw DaemonError.badRequest(response.reason == "parent_terminal" ? "This parent is terminal and cannot accept fix feedback. Your message is retained." : "PR repair was rejected: \(response.reason ?? "no reason supplied"). Your message is retained.")
+      }
+      return PodRepairReceipt(message: "PR feedback accepted. The daemon may create or reuse a fix pod; later events identify it.", podID: response.fixPodId, unreadFeedback: response.queueLength)
+    }
   }
 
   // MARK: - Actions

@@ -283,7 +283,7 @@ import Testing
 @MainActor private func launchNodes(_ root: NSObject) -> [NSObject] {
   [root] + (launchAX(root, "accessibilityChildren") as? [NSObject] ?? []).flatMap(launchNodes)
 }
-@MainActor private final class LaunchComposerHost {
+@MainActor final class LaunchComposerHost {
   let hosting: NSHostingView<AnyView>
   let window: NSWindow
   init<V: View>(_ view: V, width: Double, light: Bool = false) {

@@ -154,6 +154,11 @@ internal struct LaunchComposerLayout<Content: View, Summary: View, Footer: View>
   let busy: Bool
   let ready: Bool
   let close: () -> Void
+  var title: String? = nil
+  var subtitle: String? = nil
+  var composeTitle: String? = nil
+  var sourcePod: Pod? = nil
+  var sourceRepository: String? = nil
   @ViewBuilder let content: () -> Content
   @ViewBuilder let summary: () -> Summary
   @ViewBuilder let footer: () -> Footer
@@ -161,14 +166,15 @@ internal struct LaunchComposerLayout<Content: View, Summary: View, Footer: View>
     VStack(spacing: 0) {
       HStack(alignment: .top) {
         VStack(alignment: .leading, spacing: 8) {
-          Text(series ? "SERIES / START WORK" : "FLEET / START WORK").font(.system(size: 9, weight: .medium)).tracking(1.3).foregroundStyle(.secondary)
-          Text(series ? "New series" : "New pod").font(.title.weight(.semibold))
-          Text(series ? "Read the briefs, inspect the plan and configure the pods together." : "Describe the work, inspect the configuration, then launch its resolved snapshot.").font(.callout).foregroundStyle(.secondary)
+          Text(title != nil ? "POD / FOLLOW-UP WORK" : series ? "SERIES / START WORK" : "FLEET / START WORK").font(.system(size: 9, weight: .medium)).tracking(1.3).foregroundStyle(.secondary)
+          Text(title ?? (series ? "New series" : "New pod")).font(.title.weight(.semibold))
+          Text(subtitle ?? (series ? "Read the briefs, inspect the plan and configure the pods together." : "Describe the work, inspect the configuration, then launch its resolved snapshot.")).font(.callout).foregroundStyle(.secondary)
         }
         Spacer()
         Button("Close", systemImage: "xmark", action: close).disabled(busy).keyboardShortcut(.cancelAction)
       }.padding(24).background(DesktopTheme.surface)
       Divider()
+      if let sourcePod { FollowUpSourceContext(pod: sourcePod, repository: sourceRepository); Divider() }
       GeometryReader { geometry in
         HStack(spacing: 0) {
           VStack(alignment: .leading, spacing: 12) {
@@ -177,7 +183,7 @@ internal struct LaunchComposerLayout<Content: View, Summary: View, Footer: View>
                 HStack(spacing: 10) {
                   Text(ready && item == .review ? "✓" : String(item.rawValue + 1)).font(.caption.monospacedDigit())
                     .frame(width: 24, height: 24).overlay(Circle().stroke(DesktopTheme.line))
-                  Text(item.title(series: series)).font(.callout.weight(.medium))
+                  Text(item == .compose ? composeTitle ?? item.title(series: series) : item.title(series: series)).font(.callout.weight(.medium))
                   Spacer(minLength: 0)
                 }.padding(10).background(stage == item ? DesktopTheme.selection : .clear, in: RoundedRectangle(cornerRadius: 6))
                   .contentShape(Rectangle())
@@ -234,10 +240,13 @@ internal struct LaunchComposerSummary: View {
 internal struct LaunchResolvedReview: View {
   let preview: EffectiveLaunchPreview
   var series = false
+  var compact = false
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
+      if !compact {
       Text("Ready for this launch.").font(.title2.weight(.semibold))
       Text(series ? "Every brief has been checked. The daemon resolves the configuration again when admitting the series; edits require a fresh review." : "The preview pins the selected combination. Every edit requires a fresh preview.").font(.callout).foregroundStyle(.secondary)
+      }
       HStack { Label(preview.mainModel, systemImage: "sparkles"); Spacer(); Text(preview.executionTarget == "local" ? "Docker" : preview.executionTarget) }
       DisclosureGroup("Inspect complete resolved settings & value sources") {
         Text(ConfigurationJSON.object(preview.fields).formatted()).font(.system(.caption, design: .monospaced)).textSelection(.enabled)

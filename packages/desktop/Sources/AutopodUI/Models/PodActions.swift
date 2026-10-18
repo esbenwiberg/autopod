@@ -34,6 +34,7 @@ public enum PendingPodControl: Sendable, Equatable {
 /// Views call these; the app layer provides real implementations.
 /// All closures default to no-ops so previews work without wiring.
 public struct PodActions: Sendable {
+  public var repair: PodRepairActions = .unavailable
   public var approve: @MainActor @Sendable (String, String?) async -> Void
   public var reject: @MainActor @Sendable (String, String?) async -> Void
   public var reply: @MainActor @Sendable (String, String) async -> Void
@@ -75,7 +76,7 @@ public struct PodActions: Sendable {
   public var approveFactWaiver: @MainActor @Sendable (String, String, String?) async -> Void
   /// Manually force-spawn a fix pod for a merge_pending/complete pod. Optional message is forwarded
   /// to the fix pod as explicit reviewer instructions alongside auto-detected CI/review failures.
-  /// Returns `SpawnFixResponse` so callers can show queue-position feedback.
+  /// Returns `SpawnFixResponse` so callers can show unread-feedback backlog receipts.
   public var spawnFix: @MainActor @Sendable (String, String?) async -> SpawnFixResponse?
   /// Retry PR creation for a complete pod whose PR was never successfully created
   public var retryCreatePr: @MainActor @Sendable (String) async -> Void
