@@ -45,7 +45,7 @@ public final class LaunchConfigurationStore {
   private func connectedAPI() throws -> DaemonAPI {
     guard let api else { throw DaemonError.networkError("Connect to the daemon first") }; return api
   }
-  private func onConnection<T>(_ owner: UUID, operation: (DaemonAPI) async throws -> T) async throws -> T {
+  private func onConnection<T: Sendable>(_ owner: UUID, operation: @MainActor (DaemonAPI) async throws -> T) async throws -> T {
     guard generation == owner else { throw DaemonError.networkError("Connection changed. Reopen this launch on the current daemon.") }
     let api = try connectedAPI()
     do {
