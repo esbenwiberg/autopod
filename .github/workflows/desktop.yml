@@ -10,6 +10,7 @@ on:
       - "packages/daemon/**"
       - ".github/workflows/desktop.yml"
       - "scripts/update-village-renderer*"
+      - "scripts/test-desktop.sh"
       - "pnpm-lock.yaml"
   pull_request:
     branches: [main, codex/reliability]
@@ -19,6 +20,7 @@ on:
       - "packages/daemon/**"
       - ".github/workflows/desktop.yml"
       - "scripts/update-village-renderer*"
+      - "scripts/test-desktop.sh"
       - "pnpm-lock.yaml"
 
 concurrency:
