@@ -1,19 +1,19 @@
 # Pod-manager rewrite: remaining roadmap, slices 19–34
 
-Status: Slices 19–28 COMPLETE. Slices 1–28 complete; 6 milestones remain (29–34).
+Status: Slices 19–29 COMPLETE. Slices 1–29 complete; 5 milestones remain (30–34).
 Date: 2026-10-18. Baseline: ecc324ca4a403d49397dd63cecb1a881e653ad06.
 Branch: codex/pod-manager-workspace.
 
 ## Finite scope and count
 
-6 remaining delivery milestones: Slice 29 through final qualification at 34.
-The bounded baseline roadmap below included 16 (19–34); Slices 19–28 are complete.
+5 remaining delivery milestones: Slice 30 through final qualification at 34.
+The bounded baseline roadmap below included 16 (19–34); Slices 19–29 are complete.
 The milestones define scope; their effort varies, and they do not provide a time estimate. Recent slices moved small helpers;
 future milestones deliberately complete whole responsibilities and can contain
 multiple independently tested implementation phases within their numbered slice.
 
 At roadmap baseline the manager had 16,521 total lines and 73 public object members.
-After Slice 28 it has 6,157 lines and the same public interface. A TypeScript
+After Slice 29 it has 5,375 lines and the same public interface. A TypeScript
 AST inventory below assigns every one of 327 non-import top-level declarations,
 manager-closure declarations/statements and public members to an owning milestone.
 Nested implementation blocks inherit their containing workflow; processPod has an
@@ -41,7 +41,7 @@ corrections and unrelated bugs have their own work, outside this compatibility r
 | 26 | Approval and readiness — COMPLETE | Own approveSession, readiness waits/approvals, fact waivers, forced/bulk approval and approval snapshots. | Complete approval lifetime/readiness/controls retain17 bodies, shared references and decisions;1,192 public cases,25 direct cases and full qualification pass. |
 | 27 | Delivery and merge polling — COMPLETE | Own manager delivery/scan/PR retry, shared queue/poller construction/startup and full inline approval/validation delivery. | Twelve bodies/four bindings and full stage recipes match; trigger size exception ends. 1,192 public cases,42 new direct cases and full frozen qualification pass. |
 | 28 | Fix cycles — COMPLETE | Own complete canonical fix admission/recycling, task/binding, reply/delivery/parking lifetimes and three controls. | Twelve bodies/five initializers/export/startup recipes match;1,192 public cases,30new direct cases/five SQLite reopen cases and full frozen qualification pass. Original native alias limitation documented. |
-| 29 | Operator lifecycle controls | Own messages, rejection, pause/nudge/kill, escalation notification, credential injection and tool installation. | Public commands delegate through narrow workflow ports and retain quiescence, admission and error behavior. |
+| 29 | Operator lifecycle controls — COMPLETE | Own complete message/rejection/pause/kill lifetimes, nudge/escalation/bulk and credential/tool controls. | Ten bodies/two initializers/three receivers/shared state recipes match;1,192 public cases,33new direct cases/three SQLite reopens and full frozen qualification pass. |
 | 30 | Resources, network and preview | Own cleanup, sidecars, network/deny handles, preview and commit polling, advisory semaphore/run tracking and deferred cleanup. | Each timer/map/semaphore has one explicit owner; cleanup preserves guidance and waits for owned advisory work. |
 | 31 | Workspace and recovery commands | Own interactive completion, preservation/sync, promote/manual fix, artifact fences, delete/recover/kick/watchdog and host-fetch retries. | All workspace/artifact/recovery commands delegate; crash/replacement workspaces and branch fences retain their behavior. |
 | 32 | Admission, queries and series | Own session creation/derived launch, history/memory workspaces, dependent sessions, series and read/configuration projections. | All 73 current public methods are either thin delegates or intentional service projections; admission snapshots remain unchanged. |

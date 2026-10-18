@@ -1,6 +1,6 @@
 # Slice29: complete operator lifecycle controls
 
-Status: IMPLEMENTED — expanded regression/frozen qualification in progress.
+Status: COMPLETE — full frozen qualification passed; goal continues through34.
 Date:2026-10-19. Baseline:c7997924e39d475d674f128c5030ae8afcb277b1.
 Branch:codex/pod-manager-workspace.
 Worktree:/Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -208,10 +208,10 @@ all gates pass; record30 resource/network/preview research. Goal remains active 
 full frozen uncached clean pushed final proof. PR/main integration/deploy separate.
 
 Automated:
-- [ ] Expanded regression passes with actual SQLite and no new skip.
-- [ ] Full frozen uncached pipeline passes; actual counts/runtime/gates recorded.
-- [ ] Frozen bytes, proof and clean pushed revision verified.
-- [ ] Plan/roadmap mark29 after proof and complete30 research is recorded.
+- [x] Expanded regression passes with actual SQLite and no new skip.
+- [x] Full frozen uncached pipeline passes; actual counts/runtime/gates recorded.
+- [x] Frozen bytes, proof and clean pushed revision verified.
+- [x] Plan/roadmap mark29 after proof and complete30 research is recorded.
 Manual:none; production acceptance remains separately scoped.
 
 ## Compatibility and rollback
@@ -252,3 +252,45 @@ unchanged. Source/test bytes are frozen for affected/full qualification. Evidenc
 commands/exits, public-comparison.json, baseline-type-comparison.json, test-types.json
 and frozen-manifest.json. Expanded/full qualification and30 research remain required
 before29 is complete. Goal remains active through34.
+
+## Final qualification — 2026-10-19
+
+Verdict: PROVEN for complete local compatibility extraction. Tested implementation:
+5838a228ece085093fae33e30bd657c237ef91b6, pushed before full qualification. Evidence:
+.autopod-data/operator-controls/proof.json and named reports/commands/scripts.
+
+All237 affected suites pass:5,055 tests and four unchanged inherited infrastructure
+gates. Full frozen uncached validation passes frozen install without fallback/lock
+mutation, lint, build/declarations, typecheck, workspace tests, audit and secret scan.
+8,898 Vitest tests pass across562 passing files, plus all35 Node script tests. Same
+ten inherited full gated cases, no new skip. Actual Node22.23.3/pnpm9.15.4/SQLite3.49.2;
+all observed Turbo groups are uncached(7/11/15tasks). The inherited task-local2MiB
+root-lint input limit and82 existing warnings remain; no rule/config/dependency/
+selection relaxation. All2,115 final package/script hashes and six roots match.
+
+All1,192 public names/statuses/assertion bytes match. Final29-suite direct run passes
+130 cases:33new operator cases across eight suites and97 unchanged inherited fix/
+delivery/approval cases. Three real private-file SQLite close/reopen cases cover
+actor-labelled reply/queued guidance/decision, rejection/rework/history and completed
+kill/history; integrity/FK and unrelated profile checks pass. Actual local pending
+requests, active-run registry and task ledger exercise attached/detached/retained
+replies, pause settlement/replacement/10s timeout and kill replacement/30s late-cleanup
+fences. Three dynamic receiver paths and live launch/pending/provider fields preserve
+their contracts. External runtime/Goal/container/transport/install effects are controlled;
+no live worker/provider, real messages, credential vending or installation acceptance.
+
+Allten full bodies/defaults, both initializers and allten full source recipes match.
+Same73 public members, nine thin delegates, one shared pause map created before active
+registry/event capture and original delivery startup arguments/site remain. All24
+changed-source supplemental diagnostics match the original24 baseline; nine new test/
+fixture files have zero diagnostics. Manager6,157→5,375 lines; nine new source modules
+6–548 lines. Original cleanup may continue after timeout, with no stronger isolation/
+termination/replay/atomicity claim.28's native fix repository-alias limitation remains
+preserved; this milestone does not repair it.
+
+This completes29. Five milestones remain30–34. Complete resource/network/preview
+research is saved at ../research/2026-10-19-pod-manager-resources-preview.md. The
+concrete30 plan is saved at2026-10-19-pod-manager-resources-preview.md; it covers all25
+bodies/13initializers, shared lifetime state, network protocol and four public controls.
+Goal remains active through<=1,500-line facade/composition,327-unit/73-member/mutable-
+owner reconciliation and34 full proof. PR/main/deployment remain separately scoped.
