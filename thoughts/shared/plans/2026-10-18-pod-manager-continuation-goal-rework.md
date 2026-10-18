@@ -1,6 +1,6 @@
 # Slice 22: continuation and native Goal rework
 
-Status: IN PROGRESS — authorized continuation of the remaining-slices goal.
+Status: IN PROGRESS — extraction and affected regression complete; full qualification next.
 Date: 2026-10-18. Baseline: 2c8bab5c2dacb63de674502de2f6d7e86de33d0c.
 Branch: codex/pod-manager-workspace.
 Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -135,10 +135,10 @@ fix extraction/fixture faults without changing original algorithm behavior or ol
 assertions. No live provider/browser/Docker/Azure or paid dispatch.
 
 Automated:
-- [ ] Eighteen bodies/parameter lists, constant and complete extraction recipes match.
-- [ ] Unchanged full public manager suite passes with identical names/statuses.
-- [ ] Four direct suites and three private SQLite reopen cases pass with no new skips.
-- [ ] Build/declarations, scoped lint/whitespace and new-test semantic checks pass.
+- [x] Eighteen bodies/parameter lists, constant and complete extraction recipes match.
+- [x] Unchanged full public manager suite passes with identical names/statuses.
+- [x] Four direct suites and three private SQLite reopen cases pass with no new skips.
+- [x] Build/declarations, scoped lint/whitespace and new-test semantic checks pass.
 Manual: none.
 
 ## Phase 3: qualify and continue
@@ -173,3 +173,32 @@ usage/retry accounting and event/side-effect order. Revert the manager and five 
 modules together to roll back. Evidence remains ignored under
 .autopod-data/continuation-goal-rework/. The milestone-27 validation-trigger delivery/
 size review remains required. Full goal completion still requires all Slice-34 gates.
+
+## Phase 2 evidence
+
+All eighteen original function bodies/parameter lists, the constant initializer and
+complete explicit manager/module recipes match parsed TypeScript after formatting-only
+normalization. All 1,994 other baseline package/script paths, public assertions and six
+root controls remain byte-identical. The manager is 12,995 lines (838 fewer). New
+modules: policy86, context137, provider477, controls412 and contracts104 lines.
+Factory initialization follows existing workspace-transfer composition; original
+recovery maps and active-run references retain their identity/construction sites.
+
+The unchanged 1,192-case public suite passes with identical names/statuses. All 50
+direct cases pass, including actual runtime provenance with controlled CLI probes,
+MCP reference/order, native Goal guards/revision/budget, callback receiver lookup,
+provider handoff exclusion/write, drain/timeout/rollback, coalescing cleanup and three
+private migrated SQLite close/reopen cases. File cases verify provider binding/history,
+separate Task rework retaining Goal achievement and revision-bound native resume
+with after-commit enqueue, integrity/FK checks and retained profile/account state.
+All 107 affected suites pass 3,551 cases with no skips. Build/declarations, scoped
+Biome/whitespace and supplemental semantics on all four new direct files pass.
+
+Initial direct fixtures needed valid scanner enums/fields, the ledger's latest reader,
+outer event timestamps, an optional exclusion helper and a copied mock implementation
+for awaited probe interception. Sandbox target setup must detach the old fixture
+container before changing target, then attach the simulated sandbox. The reopen Task
+case now performs its writes through the private file connection before close/reopen.
+These are fixture corrections; no original algorithm or public assertion changed.
+Initial logs/reports remain retained. Final 2,004 package/script hashes and six root
+controls are frozen before full qualification. Node22.23.3/pnpm9.15.4/SQLite3.49.2.
