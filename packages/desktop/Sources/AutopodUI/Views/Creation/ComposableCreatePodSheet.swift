@@ -5,6 +5,7 @@ public struct ComposableCreatePodSheet: View {
   @Environment(\.desktopRedesign) private var redesign
   @State private var stage: LaunchComposerStage = .compose
   @State private var jsonDirty = false
+  @State private var previewGeneration = 0
   @State private var dirty = false
   @State private var confirmClose = false
   @State private var confirmDifferent = false
@@ -83,7 +84,9 @@ public struct ComposableCreatePodSheet: View {
     } footer: {
       composerFooter
     }
-    .onChange(of: request) { _, _ in preview = nil; previewRequest = nil; dirty = true }
+    .onChange(of: request) { _, _ in invalidatePreview(); dirty = true }
+    .onChange(of: actions.documents) { _, _ in if pendingRequest == nil { invalidatePreview() } }
+    .onChange(of: actions.capabilities) { _, _ in if pendingRequest == nil { invalidatePreview() } }
     .interactiveDismissDisabled(busy || dirty || jsonDirty || pendingRequest != nil)
     .confirmationDialog("Leave this launch draft?", isPresented: $confirmClose) {
       Button("Leave draft", role: .destructive) { isPresented = false }
@@ -101,6 +104,7 @@ public struct ComposableCreatePodSheet: View {
       }
     }
   }
+  private func invalidatePreview() { preview = nil; previewRequest = nil; previewGeneration += 1 }
   private func close() { if dirty || jsonDirty || pendingRequest != nil { confirmClose = true } else { isPresented = false } }
   private var composerFooter: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -156,9 +160,11 @@ public struct ComposableCreatePodSheet: View {
         Text(repository == nil ? "Select profile" : "Repository usual profile · \(profile?.name ?? "not selected")").tag("")
         ForEach(actions.list(.profile)) { Text($0.name).tag($0.id) }
       }
-      Picker("Intent", selection: Binding(get: { request.intent ?? "" }, set: { request.intent = $0.isEmpty ? nil : $0 })) {
-        Text("Workflow default").tag(""); Text("Task").tag("task"); Text("Native Goal").tag("goal").disabled(!nativeGoalAvailable)
-      }.pickerStyle(.segmented)
+      HStack(spacing: 6) {
+        intentButton("Workflow default", value: "")
+        intentButton("Task", value: "task")
+        intentButton(nativeGoalAvailable ? "Native Goal" : "Native Goal · locked", value: "goal")
+      }
       if !nativeGoalAvailable { Text("Native Goal is unavailable until verified for the selected AI account and execution backend.").font(.caption).foregroundStyle(.secondary) }
       Text(request.intent == "goal" ? "Objective" : "Task or objective").font(.headline)
       TextEditor(text: $request.task).font(.body).scrollContentBackground(.hidden).frame(minHeight: 180)
@@ -167,6 +173,15 @@ public struct ComposableCreatePodSheet: View {
       Text("Describe the outcome, boundaries and evidence you expect. The profile supplies tools, workflow and delivery rules.")
         .font(.callout).foregroundStyle(.secondary)
     }
+  }
+  private func intentButton(_ title: String, value: String) -> some View {
+    Button { request.intent = value.isEmpty ? nil : value } label: {
+      Text(title).font(.callout).padding(.horizontal, 12).padding(.vertical, 9)
+        .background((request.intent ?? "") == value ? DesktopTheme.selection : DesktopTheme.surface, in: RoundedRectangle(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5).stroke((request.intent ?? "") == value ? DesktopTheme.accent : DesktopTheme.line))
+    }.buttonStyle(.plain).disabled(value == "goal" && !nativeGoalAvailable)
+      .accessibilityIdentifier("launch-intent-\(value.isEmpty ? "default" : value)")
+      .accessibilityAddTraits((request.intent ?? "") == value ? .isSelected : [])
   }
   private var legacyBody: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -425,9 +440,9 @@ public struct ComposableCreatePodSheet: View {
   private func resolve() async {
     guard !busy, !jsonDirty, canPreview else { return }
     if request.intent == "goal" && !nativeGoalAvailable { error = "Native Goal is not verified for this account and execution backend."; return }
-    busy = true; error = nil; let candidate = request
+    busy = true; error = nil; let candidate = request; let generation = previewGeneration
     defer { busy = false }
-    do { let resolved = try await actions.resolve(candidate); guard request == candidate else { return }; preview = resolved; previewRequest = candidate; stage = .review }
+    do { let resolved = try await actions.resolve(candidate); guard request == candidate, previewGeneration == generation, !jsonDirty else { return }; preview = resolved; previewRequest = candidate; stage = .review }
     catch { self.error = error.localizedDescription }
   }
   private func submit() async {

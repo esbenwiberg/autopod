@@ -86,6 +86,11 @@ internal struct SeriesLaunchReview {
     let fields = LaunchComposerJSON.value(request).object ?? [:]
     if section == .advanced { return .object(fields) }
     if section == .references { return fields["referenceRepositories"] ?? .array([]) }
+    let resolvedKey: String? = switch section {
+    case .environment: "environment"; case .ai: "ai"; case .workflow: "workflow"; case .github: "githubAccess"
+    case .tools: "toolPacks"; case .pim: "pim"; default: nil
+    }
+    if let resolvedKey, let value = preview?.fields[resolvedKey] { return value }
     if section == .execution {
       if let resolved = preview?.fields["resolvedExecution"] { return resolved }
       return .object(merge(profile?.payload["execution"]?.object ?? [:], fields["overrides"]?["execution"]?.object ?? [:]))
@@ -129,7 +134,7 @@ internal struct SeriesLaunchReview {
       return [target.map { $0 == "local" ? "Docker" : $0 == "sandbox" ? "Hosted sandbox" : $0 } ?? "Profile allocation", memory.map { "\($0.formatted()) GB" }].compactMap { $0 }.joined(separator: " · ")
     case .pim: return "\(data.array?.count ?? 0) selected roles"
     case .references: return "\(request.referenceRepositories?.count ?? 0) repositories"
-    case .tools: return "\(data.array?.count ?? 0) tool packs"
+    case .tools: return "\(data.array?.count ?? 0) tool pack\(data.array?.count == 1 ? "" : "s")"
     case .advanced: return "Complete request available"
     case .github where data == .null: return "No agent access"
     default:
@@ -209,7 +214,7 @@ internal struct LaunchComposerSummary: View {
       Text(context.repositoryName).font(.headline).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
       fact("Profile", context.profile?.name ?? context.request.profileId ?? "Choose a profile", context.request.profileId == nil ? "Repository usual profile" : "Selected for this launch")
       ForEach([LaunchConfigurationSection.ai, .execution, .workflow, .github, .tools, .pim]) { item in
-        fact(item.rawValue, context.value(item), context.origin(item))
+        fact(item.rawValue, context.value(item), item == .ai ? [context.details(.ai)["main"]?["providerAccountId"]?.string, context.origin(item)].compactMap { $0 }.joined(separator: " · ") : context.origin(item))
       }
       if let seriesPlan { fact("Series plan", seriesPlan, "Inspect dependencies in Briefs") }
       Text(context.preview == nil ? "These choices are a draft. Preview resolves the effective values and their sources." : "This preview covers the reviewed configuration. Every edit requires a fresh preview.")

@@ -15,6 +15,7 @@ public struct CreateSeriesSheet: View {
     @State private var confirmDifferent = false
     @State private var review: SeriesLaunchReview?
     @State private var isResolving = false
+    @State private var reviewGeneration = 0
 
     @Binding public var isPresented: Bool
     public let actions: PodActions
@@ -151,11 +152,11 @@ public struct CreateSeriesSheet: View {
         }
         .onAppear { initializeSelection() }
         .task(id: initialSyncPodId) { await runInitialBranchSyncIfNeeded() }
-        .onChange(of: sourceIdentity) { _, _ in preview = nil; includeSpecFiles = false; review = nil; dirty = true }
-        .onChange(of: currentFingerprint) { _, _ in review = nil; dirty = true }
-        .onChange(of: configurationActions?.documents) { _, _ in review = nil }
-        .onChange(of: configurationActions?.capabilities) { _, _ in review = nil }
-        .onChange(of: jsonDirty) { _, value in if value { review = nil; dirty = true } }
+        .onChange(of: sourceIdentity) { _, _ in preview = nil; includeSpecFiles = false; invalidateReview(); dirty = true }
+        .onChange(of: currentFingerprint) { _, _ in invalidateReview(); dirty = true }
+        .onChange(of: configurationActions?.documents) { _, _ in invalidateReview() }
+        .onChange(of: configurationActions?.capabilities) { _, _ in invalidateReview() }
+        .onChange(of: jsonDirty) { _, value in if value { invalidateReview(); dirty = true } }
         .interactiveDismissDisabled(composerBusy || dirty || jsonDirty || pendingRequest != nil)
         .confirmationDialog("Leave this series draft?", isPresented: $confirmClose) {
             Button("Leave draft", role: .destructive) { isPresented = false }
@@ -166,6 +167,7 @@ public struct CreateSeriesSheet: View {
             Button("Keep saved request", role: .cancel) {}
         } message: { Text("The earlier request may already have created a series. Different work uses a new identity.") }
     }
+    private func invalidateReview() { review = nil; reviewGeneration += 1 }
     private var composerBusy: Bool { isSubmitting || isPreviewing || isInitialSyncing || isResolving }
     private func closeComposer() { if dirty || jsonDirty || pendingRequest != nil { confirmClose = true } else { isPresented = false } }
     private var sourceIdentity: ConfigurationJSON { .object([
@@ -272,12 +274,11 @@ public struct CreateSeriesSheet: View {
         guard !composerBusy, !jsonDirty, let candidate = makeRequest(id: "review"), let configurationActions else { return }
         guard !candidate.briefs.isEmpty, candidate.launch["repositoryId"]?.string != nil else { errorMessage = "Read at least one brief and select a repository."; return }
         isResolving = true; errorMessage = nil; review = nil
-        let fingerprint = SeriesLaunchReview.fingerprint(candidate), source = sourceIdentity
+        let fingerprint = SeriesLaunchReview.fingerprint(candidate), source = sourceIdentity, generation = reviewGeneration
         defer { isResolving = false }
         do {
-            let documents = configurationActions.documents, capabilities = configurationActions.capabilities
             let base = try await configurationActions.resolve(typedSelection())
-            guard sourceIdentity == source, currentFingerprint == fingerprint, !jsonDirty else { return }
+            guard reviewGeneration == generation, sourceIdentity == source, currentFingerprint == fingerprint, !jsonDirty else { return }
             guard base.intent == "task", base.fields["workflow"]?["agentMode"]?.string == "auto" else {
                 throw LaunchJSONError.invalid("Series require an automatic Task workflow.")
             }
@@ -288,8 +289,7 @@ public struct CreateSeriesSheet: View {
                 request.task = brief.task
                 request.requiredSidecarIds = Array(Set(baseSidecars + (brief.requireSidecars ?? []))).sorted()
                 let result = try await configurationActions.resolve(request)
-                guard sourceIdentity == source, currentFingerprint == fingerprint, !jsonDirty,
-                      configurationActions.documents == documents, configurationActions.capabilities == capabilities else { return }
+                guard reviewGeneration == generation, sourceIdentity == source, currentFingerprint == fingerprint, !jsonDirty else { return }
                 results.append(result)
             }
             review = .init(payload: fingerprint, configuration: base, briefPreviews: results); stage = .review
@@ -417,7 +417,7 @@ public struct CreateSeriesSheet: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
-                TextField("/path/to/briefs", text: $folderPath)
+                TextField("/path/to/briefs", text: $folderPath).accessibilityIdentifier("series-source-folder")
                     .textFieldStyle(.roundedBorder)
                     .disabled(isSubmitting)
                 Button("Pick…") { pickFolder() }
@@ -580,6 +580,10 @@ public struct CreateSeriesSheet: View {
                 }
                 .toggleStyle(.switch)
                 .disabled(isSubmitting)
+                Text(includeSpecFiles && briefSource == .onBranch
+                    ? "Implementation starts from \(sourceBranch). PRs target \(baseBranch.isEmpty ? "the repository default" : baseBranch)."
+                    : "Parsed spec source remains available as context.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -620,7 +624,7 @@ public struct CreateSeriesSheet: View {
             }
         )
         let edges = layout.edges.map {
-            PipelineEdgeCanvas.EdgeStyle(from: $0.from, to: $0.to, color: .accentColor)
+            PipelineEdgeCanvas.EdgeStyle(from: $0.from, to: $0.to, color: redesign ? DesktopTheme.accent : .accentColor)
         }
         return ScrollView([.horizontal, .vertical]) {
             ZStack(alignment: .topLeading) {
@@ -681,14 +685,14 @@ public struct CreateSeriesSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             sidecars.isEmpty
-                ? Color.accentColor.opacity(0.12)
+                ? (redesign ? DesktopTheme.accent : Color.accentColor).opacity(0.12)
                 : Color.orange.opacity(0.10)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 5)
                 .stroke(
                     sidecars.isEmpty
-                        ? Color.accentColor.opacity(0.5)
+                        ? (redesign ? DesktopTheme.accent : Color.accentColor).opacity(0.5)
                         : Color.orange.opacity(0.6),
                     lineWidth: 1
                 )
@@ -757,9 +761,10 @@ public struct CreateSeriesSheet: View {
 
     private func submit() async {
         guard !isSubmitting else { return }
-        if let pendingRequest { await sendSeries(pendingRequest); return }
+        if let pendingRequest, redesign { await sendSeries(pendingRequest); return }
         guard !submitDisabled, !jsonDirty, !redesign || reviewMatches,
-              let request = makeRequest(id: UUID().uuidString) else { return }
+              var request = makeRequest(id: pendingRequest?.requestId ?? UUID().uuidString) else { return }
+        if let previous = pendingRequest, SeriesLaunchReview.fingerprint(previous) != SeriesLaunchReview.fingerprint(request) { request.requestId = UUID().uuidString }
         pendingRequest = request
         await sendSeries(request)
     }
