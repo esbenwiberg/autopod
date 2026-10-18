@@ -1,6 +1,6 @@
 # Slice29: complete operator lifecycle controls
 
-Status: PLANNED — implementation is the next authorized phase.
+Status: IMPLEMENTED — expanded regression/frozen qualification in progress.
 Date:2026-10-19. Baseline:c7997924e39d475d674f128c5030ae8afcb277b1.
 Branch:codex/pod-manager-workspace.
 Worktree:/Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -122,8 +122,8 @@ annotation, documented primitive placement, original-instance composition and th
 public delegates. No original body/parameter/default/initializer algorithm changes.
 
 Automated:
-- [ ] Qualified predecessor hashes/root controls and public bytes/provenance match.
-- [ ] All ten-body/two-binding/reference/construction/full-source recipes saved.
+- [x] Qualified predecessor hashes/root controls and public bytes/provenance match.
+- [x] All ten-body/two-binding/reference/construction/full-source recipes saved.
 Manual:none under standing continuation authority.
 
 ## Phase2: complete ownership and behavioral proof
@@ -177,11 +177,11 @@ Same73 public members, nine thin delegates, all operator algorithms in owners. A
 owner<1,000 lines; mutable pause state has one explicit owner and tested release paths.
 
 Automated:
-- [ ] Whole bodies/defaults/two initializers/startup/state/full recipes match.
-- [ ] Public1,192 names/statuses/assertion bytes pass; same73 public interface.
-- [ ] Eight direct suites and at least three actual SQLite reopen cases pass.
-- [ ] Build/lint/whitespace/new-test semantics pass; no new source diagnostic.
-- [ ] Complete operator lifetimes/domain ownership/shared state and release proven.
+- [x] Whole bodies/defaults/two initializers/startup/state/full recipes match.
+- [x] Public1,192 names/statuses/assertion bytes pass; same73 public interface.
+- [x] Eight direct suites and at least three actual SQLite reopen cases pass.
+- [x] Build/lint/whitespace/new-test semantics pass; no new source diagnostic.
+- [x] Complete operator lifetimes/domain ownership/shared state and release proven.
 Manual:none for bounded compatibility; no live external acceptance claimed.
 
 ## Phase3: frozen qualification and next responsibility
@@ -221,3 +221,34 @@ original async bodies/awaits/error paths/receivers remain; only the pure timeout
 primitive moves to module scope. The same pause map stays at its creation point and
 all constructors add no service effects/timers. Revert manager and nine owners together.
 No unresolved design questions remain.
+
+## Implementation checkpoint — 2026-10-19
+
+Allten complete original bodies/parameters/defaults and both binding initializers
+match; allten full manager/module recipes match. Same73 public members, allnine
+thin delegates, three dynamic receivers and live launch/pending/attempt fields remain.
+The one pause map constructs before the active-run registry and is captured by the
+existing event owner and new message/pause owners; polling arguments/startup match.
+All2,096 other predecessor package/script files and six root controls are unchanged.
+Manager6,157→5,375 lines. Nine new source modules are6–548 lines.
+
+The unchanged1,192 public names/statuses/assertion bytes pass. Eight new operator
+suites plus21 inherited fix/delivery/approval suites pass130 cases:33new and97inherited.
+Three actual private-file SQLite close/reopen cases cover actor reply/guidance/decision,
+rejection/rework/history and completed kill/history, with integrity/FK checks. Pause
+settlement/timeout/replaced tokens, kill generation/30s late-cleanup fencing and live
+provider fields, attached/detached/retained decisions and dynamic receiver replacement
+are directly exercised. These use real local state/repositories/ledgers/pending requests
+and controlled runtime/container/Goal adapters; no live worker or installation claim.
+Allnine new test/fixture files have zero semantic diagnostics; all24 changed-source
+diagnostics match the original24 baseline. Build/declarations, scoped lint and
+whitespace pass.
+
+Initial noVoidTypeReturn delegate formatting, CommonJS audit names, stale nativeSessionId
+import and fixture callback types are retained in named logs. Corrections affect only
+scaffolding/types/fixtures; original algorithm bodies and public assertions remain
+unchanged. Source/test bytes are frozen for affected/full qualification. Evidence:
+.autopod-data/operator-controls/, including full recipes, movement.json, named reports/
+commands/exits, public-comparison.json, baseline-type-comparison.json, test-types.json
+and frozen-manifest.json. Expanded/full qualification and30 research remain required
+before29 is complete. Goal remains active through34.
