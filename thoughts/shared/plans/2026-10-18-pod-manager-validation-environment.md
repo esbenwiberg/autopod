@@ -1,6 +1,6 @@
 # Slice 17: validation environment extraction
 
-Status: APPROVED — implementation in progress (all three phases).
+Status: APPROVED — Phases 1 and 2 complete; final qualification running.
 Date: 2026-10-18.
 Baseline: 321ceb07d13f459242289a2f069b49e5e2ddf754.
 Branch: codex/pod-manager-workspace.
@@ -190,9 +190,9 @@ new capability fence. No extra production seam or test-only code in product.
 ### Success criteria
 
 Automated:
-- [ ] Frozen public tests and unchanged components suite pass after extraction.
-- [ ] Direct order/env/file/error/timing tests and real SQLite rotation/reopen pass.
-- [ ] Exact function, full source recipe, four external references and scope pass.
+- [x] Frozen public tests and unchanged components suite pass after extraction.
+- [x] Direct order/env/file/error/timing tests and real SQLite rotation/reopen pass.
+- [x] Exact function, full source recipe, four external references and scope pass.
 
 Manual: None required. Live Docker, registry/provider authentication are outside scope.
 
@@ -241,7 +241,7 @@ remote identity. Main integration/PR/deploy remain separate work.
 ### Success criteria
 
 Automated:
-- [ ] All 86 affected suites pass with SQLite and no newly skipped tests.
+- [x] All 86 affected suites pass with SQLite and no newly skipped tests.
 - [ ] Full uncached pipeline passes under the documented qualification environment.
 - [ ] Scoped lint/whitespace/types, exact movement and frozen hashes pass.
 - [ ] Completed plan/proof has actual results, limits and pushed revision identities.
@@ -285,3 +285,34 @@ binding checks; its account/route data now match through actual account resoluti
 Initial and corrected results are retained. Product bytes stayed unchanged.
 Public assertions/filter and before-source are frozen. Next: extract the approved
 single function and run the unchanged public assertions plus direct contracts.
+
+## Phase 2 observed results
+
+createValidationEnvironment contains the complete unchanged original function and
+its registry refresh comment. Both direct manager calls, both factory captures,
+the shared resolver body and all six resolver calls are unchanged. Parsed TypeScript
+matches the explicit manager/module recipe. All 1,975 other baseline package/script
+files and six root controls match. The manager is 16,602 lines (33 fewer); the new
+module is 69 lines. No product correction followed extraction.
+
+88 frozen public tests pass with byte-identical assertions and identical selected
+names/statuses before/after. All 42 direct tests pass, including held parallel lookups,
+sequential file effects/errors, live service replacement/removal, original adapter
+and late method/pod reads, env precedence, actual encrypted configuration credential
+rotation/revocation/scope/identity rejection, secret-free snapshots and private file
+SQLite close/reopen integrity/FK checks. Durable rows include a real provider attempt;
+unrelated credentials/profile/pod/attempt rows stay unchanged by preparation. Direct
+resolver/capability fixtures prove their narrow contracts; the unchanged composed
+service test proves real manager wiring and rotation. Container interfaces and
+credential enrollment verification remain controlled; no remote execution claim.
+
+The initial direct run exposed a fixture SQL sort on nonexistent provider_attempts.id;
+correct ordering is pod_id,ordinal. It was corrected and a real attempt was added so
+row preservation is not vacuous. Supplemental type checks identified two absent-field
+fixture values outside declared production types; explicit runtime-field fixtures
+now exercise absence without changing product types. Initial failures/lint diagnostics
+are retained. Both new boundaries have zero supplemental semantic diagnostics;
+scoped Biome and whitespace are clean.
+
+All 86 affected suites pass: 3,022 tests, zero skipped, including the unchanged
+composed service rotation test. Next: full uncached qualification on frozen source.

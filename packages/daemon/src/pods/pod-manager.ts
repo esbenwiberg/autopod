@@ -233,7 +233,6 @@ import {
   buildNuGetCredentialEnv,
   buildNuGetSecretFile,
   buildRegistryFiles,
-  buildValidationExecEnv,
   ensureNuGetCredentialProvider,
   validateRegistryFiles,
 } from './registry-injector.js';
@@ -265,6 +264,7 @@ import { generateSystemInstructions } from './system-instructions-generator.js';
 import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import { createValidationAttemptStart } from './validation-attempt-start.js';
+import { createValidationEnvironment } from './validation-environment.js';
 import { createValidationEvidence } from './validation-evidence.js';
 import { createValidationExecution } from './validation-execution.js';
 import {
@@ -1903,43 +1903,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return credentials;
   }
 
-  async function validationEnvironmentForPod(
-    pod: Pod,
-    profile: PodExecutionSettings,
-  ): Promise<Record<string, string> | undefined> {
-    const launch = deps.launchConfiguration?.read(pod.id);
-    if (!launch)
-      return buildValidationExecEnv(
-        profile.privateRegistries,
-        profile.registryPat ?? null,
-        profile.buildEnv,
-      );
-    const credentials = executionCredentialsFor(launch);
-    await deps.launchConfiguration?.assertCurrentCapabilities(launch);
-    if (!credentials)
-      return buildValidationExecEnv(profile.privateRegistries, null, profile.buildEnv);
-    const [env, registry] = await Promise.all([
-      credentials.buildEnvironment(launch),
-      credentials.registries(launch),
-    ]);
-    // Refresh every registry file before validation or resume, including npm token rotation.
-    if (pod.containerId) {
-      const cm = containerManagerFactory.get(pod.executionTarget);
-      for (const file of [
-        ...registry.files,
-        ...(registry.nugetSecret ? [registry.nugetSecret] : []),
-      ]) {
-        await cm.writeFile(pod.containerId, file.path, file.content, { mode: 0o600 });
-      }
-    }
-    await deps.launchConfiguration?.assertCurrentCapabilities(launch);
-    return {
-      ...buildValidationExecEnv([], null, env),
-      ...(registry.nugetSecret
-        ? { [registry.nugetSecret.envFileKey]: registry.nugetSecret.path }
-        : {}),
-    };
-  }
+  const { validationEnvironmentForPod } = createValidationEnvironment(deps, {
+    executionCredentialsFor,
+    containerManagerFactory,
+  });
 
   function injectionsForPod(pod: Pod): typeof daemonConfig {
     return pod.launchConfigDigest
