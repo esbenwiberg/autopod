@@ -12,7 +12,8 @@ public final class LaunchConfigurationStore {
   private var api: DaemonAPI?
   private var generation = UUID()
   private var pimDiscovery: ConfigurationJSON?
-  public init() {}
+  private let journalDirectory: URL?
+  public init(journalDirectory: URL? = nil) { self.journalDirectory = journalDirectory }
   public func disconnect() {
     api = nil; generation = UUID(); pimDiscovery = nil; documents = []; capabilities = .object([:]); supported = false; loading = false
     error = "Connect to a daemon with composable configuration support."
@@ -56,6 +57,27 @@ public final class LaunchConfigurationStore {
       throw error
     }
   }
+  /// The refresh can suspend after launch admission. Navigation must still belong
+  /// to the same configuration generation and fleet owner when it completes.
+  public func actions(selectingIn podStore: PodStore) -> LaunchConfigurationActions {
+    let connection = generation
+    let owner = api.flatMap { podStore.ownership(for: $0) }
+    let isCurrent = { self.generation == connection && podStore.isCurrent(owner) }
+    var actions = actions(onCreated: { id in
+      guard isCurrent() else { return }
+      await podStore.loadSessions()
+      guard isCurrent() else { return }
+      podStore.selectedSessionId = id
+    })
+    let launch = actions.launch
+    actions.launch = { request in
+      guard isCurrent() else { throw DaemonError.networkError("Connection changed. Reopen this launch on the current daemon.") }
+      let id = try await launch(request)
+      guard isCurrent() else { throw DaemonError.networkError("Connection changed. Check the original daemon for the accepted launch.") }
+      return id
+    }
+    return actions
+  }
   public func actions(onCreated: @escaping (String) async -> Void) -> LaunchConfigurationActions {
     let owner = generation
     var actions = LaunchConfigurationActions(documents: documents, capabilities: capabilities, loadError: error,
@@ -63,10 +85,13 @@ public final class LaunchConfigurationStore {
       resolve: { value in try await self.onConnection(owner) { try await $0.resolveLaunch(value) } },
       launch: { request in
         let pod = try await self.onConnection(owner) { api in
-          _ = try LaunchRequestJournal.save(request)
+          _ = try LaunchRequestJournal.save(request, directory: self.journalDirectory)
           return try await api.launchPod(request)
         }
         await onCreated(pod.id)
+        guard self.generation == owner else {
+          throw DaemonError.networkError("Connection changed after launch admission. Check the original daemon before retrying.")
+        }
         return pod.id
       },
       save: { kind, request in

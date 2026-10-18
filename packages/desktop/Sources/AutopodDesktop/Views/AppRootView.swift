@@ -125,9 +125,7 @@ public struct AppRootView: View {
       actions: actionHandler?.actions ?? .preview,
       profileNames: profileStore.profileNames,
       profileDetails: profileStore.profiles,
-      configurationActions: launchConfiguration.actions(onCreated: { id in
-        await podStore.loadSessions(); podStore.selectedSessionId = id
-      }),
+      configurationActions: launchConfiguration.actions(selectingIn: podStore),
       selectedSessionEvents: selectedSessionEvents,
       eventsForPod: { [eventStream] id in
         eventStream?.sessionEvents[id] ?? []
@@ -425,9 +423,7 @@ public struct AppRootView: View {
     SettingsView(
       connectionManager: connectionManager,
       profiles: profileStore.profiles,
-      configurationActions: launchConfiguration.actions(onCreated: { id in
-          await podStore.loadSessions(); podStore.selectedSessionId = id
-        }),
+      configurationActions: launchConfiguration.actions(selectingIn: podStore),
         actionCatalog: profileStore.actionCatalog,
         builtinSkills: profileStore.builtinSkills,
         profileError: profileStore.error,
