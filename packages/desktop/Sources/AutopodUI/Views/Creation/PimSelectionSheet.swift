@@ -2,6 +2,7 @@ import AutopodClient
 import SwiftUI
 
 struct PimSelectionSheet: View {
+  @Environment(\.desktopRedesign) private var redesign
   @Environment(\.dismiss) private var dismiss
   let discover: (Bool) async throws -> ConfigurationJSON
   let onSave: ([[String: ConfigurationJSON]]) -> Void
@@ -59,7 +60,7 @@ struct PimSelectionSheet: View {
   private func selectedIndex(_ value: ConfigurationJSON) -> Int? { selections.firstIndex { identity(.object($0)) == identity(value) } }
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text("Choose eligible PIM access").font(.title2.bold())
+      if !redesign { Text("Choose eligible PIM access").font(.title2.bold()) }
       Text("Same configured account. Saving selections does not activate access.").foregroundStyle(.secondary)
       HStack {
         TextField("Search roles and scopes", text: $search).textFieldStyle(.roundedBorder)
@@ -74,6 +75,9 @@ struct PimSelectionSheet: View {
         VStack(alignment: .leading, spacing: 14) {
           ForEach(Array(families.enumerated()), id: \.offset) { _, family in
             if family["available"]?.bool == false { Text("\(family["type"]?.string ?? "Access"): \(family["reason"]?.string ?? "Unavailable")").font(.caption).foregroundStyle(.secondary) }
+          }
+          if redesign && !loading && entries.isEmpty && error == nil {
+            ContentUnavailableView("No eligible roles", systemImage: "person.badge.shield.checkmark", description: Text("No assignments were returned for this account. Existing selections remain listed below."))
           }
           ForEach(Array(entries.filter { entry in search.isEmpty || "\(entry["displayName"]?.string ?? "") \(entry["scopeName"]?.string ?? "")".localizedCaseInsensitiveContains(search) }.enumerated()), id: \.offset) { _, entry in
             GroupBox {
@@ -108,8 +112,12 @@ struct PimSelectionSheet: View {
         }
       }
       if let invalidSelection { Text(invalidSelection).font(.caption).foregroundStyle(.orange) }
-      HStack { Button("Cancel") { dismiss() }; Spacer(); Text("\(selections.count) selected").foregroundStyle(.secondary); Button("Use selections") { onSave(selections); dismiss() }.buttonStyle(.borderedProminent).disabled((loading && discovery == nil) || invalidSelection != nil) }
-    }.padding(24).frame(width: 660, height: 640)
+      HStack { Button("Cancel") { dismiss() }; Spacer(); Text("\(selections.count) selected").foregroundStyle(.secondary); Button("Use selections") { onSave(selections); dismiss() }.buttonStyle(.borderedProminent).disabled((loading && discovery == nil) || invalidSelection != nil) }.desktopDialogActions()
+    }
+    .desktopDialog("Choose PIM access", eyebrow: "Launch / Eligible roles",
+      subtitle: "Review roles, scope, timing and duration for this launch.", width: 820, height: 740,
+      legacyWidth: 660, legacyHeight: 640, legacyPadding: 24)
+    .groupBoxStyle(DesktopGroupBoxStyle())
     .task { await load(fresh: false) }
   }
   private func stringBinding(_ index: Int, _ key: String, default fallback: String) -> Binding<String> {

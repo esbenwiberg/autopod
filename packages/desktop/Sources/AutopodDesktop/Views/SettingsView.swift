@@ -160,7 +160,6 @@ public struct SettingsView: View {
         }
         .frame(width: embedded ? nil : 1040, height: embedded ? nil : 720)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .environment(\.desktopRedesign, redesign && embedded)
         .tint(redesign ? DesktopTheme.accent : .accentColor)
         .background(redesign ? DesktopTheme.canvas : Color(nsColor: .windowBackgroundColor))
         .onAppear {
@@ -178,6 +177,7 @@ public struct SettingsView: View {
         .sheet(isPresented: $showAddConnection) {
             SetupSheet(isPresented: $showAddConnection, connectionManager: connectionManager)
         }
+        .environment(\.desktopRedesign, redesign)
     }
 
     // MARK: - Sidebar

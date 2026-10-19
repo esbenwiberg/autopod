@@ -23,6 +23,7 @@ private func loadProviderCatalogResult(
 }
 
 struct ProviderAccountsSettingsView: View {
+  @Environment(\.desktopRedesign) private var redesign
   let api: DaemonAPI?
   let profiles: [Profile]
   let onProfilesChanged: (() async -> Void)?
@@ -80,6 +81,9 @@ struct ProviderAccountsSettingsView: View {
         ProgressView()
           .frame(maxWidth: .infinity)
         Spacer()
+      } else if redesign && accounts.isEmpty && errorMessage != nil {
+        ContentUnavailableView("Unable to load provider accounts", systemImage: "wifi.exclamationmark",
+          description: Text("Reconnect to the daemon and refresh. Stored accounts have not been changed."))
       } else if accounts.isEmpty {
         emptyState
       } else {
@@ -93,7 +97,9 @@ struct ProviderAccountsSettingsView: View {
         }
       }
     }
-    .padding(20)
+    .padding(redesign ? 26 : 20)
+    .background(redesign ? DesktopTheme.canvas : .clear)
+    .tint(redesign ? DesktopTheme.accent : .accentColor)
     .task(id: api?.baseURL.absoluteString ?? "none") {
       await loadAccounts()
     }
@@ -179,8 +185,9 @@ struct ProviderAccountsSettingsView: View {
   private var header: some View {
     HStack(spacing: 8) {
       VStack(alignment: .leading, spacing: 2) {
+        if redesign { Text("DAEMON / AUTHENTICATION").font(.system(size: 9, weight: .semibold)).tracking(1.2).foregroundStyle(.secondary) }
         Text("Provider Accounts")
-          .font(.title3.weight(.semibold))
+          .font(redesign ? .title2.weight(.semibold) : .title3.weight(.semibold))
         Text("Shared model-provider authentication.")
           .font(.callout)
           .foregroundStyle(.secondary)
@@ -383,7 +390,7 @@ struct ProviderAccountsSettingsView: View {
       }
     }
     .padding(12)
-    .background(Color(nsColor: .controlBackgroundColor))
+    .background(redesign ? DesktopTheme.surface : Color(nsColor: .controlBackgroundColor))
     .clipShape(RoundedRectangle(cornerRadius: 8))
     .overlay(
       RoundedRectangle(cornerRadius: 8)
@@ -873,7 +880,8 @@ struct ProviderAccountsSettingsView: View {
   }
 }
 
-private struct ProviderAPIKeySheet: View {
+struct ProviderAPIKeySheet: View {
+  @Environment(\.desktopRedesign) private var redesign
   @Binding var isPresented: Bool
   let accountName: String
   let provider: ProviderCatalogProvider
@@ -885,8 +893,7 @@ private struct ProviderAPIKeySheet: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      Text("Replace \(provider.displayName) API Key")
-        .font(.headline)
+      if !redesign { Text("Replace \(provider.displayName) API Key").font(.headline) }
       Text("Enter a new key for \(accountName). The stored secret is never displayed.")
         .font(.callout)
         .foregroundStyle(.secondary)
@@ -905,6 +912,7 @@ private struct ProviderAPIKeySheet: View {
       SecureField(provider.credentialOptions.first?.label ?? "API key", text: $apiKey)
         .textFieldStyle(.roundedBorder)
 
+      if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
       HStack {
         Spacer()
         Button("Cancel") { isPresented = false }
@@ -916,8 +924,8 @@ private struct ProviderAPIKeySheet: View {
         .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
       }
     }
-    .padding(20)
-    .frame(width: 420)
+    .desktopDialog("Replace \(provider.displayName) API Key", eyebrow: "Provider account / Credentials",
+      subtitle: "Enter a replacement key for \(accountName).", legacyWidth: 420)
   }
 
   @MainActor
@@ -937,7 +945,7 @@ private struct ProviderAPIKeySheet: View {
   }
 }
 
-private enum NewProviderAccountCredentials {
+enum NewProviderAccountCredentials {
   case apiKey(String)
   case foundry(FoundryCredentialsDraft)
 }
@@ -990,7 +998,8 @@ private struct FoundryCredentialsFields: View {
   }
 }
 
-private struct FoundryCredentialsSheet: View {
+struct FoundryCredentialsSheet: View {
+  @Environment(\.desktopRedesign) private var redesign
   @Binding var isPresented: Bool
   let accountName: String
   let onSave: (FoundryCredentialsDraft) async throws -> Void
@@ -1001,8 +1010,7 @@ private struct FoundryCredentialsSheet: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      Text("Foundry Credentials")
-        .font(.headline)
+      if !redesign { Text("Foundry Credentials").font(.headline) }
       Text("Replaces the endpoint and key for \(accountName). The stored secret is never displayed.")
         .font(.callout)
         .foregroundStyle(.secondary)
@@ -1017,8 +1025,9 @@ private struct FoundryCredentialsSheet: View {
 
       Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
         FoundryCredentialsFields(draft: $draft)
-      }
+      }.desktopFormSection()
 
+      if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
       HStack {
         Spacer()
         Button("Cancel") { isPresented = false }
@@ -1030,8 +1039,8 @@ private struct FoundryCredentialsSheet: View {
         .disabled(!draft.isComplete || isSaving)
       }
     }
-    .padding(20)
-    .frame(width: 460)
+    .desktopDialog("Foundry Credentials", eyebrow: "Provider account / Credentials",
+      subtitle: "Update the connection details for \(accountName).", legacyWidth: 460)
   }
 
   @MainActor
@@ -1049,7 +1058,8 @@ private struct FoundryCredentialsSheet: View {
   }
 }
 
-private struct ProviderAccountCreateSheet: View {
+struct ProviderAccountCreateSheet: View {
+  @Environment(\.desktopRedesign) private var redesign
   @Binding var isPresented: Bool
   let providers: [ProviderCatalogProvider]
   let onCreate: (String, String, String?, NewProviderAccountCredentials?) async throws -> Void
@@ -1077,8 +1087,7 @@ private struct ProviderAccountCreateSheet: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      Text("New Provider Account")
-        .font(.headline)
+      if !redesign { Text("New Provider Account").font(.headline) }
 
       if let errorMessage {
         Text(errorMessage)
@@ -1141,8 +1150,9 @@ private struct ProviderAccountCreateSheet: View {
             FoundryCredentialsFields(draft: $foundry)
           }
         }
-      }
+      }.desktopFormSection()
 
+      if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
       HStack {
         Spacer()
         Button("Cancel") {
@@ -1169,8 +1179,8 @@ private struct ProviderAccountCreateSheet: View {
         )
       }
     }
-    .padding(20)
-    .frame(width: 460)
+    .desktopDialog("New Provider Account", eyebrow: "Daemon / Provider accounts",
+      subtitle: "Choose the provider and authentication used by your AI setups.", legacyWidth: 460)
     .onAppear {
       if !providers.contains(where: { $0.id == provider && $0.policy.runnable }),
          let first = providers.first(where: { $0.policy.runnable }) {
@@ -1199,7 +1209,8 @@ private struct ProviderAccountCreateSheet: View {
 
 }
 
-private struct ProviderAccountImportSheet: View {
+struct ProviderAccountImportSheet: View {
+  @Environment(\.desktopRedesign) private var redesign
   @Binding var isPresented: Bool
   let profiles: [Profile]
   let onImport: (String, String?, String?, Bool) async throws -> Void
@@ -1234,8 +1245,7 @@ private struct ProviderAccountImportSheet: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      Text("Import Provider Credentials")
-        .font(.headline)
+      if !redesign { Text("Import Provider Credentials").font(.headline) }
 
       if let errorMessage {
         Text(errorMessage)
@@ -1271,10 +1281,11 @@ private struct ProviderAccountImportSheet: View {
             .textFieldStyle(.roundedBorder)
             .frame(width: 260)
         }
-      }
+      }.desktopFormSection()
 
       Toggle("Clear legacy profile credentials", isOn: $clearLegacyCredentials)
 
+      if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
       HStack {
         Spacer()
         Button("Cancel") {
@@ -1296,8 +1307,8 @@ private struct ProviderAccountImportSheet: View {
         .disabled(sourceProfileName.isEmpty || isSaving)
       }
     }
-    .padding(20)
-    .frame(width: 430)
+    .desktopDialog("Import Provider Credentials", eyebrow: "Daemon / Provider accounts",
+      subtitle: "Move an existing profile’s authentication into a reusable provider account.", legacyWidth: 430)
   }
 
   @MainActor

@@ -1,7 +1,9 @@
 import SwiftUI
 import AutopodClient
+import AutopodUI
 
 struct PodsitterSettingsView: View {
+  @Environment(\.desktopRedesign) private var redesign
   let profileNames: [String]
   let openProviderAccounts: () -> Void
 
@@ -9,7 +11,7 @@ struct PodsitterSettingsView: View {
   @State private var showDisableConfirmation = false
 
   init(
-    api: DaemonAPI,
+    api: any PodsitterAPIClient,
     profileNames: [String],
     openProviderAccounts: @escaping () -> Void
   ) {
@@ -20,6 +22,7 @@ struct PodsitterSettingsView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
+      if redesign { Text("DAEMON / AUTOMATION").font(.system(size: 9, weight: .semibold)).tracking(1.2).foregroundStyle(.secondary) }
       statusHeader
       if let error = store.error {
         errorBanner(error)
@@ -35,7 +38,10 @@ struct PodsitterSettingsView: View {
         .padding(.bottom, 8)
       }
     }
-    .padding(20)
+    .padding(redesign ? 26 : 20)
+    .background(redesign ? DesktopTheme.canvas : .clear)
+    .tint(redesign ? DesktopTheme.accent : .accentColor)
+    .groupBoxStyle(DesktopGroupBoxStyle())
     .task {
       await store.load()
       while !Task.isCancelled {
@@ -63,7 +69,7 @@ struct PodsitterSettingsView: View {
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         Text("Podsitter")
-          .font(.title3.weight(.semibold))
+          .font(redesign ? .title2.weight(.semibold) : .title3.weight(.semibold))
         Text(store.stateLabel)
           .font(.callout)
           .foregroundStyle(.secondary)

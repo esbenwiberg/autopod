@@ -1,8 +1,10 @@
 import SwiftUI
 import AutopodClient
+import AutopodUI
 
 /// First-launch sheet for adding a daemon connection.
 public struct SetupSheet: View {
+  @Environment(\.desktopRedesign) private var redesign
   @Binding public var isPresented: Bool
   public let connectionManager: ConnectionManager
 
@@ -35,20 +37,19 @@ public struct SetupSheet: View {
 
   public var body: some View {
     VStack(spacing: 0) {
-      // Header
-      VStack(spacing: 6) {
-        Image(systemName: "server.rack")
-          .font(.system(size: 32))
-          .foregroundStyle(.blue)
-        Text("Connect to Daemon")
-          .font(.headline)
-        Text("Enter the URL and token for your Autopod daemon.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+      if redesign {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("THIS MAC / CONNECTIONS").font(.system(size: 9, weight: .semibold)).tracking(1.3).foregroundStyle(.secondary)
+          Text("Connect to a daemon").font(.title2.weight(.semibold))
+          Text("Name this connection, choose authentication, then verify it before saving.").font(.callout).foregroundStyle(.secondary)
+        }.padding(24).frame(maxWidth: .infinity, alignment: .leading).background(DesktopTheme.surface)
+      } else {
+        VStack(spacing: 6) {
+          Image(systemName: "server.rack").font(.system(size: 32)).foregroundStyle(.blue)
+          Text("Connect to Daemon").font(.headline)
+          Text("Enter the URL and token for your Autopod daemon.").font(.caption).foregroundStyle(.secondary)
+        }.padding(.top, 24).padding(.bottom, 16)
       }
-      .padding(.top, 24)
-      .padding(.bottom, 16)
-
       Divider()
 
       // Form
@@ -150,9 +151,10 @@ public struct SetupSheet: View {
           }
         }
       }
+      .desktopFormSection()
       .padding(24)
 
-      Spacer()
+      Spacer(minLength: 0)
 
       Divider()
 
@@ -171,10 +173,12 @@ public struct SetupSheet: View {
         .keyboardShortcut(.defaultAction)
         .disabled(!canSave || isSaving)
       }
-      .padding(16)
+      .padding(redesign ? 24 : 16)
+      .background(redesign ? DesktopTheme.surface : .clear)
     }
-    .frame(width: 420, height: 430)
-    .background(Color(nsColor: .windowBackgroundColor))
+    .frame(width: redesign ? 680 : 420, height: redesign ? 590 : 430)
+    .background(redesign ? DesktopTheme.canvas : Color(nsColor: .windowBackgroundColor))
+    .tint(redesign ? DesktopTheme.accent : .accentColor)
     .onAppear {
       // Auto-fill dev token for local connections
       if isLocalUrl, token.isEmpty, let t = DaemonConnection.readLocalDevToken() {

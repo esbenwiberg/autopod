@@ -442,7 +442,7 @@ public struct AnalyticsView: View {
 
     /// A card finishes independently. Cancelled requests cannot overwrite a newer window.
     @MainActor
-    private func loadMetric<Value>(
+    private func loadMetric<Value: Sendable>(
         _ kind: AnalyticsCardKind,
         label: String,
         using loader: ((Int) async throws -> Value)?,

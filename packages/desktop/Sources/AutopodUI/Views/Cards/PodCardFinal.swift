@@ -1205,18 +1205,20 @@ public struct SessionCardFinal: View {
 
     private var nudgeSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Nudge agent")
-                .font(.headline)
+            Group { if !redesign { Text("Nudge agent").font(.headline) } }
             Text("Send guidance to the agent. It remains pending until the worker acknowledges receipt. Leave blank for a default nudge.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             TextEditor(text: $nudgeInputText)
                 .font(.body)
+                .scrollContentBackground(redesign ? .hidden : .automatic)
+                .background(redesign ? DesktopTheme.surface : .clear)
                 .frame(minHeight: 80)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                        .stroke(redesign ? DesktopTheme.line : Color(nsColor: .separatorColor), lineWidth: 1)
                 )
+            if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
             HStack {
                 Button("Cancel") {
                     nudgeInputText = ""
@@ -1235,24 +1237,26 @@ public struct SessionCardFinal: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(20)
-        .frame(minWidth: 380)
+        .desktopDialog("Nudge agent", eyebrow: "Pod / Control",
+            width: 680, legacyWidth: 380)
     }
 
     private var rejectFeedbackSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Reject pod")
-                .font(.headline)
+            Group { if !redesign { Text("Reject pod").font(.headline) } }
             Text("Tell the agent what to fix. Leave blank for a generic rejection.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             TextEditor(text: $rejectFeedbackText)
                 .font(.body)
+                .scrollContentBackground(redesign ? .hidden : .automatic)
+                .background(redesign ? DesktopTheme.surface : .clear)
                 .frame(minHeight: 80)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                        .stroke(redesign ? DesktopTheme.line : Color(nsColor: .separatorColor), lineWidth: 1)
                 )
+            if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
             HStack {
                 Button("Cancel") {
                     rejectFeedbackText = ""
@@ -1272,8 +1276,8 @@ public struct SessionCardFinal: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(20)
-        .frame(minWidth: 380)
+        .desktopDialog("Reject pod", eyebrow: "Pod / Control",
+            width: 680, legacyWidth: 380)
     }
 
     private var deleteButton: some View {

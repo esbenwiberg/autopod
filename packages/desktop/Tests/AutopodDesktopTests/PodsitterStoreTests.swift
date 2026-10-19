@@ -8,7 +8,7 @@ private enum PodsitterMockError: LocalizedError {
   var errorDescription: String? { "Podsitter API unavailable" }
 }
 
-private actor MockPodsitterAPI: PodsitterAPIClient {
+actor MockPodsitterAPI: PodsitterAPIClient {
   var calls: [String] = []
   var failStatus = false
   var status: PodsitterStatusResponse

@@ -4,6 +4,7 @@ import AutopodClient
 
 /// Root view that bridges stores into AutopodUI views.
 public struct AppRootView: View {
+  @AppStorage("autopod.desktop.redesign") private var redesign = DesktopIdentity.isPreview
   public let connectionManager: ConnectionManager
   public let podStore: PodStore
   public let managedPodStore: ManagedPodStore
@@ -412,6 +413,8 @@ public struct AppRootView: View {
       settingsContent(embedded: false, route: .appearance)
     }
     .modifier(DesktopAppearanceModifier())
+    .environment(\.desktopRedesign, redesign)
+    .tint(redesign ? DesktopTheme.accent : .accentColor)
     .onChange(of: showSettings) { _, isShowing in
       if isShowing {
         Task { await launchConfiguration.load() }
