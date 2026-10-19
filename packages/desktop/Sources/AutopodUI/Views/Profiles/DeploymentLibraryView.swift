@@ -60,7 +60,11 @@ struct DeploymentLibraryView: View {
       } else {
         List(Array(runs.enumerated()), id: \.offset) { _, run in deploymentRow(run) }
       }
-    }.padding(redesign ? 26 : 16).background(redesign ? DesktopTheme.canvas : .clear)
+    }.padding(redesign ? 26 : 16)
+      .frame(
+        maxWidth: redesign ? .infinity : nil, maxHeight: redesign ? .infinity : nil,
+        alignment: .topLeading)
+      .background(redesign ? DesktopTheme.canvas : .clear)
       .task {
         while !Task.isCancelled {
           if !busy { await reload() }
