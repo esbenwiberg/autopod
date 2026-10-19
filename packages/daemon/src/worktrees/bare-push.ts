@@ -1,7 +1,16 @@
 import { execFile } from 'node:child_process';
+import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+
+/** Derive the bare repo path from an existing worktree via `git rev-parse --git-common-dir`. */
+export async function deriveBareRepoPath(worktreePath: string): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['rev-parse', '--git-common-dir'], {
+    cwd: worktreePath,
+  });
+  return path.resolve(worktreePath, stdout.trim());
+}
 
 const EMPTY_OID = '0000000000000000000000000000000000000000';
 

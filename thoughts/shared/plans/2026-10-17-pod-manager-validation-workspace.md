@@ -1,0 +1,362 @@
+# Slice 3: validation workspace extraction
+
+Status: COMPLETE — all three approved phases implemented and locally verified.
+Baseline: 1a2dd0c8a82db8e16f36c0849e91945e101e75e1.
+Branch: codex/pod-manager-workspace.
+Worktree: /Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
+
+## Overview and authority
+
+Extract workspace preparation before validation, following the same accepted
+three-phase structure as slices 1 and 2: characterize, extract, qualify.
+The user explicitly approved this concrete plan in the conversation. All three
+phases are authorized together, with no intermediate manual acceptance gate.
+
+## Current state analysis
+
+See ../research/2026-10-17-pod-manager-validation-workspace.md.
+Source references below use packages/daemon/src/ at baseline 1a2dd0c8.
+
+pods/pod-manager.ts:5500–5942 contains eight inspection/reset/reconciliation helpers.
+ValidationWorkspaceReconcileError at :482 is recognized by manager catches at
+:14419 and :15673. Two entry points differ deliberately: normal sandbox validation
+uses verified checkpoints, while revalidation invokes preparation for all targets.
+The existing graft/bundle primitives already have real Git tests.
+
+## Desired end state
+
+- createValidationWorkspace composes the extracted transfer callback and existing
+  Git primitives; prepareWorkspaceForValidation retains its current signature.
+- Manager callers retain routing, lifecycle, validation execution, recovery and
+  requeue decisions. Their instanceof checks use the same exported error class
+  that the new module throws.
+- Existing behavior is characterized before movement and checked unchanged after.
+- The complete module is exercised with real local Git repositories, including
+  independent sandbox object stores and actual bundle bytes/fetch/reset.
+
+## Scope and non-goals
+
+Exactly two product files: new pods/validation-workspace.ts and existing
+pods/pod-manager.ts. Test changes: pods/pod-manager.test.ts and new
+pods/validation-workspace.test.ts. Update this plan with observed evidence.
+
+No change to workspace authority, dirty-file decisions, ancestry interpretation,
+checkpoint routing, validation attempts, lifecycle, retry/cancellation, graft or
+bundle algorithms, cleanup guarantees, credentials, schemas, profiles, APIs,
+dependencies or unrelated checkout work. No deployment, real pod, PR or main merge.
+Do not add rollback or serialization while mechanically moving this boundary.
+
+## Implementation approach
+
+Create a typed factory:
+
+    createValidationWorkspace({ logger, syncWorkspaceBack })
+      -> { prepareWorkspaceForValidation }
+
+Dependencies:
+- logger: Pick<Logger, 'info' | 'warn'>.
+- syncWorkspaceBack(containerId: string, worktreePath: string,
+  cm: ContainerManager, podId: string, executionTarget: ExecutionTarget):
+  Promise<{ pushed: boolean }>.
+
+Returned operation keeps its exact current positional signature and Promise<void>.
+Keep ContainerManager and ExecutionTarget as existing domain types. Infrastructure
+is passed per operation; no Pod, repository, manager, state transition or service
+registry is a dependency.
+
+Move these eight functions unchanged into the factory:
+readHostWorktreeHead, readHostWorktreeStatus, readContainerWorktreeHead,
+readContainerWorktreeStatus, isAncestorInContainer, resetContainerWorkspaceToHead,
+reconcileDivergedSandboxWorkspace and prepareWorkspaceForValidation.
+
+Move and export ValidationWorkspaceReconcileError from the same new module,
+retaining its constructor and name exactly. Import that single class into the
+manager for both existing instanceof checks. Do not substitute a name-string check,
+wrap every infrastructure error, or leave a duplicate constructor behind.
+
+The new module imports existing deriveBareRepoPath, graftHostTreeOntoBase and
+transferCommitToContainer. Their source is unchanged. Retain manager imports that
+still serve provisioning or other callers; remove graft/bundle imports only when
+no remaining use exists. Compose the factory immediately after transfer composition.
+Retain both preparation call sites and all their surrounding branches.
+
+Compatibility details:
+
+- Four observations remain concurrent and retain exact null/empty handling.
+- Equal HEADs + definitely clean container: no synchronization, even if host is
+  dirty/unknown. Dirty or unavailable container status still selects sync.
+- Preserve ancestry probe ordering, exit 0/1/other meanings, transport rejection,
+  reset --hard followed by clean -fd, and all timeouts/log fields/messages.
+- Missing HEAD invokes existing transfer. Container ahead invokes transfer. Host
+  ahead invokes reset/clean without adding a dirty-status guard.
+- Ordinary triggerValidation keeps verified sandbox checkpoint routing. Human-fix
+  revalidation continues to invoke preparation for sandbox and local targets.
+- Keep the distinction between domain reconciliation errors, ordinary transport
+  failures, live recovery, and forced revalidation's validation-only reprovisioning.
+- Preserve object-availability and alternates guards, staging ref names, host-side
+  target selection, graft-before-transfer ordering, equal-target fast return,
+  bundle bytes and cleanup attempts. A failed transfer can follow a completed
+  graft; do not claim rollback or no host mutation on failure.
+
+## Phase 1: characterize the existing public validation paths
+
+### Changes required
+
+Only pods/pod-manager.test.ts. Add a named 'validation workspace compatibility'
+group using its existing context and controlled host/container Git boundaries.
+Reuse existing cases when they already pin the same behavior. Do not add product
+seams or import the future module to establish the baseline.
+
+Cover these groups:
+
+1. Missing/blank/unreadable host or container HEAD selects sync. Status read errors
+   remain null; equal-HEAD cases distinguish clean, dirty and unavailable container
+   status, including dirty/unavailable host status that alone does not force sync.
+2. Container ancestor of host selects reset then clean, with exact command/timeouts,
+   before validation/diff reads. Host ancestor of container selects sync-back.
+3. Local divergence blocks validation and marks the existing compromised path,
+   without live extraction recovery. Non-0/1 ancestry results retain null behavior;
+   rejected ancestry transport retains the ordinary-error recovery path.
+4. Reset/clean nonzero exits preserve domain classification; transport rejection
+   preserves ordinary classification. These are observable manager decisions,
+   not just private helper return values.
+5. Ordinary sandbox triggerValidation uses the verified checkpoint route. Sandbox
+   revalidateSession still reaches reconciliation; use pullBranch.newCommits=true
+   for non-forced human-fix cases so the existing admission guard allows execution.
+6. Sandbox reconciliation success, missing-object path validation, mismatched
+   alternates, refused import, graft failure, bundle/upload/fetch failure and
+   reset/clean failure preserve existing success/failure and cleanup behavior.
+   Use the existing Git/ContainerManager seams to drive real helper control flow.
+7. force=true revalidation failure requeues with skipAgent and retained worktree,
+   without running validation or parking a newly compromised worktree. Non-forced
+   domain and ordinary failures retain their different recovery behavior.
+
+Assert material outcomes: validation admitted/blocked, retained source/resources,
+flags/status/requeue options, reset/sync selection and cleanup. Close every new DB,
+join held operations, restore spies/timers and clean private temporary files.
+Freeze baseline source/test identities and retain logs under ignored evidence.
+
+### Success criteria
+
+Automated:
+- [x] New public cases pass against unchanged production source at recorded baseline.
+- [x] Existing stale-container, recovery, force-resume and checkpoint cases pass.
+- [x] New fixtures dispose databases, temporary resources and async work.
+- [x] Product identity and before-test hashes/logs are recorded.
+
+Manual: None required for this headless compatibility boundary.
+
+## Phase 2: extract and prove the material reconciliation boundary
+
+### Changes required
+
+Apply the two-product-file movement above and add validation-workspace.test.ts.
+Keep Phase 1 assertions byte-identical. Compare all moved bodies and the remaining
+manager against the planned construction, allowing only imports, exports, factory
+composition and formatting. Review shared imports and the single error identity.
+
+Use real temporary local Git fixtures, private Git configuration and the shared
+mock ContainerManager factory with narrowly mapped private paths. Exercise actual
+production Git commands and bundle bytes. Keep original graft/bundle implementations.
+Use canonical fixture paths on macOS. Isolate host/container temporary bundle paths
+inside private fixture directories and clean them in finally, even on failed tests.
+No Docker server, provider or external repository is required.
+
+Direct boundary evidence:
+
+- Equal clean HEADs perform no transfer/reset; divergent local histories produce
+  the exported domain error and retain their actual refs/files.
+- A local host-ahead case resets/cleans the container to the existing host commit;
+  a local container-ahead case composes the actual transfer factory and preserves
+  host Git linkage and source contents, rather than returning a fabricated result.
+- True sandbox divergence uses isolated object stores. Establish that container
+  cannot resolve the host target before transfer. Run the complete prepare method:
+  graft, create/copy/fetch bundle, reset/clean. Assert resulting target parent equals
+  original container HEAD, resulting tree equals original host tree, expected file
+  bytes materialize, host/container agree, and temporary bundles/refs are removed.
+- Host-ahead sandbox with a host-only commit must transfer the missing object before
+  reset. Verify actual resolvability before/after and retain original host target.
+- Equal-tree reconciliation returns the existing container target without an empty
+  commit or unnecessary bundle/reset.
+- A rejected upload/fetch leaves validation preparation failed and never resets to
+  an unavailable target. Verify the cleanup that this exact path guarantees. If
+  graft already changed host history, report/characterize that existing state;
+  do not assert or implement rollback.
+- Missing host object plus mismatched container alternates cannot push into an
+  unrelated repository. Assert unrelated refs unchanged and no invented authority.
+
+No test may count a shared alternate object store as proof of isolated-store bundle
+transfer. Keep public caller characterization as the error/routing compatibility
+oracle. Primitive tests alone do not establish complete module composition.
+
+### Success criteria
+
+Automated:
+- [x] Identical public characterization passes after movement.
+- [x] Actual local Git, isolated object-store and bundle outcomes pass.
+- [x] Error identity is shared and manager lifecycle policy stays outside the module.
+- [x] Movement receipt confirms exact scope and unchanged existing primitives.
+- [x] Final product diff contains only the two approved product files.
+
+Manual: None required. No live Docker/Azure qualification is claimed.
+
+## Phase 3: qualify the final source and record evidence
+
+Use the existing ignored Node 22.23.3 / pnpm 9.15.4 npx launcher from slices 1/2.
+Verify actual child runtime and an opened SQLite memory database. Store evidence
+under .autopod-data/validation-workspace/; keep prior slice evidence intact.
+
+From the isolated worktree with the pinned launcher on PATH:
+
+    npx pnpm --filter @autopod/daemon exec node -p process.execPath
+    npx pnpm --filter @autopod/daemon... build
+    SKIP_DB_TESTS=0 npx pnpm --filter @autopod/daemon exec vitest run src/pods/pod-manager.test.ts -t 'validation workspace compatibility'
+
+Run both primitive suites plus the full previous affected set and the new module:
+
+    SKIP_DB_TESTS=0 npx pnpm --filter @autopod/daemon exec vitest run src/pods/validation-workspace.test.ts src/worktrees/graft-reconcile.test.ts src/worktrees/sandbox-reconcile.test.ts src/pods/workspace-transfer.test.ts src/pods/workspace-preservation.test.ts src/pods/pod-manager.test.ts src/pods/workspace-checkpoint-controller.test.ts src/worktrees/sandbox-workspace-checkpoint.test.ts src/worktrees/bare-push.test.ts src/pods/workspace-branch-publication.test.ts src/pods/artifact-preservation.test.ts src/pods/artifact-preservation.sandbox.test.ts src/pods/artifact-snapshot-receipt.test.ts src/pods/artifact-snapshot-inventory.test.ts src/pods/artifact-resume-observation.test.ts src/pods/completion-journal.test.ts src/pods/local-reconciler.test.ts src/pods/pod-lifecycle.e2e.test.ts
+
+    npx pnpm exec biome check packages/daemon/src/pods/pod-manager.ts packages/daemon/src/pods/pod-manager.test.ts packages/daemon/src/pods/validation-workspace.ts packages/daemon/src/pods/validation-workspace.test.ts
+    git diff --check
+    TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+Freeze final product/test/script hashes before qualification and compare after.
+Record actual commands, exit statuses, counts, skips, failures and limits. Review
+final diff, commit/push verified increments under repository instructions, and
+confirm the remote branch matches the final commit. Do not relabel an unrun or
+failed gate as passing or create a deployment/PR as a side effect.
+
+### Success criteria
+
+Automated:
+- [x] Affected suites pass with SQLite explicitly included.
+- [x] Full uncached install/lint/build/typecheck/test/audit/secret pipeline passes.
+- [x] Source identities, before/after results, runtime and skips are recorded.
+- [x] Diff review confirms compatibility scope and unchanged primitives/caller policy.
+- [x] Validated commits are pushed and remote identity confirmed.
+
+Manual: None required. Approval authorizes all three phases together with no
+intermediate human gate; final acceptance is the recorded local compatibility proof.
+
+## Testing strategy and limitations
+
+Public characterization protects routing, shared error identity and lifecycle
+interpretation. Direct real Git tests protect material target selection, graft,
+object transfer and reset. Existing primitive and prior slice suites protect their
+unchanged algorithms and composition. No live Docker/Azure, process-death, new
+atomicity or cross-process synchronization guarantee is established.
+
+## Performance considerations
+
+One factory replaces the existing closure functions. Preserve observation
+concurrency, timing, command budgets, Date.now evaluation and cleanup order.
+No added I/O, retries or speed claim.
+
+## Migration and rollback
+
+No schema, API, stored-record, configuration or profile migration. Revert the new
+module and manager imports/wiring together. No database rollback is needed.
+Integration with concurrent main-branch work remains a separate integration step.
+
+## References and next action
+
+- Research: ../research/2026-10-17-pod-manager-validation-workspace.md.
+- Predecessor: 2026-10-17-pod-manager-workspace-transfer.md (complete).
+- Existing primitives: worktrees/graft-reconcile.ts and worktrees/sandbox-reconcile.ts.
+
+All three approved phases are complete. No manual verification is outstanding
+for this headless compatibility extraction. PR/integration and deployment remain
+separate requested actions; neither was performed.
+
+## Phase 1 evidence
+
+At unchanged product baseline 1a2dd0c8 (documentation HEAD de9f4b4e), 38 new
+public validation workspace cases and 56 existing compatibility/validation cases
+passed: 94 passed, 670 name-filtered. SQLite opened under the actual Node 22.23.3
+child through the established pnpm 9.15.4 launcher. Baseline source and test hashes
+are retained under .autopod-data/validation-workspace/.
+
+The initial run had four overly broad assertions: the manager can synchronize
+again during publication after validation. The cases now assert the preparation
+window before validation/diff, which is the approved boundary. No production
+behavior changed or assertion of the preparation choice was relaxed. The failed
+characterization-initial-failure.log remains retained. All new fixtures close
+their DBs, join held observations and remove any controlled bundle files.
+
+## Phase 2 evidence
+
+The new 480-line validation-workspace module owns the eight moved helpers and
+the exported error class. pod-manager is 443 lines smaller. It imports the same
+constructor for both existing instanceof checks and composes the factory after
+transfer composition. Both preparation call sites and surrounding policy remain
+unchanged. No existing primitive was edited.
+
+The 94 selected public cases passed after extraction, with the Phase 1 test file
+byte-identical (670 name-filtered). Ten direct module cases use actual local Git,
+private configuration and private temporary bundle paths. Together with the six
+existing graft/bundle primitive cases, the material-boundary run passed 16 cases.
+All 18 affected suites then passed: 924 tests, zero skipped. The dependency/daemon
+build, four-file scoped Biome and git diff --check also passed.
+
+The real boundary cases assert source refs/indexes for no-op and rejected local
+paths, local host reset/clean and actual sync-back composition, real isolated-store
+transfer before reset, correct graft parent/tree/bytes, equal-tree fast return,
+host-ahead target preservation, cleanup, refused unrelated publication, and
+retained host graft after upload/fetch failure. No isolated-store case uses shared
+alternates. No direct boundary test required a fixture correction.
+
+movement.json confirms exact construction of both product files, allowing only
+Biome relocation of one import block and wrapping of one composition call. All
+1,466 other baseline product/script paths and existing primitives are unchanged.
+Node 22.23.3 opens SQLite and actual pnpm is 9.15.4. Receipts are under
+.autopod-data/validation-workspace/, including before/after characterization,
+material-boundary.log, affected.log, build.log and scoped-biome.log. Full pipeline
+acceptance is still pending its observed result.
+
+## Final verification: Phase 3
+
+Verdict: PROVEN for the approved local compatibility extraction. All required
+implementation and automated checks are complete; no manual acceptance remains.
+
+| Claim/check | Observed evidence | Result |
+|---|---|---|
+| Existing caller behavior | Identical test file: 94 selected cases pass before and after; 670 other cases name-filtered in each selected run | Passed |
+| Material workspace boundary | Ten new direct cases plus six existing primitive cases use actual Git, isolated object stores, bundle bytes and filesystem outcomes | Passed |
+| Surrounding orchestration | 18 affected suites: 924 passed, zero skipped | Passed |
+| Full uncached pipeline | Frozen install, lint, build, typecheck, tests, audit and secret scanning | Passed |
+| Repository Vitest | 7,288 passed across 490 passing files; 10 existing skipped cases, including five fully gated files | Passed with existing skips |
+| Standalone Node scripts | 35 passed, zero skipped | Passed |
+| Shell verification | Hosted release verification, build provenance and hosted cleanup script checks | Passed |
+| Source identity | All 1,951 frozen package/script files unchanged through validation | Passed |
+| Scoped lint and whitespace | Four changed TypeScript files clean; git diff --check clean | Passed |
+| Dependency audit | No known vulnerabilities found | Passed |
+
+Actual command: TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh using the
+existing ignored runtime launcher. Node 22.23.3 opened SQLite; pnpm reports 9.15.4.
+Turbo build/typecheck/test groups had 7, 11 and 15 successful tasks respectively,
+with zero cached tasks. Repository Biome passed with 82 existing warnings; scoped
+Biome had no warnings. Frozen installation passed without fallback.
+
+The 10 existing skipped cases are the platform-specific Docker container case,
+optional live-model RPI case, and Docker gates in isolated-deploy-runner,
+native-goal-recovery, sidecar-isolation, local-runtime and reference-snapshots.
+No new case was skipped. SQLite-backed tests were explicitly included.
+
+The validated implementation commit is 69a9422e. The following documentation-only
+commit records these results without altering tested product sources. Movement
+comparison confirms eight exact helper bodies, the moved constructor and unchanged
+remaining manager code after only planned wiring/import/formatting adaptation.
+The same constructor is used by the module and both manager catches. Existing
+Git primitives, checkpoint routing, lifecycle, validation execution, live recovery
+and forced-resume policy retain their original implementations and callers.
+
+Private proof: .autopod-data/validation-workspace/proof.json, movement.json,
+final-source-manifest.json, before/after source/test copies and actual command
+logs, including full-validation.log. The initial failed assertion run is retained
+and hashed, not relabeled as a passing run. Final commit/remote identity and clean
+worktree confirmation are appended to private proof after push confirmation.
+
+Limits: a controlled local ContainerManager adapter proves the local contract and
+real Git/filesystem outcomes. This is not live Docker/Azure or real-provider
+qualification, deployment, PR or main integration. No new crash rollback, atomicity
+or cross-process serialization guarantee is claimed.
