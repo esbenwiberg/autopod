@@ -33,6 +33,7 @@
     }
   },
   "files": {
+    "maxSize": 2097152,
     "ignore": [
       "packages/desktop/Sources/AutopodUI/Resources/Village/renderer/**",
       "**/dist/**",
