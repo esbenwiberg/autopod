@@ -470,3 +470,20 @@ behavior were not weakened. Final direct, public and frozen full runs pass.
 
 The final branch is ready for separately authorized integration review. No numbered
 rewrite slice remains.
+
+
+## Merge preparation follow-up — 2026-10-19
+
+GitHub CI exposed a configuration gap after opening PR #440: the final public
+characterization file is 1,205,330 bytes, above Biome's default 1 MiB input limit.
+The full local qualification above had used the documented task-local 2 MiB limit.
+The standard CI command stopped at lint before build/test; desktop tests and secret
+scanning passed independently.
+
+Repository `biome.json` now sets `files.maxSize` to 2,097,152 bytes, so ordinary
+`npx pnpm lint` and CI inspect that same complete characterization file. The ordinary
+command passes with the same 82 inherited warnings and no errors. Lint/format/import
+rules, ignore patterns, assertions, skips and all 2,200 frozen package/script files
+remain unchanged. This is a later lint-configuration checkpoint; the six-root hash
+manifest above continues to describe its explicitly pinned pre-integration revision.
+GitHub checks on the new PR head must pass before merging.
