@@ -1,6 +1,6 @@
 # Slice30: complete resource, network and preview ownership
 
-Status: IMPLEMENTED — expanded regression/frozen qualification in progress.
+Status: COMPLETE — full frozen qualification passed; goal continues through34.
 Date:2026-10-19. Source baseline:5838a228ece085093fae33e30bd657c237ef91b6.
 Branch:codex/pod-manager-workspace.
 Worktree:/Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -218,10 +218,10 @@ Remaining count becomes four(31–34). Full goal stays active through<=1,500-lin
 composition/facade,327-unit/73-member/mutable-state reconciliation and final34 proof.
 
 Automated:
-- [ ] Expanded SQLite-enabled regression passes with no new skip.
-- [ ] Full frozen uncached pipeline passes with actual counts/runtime/gates.
-- [ ] Proof/hash integrity and clean pushed revision verified.
-- [ ] Plan/roadmap mark30 after proof; complete31 research recorded.
+- [x] Expanded SQLite-enabled regression passes with no new skip.
+- [x] Full frozen uncached pipeline passes with actual counts/runtime/gates.
+- [x] Proof/hash integrity and clean pushed revision verified.
+- [x] Plan/roadmap mark30 after proof; complete31 research recorded.
 Manual:none for bounded scope; integration/deployment remain separately authorized.
 
 ## Compatibility and rollback
@@ -282,3 +282,51 @@ Allsource/test bytes are frozen. Evidence includes recipes, movement.json, named
 commands/reports/exits, public-comparison.json, baseline-type-comparison.json,
 test-types.json and frozen-manifest.json. Expanded/full qualification, final proof,
 clean pushed revision and31research remain before30 is complete. Goal active through34.
+
+## Final qualification — 2026-10-19
+
+Verdict: PROVEN for complete local resource compatibility extraction. Tested source:
+c00a32d0871721658ef22019955109f478bc3e0c, pushed before full qualification. Evidence:
+.autopod-data/resources-preview/proof.json and named commands/reports/scripts/exits.
+
+All253 affected suites pass5,152 cases with four unchanged infrastructure gates.
+Full frozen uncached validation passes frozen install without fallback/lock mutation,
+lint, build/declarations, typecheck, workspace tests, audit and secret scan.8,949
+Vitest tests pass across572 passing files, plus all35 Node script tests. Same ten
+inherited full gated cases; no new skip. Actual Node22.23.3/pnpm9.15.4/SQLite3.49.2;
+all observed Turbo groups uncached(7/11/15tasks). Inherited task-local2MiB root-lint
+processing limit/82warnings retained, with no rule/config/dependency/selection relaxation.
+All2,137 final package/script hashes and six root controls match.
+
+The first expanded run hit an unchanged100ms runtime clock assertion at99ms. Its
+report/log is retained in affected-first.json/affected.log. The full22-case runtime
+suite, all253 affected suites and full uncached pipeline subsequently pass on identical
+frozen bytes. No test threshold/source/rule/selection was changed for this failure.
+Fixture/scaffolding corrections and original HTTPS/nonzero-port/metadata behavior are
+recorded in the checkpoint above; no product-policy repair is hidden in qualification.
+
+All1,192 public names/statuses/assertion bytes match. Final46-suite direct run passes
+355 cases:51new across ten suites,130inherited operator/fix/delivery/approval and174
+existing immediate resource cases. Four actual private-file SQLite reopen cases cover
+confirmed sandbox cleanup, native preview URL/resource metadata, controlled HTTPS
+branch metadata and owned commit observations; integrity/FK/unrelated profile checks
+pass. Real local HTTP proxy traffic, real denial stream parser/event persistence and
+actual advisory owner sharing resource semaphore/map are exercised. Poll/timer owners
+stop/drain controlled probes, semaphore failure releases capacity/removes run identity,
+guidance prevents premature release and cleanup retains original timeout/late-operation
+limits. External effects use controlled container/checkpoint/Goal/provider/HTTPS process
+adapters; no real external deletion, messages, paid model, live Docker/Azure/provider
+or installation acceptance. No stronger atomicity/replay/isolation/termination claim.
+
+All25whole bodies/defaults,13initializers, exact public network protocol and alltwelve
+full source recipes match. Same73 public members/four thin delegates, mutable creation
+order/shared advisory captures and original startup polling arguments/site remain.
+All23 current source diagnostics match the original23 baseline; eleven new test/fixture
+files have zero diagnostics. Manager5,375→4,447lines; eleven new source modules37–288lines.
+
+This completes30. Four milestones remain31–34. Complete31workspace/recovery research
+is saved at ../research/2026-10-19-pod-manager-workspace-recovery.md, covering27named
+bodies/complete branch arrow/nine initializers,15public commands and three dynamic
+receiver paths. Next is its concrete plan before product changes. Goal remains active
+through<=1,500line composition/delegates,327-unit/73-member/mutable-owner reconciliation
+and34 full proof. PR/main integration/deployment remain separately authorized.
