@@ -6,6 +6,43 @@ import Testing
 @testable import AutopodUI
 
 @Suite(.serialized) @MainActor struct LaunchComposerTests {
+  @Test(arguments: [false, true]) func newPodSheetUsesTheMainWindowInterface(redesign: Bool) async throws {
+    NSApplication.shared.finishLaunching()
+    let fixture = LaunchComposerFixture()
+    let suite = "autopod-launch-routing-" + UUID().uuidString
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defaults.set(redesign, forKey: "autopod.desktop.redesign")
+    defer { defaults.removePersistentDomain(forName: suite) }
+    // Match the installed app: MainView owns the setting; its parent does not inject it.
+    let host = LaunchComposerHost(MainView(pods: [], configurationActions: fixture.actions)
+      .defaultAppStorage(defaults), width: 1280, redesign: false)
+    defer { host.close() }
+    let buttonTitle = redesign ? "New pod" : "New Pod"
+    try await host.wait { host.containsText(buttonTitle) }
+    try host.pressLabel(buttonTitle)
+    try await host.wait { host.window.attachedSheet != nil }
+    let sheet = try #require(host.window.attachedSheet)
+    func sheetNodes() -> [NSObject] {
+      sheet.layoutIfNeeded(); sheet.contentView?.layoutSubtreeIfNeeded()
+      return sheet.contentView.map { launchNodes($0) } ?? []
+    }
+    func hasComposer() -> Bool {
+      sheetNodes().contains { launchAX($0, "accessibilityIdentifier") as? String == "launch-stage-0" }
+    }
+    try await host.wait {
+      hasComposer() || sheetNodes().contains { launchAX($0, "accessibilityLabel") as? String == "Full launch configuration" }
+    }
+    #expect(hasComposer() == redesign)
+    if let output = ProcessInfo.processInfo.environment["AUTOPOD_LAUNCH_RENDER_DIR"], let view = sheet.contentView {
+      try FileManager.default.createDirectory(atPath: output, withIntermediateDirectories: true)
+      let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      try #require(bitmap.representation(using: .png, properties: [:]))
+        .write(to: URL(fileURLWithPath: "\(output)/main-window-new-pod-\(redesign ? "redesign" : "legacy").png"))
+    }
+    host.window.endSheet(sheet)
+  }
+
   @Test func fullJSONRetainsNullEmptyAndStructuredFieldsAndRejectsLossyEdits() throws {
     let text = #"{"repositoryId":"repo","task":"Restore","work":{"kind":"task","nested":{"facts":["A"]}},"selections":{"githubAccessId":null,"toolPackIds":[]},"overrides":{"execution":{"main":{"memoryGb":null}},"pim":[]},"referenceRepositories":[{"repositoryId":"reference","ref":"spec/recovery","access":"read"}]}"#
     let request = try LaunchComposerJSON.decode(text, selectionOnly: false, task: "unused")
@@ -290,11 +327,11 @@ import Testing
 @MainActor final class LaunchComposerHost {
   let hosting: NSHostingView<AnyView>
   let window: NSWindow
-  init<V: View>(_ view: V, width: Double, light: Bool = false) {
+  init<V: View>(_ view: V, width: Double, light: Bool = false, redesign: Bool = true) {
     // Keep the native accessibility client active for this test process. Toggling it
     // off while other framework views are still tearing down affects WebKit clients.
     NSApplication.shared.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
-    hosting = NSHostingView(rootView: AnyView(view.environment(\.desktopRedesign, true).environment(\.colorScheme, light ? .light : .dark)
+    hosting = NSHostingView(rootView: AnyView(view.environment(\.desktopRedesign, redesign).environment(\.colorScheme, light ? .light : .dark)
       .environment(\.controlActiveState, .key).transaction { $0.disablesAnimations = true }.frame(width: width, height: 850)))
     hosting.sizingOptions = []
     window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 850), styleMask: [.titled], backing: .buffered, defer: false)

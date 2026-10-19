@@ -670,12 +670,9 @@ public struct MainView: View {
         } message: {
             Text("Your workspace draft has not been saved.")
         }
-        .environment(\.desktopRedesign, redesign)
         .environment(\.desktopRepositories, repositoriesByPod)
         .environment(\.desktopRepositoryFilter, { repositoryID = $0 })
         .environment(\.desktopPodSelection, { selectedSessionId = $0 })
-        .modifier(DesktopAppearanceModifier())
-        .tint(redesign ? DesktopTheme.accent : .accentColor)
         .onChange(of: sidebarSelection) { _, selection in
             if redesign, case .series(let id) = selection {
                 selectedDesktopSeriesID = id
@@ -808,6 +805,11 @@ public struct MainView: View {
                 .keyboardShortcut("r", modifiers: .command)
                 .hidden()
         }
+        // Apply presentation settings outside the sheet modifiers so launch sheets
+        // inherit the same interface and appearance as the main window.
+        .environment(\.desktopRedesign, redesign)
+        .modifier(DesktopAppearanceModifier())
+        .tint(redesign ? DesktopTheme.accent : .accentColor)
     }
 
     private var analyticsOverview: some View {
