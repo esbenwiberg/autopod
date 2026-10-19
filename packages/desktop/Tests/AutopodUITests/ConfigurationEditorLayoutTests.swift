@@ -219,3 +219,28 @@ private func libraryFixture(
   ])
   return try JSONDecoder().decode(ConfigurationDocument.self, from: Data(value.formatted().utf8))
 }
+
+@MainActor @Test(arguments: ConfigurationKind.allCases)
+func redesignedConfigurationEditorFitsCompactAndWideWorkspaces(_ kind: ConfigurationKind) throws {
+  let unavailable = DaemonError.badRequest("No daemon in the redesigned layout fixture")
+  let actions = LaunchConfigurationActions(
+    documents: [], capabilities: .object([:]), reload: {},
+    resolve: { _ in throw unavailable }, launch: { _ in throw unavailable },
+    save: { _, _ in throw unavailable }, archive: { _ in throw unavailable },
+    discoverGitHubRepositories: { [] }, discoverGitHubWorkflows: { _ in [] },
+    loadProviderAccounts: { [] }, discoverPim: { _ in throw unavailable },
+    saveFromLaunch: { _ in throw unavailable })
+  let document = try configurationEditorFixture(kind)
+  for width in [760.0, 1440.0] {
+    let view = ConfigurationEditorSheet(kind: kind, document: document, actions: actions)
+      .environment(\.desktopRedesign, true).frame(width: width, height: 820)
+    let hosting = NSHostingView(rootView: view)
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: width, height: 820),
+      styleMask: [.titled], backing: .buffered, defer: false)
+    window.contentView = hosting
+    window.layoutIfNeeded(); hosting.layoutSubtreeIfNeeded()
+    #expect(hosting.fittingSize.width <= width)
+    #expect(hosting.fittingSize.height <= 820)
+  }
+}

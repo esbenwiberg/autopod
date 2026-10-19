@@ -5,8 +5,11 @@ import SwiftUI
 
 /// Right-pane drill for the Cost card — fetches cost analytics and renders four sections.
 struct CostDrillView: View {
-    let loadCost: (() async throws -> CostAnalyticsResponse)?
+    let loadCost: ((Int) async throws -> CostAnalyticsResponse)?
     let onSelectPod: ((String) -> Void)?
+
+    @Environment(\.desktopAnalyticsWindow) private var workspaceDays
+    private var days: Int { workspaceDays ?? 30 }
 
     @State private var costData: CostAnalyticsResponse?
     @State private var costLoadError: String?
@@ -48,33 +51,32 @@ struct CostDrillView: View {
                         Text("Unreadable cost records: " + diagnostics.map { "\($0.podId): \($0.field)" }.joined(separator: ", "))
                             .font(.caption).foregroundStyle(.orange)
                     }
-                    CostEvidenceView(evidence: data.costEvidence)
-                    CostPhaseBarSectionView(byPhase: data.byPhase)
-                    Divider()
-                    CostProfileModelSectionView(byProfileModel: data.byProfileModel)
-                    Divider()
-                    CostTop10SectionView(top10: data.top10, onSelectPod: onSelectPod)
-                    Divider()
-                    CostWasteCalloutView(waste: data.waste)
+                    CostEvidenceView(evidence: data.costEvidence).desktopAnalyticsPanel()
+                    DesktopAnalyticsColumns {
+                        CostPhaseBarSectionView(byPhase: data.byPhase).desktopAnalyticsPanel()
+                        CostProfileModelSectionView(byProfileModel: data.byProfileModel).desktopAnalyticsPanel()
+                        CostTop10SectionView(top10: data.top10, onSelectPod: onSelectPod).desktopAnalyticsPanel()
+                        CostWasteCalloutView(waste: data.waste).desktopAnalyticsPanel()
+                    }
                 } else if isLoadingCost {
                     costLoadingSkeleton
                 } else if costLoadError == nil && loadCost != nil {
-                    Text("No completed pods in the last 30 days.")
+                    Text("No completed pods in the last \(days) days.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
             .padding(24)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
-        .task { await fetchCost() }
+        .background(DesktopAnalyticsBackground())
+        .task(id: days) { await fetchCost() }
     }
 
     private func fetchCost() async {
         guard let loadCost, !isLoadingCost else { return }
         isLoadingCost = true
         do {
-            costData = try await loadCost()
+            costData = try await loadCost(days)
             costLoadError = nil
         } catch {
             costLoadError = error.localizedDescription

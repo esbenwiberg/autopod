@@ -47,10 +47,12 @@ struct ConfigurationStringListEditor: View {
         ForEach(values.indices, id: \.self) { index in
           HStack {
             TextField("Value", text: Binding(get: { values.indices.contains(index) ? values[index].string ?? "" : "" }, set: { if values.indices.contains(index) { values[index] = .string($0) } }))
+              .accessibilityIdentifier("configuration-list-\(title)-\(index)")
             Button("Remove", systemImage: "minus.circle") { values.remove(at: index) }.labelStyle(.iconOnly)
           }
         }
         Button("Add", systemImage: "plus") { values.append(.string("")) }
+          .accessibilityIdentifier("configuration-list-\(title)-add")
       }.padding(6)
     }
   }
@@ -127,7 +129,7 @@ struct ProfileExecutionDefaultsEditor: View {
     VStack(alignment: .leading, spacing: 10) {
       Picker("Run in", selection: Binding(get: { target }, set: {
         fields["target"] = .string($0)
-        if $0 == "sandbox" { main.wrappedValue["cpus"] = .null; main.wrappedValue["storageGb"] = .null }
+        // Retain saved allocations when switching targets; show unsupported values for explicit reset.
       })) { Text("Docker").tag("local"); Text("Hosted sandbox").tag("sandbox") }
       if let tiers = backend?["memoryTiersGb"]?.array?.compactMap(\.number) {
         Picker("Memory", selection: Binding(get: { main.wrappedValue["memoryGb"]?.number ?? 0 }, set: { main.wrappedValue["memoryGb"] = $0 == 0 ? .null : .number($0) })) {
@@ -136,49 +138,16 @@ struct ProfileExecutionDefaultsEditor: View {
           if let current = main.wrappedValue["memoryGb"]?.number, !tiers.contains(current) { Text("\(current.formatted()) GB · unavailable").tag(current) }
         }
       } else { ConfigurationNumberValue(title: "Memory (GB)", fields: main, key: "memoryGb", fallback: 4) }
-      if target == "local" { ConfigurationNumberValue(title: "CPUs", fields: main, key: "cpus", fallback: 2) }
+      ConfigurationAllocationLimit(
+        title: "CPUs", fields: main, key: "cpus", fallback: 2,
+        supported: backend?["maxCpus"]?.number != nil,
+        unavailable: "This backend does not support independent CPU allocation.")
       if let reason = backend?["unavailableReason"]?.string { Text(reason).font(.caption).foregroundStyle(.secondary) }
       Text("These are launch defaults. The daemon checks the selected backend's capacity before starting a pod.").font(.caption).foregroundStyle(.secondary)
-      DisclosureGroup("Network and sidecar allocations") { ConfigurationFieldsEditor(fields: $fields, excluded: ["target", "main"]) }
-    }
-  }
-}
-
-struct RepositorySetupEditor: View {
-  @Binding var fields: [String: ConfigurationJSON]
-  @State private var section = "Commands"
-  private var deployment: Binding<[String: ConfigurationJSON]> {
-    Binding(get: { fields["integrations"]?["deployment"]?.object ?? ["enabled": .bool(false), "source": .string("published-default"), "env": .object([:]), "allowedScripts": .array([])] }, set: { value in
-      var integrations = fields["integrations"]?.object ?? [:]; integrations["deployment"] = .object(value); fields["integrations"] = .object(integrations)
-    })
-  }
-  private var serviceRules: Binding<[ConfigurationJSON]> {
-    Binding(get: { fields["integrations"]?["serviceAccess"]?.array ?? [] }, set: { value in
-      var integrations = fields["integrations"]?.object ?? [:]
-      integrations["serviceAccess"] = .array(value)
-      fields["integrations"] = .object(integrations)
-    })
-  }
-  var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Picker("Setup settings", selection: $section) {
-        ForEach(["Commands", "Services", "Deployment", "Advanced"], id: \.self) { Text($0).tag($0) }
-      }.pickerStyle(.segmented)
-      if section == "Commands" {
-      ConfigurationTextValue(title: "Setup name", fields: $fields, key: "name")
-      ConfigurationTextValue(title: "Default branch", fields: $fields, key: "defaultBranch", optional: true)
-      ConfigurationTextValue(title: "Working directory", fields: $fields, key: "buildWorkDir", optional: true)
-      ForEach([("validationSetupCommand", "Setup command"), ("buildCommand", "Build command"), ("testCommand", "Test command"), ("lintCommand", "Lint command"), ("startCommand", "Start command")], id: \.0) { key, title in
-        ConfigurationTextValue(title: title, fields: $fields, key: key, optional: true)
-      }
-      }
-      if section == "Services" {
-      ConfigurationObjectListEditor(title: "ADO and Azure log access", values: serviceRules, initial: {
-        ["id": .string("access-\(UUID().uuidString.prefix(8).lowercased())"), "service": .string("ado"), "organization": .string(""), "project": .string(""), "repository": .string(""), "operations": .array([.string("code.file")])]
-      }) { ServiceAccessRuleEditor(fields: $0) }
-      }
-      if section == "Deployment" { RepositoryDeploymentEditor(fields: deployment) }
-      if section == "Advanced" { ConfigurationFieldsEditor(fields: $fields, excluded: ["id", "name", "defaultBranch", "buildWorkDir", "validationSetupCommand", "buildCommand", "testCommand", "lintCommand", "startCommand", "integrations"]) }
+      ConfigurationAllocationLimit(
+        title: "Storage (GB)", fields: main, key: "storageGb", fallback: 10,
+        supported: backend?["maxStorageGb"]?.number != nil,
+        unavailable: "This backend cannot enforce a main-container storage limit.")
     }
   }
 }
@@ -193,7 +162,7 @@ struct RepositoryDeploymentEditor: View {
         ConfigurationTextValue(title: "Deployment target", fields: $fields, key: "targetId")
         Text("Use a target enrolled on the daemon for this repository and setup.").font(.caption).foregroundStyle(.secondary)
         ConfigurationStringListEditor(title: "Allowed scripts", values: Binding(get: { fields["allowedScripts"]?.array ?? [] }, set: { fields["allowedScripts"] = .array($0) }))
-        DisclosureGroup("Environment and credential references") { ConfigurationFieldsEditor(fields: $fields, excluded: ["enabled", "source", "targetId", "allowedScripts"]) }
+        ConfigurationValueMapEditor(title: "Deployment environment", context: "Passed only to approved deployment requests.", id: "deployment-env", values: Binding(get: { fields["env"]?.object ?? [:] }, set: { fields["env"] = .object($0) }))
       }
     }
   }
@@ -262,6 +231,12 @@ struct EnvironmentSidecarEditor: View {
         Text("When selected at launch").tag("on-demand"); Text("Always").tag("always"); Text("Disabled").tag("disabled")
       }
       TextField("Port", value: Binding(get: { fields["port"]?.number ?? 5432 }, set: { fields["port"] = .number($0) }), format: .number.precision(.fractionLength(0)))
+      LabeledContent("Health timeout (ms)") {
+        TextField("Health timeout (ms)", value: Binding(
+          get: { fields["healthTimeoutMs"]?.number ?? 60000 },
+          set: { fields["healthTimeoutMs"] = .number($0) }),
+          format: .number.precision(.fractionLength(0))).frame(width: 120)
+      }
       Text("Resource limits are selected in the profile or at launch.").font(.caption).foregroundStyle(.secondary)
     }
   }
@@ -275,6 +250,9 @@ struct SkillSourceEditor: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       ConfigurationTextValue(title: "Skill name", fields: $fields, key: "name")
+      TextField("Skill description (optional)", text: Binding(get: { fields["description"]?.string ?? "" }, set: {
+        if $0.isEmpty { fields.removeValue(forKey: "description") } else { fields["description"] = .string($0) }
+      })).accessibilityIdentifier("configuration-skill-description")
       Picker("Source", selection: Binding(get: { mode }, set: { value in
         var next: [String: ConfigurationJSON] = ["type": .string(value)]
         if value == "inline" { next["content"] = .string("") }
@@ -311,7 +289,7 @@ struct McpTransportEditor: View {
         ConfigurationTextValue(title: "Command", fields: transport, key: "command")
         ConfigurationStringListEditor(title: "Arguments", values: Binding(get: { transport.wrappedValue["args"]?.array ?? [] }, set: { transport.wrappedValue["args"] = .array($0) }))
       }
-      DisclosureGroup("Credential references") { ConfigurationFieldsEditor(fields: transport, excluded: ["type", "url", "command", "args"]) }
+      ConfigurationValueMapEditor(title: mode == "http" ? "HTTP headers" : "Command environment", context: mode == "http" ? "Headers sent to this MCP server." : "Environment passed to this MCP command.", id: "mcp-values", values: Binding(get: { transport.wrappedValue[mode == "http" ? "headers" : "env"]?.object ?? [:] }, set: { transport.wrappedValue[mode == "http" ? "headers" : "env"] = .object($0) }))
       Text("HTTP credentials stay with the daemon. Command credentials must be enrolled for use inside the pod.").font(.caption).foregroundStyle(.secondary)
     }
   }

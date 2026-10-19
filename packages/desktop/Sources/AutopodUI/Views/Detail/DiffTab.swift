@@ -226,6 +226,7 @@ public enum DiffParser {
 // MARK: - Diff tab view
 
 public struct DiffTab: View {
+  @Environment(\.desktopRedesign) private var redesign
   public let pod: Pod
   public let diffResponse: DiffApiResponse?
   public var onRefresh: (() -> Void)?
@@ -304,7 +305,8 @@ public struct DiffTab: View {
 
   public var body: some View {
     VStack(spacing: 0) {
-      HStack(spacing: 8) {
+      HStack(spacing: 12) {
+        if redesign { Text("Diff").font(.title3.weight(.semibold)) }
         Picker("", selection: $mode) {
           ForEach(DiffDisplayMode.allCases) { item in
             Text(item.rawValue).tag(item)
@@ -326,8 +328,8 @@ public struct DiffTab: View {
           .help("Refresh diff")
         }
       }
-      .padding(.horizontal, 10)
-      .padding(.vertical, 8)
+      .padding(.horizontal, redesign ? 20 : 10)
+      .padding(.vertical, redesign ? 14 : 8)
 
       Divider()
 
@@ -344,6 +346,7 @@ public struct DiffTab: View {
         }
       }
     }
+    .background(redesign ? DesktopTheme.surface : Color.clear)
     .task(id: responseIdentity) {
       await parseResponse()
     }
@@ -517,7 +520,7 @@ public struct DiffTab: View {
       .buttonStyle(.plain)
       .padding(.horizontal, 10)
       .padding(.vertical, 9)
-      .background(Color(nsColor: .controlBackgroundColor))
+      .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
 
       if isExpanded {
         Divider()
@@ -575,11 +578,11 @@ public struct DiffTab: View {
       .buttonStyle(.plain)
       .padding(.horizontal, 16)
       .padding(.vertical, 7)
-      .background(Color(nsColor: .windowBackgroundColor).opacity(0.65))
+      .background((redesign ? DesktopTheme.canvas : Color(nsColor: .windowBackgroundColor)).opacity(0.65))
 
       if isExpanded {
         diffFileView(file, showsHeader: false)
-          .background(Color(nsColor: .windowBackgroundColor))
+          .background((redesign ? DesktopTheme.canvas : Color(nsColor: .windowBackgroundColor)))
       }
 
       Divider()
@@ -637,7 +640,7 @@ public struct DiffTab: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
       }
 
       if let note = file.note {

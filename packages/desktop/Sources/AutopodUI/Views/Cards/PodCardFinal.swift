@@ -55,6 +55,10 @@ public struct SessionCardFinal: View {
         self.qualityScore = qualityScore
     }
 
+    @Environment(\.desktopRedesign) private var redesign
+    @Environment(\.desktopRepositories) private var repositories
+    @Environment(\.desktopRepositoryFilter) private var filterRepository
+    @Environment(\.desktopPodSelection) private var selectPod
     @State private var isHovered = false
     @State private var isInfrastructureResumePending = false
 
@@ -100,25 +104,13 @@ public struct SessionCardFinal: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Accent stripe
-            pod.status.color
-                .frame(height: 2)
-                .opacity(isSelected ? 0.8 : (pod.status.needsAttention || pod.status == .complete) ? 0.9 : 0.25)
-
-            compactContent
-                .padding(12)
-
-            if density == .detailed {
-                expandedContent
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
-            }
+        Group {
+            if redesign { redesignedCard } else { legacyCard }
         }
         .frame(maxWidth: .infinity, maxHeight: density == .detailed ? .infinity : nil, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(redesign ? DesktopTheme.surface : Color(nsColor: .controlBackgroundColor))
                 .shadow(
                     color: .black.opacity(isSelected ? 0.1 : isHovered ? 0.08 : 0.03),
                     radius: isSelected ? 10 : isHovered ? 8 : 3,
@@ -128,7 +120,7 @@ public struct SessionCardFinal: View {
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(
-                    isSelected
+                    redesign ? (isSelected ? DesktopTheme.accent : DesktopTheme.line) : isSelected
                         ? Color.accentColor.opacity(0.9)
                         : isHovered
                             ? Color.accentColor.opacity(0.4)
@@ -142,39 +134,7 @@ public struct SessionCardFinal: View {
         .animation(.easeOut(duration: 0.15), value: isHovered)
         .animation(.easeOut(duration: 0.15), value: isSelected)
         .onHover { isHovered = $0 }
-        .contextMenu {
-            if let onSpawnFollowUp, !pod.isTerminal {
-                Button {
-                    onSpawnFollowUp(pod)
-                } label: {
-                    Label("Spawn follow-up pod", systemImage: "arrow.branch")
-                }
-            }
-            if let onLaunchSeriesFromPod, pod.isWorkspace {
-                Button {
-                    onLaunchSeriesFromPod(pod)
-                } label: {
-                    Label("Launch series from here", systemImage: "rectangle.3.group.fill")
-                }
-            }
-            Divider()
-            if pod.status != .killed && pod.status != .killing {
-                Button(role: .destructive) {
-                    Task { await actions.kill(pod.id) }
-                } label: {
-                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
-                }
-                .disabled(pendingControl != nil)
-                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
-            }
-            Button(role: .destructive) {
-                showDeleteConfirmation = true
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-            .disabled(pendingControl != nil)
-            .accessibilityIdentifier("pod-control-delete-menu-\(pod.id)")
-        }
+        .contextMenu { cardMenuActions }
         .sheet(isPresented: $showOptionsPicker) {
             DecisionReplySheet(podID: pod.id, actions: actions.decisionReply) { showOptionsPicker = false }
         }
@@ -241,6 +201,116 @@ public struct SessionCardFinal: View {
     }
 
     // MARK: - Compact (always visible)
+
+    @ViewBuilder
+    private var cardMenuActions: some View {
+            if let onSpawnFollowUp, !pod.isTerminal {
+                Button {
+                    onSpawnFollowUp(pod)
+                } label: {
+                    Label("Spawn follow-up pod", systemImage: "arrow.branch")
+                }
+            }
+            if let onLaunchSeriesFromPod, pod.isWorkspace {
+                Button {
+                    onLaunchSeriesFromPod(pod)
+                } label: {
+                    Label("Launch series from here", systemImage: "rectangle.3.group.fill")
+                }
+            }
+            Divider()
+            if pod.status != .killed && pod.status != .killing {
+                Button(role: .destructive) {
+                    Task { await actions.kill(pod.id) }
+                } label: {
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
+                }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
+            }
+            Button(role: .destructive) {
+                showDeleteConfirmation = true
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            .disabled(pendingControl != nil)
+            .accessibilityIdentifier("pod-control-delete-menu-\(pod.id)")
+    }
+
+    private var legacyCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Accent stripe
+            pod.status.color
+                .frame(height: 2)
+                .opacity(isSelected ? 0.8 : (pod.status.needsAttention || pod.status == .complete) ? 0.9 : 0.25)
+
+            compactContent
+                .padding(12)
+
+            if density == .detailed {
+                expandedContent
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+            }
+        }
+    }
+
+    private var redesignedCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Circle().fill(pod.status.needsAttention ? pod.status.color : DesktopTheme.accent).frame(width: 5, height: 5)
+                Text(pod.status.label.capitalized).font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(pod.status.needsAttention ? pod.status.color : DesktopTheme.accent)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                modeBadge
+                Text(pod.id).font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                Menu { cardMenuActions } label: { Image(systemName: "ellipsis") }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Pod actions")
+            }
+            Button { selectPod?(pod.id) } label: {
+                Text(pod.desktopTitle).font(.system(size: 14, weight: .semibold))
+                    .lineLimit(density == .compact ? 1 : 2, reservesSpace: true)
+                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain).help(pod.desktopTitle)
+            if let repository = repositories[pod.id] {
+                Button { filterRepository?(repository.id) } label: {
+                    Label(repository.label, systemImage: "folder").font(.system(size: 11, weight: .medium))
+                        .lineLimit(1).truncationMode(.middle).foregroundStyle(DesktopTheme.accent)
+                }.buttonStyle(.plain).help(repository.isSnapshot ? "Filter by captured repository" : "Filter by current profile repository; original snapshot unavailable")
+            } else {
+                Label(pod.desktopRepositoryPlaceholder, systemImage: "folder").font(.caption2).foregroundStyle(.secondary)
+            }
+            if let pendingControl { PendingControlNotice(kind: pendingControl, podId: pod.id) }
+            if pod.queueLength > 0 {
+                QueueChip(count: pod.queueLength) { showQueuePopover.toggle() }
+                    .popover(isPresented: $showQueuePopover) { FixQueuePopover(messages: pod.recentQueueMessages) }
+            }
+            if let fixLifecycle = pod.prFixLifecycleLabel {
+                Text(fixLifecycle).font(.caption2).foregroundStyle(.secondary).lineLimit(1).help(fixLifecycle)
+            }
+            Spacer(minLength: 0)
+            VStack(spacing: 6) {
+                PodLifecycleRail(pod: pod)
+                HStack {
+                    Text("Autopod · \(pod.desktopLifecycleStage?.rawValue ?? pod.status.label.capitalized)")
+                        .lineLimit(1)
+                    Spacer(minLength: 2)
+                    Text(pod.desktopMilestoneToken ?? "No report").fontDesign(.monospaced)
+                        .help(pod.phase?.description ?? "The agent has not reported a milestone")
+                }.font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 4) {
+                Text("\(pod.profileName) · \(pod.model)").lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 4)
+                Text("\(pod.duration) · \(String(format: "$%.2f", pod.costUsd))").fixedSize()
+                    .help("Stored cost subtotal; billing unverified")
+            }.font(.system(size: 10)).foregroundStyle(.secondary)
+        }
+        .padding(16).frame(minHeight: density == .compact ? 152 : 184, alignment: .top)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("fleet-card-\(pod.id)")
+    }
 
     private var compactContent: some View {
         VStack(alignment: .leading, spacing: 8) {

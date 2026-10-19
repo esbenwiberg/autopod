@@ -8,6 +8,16 @@ public struct ScheduledJobTemplateSheet: View {
   public var template: ScheduledJobTemplate?
   public var onSave: ((CreateScheduledJobTemplateRequest) -> Void)?
 
+  public var linkedScheduleNames: [String] = []
+  public var embedded = false
+  public var saveAwaited: ((CreateScheduledJobTemplateRequest) async throws -> Void)?
+  public var onDirtyChanged: (Bool) -> Void = { _ in }
+  public var onBusyChanged: (Bool) -> Void = { _ in }
+  @State private var saving = false
+  @State private var saveError: String?
+  @State private var baseline: TemplateDraftSnapshot?
+  private var draftKey: TemplateDraftSnapshot { TemplateDraftSnapshot(name: name, prompt: prompt, fields: fields) }
+
   @State private var name: String
   @State private var prompt: String
   @State private var fields: [TemplateFieldDraft]
@@ -15,14 +25,24 @@ public struct ScheduledJobTemplateSheet: View {
   public init(
     isPresented: Binding<Bool>,
     template: ScheduledJobTemplate? = nil,
-    onSave: ((CreateScheduledJobTemplateRequest) -> Void)? = nil
+    onSave: ((CreateScheduledJobTemplateRequest) -> Void)? = nil,
+    embedded: Bool = false,
+    saveAwaited: ((CreateScheduledJobTemplateRequest) async throws -> Void)? = nil,
+    onDirtyChanged: @escaping (Bool) -> Void = { _ in },
+    onBusyChanged: @escaping (Bool) -> Void = { _ in },
+    linkedScheduleNames: [String] = []
   ) {
     self._isPresented = isPresented
     self.template = template
     self.onSave = onSave
+    self.embedded = embedded; self.saveAwaited = saveAwaited
+    self.onDirtyChanged = onDirtyChanged; self.onBusyChanged = onBusyChanged
+    self.linkedScheduleNames = linkedScheduleNames
     self._name = State(initialValue: template?.name ?? "")
     self._prompt = State(initialValue: template?.prompt ?? "")
-    self._fields = State(initialValue: (template?.fields ?? []).map(TemplateFieldDraft.init))
+    let initialFields = (template?.fields ?? []).map(TemplateFieldDraft.init)
+    self._fields = State(initialValue: initialFields)
+    self._baseline = State(initialValue: TemplateDraftSnapshot(name: template?.name ?? "", prompt: template?.prompt ?? "", fields: initialFields))
   }
 
   private var canSave: Bool {
@@ -40,6 +60,14 @@ public struct ScheduledJobTemplateSheet: View {
 
       ScrollView {
         VStack(alignment: .leading, spacing: 18) {
+          if let saveError { Text(saveError).foregroundStyle(.red).textSelection(.enabled) }
+          if embedded {
+            Text("Schedules fill in the fields when they run. Changes to this reusable prompt affect linked schedules.")
+              .font(.callout).foregroundStyle(.secondary)
+            if !linkedScheduleNames.isEmpty {
+              Text("Used by: " + linkedScheduleNames.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+            }
+          }
           formSection("Name") {
             HStack(spacing: 6) {
               Image(systemName: "doc.text")
@@ -83,29 +111,36 @@ public struct ScheduledJobTemplateSheet: View {
             }
           }
         }
-        .padding(20)
+        .padding(24)
+        .frame(maxWidth: embedded ? 1100 : .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
 
       Divider()
       actions
     }
-    .frame(minWidth: 500, maxWidth: 500, minHeight: 420)
-    .background(Color(nsColor: .windowBackgroundColor))
+    .frame(minWidth: embedded ? 600 : 500, maxWidth: embedded ? .infinity : 500, minHeight: 420)
+    .background(embedded ? DesktopTheme.surface : Color(nsColor: .windowBackgroundColor))
+    .disabled(saving)
+    .onChange(of: draftKey) { _, value in onDirtyChanged(value != baseline) }
   }
 
   private var header: some View {
     HStack {
-      Text(template == nil ? "New Template" : "Edit Template")
-        .font(.headline)
-      Spacer()
-      Button {
-        isPresented = false
-      } label: {
-        Image(systemName: "xmark.circle.fill")
-          .foregroundStyle(.tertiary)
-          .font(.title3)
+      if embedded {
+        VStack(alignment: .leading, spacing: 8) {
+          Button("‹ Templates") { isPresented = false }.buttonStyle(.plain).foregroundStyle(.secondary)
+          Text(template?.name ?? "New template").font(.title2.weight(.semibold))
+          Text("Reusable prompt & field definitions").font(.caption).foregroundStyle(.secondary)
+        }
+        Spacer()
+      } else {
+        Text(template == nil ? "New Template" : "Edit Template").font(.headline)
+        Spacer()
+        Button { isPresented = false } label: {
+          Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary).font(.title3)
+        }.buttonStyle(.borderless)
       }
-      .buttonStyle(.borderless)
     }
     .padding(.horizontal, 20)
     .padding(.top, 20)
@@ -114,30 +149,43 @@ public struct ScheduledJobTemplateSheet: View {
 
   private var actions: some View {
     HStack {
+      if embedded { Text(draftKey == baseline ? "No changes" : "Unsaved changes").font(.caption).foregroundStyle(.secondary) }
       Spacer()
       Button("Cancel") { isPresented = false }
         .keyboardShortcut(.cancelAction)
-      Button(template == nil ? "Create Template" : "Save Changes") {
-        onSave?(CreateScheduledJobTemplateRequest(
+      Button(saving ? "Saving…" : template == nil ? "Create Template" : "Save Changes") {
+        let request = CreateScheduledJobTemplateRequest(
           name: name.trimmingCharacters(in: .whitespacesAndNewlines),
           prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
-          fields: fields.map(\.templateField)
-        ))
-        isPresented = false
+          fields: fields.map(\.templateField))
+        if let saveAwaited {
+          saving = true; onBusyChanged(true); saveError = nil
+          Task { @MainActor in
+            defer { saving = false; onBusyChanged(false) }
+            do {
+              try await saveAwaited(request)
+              onDirtyChanged(false); onBusyChanged(false); saving = false
+              isPresented = false
+            } catch { saveError = error.localizedDescription }
+          }
+        } else { onSave?(request); isPresented = false }
       }
       .buttonStyle(.borderedProminent)
       .keyboardShortcut(.defaultAction)
-      .disabled(!canSave)
+      .disabled(!canSave || saving)
     }
     .padding(16)
   }
 
-  private func formSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-    VStack(alignment: .leading, spacing: 5) {
-      Text(title)
-        .font(.system(.caption).weight(.semibold))
-        .foregroundStyle(.secondary)
-      content()
+  private func formSection<Content: View>(_ title: String, @ViewBuilder content: @escaping () -> Content) -> some View {
+    Group {
+      if embedded { DesktopPanel(title: title, content: content) }
+      else {
+        VStack(alignment: .leading, spacing: 5) {
+          Text(title).font(.system(.caption).weight(.semibold)).foregroundStyle(.secondary)
+          content()
+        }
+      }
     }
   }
 
@@ -233,4 +281,10 @@ private struct TemplateFieldDraft: Identifiable, Hashable {
 #Preview("Scheduled Job Template") {
   @Previewable @State var show = true
   ScheduledJobTemplateSheet(isPresented: $show)
+}
+
+private struct TemplateDraftSnapshot: Equatable {
+  var name: String
+  var prompt: String
+  var fields: [TemplateFieldDraft]
 }

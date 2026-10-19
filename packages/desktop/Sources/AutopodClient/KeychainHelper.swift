@@ -5,7 +5,7 @@ import Security
 /// Stores and retrieves daemon tokens in the macOS Keychain.
 public enum KeychainHelper {
 
-  private static let service = "com.autopod.desktop"
+  private static var service: String { DesktopIdentity.credentialService }
 
   public static func save(token: String, for connectionId: UUID) throws {
     try saveString(token, account: connectionId.uuidString)

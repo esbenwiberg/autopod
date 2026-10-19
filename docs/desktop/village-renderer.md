@@ -209,8 +209,11 @@ native actor to the real projection; JavaScript tests feed it through the bridge
 ```sh
 node --test packages/desktop/Tests/VillageHost/*.test.mjs scripts/update-village-renderer.test.mjs
 swift test --package-path packages/desktop --filter Village
-swift test --package-path packages/desktop
+./scripts/test-desktop.sh
 ```
+
+The full regression runner isolates test targets to avoid shared OS authentication
+framework state; see [desktop test isolation](test-isolation.md).
 
 Real WebKit tests load the bundled scripts under the page's CSP, exercise the
 ready handshake, full snapshot replacement, pre-ready coalescing, managed

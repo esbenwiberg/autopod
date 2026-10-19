@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Terminal tab — real xterm-compatible terminal via SwiftTerm.
 public struct TerminalTab: View {
+  @Environment(\.desktopRedesign) private var redesign
   public let pod: Pod
   public var terminalState: String
   public var dataPipe: TerminalDataPipe?
@@ -110,6 +111,7 @@ public struct TerminalTab: View {
 
   private var terminalToolbar: some View {
     HStack(spacing: 8) {
+      if redesign { Text("Terminal").font(.title3.weight(.semibold)) }
       Circle()
         .fill(statusColor)
         .frame(width: 7, height: 7)

@@ -10,6 +10,7 @@ import SwiftUI
 /// matching the backend fan-in contract: it stays `queued` until *all*
 /// selected parents reach `validated`.
 public struct SpawnDependentSheet: View {
+    @Environment(\.desktopRedesign) private var redesign
     @Binding public var isPresented: Bool
     public let initiator: Pod
     public let candidatePods: [Pod]
@@ -56,6 +57,11 @@ public struct SpawnDependentSheet: View {
     }
 
     public var body: some View {
+      if redesign, let configurationActions {
+        FollowUpLaunchSheet(isPresented: $isPresented, kind: .dependent, initiator: initiator, candidatePods: candidatePods, actions: configurationActions, onCreated: onPodCreated)
+      } else { legacyBody }
+    }
+    private var legacyBody: some View {
         ScrollView {
         VStack(alignment: .leading, spacing: 14) {
             Text("Spawn follow-up pod")

@@ -42,6 +42,8 @@ export type {
   PodSummary,
   CompactPod,
   CompactPodPage,
+  PodRepositoryDisplay,
+  PodFleetDisplay,
   ReferenceRepo,
   SpecFile,
   PreSubmitReviewSnapshot,

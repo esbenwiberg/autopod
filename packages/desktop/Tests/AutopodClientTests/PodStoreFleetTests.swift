@@ -187,17 +187,77 @@ struct PodStoreFleetTests {
   #expect(store.pods.first?.status == .failed)
   #expect(await recorder.detailPaths == ["/pods/selected-pod", "/pods/selected-pod"])
 }
+@MainActor @Test func fleetDisplayArrivesBeforeSelectionAndSurvivesHydrationAndRefresh() async throws {
+  let mode = FleetMode()
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [FleetURLProtocol.self]
+  FleetURLProtocol.handler = { request in
+    if request.url?.path == "/pods/scores" { return SelfResponse.json("[]", for: request) }
+    if request.url?.path == "/pods/captured-pod" {
+      return SelfResponse.json(fullPod(id: "captured-pod").replacingOccurrences(of: "\"progress\":null", with: #""progress":{"phase":"Work","description":"Reported","currentPhase":3,"totalPhases":9}"#), for: request)
+    }
+    let newer = await mode.isNewer
+    let progress = newer ? "null" : #"{"phase":"Work","description":"Reported","currentPhase":3,"totalPhases":9}"#
+    let display = #"{"repository":{"kind":"repository","remote":"https://github.com/acme/captured.git"},"progress":\#(progress)}"#
+    return SelfResponse.json(compactPage(id: "captured-pod", hasNext: false,
+      updatedAt: newer ? "2026-07-01T00:20:00Z" : "2026-07-01T00:00:00Z", display: display), for: request)
+  }
+  defer { FleetURLProtocol.handler = nil }
+  let store = PodStore()
+  store.configure(api: DaemonAPI(baseURL: URL(string: "https://daemon.example.com")!, token: "test", session: URLSession(configuration: configuration)))
+  await store.loadSessions()
+  #expect(store.selectedSessionId == nil)
+  #expect(store.pods.first?.phase?.current == 3)
+  #expect(store.pods.first?.phase?.total == 9)
+  #expect(store.pods.first?.fleetDisplay?.repository.remote == "https://github.com/acme/captured.git")
+  await store.hydrateSessionIfNeeded("captured-pod")
+  #expect(store.pods.first?.fleetDisplay?.repository.remote == "https://github.com/acme/captured.git")
+  #expect(store.pods.first?.phase?.current == 3)
+  // A later display envelope with null progress clears a stale hydrated milestone.
+  await mode.advance()
+  await store.loadSessions()
+  #expect(store.pods.first?.phase == nil)
+  #expect(store.pods.first?.fleetDisplay?.repository.kind == "repository")
+}
+
+@MainActor @Test(arguments: [false, true])
+func fleetDisplayEnrichesEqualVersionRecordsAfterDaemonUpgrade(hydrate: Bool) async throws {
+  let mode = FleetMode()
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [FleetURLProtocol.self]
+  FleetURLProtocol.handler = { request in
+    if request.url?.path == "/pods/scores" { return SelfResponse.json("[]", for: request) }
+    if request.url?.path == "/pods/upgraded-pod" { return SelfResponse.json(fullPod(id: "upgraded-pod"), for: request) }
+    let display: String? = await mode.isNewer
+      ? #"{"repository":{"kind":"repository","remote":"https://github.com/acme/captured.git"},"progress":{"phase":"Work","description":"Reported","currentPhase":3,"totalPhases":9}}"# : nil
+    return SelfResponse.json(compactPage(id: "upgraded-pod", hasNext: false,
+      updatedAt: "2026-07-01T00:10:00Z", display: display), for: request)
+  }
+  defer { FleetURLProtocol.handler = nil }
+  let store = PodStore()
+  store.configure(api: DaemonAPI(baseURL: URL(string: "https://daemon.example.com")!, token: "test", session: URLSession(configuration: configuration)))
+  await store.loadSessions()
+  if hydrate { await store.hydrateSessionIfNeeded("upgraded-pod") }
+  #expect(store.pods.first?.fleetDisplay == nil)
+  await mode.advance()
+  await store.loadSessions()
+  #expect(store.pods.first?.fleetDisplay?.repository.remote == "https://github.com/acme/captured.git")
+  #expect(store.pods.first?.phase?.current == 3)
+}
+
 }
 
 private func compactPage(
   id: String,
   hasNext: Bool,
   status: String = "complete",
-  updatedAt: String = "2026-07-01T00:00:00Z"
+  updatedAt: String = "2026-07-01T00:00:00Z",
+  display: String? = nil
 ) -> String {
   let nextCursor = hasNext ? #""next-page""# : "null"
   return """
   {"pods":[{
+    \(display.map { "\"display\": \($0)," } ?? "")
     "id":"\(id)","title":"\(id) title","taskExcerpt":"Searchable second line","taskSummary":null,"profileName":"test",
     "status":"\(status)","model":"sonnet","runtime":"claude","executionTarget":"local",
     "branch":"autopod/\(id)","baseBranch":"main","seriesId":null,"seriesName":null,

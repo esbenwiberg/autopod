@@ -6,6 +6,17 @@ import SwiftUI
 /// Flow: pick folder → daemon parses contracts and returns the DAG → user
 /// confirms profile / PR mode → submit.
 public struct CreateSeriesSheet: View {
+    @Environment(\.desktopRedesign) private var redesign
+    @State private var stage: LaunchComposerStage = .compose
+    @State private var advanced = ""
+    @State private var jsonDirty = false
+    @State private var dirty = false
+    @State private var confirmClose = false
+    @State private var confirmDifferent = false
+    @State private var review: SeriesLaunchReview?
+    @State private var isResolving = false
+    @State private var reviewGeneration = 0
+
     @Binding public var isPresented: Bool
     public let actions: PodActions
     public let profileNames: [String]
@@ -45,6 +56,14 @@ public struct CreateSeriesSheet: View {
         self.onSeriesCreated = onSeriesCreated
     }
 
+    internal init(isPresented: Binding<Bool>, actions: PodActions, configurationActions: LaunchConfigurationActions,
+        parsed: SeriesPreviewResponse, selection: [String: ConfigurationJSON], stage: LaunchComposerStage = .compose,
+        pending: CreateSeriesRequest? = nil) {
+        self.init(isPresented: isPresented, actions: actions, profileNames: [], configurationActions: configurationActions)
+        self._preview = State(initialValue: parsed); self._launchSelection = State(initialValue: selection)
+        self._seriesName = State(initialValue: parsed.seriesName); self._folderPath = State(initialValue: "/workspace/specs/recovery")
+        self._stage = State(initialValue: stage); self._pendingRequest = State(initialValue: pending)
+    }
     enum BriefSource: String, CaseIterable, Identifiable {
         case localFolder
         case onBranch
@@ -76,6 +95,214 @@ public struct CreateSeriesSheet: View {
     @State private var errorMessage: String?
 
     public var body: some View {
+        Group { if redesign { composer } else { legacyBody } }
+    }
+    private var composer: some View {
+        LaunchComposerLayout(series: true, stage: $stage, locked: pendingRequest != nil, busy: composerBusy,
+            ready: reviewMatches, close: closeComposer) {
+            if let actions = configurationActions {
+                if let loadError = actions.loadError {
+                    Text(loadError).foregroundStyle(.red)
+                    Button("Reload configuration") { Task { await actions.reload() } }.disabled(composerBusy)
+                }
+                if let pendingRequest {
+                    LaunchRetainedRequest(id: pendingRequest.requestId, payload: LaunchComposerJSON.value(pendingRequest), series: true)
+                } else {
+                    Group {
+                        switch stage {
+                        case .compose: seriesComposer
+                        case .configure:
+                            if let typed = try? typedSelection() {
+                                LaunchConfigurationEditor(request: Binding(get: { (try? typedSelection()) ?? typed }, set: {
+                                    launchSelection = LaunchComposerJSON.value($0, selectionOnly: true).object ?? [:]
+                                }), actions: actions, jsonDirty: $jsonDirty, selectionOnly: true, advanced: $advanced)
+                            } else {
+                                Text("The selection contains fields this desktop cannot preserve. Use the saved request flow or correct the configuration before continuing.").foregroundStyle(.red)
+                            }
+                        case .review:
+                            if let review, reviewMatches {
+                                LaunchResolvedReview(preview: review.configuration, series: true)
+                                ForEach(Array(review.briefPreviews.enumerated()), id: \.offset) { index, result in
+                                    DisclosureGroup(preview?.briefs[index].title ?? "Pod \(index + 1)") {
+                                        Text(ConfigurationJSON.object(result.fields).formatted()).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                                    }
+                                }
+                                if let preview { previewSection(preview) }
+                                Text("PR mode: \(prMode) · \(briefSource == .onBranch ? "source: " + sourceBranch : folderPath)")
+                                Text("PR target / base: \(baseBranch.isEmpty ? "repository default" : baseBranch)")
+                                Text(includeSpecFiles ? "Spec source included in worktree; parsed source retained as context." : "Spec source retained as context only.").font(.caption).foregroundStyle(.secondary)
+                            } else {
+                                Text("Inspect the plan before creation.").font(.title2.weight(.semibold))
+                                Text("Read the briefs, choose the configuration and preview the launch. Each brief’s required sidecars are checked.").foregroundStyle(.secondary)
+                            }
+                        }
+                    }.disabled(composerBusy)
+                }
+            } else {
+                Text("Connect to a daemon with composable configuration to create a series.").foregroundStyle(.secondary)
+            }
+        } summary: {
+            if let actions = configurationActions {
+                LaunchComposerSummary(context: .init(request: summaryRequest, actions: actions, preview: reviewMatches ? review?.configuration : nil),
+                    status: pendingRequest != nil ? "Result unconfirmed" : reviewMatches ? "Preview ready" : "Needs preview",
+                    seriesPlan: "\(pendingRequest?.briefs.count ?? preview?.briefs.count ?? 0) pods · \((pendingRequest?.prMode ?? prMode) == "single" ? "one PR, serial ordering" : (pendingRequest?.prMode ?? prMode) == "stacked" ? "PR per pod" : "branches only")")
+            }
+        } footer: {
+            seriesFooter
+        }
+        .onAppear { initializeSelection() }
+        .task(id: initialSyncPodId) { await runInitialBranchSyncIfNeeded() }
+        .onChange(of: sourceIdentity) { _, _ in preview = nil; includeSpecFiles = false; invalidateReview(); dirty = true }
+        .onChange(of: currentFingerprint) { _, _ in invalidateReview(); dirty = true }
+        .onChange(of: configurationActions?.documents) { _, _ in invalidateReview() }
+        .onChange(of: configurationActions?.capabilities) { _, _ in invalidateReview() }
+        .onChange(of: jsonDirty) { _, value in if value { invalidateReview(); dirty = true } }
+        .interactiveDismissDisabled(composerBusy || dirty || jsonDirty || pendingRequest != nil)
+        .confirmationDialog("Leave this series draft?", isPresented: $confirmClose) {
+            Button("Leave draft", role: .destructive) { isPresented = false }
+            Button("Keep working", role: .cancel) {}
+        } message: { Text(pendingRequest == nil ? "Unsaved choices will be discarded." : "The result is unconfirmed. Its saved request remains available for retry.") }
+        .confirmationDialog("Start a different series launch?", isPresented: $confirmDifferent) {
+            Button("Edit a different launch", role: .destructive) { pendingRequest = nil; review = nil; stage = .compose }
+            Button("Keep saved request", role: .cancel) {}
+        } message: { Text("The earlier request may already have created a series. Different work uses a new identity.") }
+    }
+    private func invalidateReview() { review = nil; reviewGeneration += 1 }
+    private var composerBusy: Bool { isSubmitting || isPreviewing || isInitialSyncing || isResolving }
+    private func closeComposer() { if dirty || jsonDirty || pendingRequest != nil { confirmClose = true } else { isPresented = false } }
+    private var sourceIdentity: ConfigurationJSON { .object([
+        "repository": launchSelection["repositoryId"] ?? .null, "source": .string(briefSource.rawValue),
+        "folder": .string(folderPath), "branch": .string(sourceBranch), "path": .string(branchPath)
+    ]) }
+    private var currentFingerprint: ConfigurationJSON? { makeRequest(id: "review").map(SeriesLaunchReview.fingerprint) }
+    private var reviewMatches: Bool { !jsonDirty && makeRequest(id: "review").map { review?.matches($0) == true } == true }
+    private func typedSelection() throws -> ComposableLaunchRequest {
+        try LaunchComposerJSON.decode(ConfigurationJSON.object(launchSelection).formatted(), selectionOnly: true,
+            task: seriesName.isEmpty ? "Series configuration" : seriesName)
+    }
+    private var summaryRequest: ComposableLaunchRequest {
+        if let pendingRequest {
+            return (try? LaunchComposerJSON.decode(ConfigurationJSON.object(pendingRequest.launch).formatted(), selectionOnly: true, task: pendingRequest.seriesName)) ?? ComposableLaunchRequest()
+        }
+        return (try? typedSelection()) ?? ComposableLaunchRequest()
+    }
+    private func changeSelection(_ edit: (inout ComposableLaunchRequest) -> Void) {
+        guard var request = try? typedSelection() else { return }
+        edit(&request); launchSelection = LaunchComposerJSON.value(request, selectionOnly: true).object ?? [:]
+    }
+    private var seriesComposer: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Build the plan from its briefs.").font(.title2.weight(.semibold))
+            Text("Choose where the contract-backed source lives. Source and target branches have separate jobs.").font(.callout).foregroundStyle(.secondary)
+            if let actions = configurationActions {
+                Picker("Repository", selection: Binding(get: { launchSelection["repositoryId"]?.string ?? "" }, set: { id in changeSelection { $0.select(.repository, id: id.isEmpty ? nil : id) } })) {
+                    Text("Select repository").tag("")
+                    ForEach(actions.list(.repository)) { Text($0.name).tag($0.id) }
+                }.accessibilityIdentifier("series-repository")
+                if let repo = actions.list(.repository).first(where: { $0.id == launchSelection["repositoryId"]?.string }) {
+                    Picker("Project setup", selection: Binding(get: { launchSelection["repositorySetupId"]?.string ?? "" }, set: { id in changeSelection { $0.repositorySetupId = id.isEmpty ? nil : id } })) {
+                        Text("Repository default").tag("")
+                        ForEach(Array((repo.payload["setups"]?.array ?? []).enumerated()), id: \.offset) { _, setup in Text(setup["name"]?.string ?? "Setup").tag(setup["id"]?.string ?? "") }
+                    }
+                }
+                Picker("Profile", selection: Binding(get: { launchSelection["profileId"]?.string ?? "" }, set: { id in changeSelection { $0.select(.profile, id: id.isEmpty ? nil : id) } })) {
+                    Text("Repository usual profile").tag("")
+                    ForEach(actions.list(.profile)) { Text($0.name).tag($0.id) }
+                }
+            }
+            sourcePicker
+            initialSyncStatus
+            if initialSyncWarning != nil { Button("Retry workspace sync") { initialSyncAttemptedPodId = nil; Task { await runInitialBranchSyncIfNeeded() } } }
+            briefSourceFields
+            if let preview {
+                previewSection(preview)
+                ForEach(Array(preview.briefs.enumerated()), id: \.offset) { _, brief in
+                    DisclosureGroup(brief.title) {
+                        Text(brief.task).font(.callout).textSelection(.enabled)
+                        Text("Depends on: \(brief.dependsOn.isEmpty ? "nothing" : brief.dependsOn.joined(separator: ", "))").font(.caption)
+                        Text("\(brief.contract?.requiredFacts.count ?? 0) facts · sidecars: \((brief.requireSidecars ?? []).joined(separator: ", "))").font(.caption)
+                        DisclosureGroup("Complete brief & contract") { Text(LaunchComposerJSON.value(brief).formatted()).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+                    }.padding(14).background(DesktopTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+                }
+                if let description = preview.seriesDescription { DesktopPanel(title: "Series description") { Text(description).textSelection(.enabled) } }
+                if let design = preview.seriesDesign { DisclosureGroup("Series design") { Text(design).textSelection(.enabled) } }
+            }
+            prModePicker
+            Text(prMode == "single" ? "Single-PR mode adds serial ordering. Declared dependencies are retained." : "The plan follows declared contract dependencies.").font(.caption).foregroundStyle(.secondary)
+            baseBranchField
+            Text("The selected workflow controls approval, merge and agent questions.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    private var seriesFooter: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let errorMessage { Text(errorMessage).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
+            if jsonDirty { Text("Apply or reload unapplied JSON before previewing or creating the series.").font(.caption).foregroundStyle(.orange) }
+            if let actions = configurationActions, actions.capabilities["launchAvailable"]?.bool != true {
+                Text(actions.capabilities["launchUnavailableReason"]?.string ?? "Launch is unavailable until daemon configuration and execution checks are complete.").font(.caption).foregroundStyle(.secondary)
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack { seriesStatus; Spacer(); seriesButtons }
+                VStack(alignment: .leading, spacing: 10) { seriesStatus; HStack { Spacer(); seriesButtons } }
+            }
+        }
+    }
+    private var seriesStatus: some View {
+        HStack {
+            if composerBusy { ProgressView().controlSize(.small) }
+            Text(pendingRequest != nil ? "Result unconfirmed · exact request saved" : reviewMatches ? "Preview ready" : "Read briefs and preview before creation").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    @ViewBuilder private var seriesButtons: some View {
+        if pendingRequest != nil {
+            Button("Start a different launch") { confirmDifferent = true }.disabled(composerBusy)
+            Button("Retry saved request") { Task { await submit() } }.buttonStyle(.borderedProminent).disabled(composerBusy).accessibilityIdentifier("series-retry")
+        } else {
+            Button("Saved requests…") { retrySavedRequest() }.disabled(composerBusy)
+            if stage == .compose { Button("Inspect configuration →") { stage = .configure }.disabled(composerBusy) }
+            Button(reviewMatches ? "Refresh preview" : "Preview launch") { Task { await resolveSeriesConfiguration() } }
+                .disabled(composerBusy || preview == nil || jsonDirty || seriesName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityIdentifier("series-preview")
+            Button("Create series") { Task { await submit() } }.buttonStyle(.borderedProminent)
+                .disabled(composerBusy || !reviewMatches || submitDisabled).accessibilityIdentifier("series-submit")
+        }
+    }
+    private func initializeSelection() {
+        if launchSelection["profileId"] == nil, let initialProfile, configurationActions?.list(.profile).contains(where: { $0.id == initialProfile }) == true { launchSelection["profileId"] = .string(initialProfile) }
+        if baseBranch.isEmpty, let target = initialTargetBranch { baseBranch = target }
+        if let initial = initialBaseBranch, !initial.isEmpty { briefSource = .onBranch; if sourceBranch.isEmpty { sourceBranch = initial } }
+    }
+    private func resolveSeriesConfiguration() async {
+        guard !composerBusy, !jsonDirty, let candidate = makeRequest(id: "review"), let configurationActions else { return }
+        guard !candidate.briefs.isEmpty, candidate.launch["repositoryId"]?.string != nil else { errorMessage = "Read at least one brief and select a repository."; return }
+        isResolving = true; errorMessage = nil; review = nil
+        let fingerprint = SeriesLaunchReview.fingerprint(candidate), source = sourceIdentity, generation = reviewGeneration
+        defer { isResolving = false }
+        do {
+            let base = try await configurationActions.resolve(typedSelection())
+            guard reviewGeneration == generation, sourceIdentity == source, currentFingerprint == fingerprint, !jsonDirty else { return }
+            guard base.intent == "task", base.fields["workflow"]?["agentMode"]?.string == "auto" else {
+                throw LaunchJSONError.invalid("Series require an automatic Task workflow.")
+            }
+            let baseSidecars = base.fields["requiredSidecarIds"]?.array?.compactMap(\.string) ?? []
+            var results: [EffectiveLaunchPreview] = []
+            for brief in candidate.briefs {
+                var request = try typedSelection()
+                request.task = brief.task
+                request.requiredSidecarIds = Array(Set(baseSidecars + (brief.requireSidecars ?? []))).sorted()
+                let result = try await configurationActions.resolve(request)
+                guard reviewGeneration == generation, sourceIdentity == source, currentFingerprint == fingerprint, !jsonDirty else { return }
+                results.append(result)
+            }
+            review = .init(payload: fingerprint, configuration: base, briefPreviews: results); stage = .review
+        } catch { errorMessage = error.localizedDescription }
+    }
+    private func makeRequest(id: String) -> CreateSeriesRequest? {
+        guard let preview else { return nil }
+        return CreateSeriesRequest(requestId: id, seriesName: seriesName, briefs: preview.briefs, launch: launchSelection,
+            startBranch: briefSource == .onBranch && includeSpecFiles && !sourceBranch.isEmpty ? sourceBranch : nil,
+            baseBranch: baseBranch.isEmpty ? nil : baseBranch, specFiles: includeSpecFiles ? preview.specFiles : nil,
+            specContextFiles: preview.specFiles, prMode: prMode, seriesDescription: preview.seriesDescription, seriesDesign: preview.seriesDesign)
+    }
+    private var legacyBody: some View {
         VStack(spacing: 0) {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 16) {
@@ -190,7 +417,7 @@ public struct CreateSeriesSheet: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
-                TextField("/path/to/briefs", text: $folderPath)
+                TextField("/path/to/briefs", text: $folderPath).accessibilityIdentifier("series-source-folder")
                     .textFieldStyle(.roundedBorder)
                     .disabled(isSubmitting)
                 Button("Pick…") { pickFolder() }
@@ -207,7 +434,7 @@ public struct CreateSeriesSheet: View {
 
     private var onBranchFields: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Reads contract-backed briefs from the source branch below. PRs target the branch in Target branch above.")
+            Text("Reads contract-backed briefs from this source branch. The separate target branch controls where implementation PRs land.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -286,9 +513,10 @@ public struct CreateSeriesSheet: View {
     }
 
     private func runPreview() async {
-        guard !isInitialSyncing else { return }
+        guard !isInitialSyncing, !isPreviewing, !isSubmitting else { return }
         errorMessage = nil
         isPreviewing = true
+        let source = sourceIdentity
         defer { isPreviewing = false }
         let response: SeriesPreviewResponse? = await {
             switch briefSource {
@@ -298,6 +526,7 @@ public struct CreateSeriesSheet: View {
                 return await actions.previewSeriesOnBranch(launchSelection["repositoryId"]?.string ?? "", sourceBranch, branchPath)
             }
         }()
+        guard sourceIdentity == source else { return }
         guard let response else {
             let fallback = briefSource == .localFolder
                 ? "Could not parse contract-backed briefs from that folder."
@@ -306,6 +535,7 @@ public struct CreateSeriesSheet: View {
             preview = nil
             return
         }
+        review = nil
         preview = response
         includeSpecFiles = false
         if seriesName.isEmpty { seriesName = response.seriesName }
@@ -350,6 +580,10 @@ public struct CreateSeriesSheet: View {
                 }
                 .toggleStyle(.switch)
                 .disabled(isSubmitting)
+                Text(includeSpecFiles && briefSource == .onBranch
+                    ? "Implementation starts from \(sourceBranch). PRs target \(baseBranch.isEmpty ? "the repository default" : baseBranch)."
+                    : "Parsed spec source remains available as context.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -390,7 +624,7 @@ public struct CreateSeriesSheet: View {
             }
         )
         let edges = layout.edges.map {
-            PipelineEdgeCanvas.EdgeStyle(from: $0.from, to: $0.to, color: .accentColor)
+            PipelineEdgeCanvas.EdgeStyle(from: $0.from, to: $0.to, color: redesign ? DesktopTheme.accent : .accentColor)
         }
         return ScrollView([.horizontal, .vertical]) {
             ZStack(alignment: .topLeading) {
@@ -451,14 +685,14 @@ public struct CreateSeriesSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             sidecars.isEmpty
-                ? Color.accentColor.opacity(0.12)
+                ? (redesign ? DesktopTheme.accent : Color.accentColor).opacity(0.12)
                 : Color.orange.opacity(0.10)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 5)
                 .stroke(
                     sidecars.isEmpty
-                        ? Color.accentColor.opacity(0.5)
+                        ? (redesign ? DesktopTheme.accent : Color.accentColor).opacity(0.5)
                         : Color.orange.opacity(0.6),
                     lineWidth: 1
                 )
@@ -519,46 +753,29 @@ public struct CreateSeriesSheet: View {
             let original = try JSONDecoder().decode(ConfigurationJSON.self, from: data)
             let roundtrip = try JSONDecoder().decode(ConfigurationJSON.self, from: JSONEncoder().encode(request))
             guard original == roundtrip else { throw LaunchJSONError.invalid("This desktop cannot preserve every field in the saved series. Retry it with the CLI.") }
-            isSubmitting = true
-            Task {
-                defer { isSubmitting = false }
-                if let id = await actions.createSeries(request) { onSeriesCreated?(id); isPresented = false }
-                else { errorMessage = actions.lastCreatePodError() ?? "Series retry was not confirmed. The saved request is unchanged." }
-            }
+            pendingRequest = request
+            if redesign { stage = .review }
+            Task { await sendSeries(request) }
         } catch { errorMessage = error.localizedDescription }
     }
 
     private func submit() async {
-        guard let preview else { return }
-        errorMessage = nil
-        isSubmitting = true
-        defer { isSubmitting = false }
-
-        var request = CreateSeriesRequest(
-            requestId: pendingRequest?.requestId ?? UUID().uuidString,
-            seriesName: seriesName,
-            briefs: preview.briefs,
-            launch: launchSelection,
-            startBranch: briefSource == .onBranch && includeSpecFiles && !sourceBranch.isEmpty
-                ? sourceBranch
-                : nil,
-            baseBranch: baseBranch.isEmpty ? nil : baseBranch,
-            specFiles: includeSpecFiles ? preview.specFiles : nil,
-            specContextFiles: preview.specFiles,
-            prMode: prMode,
-            seriesDescription: preview.seriesDescription,
-            seriesDesign: preview.seriesDesign
-        )
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        if let previous = pendingRequest, (try? encoder.encode(previous)) != (try? encoder.encode(request)) {
-            request.requestId = UUID().uuidString
-        }
+        guard !isSubmitting else { return }
+        if let pendingRequest, redesign { await sendSeries(pendingRequest); return }
+        guard !submitDisabled, !jsonDirty, !redesign || reviewMatches,
+              var request = makeRequest(id: pendingRequest?.requestId ?? UUID().uuidString) else { return }
+        if let previous = pendingRequest, SeriesLaunchReview.fingerprint(previous) != SeriesLaunchReview.fingerprint(request) { request.requestId = UUID().uuidString }
         pendingRequest = request
+        await sendSeries(request)
+    }
+    private func sendSeries(_ request: CreateSeriesRequest) async {
+        guard !isSubmitting else { return }
+        isSubmitting = true; errorMessage = nil
+        defer { isSubmitting = false }
         if let id = await actions.createSeries(request) {
-            onSeriesCreated?(id)
-            isPresented = false
+            onSeriesCreated?(id); isPresented = false
         } else {
-            errorMessage = "\(actions.lastCreatePodError() ?? "Series creation was not confirmed.") Retry without editing to reuse this request. Saved at ~/.autopod/series-launches/\(request.requestId).json"
+            errorMessage = "\(actions.lastCreatePodError() ?? "Series creation was not confirmed.") Retry the saved request without editing. Saved at ~/.autopod/series-launches/\(request.requestId).json"
         }
     }
 }

@@ -67,7 +67,22 @@ public struct CompactPodPageResponse: Codable, Sendable {
   public let nextCursor: String?
 }
 
+public struct PodRepositoryDisplayResponse: Codable, Sendable {
+  public let kind: String
+  public let remote: String?
+  public init(kind: String, remote: String? = nil) { self.kind = kind; self.remote = remote }
+}
+
+public struct PodFleetDisplayResponse: Codable, Sendable {
+  public let repository: PodRepositoryDisplayResponse
+  public let progress: ProgressResponse?
+  public init(repository: PodRepositoryDisplayResponse, progress: ProgressResponse? = nil) {
+    self.repository = repository; self.progress = progress
+  }
+}
+
 public struct CompactPodResponse: Codable, Sendable {
+  public let display: PodFleetDisplayResponse?
   public let recordDiagnostics: [RecordDiagnosticResponse]?
   public let finalization: FinalizationResponse?
   public let id: String
@@ -149,6 +164,7 @@ public struct ProviderAttemptResponse: Codable, Sendable {
 }
 
 public struct SessionResponse: Codable, Sendable {
+  public let display: PodFleetDisplayResponse?
   public let recordDiagnostics: [RecordDiagnosticResponse]?
   public let finalization: FinalizationResponse?
   public let id: String
@@ -276,7 +292,7 @@ public struct SessionResponse: Codable, Sendable {
     case pod = "options"
     case baseBranch, recoveryWorktreePath, lastHeartbeatAt
     case inputTokens, outputTokens, costUsd, tokenTelemetryAccuracy, commitCount, lastCommitAt
-    case linkedPodId, linkedSessionId, taskSummary, lastCorrectionMessage, lastRecoveryTrigger, profileSnapshot
+    case display, linkedPodId, linkedSessionId, taskSummary, lastCorrectionMessage, lastRecoveryTrigger, profileSnapshot
     case dependsOnPodId, dependsOnPodIds, seriesId, seriesName, seriesDescription, seriesDesign, dependencyStartedAt
     case artifactsPath
     case requireSidecars, sidecarContainerIds, testRunBranches

@@ -920,6 +920,7 @@ public struct Pod: Identifiable, Sendable {
 
     /// Snapshot of the resolved profile config at pod creation time
     public var profileSnapshot: Profile?
+    public var fleetDisplay: PodFleetDisplayResponse?
 
     /// Host-filesystem path where artifacts were extracted — only set after
     /// an artifact-output pod completes. Used by the Overview tab to offer
@@ -1056,6 +1057,7 @@ public struct Pod: Identifiable, Sendable {
         prFixAttempts: Int = 0,
         maxPrFixAttempts: Int = 0,
         profileSnapshot: Profile? = nil,
+        fleetDisplay: PodFleetDisplayResponse? = nil,
         briefTitle: String? = nil,
         seriesId: String? = nil,
         seriesName: String? = nil,
@@ -1099,6 +1101,7 @@ public struct Pod: Identifiable, Sendable {
         self.prFixAttempts = prFixAttempts
         self.maxPrFixAttempts = maxPrFixAttempts
         self.profileSnapshot = profileSnapshot
+        self.fleetDisplay = fleetDisplay
         self.briefTitle = briefTitle
         self.seriesId = seriesId; self.seriesName = seriesName; self.seriesDescription = seriesDescription
         self.seriesDesign = seriesDesign
@@ -1155,6 +1158,7 @@ public struct Pod: Identifiable, Sendable {
         prFixAttempts: Int = 0,
         maxPrFixAttempts: Int = 0,
         profileSnapshot: Profile? = nil,
+        fleetDisplay: PodFleetDisplayResponse? = nil,
         seriesId: String? = nil,
         seriesName: String? = nil,
         seriesDescription: String? = nil,
@@ -1183,6 +1187,7 @@ public struct Pod: Identifiable, Sendable {
             prFixAttempts: prFixAttempts,
             maxPrFixAttempts: maxPrFixAttempts,
             profileSnapshot: profileSnapshot,
+            fleetDisplay: fleetDisplay,
             seriesId: seriesId, seriesName: seriesName, seriesDescription: seriesDescription,
             dependsOnPodIds: dependsOnPodIds,
             dependencyStartedAt: dependencyStartedAt

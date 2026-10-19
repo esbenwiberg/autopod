@@ -12,9 +12,9 @@ public struct AnalyticsView: View {
     /// Fetches persisted quality scores for the Quality card value.
     public var loadScores: (() async throws -> [PodQualityScore])?
     /// Fetches cost analytics from the daemon for the Cost card.
-    public var loadCost: (() async throws -> CostAnalyticsResponse)?
+    public var loadCost: ((Int) async throws -> CostAnalyticsResponse)?
     /// Fetches reliability analytics from the daemon for the Reliability card.
-    public var loadReliability: (() async throws -> ReliabilityAnalyticsResponse)?
+    public var loadReliability: ((Int) async throws -> ReliabilityAnalyticsResponse)?
     /// Fetches quality analytics from the daemon for the Quality card (sparkline, delta, sub-line).
     public var loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)?
     /// Fetches safety analytics from the daemon for the Safety card (sparkline, delta, sub-line).
@@ -29,6 +29,9 @@ public struct AnalyticsView: View {
     public var loadMemoryAnalytics: ((Int) async throws -> MemoryAnalyticsResponse)?
     @Binding public var selectedCard: AnalyticsCardKind?
 
+    @Environment(\.desktopRedesign) private var redesign
+    @Environment(\.desktopAnalyticsWindow) private var workspaceDays
+    private var days: Int { workspaceDays ?? 30 }
     @State private var scores: [PodQualityScore] = []
     @State private var scoresLoadError: String?
     @State private var costData: CostAnalyticsResponse?
@@ -43,13 +46,15 @@ public struct AnalyticsView: View {
     @State private var throughputLoadError: String?
     @State private var escalationsData: EscalationsAnalyticsResponse?
     @State private var modelsData: ModelsAnalyticsResponse?
+    @State private var isLoading = true
+    @State private var loadErrors: [String: String] = [:]
     @State private var memoryData: MemoryAnalyticsResponse?
 
     public init(
         pods: [Pod],
         loadScores: (() async throws -> [PodQualityScore])? = nil,
-        loadCost: (() async throws -> CostAnalyticsResponse)? = nil,
-        loadReliability: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
+        loadCost: ((Int) async throws -> CostAnalyticsResponse)? = nil,
+        loadReliability: ((Int) async throws -> ReliabilityAnalyticsResponse)? = nil,
         loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)? = nil,
         loadSafetyAnalytics: ((Int) async throws -> SafetyAnalyticsResponse)? = nil,
         loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)? = nil,
@@ -186,7 +191,7 @@ public struct AnalyticsView: View {
     private var escalationsCardValue: String {
         guard let e = escalationsData else { return "—" }
         if e.summary.cohortSize == 0 { return "—" }
-        return "\(Int(round(e.summary.selfRecoveryRate * 100)))%"
+        return "\(Int(round((redesign ? Double(e.summary.humanAttentionPodCount) / Double(e.summary.cohortSize) : e.summary.selfRecoveryRate) * 100)))%"
     }
 
     private var escalationsCardSparkline: [Double]? {
@@ -198,7 +203,7 @@ public struct AnalyticsView: View {
         guard let e = escalationsData, e.summary.cohortSize > 0 else { return nil }
         let delta = e.summary.selfRecoveryRateDelta
         return AnalyticsCardDelta(
-            value: String(format: "%+.0fpp", delta.value * 100),
+            value: String(format: "%+.0fpp %@", delta.value * 100, "self-recovery"),
             direction: AnalyticsCardDelta.Direction(delta.direction)
         )
     }
@@ -208,11 +213,13 @@ public struct AnalyticsView: View {
         let n = e.summary.humanAttentionCount
         let m = e.summary.askAiCount
         guard n > 0 || m > 0 else { return nil }
-        return "\(n) human \u{00B7} \(m) ai"
+        return redesign ? "\(e.summary.humanAttentionPodCount) of \(e.summary.cohortSize) terminal pods · \(n) human asks" : "\(n) human \u{00B7} \(m) ai"
     }
 
     private var modelsCardValue: String {
-        modelsData.map { $0.summary.cheapestDollarPerPrModel ?? "—" } ?? "—"
+        guard let modelsData else { return "—" }
+        if redesign { return "\(modelsData.byModel.filter(\.isSimulatorEligible).count) priced" }
+        return modelsData.summary.cheapestDollarPerPrModel ?? "—"
     }
 
     private var modelsCardSparkline: [Double]? {
@@ -288,13 +295,28 @@ public struct AnalyticsView: View {
     // MARK: - Body
 
     public var body: some View {
+        GeometryReader { geometry in overview(width: geometry.size.width) }
+    }
+
+    private func overview(width: CGFloat) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Overview")
-                    .font(.title2.weight(.semibold))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(redesign ? "The fleet at a glance" : "Overview").font(.title2.weight(.semibold))
+                    if redesign { Text("Select an area to inspect its cohort, breakdown and evidence. Status reflects loaded records; other metrics use the selected trailing window.").font(.caption).foregroundStyle(.secondary) }
+                }
 
+                if isLoading { ProgressView("Loading analytics…").font(.caption) }
+                if !loadErrors.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(loadErrors.keys.sorted(), id: \.self) { key in
+                            Text("\(key): \(loadErrors[key] ?? "Unavailable")").font(.caption).foregroundStyle(.orange)
+                        }
+                        Text("Unavailable metrics are not zero. Open an area or refresh to retry.").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 280), spacing: 12)],
+                    columns: redesign ? Array(repeating: GridItem(.flexible(), spacing: 18), count: width >= 1100 ? 3 : width >= 680 ? 2 : 1) : [GridItem(.adaptive(minimum: 280), spacing: 12)],
                     spacing: 12
                 ) {
                     AnalyticsCard(
@@ -311,21 +333,6 @@ public struct AnalyticsView: View {
                         onClick: { selectedCard = selectedCard == .cost ? nil : .cost }
                     )
                     AnalyticsCard(
-                        title: "Process Health",
-                        value: avgQualityValue,
-                        sparkline: qualityCardSparkline,
-                        delta: qualityCardDelta,
-                        subline: qualityCardSubline,
-                        isSelected: selectedCard == .quality,
-                        onClick: { selectedCard = selectedCard == .quality ? nil : .quality }
-                    )
-                    AnalyticsCard(
-                        title: "Status",
-                        value: dominantStatusValue,
-                        isSelected: selectedCard == .status,
-                        onClick: { selectedCard = selectedCard == .status ? nil : .status }
-                    )
-                    AnalyticsCard(
                         title: "Outcome Quality",
                         value: reliabilityCardValue,
                         sparkline: reliabilityDataIfPopulated.map { $0.firstPassRateSparkline.map(\.rate) },
@@ -340,15 +347,6 @@ public struct AnalyticsView: View {
                         onClick: { selectedCard = selectedCard == .reliability ? nil : .reliability }
                     )
                     AnalyticsCard(
-                        title: "Safety",
-                        value: safetyCardValue,
-                        sparkline: safetyCardSparkline,
-                        delta: safetyCardDelta,
-                        subline: safetyCardSubline,
-                        isSelected: selectedCard == .safety,
-                        onClick: { selectedCard = selectedCard == .safety ? nil : .safety }
-                    )
-                    AnalyticsCard(
                         title: "Throughput",
                         value: throughputCardValue,
                         sparkline: throughputCardSparkline,
@@ -356,6 +354,24 @@ public struct AnalyticsView: View {
                         subline: throughputCardSubline,
                         isSelected: selectedCard == .throughput,
                         onClick: { selectedCard = selectedCard == .throughput ? nil : .throughput }
+                    )
+                    AnalyticsCard(
+                        title: "Process Health",
+                        value: avgQualityValue,
+                        sparkline: qualityCardSparkline,
+                        delta: qualityCardDelta,
+                        subline: qualityCardSubline,
+                        isSelected: selectedCard == .quality,
+                        onClick: { selectedCard = selectedCard == .quality ? nil : .quality }
+                    )
+                    AnalyticsCard(
+                        title: "Safety",
+                        value: safetyCardValue,
+                        sparkline: safetyCardSparkline,
+                        delta: safetyCardDelta,
+                        subline: safetyCardSubline,
+                        isSelected: selectedCard == .safety,
+                        onClick: { selectedCard = selectedCard == .safety ? nil : .safety }
                     )
                     AnalyticsCard(
                         title: "Escalations",
@@ -376,19 +392,27 @@ public struct AnalyticsView: View {
                         onClick: { selectedCard = selectedCard == .models ? nil : .models }
                     )
                     AnalyticsCard(
-                        title: "Memory",
+                        title: "Memory loop",
                         value: memoryCardValue,
                         delta: memoryCardDelta,
                         subline: memoryCardSubline,
                         isSelected: selectedCard == .memory,
                         onClick: { selectedCard = selectedCard == .memory ? nil : .memory }
                     )
+                    AnalyticsCard(
+                        title: "Status distribution",
+                        value: dominantStatusValue,
+                        isSelected: selectedCard == .status,
+                        onClick: { selectedCard = selectedCard == .status ? nil : .status }
+                    )
                 }
             }
             .padding(24)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
-        .task {
+        .background(DesktopAnalyticsBackground())
+        .task(id: days) {
+            isLoading = true
+            defer { isLoading = false }
             // All fetches are independent — kick off concurrently and await all.
             let scoreTask = Task {
                 if let loadScores {
@@ -403,66 +427,69 @@ public struct AnalyticsView: View {
             let costTask = Task {
                 if let loadCost {
                     do {
-                        costData = try await loadCost()
-                        costLoadError = nil
+                        costData = try await loadCost(days)
+                        costLoadError = nil; loadErrors["Cost"] = nil
                     } catch {
-                        costLoadError = error.localizedDescription
+                        costLoadError = error.localizedDescription; loadErrors["Cost"] = error.localizedDescription
                     }
                 }
             }
             let reliabilityTask = Task {
                 if let loadReliability {
                     do {
-                        reliabilityData = try await loadReliability()
-                        reliabilityLoadError = nil
+                        reliabilityData = try await loadReliability(days)
+                        reliabilityLoadError = nil; loadErrors["Outcome quality"] = nil
                     } catch {
-                        reliabilityLoadError = error.localizedDescription
+                        reliabilityLoadError = error.localizedDescription; loadErrors["Outcome quality"] = error.localizedDescription
                     }
                 }
             }
             let qualityTask = Task {
                 if let loadQualityAnalytics {
                     do {
-                        qualityData = try await loadQualityAnalytics(30)
-                        qualityLoadError = nil
+                        qualityData = try await loadQualityAnalytics(days)
+                        qualityLoadError = nil; loadErrors["Process health"] = nil
                     } catch {
-                        qualityLoadError = error.localizedDescription
+                        qualityLoadError = error.localizedDescription; loadErrors["Process health"] = error.localizedDescription
                     }
                 }
             }
             let safetyTask = Task {
                 if let loadSafetyAnalytics {
                     do {
-                        safetyData = try await loadSafetyAnalytics(30)
-                        safetyLoadError = nil
+                        safetyData = try await loadSafetyAnalytics(days)
+                        safetyLoadError = nil; loadErrors["Safety"] = nil
                     } catch {
-                        safetyLoadError = error.localizedDescription
+                        safetyLoadError = error.localizedDescription; loadErrors["Safety"] = error.localizedDescription
                     }
                 }
             }
             let throughputTask = Task {
                 if let loadThroughputAnalytics {
                     do {
-                        throughputData = try await loadThroughputAnalytics(30)
-                        throughputLoadError = nil
+                        throughputData = try await loadThroughputAnalytics(days)
+                        throughputLoadError = nil; loadErrors["Throughput"] = nil
                     } catch {
-                        throughputLoadError = error.localizedDescription
+                        throughputLoadError = error.localizedDescription; loadErrors["Throughput"] = error.localizedDescription
                     }
                 }
             }
             let escalationsTask = Task {
                 if let loadEscalationsAnalytics {
-                    escalationsData = try? await loadEscalationsAnalytics(30)
+                    do { escalationsData = try await loadEscalationsAnalytics(days); loadErrors["Escalations"] = nil }
+                    catch { loadErrors["Escalations"] = error.localizedDescription }
                 }
             }
             let modelsTask = Task {
                 if let loadModelsAnalytics {
-                    modelsData = try? await loadModelsAnalytics(30)
+                    do { modelsData = try await loadModelsAnalytics(days); loadErrors["Models"] = nil }
+                    catch { loadErrors["Models"] = error.localizedDescription }
                 }
             }
             let memoryTask = Task {
                 if let loadMemoryAnalytics {
-                    memoryData = try? await loadMemoryAnalytics(30)
+                    do { memoryData = try await loadMemoryAnalytics(days); loadErrors["Memory loop"] = nil }
+                    catch { loadErrors["Memory loop"] = error.localizedDescription }
                 }
             }
             await scoreTask.value
@@ -505,7 +532,7 @@ struct StatusDrillView: View {
             }
             .padding(24)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DesktopAnalyticsBackground())
     }
 
     private var proportionBar: some View {

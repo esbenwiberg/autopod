@@ -12,6 +12,8 @@ import SwiftUI
 /// on the right instead of calling `onSelectPod` directly. A navigate button
 /// in the panel calls `onSelectPod`.
 public struct SeriesPipelineView: View {
+    @Environment(\.desktopRedesign) private var redesign
+    @Environment(\.desktopSeriesOpenPod) private var openSeriesPod
     public let pods: [Pod]
     public var qualityScores: [String: PodQualityScore]
     public let selectedPodId: String?
@@ -98,20 +100,23 @@ public struct SeriesPipelineView: View {
         return .gray.opacity(0.8)
     }
 
+    private var availableViewModes: [ViewMode] {
+        var modes: [ViewMode] = [.dag, .summary]
+        if seriesDescription != nil { modes.append(.purpose) }
+        if seriesDesign != nil { modes.append(.design) }
+        return modes
+    }
+
     private var viewModePicker: some View {
-        HStack {
-            Picker("", selection: $viewMode) {
-                Text("Pipeline").tag(ViewMode.dag)
-                Text("Summary").tag(ViewMode.summary)
-                if seriesDescription != nil { Text("Purpose").tag(ViewMode.purpose) }
-                if seriesDesign != nil { Text("Design").tag(ViewMode.design) }
+        Group {
+            if redesign {
+                DesktopSectionPicker(title: "Members", items: availableViewModes, selection: $viewMode, label: { $0.rawValue })
+            } else {
+                Picker("", selection: $viewMode) {
+                    ForEach(availableViewModes, id: \.self) { Text($0.rawValue).tag($0) }
+                }.pickerStyle(.segmented).fixedSize().padding(8)
             }
-            .pickerStyle(.segmented)
-            .fixedSize()
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
     }
 
     private func markdownView(_ text: String) -> some View {
@@ -146,7 +151,10 @@ public struct SeriesPipelineView: View {
                                     onSelectPod(pod.id)
                                 },
                                 loadQuality: loadQuality,
-                                requestTab: requestTab
+                                requestTab: { tab in
+                                    if let openSeriesPod { openSeriesPod(pod.id, tab) }
+                                    else { requestTab?(tab) }
+                                }
                             )
                             .frame(width: 380)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -171,7 +179,9 @@ public struct SeriesPipelineView: View {
     }
 
     private func fittingMetrics(for size: CGSize) -> PipelineDAGLayout.Metrics {
-        let base = PipelineDAGLayout.Metrics.default
+        let base = redesign
+            ? PipelineDAGLayout.Metrics(nodeWidth: 230, nodeHeight: 154, horizontalGap: 50, verticalGap: 44)
+            : PipelineDAGLayout.Metrics.default
         guard size.width > 0, size.height > 0, !pods.isEmpty else { return base }
 
         let inputs = pods.map { PipelineDAGLayout.Input(id: $0.id, parentIds: $0.dependsOnPodIds) }
@@ -195,7 +205,7 @@ public struct SeriesPipelineView: View {
             guard lo.width > 0, lo.height > 0 else { continue }
 
             let scale = min(size.height / lo.height, size.width / lo.width)
-            let s = min(max(scale, 0.7), 3.0)
+            let s = min(max(scale, 0.7), redesign ? 1.15 : 3.0)
 
             chosenMetrics = PipelineDAGLayout.Metrics(
                 nodeWidth:     base.nodeWidth     * s,
@@ -286,17 +296,23 @@ public struct SeriesPipelineView: View {
         let totalCost = pods.reduce(0.0) { $0 + $1.costUsd }
         let est = estimatedMinutesLeft()
         return HStack(spacing: 16) {
+            if redesign {
+                footerChip("\(pods.filter { $0.status == .complete }.count) complete", color: DesktopTheme.accent)
+                footerChip("\(pods.filter { $0.status.needsAttention }.count) need attention", color: .orange)
+                footerChip("\(counts.queued) queued", color: .secondary)
+            } else {
             footerChip("\(counts.validated) validated", color: .secondary)
             footerChip("\(counts.running) running", color: .blue)
             footerChip("\(counts.queued) queued", color: .gray)
             if counts.failed > 0 {
                 footerChip("\(counts.failed) failed", color: .red)
             }
+            }
             Spacer()
             Text(String(format: "$%.2f", totalCost))
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.secondary)
-            if let est {
+            if let est, !redesign {
                 Text("est. \(est)m left")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
@@ -362,6 +378,9 @@ public struct SeriesPipelineView: View {
 }
 
 private struct SeriesSummaryView: View {
+    @Environment(\.desktopRedesign) private var redesign
+    @Environment(\.desktopRepositories) private var repositories
+    @Environment(\.desktopSeriesOpenPod) private var openPod
     let pods: [Pod]
     let qualityScores: [String: PodQualityScore]
 
@@ -460,7 +479,7 @@ private struct SeriesSummaryView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background((redesign ? DesktopTheme.surface : Color(nsColor: .windowBackgroundColor)))
     }
 
     private var metricGrid: some View {
@@ -561,7 +580,7 @@ private struct SeriesSummaryView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
@@ -578,7 +597,10 @@ private struct SeriesSummaryView: View {
                     tableHeader
                     ForEach(rows) { row in
                         Divider()
-                        tableRow(row)
+                        if let openPod, redesign {
+                            Button { openPod(row.pod.id, .overview) } label: { tableRow(row) }
+                                .buttonStyle(.plain).accessibilityLabel("Open \(row.pod.desktopTitle)")
+                        } else { tableRow(row) }
                     }
                 }
                 .frame(minWidth: 780, alignment: .leading)
@@ -589,6 +611,7 @@ private struct SeriesSummaryView: View {
     private var tableHeader: some View {
         HStack(spacing: 10) {
             tableText("Pod", width: 220, color: .secondary)
+            if redesign { tableText("Repository", width: 180, color: .secondary); tableText("Milestone", width: 80, color: .secondary) }
             tableText("Status", width: 100, color: .secondary)
             tableText("Cost", width: 78, color: .secondary, align: .trailing)
             tableText("Tokens", width: 110, color: .secondary, align: .trailing)
@@ -613,6 +636,10 @@ private struct SeriesSummaryView: View {
                     .lineLimit(1)
             }
             .frame(width: 220, alignment: .leading)
+            if redesign {
+                tableText(repositories[pod.id]?.label ?? "Unavailable", width: 180, color: .secondary)
+                tableText(pod.desktopMilestoneToken ?? "No report", width: 80, color: .secondary)
+            }
             statusPill(pod.status)
                 .frame(width: 100, alignment: .leading)
             tableText(

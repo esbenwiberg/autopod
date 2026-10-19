@@ -3,6 +3,7 @@ import Foundation
 
 @MainActor
 public struct LaunchConfigurationActions {
+  public var connectionID: String? = nil
   public var documents: [ConfigurationDocument]
   public var listDeployments: () async throws -> [ConfigurationJSON] = { throw DaemonError.badRequest("Deployment is unavailable") }
   public var reviewDeployment: (String) async throws -> ConfigurationJSON = { _ in throw DaemonError.badRequest("Deployment is unavailable") }

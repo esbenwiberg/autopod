@@ -5,7 +5,9 @@ struct MemoryAnalyticsDrillView: View {
     let load: ((Int) async throws -> MemoryAnalyticsResponse)?
 
     @State private var response: MemoryAnalyticsResponse?
-    @State private var days: Int = 30
+    @Environment(\.desktopAnalyticsWindow) private var workspaceDays
+    @State private var localDays: Int = 30
+    private var days: Int { workspaceDays ?? localDays }
     @State private var isLoading = false
     @State private var loadError: String?
 
@@ -23,11 +25,11 @@ struct MemoryAnalyticsDrillView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 40)
                 } else if let response {
-                    fleetCounts(response.summary)
-                    Divider()
-                    repeatedPain(response.impact)
-                    Divider()
-                    topMemories(response.topMemories)
+                    DesktopAnalyticsColumns {
+                        fleetCounts(response.summary).desktopAnalyticsPanel()
+                        repeatedPain(response.impact).desktopAnalyticsPanel()
+                        topMemories(response.topMemories).desktopAnalyticsPanel()
+                    }
                 } else {
                     Text("Memory analytics not available.")
                         .font(.caption)
@@ -36,7 +38,7 @@ struct MemoryAnalyticsDrillView: View {
             }
             .padding(24)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DesktopAnalyticsBackground())
         .task(id: days) { await fetchData() }
     }
 
@@ -48,7 +50,7 @@ struct MemoryAnalyticsDrillView: View {
                 .font(.title3.weight(.semibold))
             Spacer()
             if isLoading { ProgressView().controlSize(.small) }
-            Picker("Days", selection: $days) {
+            if workspaceDays == nil { Picker("Days", selection: $localDays) {
                 Text("7d").tag(7)
                 Text("14d").tag(14)
                 Text("30d").tag(30)
@@ -57,7 +59,7 @@ struct MemoryAnalyticsDrillView: View {
             }
             .pickerStyle(.menu)
             .labelsHidden()
-            .frame(width: 70)
+            .frame(width: 70) }
         }
     }
 

@@ -34,6 +34,10 @@ private extension ConfigurationKind {
 
 public struct ConfigurationLibraryView: View {
   public var actions: LaunchConfigurationActions
+  @Environment(\.desktopRedesign) private var redesign
+  @Binding private var profileToOpen: String?
+  private var onDirtyChanged: (Bool) -> Void
+  private var onBusyChanged: (Bool) -> Void
   @State private var kind: ConfigurationKind = .profile
   @State private var page: ConfigurationLibraryPage = .profiles
   @State private var editor: EditorTarget?
@@ -46,8 +50,16 @@ public struct ConfigurationLibraryView: View {
     let kind: ConfigurationKind
     let document: ConfigurationDocument?
     let draft: ConfigurationDocument?
+    var area: ConfigurationEditorArea? = nil
   }
-  public init(actions: LaunchConfigurationActions, initialKind: ConfigurationKind = .profile) {
+  public init(
+    actions: LaunchConfigurationActions, initialKind: ConfigurationKind = .profile,
+    profileToOpen: Binding<String?> = .constant(nil), onDirtyChanged: @escaping (Bool) -> Void = { _ in },
+    onBusyChanged: @escaping (Bool) -> Void = { _ in }
+  ) {
+    self._profileToOpen = profileToOpen
+    self.onDirtyChanged = onDirtyChanged
+    self.onBusyChanged = onBusyChanged
     self.actions = actions
     self._kind = State(initialValue: initialKind)
     let initialPage: ConfigurationLibraryPage = switch initialKind {
@@ -58,8 +70,63 @@ public struct ConfigurationLibraryView: View {
     self._page = State(initialValue: initialPage)
   }
   public var body: some View {
+    Group {
+      if redesign, let target = editor {
+        ConfigurationEditorSheet(
+          kind: target.kind, document: target.document, draft: target.draft,
+          actions: actions,
+          onClose: {
+            editor = nil; onDirtyChanged(false)
+          },
+          onDirtyChanged: onDirtyChanged, onBusyChanged: onBusyChanged, onOpenDocument: { edit($0) },
+          onOpenSidecarDefinitions: { document in edit(document, area: .sidecars) }, initialArea: target.area
+        ).id(target.id)
+      } else {
+        libraryBody
+      }
+    }
+    .background(redesign ? DesktopTheme.surface : Color(nsColor: .windowBackgroundColor))
+    .onAppear { openRequestedProfile() }
+    .onChange(of: profileToOpen) { _, _ in openRequestedProfile() }
+    .onChange(of: actions.documents) { _, _ in openRequestedProfile() }
+  }
+
+  private func openRequestedProfile() {
+    guard let requested = profileToOpen,
+      let profile = actions.list(.profile).first(where: { $0.id == requested || $0.name == requested })
+    else { return }
+    edit(profile); profileToOpen = nil
+  }
+
+  private var libraryBody: some View {
     VStack(spacing: 0) {
-      libraryNavigation
+      if redesign {
+        HStack {
+          VStack(alignment: .leading, spacing: 5) {
+            Text("WORKSPACE").font(.system(size: 9, weight: .medium)).tracking(1.2).foregroundStyle(
+              .secondary)
+            Text("Profiles").font(.title.weight(.semibold))
+            Text("Launch configuration for the selected daemon.").font(.callout).foregroundStyle(.secondary)
+          }
+          Spacer()
+          Button {
+            Task { await actions.reload() }
+          } label: {
+            Label("Refresh configuration", systemImage: "arrow.clockwise")
+          }.buttonStyle(.bordered).labelStyle(.iconOnly).help("Refresh configuration")
+          if page == .profiles {
+            Button("New profile", systemImage: "plus") { create(.profile) }.buttonStyle(.borderedProminent)
+          }
+        }.padding(24)
+        Divider()
+        DesktopSectionPicker(
+          title: "",
+          items: [
+            ConfigurationLibraryPage.profiles, .buildingBlocks, .repositories, .watchers, .deployments,
+          ], selection: $page, label: { pageLabel($0) })
+      } else {
+        libraryNavigation
+      }
       Divider()
       switch page {
       case .profiles: profileLibrary
@@ -69,7 +136,7 @@ public struct ConfigurationLibraryView: View {
       case .deployments: DeploymentLibraryView(actions: actions)
       }
     }
-    .sheet(item: $editor) { target in
+    .sheet(item: Binding(get: { redesign ? nil : editor }, set: { editor = $0 })) { target in
       ConfigurationEditorSheet(
         kind: target.kind,
         document: target.document,
@@ -82,6 +149,16 @@ public struct ConfigurationLibraryView: View {
       if newPage == .buildingBlocks, !buildingBlockKinds.contains(kind) {
         kind = .environment
       }
+    }
+  }
+
+  private func pageLabel(_ page: ConfigurationLibraryPage) -> String {
+    switch page {
+    case .profiles: "Profiles"
+    case .buildingBlocks: "Building blocks"
+    case .repositories: "Repositories"
+    case .watchers: "Issue watchers"
+    case .deployments: "Deployments"
     }
   }
 
@@ -100,7 +177,9 @@ public struct ConfigurationLibraryView: View {
         )
       }
       .padding(3)
-      .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+      .background(
+        (redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)),
+        in: RoundedRectangle(cornerRadius: 8))
       Spacer()
       Menu {
         Button("Repositories", systemImage: "shippingbox") { page = .repositories }
@@ -118,7 +197,7 @@ public struct ConfigurationLibraryView: View {
     }
     .padding(.horizontal, 20)
     .padding(.vertical, 12)
-    .background(Color(nsColor: .controlBackgroundColor).opacity(0.35))
+    .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)).opacity(0.35))
   }
 
   private func primaryNavigationButton(
@@ -154,12 +233,14 @@ public struct ConfigurationLibraryView: View {
 
   private var profileLibrary: some View {
     VStack(alignment: .leading, spacing: 16) {
-      libraryHeader(
-        title: "Profiles",
-        subtitle: "Complete, launch-ready configurations for your repositories.",
+      if !redesign {
+        libraryHeader(
+          title: "Profiles",
+          subtitle: "Complete, launch-ready configurations for your repositories.",
         actionTitle: "New profile",
         kind: .profile
-      )
+        )
+      }
       HStack(spacing: 10) {
         configurationSearch(placeholder: "Search profiles")
         RepositoryFilterMenu(
@@ -173,11 +254,16 @@ public struct ConfigurationLibraryView: View {
         .frame(width: 155)
       }
       errorBanner
-      ScrollView {
-        LazyVGrid(
-          columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)],
-          alignment: .leading,
-          spacing: 14
+      GeometryReader { geometry in
+        ScrollView {
+          LazyVGrid(
+            columns: redesign
+              ? Array(
+                repeating: GridItem(.flexible(), spacing: 18),
+                count: min(3, max(1, Int(geometry.size.width / 380))))
+              : [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)],
+            alignment: .leading,
+            spacing: 14
         ) {
           if filteredProfiles.isEmpty {
             ContentUnavailableView(
@@ -186,14 +272,16 @@ public struct ConfigurationLibraryView: View {
               description: Text("Try another search or repository filter.")
             )
             .frame(maxWidth: .infinity, minHeight: 260)
-            .gridCellColumns(2)
-          } else {
-            ForEach(filteredProfiles) { profile in
+              .gridCellColumns(redesign ? 1 : 2)
+            } else {
+              ForEach(filteredProfiles) { profile in
               ProfileLibraryCard(
                 profile: profile,
                 repositoryLabel: repositoryLabel(for: profile),
-                rows: profileRows(for: profile),
-                usageCount: usageCount(profile.id),
+                  repositoryOptions: repositories(for: profile),
+                  onFilterRepository: { selectedRepositoryID = $0 },
+                  rows: profileRows(for: profile),
+                  usageCount: usageCount(profile.id),
                 onEdit: { edit(profile) },
                 onDuplicate: { duplicate(profile) },
                 onArchive: { archive(profile) }
@@ -202,6 +290,7 @@ public struct ConfigurationLibraryView: View {
           }
         }
         .padding(.bottom, 4)
+        }
       }
     }
     .padding(20)
@@ -236,7 +325,9 @@ public struct ConfigurationLibraryView: View {
               .padding(.vertical, 9)
               .background(
                 RoundedRectangle(cornerRadius: 8)
-                  .fill(kind == item ? Color.accentColor.opacity(0.16) : .clear)
+                  .fill(
+                    kind == item ? (redesign ? DesktopTheme.accent : Color.accentColor).opacity(0.16) : .clear
+                  )
               )
               .contentShape(Rectangle())
             }
@@ -247,7 +338,7 @@ public struct ConfigurationLibraryView: View {
         .padding(10)
         .frame(width: 230)
         .frame(minHeight: 470)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+        .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)).opacity(0.45))
         Divider()
         VStack(alignment: .leading, spacing: 12) {
           HStack(alignment: .center) {
@@ -281,7 +372,10 @@ public struct ConfigurationLibraryView: View {
         }
         .padding(16)
       }
-      .background(.background, in: RoundedRectangle(cornerRadius: 12))
+      .background(
+        redesign ? DesktopTheme.canvas : Color(nsColor: .windowBackgroundColor),
+        in: RoundedRectangle(cornerRadius: 12)
+      )
       .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
     }
     .padding(20)
@@ -344,7 +438,10 @@ public struct ConfigurationLibraryView: View {
     }
     .padding(.horizontal, 10)
     .frame(height: 34)
-    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+    .background(
+      (redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)),
+      in: RoundedRectangle(cornerRadius: 7)
+    )
     .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.quaternary))
   }
 
@@ -485,8 +582,8 @@ public struct ConfigurationLibraryView: View {
     editor = EditorTarget(kind: targetKind, document: nil, draft: nil)
   }
 
-  private func edit(_ document: ConfigurationDocument) {
-    editor = EditorTarget(kind: document.kind, document: document, draft: nil)
+  private func edit(_ document: ConfigurationDocument, area: ConfigurationEditorArea? = nil) {
+    editor = EditorTarget(kind: document.kind, document: document, draft: nil, area: area)
   }
 
   private func duplicate(_ document: ConfigurationDocument) {
@@ -501,14 +598,14 @@ public struct ConfigurationLibraryView: View {
   }
 
   private func usageCount(_ id: String) -> Int {
-    func references(_ value: ConfigurationJSON) -> Bool {
-      switch value { case .string(let text): text == id; case .array(let values): values.contains(where: references); case .object(let fields): fields.values.contains(where: references); default: false }
-    }
-    return actions.documents.filter { !$0.archived && $0.id != id && references(.object($0.payload)) }.count
+    actions.documents.filter {
+      !$0.archived && $0.id != id && configurationReferences(.object($0.payload), id: id)
+    }.count
   }
 }
 
 private struct RepositoryFilterMenu: View {
+  @Environment(\.desktopRedesign) private var redesign
   let repositories: [ConfigurationDocument]
   @Binding var selectedID: String?
   @State private var presented = false
@@ -524,7 +621,10 @@ private struct RepositoryFilterMenu: View {
       }
       .padding(.horizontal, 10)
       .frame(width: 190, height: 34)
-      .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+      .background(
+        (redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)),
+        in: RoundedRectangle(cornerRadius: 7)
+      )
       .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.quaternary))
     }
     .buttonStyle(.plain)
@@ -562,7 +662,8 @@ private struct RepositoryFilterMenu: View {
       HStack {
         Image(systemName: selectedID == id ? "checkmark.circle.fill" : "circle")
           .foregroundStyle(
-            selectedID == id ? Color.accentColor : Color(nsColor: .tertiaryLabelColor)
+            selectedID == id
+              ? (redesign ? DesktopTheme.accent : Color.accentColor) : Color(nsColor: .tertiaryLabelColor)
           )
         Text(title).lineLimit(1)
         Spacer()
@@ -576,6 +677,7 @@ private struct RepositoryFilterMenu: View {
 }
 
 private struct ProfileLibraryCard: View {
+  @Environment(\.desktopRedesign) private var redesign
   struct Row: Identifiable {
     let icon: String
     let label: String
@@ -584,6 +686,8 @@ private struct ProfileLibraryCard: View {
   }
   let profile: ConfigurationDocument
   let repositoryLabel: String
+  let repositoryOptions: [ConfigurationDocument]
+  let onFilterRepository: (String?) -> Void
   let rows: [Row]
   let usageCount: Int
   let onEdit: () -> Void
@@ -594,12 +698,29 @@ private struct ProfileLibraryCard: View {
     VStack(spacing: 0) {
       HStack(spacing: 10) {
         RoundedRectangle(cornerRadius: 8)
-          .fill(Color.accentColor.opacity(0.18))
+          .fill((redesign ? DesktopTheme.accent : Color.accentColor).opacity(0.18))
           .frame(width: 36, height: 36)
-          .overlay(Text(profile.libraryTitle.prefix(1).uppercased()).font(.callout.bold()).foregroundStyle(Color.accentColor))
+          .overlay(
+            Text(profile.libraryTitle.prefix(1).uppercased()).font(.callout.bold()).foregroundStyle(
+              (redesign ? DesktopTheme.accent : Color.accentColor)))
         VStack(alignment: .leading, spacing: 2) {
           Text(profile.libraryTitle).font(.headline).lineLimit(1)
-          Text(repositoryLabel).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+          if redesign && !repositoryOptions.isEmpty {
+            Menu {
+              ForEach(repositoryOptions) { repository in
+                Button(repository.libraryTitle) { onFilterRepository(repository.id) }
+              }
+              Divider()
+              Button("All repositories") { onFilterRepository(nil) }
+            } label: {
+              Label(repositoryLabel, systemImage: "folder").font(.caption).foregroundStyle(
+                DesktopTheme.accent)
+            }
+            .menuStyle(.borderlessButton).fixedSize(horizontal: false, vertical: true)
+            .help("Filter profiles by repository")
+          } else {
+            Text(repositoryLabel).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+          }
         }
         Spacer()
         Menu {
@@ -623,22 +744,27 @@ private struct ProfileLibraryCard: View {
             Spacer(minLength: 0)
           }
           .padding(.vertical, 8)
-          if row.id != rows.last?.id { Divider() }
+          if !redesign && row.id != rows.last?.id { Divider() }
         }
       }
       .padding(.horizontal, 14)
       Divider()
       HStack {
-        Label(usageLabel, systemImage: "arrow.triangle.branch")
-          .font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 3) {
+          if redesign { Text("Revision \(profile.revision)").font(.caption2).foregroundStyle(.secondary) }
+          Label(usageLabel, systemImage: "arrow.triangle.branch").font(.caption).foregroundStyle(.secondary)
+        }
         Spacer()
-        Button("Duplicate", action: onDuplicate).buttonStyle(.bordered).controlSize(.small)
+        if !redesign { Button("Duplicate", action: onDuplicate).buttonStyle(.bordered).controlSize(.small) }
         Button("Edit", action: onEdit).buttonStyle(.borderedProminent).controlSize(.small)
       }
       .padding(10)
-      .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+      .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)).opacity(0.45))
     }
-    .background(.background, in: RoundedRectangle(cornerRadius: 12))
+    .background(
+      redesign ? DesktopTheme.canvas : Color(nsColor: .windowBackgroundColor),
+      in: RoundedRectangle(cornerRadius: 12)
+    )
     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
   }
 
@@ -648,6 +774,7 @@ private struct ProfileLibraryCard: View {
 }
 
 private struct BuildingBlockRow: View {
+  @Environment(\.desktopRedesign) private var redesign
   let document: ConfigurationDocument
   let summary: String
   let usageCount: Int
@@ -659,29 +786,36 @@ private struct BuildingBlockRow: View {
       Image(systemName: "square.stack.3d.up")
         .foregroundStyle(.secondary)
         .frame(width: 34, height: 34)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .background(
+          (redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)),
+          in: RoundedRectangle(cornerRadius: 8))
       VStack(alignment: .leading, spacing: 3) {
         Text(document.libraryTitle).font(.headline).lineLimit(1)
         Text(summary.isEmpty ? "Reusable configuration" : summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
         Text("Used by \(usageCount) \(usageCount == 1 ? "configuration" : "configurations")")
-          .font(.caption2).foregroundStyle(Color.accentColor)
+          .font(.caption2).foregroundStyle((redesign ? DesktopTheme.accent : Color.accentColor))
       }
       Spacer()
-      Button("Duplicate", action: onDuplicate).buttonStyle(.bordered).controlSize(.small)
+      if !redesign { Button("Duplicate", action: onDuplicate).buttonStyle(.bordered).controlSize(.small) }
       Button("Edit", action: onEdit).buttonStyle(.borderedProminent).controlSize(.small)
       Menu {
+        if redesign { Button("Duplicate", systemImage: "plus.square.on.square", action: onDuplicate) }
         Button("Archive", systemImage: "archivebox", role: .destructive, action: onArchive)
           .disabled(usageCount > 0)
       } label: { Image(systemName: "ellipsis") }
       .menuStyle(.borderlessButton).fixedSize()
     }
     .padding(12)
-    .background(Color(nsColor: .controlBackgroundColor).opacity(0.38), in: RoundedRectangle(cornerRadius: 9))
+    .background(
+      (redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)).opacity(0.38),
+      in: RoundedRectangle(cornerRadius: 9)
+    )
     .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.quaternary))
   }
 }
 
 private struct RepositoryLibraryRow: View {
+  @Environment(\.desktopRedesign) private var redesign
   let document: ConfigurationDocument
   let defaultProfile: String
   let usageCount: Int
@@ -690,7 +824,9 @@ private struct RepositoryLibraryRow: View {
   let onArchive: () -> Void
   var body: some View {
     HStack(spacing: 12) {
-      Image(systemName: "shippingbox").font(.title3).foregroundStyle(Color.accentColor).frame(width: 36)
+      Image(systemName: "shippingbox").font(.title3).foregroundStyle(
+        (redesign ? DesktopTheme.accent : Color.accentColor)
+      ).frame(width: 36)
       VStack(alignment: .leading, spacing: 3) {
         Text(document.libraryTitle).font(.headline)
         Text(document.payload["remote"]?.string ?? document.name).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
@@ -701,22 +837,38 @@ private struct RepositoryLibraryRow: View {
         Text(defaultProfile).font(.caption.weight(.medium)).lineLimit(1)
       }
       .frame(width: 150, alignment: .trailing)
-      Button("Duplicate", action: onDuplicate).buttonStyle(.bordered).controlSize(.small)
+      if !redesign { Button("Duplicate", action: onDuplicate).buttonStyle(.bordered).controlSize(.small) }
       Button("Edit", action: onEdit).buttonStyle(.borderedProminent).controlSize(.small)
       Menu {
+        if redesign { Button("Duplicate", systemImage: "plus.square.on.square", action: onDuplicate) }
         Button("Archive", systemImage: "archivebox", role: .destructive, action: onArchive)
           .disabled(usageCount > 0)
       } label: { Image(systemName: "ellipsis") }
       .menuStyle(.borderlessButton).fixedSize()
     }
     .padding(12)
-    .background(.background, in: RoundedRectangle(cornerRadius: 9))
+    .background(
+      redesign ? DesktopTheme.canvas : Color(nsColor: .windowBackgroundColor),
+      in: RoundedRectangle(cornerRadius: 9)
+    )
     .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.quaternary))
   }
 }
 
 struct ConfigurationEditorSheet: View {
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.desktopRedesign) private var redesign
+  @Environment(\.desktopOpenProviderAccounts) private var openProviderAccounts
+  private var onClose: (() -> Void)?
+  private var onDirtyChanged: (Bool) -> Void
+  private var onBusyChanged: (Bool) -> Void
+  private var onOpenDocument: ((ConfigurationDocument) -> Void)?
+  private var onOpenSidecarDefinitions: ((ConfigurationDocument) -> Void)?
+  private let initialName: String
+  private let initialPayload: [String: ConfigurationJSON]
+  @State private var area: ConfigurationEditorArea
+  @State private var confirmDiscard = false
+  @State private var afterDiscard: (() -> Void)?
   let kind: ConfigurationKind
   let document: ConfigurationDocument?
   let draft: ConfigurationDocument?
@@ -737,13 +889,80 @@ struct ConfigurationEditorSheet: View {
     kind: ConfigurationKind,
     document: ConfigurationDocument?,
     draft: ConfigurationDocument? = nil,
-    actions: LaunchConfigurationActions
+    actions: LaunchConfigurationActions,
+    onClose: (() -> Void)? = nil,
+    onDirtyChanged: @escaping (Bool) -> Void = { _ in },
+    onBusyChanged: @escaping (Bool) -> Void = { _ in },
+    onOpenDocument: ((ConfigurationDocument) -> Void)? = nil,
+    onOpenSidecarDefinitions: ((ConfigurationDocument) -> Void)? = nil,
+    initialArea: ConfigurationEditorArea? = nil
   ) {
     self.kind = kind; self.document = document; self.draft = draft; self.actions = actions
+    self.onClose = onClose; self.onDirtyChanged = onDirtyChanged; self.onBusyChanged = onBusyChanged;
+    self.onOpenDocument = onOpenDocument
+    self.onOpenSidecarDefinitions = onOpenSidecarDefinitions
+    initialName = document?.name ?? draft.map { "\($0.libraryTitle) copy" } ?? ""
+    initialPayload = document?.payload ?? draft?.payload ?? Self.initial(kind)
+    self._area = State(initialValue: initialArea ?? ConfigurationEditorArea.areas(for: kind)[0])
     self._name = State(initialValue: document?.name ?? draft.map { "\($0.libraryTitle) copy" } ?? "")
     self._payload = State(initialValue: document?.payload ?? draft?.payload ?? Self.initial(kind))
   }
+  private var hasChanges: Bool { name != initialName || payload != initialPayload }
+  private var areas: [ConfigurationEditorArea] { ConfigurationEditorArea.areas(for: kind) }
+  private func visible(_ candidate: ConfigurationEditorArea) -> Bool { !redesign || area == candidate }
+
   var body: some View {
+    Group {
+      if redesign { redesignedEditor } else { legacyEditor }
+    }
+    .textFieldStyle(.roundedBorder)
+    .disabled(busy)
+    .interactiveDismissDisabled(redesign && (hasChanges || busy))
+    .onAppear { onDirtyChanged(hasChanges) }
+    .onChange(of: hasChanges) { _, value in onDirtyChanged(value) }
+    .confirmationDialog("Discard unsaved changes?", isPresented: $confirmDiscard) {
+      Button("Discard changes", role: .destructive) {
+        let next = afterDiscard; afterDiscard = nil
+        onDirtyChanged(false)
+        if let next { next() } else { close() }
+      }
+      Button("Keep editing", role: .cancel) { afterDiscard = nil }
+    } message: {
+      Text("Your configuration draft has not been saved.")
+    }
+    .sheet(isPresented: $showPim) {
+      PimSelectionSheet(
+        selected: payload["pim"]?.array?.compactMap(\.object) ?? [], cached: actions.cachedPim(),
+        discover: actions.discoverPim
+      ) { payload["pim"] = .array($0.map(ConfigurationJSON.object)) }
+    }
+    .sheet(isPresented: $showJSON) {
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Complete JSON").font(.title2.bold())
+        Text("Advanced escape hatch. Secret values belong in credential references.").font(.callout)
+          .foregroundStyle(.secondary)
+        TextEditor(text: $rawJSON).font(.system(.caption, design: .monospaced)).frame(minHeight: 360)
+        if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+        HStack {
+          Button("Cancel") { showJSON = false }
+          Spacer()
+          Button("Apply") {
+            applyJSON()
+            if error == nil { showJSON = false }
+          }.buttonStyle(.borderedProminent)
+        }
+      }.padding(24).frame(width: 680, height: 520)
+    }
+    .task {
+      if kind == .ai {
+        do { accounts = try await actions.loadProviderAccounts() } catch {
+          self.error = error.localizedDescription
+        }
+      }
+    }
+  }
+
+  private var legacyEditor: some View {
     VStack(alignment: .leading, spacing: 12) {
       Text(document == nil ? (draft == nil ? "New \(kind.editorLabel)" : "Duplicate \(draft?.libraryTitle ?? "")") : "Edit \(document?.libraryTitle ?? "")").font(.title2.bold()).lineLimit(1).truncationMode(.middle)
       TextField(kind == .repository ? "Repository display name" : "\(kind.editorLabel) name", text: $name).textFieldStyle(.roundedBorder)
@@ -771,43 +990,279 @@ struct ConfigurationEditorSheet: View {
         }.padding(4)
       }
       if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-      HStack { Button("Cancel") { dismiss() }; Spacer(); if busy { ProgressView().controlSize(.small) }; Button("Save") { Task { await save() } }.buttonStyle(.borderedProminent).disabled(busy || name.trimmingCharacters(in: .whitespaces).isEmpty) }
+      HStack {
+        Button("Cancel") { requestClose() }; Spacer(); if busy { ProgressView().controlSize(.small) };
+        Button("Save") { Task { await save() } }.buttonStyle(.borderedProminent).disabled(
+          busy || name.trimmingCharacters(in: .whitespaces).isEmpty)
+      }
     }.padding(24).frame(width: 760, height: 740).background(Color(nsColor: .windowBackgroundColor)).textFieldStyle(.roundedBorder).disabled(busy)
-    .sheet(isPresented: $showPim) { PimSelectionSheet(selected: payload["pim"]?.array?.compactMap(\.object) ?? [], cached: actions.cachedPim(), discover: actions.discoverPim) { payload["pim"] = .array($0.map(ConfigurationJSON.object)) } }
-    .sheet(isPresented: $showJSON) {
-      VStack(alignment: .leading, spacing: 12) {
-        Text("Complete JSON").font(.title2.bold())
-        Text("Advanced escape hatch. Secret values belong in credential references.").font(.callout).foregroundStyle(.secondary)
-        TextEditor(text: $rawJSON).font(.system(.caption, design: .monospaced)).frame(minHeight: 360)
-        if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-        HStack {
-          Button("Cancel") { showJSON = false }
-          Spacer()
-          Button("Apply") {
-            applyJSON()
-            if error == nil { showJSON = false }
-          }.buttonStyle(.borderedProminent)
-        }
-      }.padding(24).frame(width: 680, height: 520)
-    }
-    .task { if kind == .ai { do { accounts = try await actions.loadProviderAccounts() } catch { self.error = error.localizedDescription } } }
+
   }
+
+  private func close() {
+    onBusyChanged(false)
+    onDirtyChanged(false)
+    if let onClose { onClose() } else { dismiss() }
+  }
+
+  private func requestClose(then action: (() -> Void)? = nil) {
+    guard !busy else { return }
+    if redesign && hasChanges {
+      afterDiscard = action
+      confirmDiscard = true
+    } else if let action {
+      action()
+    } else {
+      close()
+    }
+  }
+
+  private var redesignedEditor: some View {
+    GeometryReader { geometry in
+      VStack(spacing: 0) {
+        HStack(alignment: .top, spacing: 20) {
+          VStack(alignment: .leading, spacing: 10) {
+            HStack {
+              Button {
+                requestClose()
+              } label: {
+                Label("Back", systemImage: "chevron.left")
+              }
+              .buttonStyle(.plain).font(.caption)
+              Text(kind.editorLabel.uppercased()).font(.system(size: 9, weight: .medium)).tracking(1.1)
+                .foregroundStyle(.secondary)
+              Text(document.map { "Revision \($0.revision)" } ?? "New")
+                .font(.caption2).padding(.horizontal, 7).padding(.vertical, 4)
+                .background(DesktopTheme.selection, in: RoundedRectangle(cornerRadius: 4))
+            }
+            TextField("\(kind.editorLabel) name", text: $name)
+              .font(.title.weight(.semibold)).textFieldStyle(.plain)
+              .accessibilityIdentifier("configuration-editor-name")
+            Text("Changes apply to future launches.").font(.caption).foregroundStyle(.secondary)
+            if kind == .repository, name.contains("://"), let document {
+              Button("Use short name: \(document.libraryTitle)") { name = document.libraryTitle }.font(
+                .caption)
+            }
+          }
+          Spacer(minLength: 0)
+          Button("JSON", systemImage: "curlybraces") { area = .advanced }
+            .buttonStyle(.bordered).controlSize(.small)
+        }.padding(24)
+        Divider()
+        if geometry.size.width < 850 {
+          DesktopSectionPicker(title: "", items: areas, selection: $area, label: { $0.rawValue })
+          Divider()
+        }
+        HStack(spacing: 0) {
+          if geometry.size.width >= 850 { editorNavigation; Divider() }
+          ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+              Text(area.rawValue).font(.title3.weight(.semibold))
+              if let error {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                  .font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                  .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                  .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+              }
+              if error != nil {
+                HStack {
+                  Button("Refresh stored revision") { Task { await actions.reload() } }
+                  if let document, let latest = actions.documents.first(where: { $0.id == document.id }),
+                    latest.revision != document.revision
+                  {
+                    Button("Reload revision \(latest.revision)") {
+                      requestClose {
+                        onDirtyChanged(false); onOpenDocument?(latest)
+                      }
+                    }.disabled(onOpenDocument == nil)
+                  }
+                }.font(.caption)
+                if let loadError = actions.loadError { Text(loadError).font(.caption).foregroundStyle(.red) }
+              }
+              if area == .advanced {
+                ConfigurationSection(
+                  title: "Complete configuration",
+                  subtitle:
+                    "Advanced fields remain part of this same draft. Secret values belong in credential references."
+                ) {
+                  Text(ConfigurationJSON.object(payload).formatted())
+                    .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                  Button("Edit complete JSON…", systemImage: "curlybraces") {
+                    rawJSON = ConfigurationJSON.object(payload).formatted(); showJSON = true
+                  }
+                }
+              } else {
+                switch kind {
+                case .profile: profileForm
+                case .ai: aiForm
+                case .workflow: workflowForm
+                case .environment: environmentForm
+                case .repository: repositoryForm
+                case .githubAccess: GitHubAccessRuleEditor(payload: $payload, actions: actions)
+                case .toolPack: toolPackForm
+                }
+              }
+            }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+          }.frame(maxWidth: .infinity, maxHeight: .infinity)
+          if geometry.size.width >= 1180 { Divider(); editorContext }
+        }
+        Divider()
+        HStack(spacing: 12) {
+          Text(hasChanges ? "Unsaved changes" : "No changes").font(.caption).foregroundStyle(.secondary)
+          Spacer()
+          if busy { ProgressView().controlSize(.small) }
+          Button("Cancel") { requestClose() }
+          Button("Revert") {
+            name = initialName; payload = initialPayload; error = nil
+          }
+          .disabled(!hasChanges)
+          Button("Save changes") { Task { await save() } }
+            .buttonStyle(.borderedProminent)
+            .disabled(
+              busy || name.trimmingCharacters(in: .whitespaces).isEmpty || (document != nil && !hasChanges)
+            )
+            .accessibilityIdentifier("configuration-editor-save")
+        }.padding(.horizontal, 24).padding(.vertical, 16).background(DesktopTheme.canvas)
+      }.background(DesktopTheme.surface)
+    }.frame(minWidth: 620, minHeight: 550)
+      .groupBoxStyle(DesktopConfigurationGroupBoxStyle())
+  }
+
+  private var editorNavigation: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      ForEach(areas) { candidate in
+        Button {
+          area = candidate
+        } label: {
+          Text(candidate.rawValue).font(.callout)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 10)
+            .foregroundStyle(area == candidate ? DesktopTheme.accent : .secondary)
+            .background(
+              area == candidate ? DesktopTheme.selection : .clear, in: RoundedRectangle(cornerRadius: 6))
+        }.buttonStyle(.plain).accessibilityIdentifier("configuration-area-\(candidate.id)")
+          .accessibilityAddTraits(area == candidate ? .isSelected : [])
+      }
+      Spacer()
+    }.padding(16).frame(width: 178).background(DesktopTheme.canvas)
+  }
+
+  private var referencedBy: [ConfigurationDocument] {
+    guard let document else { return [] }
+    return actions.documents.filter {
+      !$0.archived && $0.id != document.id && configurationReferences(.object($0.payload), id: document.id)
+    }
+  }
+
+  private var editorContext: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 14) {
+        Text(kind == .profile ? "Used by repositories" : "Shared configuration").font(
+          .subheadline.weight(.semibold))
+        if referencedBy.isEmpty {
+          Text("No saved configurations reference this item.").font(.caption).foregroundStyle(.secondary)
+        }
+        ForEach(referencedBy) { item in
+          Button(item.libraryTitle) {
+            requestClose {
+              onDirtyChanged(false); onOpenDocument?(item)
+            }
+          }.buttonStyle(.plain).font(.caption).foregroundStyle(DesktopTheme.accent)
+            .disabled(onOpenDocument == nil)
+        }
+        if kind == .profile {
+          Divider().padding(.vertical, 8)
+          Text("Selected building blocks").font(.subheadline.weight(.semibold))
+          ForEach(["environmentId", "aiId", "workflowId", "githubAccessId"], id: \.self) { key in
+            if let id = payload[key]?.string,
+              let item = actions.documents.first(where: { $0.id == id && !$0.archived })
+            {
+              Button(item.libraryTitle) {
+                requestClose {
+                  onDirtyChanged(false); onOpenDocument?(item)
+                }
+              }
+              .buttonStyle(.plain).font(.caption).foregroundStyle(DesktopTheme.accent).disabled(
+                onOpenDocument == nil)
+            }
+          }
+          ForEach(payload["toolPackIds"]?.array?.compactMap(\.string) ?? [], id: \.self) { id in
+            if let item = actions.documents.first(where: { $0.id == id && !$0.archived }) {
+              Button(item.libraryTitle) {
+                requestClose {
+                  onDirtyChanged(false); onOpenDocument?(item)
+                }
+              }
+              .buttonStyle(.plain).font(.caption).foregroundStyle(DesktopTheme.accent).disabled(
+                onOpenDocument == nil)
+            }
+          }
+        }
+        Divider().padding(.vertical, 8)
+        Text("Revision context").font(.subheadline.weight(.semibold))
+        Text(
+          document.map {
+            "Editing revision \($0.revision). A newer saved revision must be loaded before conflicting changes can be saved."
+          } ?? "This is a new configuration."
+        )
+        .font(.caption).foregroundStyle(.secondary)
+        Text("Reused building blocks affect future launches. Running pods keep their captured configuration.")
+          .font(.caption).foregroundStyle(.secondary)
+      }.frame(maxWidth: .infinity, alignment: .leading).padding(22)
+    }.frame(width: 260).background(DesktopTheme.canvas)
+  }
+
   private var profileForm: some View {
     VStack(alignment: .leading, spacing: 12) {
-      ConfigurationSection(title: "Build your profile", subtitle: "Choose reusable presets. A repository selects this profile as its default; you can choose another at launch.") {
-        referencePicker(.environment, key: "environmentId")
-        referencePicker(.ai, key: "aiId")
-        referencePicker(.workflow, key: "workflowId")
+      if visible(.composition) {
+        ConfigurationSection(
+          title: "Build your profile",
+          subtitle:
+            "Choose reusable presets. A repository selects this profile as its default; you can choose another at launch."
+        ) {
+          referencePicker(.environment, key: "environmentId")
+          referencePicker(.ai, key: "aiId")
+          referencePicker(.workflow, key: "workflowId")
         referencePicker(.githubAccess, key: "githubAccessId", optional: true)
       }
-      GroupBox("Tool packs") { VStack(alignment: .leading) { ForEach(actions.list(.toolPack)) { pack in
-        Toggle(pack.name, isOn: Binding(get: { payload["toolPackIds"]?.array?.contains(.string(pack.id)) ?? false }, set: { enabled in
-          var values = payload["toolPackIds"]?.array ?? []; values.removeAll { $0 == .string(pack.id) }; if enabled { values.append(.string(pack.id)) }; payload["toolPackIds"] = .array(values)
-        }))
+      }
+      if visible(.composition) {
+        GroupBox("Tool packs") {
+          VStack(alignment: .leading) {
+            ForEach(actions.list(.toolPack)) { pack in
+              Toggle(
+                pack.name,
+                isOn: Binding(
+                  get: { payload["toolPackIds"]?.array?.contains(.string(pack.id)) ?? false },
+                  set: { enabled in
+                    var values = payload["toolPackIds"]?.array ?? [];
+                    values.removeAll { $0 == .string(pack.id) };
+                    if enabled { values.append(.string(pack.id)) }; payload["toolPackIds"] = .array(values)
+                  }))
       } } }
-      ConfigurationSection(title: "Execution defaults") { ProfileExecutionDefaultsEditor(fields: objectBinding("execution"), capabilities: actions.capabilities) }
-      Button("Choose PIM access · \(payload["pim"]?.array?.count ?? 0) selected") { showPim = true }
-      referencePicker(.profile, key: "workerProfileId", optional: true)
+      }
+      if visible(.execution) {
+        ConfigurationSection(title: "Execution defaults") {
+          ProfileExecutionDefaultsEditor(
+            fields: objectBinding("execution"), capabilities: actions.capabilities)
+        }
+      }
+      if visible(.network) {
+        ConfigurationNetworkPolicyEditor(fields: objectBinding("execution"))
+      }
+      if visible(.sidecars) {
+        ConfigurationProfileSidecarsEditor(
+          payload: $payload,
+          environment: actions.list(.environment).first { $0.id == payload["environmentId"]?.string },
+          capabilities: actions.capabilities,
+          editDefinitions: onOpenSidecarDefinitions.map { open in
+            { document in requestClose { onDirtyChanged(false); open(document) } }
+          })
+      }
+      if visible(.access) {
+        Button("Choose PIM access · \(payload["pim"]?.array?.count ?? 0) selected") { showPim = true }
+        referencePicker(.profile, key: "workerProfileId", optional: true)
+      }
     }
   }
   private func referencePicker(_ type: ConfigurationKind, key: String, optional: Bool = false) -> some View {
@@ -818,86 +1273,158 @@ struct ConfigurationEditorSheet: View {
   }
   private var aiForm: some View {
     VStack(alignment: .leading, spacing: 14) {
-      GroupBox("Main agent") { routeEditor(objectBinding("main")) }
-      Picker("Reviewer", selection: Binding(get: { payload["reviewer"]?["mode"]?.string ?? "follow-main" }, set: { mode in
-        payload["reviewer"] = .object(mode == "follow-main" ? ["mode": .string(mode)] : ["mode": .string(mode), "route": .object(Self.initialRoute)])
-      })) { Text("Follow main").tag("follow-main"); Text("Independent account and model").tag("independent") }
-      if payload["reviewer"]?["mode"]?.string == "independent" {
-        GroupBox("Independent reviewer") { routeEditor(Binding(get: { payload["reviewer"]?["route"]?.object ?? [:] }, set: { payload["reviewer"] = .object(["mode": .string("independent"), "route": .object($0)]) })) }
+      if visible(.main) {
+        GroupBox("Main agent") { routeEditor(objectBinding("main"), showFailover: !redesign) }
+        if redesign, let openProviderAccounts {
+          Button("Manage provider accounts", systemImage: "person.2.badge.key") {
+            requestClose {
+              onDirtyChanged(false); openProviderAccounts()
+            }
+          }
+        }
       }
-      Text("Each route owns its account, runtime, model and failover choices. Review usage counts within the whole-pod budget.").font(.caption).foregroundStyle(.secondary)
+      if visible(.reviewer) {
+        Picker(
+          "Reviewer",
+          selection: Binding(
+            get: { payload["reviewer"]?["mode"]?.string ?? "follow-main" },
+            set: { mode in
+              payload["reviewer"] = .object(
+                mode == "follow-main"
+                  ? ["mode": .string(mode)] : ["mode": .string(mode), "route": .object(Self.initialRoute)])
+            })
+        ) {
+          Text("Follow main").tag("follow-main"); Text("Independent account and model").tag("independent")
+        }
+        if payload["reviewer"]?["mode"]?.string == "independent" {
+          GroupBox("Independent reviewer") { routeEditor(reviewerRoute, showFailover: !redesign) }
+        }
+        Text(
+          "Each route owns its account, runtime, model and failover choices. Review usage counts within the whole-pod budget."
+        ).font(.caption).foregroundStyle(.secondary)
+      }
+      if redesign && area == .failover {
+        GroupBox("Main agent failover") { routeEditor(objectBinding("main"), showTarget: false) }
+        if payload["reviewer"]?["mode"]?.string == "independent" {
+          GroupBox("Reviewer failover") { routeEditor(reviewerRoute, showTarget: false) }
+        }
+      }
     }
   }
-  private func routeEditor(_ route: Binding<[String: ConfigurationJSON]>) -> some View {
+  private var reviewerRoute: Binding<[String: ConfigurationJSON]> {
+    Binding(
+      get: { payload["reviewer"]?["route"]?.object ?? [:] },
+      set: { payload["reviewer"] = .object(["mode": .string("independent"), "route": .object($0)]) })
+  }
+  private func routeEditor(
+    _ route: Binding<[String: ConfigurationJSON]>, showTarget: Bool = true, showFailover: Bool = true
+  ) -> some View {
     VStack(alignment: .leading, spacing: 14) {
-      ConfigurationAgentTargetEditor(fields: route, accounts: accounts)
-      Stepper("Maximum failover switches: \(Int(route.wrappedValue["maxHops"]?.number ?? 0))", value: Binding(get: { Int(route.wrappedValue["maxHops"]?.number ?? 0) }, set: { route.wrappedValue["maxHops"] = .number(Double($0)) }), in: 0...16)
-      Text("Fallbacks are tried in order. Zero switches disables failover.").font(.caption).foregroundStyle(.secondary)
-      ConfigurationObjectListEditor(title: "Fallback models", values: Binding(get: { route.wrappedValue["failover"]?.array ?? [] }, set: { route.wrappedValue["failover"] = .array($0) }), initial: {
+      if showTarget { ConfigurationAgentTargetEditor(fields: route, accounts: accounts) }
+      if showFailover {
+        Stepper(
+          "Maximum failover switches: \(Int(route.wrappedValue["maxHops"]?.number ?? 0))",
+          value: Binding(
+            get: { Int(route.wrappedValue["maxHops"]?.number ?? 0) },
+            set: { route.wrappedValue["maxHops"] = .number(Double($0)) }), in: 0...16)
+        Text("Fallbacks are tried in order. Zero switches disables failover.").font(.caption).foregroundStyle(
+          .secondary)
+        ConfigurationObjectListEditor(title: "Fallback models", values: Binding(get: { route.wrappedValue["failover"]?.array ?? [] }, set: { route.wrappedValue["failover"] = .array($0) }), initial: {
         Self.initialRoute.filter { !["failover", "maxHops"].contains($0.key) }
       }) { ConfigurationAgentTargetEditor(fields: $0, accounts: accounts) }
+      }
     }.padding(6)
   }
   @ViewBuilder private var workflowForm: some View {
-    let escalation = objectBinding("escalation")
     VStack(alignment: .leading, spacing: 12) {
-      ConfigurationSection(title: "How work runs", subtitle: "Choose the agent style and what the daemon should deliver.") {
-        stringPicker("Agent mode", key: "agentMode", values: ["auto", "interactive"])
-        stringPicker("Default intent", key: "intent", values: ["task", "goal"])
-        stringPicker("Output", key: "output", values: ["pr", "branch", "artifact", "none"])
+      if visible(.run) {
+        ConfigurationSection(
+          title: "How work runs", subtitle: "Choose the agent style and what the daemon should deliver."
+        ) {
+          stringPicker("Agent mode", key: "agentMode", values: ["auto", "interactive"])
+          stringPicker("Default intent", key: "intent", values: ["task", "goal"])
+          stringPicker("Output", key: "output", values: ["pr", "branch", "artifact", "none"])
         stringPicker("Daemon delivery", key: "completion", values: ["approval", "deliver", "merge"])
         Toggle("Can be promoted from interactive to automatic", isOn: boolBinding("promotable"))
       }
-      ConfigurationSection(title: "Validation checks") { LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 10) { ForEach(["setup", "lint", "sast", "build", "test", "health", "pages", "facts", "review", "advisory"], id: \.self) { phase in
-        Toggle(phase.capitalized, isOn: Binding(get: { payload["validationPhases"]?.array?.contains(.string(phase)) ?? false }, set: { enabled in var values = payload["validationPhases"]?.array ?? []; values.removeAll { $0 == .string(phase) }; if enabled { values.append(.string(phase)) }; payload["validationPhases"] = .array(values) }))
-      } }
-        Toggle("Advisory browser QA", isOn: boolBinding("advisoryBrowserQaEnabled"))
+      }
+      if visible(.validation) {
+        ConfigurationSection(title: "Validation checks") {
+          LazyVGrid(
+            columns: [
+              GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading),
+            ], alignment: .leading, spacing: 10
+          ) {
+            ForEach(
+              ["setup", "lint", "sast", "build", "test", "health", "pages", "facts", "review", "advisory"],
+              id: \.self
+            ) { phase in
+              Toggle(
+                phase.capitalized,
+                isOn: Binding(
+                  get: { payload["validationPhases"]?.array?.contains(.string(phase)) ?? false },
+                  set: { enabled in
+                    var values = payload["validationPhases"]?.array ?? [];
+                    values.removeAll { $0 == .string(phase) }; if enabled { values.append(.string(phase)) };
+                    payload["validationPhases"] = .array(values)
+                  }))
+            }
+          }
+          Toggle("Advisory browser QA", isOn: boolBinding("advisoryBrowserQaEnabled"))
         Stepper("Validation attempts: \(workflowInteger("maxValidationAttempts", fallback: 3))", value: integerBinding("maxValidationAttempts", fallback: 3), in: 1...10)
       }
-      ConfigurationSection(title: "Budgets", subtitle: "Leave token limits off to use the selected model's normal limits.") {
-        ConfigurationNumberValue(title: "Whole-pod token limit", fields: $payload, key: "tokenBudget", fallback: 100000, unsetLabel: "No token limit")
-        ConfigurationNumberValue(title: "Reviewer token limit", fields: $payload, key: "reviewerTokenBudget", fallback: 10000, unsetLabel: "No separate limit")
-        stringPicker("Budget policy", key: "tokenBudgetPolicy", values: ["soft", "hard"])
+      }
+      if visible(.budgets) {
+        ConfigurationSection(
+          title: "Budgets", subtitle: "Leave token limits off to use the selected model's normal limits."
+        ) {
+          ConfigurationNumberValue(
+            title: "Whole-pod token limit", fields: $payload, key: "tokenBudget", fallback: 100000,
+            unsetLabel: "No token limit")
+          ConfigurationNumberValue(
+            title: "Reviewer token limit", fields: $payload, key: "reviewerTokenBudget", fallback: 10000,
+            unsetLabel: "No separate limit")
+          ConfigurationWorkflowFraction(title: "Warn at", id: "workflow-budget-warning", fields: $payload, key: "tokenBudgetWarnAt", fallback: 0.8, range: 0.1...0.99)
+          Text("Warn when this share of the token budget is used (10–99%).").font(.caption).foregroundStyle(.secondary)
+          stringPicker("Budget policy", key: "tokenBudgetPolicy", values: ["soft", "hard"])
         ConfigurationNumberValue(title: "Budget extensions", fields: $payload, key: "maxBudgetExtensions", fallback: 0, unsetLabel: "Default policy")
       }
-      ConfigurationSection(title: "Escalation", subtitle: "AI consultation uses the reviewer selected by the AI setup. Workflow presets only limit how often it may be used.") {
-        Stepper("AI consultation limit: \(nestedInteger(escalation, group: "askAi", key: "maxCalls", fallback: 5))", value: nestedIntegerBinding(escalation, group: "askAi", key: "maxCalls", fallback: 5), in: 0...20)
-        Toggle("Proactive AI advisor", isOn: nestedBoolBinding(escalation, group: "advisor", key: "enabled"))
-        Stepper("Pause after \(workflowInteger(escalation, "autoPauseAfter", fallback: 3)) blockers", value: integerBinding(escalation, "autoPauseAfter", fallback: 3), in: 1...20)
-        Picker("Wait for human", selection: integerBinding(escalation, "humanResponseTimeout", fallback: 3600)) {
-          Text("15 minutes").tag(900)
-          Text("1 hour").tag(3600)
-          Text("2 hours").tag(7200)
-          Text("6 hours").tag(21600)
-          Text("24 hours").tag(86400)
-        }
-        Picker("If nobody responds", selection: stringBinding(escalation, "askHumanOnTimeout", fallback: "continue")) {
-          Text("Continue with best judgement").tag("continue")
-          Text("Ask the AI reviewer").tag("ask_ai")
-        }
       }
-      ConfigurationSection(title: "Delivery details") {
-        ConfigurationTextValue(title: "Branch prefix", fields: $payload, key: "branchPrefix")
-        stringPicker("Equivalent work", key: "preflightConflictPolicy", values: ["warn", "block"])
-        LabeledContent("Merge status interval") {
+      if visible(.security) { ConfigurationWorkflowSecurityEditor(payload: $payload) }
+      if visible(.escalation) { ConfigurationWorkflowEscalationEditor(payload: $payload) }
+      if visible(.delivery) {
+        ConfigurationSection(title: "Delivery details") {
+          ConfigurationTextValue(title: "Branch prefix", fields: $payload, key: "branchPrefix")
+          stringPicker("Equivalent work", key: "preflightConflictPolicy", values: ["warn", "block"])
+          LabeledContent("Merge status interval") {
           TextField("Seconds", value: numberBinding("mergePollIntervalSec", fallback: 60), format: .number).frame(width: 100)
           Text("seconds").foregroundStyle(.secondary)
         }
       }
-      ConfigurationSection(title: "Completion instructions", subtitle: "Optional instructions for the agent when it finishes.") {
-        ConfigurationTextValue(title: "Instructions", fields: $payload, key: "agentDonePrompt", optional: true, multiline: true)
+      }
+      if visible(.delivery) {
+        ConfigurationSection(
+          title: "Completion instructions", subtitle: "Optional instructions for the agent when it finishes."
+        ) {
+          ConfigurationTextValue(
+            title: "Instructions", fields: $payload, key: "agentDonePrompt", optional: true, multiline: true)
+        }
       }
     }
   }
   private var repositoryForm: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Picker("Repository settings", selection: $repositoryTab) {
-        ForEach(["Overview", "Project setups", "Advanced"], id: \.self) { Text($0).tag($0) }
-      }.pickerStyle(.segmented)
-      if repositoryTab == "Overview" {
-      ConfigurationSection(title: "Repository", subtitle: "Repository identity and the shared profile used for new launches.") {
-      stringPicker("Source provider", key: "provider", values: ["github", "ado", "git"])
-      if document == nil, payload["provider"]?.string == "github" {
+      if !redesign {
+        Picker("Repository settings", selection: $repositoryTab) {
+          ForEach(["Overview", "Project setups", "Advanced"], id: \.self) { Text($0).tag($0) }
+        }.pickerStyle(.segmented)
+      }
+      if redesign ? area == .overview : repositoryTab == "Overview" {
+        ConfigurationSection(
+          title: "Repository", subtitle: "Repository identity and the shared profile used for new launches."
+        ) {
+          stringPicker("Source provider", key: "provider", values: ["github", "ado", "git"])
+          if document == nil, payload["provider"]?.string == "github" {
         RepositoryMultiSelect(repositories: repositoryChoices, selectedIDs: Binding(get: {
           payload["providerRepositoryId"]?.string.map { [$0] } ?? []
         }, set: { ids in
@@ -928,16 +1455,18 @@ struct ConfigurationEditorSheet: View {
         Text("Choose a profile to reuse its environment, AI, workflow and access presets. You can choose a different profile at launch.").font(.callout).foregroundStyle(.secondary)
       }
       }
-      if repositoryTab == "Project setups" {
-      Text("Project setups hold repository-specific commands and paths. Select one setup to edit.").font(.callout).foregroundStyle(.secondary)
-      Picker("Default setup", selection: stringBinding("defaultSetupId")) {
-        ForEach(payload["setups"]?.array?.compactMap(\.object) ?? [], id: \.["id"]) { setup in
+      if redesign ? area == .setups : repositoryTab == "Project setups" {
+        Text("Project setups hold repository-specific commands and paths. Select one setup to edit.").font(
+          .callout
+        ).foregroundStyle(.secondary)
+        Picker("Default setup", selection: stringBinding("defaultSetupId")) {
+          ForEach(payload["setups"]?.array?.compactMap(\.object) ?? [], id: \.["id"]) { setup in
           Text(setup["name"]?.string ?? "Unnamed setup").tag(setup["id"]?.string ?? "")
         }
       }
       repositorySetups
       }
-      if repositoryTab == "Advanced" {
+      if redesign ? area == .trust : repositoryTab == "Advanced" {
         ConfigurationSection(title: "Provider identity", subtitle: "AutoPod records this when a GitHub repository is selected. It prevents a renamed URL from silently pointing at a different repository.") {
           if payload["provider"]?.string == "github", let id = payload["providerRepositoryId"]?.string {
             LabeledContent("GitHub repository ID", value: id)
@@ -968,12 +1497,22 @@ struct ConfigurationEditorSheet: View {
   }
   private var environmentForm: some View {
     VStack(alignment: .leading, spacing: 12) {
-      stringPicker("Template", key: "template", values: ["node22", "node22-pw", "node22-pw-pg", "node24", "node24-pw", "dotnet9", "dotnet10", "dotnet10-go", "python312", "python-node", "python-node-pg", "go124", "go124-pw", "custom"])
-      Text("Software and sidecar definitions belong here. Docker/sandbox and resource sizes are chosen by the profile or at launch.").font(.caption).foregroundStyle(.secondary)
-      ConfigurationTextValue(title: "Base image (optional)", fields: $payload, key: "baseImage", optional: true)
-      Text("Additional software").font(.headline)
-      HStack(alignment: .top, spacing: 10) {
-        Image(systemName: "info.circle").foregroundStyle(Color.accentColor)
+      if visible(.runtime) {
+        stringPicker(
+          "Template", key: "template",
+          values: [
+            "node22", "node22-pw", "node22-pw-pg", "node24", "node24-pw", "dotnet9", "dotnet10",
+            "dotnet10-go", "python312", "python-node", "python-node-pg", "go124", "go124-pw", "custom",
+          ])
+        Text(
+          "Software and sidecar definitions belong here. Docker/sandbox and resource sizes are chosen by the profile or at launch."
+        ).font(.caption).foregroundStyle(.secondary)
+        ConfigurationTextValue(title: "Base image (optional)", fields: $payload, key: "baseImage", optional: true)
+      }
+      if visible(.software) {
+        Text("Additional software").font(.headline)
+        HStack(alignment: .top, spacing: 10) {
+          Image(systemName: "info.circle").foregroundStyle(Color.accentColor)
         VStack(alignment: .leading, spacing: 6) {
           Text("Install extra packages in the pod environment").font(.callout.weight(.semibold))
           Text("Choose a package type, then enter its name and version. pnpm and Playwright only need a version; npm, Python and .NET packages also need a name.")
@@ -987,19 +1526,58 @@ struct ConfigurationEditorSheet: View {
       ConfigurationObjectListEditor(title: "Packages", values: arrayBinding("tools"), initial: { ["name": .string("pnpm"), "version": .string("")] }) { fields in
         ConfigurationSoftwarePackageEditor(fields: fields)
       }
-      ConfigurationStringListEditor(title: "Image preparation commands", values: arrayBinding("prepareCommands"))
-      ConfigurationObjectListEditor(title: "Sidecars", values: arrayBinding("sidecars"), initial: { ["id": .string("service-\(UUID().uuidString.prefix(8).lowercased())"), "type": .string("postgres"), "image": .string(""), "version": .string(""), "startup": .string("on-demand"), "port": .number(5432)] }) { EnvironmentSidecarEditor(fields: $0) }
-      ConfigurationCapabilitiesEditor(values: arrayBinding("capabilities"))
+      }
+      if visible(.runtime) {
+        ConfigurationStringListEditor(
+          title: "Image preparation commands", values: arrayBinding("prepareCommands"))
+      }
+      if visible(.sidecars) {
+        ConfigurationObjectListEditor(
+          title: "Sidecars", values: arrayBinding("sidecars"),
+          initial: {
+            [
+              "id": .string("service-\(UUID().uuidString.prefix(8).lowercased())"),
+              "type": .string("postgres"), "image": .string(""), "version": .string(""),
+              "startup": .string("on-demand"), "port": .number(5432),
+            ]
+          }
+        ) { EnvironmentSidecarEditor(fields: $0) }
+      }
+      if visible(.capabilities) { ConfigurationCapabilitiesEditor(values: arrayBinding("capabilities")) }
     }
   }
   private var toolPackForm: some View {
     VStack(alignment: .leading, spacing: 12) {
-      ConfigurationObjectListEditor(title: "Instructions", values: arrayBinding("instructions"), initial: { ["heading": .string(""), "content": .string("")] }) { fields in
-        VStack { ConfigurationTextValue(title: "Heading", fields: fields, key: "heading"); ConfigurationTextValue(title: "Instructions", fields: fields, key: "content", multiline: true) }
+      if visible(.instructions) {
+        ConfigurationObjectListEditor(
+          title: "Instructions", values: arrayBinding("instructions"),
+          initial: { ["heading": .string(""), "content": .string("")] }
+        ) { fields in
+          VStack {
+            ConfigurationTextValue(title: "Heading", fields: fields, key: "heading");
+            ConfigurationTextValue(title: "Instructions", fields: fields, key: "content", multiline: true)
+          }
+        }
       }
-      ConfigurationObjectListEditor(title: "Skills", values: arrayBinding("skills"), initial: { ["name": .string(""), "source": .object(["type": .string("builtin")])] }) { SkillSourceEditor(fields: $0, repositories: actions.list(.repository)) }
-      ConfigurationObjectListEditor(title: "MCP servers", values: arrayBinding("mcpServers"), initial: { ["name": .string(""), "transport": .object(["type": .string("http"), "url": .string(""), "headers": .object([:])])] }) { McpTransportEditor(fields: $0) }
-      ConfigurationStringListEditor(title: "Required capabilities", values: arrayBinding("requiredCapabilities"))
+      if visible(.integrations) {
+        ConfigurationObjectListEditor(
+          title: "Skills", values: arrayBinding("skills"),
+          initial: { ["name": .string(""), "source": .object(["type": .string("builtin")])] }
+        ) { SkillSourceEditor(fields: $0, repositories: actions.list(.repository)) }
+        ConfigurationObjectListEditor(
+          title: "MCP servers", values: arrayBinding("mcpServers"),
+          initial: {
+            [
+              "name": .string(""),
+              "transport": .object(["type": .string("http"), "url": .string(""), "headers": .object([:])]),
+            ]
+          }
+        ) { McpTransportEditor(fields: $0) }
+      }
+      if visible(.capabilities) {
+        ConfigurationStringListEditor(
+          title: "Required capabilities", values: arrayBinding("requiredCapabilities"))
+      }
       Text("Tool packs provide tools and instructions. Access is selected separately.").font(.caption).foregroundStyle(.secondary)
     }
   }
@@ -1060,7 +1638,18 @@ struct ConfigurationEditorSheet: View {
     }
   }
   private func applyJSON() { do { guard let fields = try JSONDecoder().decode(ConfigurationJSON.self, from: Data(rawJSON.utf8)).object else { throw LaunchJSONError.invalid("Preset payload must be an object") }; payload = fields; error = nil } catch { self.error = error.localizedDescription } }
-  private func save() async { busy = true; defer { busy = false }; do { _ = try await actions.save(kind, ConfigurationWriteRequest(id: document?.id, name: name, payload: payload, expectedRevision: document?.revision)); dismiss() } catch { self.error = error.localizedDescription } }
+  private func save() async {
+    busy = true
+    onBusyChanged(true)
+    defer { busy = false; onBusyChanged(false) }
+    do {
+      _ = try await actions.save(
+        kind,
+        ConfigurationWriteRequest(
+          id: document?.id, name: name, payload: payload, expectedRevision: document?.revision));
+      close()
+    } catch { self.error = error.localizedDescription }
+  }
   private static var initialRoute: [String: ConfigurationJSON] { ["providerAccountId": .string(""), "runtime": .string("claude"), "model": .string(""), "reasoningEffort": .string("auto"), "failover": .array([]), "maxHops": .number(0)] }
   private static func initial(_ kind: ConfigurationKind) -> [String: ConfigurationJSON] {
     switch kind {
