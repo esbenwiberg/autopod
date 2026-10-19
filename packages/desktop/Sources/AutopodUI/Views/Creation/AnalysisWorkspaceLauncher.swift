@@ -14,7 +14,8 @@ struct AnalysisWorkspaceLauncher: View {
   }
 }
 
-private struct AnalysisWorkspaceSheet: View {
+struct AnalysisWorkspaceSheet: View {
+  @Environment(\.desktopRedesign) private var redesign
   let kind: String
   let actions: LaunchConfigurationActions
   @Environment(\.dismiss) private var dismiss
@@ -33,7 +34,7 @@ private struct AnalysisWorkspaceSheet: View {
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text(kind == "history" ? "History workspace" : "Memory workspace").font(.title2.bold())
+      if !redesign { Text(kind == "history" ? "History workspace" : "Memory workspace").font(.title2.bold()) }
       Text("Select a repository and reusable configuration. This launch opens an interactive Task workspace.")
         .foregroundStyle(.secondary)
       ScrollView {
@@ -55,7 +56,7 @@ private struct AnalysisWorkspaceSheet: View {
           Text("\(preview.repositoryName) · \(preview.mainModel) · \(preview.executionTarget)")
           Text("Interactive Task · branch output for a repository · no automatic delivery").font(.caption)
         }
-      }.disabled(busy)
+      }.disabled(busy).desktopFormSection()
       if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
       HStack {
         Button("Cancel") { dismiss() }.disabled(busy)
@@ -63,9 +64,11 @@ private struct AnalysisWorkspaceSheet: View {
         Button("Preview") { Task { await resolve() } }.disabled(busy)
         Button("Launch") { Task { await launch() } }
           .buttonStyle(.borderedProminent).disabled(busy || request == nil)
-      }
+      }.desktopDialogActions()
     }
-    .padding(24).frame(width: 660, height: 720)
+    .desktopDialog(kind == "history" ? "Open History workspace" : "Open Memory workspace",
+      eyebrow: "Workspace / Analysis", subtitle: "Choose the evidence and configuration for an interactive workspace.",
+      width: 820, height: 800, legacyWidth: 660, legacyHeight: 720, legacyPadding: 24)
     .onChange(of: selection) { _, _ in invalidate() }
     .onChange(of: allRepositories) { _, _ in invalidate() }
     .onChange(of: failuresOnly) { _, _ in invalidate() }

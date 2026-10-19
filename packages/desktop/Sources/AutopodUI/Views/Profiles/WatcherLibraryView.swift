@@ -2,6 +2,7 @@ import AutopodClient
 import SwiftUI
 
 struct WatcherLibraryView: View {
+  @Environment(\.desktopRedesign) private var redesign
   let actions: LaunchConfigurationActions
   @State private var items: [WatcherBindingResponse] = []
   @State private var error: String?
@@ -9,20 +10,49 @@ struct WatcherLibraryView: View {
   @State private var editor: Editor?
   private struct Editor: Identifiable { let id = UUID(); let item: WatcherBindingResponse? }
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: 16) {
+      if redesign { Text("AUTOMATION / ISSUE ROUTING").font(.system(size: 9, weight: .semibold)).tracking(1.2).foregroundStyle(.secondary) }
       HStack { Text("Issue watchers").font(.title2.bold()); Spacer(); Button("New watcher") { editor = Editor(item: nil) }; Button("Refresh") { Task { await load() } }.disabled(loading) }
       Text("Choose the repository and configuration for new issues. Planning keeps a saved copy of the implementation settings.").foregroundStyle(.secondary)
       if let error { Text(error).foregroundStyle(.red) }
-      List(items) { item in
-        HStack { VStack(alignment: .leading) { Text(item.name).font(.headline); Text("\(item.payload["enabled"]?.bool == true ? "Enabled" : "Paused") · \(item.payload["labelPrefix"]?.string ?? "autopod") · revision \(item.revision)").font(.caption).foregroundStyle(.secondary) }; Spacer(); Button("Edit") { editor = Editor(item: item) } }
+      if redesign {
+        if items.isEmpty && !loading {
+          ContentUnavailableView("No issue watchers", systemImage: "eye", description: Text("Create a watcher to route new issues into a saved launch configuration."))
+        } else {
+          ScrollView {
+            LazyVStack(spacing: 10) {
+              ForEach(items) { item in
+                HStack(spacing: 16) {
+                  Image(systemName: "eye").font(.title3).foregroundStyle(DesktopTheme.accent)
+                    .frame(width: 40, height: 40).background(DesktopTheme.selection, in: RoundedRectangle(cornerRadius: 8))
+                  VStack(alignment: .leading, spacing: 6) {
+                    Text(item.name).font(.headline)
+                    Text("Label \(item.payload["labelPrefix"]?.string ?? "autopod") · Revision \(item.revision)")
+                      .font(.caption).foregroundStyle(.secondary)
+                  }
+                  Spacer()
+                  Text(item.payload["enabled"]?.bool == true ? "Enabled" : "Paused")
+                    .font(.caption).foregroundStyle(item.payload["enabled"]?.bool == true ? DesktopTheme.accent : .secondary)
+                    .padding(.horizontal, 10).padding(.vertical, 6).background(DesktopTheme.canvas, in: Capsule())
+                  Button("Edit") { editor = Editor(item: item) }
+                }.desktopFormSection()
+              }
+            }.padding(1)
+          }
+        }
+      } else {
+        List(items) { item in
+          HStack { VStack(alignment: .leading) { Text(item.name).font(.headline); Text("\(item.payload["enabled"]?.bool == true ? "Enabled" : "Paused") · \(item.payload["labelPrefix"]?.string ?? "autopod") · revision \(item.revision)").font(.caption).foregroundStyle(.secondary) }; Spacer(); Button("Edit") { editor = Editor(item: item) } }
+        }
       }
-    }.padding().task { await load() }
+    }.padding(redesign ? 26 : 16).background(redesign ? DesktopTheme.canvas : .clear).task { await load() }
       .sheet(item: $editor, onDismiss: { Task { await load() } }) { target in WatcherEditorView(actions: actions, item: target.item) }
   }
   private func load() async { loading = true; defer { loading = false }; do { items = try await actions.listWatchers(); error = nil } catch { self.error = error.localizedDescription } }
 }
 
-private struct WatcherEditorView: View {
+struct WatcherEditorView: View {
+  @Environment(\.desktopRedesign) private var redesign
   @Environment(\.dismiss) private var dismiss
   let actions: LaunchConfigurationActions
   let item: WatcherBindingResponse?
@@ -41,7 +71,7 @@ private struct WatcherEditorView: View {
   private var targets: [String: ConfigurationJSON] { payload["targets"]?.object ?? [:] }
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      Text(item == nil ? "New issue watcher" : "Edit issue watcher").font(.title2.bold())
+      if !redesign { Text(item == nil ? "New issue watcher" : "Edit issue watcher").font(.title2.bold()) }
       ScrollView { VStack(alignment: .leading, spacing: 12) {
         TextField("Name", text: text("name"))
         Toggle("Enabled", isOn: Binding(get: { payload["enabled"]?.bool ?? false }, set: { payload["enabled"] = .bool($0) }))
@@ -61,10 +91,14 @@ private struct WatcherEditorView: View {
           TextEditor(text: $rawJSON).font(.system(.caption, design: .monospaced)).frame(minHeight: 150)
           Button("Apply JSON") { do { guard let value = try JSONDecoder().decode(ConfigurationJSON.self, from: Data(rawJSON.utf8)).object else { throw DaemonError.badRequest("Watcher payload must be an object") }; payload = value; error = nil } catch { self.error = error.localizedDescription } }
         }
-      } }
+      }.desktopFormSection() }
       if let error { Text(error).foregroundStyle(.red) }
-      HStack { Spacer(); Button("Cancel") { dismiss() }; Button("Save") { Task { await save() } }.disabled(busy || repositoryId.isEmpty || (payload["name"]?.string ?? "").isEmpty) }
-    }.padding(24).frame(width: 720, height: 620).disabled(busy)
+      HStack { Spacer(); Button("Cancel") { dismiss() }; Button("Save") { Task { await save() } }.disabled(busy || repositoryId.isEmpty || (payload["name"]?.string ?? "").isEmpty) }.desktopDialogActions()
+    }
+    .desktopDialog(item == nil ? "New issue watcher" : "Edit issue watcher", eyebrow: "Automation / Issue routing",
+      subtitle: "Choose the repository, default profile and label routes for incoming issues.",
+      width: 820, height: 740, legacyWidth: 720, legacyHeight: 620, legacyPadding: 24)
+    .groupBoxStyle(DesktopGroupBoxStyle()).disabled(busy)
       .onAppear { rawJSON = ConfigurationJSON.object(payload).formatted() }
       .onChange(of: payload) { _, value in rawJSON = ConfigurationJSON.object(value).formatted() }
   }

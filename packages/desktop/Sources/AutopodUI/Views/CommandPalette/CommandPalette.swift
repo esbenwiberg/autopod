@@ -32,6 +32,7 @@ public struct CommandPalette: View {
     self.onEditProfile = onEditProfile
   }
 
+  @Environment(\.desktopRedesign) private var redesign
   @State private var query = ""
   @State private var selectedIndex = 0
   @FocusState private var queryFocused: Bool
@@ -42,6 +43,13 @@ public struct CommandPalette: View {
 
   public var body: some View {
     VStack(spacing: 0) {
+      if redesign {
+        HStack {
+          Text("FLEET / QUICK ACTIONS").font(.system(size: 9, weight: .semibold)).tracking(1.2)
+          Spacer()
+          Text("esc to close").font(.caption2)
+        }.foregroundStyle(.secondary).padding(.horizontal, 18).padding(.top, 16)
+      }
       // Search field
       HStack(spacing: 8) {
         Image(systemName: "magnifyingglass")
@@ -52,7 +60,7 @@ public struct CommandPalette: View {
           .focused($queryFocused)
           .onSubmit { executeSelected() }
       }
-      .padding(12)
+      .padding(redesign ? 18 : 12)
 
       Divider()
 
@@ -83,9 +91,21 @@ public struct CommandPalette: View {
         }
       }
       .frame(maxHeight: 300)
+      if redesign {
+        HStack(spacing: 16) {
+          Label("Navigate", systemImage: "arrow.up.arrow.down")
+          Label("Open", systemImage: "return")
+          Spacer()
+        }.font(.caption2).foregroundStyle(.secondary).padding(14)
+          .background(DesktopTheme.canvas)
+      }
     }
-    .frame(width: 480)
-    .background(.ultraThinMaterial)
+    .frame(width: redesign ? 600 : 480)
+    .background {
+      if redesign { DesktopTheme.surface }
+      else { Rectangle().fill(.ultraThinMaterial) }
+    }
+    .overlay(RoundedRectangle(cornerRadius: 12).stroke(redesign ? DesktopTheme.line : .clear))
     .clipShape(RoundedRectangle(cornerRadius: 12))
     .shadow(color: .black.opacity(0.2), radius: 20, y: 10)
     .onAppear {
@@ -153,7 +173,7 @@ public struct CommandPalette: View {
     }
     .padding(.horizontal, 12)
     .padding(.vertical, 6)
-    .background(isSelected ? Color.accentColor.opacity(0.1) : .clear)
+    .background(isSelected ? (redesign ? DesktopTheme.selection : Color.accentColor.opacity(0.1)) : .clear)
     .contentShape(Rectangle())
   }
 

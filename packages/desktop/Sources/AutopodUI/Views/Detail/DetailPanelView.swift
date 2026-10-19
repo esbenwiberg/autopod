@@ -1311,8 +1311,7 @@ public struct DetailPanelView: View {
 
     private var nudgeSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Nudge agent")
-                .font(.headline)
+            Group { if !redesign { Text("Nudge agent").font(.headline) } }
             Text("Send guidance to the agent. It remains pending until the worker acknowledges receipt. Leave blank for a default nudge.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -1323,6 +1322,7 @@ public struct DetailPanelView: View {
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
                 )
+            if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
             HStack {
                 Button("Cancel") {
                     nudgeInputText = ""
@@ -1341,14 +1341,13 @@ public struct DetailPanelView: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(20)
-        .frame(minWidth: 380)
+        .desktopDialog("Nudge agent", eyebrow: "Pod / Control",
+            width: 680, legacyWidth: 380)
     }
 
     private var forceCompleteSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("Force complete pod", systemImage: "checkmark.shield")
-                .font(.headline)
+            Group { if !redesign { Label("Force complete pod", systemImage: "checkmark.shield").font(.headline) } }
             Text("Mark **\(pod.id)** as complete without pushing, opening a PR, or merging. The agent's work stays in the worktree as-is. Use this when the work is fine but a downstream step is stuck and re-running would burn tokens.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -1363,6 +1362,7 @@ public struct DetailPanelView: View {
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
                 )
+            if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
             HStack {
                 Button("Cancel") {
                     forceCompleteReasonText = ""
@@ -1381,14 +1381,13 @@ public struct DetailPanelView: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(20)
-        .frame(minWidth: 420, idealWidth: 480)
+        .desktopDialog("Force complete pod", eyebrow: "Pod / Control",
+            width: 680, legacyWidth: 480)
     }
 
     private var kickSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("Kick pod", systemImage: "bolt.horizontal")
-                .font(.headline)
+            Group { if !redesign { Label("Kick pod", systemImage: "bolt.horizontal").font(.headline) } }
             Text("Force **\(pod.id)** to fail and free its concurrency slot. The container is stopped if present; you can `Resume` or `Force Complete` afterward.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -1403,6 +1402,7 @@ public struct DetailPanelView: View {
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
                 )
+            if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
             HStack {
                 Button("Cancel") {
                     kickReasonText = ""
@@ -1421,8 +1421,8 @@ public struct DetailPanelView: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(20)
-        .frame(minWidth: 420, idealWidth: 480)
+        .desktopDialog("Kick pod", eyebrow: "Pod / Control",
+            width: 680, legacyWidth: 480)
     }
 
     private var handoffTargetLabel: String {
@@ -1451,8 +1451,7 @@ public struct DetailPanelView: View {
         // already covers "just push the commits", so we hide the toggle there.
         let skipAgentEligible = handoffTarget == "pr" || handoffTarget == "artifact"
         return VStack(alignment: .leading, spacing: 16) {
-            Text("Hand off → \(handoffTargetLabel)")
-                .font(.headline)
+            Group { if !redesign { Text("Hand off → \(handoffTargetLabel)").font(.headline) } }
             Text("Tell the agent what to finish and anything tricky about your in-flight changes. Your commits and a diff summary are forwarded automatically — leave blank if there's nothing to add.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -1479,6 +1478,7 @@ public struct DetailPanelView: View {
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
                 )
+            if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
             HStack {
                 Button("Cancel") {
                     handoffInstructionsText = ""
@@ -1504,8 +1504,8 @@ public struct DetailPanelView: View {
                 .disabled(handoffTarget == nil)
             }
         }
-        .padding(20)
-        .frame(minWidth: 480)
+        .desktopDialog("Hand off → \(handoffTargetLabel)", eyebrow: "Pod / Handoff",
+            width: 680, legacyWidth: 480)
     }
 
 
@@ -1515,8 +1515,7 @@ public struct DetailPanelView: View {
 
     private var singleSpecHandoffSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Hand off → Single spec")
-                .font(.headline)
+            Group { if !redesign { Text("Hand off → Single spec").font(.headline) } }
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.branch")
@@ -1593,6 +1592,7 @@ public struct DetailPanelView: View {
                 singleSpecPreviewSection(preview)
             }
 
+            if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
             HStack {
                 Button("Cancel") {
                     resetSingleSpecHandoff()
@@ -1608,8 +1608,8 @@ public struct DetailPanelView: View {
                 .disabled(!canLaunchSingleSpec)
             }
         }
-        .padding(20)
-        .frame(minWidth: 520)
+        .desktopDialog("Hand off → Single spec", eyebrow: "Pod / Handoff",
+            width: 860, legacyWidth: 620)
     }
 
     private func singleSpecPreviewSection(_ brief: ParsedBriefResponse) -> some View {
@@ -1730,8 +1730,7 @@ public struct DetailPanelView: View {
 
     private var rejectFeedbackSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Reject pod")
-                .font(.headline)
+            Group { if !redesign { Text("Reject pod").font(.headline) } }
             Text("Tell the agent what to fix. Leave blank for a generic rejection.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -1742,6 +1741,7 @@ public struct DetailPanelView: View {
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
                 )
+            if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
             HStack {
                 Button("Cancel") {
                     rejectFeedbackText = ""
@@ -1761,8 +1761,8 @@ public struct DetailPanelView: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(20)
-        .frame(minWidth: 380)
+        .desktopDialog("Reject pod", eyebrow: "Pod / Control",
+            width: 680, legacyWidth: 380)
     }
 
     private func routeRepair(_ kind: PodRepairKind) {
