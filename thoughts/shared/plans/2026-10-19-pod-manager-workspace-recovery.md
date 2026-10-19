@@ -1,6 +1,6 @@
 # Slice31: complete workspace and recovery ownership
 
-Status: PLANNED — implementation is the next authorized phase.
+Status: IMPLEMENTED — expanded regression/frozen qualification in progress.
 Date:2026-10-19. Qualified source:c00a32d0871721658ef22019955109f478bc3e0c.
 Documentation baseline:a5f98e7fe16a473f59f8da1acc8d3a1c16235e78.
 Branch:codex/pod-manager-workspace.
@@ -144,8 +144,8 @@ instance wiring, explicit this and the documented coordinator type-only substitu
 No original body/default/runtime initializer/await/error-policy changes.
 
 Automated:
-- [ ] Qualified source/root/public provenance and complete baseline capture match.
-- [ ] Whole bodies/arrow/bindings/type/reference/construction/source recipes saved.
+- [x] Qualified source/root/public provenance and complete baseline capture match.
+- [x] Whole bodies/arrow/bindings/type/reference/construction/source recipes saved.
 Manual:none for bounded compatibility under standing grouped approval.
 
 ## Phase2: complete ownership and meaningful boundary proof
@@ -209,11 +209,11 @@ PodCreator protocol, all17full recipes, shared original state/construction/start
 package/script files and six roots stay fixed. All new sources<1,000lines.
 
 Automated:
-- [ ] Whole body/default/arrow/binding/type/full recipes and construction audit pass.
-- [ ] Same73public members/fifteen delegates/three dynamic receivers/live fields pass.
-- [ ] Public1,192 names/statuses/assertion bytes and direct boundary cases pass.
-- [ ] Four actual SQLite reopens, retained failures and owned state cleanup proven.
-- [ ] Build/lint/whitespace/semantic comparison pass without new diagnostics.
+- [x] Whole body/default/arrow/binding/type/full recipes and construction audit pass.
+- [x] Same73public members/fifteen delegates/three dynamic receivers/live fields pass.
+- [x] Public1,192 names/statuses/assertion bytes and direct boundary cases pass.
+- [x] Four actual SQLite reopens, retained failures and owned state cleanup proven.
+- [x] Build/lint/whitespace/semantic comparison pass without new diagnostics.
 Manual:none for bounded local extraction; live external acceptance separately scoped.
 
 ## Phase3: frozen qualification and next responsibility
@@ -255,3 +255,45 @@ re-export. Original mutable state remains per manager at original construction s
 callbacks passed before their binding is initialized stay lazy with exact arity.
 Constructors add no remote work/timers/listeners. Revert manager and sixteen owners
 together. No unresolved design choices remain.
+
+## Implementation checkpoint — 2026-10-19
+
+Goal tool now reports ACTIVE after resumption; no code blocker. All27 complete named
+bodies/parameters/defaults, complete branch arrow and eight binding initializers match.
+The ninth coordinator initializer changes only its equivalent result type argument;
+actual compiler assignability proves the original public result and domain result
+compatible both ways. Explicit factory ReturnType annotation names the previously
+private coordinator request type for declaration generation, with no runtime change.
+Exact PodCreator protocol and all17full source recipes match. Same73public members,
+fifteen thin delegates/three .call(this) receivers, original state construction order,
+lazy two-argument host activity callback and startup polling arguments/site remain.
+All2,136 other predecessor package/script files/six roots unchanged. Manager4,447→3,096
+lines. Allsixteen new source owners remain<1,000lines.
+
+Unchanged1,192 public names/statuses/assertion bytes pass. Final72-suite direct run
+passes573cases:53new across fifteen workspace suites,355inherited direct cases and165
+additional existing workspace/ledger/reconciler cases. Six actual private-file SQLite
+reopen cases cover host retry evidence, completed workspace, retained physical source
+on sync failure, deleted visibility/metadata outcome, frozen derived manual workspace
+and pending frozen worker handoff despite preset edits. Integrity/FK/unrelated rows
+are checked at appropriate boundaries; immutable config/actual native snapshot and
+retry/deletion/task ledgers execute. Real Git path discovery/commitFiles preserves
+unrelated staged code, with controlled push. Watchdog uses actual event bus/timers and
+controlled reconcile adapter; existing actual reconciler tests also run. Deferred
+promotion/linked revalidation/wake receiver changes and live PIM secret resolver are
+exercised with controlled external effects; no paid/live provider, PIM, Docker/Azure,
+external messages or installation acceptance.
+
+Alleleven prior qualification constraints persist. Allsixteen new test/fixture files
+have zero diagnostics; all21 changed-source supplemental diagnostics match original21
+manager baseline. Build/declarations, scoped lint/format and whitespace pass. Initial
+receiver/type/nameability, immutable metadata, real Git tracking ref, native failed
+startup admission, managed transaction and valid wake detector fixture corrections
+preserve original bodies/assertions/policy. Named logs/exits and observed summaries
+are saved in initial-failure-summaries.json. Earlier direct JSON reports shared a path
+and were superseded; summaries are identified honestly rather than labelled raw reports.
+
+Allsource/test bytes are frozen. Evidence in .autopod-data/workspace-recovery includes
+recipes, movement.json, public-comparison.json, semantic reports, commands/exits/logs
+and frozen-manifest.json. Expanded/full qualification, final proof/clean push and32
+research remain before31is complete. Full goal stays active through34.
