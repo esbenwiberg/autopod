@@ -156,6 +156,7 @@ internal struct LaunchComposerLayout<Content: View, Summary: View, Footer: View>
   let close: () -> Void
   var title: String? = nil
   var subtitle: String? = nil
+  var eyebrow: String? = nil
   var composeTitle: String? = nil
   var sourcePod: Pod? = nil
   var sourceRepository: String? = nil
@@ -166,7 +167,7 @@ internal struct LaunchComposerLayout<Content: View, Summary: View, Footer: View>
     VStack(spacing: 0) {
       HStack(alignment: .top) {
         VStack(alignment: .leading, spacing: 8) {
-          Text(title != nil ? "POD / FOLLOW-UP WORK" : series ? "SERIES / START WORK" : "FLEET / START WORK").font(.system(size: 9, weight: .medium)).tracking(1.3).foregroundStyle(.secondary)
+          Text(eyebrow ?? (title != nil ? "POD / FOLLOW-UP WORK" : series ? "SERIES / START WORK" : "FLEET / START WORK")).font(.system(size: 9, weight: .medium)).tracking(1.3).foregroundStyle(.secondary)
           Text(title ?? (series ? "New series" : "New pod")).font(.title.weight(.semibold))
           Text(subtitle ?? (series ? "Read the briefs, inspect the plan and configure the pods together." : "Describe the work, inspect the configuration, then launch its resolved snapshot.")).font(.callout).foregroundStyle(.secondary)
         }

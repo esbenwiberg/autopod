@@ -96,6 +96,7 @@ struct ProviderAccountsSettingsView: View {
     }
     .padding(redesign ? 26 : 20)
     .background(redesign ? DesktopTheme.canvas : .clear)
+    .tint(redesign ? DesktopTheme.accent : .accentColor)
     .task(id: api?.baseURL.absoluteString ?? "none") {
       await loadAccounts()
     }

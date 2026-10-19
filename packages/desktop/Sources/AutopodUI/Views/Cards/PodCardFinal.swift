@@ -1211,10 +1211,12 @@ public struct SessionCardFinal: View {
                 .foregroundStyle(.secondary)
             TextEditor(text: $nudgeInputText)
                 .font(.body)
+                .scrollContentBackground(redesign ? .hidden : .automatic)
+                .background(redesign ? DesktopTheme.surface : .clear)
                 .frame(minHeight: 80)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                        .stroke(redesign ? DesktopTheme.line : Color(nsColor: .separatorColor), lineWidth: 1)
                 )
             if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
             HStack {
@@ -1247,10 +1249,12 @@ public struct SessionCardFinal: View {
                 .foregroundStyle(.secondary)
             TextEditor(text: $rejectFeedbackText)
                 .font(.body)
+                .scrollContentBackground(redesign ? .hidden : .automatic)
+                .background(redesign ? DesktopTheme.surface : .clear)
                 .frame(minHeight: 80)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                        .stroke(redesign ? DesktopTheme.line : Color(nsColor: .separatorColor), lineWidth: 1)
                 )
             if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
             HStack {

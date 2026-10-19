@@ -1290,6 +1290,18 @@ public struct DetailPanelView: View {
     @State private var isSingleSpecSyncing = false
     @State private var isSingleSpecSubmitting = false
     @State private var singleSpecSyncGeneration = 0
+    /// Explicit presentation route used by the native preview/interaction harness.
+    internal init(pod: Pod, controlDialog: String, actions: PodActions = .preview) {
+        self.init(pod: pod, events: [], actions: actions)
+        self._showNudgeInput = State(initialValue: controlDialog == "nudge")
+        self._showRejectFeedback = State(initialValue: controlDialog == "reject")
+        self._showForceCompleteSheet = State(initialValue: controlDialog == "force-complete")
+        self._showKickSheet = State(initialValue: controlDialog == "kick")
+        self._showHandoffSheet = State(initialValue: controlDialog == "handoff")
+        self._showSingleSpecHandoffSheet = State(initialValue: controlDialog == "single-spec")
+        self._handoffTarget = State(initialValue: controlDialog == "handoff" ? "pr" : nil)
+    }
+
     @State private var showForceCompleteSheet = false
     @State private var forceCompleteReasonText = ""
     @State private var showKickSheet = false
@@ -1317,10 +1329,12 @@ public struct DetailPanelView: View {
                 .foregroundStyle(.secondary)
             TextEditor(text: $nudgeInputText)
                 .font(.body)
+                .scrollContentBackground(redesign ? .hidden : .automatic)
+                .background(redesign ? DesktopTheme.surface : .clear)
                 .frame(minHeight: 80)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                        .stroke(redesign ? DesktopTheme.line : Color(nsColor: .separatorColor), lineWidth: 1)
                 )
             if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
             HStack {
@@ -1357,10 +1371,12 @@ public struct DetailPanelView: View {
                 .foregroundStyle(.secondary)
             TextEditor(text: $forceCompleteReasonText)
                 .font(.body)
+                .scrollContentBackground(redesign ? .hidden : .automatic)
+                .background(redesign ? DesktopTheme.surface : .clear)
                 .frame(minHeight: 80)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                        .stroke(redesign ? DesktopTheme.line : Color(nsColor: .separatorColor), lineWidth: 1)
                 )
             if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
             HStack {
@@ -1397,10 +1413,12 @@ public struct DetailPanelView: View {
                 .foregroundStyle(.secondary)
             TextEditor(text: $kickReasonText)
                 .font(.body)
+                .scrollContentBackground(redesign ? .hidden : .automatic)
+                .background(redesign ? DesktopTheme.surface : .clear)
                 .frame(minHeight: 80)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                        .stroke(redesign ? DesktopTheme.line : Color(nsColor: .separatorColor), lineWidth: 1)
                 )
             if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
             HStack {
@@ -1473,10 +1491,12 @@ public struct DetailPanelView: View {
             }
             TextEditor(text: $handoffInstructionsText)
                 .font(.body)
+                .scrollContentBackground(redesign ? .hidden : .automatic)
+                .background(redesign ? DesktopTheme.surface : .clear)
                 .frame(minHeight: 120)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                        .stroke(redesign ? DesktopTheme.line : Color(nsColor: .separatorColor), lineWidth: 1)
                 )
             if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
             HStack {
@@ -1736,10 +1756,12 @@ public struct DetailPanelView: View {
                 .foregroundStyle(.secondary)
             TextEditor(text: $rejectFeedbackText)
                 .font(.body)
+                .scrollContentBackground(redesign ? .hidden : .automatic)
+                .background(redesign ? DesktopTheme.surface : .clear)
                 .frame(minHeight: 80)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                        .stroke(redesign ? DesktopTheme.line : Color(nsColor: .separatorColor), lineWidth: 1)
                 )
             if redesign { Divider().overlay(DesktopTheme.line).padding(.top, 8) }
             HStack {

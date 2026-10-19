@@ -11,7 +11,7 @@ struct PodsitterSettingsView: View {
   @State private var showDisableConfirmation = false
 
   init(
-    api: DaemonAPI,
+    api: any PodsitterAPIClient,
     profileNames: [String],
     openProviderAccounts: @escaping () -> Void
   ) {
@@ -40,6 +40,7 @@ struct PodsitterSettingsView: View {
     }
     .padding(redesign ? 26 : 20)
     .background(redesign ? DesktopTheme.canvas : .clear)
+    .tint(redesign ? DesktopTheme.accent : .accentColor)
     .groupBoxStyle(DesktopGroupBoxStyle())
     .task {
       await store.load()
