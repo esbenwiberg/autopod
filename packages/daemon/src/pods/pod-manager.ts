@@ -30,12 +30,10 @@ import type {
   HistoryQuery,
   InjectedMcpServer,
   MemoryEntry,
-  NetworkPolicy,
   OperatorActor,
   Pod,
   PodOptions,
   PodStatus,
-  PrivateRegistry,
   ProviderCredentials,
   ProviderFailoverTarget,
   PublicProviderCatalog,
@@ -43,7 +41,6 @@ import type {
   TaskRetryIdentity,
   UpdateFromBaseResponse,
   ValidationOverride,
-  ValidationResult,
 } from '@autopod/shared';
 import {
   AutopodError,
@@ -76,17 +73,8 @@ import {
 } from './validation-workflow-policy.js';
 import { createValidationWorkflowState } from './validation-workflow-state.js';
 
-import {
-  computeNetworkPolicyAllowlist,
-  networkNameForPod,
-} from '../containers/docker-network-manager.js';
-import {
-  type HaproxyDenyStreamHandle,
-  streamHaproxyDenials,
-} from '../containers/haproxy-deny-stream.js';
-
 import type { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
-import { sandboxEgressRefreshPayload } from '../containers/sandbox-container-manager.js';
+
 import type { SidecarManager } from '../containers/sidecar-manager.js';
 import { getAutoAttachedSidecars, resolveSidecarSpec } from '../containers/sidecar-resolver.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
@@ -108,8 +96,6 @@ import type { ProfileLlmClientResult } from '../providers/index.js';
 
 import { cleanupClaudeState } from '../runtimes/claude-state-store.js';
 import { cleanupCodexState } from '../runtimes/codex-state-store.js';
-
-import { authenticatedGitEnvironment } from '../worktrees/authenticated-git-environment.js';
 
 import {
   DeletionGuardError,
@@ -147,9 +133,9 @@ import { prefilterMemories, selectRelevantMemories } from './memory-selector.js'
 import type { MemoryUsageRepository } from './memory-usage-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import type { PodRepository, PodStats } from './pod-repository.js';
-import { createPollingCoordinator } from './polling-coordinator.js';
+
 import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
-import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
+
 import type { ProgressEventRepository } from './progress-event-repository.js';
 import { projectMemoryScope } from './project-memory-scope.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
@@ -158,10 +144,9 @@ import type { QualityScoreRepository } from './quality-score-repository.js';
 
 import { deriveReferenceRepos } from './reference-repos.js';
 import { createReviewerContext } from './reviewer-context.js';
-import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
 
 import { createRuntimeResumeContext } from './runtime-resume-context.js';
-import { type SandboxPreviewProxy, startSandboxPreviewProxy } from './sandbox-preview-proxy.js';
+
 import { sandboxStartupRetryInput } from './sandbox-startup-admission.js';
 
 import { canKill, canPromote, isTerminalState } from './state-machine.js';
@@ -250,34 +235,29 @@ import { createOperatorPause } from './operator-pause.js';
 import { createOperatorRejection } from './operator-rejection.js';
 import { createOperatorPauseState } from './operator-state.js';
 import { createOperatorTools } from './operator-tools.js';
+import type { NetworkManager } from './resource-contracts.js';
+import {
+  CONTAINER_APP_PORT,
+  CONTAINER_CLEANUP_TIMEOUT_MS,
+  allocateHostPort,
+  hostnameFromUrl,
+  portFromUrl,
+} from './resource-policy.js';
+export type { NetworkManager } from './resource-contracts.js';
+import { createResourceAdvisoryCleanup, createResourceAdvisoryState } from './resource-advisory.js';
+import { createResourceAuxiliary } from './resource-auxiliary.js';
+import { createResourceCleanup } from './resource-cleanup.js';
+import {
+  createResourceCommitPolling,
+  createResourceCommitPollingState,
+} from './resource-commit-polling.js';
+import { createResourceDenials } from './resource-denials.js';
+import { createResourceNetwork } from './resource-network.js';
+import { createResourcePreviewControls } from './resource-preview-controls.js';
+import { createResourcePreviewTimers } from './resource-preview-timers.js';
+import { createResourcePreview } from './resource-preview.js';
 
 export type { ApproveSessionOptions, ApproveAllSkippedPod } from './approval-contracts.js';
-
-/** Allocate a random host port in range 10000–48999 for container port mapping.
- * Capped at 48999 to avoid the Windows/Hyper-V ephemeral port reservation range (49152+). */
-function allocateHostPort(): number {
-  return 10_000 + Math.floor(Math.random() * 39_000);
-}
-
-/** Default container port for app servers (matches Dockerfile HEALTHCHECK). */
-const CONTAINER_APP_PORT = 3000;
-
-/**
- * Entra email allowlist for native sandbox preview URLs. When set (comma/space
- * separated), sandbox pods expose their app port through the platform's native
- * public URL (Entra-gated to these addresses) instead of the daemon-side exec
- * proxy; unset preserves the exec-proxy behavior. This is both the enable switch
- * and the "where do I put my email" answer for native preview.
- */
-function nativePreviewEmails(): string[] {
-  return (process.env.AUTOPOD_SANDBOX_NATIVE_PREVIEW_EMAILS ?? '')
-    .split(/[,\s]+/)
-    .map((email) => email.trim())
-    .filter(Boolean);
-}
-
-/** Auto-stop preview containers after this duration (default 10 minutes). */
-const PREVIEW_AUTO_STOP_MS = 10 * 60 * 1000;
 
 const execFileAsync = promisify(execFile);
 
@@ -315,22 +295,6 @@ function mergeOverrides(
 
 export interface ContainerManagerFactory {
   get(target: ExecutionTarget): ContainerManager;
-}
-
-export interface NetworkManager {
-  buildNetworkConfig(
-    policy: NetworkPolicy | null,
-    mcpServers: InjectedMcpServer[],
-    daemonGatewayIp: string,
-    registries?: PrivateRegistry[],
-    podId?: string,
-    extraAllowedIps?: string[],
-    extraAllowedHosts?: string[],
-    daemonGatewayPort?: number,
-  ): Promise<{ networkName: string; firewallScript: string } | null>;
-  getGatewayIp(podId?: string): Promise<string>;
-  /** Remove the per-pod bridge — called from pod cleanup. Idempotent. */
-  destroyNetworkForPod?(podId: string): Promise<void>;
 }
 
 export interface PodManagerDependencies {
@@ -1165,12 +1129,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     resolvedReasoningEffort,
   });
   const { mergeQueue } = createDeliveryMergeQueue();
+  const { startHaproxyDenyReceiver, stopHaproxyDenyReceiver } = createResourceDenials({
+    containerManagerFactory,
+    eventBus,
+    logger,
+  });
 
-  /** Per-pod HAProxy denial log receivers. Started after container spawn in
-   *  restricted mode; stopped from `cleanupContainer`. Map is the source of
-   *  truth — any cleanup path that goes through `cleanupContainer` reaps the
-   *  handle. */
-  const haproxyDenyHandles = new Map<string, HaproxyDenyStreamHandle>();
   const { readinessService, refreshReadiness } = createReadinessRefresh(deps, {
     podRepo,
     validationRepo,
@@ -1179,414 +1143,41 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     qualityScoreRepo,
     logger,
   });
+  const resourceNetwork = createResourceNetwork(deps, {
+    networkManager,
+    logger,
+    profileStore,
+    podRepo,
+    daemonConfig,
+    sidecarManager,
+    providerAccountStore,
+    providerCatalog,
+    mcpBaseUrl,
+    containerManagerFactory,
+  });
+  const { destroyPodNetwork } = resourceNetwork;
 
-  /** Best-effort: start the HAProxy deny log receiver for a restricted-mode
-   *  pod and wire each denied SNI to a `pod.firewall_denied` event. Failures
-   *  here must not block the pod — denial visibility is informational. */
-  async function startHaproxyDenyReceiver(pod: Pod, containerId: string): Promise<void> {
-    const cm = containerManagerFactory.get(pod.executionTarget);
-    try {
-      const handle = await streamHaproxyDenials(
-        cm,
-        containerId,
-        ({ sni, src }) => {
-          eventBus.emit({
-            type: 'pod.firewall_denied',
-            timestamp: new Date().toISOString(),
-            podId: pod.id,
-            sni,
-            src,
-          });
-        },
-        logger,
-      );
-      haproxyDenyHandles.set(pod.id, handle);
-    } catch (err) {
-      logger.warn(
-        { err, podId: pod.id, containerId },
-        'Failed to start HAProxy deny receiver — pod runs without denial visibility',
-      );
-    }
-  }
+  const { ensureSandboxPreviewProxy, stopSandboxPreviewProxy } = createResourcePreview({
+    containerManagerFactory,
+    logger,
+    podRepo,
+  });
 
-  /** Stop the deny receiver for a pod, if one is registered. Idempotent. */
-  async function stopHaproxyDenyReceiver(podId: string): Promise<void> {
-    const handle = haproxyDenyHandles.get(podId);
-    if (!handle) return;
-    haproxyDenyHandles.delete(podId);
-    try {
-      await handle.stop();
-    } catch (err) {
-      logger.warn({ err, podId }, 'Failed to stop HAProxy deny receiver');
-    }
-  }
+  const { killSidecarsForPod, cleanupTestRunBranches } = createResourceAuxiliary(deps, {
+    sidecarManager,
+    podRepo,
+    logger,
+    executionForPod,
+  });
 
-  /** Destroy the per-pod Docker bridge. Must be called AFTER the pod + all
-   *  sidecars are killed, otherwise Docker refuses with "has active endpoints".
-   *  No-ops when the network manager doesn't support teardown (tests / older
-   *  implementations) or isn't wired. Best-effort unless `strict` is requested. */
-  async function destroyPodNetwork(podId: string, strict = false): Promise<void> {
-    if (!networkManager?.destroyNetworkForPod) return;
-    try {
-      await networkManager.destroyNetworkForPod(podId);
-    } catch (err) {
-      logger.warn({ err, podId }, 'Failed to destroy pod network');
-      if (strict) throw err;
-    }
-  }
+  const { clearPreviewTimer, schedulePreviewAutoStop } = createResourcePreviewTimers({
+    stopSandboxPreviewProxy,
+    containerManagerFactory,
+    logger,
+  });
 
-  /** Hard ceiling on container cleanup at terminal transitions. A wedged Docker
-   *  daemon must never keep an operator endpoint hanging — once the pod is
-   *  conceptually done, we proceed even if Docker is still chewing on the API
-   *  call. 15s is generous for a cooperative `stop -t 10` + remove. */
-  const CONTAINER_CLEANUP_TIMEOUT_MS = 15_000;
+  const { commitPolling } = createResourceCommitPollingState({ logger });
 
-  /**
-   * Best-effort container cleanup with a hard timeout. Use at terminal
-   * transitions (complete, force-complete) and operator escape hatches (kick)
-   * so a wedged Docker engine can't tie up the request. Never throws — the
-   * caller has already decided the pod is done.
-   *
-   * mode='kill' stops + removes (terminal — pod will never restart).
-   * mode='stop' only stops, leaving the container so it can be restarted later
-   * (preview, rejection retry, resume).
-   */
-  async function cleanupContainer(
-    pod: Pod,
-    label: string,
-    mode: 'kill' | 'stop' = 'kill',
-    assertReleaseAllowed?: () => void,
-  ): Promise<void> {
-    assertReleaseAllowed?.();
-    const targetContainerId = pod.containerId;
-    if (!targetContainerId) {
-      if (
-        mode === 'kill' &&
-        podRepo.getOrThrow(pod.id).lifecycleGeneration === pod.lifecycleGeneration
-      )
-        deps.launchConfiguration?.pim?.release(pod.id);
-      return;
-    }
-    logger.info(
-      { podId: pod.id, containerId: targetContainerId, generation: pod.lifecycleGeneration },
-      'Cleaning lifecycle container by captured identity',
-    );
-    const ownsSharedResources = ownsLifecycle(pod.id, pod.lifecycleGeneration, targetContainerId);
-    if (ownsSharedResources) await stopSandboxPreviewProxy(pod.id);
-    assertReleaseAllowed?.();
-    if (ownsSharedResources && mode === 'kill' && deps.beforeContainerCleanup) {
-      let extractionTimer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([
-        deps
-          .beforeContainerCleanup(pod.id)
-          .catch((err) =>
-            logger.warn({ err, podId: pod.id, label }, 'Pre-cleanup memory extraction failed'),
-          )
-          .finally(() => {
-            if (extractionTimer) clearTimeout(extractionTimer);
-          }),
-        new Promise<void>((resolve) => {
-          extractionTimer = setTimeout(() => {
-            logger.warn(
-              { podId: pod.id, label, timeoutMs: 20_000 },
-              'Pre-cleanup memory extraction timed out — continuing container cleanup',
-            );
-            resolve();
-          }, 20_000);
-        }),
-      ]);
-    }
-    assertReleaseAllowed?.();
-    // Stop denial receiver before killing/stopping the container so the
-    // long-running socat exec gets a clean shutdown signal.
-    if (ownsSharedResources) await stopHaproxyDenyReceiver(pod.id);
-    assertReleaseAllowed?.();
-    const cm = containerManagerFactory.get(pod.executionTarget);
-    const op = mode === 'kill' ? cm.kill(targetContainerId) : cm.stop(targetContainerId);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const deleted = await Promise.race([
-      op
-        .then(() => true)
-        .catch((err) => {
-          logger.warn({ err, podId: pod.id, label, mode }, `${label}: container ${mode} failed`);
-          return false;
-        })
-        .finally(() => {
-          if (timer) clearTimeout(timer);
-        }),
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => {
-          logger.warn(
-            { podId: pod.id, label, mode, timeoutMs: CONTAINER_CLEANUP_TIMEOUT_MS },
-            `${label}: container ${mode} timed out — proceeding without waiting`,
-          );
-          resolve(false);
-        }, CONTAINER_CLEANUP_TIMEOUT_MS);
-      }),
-    ]);
-    assertReleaseAllowed?.();
-    if (mode === 'kill' && deleted && pod.executionTarget === 'sandbox') {
-      const current = podRepo.getOrThrow(pod.id);
-      if (
-        current.lifecycleGeneration === pod.lifecycleGeneration &&
-        current.containerId === targetContainerId
-      ) {
-        podRepo.update(pod.id, { containerId: null });
-      }
-    }
-    if (mode === 'kill' && ownsSharedResources) {
-      deps.launchConfiguration?.pim?.release(pod.id);
-      forgetMaxCredentialLineage(pod.id);
-    }
-  }
-
-  const sandboxPreviewProxies = new Map<
-    string,
-    { containerId: string; proxy: SandboxPreviewProxy }
-  >();
-  // Pods whose preview is served by a native platform port (not the exec proxy).
-  const nativePreviewPorts = new Map<string, { containerId: string; port: number; url: string }>();
-
-  /**
-   * Try to expose the app port on the platform's native public URL (Entra-gated
-   * to the configured allowlist). Returns the URL on success, or null to fall
-   * back to the daemon-side exec proxy. Never throws — a native failure must not
-   * break preview, which has a working fallback.
-   */
-  async function tryNativeSandboxPreview(pod: Pod, containerId: string): Promise<string | null> {
-    const emails = nativePreviewEmails();
-    if (emails.length === 0) return null;
-    const cm = containerManagerFactory.get('sandbox');
-    if (!cm.exposePort) return null;
-
-    const cached = nativePreviewPorts.get(pod.id);
-    if (cached?.containerId === containerId) return cached.url;
-    if (cached) nativePreviewPorts.delete(pod.id);
-
-    try {
-      const exposed = await cm.exposePort(containerId, CONTAINER_APP_PORT, { entraEmails: emails });
-      if (!exposed.url) {
-        logger.warn(
-          { podId: pod.id },
-          'Native sandbox port exposed but no URL assigned; falling back to preview proxy',
-        );
-        return null;
-      }
-      nativePreviewPorts.set(pod.id, { containerId, port: CONTAINER_APP_PORT, url: exposed.url });
-      if (pod.previewUrl !== exposed.url) {
-        podRepo.update(pod.id, { previewUrl: exposed.url });
-      }
-      logger.info({ podId: pod.id, url: exposed.url }, 'Native sandbox preview URL exposed');
-      return exposed.url;
-    } catch (err) {
-      logger.warn(
-        { err, podId: pod.id },
-        'Native sandbox port exposure failed; falling back to preview proxy',
-      );
-      return null;
-    }
-  }
-
-  async function ensureSandboxPreviewProxy(pod: Pod): Promise<string> {
-    if (pod.executionTarget !== 'sandbox') {
-      if (!pod.previewUrl) {
-        throw new AutopodError(`Pod ${pod.id} has no preview URL`, 'INVALID_STATE', 409);
-      }
-      return pod.previewUrl;
-    }
-
-    if (!pod.containerId) {
-      throw new AutopodError(
-        `Pod ${pod.id} has no container — cannot start preview`,
-        'INVALID_STATE',
-        409,
-      );
-    }
-
-    // Prefer the platform's native public port when configured; fall back to the
-    // daemon-side exec proxy otherwise (or on failure).
-    const nativeUrl = await tryNativeSandboxPreview(pod, pod.containerId);
-    if (nativeUrl) {
-      // A native URL supersedes any previously-started exec proxy for this pod.
-      if (sandboxPreviewProxies.has(pod.id)) await stopSandboxPreviewProxy(pod.id);
-      return nativeUrl;
-    }
-
-    let previewUrl = pod.previewUrl;
-    // A stale native URL (native since disabled/failed) must not be reused as a
-    // proxy host-port — reset it so a fresh 127.0.0.1 URL is allocated below.
-    if (previewUrl && !previewUrl.startsWith('http://127.0.0.1')) {
-      previewUrl = null;
-    }
-    if (!previewUrl) {
-      previewUrl = `http://127.0.0.1:${allocateHostPort()}`;
-      podRepo.update(pod.id, { previewUrl });
-    }
-
-    const existing = sandboxPreviewProxies.get(pod.id);
-    if (existing?.containerId === pod.containerId) return existing.proxy.url;
-    if (existing) await stopSandboxPreviewProxy(pod.id);
-
-    const hostPort = parsePreviewPort(previewUrl);
-    if (!hostPort) {
-      throw new AutopodError(`Pod ${pod.id} has invalid preview URL`, 'INVALID_STATE', 409);
-    }
-
-    const proxy = await startSandboxPreviewProxy({
-      podId: pod.id,
-      containerId: pod.containerId,
-      hostPort,
-      containerPort: CONTAINER_APP_PORT,
-      containerManager: containerManagerFactory.get('sandbox'),
-      logger,
-    });
-    sandboxPreviewProxies.set(pod.id, { containerId: pod.containerId, proxy });
-    if (proxy.url !== previewUrl) {
-      podRepo.update(pod.id, { previewUrl: proxy.url });
-    }
-    return proxy.url;
-  }
-
-  async function stopSandboxPreviewProxy(podId: string): Promise<void> {
-    const native = nativePreviewPorts.get(podId);
-    if (native) {
-      nativePreviewPorts.delete(podId);
-      const cm = containerManagerFactory.get('sandbox');
-      await cm.unexposePort?.(native.containerId, native.port).catch((err) => {
-        logger.warn({ err, podId }, 'Failed to remove native sandbox preview port');
-      });
-    }
-    const existing = sandboxPreviewProxies.get(podId);
-    if (!existing) return;
-    sandboxPreviewProxies.delete(podId);
-    await existing.proxy.close().catch((err) => {
-      logger.warn({ err, podId }, 'Failed to close sandbox preview proxy');
-    });
-  }
-
-  function parsePreviewPort(previewUrl: string): number | null {
-    try {
-      const parsed = new URL(previewUrl);
-      const port = Number.parseInt(parsed.port, 10);
-      return Number.isSafeInteger(port) && port >= 0 ? port : null;
-    } catch {
-      return null;
-    }
-  }
-
-  /** Tear down all sidecars attached to a pod. Re-reads the pod so it sees
-   *  the most recent `sidecarContainerIds` even if the caller's snapshot is
-   *  stale. No-ops if the pod never spawned any, or if no SidecarManager is
-   *  configured (older deployments). Best-effort unless `strict` is requested. */
-  async function killSidecarsForPod(
-    podId: string,
-    strict = false,
-    assertCurrent?: () => void,
-    retainMetadata = false,
-  ): Promise<void> {
-    assertCurrent?.();
-    if (!sidecarManager) {
-      if (strict && Object.keys(podRepo.getOrThrow(podId).sidecarContainerIds ?? {}).length > 0)
-        throw new Error('Sidecar cleanup capability unavailable');
-      return;
-    }
-    let current: Pod;
-    try {
-      current = podRepo.getOrThrow(podId);
-    } catch {
-      return;
-    }
-    const ids = current.sidecarContainerIds;
-    if (!ids) return;
-    const entries = Object.entries(ids);
-    const results = await Promise.allSettled(
-      entries.map(([, containerId]) => sidecarManager.kill(containerId)),
-    );
-    const failures: unknown[] = [];
-    for (const [index, result] of results.entries()) {
-      if (result.status === 'fulfilled') continue;
-      const [name, containerId] = entries[index] ?? ['unknown', 'unknown'];
-      failures.push(result.reason);
-      logger.warn(
-        { err: result.reason, podId, sidecarName: name, containerId },
-        'Failed to kill sidecar',
-      );
-    }
-    if (failures.length > 0 && strict) {
-      throw new AggregateError(failures, `Failed to clean up sidecars for pod ${podId}`);
-    }
-    assertCurrent?.();
-    if (!retainMetadata) podRepo.update(podId, { sidecarContainerIds: null });
-  }
-
-  /** Delete any branches this pod pushed to the test repo via
-   *  `ado.run_test_pipeline`. Best-effort — network failures or already-deleted
-   *  branches are logged, not thrown. Cleared from the DB afterwards so a
-   *  cron-level sweep can see "this pod has no pending test branches".
-   */
-  async function cleanupTestRunBranches(
-    podId: string,
-    options?: { strict: boolean; assertCurrent: () => void; retainMetadata?: boolean },
-  ): Promise<void> {
-    options?.assertCurrent();
-    let current: Pod;
-    try {
-      current = podRepo.getOrThrow(podId);
-    } catch {
-      return;
-    }
-    const branches = current.testRunBranches;
-    if (!branches || branches.length === 0) return;
-    const profile = executionForPod(current);
-    const cfg = profile.testPipeline;
-    if (!cfg || !cfg.enabled || !deps.azureDevOpsAuth) {
-      if (options?.strict) throw new Error('Test branch cleanup capability unavailable');
-      podRepo.update(podId, { testRunBranches: null });
-      return;
-    }
-    const token = await deps.azureDevOpsAuth.getToken();
-    options?.assertCurrent();
-    if (!current.worktreePath) {
-      // No worktree to run git from. Can't delete; leave a daily sweep to reap.
-      if (options?.strict) throw new Error('Test branch worktree unavailable');
-      logger.warn({ podId, branches }, 'Cannot cleanup test-run branches — pod has no worktree');
-      podRepo.update(podId, { testRunBranches: null });
-      return;
-    }
-    const results = await Promise.allSettled(
-      branches.map(async (branch) => {
-        try {
-          options?.assertCurrent();
-          await execFileAsync(
-            'git',
-            ['-C', current.worktreePath as string, 'push', cfg.testRepo, '--delete', branch],
-            {
-              timeout: 30_000,
-              env: authenticatedGitEnvironment(cfg.testRepo, `Bearer ${token}`),
-            },
-          );
-        } catch (err) {
-          // Git errors can include authentication headers; never retain the raw provider error.
-          logger.warn({ podId, branch }, 'Failed to delete test-run branch');
-          if (options?.strict) throw new Error('Test branch deletion was not confirmed');
-        }
-      }),
-    );
-    options?.assertCurrent();
-    if (options?.strict && results.some((result) => result.status === 'rejected'))
-      throw new Error('Test branch cleanup incomplete');
-    if (!options?.retainMetadata) podRepo.update(podId, { testRunBranches: null });
-  }
-
-  /** Active auto-stop timers for preview containers, keyed by podId. */
-  const previewTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-  /** Active commit polling intervals, keyed by podId. */
-  const commitPolling = createPollingCoordinator((err, podId) =>
-    logger.debug({ err, podId }, 'Commit polling failed, skipping cycle'),
-  );
-
-  const COMMIT_POLL_INTERVAL_MS = 60_000;
   const { mergePolling, DEFAULT_MERGE_POLL_INTERVAL_MS } = createDeliveryPollingState(logger);
 
   /** Active AbortControllers for in-progress validation runs, keyed by podId. */
@@ -1626,59 +1217,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     executionForPod,
     activeAgentRuns,
   });
-
-  /** Active post-validation advisory QA runs, keyed by podId.
-   *  These are nonblocking for validation outcome, but approval must not cut
-   *  off the preview/container before screenshot-backed advisory QA finishes. */
-  const advisoryRuns = new Map<string, Promise<ValidationResult>>();
-
-  // Serialise advisory browser QA across pods so that concurrent validations
-  // don't all hammer the reviewer model's rate limit window at once. Inner
-  // retry handles transient 429s; the semaphore prevents the collision.
-  const ADVISORY_QA_MAX_CONCURRENCY = 1;
-  let advisoryQaActive = 0;
-  const advisoryQaWaiters: Array<() => void> = [];
-
-  function acquireAdvisoryQaSlot(): Promise<void> {
-    if (advisoryQaActive < ADVISORY_QA_MAX_CONCURRENCY) {
-      advisoryQaActive++;
-      return Promise.resolve();
-    }
-    return new Promise<void>((resolve) => advisoryQaWaiters.push(resolve));
-  }
-
-  function releaseAdvisoryQaSlot(): void {
-    const next = advisoryQaWaiters.shift();
-    if (next) {
-      next();
-    } else {
-      advisoryQaActive--;
-    }
-  }
-
-  function cleanupContainerAfterAdvisorySettles(
-    pod: Pod,
-    label: string,
-    mode: 'kill' | 'stop' = 'kill',
-    assertReleaseAllowed?: () => void,
-  ): Promise<void> {
-    assertGuidanceCollected(pod.id);
-    const advisoryRun = advisoryRuns.get(pod.id);
-    if (!advisoryRun) {
-      return cleanupContainer(pod, label, mode, assertReleaseAllowed);
-    }
-
-    emitActivityStatus(pod.id, 'Keeping container running until advisory browser QA finishes…');
-    void advisoryRun
-      .finally(() => cleanupContainer(pod, label, mode, assertReleaseAllowed))
-      .catch((err) =>
-        logger.warn(
-          { err, podId: pod.id, label, mode },
-          'Deferred container cleanup after advisory QA failed',
-        ),
-      );
-    return Promise.resolve();
-  }
+  const { cleanupContainer } = createResourceCleanup(deps, {
+    podRepo,
+    logger,
+    ownsLifecycle,
+    stopSandboxPreviewProxy,
+    stopHaproxyDenyReceiver,
+    containerManagerFactory,
+    forgetMaxCredentialLineage,
+  });
+  const { acquireAdvisoryQaSlot, releaseAdvisoryQaSlot, advisoryRuns } =
+    createResourceAdvisoryState();
 
   /** Pods whose operator triggered update-from-base while they were validating.
    *  Consumed by the validation unwind to run the rebase instead of retrying the agent. */
@@ -1696,6 +1245,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       podRepo,
       refreshReadiness,
     });
+  const { cleanupContainerAfterAdvisorySettles } = createResourceAdvisoryCleanup({
+    assertGuidanceCollected,
+    advisoryRuns,
+    cleanupContainer,
+    emitActivityStatus,
+    logger,
+  });
+
   const { resolveApprovalReadiness, persistReadinessApproval, assertApprovalCurrent } =
     createApprovalReadiness({
       assertGuidanceCollected,
@@ -1891,129 +1448,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   // Resume merge polling on startup
   resumeMergePolling();
-
-  /** Start polling git commit count inside one owned lifecycle and container. */
-  function startCommitPolling(podId: string): void {
-    const expected = podRepo.getOrThrow(podId);
-    let captureAttempted = false;
-    commitPolling.start(podId, COMMIT_POLL_INTERVAL_MS, async (ownership) => {
-      const current = (): Pod | null => {
-        try {
-          const pod = podRepo.getOrThrow(podId);
-          if (
-            ownership.isCurrent() &&
-            pod.status === 'running' &&
-            pod.containerId &&
-            pod.lifecycleGeneration === expected.lifecycleGeneration &&
-            pod.containerId === expected.containerId &&
-            pod.executionTarget === expected.executionTarget &&
-            pod.worktreePath === expected.worktreePath &&
-            pod.branch === expected.branch &&
-            pod.baseBranch === expected.baseBranch
-          )
-            return pod;
-        } catch {
-          /* Deleted or replaced pods have no polling authority. */
-        }
-        ownership.stop();
-        return null;
-      };
-      let pod = current();
-      if (!pod?.containerId) return;
-      const cm = containerManagerFactory.get(pod.executionTarget);
-      if (!captureAttempted) {
-        captureAttempted = true;
-        if (!pod.startCommitSha) {
-          try {
-            const shaResult = await cm.execInContainer(
-              pod.containerId,
-              ['git', 'rev-parse', 'HEAD'],
-              {
-                cwd: '/workspace',
-                timeout: 5_000,
-              },
-            );
-            pod = current();
-            if (!pod) return;
-            if (!pod.startCommitSha && shaResult.exitCode === 0 && shaResult.stdout.trim())
-              podRepo.update(podId, { startCommitSha: shaResult.stdout.trim() });
-          } catch {
-            if (!current()) return;
-            logger.debug({ podId }, 'Failed to capture start commit SHA');
-          }
-        }
-      }
-      pod = current();
-      if (!pod?.containerId) return;
-      // Use the captured starting SHA; retain the existing legacy base fallback.
-      const exclusionRef = pod.startCommitSha ?? pod.baseBranch ?? 'main';
-      const [countResult, timeResult] = await Promise.all([
-        cm.execInContainer(
-          pod.containerId,
-          ['git', 'rev-list', '--count', 'HEAD', `^${exclusionRef}`],
-          {
-            cwd: '/workspace',
-            timeout: 5_000,
-          },
-        ),
-        cm.execInContainer(pod.containerId, ['git', 'log', '-1', '--format=%cI'], {
-          cwd: '/workspace',
-          timeout: 5_000,
-        }),
-      ]);
-      const observed = current();
-      if (!observed || observed.startCommitSha !== pod.startCommitSha) return;
-      const commitCount = Number.parseInt(countResult.stdout.trim(), 10) || 0;
-      const lastCommitAt = timeResult.exitCode === 0 ? timeResult.stdout.trim() : null;
-      podRepo.update(podId, { commitCount, lastCommitAt });
-      if (pod.executionTarget === 'sandbox') {
-        const decision = await deps.workspaceCheckpointController?.poll(podId);
-        if (!current()) return;
-        if (decision?.degraded)
-          emitActivityStatus(
-            podId,
-            'Durability degraded — retaining sandbox until checkpoint succeeds.',
-          );
-      }
-    });
-  }
-
-  /** Stop only the currently registered poller; pending callbacks lose authority. */
-  function stopCommitPolling(podId: string): void {
-    commitPolling.stop(podId);
-  }
-
-  /** Cancel and remove an auto-stop timer for a pod if one exists. */
-  function clearPreviewTimer(podId: string): void {
-    const timer = previewTimers.get(podId);
-    if (timer) {
-      clearTimeout(timer);
-      previewTimers.delete(podId);
-    }
-  }
-
-  /** Schedule an auto-stop timer that will stop the container after PREVIEW_AUTO_STOP_MS. */
-  function schedulePreviewAutoStop(
-    podId: string,
-    containerId: string,
-    target: import('@autopod/shared').ExecutionTarget,
-  ): void {
-    clearPreviewTimer(podId);
-    const timer = setTimeout(async () => {
-      previewTimers.delete(podId);
-      try {
-        await stopSandboxPreviewProxy(podId);
-        const cm = containerManagerFactory.get(target);
-        await cm.stop(containerId);
-        logger.info({ podId, containerId }, 'Preview auto-stopped after timeout');
-      } catch (err) {
-        logger.warn({ err, podId }, 'Failed to auto-stop preview container');
-      }
-    }, PREVIEW_AUTO_STOP_MS);
-    // Unref so the timer doesn't prevent process exit
-    timer.unref();
-    previewTimers.set(podId, timer);
-  }
+  const { startCommitPolling, stopCommitPolling } = createResourceCommitPolling(deps, {
+    podRepo,
+    commitPolling,
+    containerManagerFactory,
+    logger,
+    emitActivityStatus,
+  });
 
   const { getResumeEnv, persistRuntimeCredentialsForPod } = createWorkerRuntimeCredentials(deps, {
     podRepo,
@@ -2946,6 +2387,16 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityStatus,
     installGhBinary,
     installAzViaPip,
+  });
+  const resourcePreviewControls = createResourcePreviewControls({
+    podRepo,
+    containerManagerFactory,
+    executionForPod,
+    ensureSandboxPreviewProxy,
+    schedulePreviewAutoStop,
+    logger,
+    clearPreviewTimer,
+    stopSandboxPreviewProxy,
   });
 
   return {
@@ -4318,274 +3769,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       logger.info({ podId }, 'Pod deleted');
     },
 
-    async startPreview(podId: string): Promise<{ previewUrl: string }> {
-      podRepo.deletionOwnership?.assertTaskAvailable(podId);
-      const pod = podRepo.getOrThrow(podId);
-
-      if (!pod.containerId) {
-        throw new AutopodError(
-          `Pod ${podId} has no container — cannot start preview`,
-          'INVALID_STATE',
-          409,
-        );
-      }
-
-      if (!pod.previewUrl && pod.executionTarget !== 'sandbox') {
-        throw new AutopodError(`Pod ${podId} has no preview URL`, 'INVALID_STATE', 409);
-      }
-
-      const cm = containerManagerFactory.get(pod.executionTarget);
-      const status = await cm.getStatus(pod.containerId);
-
-      if (status === 'unknown') {
-        throw new AutopodError(
-          `Container for pod ${podId} has been removed — cannot start preview`,
-          'INVALID_STATE',
-          409,
-        );
-      }
-
-      const profile = executionForPod(pod);
-
-      if (status === 'running') {
-        // Container is running. Check if the supervisor is already alive — if so
-        // return immediately without re-spawning (idempotent against a second
-        // startPreview call while validation is running the supervisor).
-        if (profile.startCommand) {
-          const supervisorAlive = await (async () => {
-            try {
-              const pidResult = await cm.execInContainer(
-                pod.containerId,
-                ['sh', '-c', 'cat /tmp/autopod-supervisor.pid 2>/dev/null'],
-                {},
-              );
-              const pid = pidResult.stdout.trim();
-              if (!pid) return false;
-              const liveness = await cm.execInContainer(
-                pod.containerId,
-                ['sh', '-c', `kill -0 ${pid} 2>/dev/null && echo 1 || echo 0`],
-                {},
-              );
-              return liveness.stdout.trim() === '1';
-            } catch {
-              return false;
-            }
-          })();
-
-          if (supervisorAlive) {
-            const previewUrl =
-              pod.executionTarget === 'sandbox'
-                ? await ensureSandboxPreviewProxy(pod)
-                : // biome-ignore lint/style/noNonNullAssertion: checked above for local pods
-                  pod.previewUrl!;
-            schedulePreviewAutoStop(podId, pod.containerId, pod.executionTarget);
-            logger.info({ podId }, 'Supervisor already running — reusing existing preview');
-            return { previewUrl };
-          }
-
-          // Supervisor is dead — (re)spawn it
-          cm.execInContainer(
-            pod.containerId,
-            ['sh', '-c', buildSupervisorCommand(profile.startCommand)],
-            { cwd: '/workspace' },
-          ).catch((err) => {
-            logger.warn({ err, podId }, 'Preview supervisor start errored');
-          });
-        }
-
-        const previewUrl =
-          pod.executionTarget === 'sandbox'
-            ? await ensureSandboxPreviewProxy(pod)
-            : // biome-ignore lint/style/noNonNullAssertion: checked above for local pods
-              pod.previewUrl!;
-        schedulePreviewAutoStop(podId, pod.containerId, pod.executionTarget);
-        logger.info({ podId, previewUrl }, 'Preview started');
-        return { previewUrl };
-      }
-
-      // Container is stopped — start it
-      await cm.start(pod.containerId);
-      const previewUrl =
-        pod.executionTarget === 'sandbox'
-          ? await ensureSandboxPreviewProxy(pod)
-          : // biome-ignore lint/style/noNonNullAssertion: checked above for local pods
-            pod.previewUrl!;
-
-      // Re-run the start command under the supervisor and wait for health check
-      if (profile.startCommand) {
-        cm.execInContainer(
-          pod.containerId,
-          ['sh', '-c', buildSupervisorCommand(profile.startCommand)],
-          { cwd: '/workspace' },
-        ).catch((err) => {
-          logger.warn(
-            { err, podId },
-            'Preview supervisor start command errored (may be expected for long-running processes)',
-          );
-        });
-
-        // Poll for health
-        const healthUrl = previewUrl + profile.healthPath;
-        const timeoutMs = (profile.healthTimeout ?? 30) * 1_000;
-        const pollIntervalMs = 2_000;
-        const start = Date.now();
-
-        while (Date.now() - start < timeoutMs) {
-          try {
-            const response = await fetch(healthUrl, {
-              signal: AbortSignal.timeout(5_000),
-            });
-            if (response.status === 200) {
-              logger.info({ podId, healthUrl }, 'Preview health check passed');
-              break;
-            }
-          } catch {
-            // Health check not ready yet
-          }
-          const remaining = timeoutMs - (Date.now() - start);
-          if (remaining > 0) {
-            await new Promise<void>((r) => setTimeout(r, Math.min(pollIntervalMs, remaining)));
-          }
-        }
-      }
-
-      schedulePreviewAutoStop(podId, pod.containerId, pod.executionTarget);
-      logger.info({ podId, previewUrl }, 'Preview started');
-      return { previewUrl };
+    startPreview(podId: string): Promise<{ previewUrl: string }> {
+      return resourcePreviewControls.startPreview(podId);
     },
 
-    async stopPreview(podId: string): Promise<void> {
-      podRepo.deletionOwnership?.assertTaskAvailable(podId);
-      clearPreviewTimer(podId);
-      await stopSandboxPreviewProxy(podId);
-      const pod = podRepo.getOrThrow(podId);
-
-      if (!pod.containerId) {
-        throw new AutopodError(
-          `Pod ${podId} has no container — cannot stop preview`,
-          'INVALID_STATE',
-          409,
-        );
-      }
-
-      const cm = containerManagerFactory.get(pod.executionTarget);
-      await cm.stop(pod.containerId);
-      logger.info({ podId }, 'Preview stopped');
+    stopPreview(podId: string): Promise<void> {
+      return resourcePreviewControls.stopPreview(podId);
     },
 
-    async previewStatus(podId: string): Promise<{
+    previewStatus(podId: string): Promise<{
       running: boolean;
       reachable: boolean;
       restartCount: number;
       lastError: string | null;
       previewUrl: string | null;
     }> {
-      const pod = podRepo.getOrThrow(podId);
-      const safeDefaults = {
-        running: false,
-        reachable: false,
-        restartCount: 0,
-        lastError: null,
-        previewUrl: pod.previewUrl,
-      };
-
-      if (!pod.containerId || (!pod.previewUrl && pod.executionTarget !== 'sandbox')) {
-        return safeDefaults;
-      }
-
-      const cm = containerManagerFactory.get(pod.executionTarget);
-
-      // If the container is not running, the supervisor is definitely not alive.
-      try {
-        const containerStatus = await cm.getStatus(pod.containerId);
-        if (containerStatus !== 'running') return safeDefaults;
-      } catch {
-        return safeDefaults;
-      }
-
-      const previewUrl =
-        pod.executionTarget === 'sandbox'
-          ? await ensureSandboxPreviewProxy(pod)
-          : // biome-ignore lint/style/noNonNullAssertion: checked before status probe
-            pod.previewUrl!;
-
-      // A native sandbox preview URL is Entra-gated, so a host-side fetch just
-      // gets 401 — probe the app from inside the container instead (the real
-      // liveness signal). The daemon-local proxy URL (127.0.0.1) is fetched
-      // directly as before.
-      const isNativePreview =
-        pod.executionTarget === 'sandbox' && !previewUrl.startsWith('http://127.0.0.1');
-
-      // Exec parallel reads inside the container + an HTTP probe.
-      const [pidResult, restartCountResult, logTailResult, httpProbeResult] = await Promise.all([
-        cm
-          .execInContainer(
-            pod.containerId,
-            ['sh', '-c', 'cat /tmp/autopod-supervisor.pid 2>/dev/null'],
-            {},
-          )
-          .catch(() => null),
-        cm
-          .execInContainer(
-            pod.containerId,
-            ['sh', '-c', 'cat /tmp/autopod-restart-count 2>/dev/null'],
-            {},
-          )
-          .catch(() => null),
-        cm
-          .execInContainer(
-            pod.containerId,
-            ['sh', '-c', 'tail -c 200 /tmp/autopod-start.log 2>/dev/null'],
-            {},
-          )
-          .catch(() => null),
-        isNativePreview
-          ? cm
-              .execInContainer(
-                pod.containerId,
-                [
-                  'sh',
-                  '-c',
-                  // Prefer curl for the exact status code; fall back to wget (treat
-                  // a 2xx/3xx success as 200) so leaner warm images still probe.
-                  `code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://localhost:${CONTAINER_APP_PORT} 2>/dev/null); if [ -n "$code" ] && [ "$code" != "000" ]; then echo "$code"; elif wget -q -T 3 -O /dev/null http://localhost:${CONTAINER_APP_PORT} 2>/dev/null; then echo 200; fi`,
-                ],
-                {},
-              )
-              .then((r) => {
-                const code = Number.parseInt(r.stdout.trim(), 10);
-                return Number.isFinite(code) && code > 0 ? code : null;
-              })
-              .catch(() => null)
-          : fetch(previewUrl, { signal: AbortSignal.timeout(3_000) })
-              .then((r) => r.status)
-              .catch(() => null),
-      ]);
-
-      // Check PID liveness: if we got a PID string, verify the process is still alive.
-      const rawPid = pidResult?.stdout?.trim() ?? null;
-      let alivePid: string | null = null;
-      if (rawPid) {
-        try {
-          const check = await cm.execInContainer(
-            pod.containerId,
-            ['sh', '-c', `kill -0 ${rawPid} 2>/dev/null && echo 1 || echo 0`],
-            {},
-          );
-          alivePid = check.stdout.trim() === '1' ? rawPid : null;
-        } catch {
-          alivePid = null;
-        }
-      }
-
-      const status = parseStatus({
-        pid: alivePid,
-        restartCount: restartCountResult?.stdout ?? null,
-        startLogTail: logTailResult?.stdout ?? null,
-        reachableHttp: typeof httpProbeResult === 'number' ? httpProbeResult : null,
-      });
-
-      return { ...status, previewUrl };
+      return resourcePreviewControls.previewStatus(podId);
     },
 
     getSession(podId: string): Pod {
@@ -4796,117 +3995,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return validationWorkflowControls.setSkipValidation(podId, skip, actor);
     },
 
-    async refreshNetworkPolicy(profileName: string): Promise<void> {
-      if (deps.launchConfiguration)
-        throw new AutopodError(
-          'Running pods retain their launch network policy. Change the reusable profile for a new launch.',
-          'CONFIG_API_VERSION_UNSUPPORTED',
-          410,
-        );
-      const profile = profileStore.get(profileName);
-      if (!profile.networkPolicy?.enabled) return;
-
-      const runningSessions = podRepo
-        .list({ status: 'running' })
-        .filter(
-          (s) =>
-            s.profileName === profileName &&
-            (s.executionTarget === 'local' || s.executionTarget === 'sandbox') &&
-            s.containerId != null,
-        );
-
-      if (runningSessions.length === 0) return;
-
-      const mergedServers = mergeMcpServers(daemonConfig.mcpServers, profile.mcpServers);
-
-      // Resolve the current bridge IP of each sidecar for a given pod. With
-      // per-pod networks each pod has its own `autopod-<podId>` bridge, and
-      // sidecar IPs can be different across pods.
-      const collectSidecarIps = async (pod: import('@autopod/shared').Pod): Promise<string[]> => {
-        if (!sidecarManager || !pod.sidecarContainerIds) return [];
-        const networkName = networkNameForPod(pod.id);
-        const ips: string[] = [];
-        for (const [name, containerId] of Object.entries(pod.sidecarContainerIds)) {
-          const ip = await sidecarManager.getBridgeIp({ containerId, name }, networkName);
-          if (ip) ips.push(ip);
-        }
-        return ips;
-      };
-
-      // With per-pod networks, each pod has its own bridge and may have
-      // different sidecar IPs to allowlist. Build the firewall script per
-      // pod rather than once for the whole profile.
-      await Promise.all(
-        runningSessions.map(async (pod) => {
-          try {
-            const providerPreflight = resolveProviderPreflight(profile, pod.runtime, pod.model, {
-              profileStore,
-              providerAccountStore,
-              manifest: providerCatalog,
-              ...(pod.providerIdSnapshot
-                ? {
-                    expectedBinding: {
-                      accountId: pod.providerAccountIdSnapshot,
-                      providerId: pod.providerIdSnapshot,
-                    },
-                  }
-                : {}),
-            });
-            const runtimeNetworkPolicy = addRuntimeNetworkDefaults(
-              profile.networkPolicy,
-              profile,
-              pod.runtime,
-              providerPreflight.manifestProvider,
-              providerPreflight.account,
-            );
-            // biome-ignore lint/style/noNonNullAssertion: runningSessions always have a containerId
-            const containerId = pod.containerId!;
-            if (pod.executionTarget === 'sandbox') {
-              if (!runtimeNetworkPolicy?.enabled) return;
-              const allowedHosts = computeNetworkPolicyAllowlist(
-                runtimeNetworkPolicy,
-                mergedServers,
-                hostnameFromUrl(mcpBaseUrl),
-                profile.privateRegistries,
-              );
-              const cm = containerManagerFactory.get('sandbox');
-              await cm.refreshFirewall(
-                containerId,
-                sandboxEgressRefreshPayload(
-                  runtimeNetworkPolicy.mode ?? 'restricted',
-                  allowedHosts,
-                ),
-              );
-            } else {
-              if (!networkManager) return;
-              const gatewayIp = await networkManager.getGatewayIp(pod.id);
-              const sidecarIps = await collectSidecarIps(pod);
-              const netConfig = await networkManager.buildNetworkConfig(
-                runtimeNetworkPolicy,
-                mergedServers,
-                gatewayIp,
-                profile.privateRegistries,
-                pod.id,
-                sidecarIps,
-                [hostnameFromUrl(mcpBaseUrl)],
-                portFromUrl(mcpBaseUrl),
-              );
-              if (!netConfig) return;
-              const cm = containerManagerFactory.get('local');
-              await cm.refreshFirewall(containerId, netConfig.firewallScript);
-            }
-            logger.info(
-              { podId: pod.id, profileName },
-              'Network policy refreshed on running container',
-            );
-          } catch (err) {
-            logger.warn(
-              { err, podId: pod.id, profileName },
-              'Failed to refresh network policy on running container',
-            );
-          }
-        }),
-      );
+    refreshNetworkPolicy(profileName: string): Promise<void> {
+      return resourceNetwork.refreshNetworkPolicy(profileName);
     },
 
     injectCredential(_podId: string, _service: 'github' | 'ado'): Promise<void> {
@@ -5354,22 +4444,4 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       return { recovered: true, message: restored.reason };
     },
   };
-}
-
-function hostnameFromUrl(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return 'host.docker.internal';
-  }
-}
-
-function portFromUrl(url: string): number {
-  try {
-    const parsed = new URL(url);
-    if (parsed.port) return Number.parseInt(parsed.port, 10);
-    return parsed.protocol === 'https:' ? 443 : 80;
-  } catch {
-    return 3100;
-  }
 }

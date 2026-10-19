@@ -1,6 +1,6 @@
 # Slice30: complete resource, network and preview ownership
 
-Status: PLANNED —29 qualified;30 implementation is the next authorized phase.
+Status: IMPLEMENTED — expanded regression/frozen qualification in progress.
 Date:2026-10-19. Source baseline:5838a228ece085093fae33e30bd657c237ef91b6.
 Branch:codex/pod-manager-workspace.
 Worktree:/Users/ewi/.codex/worktrees/pod-manager-workspace/autopod.
@@ -119,8 +119,8 @@ explicit domain types, effect-free factory scaffolding and construction/thin del
 no original algorithm/default/await/error-policy change.
 
 Automated:
-- [ ] Qualified29 proof/hashes/root controls/public provenance match.
-- [ ] Whole source/reference/initializer/network interface/full recipes recorded.
+- [x] Qualified29 proof/hashes/root controls/public provenance match.
+- [x] Whole source/reference/initializer/network interface/full recipes recorded.
 Manual:none for bounded local compatibility under standing authority.
 
 ## Phase2: complete lifetime ownership and contract evidence
@@ -188,11 +188,11 @@ startup delivery polling arguments/site and allfour thin delegates. All2,114 oth
 predecessor package/script files/six roots stay unchanged. Each new source<1,000lines.
 
 Automated:
-- [ ] Whole bodies/defaults/initializers/network interface/full recipes match.
-- [ ] Shared ownership/construction/startup and73member/four-delegate API match.
-- [ ] Public1,192 names/statuses/assertion bytes pass.
-- [ ] Direct lifetime tests, three real SQLite reopens and cleanup/no-leak paths pass.
-- [ ] Build/lint/whitespace/new-test semantics pass; no new source diagnostic.
+- [x] Whole bodies/defaults/initializers/network interface/full recipes match.
+- [x] Shared ownership/construction/startup and73member/four-delegate API match.
+- [x] Public1,192 names/statuses/assertion bytes pass.
+- [x] Direct lifetime tests, three real SQLite reopens and cleanup/no-leak paths pass.
+- [x] Build/lint/whitespace/new-test semantics pass; no new source diagnostic.
 Manual:none for these local compatibility claims; no live external acceptance claimed.
 
 ## Phase3: frozen qualification and next responsibility
@@ -242,3 +242,43 @@ design questions remain.
 six roots match. Source inventory/research above remain exact. Next is30 baseline/
 recipe capture and implementation. Standing execution authority applies; goal remains
 active through34. This artifact was written before any30 product code.
+
+## Implementation checkpoint — 2026-10-19
+
+All25 complete original bodies/parameters/defaults and13 binding initializers match;
+alltwelve full manager/module recipes match. NetworkManager protocol has identical
+members in stable resource-contracts with manager re-export. Same73 public members,
+four thin public delegates and original startup polling arguments/site remain.
+Mutable creation order and exact shared advisory map captures match. Live PIM/hook,
+ADO token/checkpoint and immutable launch refusal remain live; other service instances
+stay captured. All2,114 other predecessor package/script files/six roots unchanged.
+Manager5,375→4,447lines. Eleven new source modules are37–288lines.
+
+Unchanged1,192 public names/statuses/assertion bytes pass. Ten new resource suites,
+29inherited direct suites and seven immediate resource collaborators pass355 cases
+across46files:51new,130inherited operator/fix/delivery/approval and174existing resource
+cases. Four actual private-file SQLite reopen cases cover confirmed sandbox cleanup,
+native preview URL/metadata, HTTPS test-branch metadata and owned commit observations,
+with integrity/FK and unrelated profile checks. Real local HTTP proxy traffic and
+actual denial stream parser/event persistence execute. HTTPS git process effects,
+container/Goal/provider/checkpoint adapters remain controlled; no external deletion,
+install/provider or live Docker/Azure acceptance. Actual advisory-validation shares
+this resource semaphore/map and releases/deletes its run after runner failure; FIFO
+waiters, detached guidance/cleanup promises, timers, polling replacement ownership,
+cleanup20s/15s deadlines and original late-operation limits are exercised.
+
+Alleleven new test/fixture files have zero semantic diagnostics; all23 changed-source
+diagnostics match the original23 baseline. Build/declarations/scoped lint/whitespace
+pass. Initial inferred catalog/poll types, unused facade binding, direct runner path,
+fixture stored-payload/captured snapshot/logger/target setup, immutable branch field,
+health minimum, nonzero preview port and reopened repository lifetime issues were
+corrected without changing original algorithm bodies/public assertions. The first
+local Git deletion fixture established the existing credential-free HTTPS requirement;
+it was replaced with a controlled HTTPS process adapter, preserving that security
+policy. No successful real local-remote authenticated branch deletion is claimed.
+Named first failures/outputs are retained under .autopod-data/resources-preview/.
+
+Allsource/test bytes are frozen. Evidence includes recipes, movement.json, named
+commands/reports/exits, public-comparison.json, baseline-type-comparison.json,
+test-types.json and frozen-manifest.json. Expanded/full qualification, final proof,
+clean pushed revision and31research remain before30 is complete. Goal active through34.
