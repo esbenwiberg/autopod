@@ -147,8 +147,9 @@ order and all27moved bodies/defaults/full recipes pass. Direct91-suite selection
 680cases, including38new cases and six real SQLite reopen boundaries. Earlier owner
 tests cover mutable map/timer/semaphore identity and cleanup, deferred receiver and
 live fields. Relevant existing tests for remaining references include
-pod-bridge-impl.test.ts, memory-candidate-recorder.test.ts, validation-environment.test.ts,
-validation-trigger-workflow.test.ts and the public manager suite. This research has
+pod-bridge-validation.test.ts, pod-bridge-memory.test.ts,
+pod-bridge-task-summary.test.ts, memory-candidate-recorder.test.ts and
+validation-environment.test.ts and the public manager suite. This research has
 not executed new33tests or claimed final architectural completion.
 
 The finite roadmap assigns stable public contracts, composition/delegate consolidation
@@ -182,3 +183,11 @@ script hashes and six roots unchanged. Full uncached qualification passes9,040Vi
 cases/597passing files plus35Node cases, same ten inherited gates;304affected suites
 pass5,450cases/four identical gates. No33product source edits occurred during research.
 Next is the concrete33plan under standing grouped approval, followed by final34audit.
+
+## Follow-up Research — verified existing test paths
+
+The original narrative used two conceptual test filenames that do not exist as
+standalone suites. Live rg inventory confirms bridge coverage is split across
+pod-bridge-validation/pod-bridge-memory/pod-bridge-task-summary.test.ts; trigger entry
+is covered by unchanged public/workflow suites. Correct paths are used in33direct
+selection, whose command is saved. No test selection was silently dropped.

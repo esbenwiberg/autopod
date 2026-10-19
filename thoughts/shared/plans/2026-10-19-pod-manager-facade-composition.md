@@ -1,6 +1,6 @@
 # Slice33: stable facade, dependency contracts and final composition
 
-Status: PLANNED — implementation next under standing grouped approval.
+Status: IMPLEMENTED — frozen expanded/full qualification in progress.
 Date:2026-10-19. Baseline:1dfca753f34bb93bc879ec7ad9a95f6940198590.
 Qualified implementation:2bbc454a42f826dcf2683948297f0ac26cdafd6c.
 Branch:codex/pod-manager-workspace.
@@ -50,7 +50,7 @@ source files change:pod-manager.ts,pod-bridge-impl.ts,memory-candidate-recorder.
    captures original instances/functions once at the same return site. No domain owner
    receives this aggregate facade assembly port.
 4. pod-facade-calls.ts moves exactly the triggerValidation proxy object's five lazy
-   arrows to createValidationTriggerCalls(receiver:ValidationTriggerCalls), using the
+   arrows to createValidationTriggerCalls(receiver:ValidationWorkflowCalls), using the
    existing narrow domain receiver protocol. Replace only lexical this with receiver
    inside those same five arrows. Construct at the original public method call, not at
    manager construction. Original .call(proxy,podId,options) stays; the public delegate
@@ -94,8 +94,8 @@ the documented lexical trigger receiver substitution and type-only consumer narr
 No original workflow body/default/await/error/event/publication/credential policy changes.
 
 Automated:
-- [ ] Qualified32hashes/public provenance and complete original captures match.
-- [ ] Full recipes, public types/73members,109construction statements and ports captured.
+- [x] Qualified32hashes/public provenance and complete original captures match.
+- [x] Full recipes, public types/73members,109construction statements and ports captured.
 Manual:none under grouped local compatibility approval.
 
 ## Phase2: implementation and architecture/behavior proof
@@ -141,10 +141,10 @@ weaken rules. Full unchanged1,192public names/status/assertion bytes and direct 
 must pass final source; original assertions/helpers remain byte fixed.
 
 Automated:
-- [ ] Exact contracts/73methods/trigger proxy/full recipes/construction/consumer runtime audit.
-- [ ] <=1,500manager/<=10public bodies/<1,000newfiles/no broad domain imports/no cycles.
-- [ ] Public1,192and direct boundary suites pass, including two actual SQLite reopens.
-- [ ] Build/DTS/lint/whitespace/types pass without new source/test diagnostics.
+- [x] Exact contracts/73methods/trigger proxy/full recipes/construction/consumer runtime audit.
+- [x] <=1,500manager/<=10public bodies/<1,000newfiles/no broad domain imports/no cycles.
+- [x] Public1,192and direct boundary suites pass, including two actual SQLite reopens.
+- [x] Build/DTS/lint/whitespace/types pass without new source/test diagnostics.
 Manual:none for bounded extraction; real external acceptance/integration separate.
 
 ## Phase3: frozen qualification and final audit preparation
@@ -181,3 +181,51 @@ replay/termination/atomicity guarantee. Same public imports, exact contract shap
 No dependency changes. Revert manager/facade/contracts/ports/calls and two type-only
 domain consumer changes together. Existing alias/reviewer/interface limits remain.
 34must prove every original finish gate;33does not declare the whole goal complete.
+
+## Implementation checkpoint — 2026-10-19
+
+Allthree public contracts are token-exact in stable module and original import paths
+remain. Same73runtime entries/order/async/default/parameters,72declared public facade
+protocols assignable both ways and original shorthand identities. All109construction/
+startup statements and exec adapter initializer/lifetime match. Facade captures43
+original owner/callback references through observed-method domain ports; no domain
+owner receives the aggregate facade port. Both bridge/recorder files emit identical
+runtime code after type erasure; ten exact bridge protocols and memory callback are
+equivalent. Original five trigger lazy arrows match with only lexical this→receiver
+and are created at the original public call. Full eight source recipes match.
+
+Manager2,247→1,421lines, max public body10lines; five new source files12–500lines.
+No residual condition/loop/retry/timer/resource algorithms in manager/facade and no
+domain public manager/dependency-bag references. Only public entry/contracts/index
+name the public types. New runtime edges are manager→facade→call adapter, without a
+new cycle. Every2,188other predecessor package/script file and six root controls match.
+
+Unchanged1,192public names/statuses/assertion bytes pass. Final99-suite direct run
+passes822cases:13new across three suites,680inherited direct cases and
+129additional existing bridge/recorder/environment cases. Two actual private-file
+SQLite reopens through the final public facade cover legacy metadata/committed queue
+publication and canonical frozen native configuration after preset edits, with actual
+repository/snapshot/ledger, integrity/FK and relevant unrelated data. Deferred
+property replacement/receiver/promise/error/default behavior, per-manager watchdog
+interval separation/stop and same shorthand function identities are directly tested.
+Original inherited direct/recovery/persistence suites also run unchanged.
+
+Allthree new test files have zero semantics. Full supplemental audit of allthree
+original source files has15baseline diagnostics; changed source now has10, all inherited.
+Removed diagnostics are unused imports and the historical object-literal series excess
+property warning avoided by factory-return inference; the original public interface
+still omits that runtime entry. Unchanged admission memory reviewer diagnostics remain
+outside this slice. No product/API correction or rule relaxation. Final build/DTS,
+scoped lint and whitespace pass.
+
+First scaffold issues were optional/default type syntax, void annotation lint and
+unused imports; explicit actual domain ReturnType annotations retain original bodies.
+Verifier treats defaults/proxies as expressions and accounts for redundant default
+type annotations removed by Biome. Test-only widened mock result and partial Task
+service object types were corrected without assertion changes. Named original logs/
+exits and direct-early.json are retained; first runtime direct run already passed13.
+No inherited assertion or runtime threshold changed.
+
+Allsource/test bytes frozen at2,199package/script files plus six root controls.
+Expanded/full qualification, final proof,34audit research and clean pushed docs remain
+before33is complete. Goal stays ACTIVE through all34finish gates.

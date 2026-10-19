@@ -1,3 +1,4 @@
+import type { Pod } from '@autopod/shared';
 import type {
   AgentActivityEvent,
   AgentTaskSummaryEvent,
@@ -13,6 +14,7 @@ import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ProfileStore } from '../profiles/index.js';
 import { createProfileMemoryReviewer } from '../providers/memory-reviewer.js';
+import type { AdmissionLaunchMemoryContext } from './admission-contracts.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
@@ -54,7 +56,7 @@ export interface MemoryCandidateRecorderDeps {
   providerAttemptRepo?: ProviderAttemptRepository;
   containerManagerFactory?: MemoryRecorderContainerManagerFactory;
   logger: Logger;
-  launchContext?: import('./pod-manager.js').PodManager['getLaunchMemoryContext'];
+  launchContext?: (pod: Pod) => AdmissionLaunchMemoryContext;
 }
 
 const EXTRACTION_STATUSES: PodStatus[] = ['failed', 'review_required'];
