@@ -159,7 +159,7 @@ deleteSession(:3678–3770) asserts durable task-execution deletion availability
 terminal/failed/review/killing and hashes the current test-pipeline config. It acquires
 deletionOwnership, checks exact generation/status/container/target/worktree/runtime/
 configuration before effects and each stage, and calls imported runDeletionCleanup
-with25s stage allowance and original preview→sidecar→container→network→test branches→
+with one25s whole-operation deadline and original preview→sidecar→container→network→test branches→
 worktree→runtime-state order. Sidecar/branch metadata is retained until final claim.
 After verified cleanup it clears validation intent/force-lease state and deletes within
 claim.finish. Missing or stale cleanup proof retains the row/resources. Imported durable
@@ -289,3 +289,13 @@ assertion measured99ms; isolated/full affected/full pipeline rechecks pass on un
 source with retained first evidence. Plan/roadmap mark30complete. Four milestones
 remain31–34. Next phase is the concrete31plan under standing continuation authority;
 no31 product code was changed during30qualification. Full goal remains active.
+
+## Resume follow-up — 2026-10-19
+
+Clean pushed checkpoint a5f98e7fe16a473f59f8da1acc8d3a1c16235e78 and all2,143 source/
+root hashes reverified on the user resume request. Corrected deadline wording from
+source: deletion-cleanup.ts uses a common25s operation deadline, not25s per stage.
+Concrete31 plan is now saved at ../plans/2026-10-19-pod-manager-workspace-recovery.md.
+No31 product code has changed. Next is baseline/recipe capture and implementation
+under standing grouped approval. The app goal tool currently reports blocked despite
+no repository blocker; this report does not claim that runner status was changed.
