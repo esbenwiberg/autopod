@@ -152,45 +152,6 @@ struct ProfileExecutionDefaultsEditor: View {
   }
 }
 
-struct RepositorySetupEditor: View {
-  @Binding var fields: [String: ConfigurationJSON]
-  @State private var section = "Commands"
-  private var deployment: Binding<[String: ConfigurationJSON]> {
-    Binding(get: { fields["integrations"]?["deployment"]?.object ?? ["enabled": .bool(false), "source": .string("published-default"), "env": .object([:]), "allowedScripts": .array([])] }, set: { value in
-      var integrations = fields["integrations"]?.object ?? [:]; integrations["deployment"] = .object(value); fields["integrations"] = .object(integrations)
-    })
-  }
-  private var serviceRules: Binding<[ConfigurationJSON]> {
-    Binding(get: { fields["integrations"]?["serviceAccess"]?.array ?? [] }, set: { value in
-      var integrations = fields["integrations"]?.object ?? [:]
-      integrations["serviceAccess"] = .array(value)
-      fields["integrations"] = .object(integrations)
-    })
-  }
-  var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Picker("Setup settings", selection: $section) {
-        ForEach(["Commands", "Services", "Deployment", "Advanced"], id: \.self) { Text($0).tag($0) }
-      }.pickerStyle(.segmented)
-      if section == "Commands" {
-      ConfigurationTextValue(title: "Setup name", fields: $fields, key: "name")
-      ConfigurationTextValue(title: "Default branch", fields: $fields, key: "defaultBranch", optional: true)
-      ConfigurationTextValue(title: "Working directory", fields: $fields, key: "buildWorkDir", optional: true)
-      ForEach([("validationSetupCommand", "Setup command"), ("buildCommand", "Build command"), ("testCommand", "Test command"), ("lintCommand", "Lint command"), ("startCommand", "Start command")], id: \.0) { key, title in
-        ConfigurationTextValue(title: title, fields: $fields, key: key, optional: true)
-      }
-      }
-      if section == "Services" {
-      ConfigurationObjectListEditor(title: "ADO and Azure log access", values: serviceRules, initial: {
-        ["id": .string("access-\(UUID().uuidString.prefix(8).lowercased())"), "service": .string("ado"), "organization": .string(""), "project": .string(""), "repository": .string(""), "operations": .array([.string("code.file")])]
-      }) { ServiceAccessRuleEditor(fields: $0) }
-      }
-      if section == "Deployment" { RepositoryDeploymentEditor(fields: deployment) }
-      if section == "Advanced" { ConfigurationFieldsEditor(fields: $fields, excluded: ["id", "name", "defaultBranch", "buildWorkDir", "validationSetupCommand", "buildCommand", "testCommand", "lintCommand", "startCommand", "integrations"]) }
-    }
-  }
-}
-
 struct RepositoryDeploymentEditor: View {
   @Binding var fields: [String: ConfigurationJSON]
   var body: some View {
@@ -201,7 +162,7 @@ struct RepositoryDeploymentEditor: View {
         ConfigurationTextValue(title: "Deployment target", fields: $fields, key: "targetId")
         Text("Use a target enrolled on the daemon for this repository and setup.").font(.caption).foregroundStyle(.secondary)
         ConfigurationStringListEditor(title: "Allowed scripts", values: Binding(get: { fields["allowedScripts"]?.array ?? [] }, set: { fields["allowedScripts"] = .array($0) }))
-        DisclosureGroup("Environment and credential references") { ConfigurationFieldsEditor(fields: $fields, excluded: ["enabled", "source", "targetId", "allowedScripts"]) }
+        ConfigurationValueMapEditor(title: "Deployment environment", context: "Passed only to approved deployment requests.", id: "deployment-env", values: Binding(get: { fields["env"]?.object ?? [:] }, set: { fields["env"] = .object($0) }))
       }
     }
   }
@@ -289,6 +250,9 @@ struct SkillSourceEditor: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       ConfigurationTextValue(title: "Skill name", fields: $fields, key: "name")
+      TextField("Skill description (optional)", text: Binding(get: { fields["description"]?.string ?? "" }, set: {
+        if $0.isEmpty { fields.removeValue(forKey: "description") } else { fields["description"] = .string($0) }
+      })).accessibilityIdentifier("configuration-skill-description")
       Picker("Source", selection: Binding(get: { mode }, set: { value in
         var next: [String: ConfigurationJSON] = ["type": .string(value)]
         if value == "inline" { next["content"] = .string("") }
@@ -325,7 +289,7 @@ struct McpTransportEditor: View {
         ConfigurationTextValue(title: "Command", fields: transport, key: "command")
         ConfigurationStringListEditor(title: "Arguments", values: Binding(get: { transport.wrappedValue["args"]?.array ?? [] }, set: { transport.wrappedValue["args"] = .array($0) }))
       }
-      DisclosureGroup("Credential references") { ConfigurationFieldsEditor(fields: transport, excluded: ["type", "url", "command", "args"]) }
+      ConfigurationValueMapEditor(title: mode == "http" ? "HTTP headers" : "Command environment", context: mode == "http" ? "Headers sent to this MCP server." : "Environment passed to this MCP command.", id: "mcp-values", values: Binding(get: { transport.wrappedValue[mode == "http" ? "headers" : "env"]?.object ?? [:] }, set: { transport.wrappedValue[mode == "http" ? "headers" : "env"] = .object($0) }))
       Text("HTTP credentials stay with the daemon. Command credentials must be enrolled for use inside the pod.").font(.caption).foregroundStyle(.secondary)
     }
   }

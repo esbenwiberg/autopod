@@ -39,8 +39,9 @@ functions include parameterized empty/null and dark/light compact/wide cases.
 `com.autopod.desktop.preview` app. These results do not include a real daemon
 profile save or real sidecar launch.
 
-**Overall form completeness remains partial.** Repository validation/registries,
-value/credential maps and skill description remain open after the Workflow repair below. This slice does not close the whole gap matrix or connected acceptance.
+The first two repair slices closed Profile execution and Workflow gaps. The
+Repository/value-map slice below closes the remaining gaps identified by this
+field audit. Connected daemon acceptance remains pending.
 
 ## Second repair slice: Workflow
 
@@ -65,10 +66,57 @@ The full `./scripts/test-desktop.sh` runner passes 565 Swift Testing tests
 (355 Client, 11 Desktop, 199 UI) and 13 XCTest tests. The separate signed Preview
 build also passes. Logs: `/private/tmp/autopod-workflow-full.log` and
 `/private/tmp/autopod-workflow-preview-build.log`.
-Native computer use failed before inspection, including after a bridge reset;
-these captures and saves establish the owned-view boundary, not a connected daemon.
+Native access initially failed. After the user closed both apps, reopening restored
+computer use. Workflow sample saves were then reopened in the full Preview at
+revision 2 with 95% warning, 50 calls and a 12345-second timeout. This establishes
+full-app sample interaction, not connected daemon persistence.
 
-## Evidence boundary
+## Third repair slice: Repository setups and value/reference maps
+
+Repository Project setups now has a left section rail for Commands, Validation,
+Smoke pages, Variables, PR & registries, Services, Deployment and additional saved
+fields. Commands includes prepare and SAST. Validation exposes health path, web UI
+presence and all five phase timeouts with seconds, the full 1–86400 range and an
+explicit reset that omits the key so daemon defaults apply.
+
+Smoke pages supports add/remove pages and CSS assertions with exists, visible,
+text-contains and count modes. The PR provider and private registry forms expose
+type, URL, npm scope, enrolled credential ID and optional expiry. Editing preserves
+other setup/integration fields and the repository's other setups/default/trust
+selections.
+
+A shared editor adds/removes named literal values or enrolled credential references
+from empty maps. Duplicate names cannot overwrite saved entries. Unsupported saved
+entry shapes remain visible and retained. The same editor is used for build
+variables, Deployment environment, MCP HTTP headers and MCP command environment.
+Skill description is now editable and omitted when cleared. No plaintext credential
+contents or new access grants are added to these forms; references are validated by
+the daemon.
+
+Eight new native test functions cover control presses/text entry, empty lists/maps,
+save/reopen/reset, duplicate rejection, numeric boundaries, optional-field encoding,
+unknown-field retention, shared map consumers and skill description. Four native
+save payloads (commands, pages, variables and registries) pass the current shared
+repository schema. Layout captures cover 900/1400-point windows in dark/light.
+
+Final validation: `./scripts/test-desktop.sh` passes 573 Swift Testing tests
+(355 Client, 11 Desktop, 207 UI) and 13 XCTest tests. The separate Preview Xcode
+build and strict deep signature verification pass. Logs:
+`/private/tmp/autopod-repository-full.log` and
+`/private/tmp/autopod-repository-preview-final-build.log`.
+
+Full Preview computer use saved and reopened the sample repository at revision 2.
+Its displayed payload retained prepare/SAST commands, a 901-second build timeout,
+`FEED_TOKEN` as `{secretId: "sample-feed"}`, and a Count assertion `.result` → `3`.
+The full-app capture is `/private/tmp/autopod-live-repository-reopened.png`.
+
+The installed current app was inspected through computer use: Settings →
+Repositories → Project setups confirmed its existing Commands/Services/Deployment/
+Advanced controls. It was left unchanged. Preview uses fictional records and
+memory-only saves; those checks do not establish a real daemon save, credential
+availability, package feed access or execution of the edited commands.
+
+## Original audit evidence boundary (historical)
 
 - Native computer use reached Preview's fleet and Profiles library. Preview
   explicitly identifies its records as sample data. The user's native screenshot

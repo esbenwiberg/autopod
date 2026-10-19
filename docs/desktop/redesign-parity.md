@@ -1,15 +1,16 @@
 # Desktop redesign source parity
 
-Reviewed 2026-10-18 against freshly fetched `origin/main`
+Updated 2026-10-19 against freshly fetched `origin/main`
 `6e51d1ce9495235e6aac2e498393cd2dd9a0e66b`. Redesign baseline:
 `7151cc6654939c5195e55c33c87d68de94fb96b9`, branch `codex/desktop-redesign`.
 
 This is a source review plus the named automated checks. It does not substitute
 for operating the connected Preview app. Native access resumed on 2026-10-18,
-but profile configuration gaps were then identified. The first Network/Sidecars
-repair slice is now implemented and checked in owned native views; see the
-[profile configuration audit](profile-configuration-audit.md). Keep PR #439 draft
-until those repairs and live acceptance are completed.
+but profile configuration gaps were then identified. The Profile, Workflow and
+Repository/value-map repairs are now implemented and covered by native interaction
+checks; see the [profile configuration audit](profile-configuration-audit.md).
+Full Preview sample saves/reopens were operated through computer use. Keep PR #439
+draft until connected daemon acceptance is completed.
 
 ## Reviewed routes and controls
 
@@ -26,7 +27,7 @@ until those repairs and live acceptance are completed.
 | Logs | Existing filtering/search, loading, copy and auto-scroll behavior retained in new chrome. | EventStream tests; connected scrolling remains a live check |
 | Terminal | Existing SwiftTerm/data pipe and session controls retained; only toolbar label added. | Source review; connected terminal input remains a live check |
 | Series | Standalone Series list and pipeline retained, including purpose/design, summary, member quality/activity, PR links and delete confirmation. Drill-through opens full pod details or Validation. | DesktopSeriesTests, PipelineDAGLayout tests |
-| Profiles | Library routes, configuration kinds, full JSON and revision/draft controls exist, but form completeness FAILED the follow-up audit. Network and sidecar defaults now have explicit controls; Workflow scan, budget warning and escalation forms are also repaired; repository/setup and value/reference maps remain open. See [confirmed gaps](profile-configuration-audit.md). | ConfigurationExecutionInteractionTests and ConfigurationWorkflowInteractionTests check the repaired fields; older layout tests establish fit only. |
+| Profiles | Library routes, configuration kinds, full JSON and revision/draft controls exist, but form completeness FAILED the follow-up audit. Network and sidecar defaults now have explicit controls; Workflow and repository/setup forms, reusable value/reference maps and skill description are repaired. Connected daemon acceptance remains pending. See [confirmed gaps](profile-configuration-audit.md). | ConfigurationExecutionInteractionTests, ConfigurationWorkflowInteractionTests, ConfigurationRepositoryInteractionTests and ConfigurationValueMapInteractionTests check the repaired fields; older layout tests establish fit only. |
 | Settings | Appearance, Connections, Provider Accounts, Podsitter, Notifications, Logs and About remain reachable. Embedded settings use real AppRootView callbacks. Profiles has its own workspace and deep links. | DesktopSettingsLayoutTests, provider catalog and connection tests |
 | Schedules | Create/edit/enable/disable/run/delete, templates, launch settings, last-pod navigation and scan policy/report routes remain wired. | ScheduledJobDraftTests, DesktopSchedulesLayoutTests, ScheduledScanTests |
 | History / Analytics | Existing drill loaders, date-window propagation, charts and pod links remain wired. | DesktopInsightsLayoutTests, AnalyticsWiringTests |
