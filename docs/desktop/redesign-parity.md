@@ -10,7 +10,9 @@ but profile configuration gaps were then identified. The Profile, Workflow and
 Repository/value-map repairs are now implemented and covered by native interaction
 checks; see the [profile configuration audit](profile-configuration-audit.md).
 Full Preview sample saves/reopens were operated through computer use. Keep PR #439
-draft until connected daemon acceptance is completed.
+draft: [connected acceptance](connected-acceptance.md) now proves real configuration
+persistence and isolation, but FAILED repository identity/filtering and initial
+fleet milestone display. Those two blockers remain.
 
 ## Reviewed routes and controls
 
@@ -56,7 +58,7 @@ that investigation and the target-isolated runner are recorded in
 [test isolation](test-isolation.md). No test assertions are skipped or
 weakened to establish parity.
 
-## Deferred connected Preview walkthrough
+## Connected Preview walkthrough and remaining checks
 
 - Operate the sidebar, Settings/Profile deep links and repository filters.
 - Open pods from History/Schedules/Analytics/Series with existing filters active.
@@ -66,7 +68,12 @@ weakened to establish parity.
 - Verify theme changes, window resizing and Village list/map/detail navigation.
 - Confirm current-app and Preview isolation before deciding whether to merge.
 
+The connected walkthrough is recorded in [connected acceptance](connected-acceptance.md).
+Its findings supersede source-only claims about repository identity and initial
+fleet milestone display. The unexercised states below remain separate from the
+passing configuration checks.
+
 The earlier review missed configuration fields and controls for absent/empty
 values. That conclusion is superseded by the
-[profile configuration audit](profile-configuration-audit.md). Connected behavior
-remains unverified; passing layout tests do not establish field completeness.
+[profile configuration audit](profile-configuration-audit.md). Connected proof is bounded by the acceptance report; passing layout tests alone
+do not establish field completeness.

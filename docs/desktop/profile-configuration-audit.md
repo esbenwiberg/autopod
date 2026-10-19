@@ -211,3 +211,14 @@ For each repair, exercise new/empty, saved/populated and unavailable-reference
 states. Verify save/reopen and unchanged unrelated payload fields. Use fictional
 native fixtures for visual review before connected acceptance. A test that only
 checks the host view's size cannot establish these behaviors.
+
+## Connected acceptance follow-up — 2026-10-19
+
+Real daemon repository save/reopen, invalid-input retention, credential-reference
+encoding, process restart, cleanup and current-app isolation now pass at
+`9c64410d`. The named disposable repository was archived and every pre-existing
+repository/profile/credential metadata record matched its baseline. This does not
+prove every form against live credentials or execution. The broader connected
+walkthrough FAILED repository identity/filtering and initial fleet milestone
+counts; PR #439 remains draft. See [connected acceptance](connected-acceptance.md)
+for exact reproductions, evidence and proof boundaries.
