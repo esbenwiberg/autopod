@@ -13,7 +13,7 @@ export interface GoalAttemptFence {
 }
 /** Backend-issued identity captured durably before a native process can start. */
 export interface NativeGoalProcessIdentity {
-  backend: 'docker';
+  backend: 'docker' | 'sandbox';
   containerId: string;
   execId: string;
   pidPath: string;

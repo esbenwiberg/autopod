@@ -1,3 +1,5 @@
+import type { NativeGoalProcessIdentity } from '@autopod/shared';
+
 /**
  * Seam over the Azure Container Apps **Sandboxes** preview data-plane.
  *
@@ -52,6 +54,8 @@ export interface CreateSandboxOptions {
 }
 
 export interface SandboxExecOptions {
+  onProcessCreated?: (identity: NativeGoalProcessIdentity) => void;
+  onProcessStarted?: (identity: NativeGoalProcessIdentity) => void;
   cwd?: string;
   timeoutMs?: number;
   /** Run the command as this user inside the sandbox (e.g. 'root'). */
@@ -191,6 +195,8 @@ export interface SandboxResourceAllocation {
 }
 
 export interface SandboxApiClient {
+  readonly supportsExecRecovery?: boolean;
+  terminateRecordedExec?(identity: NativeGoalProcessIdentity): Promise<number>;
   /** Fresh sandbox-to-disk link and immutable provider image source; null when unverified. */
   getImageDigest?(sandboxId: string): Promise<string | null>;
   /** Fresh provider-observed allocation, never cached spawn requests or tier guesses. */

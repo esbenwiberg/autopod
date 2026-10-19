@@ -37,6 +37,7 @@ import { admitLaunch } from './launch-admission.js';
 import { resolveLaunchExecutionSettings } from './launch-execution-settings.js';
 import { type LaunchResolutionServices, configurationDigest } from './launch-resolver.js';
 import { createLaunchSnapshotRepository } from './launch-snapshot.js';
+import { nativeGoalCapabilities } from './native-goal-capabilities.js';
 import { resolveExecution } from './resolve-execution.js';
 import { createScanLaunches } from './scan-launches.js';
 import { createScopedPodTools } from './scoped-pod-tools.js';
@@ -236,7 +237,7 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
   const goals = createPodGoalService({
     db,
     pods: options.pods,
-    recovery: { readConfig: snapshots.get, manager: options.reviewer.manager('local') },
+    recovery: { readConfig: snapshots.get, manager: options.reviewer.manager },
     evidence: options.nativeGoalEvidence ?? [],
     assertAllowed: assertCurrent,
     assertCurrent(config) {
@@ -407,16 +408,22 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     capabilities: async () => {
       const ready = options.admissionReady();
       const suspended = policy.get().payload.suspended;
+      const execution = await Promise.all(
+        (['local', 'sandbox'] as const).map(options.ports.executionCapabilities),
+      );
       return {
         schemaVersion: 1,
         launchAvailable: ready.ready && !suspended,
         launchUnavailableReason: suspended
           ? 'Execution is suspended by the operator'
           : ready.reason,
-        execution: await Promise.all(
-          (['local', 'sandbox'] as const).map(options.ports.executionCapabilities),
+        execution,
+        nativeGoals: nativeGoalCapabilities(
+          options.accounts.list(),
+          options.nativeGoalEvidence ?? [],
+          options.reviewer.manager,
+          (target) => execution.some((item) => item.target === target && item.available),
         ),
-        nativeGoals: [],
         deployment: { available: !!deployments, source: 'published-default', backend: 'local' },
       };
     },

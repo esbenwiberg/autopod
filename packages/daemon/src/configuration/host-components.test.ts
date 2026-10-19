@@ -12,6 +12,104 @@ import {
 import { resolveLaunch } from './launch-resolver.js';
 
 describe('configuration host composition', () => {
+  it('advertises accepted sandbox Goals and resolves them through the real host gates', async () => {
+    const ctx = createTestContext();
+    try {
+      const fixture = createTestConfiguration(ctx.db);
+      const ai = fixture.store.get('ai', 'ai');
+      fixture.store.write({
+        ...ai,
+        expectedRevision: ai.revision,
+        payload: {
+          main: { providerAccountId: 'account', runtime: 'codex', model: 'gpt-6.1-sol' },
+        },
+      });
+      const accounts = createProviderAccountStore(ctx.db);
+      accounts.create({
+        id: 'account',
+        name: 'OpenAI',
+        provider: 'openai',
+        credentials: {
+          provider: 'openai',
+          authMode: 'chatgpt',
+          authJson: '{"tokens":{"access_token":"fixture"}}',
+        },
+      });
+      let recovery = true;
+      Object.defineProperty(ctx.containerManager, 'supportsExecRecovery', { get: () => recovery });
+      const settings = hostConfigurationSettingsSchema.parse({
+        nativeGoalEvidence: [
+          {
+            runtime: 'codex',
+            runtimeVersion: '0.160.1',
+            imageDigest: `sha256:${'a'.repeat(64)}`,
+            backend: 'sandbox',
+            providerId: 'openai',
+            observedAt: '2026-10-19T00:00:00Z',
+            evidenceId: 'fixture-only',
+            accountId: 'account',
+            checks: {
+              start: true,
+              continuation: true,
+              terminalEvidence: true,
+              cancellation: true,
+              resume: true,
+              daemonRecovery: true,
+              usageIncludingEvaluator: true,
+              confirmedTermination: true,
+            },
+          },
+        ],
+      });
+      const components = createHostConfigurationComponents({
+        db: ctx.db,
+        logger: ctx.deps.logger,
+        pods: ctx.podRepo,
+        accounts,
+        audit: createActionAuditRepository(ctx.db),
+        cipher: { encrypt: (v) => v, decrypt: (v) => v },
+        githubAuth: { resolveCredential: vi.fn(), getStatus: vi.fn() },
+        azureDevOpsAuth: { getToken: vi.fn() },
+        images: {
+          resolveEnvironment: fixture.services.resolveEnvironment,
+          buildEnvironmentImage: vi.fn(),
+        },
+        reviewerManager: () => ctx.containerManager,
+        sandboxEnabled: true,
+        sandboxDefaultTier: 'M',
+        settings,
+        podManager: vi.fn(),
+        admissionReady: () => ({ ready: true }),
+      });
+      const request = {
+        repositoryId: 'repo-a',
+        task: 'Native objective',
+        intent: 'goal',
+        selections: { githubAccessId: null },
+        overrides: { execution: { target: 'sandbox' } },
+      };
+      expect(await components.routes.capabilities()).toMatchObject({
+        nativeGoals: [
+          {
+            runtime: 'codex',
+            accountId: 'account',
+            backend: 'sandbox',
+            available: true,
+          },
+        ],
+      });
+      await expect(resolveLaunch(request, components.resolution)).resolves.toMatchObject({
+        intent: 'goal',
+      });
+      recovery = false;
+      expect(await components.routes.capabilities()).toMatchObject({ nativeGoals: [] });
+      await expect(resolveLaunch(request, components.resolution)).rejects.toMatchObject({
+        code: 'GOAL_UNAVAILABLE',
+      });
+    } finally {
+      ctx.db.close();
+    }
+  });
   it('exposes actual backend limits while keeping closed admission and unenrolled PIM closed', async () => {
     const ctx = createTestContext();
     try {

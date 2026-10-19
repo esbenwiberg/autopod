@@ -13,6 +13,8 @@ export interface CodexGoalThreadConfig {
   model: string;
   cwd: string;
   developerInstructions: string;
+  /** Hosted sandbox already enforces the pod boundary, matching ordinary Codex tasks. */
+  externalSandbox?: boolean;
 }
 
 /** Native APIs only. Version/backend capability proof is required before constructing for a pod. */
@@ -65,7 +67,7 @@ export class CodexAppServerGoalSession implements NativeGoalSession {
       cwd: this.config.cwd,
       developerInstructions: this.config.developerInstructions,
       approvalPolicy: 'never',
-      sandbox: 'workspace-write',
+      sandbox: this.config.externalSandbox ? 'danger-full-access' : 'workspace-write',
       ...(sessionId ? { threadId: sessionId } : { ephemeral: false }),
     };
     const response = z
@@ -107,7 +109,9 @@ export class CodexAppServerGoalSession implements NativeGoalSession {
   async clear(): Promise<void> {
     const response = z
       .object({ cleared: z.boolean() })
-      .parse(await this.client.request('thread/goal/clear', { threadId: this.id() }));
+      .parse(
+        await this.client.request('thread/goal/clear', { threadId: this.id(), origin: 'user' }),
+      );
     if (!response.cleared && (await this.get())) throw new CodexRpcError('GOAL_CLEAR_UNCONFIRMED');
   }
   stop(): Promise<void> {
@@ -177,7 +181,11 @@ export class CodexAppServerGoalSession implements NativeGoalSession {
   }
   private async set(params: Record<string, unknown>): Promise<NativeGoalObservation> {
     const response = responseSchema.parse(
-      await this.client.request('thread/goal/set', { threadId: this.id(), ...params }),
+      await this.client.request('thread/goal/set', {
+        threadId: this.id(),
+        origin: this.inspectionOnly ? 'automatic' : 'user',
+        ...params,
+      }),
     );
     if (!response.goal) throw new CodexRpcError('GOAL_MISSING');
     return this.accept(response.goal);

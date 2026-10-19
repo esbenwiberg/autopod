@@ -1,6 +1,8 @@
 import type { NativeGoalObservation, NativeGoalSession } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
+import { sandboxCapabilities } from '../configuration/backend-capabilities.js';
 import { resolveLaunch } from '../configuration/launch-resolver.js';
+import { sandboxGoalProcess } from '../containers/sandbox-goal-process.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { inspectNativeGoal } from '../runtimes/inspect-native-goal.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
@@ -41,10 +43,14 @@ function nativeSession(): NativeGoalSession {
   };
 }
 
-async function fixture(verified = true) {
+async function fixture(verified = true, target: 'local' | 'sandbox' = 'local') {
   const db = createTestDb();
   insertTestProfile(db);
   const { store, services } = createTestConfiguration(db);
+  if (target === 'sandbox')
+    services.executionCapabilities = vi.fn(async () =>
+      sandboxCapabilities({ enabled: true, defaultTier: 'M' }),
+    );
   const ai = store.get('ai', 'ai');
   store.write({
     ...ai,
@@ -52,7 +58,12 @@ async function fixture(verified = true) {
     payload: { main: { providerAccountId: 'account', runtime: 'codex', model: 'gpt-5.5' } },
   });
   const config = await resolveLaunch(
-    { repositoryId: 'repo-a', task: 'Tests pass', intent: 'goal' },
+    {
+      repositoryId: 'repo-a',
+      task: 'Tests pass',
+      intent: 'goal',
+      overrides: { execution: { target } },
+    },
     services,
   );
   const pods = createPodRepository(db);
@@ -63,7 +74,7 @@ async function fixture(verified = true) {
     status: 'running',
     model: 'gpt-5.5',
     runtime: 'codex',
-    executionTarget: 'local',
+    executionTarget: target,
     branch: 'branch',
     userId: 'operator',
     maxValidationAttempts: 3,
@@ -117,8 +128,9 @@ async function fixture(verified = true) {
             runtime: 'codex',
             runtimeVersion: '0.152.1',
             imageDigest: provenance.imageDigest,
-            backend: 'local',
+            backend: target,
             providerId: 'openai',
+            accountId: 'account',
             observedAt: '2026-09-14T00:00:00Z',
             evidenceId: 'fixture',
             checks: {
@@ -153,8 +165,8 @@ async function fixture(verified = true) {
 }
 
 describe('native Goal pod lifecycle binding', () => {
-  async function interrupted() {
-    const f = await fixture();
+  async function interrupted(target: 'local' | 'sandbox' = 'local') {
+    const f = await fixture(true, target);
     const containerId = 'c'.repeat(64);
     f.pods.update('pod', { containerId });
     const repo = createGoalRepository(f.db);
@@ -171,12 +183,15 @@ describe('native Goal pod lifecycle binding', () => {
       accountId: 'account',
       containerId,
     };
-    const identity = {
-      backend: 'docker' as const,
-      containerId,
-      execId: 'a'.repeat(64),
-      pidPath: '/tmp/.autopod-stream-exec-11111111-1111-1111-1111-111111111111.pid',
-    };
+    const identity =
+      target === 'sandbox'
+        ? sandboxGoalProcess(containerId, '11111111-1111-4111-8111-111111111111')
+        : {
+            backend: 'docker' as const,
+            containerId,
+            execId: 'a'.repeat(64),
+            pidPath: '/tmp/.autopod-stream-exec-11111111-1111-1111-1111-111111111111.pid',
+          };
     processes.record(owner, identity, 'agent');
     processes.confirmStarted(owner, identity.execId);
     f.pods.taskExecutions?.retainUnverifiedRun(f.input.fence.attemptId);
@@ -184,7 +199,13 @@ describe('native Goal pod lifecycle binding', () => {
     let inspectionCount = 0;
     const inspect = vi.fn<typeof inspectNativeGoal>(async (input) => {
       expect(terminate).toHaveBeenCalled();
-      const ref = { ...identity, execId: (++inspectionCount).toString(16).padStart(64, '0') };
+      const ref =
+        target === 'sandbox'
+          ? sandboxGoalProcess(
+              containerId,
+              `22222222-2222-4222-8222-${String(++inspectionCount).padStart(12, '0')}`,
+            )
+          : { ...identity, execId: (++inspectionCount).toString(16).padStart(64, '0') };
       input.hooks.processCreated(ref);
       input.hooks.processStarted(ref);
       input.observe({ ...observation(1, 'paused'), cumulativeTokens: 110, cumulativeSeconds: 11 });
@@ -198,53 +219,66 @@ describe('native Goal pod lifecycle binding', () => {
       publish: vi.fn(),
       recovery: {
         readConfig: () => f.input.config,
-        manager: { terminateRecordedExec: terminate } as unknown as ContainerManager,
+        manager: (backend) => {
+          expect(backend).toBe(target);
+          return { terminateRecordedExec: terminate } as unknown as ContainerManager;
+        },
         inspect,
       },
     });
     return { ...f, restarted, terminate, inspect, processes, owner, identity };
   }
-  it('recovers a lost process before inspecting native state and settling the durable attempt', async () => {
-    const f = await interrupted();
-    try {
-      const goal = await f.restarted.recover('pod');
-      expect(goal).toMatchObject({ state: 'paused', executionStopped: true, observedTokens: 110 });
-      expect(f.terminate).toHaveBeenCalledWith(
-        expect.objectContaining({ execId: f.identity.execId }),
-      );
-      expect(f.pods.taskExecutions?.hasUnverifiedTermination('pod')).toBe(false);
-      expect(
-        f.db
-          .prepare('SELECT outcome,failure_category FROM task_agent_runs WHERE id=?')
-          .get(f.input.fence.attemptId),
-      ).toEqual({ outcome: 'paused', failure_category: 'native_goal_recovered' });
-      await f.restarted.recover('pod');
-      expect(f.inspect).toHaveBeenCalledOnce();
-      expect(f.restarted.get('pod')?.observedTokens).toBe(110);
-    } finally {
-      f.db.close();
-    }
-  });
-  it('does not inspect, release the task budget, or confirm cancellation after uncertain termination', async () => {
-    const f = await interrupted();
-    try {
-      f.terminate.mockRejectedValue(new Error('Disconnected'));
-      await expect(f.restarted.control('pod', 'cancel')).rejects.toThrow('Disconnected');
-      expect(f.inspect).not.toHaveBeenCalled();
-      expect(f.restarted.get('pod')).toMatchObject({
-        executionStopped: false,
-        controlIntent: 'cancel',
-      });
-      expect(f.pods.taskExecutions?.hasUnverifiedTermination('pod')).toBe(true);
-      f.terminate.mockResolvedValue(137);
-      expect(await f.restarted.recover('pod')).toMatchObject({
-        state: 'cancelled',
-        executionStopped: true,
-      });
-    } finally {
-      f.db.close();
-    }
-  });
+  it.each(['local', 'sandbox'] as const)(
+    'recovers a lost %s process before inspecting native state and settling the durable attempt',
+    async (target) => {
+      const f = await interrupted(target);
+      try {
+        const goal = await f.restarted.recover('pod');
+        expect(goal).toMatchObject({
+          state: 'paused',
+          executionStopped: true,
+          observedTokens: 110,
+        });
+        expect(f.terminate).toHaveBeenCalledWith(
+          expect.objectContaining({ execId: f.identity.execId }),
+        );
+        expect(f.pods.taskExecutions?.hasUnverifiedTermination('pod')).toBe(false);
+        expect(
+          f.db
+            .prepare('SELECT outcome,failure_category FROM task_agent_runs WHERE id=?')
+            .get(f.input.fence.attemptId),
+        ).toEqual({ outcome: 'paused', failure_category: 'native_goal_recovered' });
+        await f.restarted.recover('pod');
+        expect(f.inspect).toHaveBeenCalledOnce();
+        expect(f.restarted.get('pod')?.observedTokens).toBe(110);
+      } finally {
+        f.db.close();
+      }
+    },
+  );
+  it.each(['local', 'sandbox'] as const)(
+    'does not inspect, release the task budget, or confirm cancellation after uncertain %s termination',
+    async (target) => {
+      const f = await interrupted(target);
+      try {
+        f.terminate.mockRejectedValue(new Error('Disconnected'));
+        await expect(f.restarted.control('pod', 'cancel')).rejects.toThrow('Disconnected');
+        expect(f.inspect).not.toHaveBeenCalled();
+        expect(f.restarted.get('pod')).toMatchObject({
+          executionStopped: false,
+          controlIntent: 'cancel',
+        });
+        expect(f.pods.taskExecutions?.hasUnverifiedTermination('pod')).toBe(true);
+        f.terminate.mockResolvedValue(137);
+        expect(await f.restarted.recover('pod')).toMatchObject({
+          state: 'cancelled',
+          executionStopped: true,
+        });
+      } finally {
+        f.db.close();
+      }
+    },
+  );
   it('retains an interrupted inspection process and terminates it before a replacement inspector', async () => {
     const f = await interrupted();
     try {

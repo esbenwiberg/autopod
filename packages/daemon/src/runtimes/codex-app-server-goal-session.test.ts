@@ -58,6 +58,7 @@ describe('native Codex Goal session', () => {
       cumulativeTokens: 100,
     });
     expect(client.request).toHaveBeenLastCalledWith('thread/goal/set', {
+      origin: 'user',
       threadId: 'native',
       tokenBudget: 350,
     });
@@ -66,6 +67,7 @@ describe('native Codex Goal session', () => {
       cumulativeTokens: 100,
     });
     expect(client.request).toHaveBeenLastCalledWith('thread/goal/set', {
+      origin: 'user',
       threadId: 'native',
       tokenBudget: null,
     });
@@ -151,6 +153,7 @@ describe('native Codex Goal session', () => {
     await session.get();
     await session.resume(50);
     expect(client.request).toHaveBeenLastCalledWith('thread/goal/set', {
+      origin: 'user',
       threadId: 'native',
       status: 'active',
       tokenBudget: 150,

@@ -15,7 +15,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { createGzip } from 'node:zlib';
-import { type ArtifactOutput, AutopodError } from '@autopod/shared';
+import { type ArtifactOutput, AutopodError, type NativeGoalProcessIdentity } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { Logger } from 'pino';
 import { type Pack as TarPack, pack as tarPack } from 'tar-stream';
@@ -557,7 +557,7 @@ for root in sys.argv[1:]:
     command: string[],
     options?: ExecOptions,
   ): Promise<StreamingExecResult> {
-    if (options?.onProcessCreated)
+    if (options?.onProcessCreated && !this.supportsExecRecovery)
       throw new Error('Recoverable native Goal processes are unavailable on this backend');
     const sandboxOptions = toSandboxExecOptions(options);
 
@@ -567,6 +567,16 @@ for root in sys.argv[1:]:
     throw new Error(
       'Sandbox streaming exec is not supported by the Azure Sandboxes data plane yet. Buffered exec is available for short commands, but agent runtimes and terminals require native streaming/TTY support.',
     );
+  }
+
+  get supportsExecRecovery(): boolean {
+    return this.client.supportsExecRecovery === true && !!this.client.terminateRecordedExec;
+  }
+
+  async terminateRecordedExec(identity: NativeGoalProcessIdentity): Promise<number> {
+    if (!this.supportsExecRecovery || !this.client.terminateRecordedExec)
+      throw new Error('Recoverable native Goal processes are unavailable on this backend');
+    return this.client.terminateRecordedExec(identity);
   }
 
   async attachTerminal(
@@ -980,6 +990,8 @@ function toSandboxExecOptions(options?: ExecOptions): SandboxExecOptions | undef
     user: options.user,
     env: options.env,
     stdin: options.stdin,
+    onProcessCreated: options.onProcessCreated,
+    onProcessStarted: options.onProcessStarted,
   };
 }
 

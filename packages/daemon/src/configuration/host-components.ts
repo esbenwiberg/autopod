@@ -16,6 +16,10 @@ import { createPimEligibilityService } from '../pim/eligibility-service.js';
 import { createPimPolicyReader } from '../pim/policy-reader.js';
 import type { AzureDevOpsAuth } from '../providers/azure-devops-auth.js';
 import { getAzureToken } from '../providers/azure-token.js';
+import {
+  nativeGoalCapability,
+  nativeGoalEvidenceSchema,
+} from '../runtimes/native-goal-capability.js';
 import { dockerCapabilities, sandboxCapabilities } from './backend-capabilities.js';
 import {
   type ConfigurationComponentsOptions,
@@ -31,6 +35,7 @@ const REVIEWER_IMAGE_CACHE_MS = 10 * 60_000;
 
 export const hostConfigurationSettingsSchema = z
   .object({
+    nativeGoalEvidence: z.array(nativeGoalEvidenceSchema).default([]),
     deploymentTargets: z
       .array(deploymentTargetSchema)
       .refine((v) => new Set(v.map((t) => t.id)).size === v.length, 'Duplicate deployment targets')
@@ -176,6 +181,7 @@ export function createHostConfigurationComponents(
   };
   return createConfigurationComponents({
     ...options,
+    nativeGoalEvidence: settings.nativeGoalEvidence,
     deployment:
       options.docker && readSnapshotArchive
         ? {
@@ -222,12 +228,38 @@ export function createHostConfigurationComponents(
               }),
             ),
       async assertCapabilities(config: EffectiveLaunchConfig) {
-        if (config.intent === 'goal')
-          configurationError(
-            'Native Goal provider and recovery acceptance is not enabled',
-            'GOAL_UNAVAILABLE',
-            409,
-          );
+        if (config.intent === 'goal') {
+          if (!options.reviewerManager(config.execution.target).supportsExecRecovery)
+            configurationError(
+              'Native Goal process recovery is unavailable on this backend',
+              'GOAL_UNAVAILABLE',
+              409,
+            );
+          for (const route of [config.ai.main, ...config.ai.main.failover]) {
+            const providerId = config.agentAccounts[route.providerAccountId]?.providerId;
+            if (
+              !settings.nativeGoalEvidence.some(
+                (record) =>
+                  nativeGoalCapability(
+                    {
+                      runtime: route.runtime,
+                      runtimeVersion: record.runtimeVersion,
+                      imageDigest: record.imageDigest,
+                      backend: config.execution.target,
+                      providerId: providerId ?? '',
+                      accountId: route.providerAccountId,
+                    },
+                    [record],
+                  ).available,
+              )
+            )
+              configurationError(
+                'Native Goal lifecycle and usage have not been verified for the selected provider and backend',
+                'GOAL_UNAVAILABLE',
+                409,
+              );
+          }
+        }
         const routes = [
           config.ai.main,
           ...config.ai.main.failover,

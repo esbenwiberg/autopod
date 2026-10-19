@@ -189,14 +189,11 @@ export class CodexRuntime implements Runtime {
         model: config.model,
         cwd: config.workDir,
         developerInstructions: config.customInstructions ?? '',
+        externalSandbox: config.executionTarget === 'sandbox',
       },
       prepare: async () => {
         assertOwner();
-        if (
-          !hooks ||
-          config.executionTarget !== 'local' ||
-          !this.containerManager.supportsExecRecovery
-        )
+        if (!hooks || !this.containerManager.supportsExecRecovery)
           throw new AutopodError(
             'Recoverable native Goal execution is unavailable',
             'GOAL_UNAVAILABLE',
