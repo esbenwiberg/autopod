@@ -413,6 +413,26 @@ describe('DockerContainerManager', () => {
       expect(createCall.HostConfig.CapAdd).toEqual(['NET_ADMIN', 'SETGID', 'SETUID', 'SETPCAP']);
     });
 
+    it('gives managed root setup mount ownership and cross-uid process cleanup capabilities', async () => {
+      await manager.spawn({
+        ...baseConfig,
+        networkName: 'autopod-net',
+        managedSpecDigest: `sha256:${'a'.repeat(64)}`,
+      });
+      const createCall = docker.createContainer.mock.calls[0]?.[0];
+      expect(createCall.HostConfig.CapAdd).toEqual([
+        'NET_ADMIN',
+        'SETGID',
+        'SETUID',
+        'CHOWN',
+        'FOWNER',
+        'DAC_OVERRIDE',
+        'KILL',
+      ]);
+      expect(createCall.User).toBe('autopod');
+      expect(createCall.HostConfig.SecurityOpt).toContain('no-new-privileges:true');
+    });
+
     it('does NOT set NetworkMode when networkName absent', async () => {
       await manager.spawn(baseConfig);
 

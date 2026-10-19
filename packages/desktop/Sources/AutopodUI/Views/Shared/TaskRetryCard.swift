@@ -17,13 +17,35 @@ struct TaskRetryCard: View {
       + (stage == "validation" ? "" : ".\(stage)")
   }
   private var stageLabel: String { stage == "codex_interruption" ? "Codex interruption recovery" : stage == "validation" ? "Validation" : stage == "worker" ? "Worker" : "Sandbox startup" }
+  private var title: String {
+    stage == "codex_interruption" ? "Codex recovery allowance" : stage == "worker" ? "Worker execution" : "\(stageLabel) retry budget"
+  }
+  /// The resume/rework controls are live: a failed attempt the operator can act on.
+  private var actionable: Bool {
+    guard let state, let outcome = state.latest?.outcome,
+      status == "failed" || status == "review_required"
+    else { return false }
+    return stage == "worker"
+      ? state.authorizationRequired == true || state.retryFailure == "transient"
+      : outcome != "pass" || stage == "codex_interruption"
+  }
+  private var needsAttention: Bool { actionable || pending != nil || !error.isEmpty || !message.isEmpty }
+  @State private var userExpanded: Bool?
+  private var expanded: Binding<Bool> {
+    Binding(get: { userExpanded ?? needsAttention }, set: { userExpanded = $0 })
+  }
+  private var summary: String {
+    guard let state else { return "" }
+    return "\(state.executedCount)/\(state.admissionCount) · latest \(state.latest?.outcome ?? "none")"
+  }
   var body: some View {
     // Keep a mounted container while evidence is loading. An empty Group has no
     // view lifecycle, so its task never loads the conditionally visible stages.
     VStack(alignment: .leading, spacing: 0) {
-      if stage == "validation" || (state?.admissionCount ?? 0) > 0 || !error.isEmpty {
+      if (state?.admissionCount ?? 0) > 0 || needsAttention {
+        // Accounting detail is collapsed unless a failure needs a human decision.
+        DisclosureGroup(isExpanded: expanded) {
         VStack(alignment: .leading, spacing: 10) {
-          Text(stage == "codex_interruption" ? "Codex recovery allowance" : stage == "worker" ? "Worker execution" : "\(stageLabel) retry budget").font(.headline)
           if !error.isEmpty { Text(error).foregroundStyle(.red).textSelection(.enabled) }
           if !message.isEmpty { Text(message).textSelection(.enabled) }
           if let state {
@@ -46,9 +68,7 @@ struct TaskRetryCard: View {
                 "\(grant.usedByAttemptId != nil ? "Consumed" : grant.failureId == state.latest?.id ? (stage == "codex_interruption" ? "Available for latest recovery" : "Available for latest failure") : "Superseded"): \(grant.reason)"
               ).font(.caption)
             }
-            if let outcome = state.latest?.outcome, (stage == "worker" ? state.authorizationRequired == true || state.retryFailure == "transient" : outcome != "pass" || stage == "codex_interruption"),
-              status == "failed" || status == "review_required"
-            {
+            if actionable {
               if stage != "worker" || state.authorizationRequired == true || pending != nil {
               TextField("Reason for one extra retry", text: $reason, axis: .vertical)
                 .textFieldStyle(.roundedBorder).disabled(busy || pending != nil)
@@ -76,12 +96,20 @@ struct TaskRetryCard: View {
             }
           }
           Button("Refresh retry accounting") { Task { await refresh() } }.disabled(busy)
+        }.font(.callout).padding(.top, 6)
+        } label: {
+          HStack {
+            Text(title).font(.headline)
+            Spacer()
+            Text(summary).font(.caption).foregroundStyle(actionable ? .red : .secondary)
+          }
         }.padding(16).background(Color(nsColor: .controlBackgroundColor)).clipShape(
           RoundedRectangle(cornerRadius: 10))
       }
     }
     .task(id: "\(podId).\(stage).\(status)") {
       state = nil
+      userExpanded = nil
       pending = nil
       reason = ""
       error = ""

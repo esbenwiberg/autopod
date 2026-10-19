@@ -14,6 +14,7 @@ public struct AppRootView: View {
   public let eventStream: EventStream?
   public let terminalManager: TerminalManager?
   @Binding public var showSetup: Bool
+  private let onConnectionRecovered: @MainActor () -> Void
 
   public init(
     connectionManager: ConnectionManager,
@@ -25,7 +26,8 @@ public struct AppRootView: View {
     actionHandler: ActionHandler?,
     eventStream: EventStream?,
     terminalManager: TerminalManager?,
-    showSetup: Binding<Bool>
+    showSetup: Binding<Bool>,
+    onConnectionRecovered: @escaping @MainActor () -> Void
   ) {
     self.connectionManager = connectionManager
     self.podStore = podStore
@@ -37,9 +39,33 @@ public struct AppRootView: View {
     self.eventStream = eventStream
     self.terminalManager = terminalManager
     self._showSetup = showSetup
+    self.onConnectionRecovered = onConnectionRecovered
   }
 
   @State private var launchConfiguration = LaunchConfigurationStore()
+  private func requireScheduledConnection() throws {
+    guard connectionManager.isConnected, connectionManager.api != nil else {
+      throw DaemonError.badRequest("Connect to the daemon before changing or running schedules.")
+    }
+  }
+  private var scheduledWorkspaceActions: ScheduledWorkspaceActions {
+    ScheduledWorkspaceActions(
+      reload: { try requireScheduledConnection(); await scheduledJobStore.load(); if let error = scheduledJobStore.error { throw DaemonError.badRequest(error) } },
+      run: { job, catchup in
+        try requireScheduledConnection()
+        if catchup { try await scheduledJobStore.runCatchup(job.id) }
+        else { try await scheduledJobStore.triggerJob(job.id) }
+        return scheduledJobStore.notice ?? "Run requested."
+      },
+      skip: { try requireScheduledConnection(); try await scheduledJobStore.skipCatchup($0.id) },
+      create: { try requireScheduledConnection(); try await scheduledJobStore.createJob($0) },
+      update: { try requireScheduledConnection(); try await scheduledJobStore.updateJob($0, $1) },
+      delete: { try requireScheduledConnection(); try await scheduledJobStore.deleteJob($0.id) },
+      createTemplate: { try requireScheduledConnection(); try await scheduledJobStore.createTemplate($0) },
+      updateTemplate: { try requireScheduledConnection(); try await scheduledJobStore.updateTemplate($0, $1) },
+      deleteTemplate: { try requireScheduledConnection(); try await scheduledJobStore.deleteTemplate($0.id) })
+  }
+
   @State private var scanJob: ScheduledJob?
   @State private var showError = false
   @State private var showAuthRecoveryFailure = false
@@ -94,13 +120,12 @@ public struct AppRootView: View {
       isConnected: connectionManager.isConnected,
       connectionLabel: connectionManager.connectionLabel,
       connectionState: connectionManager.state.label,
+      activityStreamConnected: eventStream?.connectionState == "Connected",
       isLoading: podStore.isLoading,
       actions: actionHandler?.actions ?? .preview,
       profileNames: profileStore.profileNames,
       profileDetails: profileStore.profiles,
-      configurationActions: launchConfiguration.actions(onCreated: { id in
-        await podStore.loadSessions(); podStore.selectedSessionId = id
-      }),
+      configurationActions: launchConfiguration.actions(selectingIn: podStore),
       selectedSessionEvents: selectedSessionEvents,
       eventsForPod: { [eventStream] id in
         eventStream?.sessionEvents[id] ?? []
@@ -161,9 +186,8 @@ public struct AppRootView: View {
       onRefreshDiff: { podId in
         Task { await podStore.loadDiff(podId) }
       },
-      onShowSettings: {
-        showSettings = true
-      },
+      onShowSettings: { showSettings = true },
+      settingsWorkspace: { route in AnyView(settingsContent(embedded: true, route: route)) },
       onEditProfile: { name in
         settingsProfileToEdit = name
         showSettings = true
@@ -210,13 +234,13 @@ public struct AppRootView: View {
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
         return try await api.listQualityScores()
       },
-      loadCostAnalytics: { [connectionManager] in
+      loadCostAnalytics: { [connectionManager] days in
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
-        return try await api.getCostAnalytics()
+        return try await api.getCostAnalytics(days: days)
       },
-      loadReliabilityAnalytics: { [connectionManager] in
+      loadReliabilityAnalytics: { [connectionManager] days in
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
-        return try await api.getReliabilityAnalytics()
+        return try await api.getReliabilityAnalytics(days: days)
       },
       loadQualityAnalytics: { [connectionManager] (days: Int) in
         guard let api = connectionManager.api else { throw URLError(.notConnectedToInternet) }
@@ -250,6 +274,14 @@ public struct AppRootView: View {
       onRunCatchup: { job in Task { try? await scheduledJobStore.runCatchup(job.id) } },
       onSkipCatchup: { job in Task { try? await scheduledJobStore.skipCatchup(job.id) } },
       onOpenScanReports: { job in scanJob = job },
+      scheduledWorkspaceActions: scheduledWorkspaceActions,
+      scanWorkspace: { job, presented in
+        AnyView(Group {
+          if let api = connectionManager.api {
+            ScanInboxView(job: job, api: api, embedded: true, onClose: { presented.wrappedValue = false })
+          } else { ContentUnavailableView("Connect to review scan reports", systemImage: "network") }
+        })
+      },
       onTriggerJob: { job in Task { try? await scheduledJobStore.triggerJob(job.id) } },
       onCreateJob: { req in Task { try? await scheduledJobStore.createJob(req) } },
       onEditJob: { id, req in Task { try? await scheduledJobStore.updateJob(id, req) } },
@@ -289,7 +321,17 @@ public struct AppRootView: View {
         await memoryStore.loadPendingCandidates(scopeIds: profileStore.profileNames + repositoryIds)
         await memoryStore.loadExtractionAttempts(profileNames: profileStore.profileNames)
         await memoryStore.loadAnalytics()
-      }
+      },
+      memoryWorkspaceActions: MemoryWorkspaceActions(
+        create: { scope, scopeID, path, content in
+          guard await memoryStore.create(scope: scope, scopeId: scopeID, path: path, content: content) else { throw DaemonError.badRequest(memoryStore.error ?? "Memory creation failed.") }
+        },
+        update: { id, content in
+          guard await memoryStore.update(id, content: content) else { throw DaemonError.badRequest(memoryStore.error ?? "Memory save failed.") }
+        },
+        updateCandidate: { id, update in
+          guard await memoryStore.updateCandidate(id, updates: update) else { throw DaemonError.badRequest(memoryStore.error ?? "Candidate save failed.") }
+        }), memoryLoading: memoryStore.isLoading
     )
     .environment(\.daemonAuthToken, connectionManager.activeToken ?? "")
     .environment(\.daemonBaseURL, connectionManager.api?.baseURL)
@@ -341,6 +383,17 @@ public struct AppRootView: View {
     } message: {
       Text(scheduledJobStore.error ?? "Unknown error")
     }
+    .alert(
+      "Scheduled Job",
+      isPresented: Binding(
+        get: { scheduledJobStore.notice != nil && scheduledJobStore.error == nil },
+        set: { if !$0 { scheduledJobStore.notice = nil } }
+      )
+    ) {
+      Button("OK") { scheduledJobStore.notice = nil }
+    } message: {
+      Text(scheduledJobStore.notice ?? "")
+    }
     .task(id: "\(connectionManager.isConnected)-\(connectionManager.connectionLabel)") {
       if let api = connectionManager.api, connectionManager.isConnected { launchConfiguration.configure(api: api); await launchConfiguration.load() }
       else { launchConfiguration.disconnect() }
@@ -356,12 +409,21 @@ public struct AppRootView: View {
       )
     }
     .sheet(isPresented: $showSettings) {
-      SettingsView(
-        connectionManager: connectionManager,
-        profiles: profileStore.profiles,
-        configurationActions: launchConfiguration.actions(onCreated: { id in
-          await podStore.loadSessions(); podStore.selectedSessionId = id
-        }),
+      settingsContent(embedded: false, route: .appearance)
+    }
+    .modifier(DesktopAppearanceModifier())
+    .onChange(of: showSettings) { _, isShowing in
+      if isShowing {
+        Task { await launchConfiguration.load() }
+      }
+    }
+  }
+
+  private func settingsContent(embedded: Bool, route: DesktopSettingsRoute) -> some View {
+    SettingsView(
+      connectionManager: connectionManager,
+      profiles: profileStore.profiles,
+      configurationActions: launchConfiguration.actions(selectingIn: podStore),
         actionCatalog: profileStore.actionCatalog,
         builtinSkills: profileStore.builtinSkills,
         profileError: profileStore.error,
@@ -439,14 +501,8 @@ public struct AppRootView: View {
           await launchConfiguration.load()
         },
         deepLinkedProfileName: $settingsProfileToEdit,
-        isPresented: $showSettings
-      )
-    }
-    .onChange(of: showSettings) { _, isShowing in
-      if isShowing {
-        Task { await launchConfiguration.load() }
-      }
-    }
+      isPresented: $showSettings, embedded: embedded, initialRoute: route
+    )
   }
 
   private func handleAuthenticationError(_ message: String?) {
@@ -455,13 +511,12 @@ public struct AppRootView: View {
   }
 
   private func recoverAuthenticationAndReload(fallbackMessage: String?) async {
-    let recovered = await connectionManager.recoverAuthentication()
+    let recovered = await recoverDesktopConnection(
+      recover: { await connectionManager.recoverAuthentication() },
+      onRecovered: onConnectionRecovered
+    )
     if recovered {
       if let api = connectionManager.api {
-        podStore.configure(api: api)
-        profileStore.configure(api: api)
-        memoryStore.configure(api: api)
-        scheduledJobStore.configure(api: api)
         launchConfiguration.configure(api: api)
       }
       await podStore.loadSessions()

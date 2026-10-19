@@ -160,6 +160,66 @@ describe('dispatch admission against immutable execution evidence', () => {
       db.close();
     }
   });
+  it('admits a rerun of the blocked request for exactly the conflicts it recorded', () => {
+    const { db, repo, ledger } = fixture();
+    try {
+      repo.insert(request('first'));
+      expect(ledger.inspect('first', 1, repository, 'main', base).status).toBe('admitted');
+      repo.insert(request('blocked'));
+      expect(ledger.inspect('blocked', 1, repository, 'main', base).status).toBe('review_required');
+      // The desktop/CLI rerun of a failed pod names that pod, not the conflict it was shown.
+      const rerun = (id: string, requestKey: string) =>
+        repo.insert(
+          request(id, {
+            rerunRequestHash: 'a'.repeat(64),
+            intentionalRerun: { requestKey, ofPodId: 'blocked', reason: 'Prior run was killed' },
+          }),
+        );
+      rerun('rerun', 'rerun-1');
+      expect(ledger.inspect('rerun', 1, repository, 'main', base)).toMatchObject({
+        status: 'admitted',
+        rerun: { ofPodId: 'blocked' },
+      });
+      // The admitted rerun is new equivalent work the human never reviewed.
+      rerun('again', 'rerun-2');
+      expect(ledger.inspect('again', 1, repository, 'main', base).status).toBe('review_required');
+    } finally {
+      db.close();
+    }
+  });
+  it('lets a schedule repeat its finished or deleted runs but never overlap an active one', () => {
+    const { db, repo, ledger } = fixture();
+    try {
+      db.prepare(
+        "INSERT INTO scheduled_jobs (id,name,profile_name,task,cron_expression,next_run_at) VALUES ('job','Daily','test-profile','t','0 10 * * *','2030-01-01T00:00:00Z')",
+      ).run();
+      const run = (id: string) => repo.insert(request(id, { scheduledJobId: 'job' }));
+      const inspect = (id: string) => ledger.inspect(id, 1, repository, 'main', base);
+      run('monday');
+      expect(inspect('monday').status).toBe('admitted');
+      run('overlap');
+      expect(inspect('overlap')).toMatchObject({
+        status: 'review_required',
+        conflicts: [{ podId: 'monday' }],
+      });
+      db.prepare("UPDATE pods SET status = 'complete' WHERE id = 'monday'").run();
+      run('tuesday');
+      expect(inspect('tuesday').status).toBe('admitted');
+      db.prepare("UPDATE pods SET status = 'killed' WHERE id = 'tuesday'").run();
+      repo.delete('tuesday');
+      run('wednesday');
+      expect(inspect('wednesday').status).toBe('admitted');
+      // Identical work from outside the schedule is still a duplicate of the schedule's runs.
+      db.prepare("UPDATE pods SET status = 'complete' WHERE id = 'wednesday'").run();
+      repo.insert(request('manual'));
+      expect(inspect('manual')).toMatchObject({
+        status: 'review_required',
+        conflicts: expect.arrayContaining([expect.objectContaining({ podId: 'wednesday' })]),
+      });
+    } finally {
+      db.close();
+    }
+  });
   it('ignores terminal work outside the seven-day window but retains older active work', () => {
     const { db, repo, ledger } = fixture();
     try {

@@ -51,6 +51,12 @@ export interface ManagedValidationBoundary {
   dependencyCache?: { enrollmentId: string; path: string };
   sourceWorkspace(podId: string, repositoryId: string): string;
   network(request: ManagedPodRequest): Pick<ContainerSpawnConfig, 'firewallScript' | 'networkName'>;
+  prepareNetwork?(
+    request: ManagedPodRequest,
+    podId: string,
+  ):
+    | Pick<ContainerSpawnConfig, 'firewallScript' | 'networkName'>
+    | Promise<Pick<ContainerSpawnConfig, 'firewallScript' | 'networkName'>>;
 }
 
 interface SupervisorSnapshot {
@@ -153,7 +159,10 @@ export class ManagedSupervisedValidation implements ManagedValidationPort {
       choice?.mode !== 'deterministic' ||
       choice.configurationDigest !== digest(configuration) ||
       !boundary.manager.ensureManagedContainer ||
-      !boundary.image.includes('@sha256:') ||
+      !(
+        /@sha256:[a-f0-9]{64}$/.test(boundary.image) ||
+        (request.route.executionTarget === 'local' && /^sha256:[a-f0-9]{64}$/.test(boundary.image))
+      ) ||
       process.env.AUTOPOD_FAIL_OPEN_FIREWALL === '1'
     )
       throw new Error('managed-validation-enforcement-unavailable');
@@ -176,6 +185,7 @@ export class ManagedSupervisedValidation implements ManagedValidationPort {
     const network = boundary.network(request);
     if (
       request.route.executionTarget === 'local' &&
+      !boundary.prepareNetwork &&
       (!network.firewallScript || !network.networkName)
     )
       throw new Error('managed-validation-network-unavailable');
@@ -229,8 +239,16 @@ export class ManagedSupervisedValidation implements ManagedValidationPort {
       candidateDigest: candidate.candidateDigest,
     });
     const resourceId = `managed-validation-${candidate.podId.replace(/^managed-/, '')}`;
+    const network = boundary.prepareNetwork
+      ? await boundary.prepareNetwork(request, candidate.podId)
+      : boundary.network(request);
+    if (
+      request.route.executionTarget === 'local' &&
+      (!network.firewallScript || !network.networkName)
+    )
+      throw new Error('managed-validation-network-unavailable');
     const ref = await ensure.call(boundary.manager, {
-      ...boundary.network(request),
+      ...network,
       podId: resourceId,
       managedSpecDigest: resourceDigest,
       image: boundary.image,

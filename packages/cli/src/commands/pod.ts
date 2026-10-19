@@ -17,6 +17,8 @@ import { withSpinner } from '../output/spinner.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
 import { formatToolUse } from '../utils/formatToolUse.js';
 import { resolvePodId } from '../utils/id-resolver.js';
+import { followLogs } from '../utils/log-follow.js';
+import { registerBudgetCommand } from './budget.js';
 import { registerGoalCommands } from './goal.js';
 import { registerLaunchCommand } from './launch.js';
 
@@ -134,6 +136,7 @@ function printApproveAllResult(result: {
 
 export function registerPodCommands(program: Command, getClient: () => AutopodClient): void {
   registerGoalCommands(program, getClient);
+  registerBudgetCommand(program, getClient);
   program
     .command('execution-provenance <id>')
     .description('Inspect recorded runtime, image, build, resource and command preflight evidence')
@@ -674,35 +677,15 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      ws.on('open', () => {
-        ws.send(JSON.stringify({ type: 'subscribe', podId: resolvedId }));
-        console.log(chalk.dim(`Following pod ${resolvedId.slice(0, 8)}… (Ctrl+C to stop)\n`));
-      });
-
-      ws.on('message', (data: Buffer) => {
-        try {
-          const event = JSON.parse(data.toString()) as { type: string };
-          // Skip subscribe/unsubscribe confirmations
-          if (['subscribed', 'unsubscribed', 'subscribed_all', 'error'].includes(event.type))
-            return;
+      await followLogs(ws, resolvedId, {
+        onOpen: () => {
+          console.log(chalk.dim(`Following pod ${resolvedId.slice(0, 8)}… (Ctrl+C to stop)\n`));
+        },
+        onEvent: (event) => {
           formatLogEvent(event as SystemEvent, { showReasoning: opts.showReasoning });
-        } catch {
-          // Ignore malformed messages
-        }
+        },
       });
 
-      ws.on('close', () => process.exit(0));
-      ws.on('error', (err: Error) => {
-        console.error(chalk.red(`WebSocket error: ${err.message}`));
-        process.exit(1);
-      });
-
-      process.on('SIGINT', () => {
-        ws.close();
-        process.exit(0);
-      });
-
-      // Keep the process alive — the event loop stays open via the WebSocket
       return;
     }
 
@@ -818,6 +801,21 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       } else {
         console.log(chalk.green(`Pod ${resolvedId} provider continuation queued.`));
       }
+    });
+
+  program
+    .command('files <id>')
+    .description('Read preserved pod files without waking the worker')
+    .option('--path <path>', 'Read one relative file path')
+    .option('--json', 'Output full content as JSON')
+    .action(async (id: string, opts: { path?: string; json?: boolean }) => {
+      const client = getClient();
+      const result = opts.path
+        ? await client.getPodFile(id, opts.path)
+        : await client.listPodFiles(id);
+      if (opts.json) console.log(JSON.stringify(result));
+      else if ('content' in result) process.stdout.write(result.content);
+      else for (const file of result.files) console.log(file.path);
     });
 
   // ap tell

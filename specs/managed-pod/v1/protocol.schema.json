@@ -702,6 +702,56 @@
               "not": {
                 "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
               }
+            },
+            "contextFiles": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+                    "not": {
+                      "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+                    }
+                  },
+                  "content": {
+                    "type": "string",
+                    "maxLength": 1000000,
+                    "not": {
+                      "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+                    }
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^sha256:[a-f0-9]{64}$",
+                    "not": {
+                      "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+                    }
+                  },
+                  "sourceJobId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$",
+                    "not": {
+                      "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+                    }
+                  },
+                  "evidenceLevel": {
+                    "type": "string",
+                    "enum": [
+                      "artifact-contract-verified",
+                      "backend-observed",
+                      "dispatcher-observed"
+                    ],
+                    "not": {
+                      "pattern": "(Bearer\\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?://[^/\\s]+:[^/\\s]+@|[?&](?:sig|token|access_token)=)"
+                    }
+                  }
+                },
+                "required": ["path", "content", "sha256", "sourceJobId", "evidenceLevel"]
+              }
             }
           },
           "required": ["kind", "objective", "contextBundleDigest"]

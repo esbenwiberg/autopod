@@ -7,3 +7,5 @@ DerivedData/
 xcuserdata/
 *.xcodeproj/xcuserdata/
 *.xcodeproj/project.xcworkspace/xcuserdata/
+
+build-preview/

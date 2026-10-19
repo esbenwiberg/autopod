@@ -34,6 +34,8 @@ export interface AskAiPayload {
 }
 
 export interface ReportBlockerPayload {
+  /** Set by the tool from the configured threshold; omitted legacy records block. */
+  requiresResponse?: boolean;
   description: string;
   attempted: string[];
   needs: string;

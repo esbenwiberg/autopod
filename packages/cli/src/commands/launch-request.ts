@@ -26,6 +26,7 @@ export interface LaunchFlags {
   execution?: 'local' | 'sandbox';
   memoryGb?: number;
   cpus?: number;
+  tokenBudget?: number | null;
   requestId?: string;
   overrideConfig?: boolean;
 }
@@ -83,6 +84,7 @@ export async function buildLaunchRequest(
     flags.memoryGb,
     flags.cpus,
     flags.requestId,
+    flags.tokenBudget,
   ];
   if (
     file !== undefined &&
@@ -98,6 +100,7 @@ export async function buildLaunchRequest(
   const overrides: NonNullable<LaunchRequest['overrides']> = structuredClone(
     saved?.overrides ?? {},
   );
+
   const cache = new Map<ConfigurationKind, Promise<ConfigurationEntity[]>>();
   const cached: ConfigurationLookup = (kind) => {
     let pending = cache.get(kind);
@@ -120,6 +123,8 @@ export async function buildLaunchRequest(
       }
     }),
   );
+  if (flags.tokenBudget !== undefined)
+    overrides.workflow = { ...overrides.workflow, tokenBudget: flags.tokenBudget };
   if (flags.githubAccess !== undefined) Reflect.deleteProperty(overrides, 'githubAccess');
   if (flags.githubAccess === false) selections.githubAccessId = null;
   else if (flags.githubAccess !== undefined)

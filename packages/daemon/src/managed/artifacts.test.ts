@@ -223,6 +223,7 @@ describe('managed artifacts', () => {
     ).rejects.toThrow('digest-mismatch');
     const dest = path.join(root, 'input');
     await store.materializeInput(input, dest);
+    expect((await lstat(dest)).mode & 0o222).toBe(0);
     expect(await readFile(path.join(dest, 'research.md'), 'utf8')).toBe('# Research\n');
     expect((await lstat(path.join(dest, 'research.md'))).mode & 0o222).toBe(0);
     await expect(store.materializeInput(input, dest)).rejects.toThrow('destination-exists');

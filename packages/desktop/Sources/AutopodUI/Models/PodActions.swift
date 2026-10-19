@@ -15,14 +15,33 @@ public typealias CreatePodAction = @MainActor @Sendable (
   BriefPodMetadata?
 ) async -> String?
 
+/// An in-flight request, independent of confirmed pod status.
+public enum PendingPodControl: Sendable, Equatable {
+  case pause, kill, killAndDelete
+
+  public var notice: String {
+    switch self {
+    case .pause: "Pause requested — waiting for daemon"
+    case .kill: "Kill requested — waiting for daemon"
+    case .killAndDelete: "Kill and delete requested — waiting for daemon"
+    }
+  }
+
+  public var isKill: Bool { self != .pause }
+}
+
 /// Closure-based action dispatch for pod operations.
 /// Views call these; the app layer provides real implementations.
 /// All closures default to no-ops so previews work without wiring.
 public struct PodActions: Sendable {
+  public var repair: PodRepairActions = .unavailable
   public var approve: @MainActor @Sendable (String, String?) async -> Void
   public var reject: @MainActor @Sendable (String, String?) async -> Void
   public var reply: @MainActor @Sendable (String, String) async -> Void
+  public var decisionReply: DecisionReplyActions
   public var nudge: @MainActor @Sendable (String, String) async -> Void
+  public var pendingControl: @MainActor @Sendable (String) -> PendingPodControl?
+  public var killAndDelete: @MainActor @Sendable (String) async -> Void
   public var kill: @MainActor @Sendable (String) async -> Void
   public var complete: @MainActor @Sendable (String) async -> Void
   public var pause: @MainActor @Sendable (String) async -> Void
@@ -57,7 +76,7 @@ public struct PodActions: Sendable {
   public var approveFactWaiver: @MainActor @Sendable (String, String, String?) async -> Void
   /// Manually force-spawn a fix pod for a merge_pending/complete pod. Optional message is forwarded
   /// to the fix pod as explicit reviewer instructions alongside auto-detected CI/review failures.
-  /// Returns `SpawnFixResponse` so callers can show queue-position feedback.
+  /// Returns `SpawnFixResponse` so callers can show unread-feedback backlog receipts.
   public var spawnFix: @MainActor @Sendable (String, String?) async -> SpawnFixResponse?
   /// Retry PR creation for a complete pod whose PR was never successfully created
   public var retryCreatePr: @MainActor @Sendable (String) async -> Void
@@ -122,7 +141,10 @@ public struct PodActions: Sendable {
     approve: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     reject: @escaping @MainActor @Sendable (String, String?) async -> Void = { _, _ in },
     reply: @escaping @MainActor @Sendable (String, String) async -> Void = { _, _ in },
+    decisionReply: DecisionReplyActions = .init(),
     nudge: @escaping @MainActor @Sendable (String, String) async -> Void = { _, _ in },
+    pendingControl: @escaping @MainActor @Sendable (String) -> PendingPodControl? = { _ in nil },
+    killAndDelete: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     kill: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     complete: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
     pause: @escaping @MainActor @Sendable (String) async -> Void = { _ in },
@@ -176,7 +198,10 @@ public struct PodActions: Sendable {
     self.approve = approve
     self.reject = reject
     self.reply = reply
+    self.decisionReply = decisionReply
     self.nudge = nudge
+    self.pendingControl = pendingControl
+    self.killAndDelete = killAndDelete
     self.kill = kill
     self.complete = complete
     self.pause = pause

@@ -55,8 +55,14 @@ public struct SessionCardFinal: View {
         self.qualityScore = qualityScore
     }
 
+    @Environment(\.desktopRedesign) private var redesign
+    @Environment(\.desktopRepositories) private var repositories
+    @Environment(\.desktopRepositoryFilter) private var filterRepository
+    @Environment(\.desktopPodSelection) private var selectPod
     @State private var isHovered = false
     @State private var isInfrastructureResumePending = false
+
+    private var pendingControl: PendingPodControl? { actions.pendingControl(pod.id) }
 
     private var isAdvisoryQaRunning: Bool {
         pod.validationProgress?.advisory.status == .running
@@ -98,25 +104,13 @@ public struct SessionCardFinal: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Accent stripe
-            pod.status.color
-                .frame(height: 2)
-                .opacity(isSelected ? 0.8 : (pod.status.needsAttention || pod.status == .complete) ? 0.9 : 0.25)
-
-            compactContent
-                .padding(12)
-
-            if density == .detailed {
-                expandedContent
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
-            }
+        Group {
+            if redesign { redesignedCard } else { legacyCard }
         }
         .frame(maxWidth: .infinity, maxHeight: density == .detailed ? .infinity : nil, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(redesign ? DesktopTheme.surface : Color(nsColor: .controlBackgroundColor))
                 .shadow(
                     color: .black.opacity(isSelected ? 0.1 : isHovered ? 0.08 : 0.03),
                     radius: isSelected ? 10 : isHovered ? 8 : 3,
@@ -126,7 +120,7 @@ public struct SessionCardFinal: View {
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(
-                    isSelected
+                    redesign ? (isSelected ? DesktopTheme.accent : DesktopTheme.line) : isSelected
                         ? Color.accentColor.opacity(0.9)
                         : isHovered
                             ? Color.accentColor.opacity(0.4)
@@ -140,34 +134,9 @@ public struct SessionCardFinal: View {
         .animation(.easeOut(duration: 0.15), value: isHovered)
         .animation(.easeOut(duration: 0.15), value: isSelected)
         .onHover { isHovered = $0 }
-        .contextMenu {
-            if let onSpawnFollowUp, !pod.isTerminal {
-                Button {
-                    onSpawnFollowUp(pod)
-                } label: {
-                    Label("Spawn follow-up pod", systemImage: "arrow.branch")
-                }
-            }
-            if let onLaunchSeriesFromPod, pod.isWorkspace {
-                Button {
-                    onLaunchSeriesFromPod(pod)
-                } label: {
-                    Label("Launch series from here", systemImage: "rectangle.3.group.fill")
-                }
-            }
-            Divider()
-            if pod.status != .killed && pod.status != .killing {
-                Button(role: .destructive) {
-                    Task { await actions.kill(pod.id) }
-                } label: {
-                    Label("Kill", systemImage: "xmark.circle")
-                }
-            }
-            Button(role: .destructive) {
-                showDeleteConfirmation = true
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
+        .contextMenu { cardMenuActions }
+        .sheet(isPresented: $showOptionsPicker) {
+            DecisionReplySheet(podID: pod.id, actions: actions.decisionReply) { showOptionsPicker = false }
         }
         .sheet(isPresented: $showRejectFeedback) { rejectFeedbackSheet }
         .sheet(isPresented: $showNudgeInput) { nudgeSheet }
@@ -177,12 +146,15 @@ public struct SessionCardFinal: View {
         ) {
             Button(deleteButtonTitle, role: .destructive) {
                 Task {
-                    if !isDeletableNow {
-                        await actions.kill(pod.id)
+                    if isDeletableNow {
+                        await actions.delete(pod.id)
+                    } else {
+                        await actions.killAndDelete(pod.id)
                     }
-                    await actions.delete(pod.id)
                 }
             }
+            .disabled(pendingControl != nil)
+            .accessibilityIdentifier("pod-control-delete-confirm-\(pod.id)")
         } message: {
             Text(deleteDialogMessage)
         }
@@ -230,6 +202,116 @@ public struct SessionCardFinal: View {
 
     // MARK: - Compact (always visible)
 
+    @ViewBuilder
+    private var cardMenuActions: some View {
+            if let onSpawnFollowUp, !pod.isTerminal {
+                Button {
+                    onSpawnFollowUp(pod)
+                } label: {
+                    Label("Spawn follow-up pod", systemImage: "arrow.branch")
+                }
+            }
+            if let onLaunchSeriesFromPod, pod.isWorkspace {
+                Button {
+                    onLaunchSeriesFromPod(pod)
+                } label: {
+                    Label("Launch series from here", systemImage: "rectangle.3.group.fill")
+                }
+            }
+            Divider()
+            if pod.status != .killed && pod.status != .killing {
+                Button(role: .destructive) {
+                    Task { await actions.kill(pod.id) }
+                } label: {
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
+                }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
+            }
+            Button(role: .destructive) {
+                showDeleteConfirmation = true
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            .disabled(pendingControl != nil)
+            .accessibilityIdentifier("pod-control-delete-menu-\(pod.id)")
+    }
+
+    private var legacyCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Accent stripe
+            pod.status.color
+                .frame(height: 2)
+                .opacity(isSelected ? 0.8 : (pod.status.needsAttention || pod.status == .complete) ? 0.9 : 0.25)
+
+            compactContent
+                .padding(12)
+
+            if density == .detailed {
+                expandedContent
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+            }
+        }
+    }
+
+    private var redesignedCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Circle().fill(pod.status.needsAttention ? pod.status.color : DesktopTheme.accent).frame(width: 5, height: 5)
+                Text(pod.status.label.capitalized).font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(pod.status.needsAttention ? pod.status.color : DesktopTheme.accent)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                modeBadge
+                Text(pod.id).font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                Menu { cardMenuActions } label: { Image(systemName: "ellipsis") }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Pod actions")
+            }
+            Button { selectPod?(pod.id) } label: {
+                Text(pod.desktopTitle).font(.system(size: 14, weight: .semibold))
+                    .lineLimit(density == .compact ? 1 : 2, reservesSpace: true)
+                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain).help(pod.desktopTitle)
+            if let repository = repositories[pod.id] {
+                Button { filterRepository?(repository.id) } label: {
+                    Label(repository.label, systemImage: "folder").font(.system(size: 11, weight: .medium))
+                        .lineLimit(1).truncationMode(.middle).foregroundStyle(DesktopTheme.accent)
+                }.buttonStyle(.plain).help(repository.isSnapshot ? "Filter by captured repository" : "Filter by current profile repository; original snapshot unavailable")
+            } else {
+                Label(pod.desktopRepositoryPlaceholder, systemImage: "folder").font(.caption2).foregroundStyle(.secondary)
+            }
+            if let pendingControl { PendingControlNotice(kind: pendingControl, podId: pod.id) }
+            if pod.queueLength > 0 {
+                QueueChip(count: pod.queueLength) { showQueuePopover.toggle() }
+                    .popover(isPresented: $showQueuePopover) { FixQueuePopover(messages: pod.recentQueueMessages) }
+            }
+            if let fixLifecycle = pod.prFixLifecycleLabel {
+                Text(fixLifecycle).font(.caption2).foregroundStyle(.secondary).lineLimit(1).help(fixLifecycle)
+            }
+            Spacer(minLength: 0)
+            VStack(spacing: 6) {
+                PodLifecycleRail(pod: pod)
+                HStack {
+                    Text("Autopod · \(pod.desktopLifecycleStage?.rawValue ?? pod.status.label.capitalized)")
+                        .lineLimit(1)
+                    Spacer(minLength: 2)
+                    Text(pod.desktopMilestoneToken ?? "No report").fontDesign(.monospaced)
+                        .help(pod.phase?.description ?? "The agent has not reported a milestone")
+                }.font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 4) {
+                Text("\(pod.profileName) · \(pod.model)").lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 4)
+                Text("\(pod.duration) · \(String(format: "$%.2f", pod.costUsd))").fixedSize()
+                    .help("Stored cost subtotal; billing unverified")
+            }.font(.system(size: 10)).foregroundStyle(.secondary)
+        }
+        .padding(16).frame(minHeight: density == .compact ? 152 : 184, alignment: .top)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("fleet-card-\(pod.id)")
+    }
+
     private var compactContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Top row: dot + ID + badge
@@ -264,6 +346,10 @@ public struct SessionCardFinal: View {
                 }
                 modeBadge
                 statusBadge
+            }
+
+            if let pendingControl {
+                PendingControlNotice(kind: pendingControl, podId: pod.id)
             }
 
             // Summary row — one line per state
@@ -684,9 +770,11 @@ public struct SessionCardFinal: View {
                 Button {
                     Task { await actions.pause(pod.id) }
                 } label: {
-                    Label("Pause", systemImage: "pause.circle")
+                    Label(pendingControl == .pause ? "Pausing…" : "Pause", systemImage: "pause.circle")
                         .frame(maxWidth: .infinity)
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-pause-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.yellow)
@@ -743,7 +831,7 @@ public struct SessionCardFinal: View {
                 } else if pod.escalationType == "action_approval" {
                     HStack(spacing: 6) {
                         Button {
-                            Task { await actions.reply(pod.id, "approved") }
+                            submitDecisionAnswer("approved")
                         } label: {
                             Label("Approve", systemImage: "checkmark.circle.fill")
                                 .frame(maxWidth: .infinity)
@@ -751,9 +839,10 @@ public struct SessionCardFinal: View {
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .tint(.green)
+                        .accessibilityIdentifier("decision-card-approve")
 
                         Button {
-                            Task { await actions.reply(pod.id, "rejected") }
+                            submitDecisionAnswer("rejected")
                         } label: {
                             Label("Reject", systemImage: "xmark.circle.fill")
                                 .frame(maxWidth: .infinity)
@@ -761,6 +850,12 @@ public struct SessionCardFinal: View {
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .tint(.red)
+                        .accessibilityIdentifier("decision-card-reject")
+                    }
+                    .disabled(pod.escalationId != nil && !decisionSnapshot.canSubmit)
+                    if let notice = decisionSnapshot.notice {
+                        Text(notice).font(.caption).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 } else {
                     Button {
@@ -772,9 +867,7 @@ public struct SessionCardFinal: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .tint(.orange)
-                    .sheet(isPresented: $showOptionsPicker) {
-                        replySheet
-                    }
+                    .accessibilityIdentifier("decision-card-reply")
                 }
             }
 
@@ -905,9 +998,11 @@ public struct SessionCardFinal: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                         .frame(maxWidth: .infinity)
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -1075,7 +1170,6 @@ public struct SessionCardFinal: View {
     }
 
     @State private var showQueuePopover = false
-    @State private var replyInputText = ""
     @State private var showOptionsPicker = false
     @State private var showNudgeInput = false
     @State private var nudgeInputText = ""
@@ -1095,92 +1189,18 @@ public struct SessionCardFinal: View {
         }
     }
 
-    private var replySheet: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Markdown(pod.escalationQuestion ?? "Agent needs input")
-                        .markdownTheme(.autopod)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+    private var decisionSnapshot: DecisionReplySnapshot {
+        actions.decisionReply.snapshot(pod.id, pod.escalationId)
+    }
 
-                    if let options = pod.escalationOptions, !options.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(options, id: \.self) { option in
-                                Button {
-                                    showOptionsPicker = false
-                                    Task { await actions.reply(pod.id, option) }
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "circle")
-                                            .font(.system(size: 11))
-                                        Text(option)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .multilineTextAlignment(.leading)
-                                    }
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 7)
-                                }
-                                .buttonStyle(.bordered)
-                                .tint(.orange)
-                            }
-                        }
-
-                        Divider()
-
-                        HStack(spacing: 4) {
-                            Image(systemName: "pencil")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("Or type a custom reply:")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .padding(20)
-                .padding(.bottom, 4)
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    TextField("Type your reply…", text: $replyInputText)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit {
-                            guard !replyInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                            let message = replyInputText
-                            replyInputText = ""
-                            showOptionsPicker = false
-                            Task { await actions.reply(pod.id, message) }
-                        }
-
-                    Button {
-                        let message = replyInputText
-                        replyInputText = ""
-                        showOptionsPicker = false
-                        Task { await actions.reply(pod.id, message) }
-                    } label: {
-                        Image(systemName: "paperplane.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.orange)
-                    .disabled(replyInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-
-                HStack {
-                    Spacer()
-                    Button("Cancel", role: .cancel) {
-                        replyInputText = ""
-                        showOptionsPicker = false
-                    }
-                    .controlSize(.small)
-                }
-            }
-            .padding(20)
+    private func submitDecisionAnswer(_ answer: String) {
+        guard let decision = pod.escalationId else {
+            showOptionsPicker = true
+            return
         }
-        .frame(minWidth: 560, maxWidth: 760, minHeight: 200, maxHeight: 600)
+        guard decisionSnapshot.canSubmit else { return }
+        actions.decisionReply.edit(pod.id, decision, answer)
+        _ = actions.decisionReply.submit(pod.id, decision)
     }
 
     private var nudgeSheet: some View {
@@ -1263,6 +1283,8 @@ public struct SessionCardFinal: View {
             Label("Delete", systemImage: "trash")
                 .frame(maxWidth: .infinity)
         }
+        .disabled(pendingControl != nil)
+        .accessibilityIdentifier("pod-control-delete-\(pod.id)")
         .buttonStyle(.bordered)
         .controlSize(.small)
     }

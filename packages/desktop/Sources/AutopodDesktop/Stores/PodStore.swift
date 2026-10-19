@@ -55,14 +55,68 @@ public final class PodStore {
   // MARK: - API
 
   private var api: DaemonAPI?
+  struct Source: Hashable {
+    let connectionID: UUID?
+    let endpoint: URL
+  }
+  struct Ownership: Equatable {
+    fileprivate let storeID: UUID
+    fileprivate let epoch: UInt64
+  }
+  private let storeID = UUID()
+  private var source: Source?
+  var retainedSource: Source? { source }
+  let decisionReplies = DecisionReplyStore()
+  private var configurationEpoch: UInt64 = 0
   private var hydratedPodIds = Set<String>()
   private var hydratingPodIds = Set<String>()
   private var statusRevisions: [String: Int] = [:]
+  // Tokens never repeat when a pod is removed and later reinserted.
+  private var decisionSequence: UInt64 = 0
+  private var decisionRevisions: [String: UInt64] = [:]
   private var fleetMembershipRevision = 0
   private var insertionRevisions: [String: Int] = [:]
 
-  public func configure(api: DaemonAPI) {
+  public func configure(api: DaemonAPI, connectionID: UUID? = nil) {
+    let next = Source(connectionID: connectionID, endpoint: api.baseURL)
+    if source != next {
+      pods.removeAll()
+      selectedSessionId = nil
+      sessionDiffs.removeAll()
+      qualityScores.removeAll()
+      seriesCache.removeAll()
+      statusRevisions.removeAll()
+      decisionRevisions.removeAll()
+      insertionRevisions.removeAll()
+    }
+    source = next
+    configurationEpoch += 1
     self.api = api
+    resetRequestState()
+  }
+
+  /// Keep readable last-observed data, but revoke all request/action authority.
+  public func disconnect() {
+    configurationEpoch += 1
+    api = nil
+    resetRequestState()
+  }
+
+  func ownership(for api: DaemonAPI) -> Ownership? {
+    guard self.api === api else { return nil }
+    return Ownership(storeID: storeID, epoch: configurationEpoch)
+  }
+
+  func isCurrent(_ ownership: Ownership?) -> Bool {
+    guard let ownership, api != nil else { return false }
+    return ownership.storeID == storeID && ownership.epoch == configurationEpoch
+  }
+
+  private func resetRequestState() {
+    hydratedPodIds.removeAll()
+    hydratingPodIds.removeAll()
+    isLoading = false
+    error = nil
   }
 
   private func recordInsertion(_ podId: String) {
@@ -71,9 +125,11 @@ public final class PodStore {
   }
 
   private func forgetPodState(_ podId: String) {
+    decisionReplies.forget(source: source, podID: podId)
     hydratedPodIds.remove(podId)
     hydratingPodIds.remove(podId)
     statusRevisions.removeValue(forKey: podId)
+    decisionRevisions.removeValue(forKey: podId)
     insertionRevisions.removeValue(forKey: podId)
   }
 
@@ -91,14 +147,26 @@ public final class PodStore {
     _ incoming: Pod,
     with current: Pod?,
     preferIncomingOnEqual: Bool,
-    preserveCurrentStatus: Bool = false
+    preserveCurrentStatus: Bool = false,
+    preserveCurrentDecision: Bool = false
   ) -> Pod {
     guard let current else { return incoming }
     if !preferIncomingOnEqual
       && (current.updatedAt > incoming.updatedAt || current.updatedAt == incoming.updatedAt) {
+      if current.updatedAt == incoming.updatedAt, current.fleetDisplay == nil,
+         incoming.fleetDisplay != nil {
+        var enriched = current
+        enriched.fleetDisplay = incoming.fleetDisplay
+        enriched.phase = incoming.phase
+        return enriched
+      }
       return current
     }
     var merged = incoming
+    merged.fleetDisplay = incoming.fleetDisplay ?? current.fleetDisplay
+    if preserveCurrentDecision || current.updatedAt > incoming.updatedAt {
+      copyDecision(from: current, to: &merged)
+    }
     if preserveCurrentStatus {
       merged.status = current.status
     } else if current.updatedAt > incoming.updatedAt {
@@ -122,12 +190,26 @@ public final class PodStore {
   private func mergeCompactPod(
     _ incoming: Pod,
     with hydrated: Pod,
-    preserveCurrentStatus: Bool
+    preserveCurrentStatus: Bool,
+    preserveCurrentDecision: Bool
   ) -> Pod {
-    guard incoming.updatedAt > hydrated.updatedAt else { return hydrated }
+    guard incoming.updatedAt > hydrated.updatedAt else {
+      if incoming.updatedAt == hydrated.updatedAt, hydrated.fleetDisplay == nil,
+         incoming.fleetDisplay != nil {
+        var enriched = hydrated
+        enriched.fleetDisplay = incoming.fleetDisplay
+        enriched.phase = incoming.phase
+        return enriched
+      }
+      return hydrated
+    }
     var merged = hydrated
     if !preserveCurrentStatus {
       merged.status = incoming.status
+    }
+    if incoming.fleetDisplay != nil {
+      merged.fleetDisplay = incoming.fleetDisplay
+      merged.phase = incoming.phase
     }
     merged.pod = incoming.pod
     merged.hasWorktree = incoming.hasWorktree
@@ -137,7 +219,7 @@ public final class PodStore {
     merged.startedAt = incoming.startedAt
     merged.updatedAt = incoming.updatedAt
     merged.baseBranch = incoming.baseBranch
-    merged.escalationQuestion = incoming.escalationQuestion
+    copyDecision(from: preserveCurrentDecision ? hydrated : incoming, to: &merged)
     merged.containerUrl = incoming.containerUrl
     merged.hasWebUi = incoming.hasWebUi
     merged.latestActivity = incoming.latestActivity
@@ -161,12 +243,15 @@ public final class PodStore {
       error = "API client not configured — try disconnecting and reconnecting"
       return
     }
+    let epoch = configurationEpoch
     isLoading = true
     error = nil
     let statusRevisionSnapshot = statusRevisions
+    let decisionRevisionSnapshot = decisionRevisions
     let fleetMembershipSnapshot = fleetMembershipRevision
     do {
       let responses = try await api.listAllCompactPods()
+      guard epoch == configurationEpoch else { return }
       let fresh = PodMapper.map(responses, baseURL: api.baseURL)
       let currentById = Dictionary(uniqueKeysWithValues: pods.map { ($0.id, $0) })
       let staleHydratedIds: Set<String> = Set(
@@ -194,7 +279,9 @@ public final class PodStore {
             with: current,
             preserveCurrentStatus:
               statusRevisions[pod.id, default: 0]
-                > statusRevisionSnapshot[pod.id, default: 0]
+                > statusRevisionSnapshot[pod.id, default: 0],
+            preserveCurrentDecision: decisionRevisions[pod.id, default: 0]
+              != decisionRevisionSnapshot[pod.id, default: 0]
           )
         }
         return mergeRestPod(
@@ -203,7 +290,9 @@ public final class PodStore {
           preferIncomingOnEqual: false,
           preserveCurrentStatus:
             statusRevisions[pod.id, default: 0]
-              > statusRevisionSnapshot[pod.id, default: 0]
+              > statusRevisionSnapshot[pod.id, default: 0],
+          preserveCurrentDecision: decisionRevisions[pod.id, default: 0]
+            != decisionRevisionSnapshot[pod.id, default: 0]
         )
       }
       // Pods created over WebSocket after page one sit outside the keyset snapshot.
@@ -218,9 +307,12 @@ public final class PodStore {
         await hydrateSessionIfNeeded(selectedSessionId)
       }
     } catch {
+      guard epoch == configurationEpoch else { return }
       print("[PodStore] Failed to load pods: \(error)")
       self.error = error.localizedDescription
     }
+    // Selected-pod hydration above can suspend across another configuration.
+    guard epoch == configurationEpoch else { return }
     isLoading = false
 
     // Best-effort score refresh — failures are non-fatal. Fires after pods
@@ -232,8 +324,10 @@ public final class PodStore {
   /// Silent failure — the badge is a nice-to-have, not a blocker.
   public func loadQualityScores() async {
     guard let api else { return }
+    let epoch = configurationEpoch
     do {
       let list = try await api.listQualityScores(limit: 500)
+      guard epoch == configurationEpoch else { return }
       var byId: [String: PodQualityScore] = [:]
       byId.reserveCapacity(list.count)
       for score in list { byId[score.podId] = score }
@@ -245,36 +339,52 @@ public final class PodStore {
   }
 
   public func refreshSession(_ id: String) async {
-    guard let api else { return }
+    _ = try? await readSession(id)
+  }
+
+  struct SessionRead {
+    let returned: Pod
+    let current: Pod
+  }
+
+  /// The same revision-aware refresh, with a real result for admission/preparation.
+  /// The optional guard lets a caller retire its own work before this merge.
+  func readSession(_ id: String, accepting: @MainActor () -> Bool = { true }) async throws -> SessionRead {
+    guard let api else { throw URLError(.notConnectedToInternet) }
+    let epoch = configurationEpoch
     let statusRevision = statusRevisions[id, default: 0]
-    do {
-      let response = try await api.getPod(id)
-      var updated = PodMapper.map(response, baseURL: api.baseURL)
-      if let index = pods.firstIndex(where: { $0.id == id }) {
-        updated = mergeRestPod(
-          updated,
-          with: pods[index],
-          preferIncomingOnEqual: true,
-          preserveCurrentStatus: statusRevisions[id, default: 0] > statusRevision
-        )
-        if updated.validationProgress == nil && updated.status == .validating {
-          updated.validationProgress = ValidationProgress.initial(attempt: updated.attempts?.current ?? 1)
-        }
-        pods[index] = updated
-      } else {
-        recordInsertion(id)
-        pods.append(updated)
+    let decisionRevision = decisionRevisions[id, default: 0]
+    let response = try await api.getPod(id)
+    guard epoch == configurationEpoch, accepting() else { throw CancellationError() }
+    let returned = PodMapper.map(response, baseURL: api.baseURL)
+    var updated = returned
+    if let index = pods.firstIndex(where: { $0.id == id }) {
+      updated = mergeRestPod(
+        updated,
+        with: pods[index],
+        preferIncomingOnEqual: true,
+        preserveCurrentStatus: statusRevisions[id, default: 0] > statusRevision,
+        preserveCurrentDecision: decisionRevisions[id, default: 0] != decisionRevision
+      )
+      if updated.validationProgress == nil && updated.status == .validating {
+        updated.validationProgress = ValidationProgress.initial(attempt: updated.attempts?.current ?? 1)
       }
-      hydratedPodIds.insert(id)
-    } catch {
-      // Silent refresh failure — don't overwrite existing data
+      pods[index] = updated
+    } else {
+      recordInsertion(id)
+      pods.append(updated)
     }
+    hydratedPodIds.insert(id)
+    return SessionRead(returned: returned, current: updated)
   }
 
   public func hydrateSessionIfNeeded(_ id: String) async {
     guard !hydratedPodIds.contains(id), !hydratingPodIds.contains(id) else { return }
+    let epoch = configurationEpoch
     hydratingPodIds.insert(id)
-    defer { hydratingPodIds.remove(id) }
+    defer {
+      if epoch == configurationEpoch { hydratingPodIds.remove(id) }
+    }
     await refreshSession(id)
   }
 
@@ -287,8 +397,10 @@ public final class PodStore {
   @discardableResult
   public func loadSeries(_ seriesId: String) async -> SeriesResponse? {
     guard let api else { return nil }
+    let epoch = configurationEpoch
     do {
       let response = try await api.getSeries(seriesId)
+      guard epoch == configurationEpoch else { return nil }
       seriesCache[seriesId] = response
       // Upsert any pods in the response that aren't yet in our local store.
       for pod in PodMapper.map(response.pods) {
@@ -307,8 +419,10 @@ public final class PodStore {
 
   public func loadDiff(_ podId: String) async {
     guard let api else { return }
+    let epoch = configurationEpoch
     do {
       let response = try await api.getSessionDiff(podId)
+      guard epoch == configurationEpoch else { return }
       let hasDiff =
         !response.files.isEmpty ||
         !(response.previewFiles ?? []).isEmpty ||
@@ -379,10 +493,30 @@ public final class PodStore {
     pods[index].phase = phase
   }
 
-  public func setEscalation(_ podId: String, question: String?, options: [String]? = nil) {
+  private func copyDecision(from source: Pod, to destination: inout Pod) {
+    destination.escalationId = source.escalationId
+    destination.escalationQuestion = source.escalationQuestion
+    destination.escalationOptions = source.escalationOptions
+    destination.escalationType = source.escalationType
+  }
+
+  public func setEscalation(
+    _ podId: String, question: String?, options: [String]? = nil,
+    id: String? = nil, type: String? = nil
+  ) {
     guard let index = pods.firstIndex(where: { $0.id == podId }) else { return }
+    decisionSequence += 1
+    decisionRevisions[podId] = decisionSequence
+    pods[index].escalationId = id.flatMap { $0.isEmpty ? nil : $0 }
     pods[index].escalationQuestion = question
     pods[index].escalationOptions = options
+    pods[index].escalationType = type
+  }
+
+  public func resolveEscalation(_ podId: String, id: String) {
+    guard !id.isEmpty,
+          let pod = pods.first(where: { $0.id == podId }), pod.escalationId == id else { return }
+    setEscalation(podId, question: nil)
   }
 
   public func setValidationChecks(_ podId: String, checks: ValidationChecks) {

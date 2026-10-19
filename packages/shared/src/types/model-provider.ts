@@ -108,11 +108,21 @@ export type FoundryApiSurface = 'anthropic' | 'openai';
  */
 export interface FoundryCredentials {
   provider: 'foundry';
-  /** Foundry endpoint URL (Azure-AI / Cognitive Services region root). */
+  /**
+   * Foundry endpoint URL. For the `anthropic` surface this is the resource root
+   * (`https://{resource}.services.ai.azure.com`) or its `/anthropic` base URL;
+   * for the `openai` surface, the OpenAI-compatible base URL.
+   */
   endpoint: string;
-  /** Foundry project identifier. */
-  projectId: string;
-  /** Optional API key. Omit to use managed identity / az-login bearer tokens. */
+  /**
+   * Legacy Foundry project identifier. Neither Claude Code nor Codex consumes
+   * it — kept optional so pre-existing profiles still parse.
+   */
+  projectId?: string;
+  /**
+   * API key. Required for provider accounts; legacy profiles may omit it to use
+   * a managed identity / az-login bearer token minted at exec time.
+   */
   apiKey?: string;
   /**
    * Protocol surface the deployment exposes. Defaults to `anthropic` when

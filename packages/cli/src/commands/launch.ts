@@ -5,6 +5,7 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { saveLaunchReceipt } from '../config/launch-store.js';
+import { parseTokenBudget } from './budget.js';
 import { type LaunchFlags, buildLaunchRequest } from './launch-request.js';
 import { type LaunchTaskFlags, readLaunchTask } from './launch-task.js';
 
@@ -23,6 +24,7 @@ function summarize(config: EffectiveLaunchConfig): string {
     `AI: ${config.ai.main.runtime} / ${config.ai.main.model}`,
     `Execution: ${config.execution.target} / ${config.resolvedExecution.main.memoryGb} GB`,
     `Intent: ${config.intent}`,
+    `Task token limit: ${config.workflow.tokenBudget ?? 'off'}`,
     `Configuration: ${config.digest}`,
   ].join('\n');
 }
@@ -58,6 +60,11 @@ export function registerLaunchCommand(
     .option('--config <file>', 'Full shared LaunchRequest JSON file')
     .option('--override-config', 'Let explicit flags replace corresponding file settings')
     .option('--request-id <id>', 'Stable launch key; reuse it after a lost response')
+    .option(
+      '--token-budget <tokens-or-off>',
+      'Optional task token limit; off removes a preset limit',
+      parseTokenBudget,
+    )
     .option('--preview', 'Resolve and display effective configuration without launching')
     .option('--json', 'Output the full preview or created pod as JSON');
   addLaunchPresetOptions(command);

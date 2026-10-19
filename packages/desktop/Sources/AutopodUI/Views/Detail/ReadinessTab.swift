@@ -3,6 +3,7 @@ import AutopodClient
 import SwiftUI
 
 struct ReadinessTab: View {
+    @Environment(\.desktopRedesign) private var redesign
     let pod: Pod
     let seriesReadiness: SeriesReadinessReview?
     var actions: PodActions = .preview
@@ -34,6 +35,29 @@ struct ReadinessTab: View {
     }
 
     var body: some View {
+        Group {
+            if redesign {
+                GeometryReader { geometry in
+                    VStack(spacing: 0) {
+                        HStack { Text("Readiness").font(.title3.weight(.semibold)); Spacer() }
+                            .padding(.horizontal, 20).padding(.vertical, 14)
+                        Divider()
+                        ScrollView {
+                            if geometry.size.width >= 740 {
+                                HStack(alignment: .top, spacing: 20) {
+                                    reviewContent.frame(maxWidth: .infinity)
+                                    approvalSection.frame(width: 270)
+                                }.padding(20)
+                            } else {
+                                VStack(alignment: .leading, spacing: 20) {
+                                    reviewContent
+                                    approvalSection
+                                }.padding(20)
+                            }
+                        }
+                    }.background(DesktopTheme.surface)
+                }
+            } else {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if let seriesReadiness {
@@ -54,7 +78,20 @@ struct ReadinessTab: View {
             .padding(20)
             .frame(maxWidth: 900, alignment: .leading)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background((redesign ? DesktopTheme.canvas : Color(nsColor: .windowBackgroundColor)))
+            }
+        }
+    }
+
+    private var reviewContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if let seriesReadiness { seriesSection(seriesReadiness) }
+            if let readiness = pod.readinessReview, readiness.scope == .pod {
+                podSection(readiness)
+            } else if seriesReadiness == nil {
+                pendingSection
+            }
+        }
     }
 
     private func seriesSection(_ readiness: SeriesReadinessReview) -> some View {
@@ -159,18 +196,22 @@ struct ReadinessTab: View {
                     }
                 }
             }
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+            .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)).opacity(0.55))
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1))
         }
     }
 
+    @ViewBuilder
     private func readinessAreaRow(
         _ area: ReadinessAreaReview,
         findings: [ReadinessFinding]
     ) -> some View {
         let isExpanded = !area.status.isGreen || !findings.isEmpty
-        return VStack(alignment: .leading, spacing: isExpanded ? 8 : 0) {
+        if redesign {
+            DesktopReadinessArea(area: area, findings: findings, onOpen: open)
+        } else {
+        VStack(alignment: .leading, spacing: isExpanded ? 8 : 0) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(area.area.label)
                     .font(.caption.weight(.semibold))
@@ -202,6 +243,7 @@ struct ReadinessTab: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, isExpanded ? 10 : 7)
+    }
     }
 
     private func findingInline(_ finding: ReadinessFinding) -> some View {
@@ -236,7 +278,7 @@ struct ReadinessTab: View {
                         sourceRefs(finding.sourceRefs)
                     }
                     .padding(10)
-                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+                    .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)).opacity(0.45))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
             }
@@ -273,7 +315,7 @@ struct ReadinessTab: View {
                     }
                 }
             }
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+            .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)).opacity(0.55))
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1))
         }
@@ -321,7 +363,7 @@ struct ReadinessTab: View {
                             }
                         }
                     }
-                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+                    .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)).opacity(0.45))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor).opacity(0.4), lineWidth: 1))
                     if firewallDenials.count > 8 {
@@ -400,10 +442,10 @@ struct ReadinessTab: View {
                     .font(.callout.weight(.semibold))
                 TextEditor(text: $approvalReason)
                     .font(.callout)
-                    .frame(minHeight: 78)
+                    .frame(minHeight: 78, maxHeight: redesign ? 110 : .infinity)
                     .scrollContentBackground(.hidden)
                     .padding(8)
-                    .background(Color(nsColor: .textBackgroundColor))
+                    .background((redesign ? DesktopTheme.canvas : Color(nsColor: .textBackgroundColor)))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor), lineWidth: 1))
             } else if decisionStatus == .needsReview {
@@ -503,10 +545,11 @@ struct ReadinessTab: View {
 }
 
 private struct ReadinessPanelModifier: ViewModifier {
+    @Environment(\.desktopRedesign) private var redesign
     func body(content: Content) -> some View {
         content
             .padding(14)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.32))
+            .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)).opacity(0.32))
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 1))
     }
@@ -577,5 +620,42 @@ private struct FlowLayout: Layout {
             currentX += size.width + spacing
             currentRowHeight = max(currentRowHeight, size.height)
         }
+    }
+}
+
+private struct DesktopReadinessArea: View {
+    let area: ReadinessAreaReview
+    let findings: [ReadinessFinding]
+    let onOpen: (ReadinessSourceRef) -> Void
+    @State private var expanded: Bool
+    init(area: ReadinessAreaReview, findings: [ReadinessFinding], onOpen: @escaping (ReadinessSourceRef) -> Void) {
+        self.area = area; self.findings = findings; self.onOpen = onOpen
+        _expanded = State(initialValue: !area.status.isGreen || !findings.isEmpty)
+    }
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(area.summary).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                ForEach(findings) { finding in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Label(finding.title, systemImage: "circle.fill").font(.caption.weight(.semibold)).foregroundStyle(finding.severity.color)
+                        Text(finding.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                FlowLayout(spacing: 6) {
+                    ForEach(area.sourceRefs) { ref in
+                        Button(ref.label) { onOpen(ref) }.font(.caption2).buttonStyle(.bordered).controlSize(.mini)
+                    }
+                }
+            }.padding(.top, 8)
+        } label: {
+            HStack {
+                Text(area.area.label).font(.caption.weight(.semibold))
+                Spacer(minLength: 8)
+                Text(area.status.displayLabel).font(.caption2.weight(.medium)).foregroundStyle(area.status.color)
+            }
+        }
+        .padding(12)
+        .onChange(of: area.status) { _, status in if !status.isGreen { expanded = true } }
     }
 }

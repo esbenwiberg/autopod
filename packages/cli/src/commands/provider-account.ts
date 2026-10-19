@@ -129,6 +129,15 @@ async function requireCatalogProvider(
   return provider;
 }
 
+function parseFoundryEndpoint(value: string): string | null {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'https:' ? url.toString().replace(/\/+$/, '') : null;
+  } catch {
+    return null;
+  }
+}
+
 async function requireAccountProvider(
   client: AutopodClient,
   id: string,
@@ -432,6 +441,57 @@ export function registerProviderAccountCommands(
       );
       console.log(chalk.green(`Provider account "${id}" is authenticated.`));
     });
+
+  accounts
+    .command('auth-foundry <id>')
+    .description(
+      'Store an Azure AI Foundry endpoint + API key (key read from AUTOPOD_PROVIDER_API_KEY or prompt)',
+    )
+    .requiredOption(
+      '--endpoint <url>',
+      'Foundry resource URL, e.g. https://<resource>.services.ai.azure.com/anthropic',
+    )
+    .option('--surface <surface>', 'anthropic (Claude) or openai (Codex)', 'anthropic')
+    .option('--api-version <version>', 'Azure OpenAI api-version (openai surface only)')
+    .action(
+      async (id: string, opts: { endpoint: string; surface: string; apiVersion?: string }) => {
+        if (opts.surface !== 'anthropic' && opts.surface !== 'openai') {
+          console.error(chalk.red('--surface must be "anthropic" or "openai".'));
+          process.exit(1);
+        }
+        const endpoint = parseFoundryEndpoint(opts.endpoint);
+        if (!endpoint) {
+          console.error(chalk.red('--endpoint must be an https:// URL.'));
+          process.exit(1);
+        }
+
+        const client = getClient();
+        await requireAccountProvider(client, id, 'foundry');
+        // Never accept the key as a flag — it would land in shell history and `ps`.
+        const apiKey =
+          process.env.AUTOPOD_PROVIDER_API_KEY?.trim() || (await readSecret('Foundry API key: '));
+        if (!apiKey) {
+          console.error(chalk.red('API key cannot be empty.'));
+          process.exit(1);
+        }
+        const credentials = {
+          provider: 'foundry',
+          endpoint,
+          apiKey,
+          apiSurface: opts.surface,
+          ...(opts.apiVersion ? { apiVersion: opts.apiVersion } : {}),
+        } satisfies ProviderCredentials;
+        await withSpinner(`Saving credentials for "${id}"...`, () =>
+          client.updateProviderAccount(id, { credentials }),
+        );
+        console.log(chalk.green(`Provider account "${id}" is authenticated.`));
+        console.log(
+          chalk.dim(
+            'Foundry routes by deployment name: set the profile model to your deployment name.',
+          ),
+        );
+      },
+    );
 
   accounts
     .command('auth-pi <id> <provider>')

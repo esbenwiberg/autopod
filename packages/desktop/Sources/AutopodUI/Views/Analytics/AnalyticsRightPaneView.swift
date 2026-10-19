@@ -11,8 +11,8 @@ public struct AnalyticsRightPaneView: View {
     public let card: AnalyticsCardKind?
     public let pods: [Pod]
     public let loadScores: (() async throws -> [PodQualityScore])?
-    public let loadCost: (() async throws -> CostAnalyticsResponse)?
-    public let loadReliability: (() async throws -> ReliabilityAnalyticsResponse)?
+    public let loadCost: ((Int) async throws -> CostAnalyticsResponse)?
+    public let loadReliability: ((Int) async throws -> ReliabilityAnalyticsResponse)?
     public let loadQuality: ((Int) async throws -> QualityAnalyticsResponse)?
     public let loadSafety: ((Int) async throws -> SafetyAnalyticsResponse)?
     public let loadThroughput: ((Int) async throws -> ThroughputAnalyticsResponse)?
@@ -34,8 +34,8 @@ public struct AnalyticsRightPaneView: View {
         card: AnalyticsCardKind?,
         pods: [Pod],
         loadScores: (() async throws -> [PodQualityScore])? = nil,
-        loadCost: (() async throws -> CostAnalyticsResponse)? = nil,
-        loadReliability: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
+        loadCost: ((Int) async throws -> CostAnalyticsResponse)? = nil,
+        loadReliability: ((Int) async throws -> ReliabilityAnalyticsResponse)? = nil,
         loadQuality: ((Int) async throws -> QualityAnalyticsResponse)? = nil,
         loadSafety: ((Int) async throws -> SafetyAnalyticsResponse)? = nil,
         loadThroughput: ((Int) async throws -> ThroughputAnalyticsResponse)? = nil,

@@ -12,6 +12,11 @@ public struct ManagedPodsView: View {
   public let error: String?
   public let onRefresh: () async -> Void
 
+  public var isConnected: Bool
+  public var embedded: Bool
+  @State private var profileFilter = "all"
+  @State private var accountFilter = "all"
+  @Environment(\.desktopRedesign) private var redesign
   @State private var searchText = ""
   @State private var filter: ManagedPodFilter = .all
 
@@ -20,8 +25,9 @@ public struct ManagedPodsView: View {
     selection: Binding<String?>,
     isLoading: Bool,
     error: String?,
-    onRefresh: @escaping () async -> Void
+    onRefresh: @escaping () async -> Void, isConnected: Bool = true, embedded: Bool = false
   ) {
+    self.isConnected = isConnected; self.embedded = embedded
     self.pods = pods
     self._selection = selection
     self.isLoading = isLoading
@@ -33,11 +39,14 @@ public struct ManagedPodsView: View {
     let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     return pods.filter { pod in
       filter.includes(pod)
+        && (profileFilter == "all" || profileFilter == pod.profileId)
+        && (accountFilter == "all" || accountFilter == pod.providerAccountId)
         && (query.isEmpty
           || pod.podId.lowercased().contains(query)
           || pod.dispatcherAttemptId.lowercased().contains(query)
           || pod.profileId.lowercased().contains(query)
           || pod.model.lowercased().contains(query)
+          || pod.providerAccountId.lowercased().contains(query)
           || pod.state.lowercased().contains(query))
     }
   }
@@ -47,14 +56,19 @@ public struct ManagedPodsView: View {
       header
       Divider()
 
-      if pods.isEmpty && !isLoading {
+      if pods.isEmpty && isLoading {
+        ProgressView("Loading managed inventory…").frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else if pods.isEmpty && !isLoading {
         ContentUnavailableView(
           "No Managed Pods",
           systemImage: "shippingbox",
           description: Text("No Dispatcher attempts are visible for this installation.")
         )
       } else if visiblePods.isEmpty {
-        ContentUnavailableView.search(text: searchText)
+        ContentUnavailableView {
+          Label("No matching managed pods", systemImage: "line.3.horizontal.decrease.circle")
+        } description: { Text("Try another state, profile, account or search.") }
+        actions: { Button("Clear filters") { searchText = ""; filter = .all; profileFilter = "all"; accountFilter = "all" } }
       } else {
         ScrollView {
           LazyVGrid(
@@ -74,6 +88,7 @@ public struct ManagedPodsView: View {
         }
       }
     }
+    .background(redesign ? DesktopTheme.canvas : Color(nsColor: .windowBackgroundColor))
     .task {
       while !Task.isCancelled {
         await onRefresh()
@@ -88,6 +103,7 @@ public struct ManagedPodsView: View {
 
   private var header: some View {
     VStack(spacing: 10) {
+      if !embedded {
       HStack(spacing: 10) {
         Text("Managed Pods")
           .font(.title3.weight(.semibold))
@@ -109,6 +125,7 @@ public struct ManagedPodsView: View {
         .disabled(isLoading)
       }
 
+      }
       HStack(spacing: 8) {
         HStack(spacing: 6) {
           Image(systemName: "magnifyingglass")
@@ -143,6 +160,18 @@ public struct ManagedPodsView: View {
         .fixedSize()
       }
 
+      if redesign {
+        HStack {
+          Picker("Profile", selection: $profileFilter) {
+            Text("All profiles").tag("all")
+            ForEach(Array(Set(pods.map(\.profileId))).sorted(), id: \.self) { Text($0).tag($0) }
+          }
+          Picker("Account", selection: $accountFilter) {
+            Text("All accounts").tag("all")
+            ForEach(Array(Set(pods.map(\.providerAccountId))).sorted(), id: \.self) { Text($0).tag($0) }
+          }
+        }.controlSize(.small)
+      }
       if let error {
         Label(error, systemImage: "exclamationmark.triangle.fill")
           .font(.caption)
@@ -194,124 +223,49 @@ private enum ManagedPodFilter: String, CaseIterable, Identifiable {
 private struct ManagedPodCard: View {
   let pod: ManagedPodSummary
   let isSelected: Bool
-  @State private var isHovered = false
-
+  @Environment(\.desktopRedesign) private var redesign
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      managedStateColor(pod.state)
-        .frame(height: 2)
-        .opacity(isSelected ? 1 : 0.72)
-
-      VStack(alignment: .leading, spacing: 10) {
-        HStack(spacing: 7) {
-          Image(systemName: managedStateIcon(pod.state))
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(managedStateColor(pod.state))
-          Text(managedPodDisplayName(pod.podId))
-            .font(.system(.callout, design: .monospaced).weight(.semibold))
-            .foregroundStyle(managedStateColor(pod.state))
-            .lineLimit(1)
-            .help(pod.podId)
-          Spacer(minLength: 4)
-          ManagedStateBadge(state: pod.state)
-        }
-
-        HStack(spacing: 6) {
-          Label(pod.profileId, systemImage: "person.text.rectangle")
-            .lineLimit(1)
-          Spacer(minLength: 4)
-          Text(pod.lastEventDate, style: .relative)
-            .monospacedDigit()
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-
-        HStack(spacing: 12) {
-          compactMetric(
-            icon: "arrow.up.arrow.down",
-            value: pod.providerRequests.formatted(),
-            label: "requests"
-          )
-          compactMetric(
-            icon: "number",
-            value: compactCount(pod.consumedTokens),
-            label: pod.tokenUsageKnown ? "tokens" : "tokens*"
-          )
-          compactMetric(
-            icon: "checkmark.shield",
-            value: managedValidationLabel(pod.validationStatus),
-            label: "validation"
-          )
-        }
-
-        HStack(spacing: 5) {
-          Text(pod.model)
-          Text("·").foregroundStyle(.quaternary)
-          Text(pod.providerAccountId)
-          Spacer(minLength: 4)
-          if pod.failure != nil {
-            Image(systemName: "exclamationmark.triangle.fill")
-              .foregroundStyle(.orange)
-              .help("Provider failure recorded")
-          }
-          if !pod.limitations.isEmpty {
-            Label(pod.limitations.count.formatted(), systemImage: "exclamationmark.circle")
-              .help("\(pod.limitations.count) limitation(s)")
-          }
-        }
-        .font(.caption2)
-        .foregroundStyle(.tertiary)
-        .lineLimit(1)
+    VStack(alignment: .leading, spacing: 16) {
+      HStack {
+        Text(managedPodDisplayName(pod.podId)).font(.system(.callout, design: .monospaced).weight(.semibold)).lineLimit(1).help(pod.podId)
+        Spacer(minLength: 4); ManagedStateBadge(state: pod.state)
       }
-      .padding(12)
-    }
-    .frame(maxWidth: .infinity, alignment: .topLeading)
-    .background(
-      RoundedRectangle(cornerRadius: 10)
-        .fill(Color(nsColor: .controlBackgroundColor))
-        .shadow(
-          color: .black.opacity(isSelected ? 0.10 : isHovered ? 0.07 : 0.03),
-          radius: isSelected ? 9 : isHovered ? 7 : 3,
-          y: isSelected ? 3 : 1
-        )
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 10)
-        .stroke(
-          isSelected
-            ? Color.accentColor.opacity(0.9)
-            : isHovered
-              ? Color.accentColor.opacity(0.4)
-              : managedStateColor(pod.state).opacity(0.28),
-          lineWidth: isSelected ? 2 : 1
-        )
-    )
-    .clipShape(RoundedRectangle(cornerRadius: 10))
-    .animation(.easeOut(duration: 0.15), value: isHovered)
-    .animation(.easeOut(duration: 0.15), value: isSelected)
-    .onHover { isHovered = $0 }
-    .accessibilityLabel(
-      "\(managedPodDisplayName(pod.podId)), \(managedStateLabel(pod.state)), \(pod.profileId)"
-    )
+      Text("\(pod.profileId) · v\(pod.profileVersion)").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+      VStack(alignment: .leading, spacing: 5) {
+        Text("\(pod.runtime) / \(pod.model)")
+        Text(pod.providerAccountId)
+      }.font(.caption).foregroundStyle(DesktopTheme.accent).lineLimit(2)
+      HStack(spacing: 24) {
+        metric(pod.providerRequests.formatted(), "Requests")
+        metric(compactCount(pod.consumedTokens) + (pod.tokenUsageKnown ? "" : "*"), pod.tokenUsageKnown ? "Tokens" : "Tokens · partial")
+      }.padding(.vertical, 4)
+      Divider()
+      VStack(alignment: .leading, spacing: 7) {
+        Label(pod.failure == nil ? "Provider · route selected" : "Provider · failure recorded", systemImage: "point.3.connected.trianglepath.dotted")
+        Label("Validation · \(managedValidationLabel(pod.validationStatus))", systemImage: "checkmark.shield")
+        Label("Runtime · \(pod.exitCode.map { "exit \($0)" } ?? (pod.observedExit ? "exit observed" : "exit not observed"))", systemImage: "terminal")
+      }.font(.caption2).foregroundStyle(.secondary)
+      HStack {
+        Text(pod.lastEventDate, style: .relative)
+        Spacer()
+        if !pod.limitations.isEmpty { Label("\(pod.limitations.count)", systemImage: "exclamationmark.circle") }
+        Image(systemName: "arrow.right")
+      }.font(.caption2).foregroundStyle(.secondary)
+    }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+      .background(isSelected ? DesktopTheme.selection : DesktopTheme.surface, in: RoundedRectangle(cornerRadius: 8))
+      .overlay(RoundedRectangle(cornerRadius: 8).stroke(isSelected ? DesktopTheme.accent : DesktopTheme.line, lineWidth: isSelected ? 1.5 : 1))
+      .accessibilityLabel("\(managedPodDisplayName(pod.podId)), \(managedStateLabel(pod.state)), \(pod.profileId)")
+      .accessibilityAddTraits(isSelected ? .isSelected : [])
   }
-
-  private func compactMetric(icon: String, value: String, label: String) -> some View {
-    HStack(spacing: 5) {
-      Image(systemName: icon)
-        .font(.system(size: 9))
-        .foregroundStyle(.tertiary)
-      VStack(alignment: .leading, spacing: 0) {
-        Text(value)
-          .font(.system(.caption, design: .monospaced).weight(.semibold))
-          .lineLimit(1)
-        Text(label)
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
-      }
+  private func metric(_ value: String, _ label: String) -> some View {
+    VStack(alignment: .leading, spacing: 5) {
+      Text(value).font(.system(size: 20, weight: .medium, design: .monospaced))
+      Text(label).font(.caption2).foregroundStyle(.secondary)
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
+
+private struct ManagedDetailLoadKey: Hashable { let podID: String; let baseURL: URL? }
 
 public struct ManagedPodDetailView: View {
   private let initialPod: ManagedPodSummary
@@ -320,16 +274,44 @@ public struct ManagedPodDetailView: View {
   }
   public let api: DaemonAPI?
 
+  @Environment(\.desktopRedesign) private var redesign
+  @State private var detailTab: String
   @State private var detail: ManagedPodDetailResponse?
   @State private var detailError: String?
   @State private var didCopyId = false
 
-  public init(pod: ManagedPodSummary, api: DaemonAPI? = nil) {
+  public init(pod: ManagedPodSummary, api: DaemonAPI? = nil, initialDetail: ManagedPodDetailResponse? = nil, initialTab: String = "Overview") {
+    _detailTab = State(initialValue: initialTab); _detail = State(initialValue: initialDetail)
     self.initialPod = pod
     self.api = api
   }
 
   public var body: some View {
+    Group { if redesign { desktopBody } else { legacyBody } }
+    .task(id: ManagedDetailLoadKey(podID: initialPod.podId, baseURL: api?.baseURL)) {
+      guard let api else { return }
+      detail = nil
+      detailError = nil
+      while !Task.isCancelled {
+        do {
+          let fetched = try await api.getManagedPod(pod.podId)
+          guard !Task.isCancelled else { return }
+          guard fetched.pod.podId == initialPod.podId else { throw DaemonError.badRequest("The detail response belongs to another managed pod.") }
+          detail = fetched
+          detailError = nil
+        } catch {
+          if !Task.isCancelled { detailError = error.localizedDescription }
+        }
+        do {
+          try await Task.sleep(for: .seconds(5))
+        } catch {
+          return
+        }
+      }
+    }
+  }
+
+  private var legacyBody: some View {
     VStack(spacing: 0) {
       detailHeader
       HStack(spacing: 6) {
@@ -408,26 +390,39 @@ public struct ManagedPodDetailView: View {
         .padding(14)
       }
     }
-    .task(id: pod.podId) {
-      detail = nil
-      detailError = nil
-      guard let api else { return }
-      while !Task.isCancelled {
-        do {
-          let fetched = try await api.getManagedPod(pod.podId)
-          guard !Task.isCancelled else { return }
-          detail = fetched
-          detailError = nil
-        } catch {
-          if !Task.isCancelled { detailError = error.localizedDescription }
-        }
-        do {
-          try await Task.sleep(for: .seconds(5))
-        } catch {
-          return
-        }
+
+  }
+
+  private var desktopBody: some View {
+    VStack(spacing: 0) {
+      detailHeader
+      DesktopSectionPicker(title: "", items: ["Overview", "Validation", "Delivery", "Artifacts", "Activity"], selection: $detailTab, label: { $0 })
+      if let detailError {
+        Label("Refresh failed · showing the last loaded detail. " + detailError, systemImage: "exclamationmark.triangle")
+          .font(.caption).foregroundStyle(.orange).padding(14).textSelection(.enabled)
       }
-    }
+      ScrollView {
+        VStack(alignment: .leading, spacing: 20) {
+          if detailTab == "Validation" { validationCard }
+          else if detailTab == "Delivery" { deliveryCard }
+          else if detailTab == "Artifacts" { artifactsCard }
+          else if detailTab == "Activity" { timelineCard }
+          else {
+            statusBanner
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 125))], spacing: 10) {
+              metricTile(icon: "arrow.up.arrow.down", value: pod.providerRequests.formatted(), label: "Provider requests")
+              metricTile(icon: "number", value: compactCount(pod.consumedTokens), label: pod.tokenUsageKnown ? "Observed tokens" : "Tokens · partial")
+              metricTile(icon: "clock", value: managedDuration(pod), label: "Duration")
+              metricTile(icon: "terminal", value: pod.exitCode.map { "Exit \($0)" } ?? (pod.observedExit ? "Observed" : "Pending"), label: "Runtime exit")
+            }
+            if let failure = pod.failure { failureCard(failure) }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), alignment: .top)], spacing: 16) { routeCard; identityCard }
+            if !pod.limitations.isEmpty { limitationsCard }
+            Text("Repository identity and task titles are not reported by this managed inventory.").font(.caption).foregroundStyle(.secondary)
+          }
+        }.padding(24)
+      }
+    }.background(DesktopTheme.surface)
   }
 
   private var detailHeader: some View {
@@ -478,10 +473,16 @@ public struct ManagedPodDetailView: View {
 
       Spacer(minLength: 8)
       ManagedStateBadge(state: pod.state)
+      if redesign {
+        Menu {
+          Button("Copy pod ID") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(pod.podId, forType: .string) }
+          Button("Copy attempt ID") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(pod.dispatcherAttemptId, forType: .string) }
+        } label: { Text("Actions ···") }.menuStyle(.borderlessButton).fixedSize()
+      }
     }
-    .padding(.horizontal, 16)
+    .padding(.horizontal, 24)
     .padding(.vertical, 12)
-    .background(Color(nsColor: .windowBackgroundColor))
+    .background(redesign ? DesktopTheme.surface : Color(nsColor: .windowBackgroundColor))
   }
 
   private var statusBanner: some View {
@@ -534,7 +535,7 @@ public struct ManagedPodDetailView: View {
       Spacer(minLength: 0)
     }
     .padding(10)
-    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
+    .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)), in: RoundedRectangle(cornerRadius: 9))
   }
 
   private var routeCard: some View {
@@ -551,6 +552,7 @@ public struct ManagedPodDetailView: View {
     detailCard("Identity", icon: "number.square") {
       detailRow("Managed pod", pod.podId, monospaced: true)
       detailRow("Dispatcher attempt", pod.dispatcherAttemptId, monospaced: true)
+      detailRow("Profile", "\(pod.profileId) · v\(pod.profileVersion)")
       detailRow("Cleanup", pod.cleanup)
       detailRow("Grant revoked", pod.revoked ? "Yes" : "No")
       detailRow("Stop requested", pod.stopRequested ? "Yes" : "No")
@@ -572,7 +574,10 @@ public struct ManagedPodDetailView: View {
 
       ForEach(detail?.validations ?? []) { run in
         Divider()
+        detailRow("Validation ID", run.validationId, monospaced: true)
+        detailRow("Status", run.status)
         detailRow("Mode", run.mode)
+        detailRow("Receipt digest", run.receiptDigest, monospaced: true)
         detailRow("Checked commit", run.newCommit, monospaced: true)
         if !run.reason.isEmpty {
           Text(run.reason)
@@ -584,6 +589,7 @@ public struct ManagedPodDetailView: View {
             Image(systemName: phase.status == "passed" ? "checkmark.circle.fill" : "circle")
               .foregroundStyle(phase.status == "passed" ? .green : .secondary)
             Text(phase.phase.capitalized)
+            Text(phase.status).foregroundStyle(.secondary)
             Spacer()
             Text(String(format: "%.1fs", Double(phase.durationMs) / 1000))
               .monospacedDigit()
@@ -608,6 +614,7 @@ public struct ManagedPodDetailView: View {
       }
       ForEach(detail?.source ?? []) { receipt in
         Divider()
+        detailRow("Operation key", receipt.operationKey, monospaced: true)
         detailRow(receipt.operation.capitalized, receipt.status)
         detailRow("Branch", receipt.head, monospaced: true)
         if receipt.pullRequestId > 0 {
@@ -683,6 +690,7 @@ public struct ManagedPodDetailView: View {
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(artifact.status == "committed" ? .green : .secondary)
             }
+            if let committedAt = artifact.committedAt { Text("Committed: " + Date(timeIntervalSince1970: TimeInterval(committedAt)).formatted(date: .abbreviated, time: .shortened)).font(.caption2).foregroundStyle(.secondary) }
             if artifact.status == "committed", let api {
               ManagedArtifactInspector(artifact: artifact, api: api)
             }
@@ -708,8 +716,10 @@ public struct ManagedPodDetailView: View {
             Circle()
               .fill(managedEventColor(event.kind))
               .frame(width: 6, height: 6)
-            Text(event.kind.replacingOccurrences(of: "_", with: " ").capitalized)
-              .font(.caption)
+            VStack(alignment: .leading, spacing: 4) {
+              Text(event.kind.replacingOccurrences(of: "_", with: " ").capitalized).font(.caption)
+              Text(event.eventId).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+            }
             Spacer()
             Text(Date(timeIntervalSince1970: TimeInterval(event.createdAt)), style: .time)
               .font(.system(.caption2, design: .monospaced))
@@ -733,7 +743,7 @@ public struct ManagedPodDetailView: View {
     }
     .frame(maxWidth: .infinity, alignment: .topLeading)
     .padding(12)
-    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+    .background((redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)), in: RoundedRectangle(cornerRadius: 10))
     .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.07)))
   }
 
@@ -848,49 +858,37 @@ private func managedEventColor(_ kind: String) -> Color {
 private struct ManagedArtifactInspector: View {
   let artifact: ManagedArtifactSummary
   let api: DaemonAPI
+  @Environment(\.desktopOpenManagedArtifact) private var openArtifact
   @State private var isViewerPresented = false
-  @State private var error: String?
-  @State private var busy = false
+  var body: some View {
+    HStack(alignment: .top, spacing: 8) {
+      Button {
+        if let openArtifact { openArtifact(artifact) } else { isViewerPresented = true }
+      } label: { Label("Open", systemImage: "doc.richtext") }.buttonStyle(.bordered).controlSize(.small)
+      ManagedArtifactDownloadControl(artifact: artifact, api: api)
+    }.sheet(isPresented: $isViewerPresented) { ManagedArtifactViewer(artifact: artifact, api: api) }
+  }
+}
 
+private struct ManagedArtifactDownloadControl: View {
+  let artifact: ManagedArtifactSummary
+  let api: DaemonAPI
+  @State private var busy = false
+  @State private var error: String?
   var body: some View {
     VStack(alignment: .leading, spacing: 7) {
-      HStack(spacing: 6) {
-        Button {
-          isViewerPresented = true
-        } label: {
-          Label("Open", systemImage: "doc.richtext")
+      Button {
+        Task { @MainActor in
+          let panel = NSSavePanel(); panel.nameFieldStringValue = "\(artifact.artifactId).tar.gz"
+          guard await panel.begin() == .OK, let url = panel.url else { return }
+          busy = true; error = nil
+          defer { busy = false }
+          do { let data = try await api.downloadManagedArtifact(artifact.artifactId); try data.write(to: url, options: .atomic) }
+          catch { self.error = error.localizedDescription }
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-
-        Button {
-          Task { @MainActor in
-            let panel = NSSavePanel()
-            panel.nameFieldStringValue = "\(artifact.artifactId).tar.gz"
-            guard await panel.begin() == .OK, let url = panel.url else { return }
-            busy = true
-            defer { busy = false }
-            do {
-              let data = try await api.downloadManagedArtifact(artifact.artifactId)
-              try data.write(to: url, options: .atomic)
-              error = nil
-            } catch {
-              self.error = error.localizedDescription
-            }
-          }
-        } label: {
-          Label("Download", systemImage: "arrow.down.circle")
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-      }
-      .disabled(busy)
-
-      if busy { ProgressView().controlSize(.small) }
-      if let error { Text(error).font(.caption).foregroundStyle(.orange) }
-    }
-    .sheet(isPresented: $isViewerPresented) {
-      ManagedArtifactViewer(artifact: artifact, api: api)
+      } label: { Label(busy ? "Downloading…" : "Download bundle", systemImage: "arrow.down.circle") }
+        .buttonStyle(.bordered).controlSize(.small).disabled(busy)
+      if let error { Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled).frame(maxWidth: 260) }
     }
   }
 }
@@ -925,9 +923,14 @@ func managedArtifactPreviewKind(path: String, mediaType: String) -> ManagedArtif
   return .unavailable
 }
 
-private struct ManagedArtifactViewer: View {
+struct ManagedArtifactViewer: View {
   let artifact: ManagedArtifactSummary
   let api: DaemonAPI
+  var onClose: (() -> Void)? = nil
+  var initialPath: String? = nil
+  var initialHTMLSource = false
+  var onPreviewSettled: (() -> Void)? = nil
+  @Environment(\.desktopRedesign) private var redesign
 
   @Environment(\.dismiss) private var dismiss
   @State private var manifest: ManagedArtifactManifest?
@@ -935,6 +938,7 @@ private struct ManagedArtifactViewer: View {
   @State private var contents: [String: Data] = [:]
   @State private var isLoadingManifest = true
   @State private var isLoadingFile = false
+  @State private var loadingPath: String?
   @State private var manifestError: String?
   @State private var fileError: String?
   @State private var htmlPreviewMode = ManagedHTMLPreviewMode.rendered
@@ -963,7 +967,8 @@ private struct ManagedArtifactViewer: View {
         Text("\(artifact.fileCount) file\(artifact.fileCount == 1 ? "" : "s")")
           .font(.caption)
           .foregroundStyle(.secondary)
-        Button("Done") { dismiss() }
+        ManagedArtifactDownloadControl(artifact: artifact, api: api)
+        Button(onClose == nil ? "Done" : "Back to attempt") { if let onClose { onClose() } else { dismiss() } }
           .keyboardShortcut(.cancelAction)
       }
       .padding(14)
@@ -975,11 +980,9 @@ private struct ManagedArtifactViewer: View {
           .controlSize(.small)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else if let manifestError {
-        artifactViewerMessage(
-          "Artifact unavailable",
-          detail: manifestError,
-          icon: "exclamationmark.triangle"
-        )
+        VStack { artifactViewerMessage("Artifact unavailable", detail: manifestError, icon: "exclamationmark.triangle")
+          Button("Retry") { Task { await loadManifest() } }.padding(.bottom, 24)
+        }
       } else if let manifest {
         HStack(spacing: 0) {
           fileSidebar(manifest)
@@ -989,9 +992,14 @@ private struct ManagedArtifactViewer: View {
         }
       }
     }
-    .frame(minWidth: 900, idealWidth: 1080, minHeight: 580, idealHeight: 720)
+    .frame(minWidth: onClose == nil ? 900 : 650, minHeight: 580)
+    .background(redesign ? DesktopTheme.surface : Color(nsColor: .windowBackgroundColor))
+    .onAppear { if initialHTMLSource { htmlPreviewMode = .source } }
     .task { await loadManifest() }
-    .task(id: selectedPath) { await loadSelectedFile() }
+    .task(id: selectedPath) {
+      await loadSelectedFile()
+      if selectedPath != nil && !Task.isCancelled { onPreviewSettled?() }
+    }
   }
 
   private func fileSidebar(_ manifest: ManagedArtifactManifest) -> some View {
@@ -1010,7 +1018,7 @@ private struct ManagedArtifactViewer: View {
               HStack(spacing: 9) {
                 Image(systemName: managedArtifactFileIcon(file))
                   .frame(width: 16)
-                  .foregroundStyle(selectedPath == file.path ? .white : .secondary)
+                  .foregroundStyle(selectedPath == file.path ? DesktopTheme.accent : .secondary)
                 VStack(alignment: .leading, spacing: 2) {
                   Text(file.path)
                     .font(.system(.caption, design: .monospaced))
@@ -1022,11 +1030,11 @@ private struct ManagedArtifactViewer: View {
                 }
                 Spacer(minLength: 0)
               }
-              .foregroundStyle(selectedPath == file.path ? Color.white : Color.primary)
+              .foregroundStyle(selectedPath == file.path ? DesktopTheme.accent : Color.primary)
               .padding(.horizontal, 10)
               .padding(.vertical, 7)
               .background(
-                selectedPath == file.path ? Color.accentColor : Color.clear,
+                selectedPath == file.path ? DesktopTheme.selection : Color.clear,
                 in: RoundedRectangle(cornerRadius: 6)
               )
               .contentShape(Rectangle())
@@ -1041,11 +1049,12 @@ private struct ManagedArtifactViewer: View {
       VStack(alignment: .leading, spacing: 3) {
         Text(manifest.bundle.format.uppercased())
           .font(.caption2.weight(.semibold))
+        Text(ByteCountFormatter.string(fromByteCount: Int64(manifest.bundle.size), countStyle: .file)).font(.caption2).foregroundStyle(.secondary)
+        Text("SHA-256").font(.caption2).foregroundStyle(.secondary)
         Text(manifest.bundle.sha256)
           .font(.system(size: 9, design: .monospaced))
           .foregroundStyle(.tertiary)
-          .lineLimit(1)
-          .truncationMode(.middle)
+          .textSelection(.enabled)
           .help(manifest.bundle.sha256)
       }
       .padding(10)
@@ -1191,7 +1200,7 @@ private struct ManagedArtifactViewer: View {
     do {
       let loaded = try await api.getManagedArtifactManifest(artifact.artifactId)
       manifest = loaded
-      selectedPath = loaded.files.first(where: {
+      selectedPath = loaded.files.first(where: { $0.path == initialPath })?.path ?? loaded.files.first(where: {
         managedArtifactPreviewKind(path: $0.path, mediaType: $0.mediaType) != .unavailable
       })?.path ?? loaded.files.first?.path
       manifestError = nil
@@ -1202,6 +1211,8 @@ private struct ManagedArtifactViewer: View {
 
   @MainActor
   private func loadSelectedFile() async {
+    fileError = nil
+    isLoadingFile = false
     guard let manifest, let file = selectedFile else { return }
     guard managedArtifactPreviewKind(path: file.path, mediaType: file.mediaType) != .unavailable else {
       fileError = nil
@@ -1209,15 +1220,19 @@ private struct ManagedArtifactViewer: View {
     }
     guard contents[file.path] == nil else { return }
     isLoadingFile = true
+    loadingPath = file.path
     fileError = nil
-    defer { isLoadingFile = false }
+    defer { if loadingPath == file.path { isLoadingFile = false; loadingPath = nil } }
     do {
-      contents[file.path] = try await api.getManagedArtifactFile(
+      let data = try await api.getManagedArtifactFile(
         artifact.artifactId,
         file: file,
         bundle: manifest.bundle
       )
+      guard !Task.isCancelled, selectedPath == file.path else { return }
+      contents[file.path] = data
     } catch {
+      guard !Task.isCancelled, selectedPath == file.path else { return }
       fileError = error.localizedDescription
     }
   }

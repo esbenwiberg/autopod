@@ -38,6 +38,27 @@ public struct MemoryManagementView: View {
     public var onScanMemories: ((String) -> Void)?
     public var configurationActions: LaunchConfigurationActions?
 
+    @Environment(\.desktopRedesign) private var redesign
+    @Environment(\.desktopWorkspaceDirty) private var workspaceDirty
+    @Environment(\.desktopWorkspaceBusy) private var workspaceBusy
+    public var workspaceActions: MemoryWorkspaceActions?
+    public var isConnected: Bool
+    public var isLoading: Bool
+    public var refresh: (() async -> Void)?
+    @State private var workspaceSection: String
+    @State private var detailSection: String
+    @State private var workspaceScope: MemoryScope?
+    @State private var workspaceRepository: String?
+    @State private var draft: DesktopMemoryDraft?
+    @State private var originalDraft: DesktopMemoryDraft?
+    @State private var draftBusy = false
+    @State private var draftError: String?
+    @State private var showDraftDiscard = false
+    @State private var pendingMemoryNavigation: (() -> Void)?
+    @State private var removalID: String?
+    @State private var removeIsActive = false
+    @State private var removeIsCandidate = false
+    @State private var showMemoryRemoval = false
     @State private var selectedScope: MemoryScope = .global
     @State private var searchText = ""
     @State private var selectedItem: MemoryWorkbenchSelection?
@@ -75,8 +96,13 @@ public struct MemoryManagementView: View {
         scopeNameLookup: ((MemoryScope, String) -> String?)? = nil,
         profileNames: [String] = [],
         onScanMemories: ((String) -> Void)? = nil,
-        configurationActions: LaunchConfigurationActions? = nil
+        configurationActions: LaunchConfigurationActions? = nil,
+        workspaceActions: MemoryWorkspaceActions? = nil, isConnected: Bool = true, isLoading: Bool = false,
+        refresh: (() async -> Void)? = nil, initialSection: String = "Review", initialDetail: String = "Content", initialMemoryID: String? = nil
     ) {
+        _selectedItem = State(initialValue: initialMemoryID.map { .memory($0) })
+        self.workspaceActions = workspaceActions; self.isConnected = isConnected; self.isLoading = isLoading; self.refresh = refresh
+        _workspaceSection = State(initialValue: initialSection); _detailSection = State(initialValue: initialDetail)
         self.entries = entries
         self.activeMemories = activeMemories
         self.pendingCandidates = pendingCandidates
@@ -112,12 +138,13 @@ public struct MemoryManagementView: View {
     }
 
     private var filteredEntries: [MemoryEntry] {
-        Self.filteredEntries(entries, scope: displayedScope, query: searchText)
+        desktopMode ? entries.filter(matchesWorkspace) : Self.filteredEntries(entries, scope: displayedScope, query: searchText)
     }
 
     private var pending: [MemoryEntry] { filteredEntries.filter { !$0.approved } }
     private var approved: [MemoryEntry] {
-        Self.approvedEntries(
+        if desktopMode { return Self.mergeEntries(entries.filter(\.approved), with: activeMemories).filter(matchesWorkspace) }
+        return Self.approvedEntries(
             entries: entries,
             activeMemories: activeMemories,
             scope: displayedScope,
@@ -126,16 +153,19 @@ public struct MemoryManagementView: View {
     }
 
     private var candidates: [MemoryCandidate] {
-        Self.filteredCandidates(pendingCandidates, scope: displayedScope, query: searchText)
+        if desktopMode {
+            return pendingCandidates.filter { matchesWorkspace(scope: $0.scope, scopeID: $0.scopeId, path: $0.path, content: $0.content, origin: $0.createdByPodId, extra: ($0.rationale ?? "") + $0.tags.joined(separator: " ") + $0.impactSummary) }
+        }
+        return Self.filteredCandidates(pendingCandidates, scope: displayedScope, query: searchText)
     }
 
     private var visibleExtractionAttempts: [MemoryExtractionAttempt] {
-        Self.filteredExtractionAttempts(extractionAttempts, scope: displayedScope, query: searchText)
+        Self.filteredExtractionAttempts(extractionAttempts, scope: desktopMode ? .global : displayedScope, query: searchText)
     }
 
     private var selectedMemory: MemoryEntry? {
         guard case .memory(let id) = selectedItem else { return nil }
-        return approved.first { $0.id == id }
+        return (desktopMode ? workspaceMemories : approved).first { $0.id == id }
     }
 
     private var selectedCandidate: MemoryCandidate? {
@@ -144,6 +174,9 @@ public struct MemoryManagementView: View {
     }
 
     public var body: some View {
+        Group { if desktopMode { desktopBody } else { legacyBody } }
+    }
+    private var legacyBody: some View {
         VStack(spacing: 0) {
             toolbar
             Divider()
@@ -266,7 +299,7 @@ public struct MemoryManagementView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background((desktopMode ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .frame(width: 220)
     }
@@ -809,7 +842,7 @@ public struct MemoryManagementView: View {
     }
 
     private func cardBackground(isSelected: Bool) -> Color {
-        isSelected ? Color.accentColor.opacity(0.08) : Color(nsColor: .controlBackgroundColor)
+        isSelected ? Color.accentColor.opacity(0.08) : (desktopMode ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
     }
 
     private func provenanceRow(primary: String, secondary: String?) -> some View {
@@ -945,7 +978,7 @@ public struct MemoryManagementView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
-                .background(Color(nsColor: .controlBackgroundColor))
+                .background((desktopMode ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
         }
     }
@@ -961,7 +994,7 @@ public struct MemoryManagementView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background((desktopMode ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -1001,7 +1034,7 @@ public struct MemoryManagementView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background((desktopMode ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -1048,7 +1081,7 @@ public struct MemoryManagementView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background((desktopMode ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -1071,7 +1104,7 @@ public struct MemoryManagementView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background((desktopMode ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor)))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -1124,6 +1157,11 @@ public struct MemoryManagementView: View {
     }
 
     private func ensureSelection() {
+        if desktopMode {
+            guard workspaceSection != "Extraction", draft == nil else { return }
+            selectedItem = Self.preferredSelection(current: selectedItem, candidates: workspaceSection == "Review" ? candidates : [], memories: workspaceMemories)
+            return
+        }
         if let selectedItem {
             let preferred = Self.preferredSelection(
                 current: selectedItem,
@@ -1469,17 +1507,16 @@ struct CreateMemorySheet: View {
 
 private struct FlowTags: View {
     let tags: [String]
-
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(tags.prefix(8), id: \.self) { tag in
-                Text(tag)
-                    .font(.caption2)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.accentColor.opacity(0.08), in: Capsule())
-                    .foregroundStyle(.secondary)
-            }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) { badges }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], alignment: .leading, spacing: 6) { badges }
+        }
+    }
+    private var badges: some View {
+        ForEach(Array(tags.enumerated()), id: \.offset) { _, tag in
+            Text(tag).font(.caption2).padding(.horizontal, 6).padding(.vertical, 3)
+                .background(DesktopTheme.selection, in: Capsule()).foregroundStyle(.secondary)
         }
     }
 }
@@ -1782,5 +1819,308 @@ struct EditMemorySheet: View {
             }
         }
         .frame(width: 480)
+    }
+}
+
+// MARK: - Desktop knowledge workspace
+extension MemoryManagementView {
+    private var desktopMode: Bool { redesign && scopeFilter == nil }
+    private var workspaceMemories: [MemoryEntry] {
+        workspaceSection == "Review" ? pending : approved
+    }
+    private var repositoryIDs: [String] {
+        Array(Set((entries + activeMemories).filter { $0.scope == .repository }.compactMap(\.scopeId)
+            + pendingCandidates.filter { $0.scope == .repository }.compactMap(\.scopeId))).sorted()
+    }
+    private func matchesWorkspace(scope: MemoryScope, scopeID: String?, path: String, content: String, origin: String?, extra: String) -> Bool {
+        if let workspaceScope, scope != workspaceScope { return false }
+        if let workspaceRepository, scope != .repository || scopeID != workspaceRepository { return false }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty || [path, content, origin ?? "", scopeID ?? "", extra].joined(separator: " ").localizedCaseInsensitiveContains(query)
+    }
+    private func matchesWorkspace(_ entry: MemoryEntry) -> Bool {
+        matchesWorkspace(scope: entry.scope, scopeID: entry.scopeId, path: entry.path, content: entry.content,
+            origin: Self.originKey(for: entry), extra: (entry.rationale ?? "") + entry.tags.joined(separator: " "))
+    }
+    private var desktopContent: some View {
+        VStack(spacing: 0) {
+            DesktopInsightsHeader(title: "Memory", subtitle: "Review what was learned. Keep what helps the next task.") {
+                HStack {
+                    if let refresh {
+                        Button { Task { await refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(!isConnected || isLoading)
+                    }
+                    AnalysisWorkspaceLauncher(kind: "memory", actions: isConnected ? configurationActions : nil)
+                    Button { requestMemoryNavigation { beginDraft(DesktopMemoryDraft(scope: workspaceScope ?? .global)) } } label: { Label("New memory", systemImage: "plus") }
+                        .buttonStyle(.borderedProminent).disabled(workspaceActions == nil || !isConnected || draftBusy)
+                }
+            }
+            if !isConnected { workspaceNotice("Disconnected · loaded knowledge may be stale. Connect to edit, approve or launch.") }
+            if let error { inlineError(error).padding(.horizontal, 24).padding(.vertical, 8) }
+            if let draft {
+                DesktopMemoryEditor(draft: Binding(get: { self.draft ?? draft }, set: { self.draft = $0 }),
+                    original: originalDraft ?? draft, busy: draftBusy, error: draftError, connected: isConnected,
+                    cancel: { requestMemoryNavigation { self.draft = nil } }, save: saveDraft)
+            } else {
+                DesktopSectionPicker(title: "", items: ["Review", "Library", "Extraction"], selection: $workspaceSection, label: { section in
+                    section == "Review" ? "Review · \(pendingCandidates.count + entries.filter { !$0.approved }.count)" : section == "Library" ? "Library · \(Self.mergeEntries(entries.filter(\.approved), with: activeMemories).count)" : section
+                })
+                if workspaceSection == "Extraction" { desktopExtraction }
+                else {
+                    HSplitView {
+                        desktopMemoryList.frame(minWidth: 285, idealWidth: 370, maxWidth: 430)
+                        desktopMemoryDetail.frame(minWidth: 340, maxWidth: .infinity)
+                    }
+                }
+            }
+        }.background(DesktopTheme.surface)
+    }
+    private var desktopObservedBody: some View {
+        desktopContent
+            .onAppear { ensureSelection() }
+            .onChange(of: entries.map { "\($0.id):\($0.approved)" }) { _, _ in ensureSelection() }
+            .onChange(of: activeMemories.map(\.id)) { _, _ in ensureSelection() }
+            .onChange(of: pendingCandidates.map(\.id)) { _, _ in ensureSelection() }
+            .onChange(of: workspaceSection) { _, _ in detailSection = "Content"; ensureSelection() }
+            .onChange(of: workspaceScope) { _, scope in if scope != .repository { workspaceRepository = nil }; ensureSelection() }
+            .onChange(of: workspaceRepository) { _, repo in if repo != nil { workspaceScope = .repository }; ensureSelection() }
+            .onChange(of: searchText) { _, _ in ensureSelection() }
+            .onChange(of: selectedItem) { _, value in
+                detailSection = "Content"
+                switch value { case .memory(let id): onSelectMemory?(id); case .candidate(let id): onSelectCandidate?(id); case nil: break }
+            }
+            .onChange(of: draft) { _, value in workspaceDirty?(value != nil && value != originalDraft) }
+            .onChange(of: draftBusy) { _, value in workspaceBusy?(value) }
+            .onDisappear { workspaceDirty?(false); workspaceBusy?(false) }
+    }
+    private var desktopBody: some View {
+        AnyView(desktopObservedBody)
+            .confirmationDialog("Discard unsaved memory changes?", isPresented: $showDraftDiscard) {
+                Button("Discard changes", role: .destructive) { let action = pendingMemoryNavigation; pendingMemoryNavigation = nil; draft = nil; action?() }
+                Button("Keep editing", role: .cancel) { pendingMemoryNavigation = nil }
+            }
+            .confirmationDialog("\(removeIsActive ? "Delete memory" : "Reject suggestion")?", isPresented: $showMemoryRemoval) {
+                Button(removeIsActive ? "Delete memory" : "Reject suggestion", role: .destructive) {
+                    if let removalID { if removeIsActive { onDelete(removalID) } else if removeIsCandidate { onRejectCandidate(removalID) } else { onReject(removalID) } }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text(removeIsActive ? "Remove this active entry. Review its source and usage before deleting." : "Rejecting a suggestion leaves the active library unchanged.") }
+    }
+    private func workspaceNotice(_ text: String) -> some View {
+        Label(text, systemImage: "wifi.slash").font(.caption).foregroundStyle(.secondary)
+            .padding(14).frame(maxWidth: .infinity, alignment: .leading).background(DesktopTheme.canvas)
+    }
+    private var desktopMemoryList: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 12) {
+                TextField("Search path, content, origin…", text: $searchText).textFieldStyle(.roundedBorder).accessibilityIdentifier("memory-search")
+                Picker("Scope", selection: $workspaceScope) {
+                    Text("All scopes").tag(MemoryScope?.none)
+                    ForEach(Array(Set(MemoryScope.allCases + entries.map(\.scope) + pendingCandidates.map(\.scope))).sorted { $0.rawValue < $1.rawValue }, id: \.self) { Text($0.label).tag(Optional($0)) }
+                }.accessibilityIdentifier("memory-scope-filter")
+                Picker("Repository", selection: $workspaceRepository) {
+                    Text("All repositories").tag(String?.none)
+                    ForEach(repositoryIDs, id: \.self) { Text(scopeNameLookup?(.repository, $0) ?? $0).tag(Optional($0)) }
+                }.accessibilityIdentifier("memory-repository-filter")
+            }.controlSize(.small).padding(18)
+            Divider()
+            if isLoading && entries.isEmpty && activeMemories.isEmpty && pendingCandidates.isEmpty {
+                ProgressView("Loading knowledge…").frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        if workspaceSection == "Review" {
+                            ForEach(Self.groupCandidatesByOrigin(candidates), id: \.key) { group in
+                                originHeader("From \(group.key)", count: group.candidates.count)
+                                ForEach(group.candidates) { candidate in desktopCandidateCard(candidate) }
+                            }
+                            if !pending.isEmpty {
+                                originHeader("Legacy suggestions", count: pending.count)
+                                ForEach(pending) { memory in desktopEntryCard(memory) }
+                            }
+                        } else {
+                            ForEach(workspaceMemories) { memory in desktopEntryCard(memory) }
+                        }
+                        if (workspaceSection != "Review" || candidates.isEmpty) && workspaceMemories.isEmpty {
+                            ContentUnavailableView("No matching memories", systemImage: "brain", description: Text("Try another scope or search. Agents can propose knowledge for review."))
+                        }
+                        Text("Repository filters apply to repository-scoped knowledge.").font(.caption2).foregroundStyle(.secondary).padding(.top, 10)
+                        Button("Clear filters") { searchText = ""; workspaceScope = nil; workspaceRepository = nil }.font(.caption)
+                    }.padding(18)
+                }
+            }
+        }.background(DesktopTheme.canvas)
+    }
+    private func desktopCandidateCard(_ candidate: MemoryCandidate) -> some View {
+        Button { selectedItem = .candidate(candidate.id) } label: {
+            workspaceCard(path: candidate.path, badge: candidate.action == .update ? "Update candidate" : "New candidate",
+                scope: Self.scopeLabel(scope: candidate.scope, scopeId: candidate.scopeId, repositorySetupId: candidate.repositorySetupId),
+                summary: candidate.impactSummary.isEmpty ? candidate.content : candidate.impactSummary,
+                meta: "\(Int((candidate.confidence * 100).rounded()))% confidence · \(candidate.kind.rawValue)", selected: selectedItem == .candidate(candidate.id))
+        }.buttonStyle(.plain).accessibilityAddTraits(selectedItem == .candidate(candidate.id) ? .isSelected : [])
+    }
+    private func desktopEntryCard(_ memory: MemoryEntry) -> some View {
+        Button { selectedItem = .memory(memory.id) } label: {
+            workspaceCard(path: memory.path, badge: memory.approved ? "Active memory" : "Legacy suggestion",
+                scope: resolvedScopeLabel(for: memory) ?? Self.scopeLabel(scope: memory.scope, scopeId: memory.scopeId),
+                summary: memory.content, meta: "v\(memory.version) · \(Self.originKey(for: memory))", selected: selectedItem == .memory(memory.id))
+        }.buttonStyle(.plain).accessibilityAddTraits(selectedItem == .memory(memory.id) ? .isSelected : [])
+    }
+    private func workspaceCard(path: String, badge: String, scope: String, summary: String, meta: String, selected: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 11) {
+            Text(badge).font(.caption2.weight(.medium)).foregroundStyle(DesktopTheme.accent)
+            Text(path).font(.system(.callout, design: .monospaced).weight(.medium)).lineLimit(2)
+            Text(scope).font(.caption).foregroundStyle(DesktopTheme.accent).lineLimit(2)
+            Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+            Text(meta).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? DesktopTheme.selection : DesktopTheme.surface, in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(selected ? DesktopTheme.accent : DesktopTheme.line))
+    }
+    private var desktopMemoryDetail: some View {
+        VStack(spacing: 0) {
+            if let candidate = selectedCandidate {
+                workspaceDetailHeader(path: candidate.path, scope: Self.scopeLabel(scope: candidate.scope, scopeId: candidate.scopeId, repositorySetupId: candidate.repositorySetupId),
+                    id: candidate.id, kind: "\(candidate.action.rawValue.capitalized) candidate", confidence: candidate.confidence, tags: candidate.tags,
+                    approve: { onApproveCandidate(candidate.id) }, edit: { beginDraft(DesktopMemoryDraft(candidate: candidate)) }, remove: { requestRemoval(id: candidate.id, active: false, candidate: true) })
+                DesktopSectionPicker(title: "", items: ["Content", "Source evidence"], selection: $detailSection, label: { $0 })
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        if isLoadingDetails { ProgressView("Loading evidence…").controlSize(.small) }
+                        if detailSection == "Source evidence" { evidencePanel(title: "Source evidence", evidence: detailSourceEvidence(for: .candidate(candidate.id), fallback: candidate.sourceEvidence)) }
+                        else {
+                            desktopCandidateContent(candidate)
+                        }
+                    }.padding(24)
+                }
+            } else if let memory = selectedMemory {
+                workspaceDetailHeader(path: memory.path, scope: resolvedScopeLabel(for: memory) ?? Self.scopeLabel(scope: memory.scope, scopeId: memory.scopeId),
+                    id: memory.id, kind: memory.approved ? "Active memory · v\(memory.version)" : "Legacy suggestion", confidence: memory.confidence, tags: memory.tags,
+                    approve: memory.approved ? nil : { onApprove(memory.id) }, edit: memory.approved ? { beginDraft(DesktopMemoryDraft(memory: memory)) } : nil,
+                    remove: { requestRemoval(id: memory.id, active: memory.approved, candidate: false) })
+                let stale = detailStaleEvidence(for: memory.id), harmful = detailHarmfulEvidence(for: memory.id)
+                if Self.hasWarningEvidence(stale: stale, harmful: harmful) {
+                    HStack { Label("Stale or harmful usage reported", systemImage: "exclamationmark.triangle.fill"); Spacer(); Button("See evidence") { detailSection = "Source evidence" } }
+                        .font(.caption).foregroundStyle(.orange).padding(14).background(Color.orange.opacity(0.08))
+                }
+                DesktopSectionPicker(title: "", items: memory.approved ? ["Content", "Source evidence", "Usage & impact"] : ["Content", "Source evidence"], selection: $detailSection, label: { $0 })
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        if isLoadingDetails { ProgressView("Loading evidence…").controlSize(.small) }
+                        if detailSection == "Source evidence" {
+                            if Self.hasWarningEvidence(stale: stale, harmful: harmful) { warningPanel(stale: stale, harmful: harmful) }
+                            evidencePanel(title: "Source evidence", evidence: detailSourceEvidence(for: .memory(memory.id), fallback: memory.sourceEvidence))
+                        } else if detailSection == "Usage & impact" {
+                            impactPanel(memory, usage: detailUsage(for: memory.id)); usagePanel(detailUsage(for: memory.id))
+                        } else {
+                            desktopActiveContent(memory)
+                        }
+                    }.padding(24)
+                }
+            } else { ContentUnavailableView("Select knowledge to review", systemImage: "sidebar.right", description: Text("Content, evidence and usage appear here.")) }
+        }.background(DesktopTheme.surface)
+    }
+    private func contextFact(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) { Text(label).font(.caption2).foregroundStyle(.secondary); Text(value).font(.callout).textSelection(.enabled) }
+    }
+    private func desktopCandidateContent(_ candidate: MemoryCandidate) -> some View {
+        DesktopKnowledgeColumns {
+            VStack(alignment: .leading, spacing: 20) {
+                contentPanel(candidate.content)
+                infoPanel(title: "Why this was learned", text: candidate.rationale ?? "", systemImage: "quote.bubble")
+                infoPanel(title: "Expected impact", text: candidate.impactSummary, systemImage: "chart.line.uptrend.xyaxis")
+            }
+        } context: {
+            VStack(alignment: .leading, spacing: 20) {
+                DesktopPanel(title: "Context") {
+                    contextFact("Scope", candidate.scope.label)
+                    contextFact("Scope ID", candidate.scopeId.isEmpty ? "Global" : candidate.scopeId)
+                    contextFact("Kind", candidate.kind.rawValue)
+                    contextFact("Source pod", candidate.createdByPodId ?? "Manual")
+                    if let setup = candidate.repositorySetupId { contextFact("Repository setup", setup) }
+                    if let target = candidate.targetMemoryId { contextFact("Updates memory", target) }
+                }
+                if let applies = candidate.appliesWhen { infoPanel(title: "Applies when", text: applies, systemImage: "checkmark.circle") }
+                if let avoid = candidate.avoidWhen { infoPanel(title: "Avoid when", text: avoid, systemImage: "minus.circle") }
+                if let fallback = candidate.fallbackReason { infoPanel(title: "Fallback reason", text: fallback, systemImage: "info.circle") }
+            }
+        }
+    }
+    private func desktopActiveContent(_ memory: MemoryEntry) -> some View {
+        DesktopKnowledgeColumns {
+            VStack(alignment: .leading, spacing: 20) {
+                contentPanel(memory.content)
+                if let rationale = memory.rationale { infoPanel(title: "Why this was learned", text: rationale, systemImage: "quote.bubble") }
+            }
+        } context: {
+            VStack(alignment: .leading, spacing: 20) {
+                DesktopPanel(title: "Context") {
+                    contextFact("Scope", memory.scope.label)
+                    contextFact("Scope ID", memory.scopeId ?? "Global")
+                    contextFact("Kind", memory.kind?.rawValue ?? "Not recorded")
+                    contextFact("Source", Self.originKey(for: memory))
+                    contextFact("Version", String(memory.version))
+                    if let setup = memory.repositorySetupId { contextFact("Repository setup", setup) }
+                }
+                if let applies = memory.appliesWhen { infoPanel(title: "Applies when", text: applies, systemImage: "checkmark.circle") }
+                if let avoid = memory.avoidWhen { infoPanel(title: "Avoid when", text: avoid, systemImage: "minus.circle") }
+            }
+        }
+    }
+    private func workspaceDetailHeader(path: String, scope: String, id: String, kind: String, confidence: Double?, tags: [String], approve: (() -> Void)?, edit: (() -> Void)?, remove: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text(kind).font(.caption.weight(.medium)).foregroundStyle(DesktopTheme.accent)
+                Text(Self.shortId(id)).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
+                Spacer()
+                if let approve { Button("Approve", action: approve).buttonStyle(.borderedProminent).disabled(!isConnected) }
+                Menu {
+                    if let edit { Button("Edit", action: edit).disabled(!isConnected || workspaceActions == nil) }
+                    Button(approve == nil ? "Delete memory" : "Reject suggestion", role: .destructive, action: remove).disabled(!isConnected)
+                    Button(copiedId == id ? "Copied ID" : "Copy ID") { copyId(id) }
+                } label: { Text("Actions ···") }.menuStyle(.borderlessButton).fixedSize()
+            }.controlSize(.small)
+            Text(path).font(.system(size: 23, weight: .medium, design: .monospaced)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            Text(scope + (confidence.map { " · \(Int(($0 * 100).rounded()))% confidence" } ?? "")).font(.caption).foregroundStyle(DesktopTheme.accent).textSelection(.enabled)
+            if !tags.isEmpty { FlowTags(tags: tags) }
+        }.padding(24)
+    }
+    private var desktopExtraction: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("How knowledge reached the queue").font(.title2.weight(.semibold))
+                Text("Recent extraction attempts. A no-candidate result is valid; reviewer failures remain explicit.").font(.callout).foregroundStyle(.secondary)
+                TextField("Search profile, pod, status or reason…", text: $searchText).textFieldStyle(.roundedBorder)
+                if visibleExtractionAttempts.isEmpty { ContentUnavailableView("No matching attempts", systemImage: "lightbulb", description: Text("Extraction diagnostics appear after an eligible task is reviewed.")) }
+                ForEach(visibleExtractionAttempts) { attempt in
+                    DesktopPanel(title: attempt.profileName) {
+                        HStack { Label(attempt.status.label, systemImage: attemptIcon(attempt.status)).foregroundStyle(attemptColor(attempt.status)); Spacer(); Text(Self.shortId(attempt.podId)).font(.system(.caption, design: .monospaced)) }
+                        Text(Self.humanReadableAttemptReason(attempt.reason)).textSelection(.enabled)
+                        if !attempt.signals.isEmpty { Text(attempt.signals.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
+            }.padding(28)
+        }.background(DesktopTheme.canvas)
+    }
+    private func beginDraft(_ value: DesktopMemoryDraft) { draftError = nil; originalDraft = value; draft = value }
+    private func requestMemoryNavigation(_ action: @escaping () -> Void) {
+        guard !draftBusy else { return }
+        if draft != nil && draft != originalDraft { pendingMemoryNavigation = action; showDraftDiscard = true } else { action() }
+    }
+    private func requestRemoval(id: String, active: Bool, candidate: Bool) { removalID = id; removeIsActive = active; removeIsCandidate = candidate; showMemoryRemoval = true }
+    private func saveDraft() {
+        guard let value = draft, value.isValid, let workspaceActions, isConnected, !draftBusy else { return }
+        draftBusy = true; draftError = nil
+        Task { @MainActor in
+            defer { draftBusy = false }
+            do {
+                if let candidate = value.candidate, let update = value.candidateUpdate { try await workspaceActions.updateCandidate(candidate.id, update) }
+                else if let id = value.memoryID { try await workspaceActions.update(id, value.content) }
+                else {
+                    try await workspaceActions.create(value.scope, value.scope == .global ? nil : value.scopeID.trimmingCharacters(in: .whitespacesAndNewlines), value.path.trimmingCharacters(in: .whitespacesAndNewlines), value.content)
+                    workspaceSection = "Library"; workspaceScope = value.scope; workspaceRepository = value.scope == .repository ? value.scopeID.trimmingCharacters(in: .whitespacesAndNewlines) : nil; searchText = ""
+                }
+                draft = nil; originalDraft = nil; ensureSelection()
+            } catch { draftError = error.localizedDescription }
+        }
     }
 }

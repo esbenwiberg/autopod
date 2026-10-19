@@ -59,6 +59,8 @@ export function createPimApiClient(
         headers: {
           Authorization: `Bearer ${auth.token}`,
           Accept: 'application/json',
+          // Node fetch defaults to `Accept-Language: *`, which PIM rejects (400 CultureNotFoundException).
+          'Accept-Language': 'en-US',
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),

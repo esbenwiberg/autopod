@@ -59,3 +59,21 @@ it('dark composition permits terminal history but cannot replace a live runtime'
     f.close();
   }
 });
+
+it('accepts one absolute local artifact directory without changing Entra requirements', () => {
+  const local = { bindings: input.bindings, artifactDirectory: '/data/local-artifacts' };
+  expect(parseManagedCliConfig(JSON.stringify(local), false)?.artifactDirectory).toBe(
+    local.artifactDirectory,
+  );
+  for (const invalid of [
+    { bindings: input.bindings },
+    { ...local, artifactDirectory: 'relative/path' },
+    { ...local, blobContainerUrl: input.blobContainerUrl },
+  ])
+    expect(() => parseManagedCliConfig(JSON.stringify(invalid), false)).toThrow(
+      'managed-cli-config-invalid',
+    );
+  expect(() => parseManagedCliConfig(JSON.stringify(local), true)).toThrow(
+    'managed-cli-config-invalid',
+  );
+});

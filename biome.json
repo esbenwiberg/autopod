@@ -33,7 +33,9 @@
     }
   },
   "files": {
+    "maxSize": 2097152,
     "ignore": [
+      "packages/desktop/Sources/AutopodUI/Resources/Village/renderer/**",
       "**/dist/**",
       "**/node_modules/**",
       "**/.turbo/**",
@@ -47,6 +49,7 @@
       "**/.speclint-cache/**",
       "packages/desktop/.build/**",
       "packages/desktop/build/**",
+      "packages/desktop/build-preview/**",
       "tmp/**"
     ]
   }

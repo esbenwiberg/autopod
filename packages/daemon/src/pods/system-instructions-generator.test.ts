@@ -84,6 +84,34 @@ function makeSession(overrides?: Partial<Pod>): Pod {
 }
 
 describe('generateSystemInstructions', () => {
+  it('allows normal read tools for supplied references while restricting other repositories', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        referenceRepos: [{ url: 'https://github.com/org/reference', mountPath: '1-reference' }],
+      }),
+      'http://localhost:8080/mcp/abc12345',
+      { referenceRevisions: { '1-reference': 'a'.repeat(40) } },
+    );
+    expect(md).toContain('`/repos/1-reference/`');
+    expect(md).toContain(`launch-pinned revision: ${'a'.repeat(40)}`);
+    expect(md).toContain(
+      'Read these supplied snapshots directly with normal read-only file or shell tools',
+    );
+    expect(md).toContain('outside your worktree and the supplied reference paths');
+    expect(md).not.toContain(
+      'Read files from repos other than your worktree (use read_file action instead)',
+    );
+    expect(md).toContain('Do not modify these snapshots or change their permissions');
+    const withoutReferences = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/abc12345',
+    );
+    expect(withoutReferences).toContain(
+      'Read files from repos other than your worktree (use read_file action instead)',
+    );
+  });
   it('includes pod id, profile, and task', () => {
     const md = generateSystemInstructions(
       makeProfile(),

@@ -37,6 +37,15 @@ export const scheduledScanPolicySchema = z
     (policy) => policy.windowHours === undefined || policy.baseRef === policy.headRef,
     'A time window uses one branch; baseRef and headRef must match',
   );
+/**
+ * Boundary schema for creating or replacing a policy. Without a window the scan is the
+ * net `baseRef..headRef` delta, so identical refs can only ever yield an empty report.
+ * Stored policies are read with the lenient schema above so existing rows stay readable.
+ */
+export const scheduledScanPolicyInputSchema = scheduledScanPolicySchema.refine(
+  (policy) => policy.windowHours !== undefined || policy.baseRef !== policy.headRef,
+  'baseRef and headRef are the same branch, so the delta is always empty; set windowHours to scan recent commits on it',
+);
 export type ScheduledScanPolicy = z.infer<typeof scheduledScanPolicySchema>;
 
 export interface ScheduledScanFinding {

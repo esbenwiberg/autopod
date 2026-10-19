@@ -88,6 +88,7 @@ function createMockDeps() {
   } as unknown as import('dockerode');
 
   const mockAcr = {
+    canPull: vi.fn((tag: string) => tag.startsWith('ewiacr.azurecr.io/')),
     push: vi.fn().mockResolvedValue('sha256:abc123'),
     pull: vi.fn().mockResolvedValue(undefined),
     pullPinned: vi.fn(
@@ -237,6 +238,48 @@ describe('ImageBuilder', () => {
     await expect(builder.buildEnvironmentImage(input, { publish: true })).rejects.toThrow('ACR');
     expect(mockDocker.buildImage).toHaveBeenCalledTimes(1);
   });
+
+  it.each(['success', 'unauthorized', 'changed'] as const)(
+    'authenticates a cold environment base pull: %s',
+    async (outcome) => {
+      const { mockDocker, mockAcr, mockProfileStore, dockerfiles } = createMockDeps();
+      const input = {
+        environment: environmentPresetSchema.parse({ template: 'node22' }),
+        pinnedBase: `ewiacr.azurecr.io/base@sha256:${'a'.repeat(64)}`,
+        platform: 'linux/amd64' as const,
+        agentToolingDigest: 'b'.repeat(64),
+        toolInstallCommands: [],
+      };
+      vi.mocked(mockDocker.getImage('image').inspect)
+        .mockRejectedValueOnce({ statusCode: 404 })
+        .mockResolvedValue({
+          Id: `sha256:${'c'.repeat(64)}`,
+          Size: 1,
+          Config: { Labels: { 'com.autopod.environment-key': environmentImageKey(input) } },
+        } as unknown as import('dockerode').ImageInspectInfo);
+      vi.mocked(mockAcr.pullPinned).mockImplementation(async () => {
+        expect(mockDocker.buildImage).not.toHaveBeenCalled();
+        if (outcome === 'unauthorized') throw new Error('unauthorized');
+        return outcome === 'changed' ? 'different' : input.pinnedBase;
+      });
+      const builder = new ImageBuilder({
+        docker: mockDocker,
+        acr: mockAcr,
+        profileStore: mockProfileStore,
+      });
+      if (outcome === 'success') {
+        await builder.buildEnvironmentImage(input);
+        await builder.buildEnvironmentImage(input);
+        expect(mockDocker.buildImage).toHaveBeenCalledTimes(1);
+        expect(dockerfiles[0]).toContain(`FROM ${input.pinnedBase}`);
+      } else {
+        await expect(builder.buildEnvironmentImage(input)).rejects.toThrow();
+        expect(mockDocker.buildImage).not.toHaveBeenCalled();
+      }
+      expect(mockAcr.pullPinned).toHaveBeenCalledExactlyOnceWith(input.pinnedBase);
+      expect(mockAcr.push).not.toHaveBeenCalled();
+    },
+  );
 
   it('builds and pushes warm image', async () => {
     const { mockDocker, mockAcr, mockProfileStore } = createMockDeps();

@@ -184,9 +184,9 @@ describe('createProfileSchema model validation', () => {
     expect(parsed.escalation?.askAi.model).toBe('claude-sonnet-4-6');
 
     const defaulted = createProfileSchema.parse({ name: 'defaulted' });
-    expect(defaulted.defaultModel).toBe('claude-opus-5');
-    expect(defaulted.reviewerModel).toBe('claude-sonnet-5');
-    expect(defaulted.escalation?.askAi.model).toBe('claude-sonnet-5');
+    expect(defaulted.defaultModel).toBe('claude-opus-5-5');
+    expect(defaulted.reviewerModel).toBe('claude-sonnet-5-5');
+    expect(defaulted.escalation?.askAi.model).toBe('claude-sonnet-5-5');
   });
 
   it('accepts OpenRouter profile credentials and API key field', () => {
@@ -435,6 +435,34 @@ describe('provider account schemas', () => {
           providerId: 'anthropic',
           credential: {},
         },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('accepts Foundry account credentials and trims the pasted API key', () => {
+    const created = createProviderAccountSchema.parse({
+      name: 'Foundry',
+      provider: 'foundry',
+      credentials: {
+        provider: 'foundry',
+        endpoint: 'https://res.services.ai.azure.com/anthropic',
+        apiKey: '  foundry-key\n',
+      },
+    });
+    expect(created.credentials).toMatchObject({ provider: 'foundry', apiKey: 'foundry-key' });
+  });
+
+  it.each([
+    ['keyless', { endpoint: 'https://res.services.ai.azure.com' }],
+    ['blank key', { endpoint: 'https://res.services.ai.azure.com', apiKey: '   ' }],
+    ['plaintext endpoint', { endpoint: 'http://res.services.ai.azure.com', apiKey: 'k' }],
+    ['non-url endpoint', { endpoint: 'res.services.ai.azure.com', apiKey: 'k' }],
+  ])('rejects Foundry account credentials: %s', (_label, credentials) => {
+    expect(
+      createProviderAccountSchema.safeParse({
+        name: 'Foundry',
+        provider: 'foundry',
+        credentials: { provider: 'foundry', ...credentials },
       }).success,
     ).toBe(false);
   });

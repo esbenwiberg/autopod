@@ -34,7 +34,7 @@ const example: ManagedPodRequest =
 const db = new Database(path.join(stateRoot, 'autopod.sqlite3'));
 db.exec('CREATE TABLE IF NOT EXISTS fixture_migrations (name TEXT PRIMARY KEY)');
 for (const file of readdirSync(migrations)
-  .filter((file) => /^(14[2-9]|15[01])_/.test(file))
+  .filter((file) => /^(14[2-9]|15[0-3]|184|185|206)_/.test(file))
   .sort()) {
   if (db.prepare('SELECT name FROM fixture_migrations WHERE name=?').get(file)) continue;
   db.transaction(() => {
@@ -60,6 +60,17 @@ const runtime: ManagedRuntimePort = {
   },
   async cleanup() {
     return true;
+  },
+  async extractSource(_ref, repository) {
+    // The fixture's stopped sandbox is represented by the already-local Git
+    // workspace. Only acknowledge the exact fixture-bound source; no cloud copy.
+    if (
+      !sourceConfig ||
+      example.outputs.source.mode === 'none' ||
+      repository !== example.outputs.source.repository ||
+      !existsSync(path.join(sourceConfig.repo, '.git'))
+    )
+      throw new Error('fixture-source-not-bound');
   },
   async extractOutput(ref, destination) {
     const row = db.prepare('SELECT request_json FROM managed_pods WHERE pod_id=?').get(ref) as {

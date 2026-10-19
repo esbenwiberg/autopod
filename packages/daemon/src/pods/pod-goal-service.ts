@@ -197,6 +197,7 @@ export function createPodGoalService(options: PodGoalServiceOptions) {
   }
   return {
     recover,
+    refreshBudget: (podId: string) => controller.refreshBudget(podId),
     get: repository.get,
     processHooks(podId: string, config: EffectiveLaunchConfig): NativeGoalProcessHooks {
       return {

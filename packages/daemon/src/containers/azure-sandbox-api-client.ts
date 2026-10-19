@@ -420,11 +420,30 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     };
     if (options?.cwd) body.workingDirectory = options.cwd;
     if (options?.user) body.user = options.user;
-    const response = await this.requestData<ExecResponse>(
-      'POST',
-      `${this.sandboxPath(sandboxId)}/executeShellCommand`,
-      { json: body, timeoutMs: options?.timeoutMs },
-    );
+    let response: ExecResponse;
+    try {
+      response = await this.requestData<ExecResponse>(
+        'POST',
+        `${this.sandboxPath(sandboxId)}/executeShellCommand`,
+        { json: body, timeoutMs: options?.timeoutMs },
+      );
+    } catch (err) {
+      // A lost response cannot establish whether this command ran remotely.
+      // Preserve explicit pre-execution refusals; never replay an unknown exit.
+      if (err instanceof SandboxInfrastructureError) throw err;
+      if (
+        err instanceof AutopodError &&
+        err.code !== 'AZURE_SANDBOX_TIMEOUT' &&
+        err.statusCode < 500
+      ) {
+        throw err;
+      }
+      throw new AutopodError(
+        'Buffered sandbox execution result was not observed; reconcile before another execution.',
+        'EXEC_EXIT_UNVERIFIED',
+        409,
+      );
+    }
     const rawExitCode = response.exitCode ?? response.exit_code;
     if (rawExitCode === undefined || !Number.isInteger(rawExitCode)) {
       throw new AutopodError(

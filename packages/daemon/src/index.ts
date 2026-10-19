@@ -39,6 +39,7 @@ import {
   composeManagedAcceptance,
   parseManagedAcceptanceConfig,
 } from './managed/acceptance-config.js';
+import { composeManagedCatalog } from './managed/catalog.js';
 import { composeDarkManagedCli, parseManagedCliConfig } from './managed/cli-config.js';
 import {
   composeManagedProfileSet,
@@ -116,7 +117,10 @@ import { createValidationEvidenceCache } from './validation/validation-evidence-
 import { AdoPrManager, parseAdoRepoUrl } from './worktrees/ado-pr-manager.js';
 import { LocalWorktreeManager } from './worktrees/local-worktree-manager.js';
 import { GhPrManager } from './worktrees/pr-manager.js';
-import { checkpointSandboxWorkspace } from './worktrees/sandbox-workspace-checkpoint.js';
+import {
+  checkpointSandboxWorkspace,
+  observeSandboxWorkspace,
+} from './worktrees/sandbox-workspace-checkpoint.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -731,19 +735,7 @@ const workspaceCheckpointController = new WorkspaceCheckpointController({
   observe: async (podId) => {
     const pod = podRepo.getOrThrow(podId);
     if (!pod.containerId) throw new Error('sandbox workspace is unavailable');
-    const output = await containerManagerFactory
-      .get('sandbox')
-      .execInContainer(
-        pod.containerId,
-        [
-          'sh',
-          '-ceu',
-          'git rev-parse HEAD; git status --porcelain=v1 -uall | git hash-object --stdin; test -n "$(git status --porcelain=v1 -uall)" && echo dirty || echo clean',
-        ],
-        { cwd: '/workspace', timeout: 5_000 },
-      );
-    const [head = '', fingerprint = '', state = 'clean'] = output.stdout.trim().split('\n');
-    return { head, tree: fingerprint, dirty: state === 'dirty' };
+    return observeSandboxWorkspace(containerManagerFactory.get('sandbox'), pod.containerId);
   },
   checkpoint: async (podId, _reason, sequence) => {
     const pod = podRepo.getOrThrow(podId);
@@ -758,7 +750,7 @@ const workspaceCheckpointController = new WorkspaceCheckpointController({
   },
   emit: (event) => logger.info({ checkpoint: event }, 'Sandbox workspace checkpoint'),
   onDurabilityDegraded: (podId, ageMs) =>
-    logger.error({ podId, ageMs }, 'Sandbox durability degraded'),
+    logger.warn({ podId, ageMs }, 'Sandbox durability degraded'),
 });
 
 const configurationHostPath =
@@ -1105,7 +1097,7 @@ await podsitterService.start().catch((err) => {
   logger.error({ err }, 'Podsitter startup reconciliation failed');
 });
 
-const managedRuntime = managedAcceptanceConfig
+const legacyManagedRuntime = managedAcceptanceConfig
   ? composeManagedAcceptance(managedAcceptanceConfig, managedCliConfig, {
       db,
       databasePath: DB_PATH,
@@ -1116,11 +1108,33 @@ const managedRuntime = managedAcceptanceConfig
     ? composeManagedProfileSet(managedProfileSetConfig, managedCliConfig, {
         db,
         databasePath: DB_PATH,
-        manager: sandboxContainerManager,
+        manager:
+          managedProfileSetConfig.profiles[0]?.profileSnapshot.route.executionTarget === 'local'
+            ? containerManager
+            : sandboxContainerManager,
+        networkManager,
         providerAccounts: providerAccountStore,
         githubAuth,
       })
     : undefined;
+const managedRuntime =
+  managedProfileSetConfig?.catalogArtifacts &&
+  legacyManagedRuntime &&
+  'components' in legacyManagedRuntime
+    ? composeManagedCatalog(managedProfileSetConfig, legacyManagedRuntime, {
+        db,
+        databasePath: DB_PATH,
+        manager:
+          managedProfileSetConfig.profiles[0]?.profileSnapshot.route.executionTarget === 'local'
+            ? containerManager
+            : sandboxContainerManager,
+        networkManager,
+        providerAccounts: providerAccountStore,
+        githubAuth,
+        catalog: configuration.store,
+        worktrees: worktreeManager,
+      })
+    : legacyManagedRuntime;
 if (managedRuntime) await managedRuntime.resume();
 
 // Server

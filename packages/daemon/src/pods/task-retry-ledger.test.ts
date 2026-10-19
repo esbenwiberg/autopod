@@ -772,7 +772,12 @@ it('upgrades schema 177 without broadening an existing worker permission', async
       run,
     );
     const actor = { type: 'human' as const, userId: 'operator' };
-    const taskId = executions.snapshot('root').taskId;
+    // Read the old-schema identity directly; current snapshots require current migrations.
+    const taskId = (
+      db.prepare("SELECT task_id FROM task_executions WHERE pod_id='root'").get() as {
+        task_id: string;
+      }
+    ).task_id;
     db.prepare(`INSERT INTO task_retry_authorizations(id,request_key,task_id,pod_id,stage,failure_id,actor,reason,created_at)
       VALUES ('legacy','legacy-key',?,'root','worker',?,?,'Retry original provider','2026-09-08T10:00:00Z')`).run(
       taskId,

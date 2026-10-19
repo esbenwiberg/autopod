@@ -15,7 +15,13 @@ export interface PimRouteDependencies {
   ): { selections: PimSelection[]; assertAuthorized(selection: PimSelection): void };
 }
 export function pimRoutes(app: FastifyInstance, deps: PimRouteDependencies): void {
-  app.get('/pim/eligibility', async () => deps.eligibility.discover());
+  app.get('/pim/eligibility', async (request) => {
+    // Discovery is cached server-side; `fresh=1` is the explicit user-driven refresh.
+    const { fresh } = z
+      .object({ fresh: z.enum(['0', '1', 'true', 'false']).optional() })
+      .parse(request.query);
+    return deps.eligibility.discover(fresh === '1' || fresh === 'true');
+  });
   app.post('/pods/:id/pim/activate', async (request) => {
     const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
     const input = z

@@ -61,7 +61,7 @@ export async function inspectExecutionPreflight(
   };
   const requiresCli = purpose === 'coding' || subject === 'reviewer';
   try {
-    Object.assign(result, await verifyAgentCli(cm, containerId, pod.runtime));
+    Object.assign(result, await verifyAgentCli(cm, containerId, pod.runtime, pod.model));
   } catch (error) {
     if (requiresCli) result.status = 'blocked';
     result.diagnostics.push({

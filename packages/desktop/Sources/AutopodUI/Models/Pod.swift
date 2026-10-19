@@ -879,6 +879,8 @@ public struct Pod: Identifiable, Sendable {
     public var contract: SpecContractResponse?
 
     public var diffStats: DiffStats?
+    /// Exact unanswered decision identity; compact summaries may not provide it.
+    public var escalationId: String?
     public var escalationQuestion: String?
     public var escalationOptions: [String]?
     public var escalationType: String?
@@ -918,6 +920,7 @@ public struct Pod: Identifiable, Sendable {
 
     /// Snapshot of the resolved profile config at pod creation time
     public var profileSnapshot: Profile?
+    public var fleetDisplay: PodFleetDisplayResponse?
 
     /// Host-filesystem path where artifacts were extracted — only set after
     /// an artifact-output pod completes. Used by the Overview tab to offer
@@ -1028,6 +1031,7 @@ public struct Pod: Identifiable, Sendable {
         baseBranch: String? = nil,
         contract: SpecContractResponse? = nil,
         diffStats: DiffStats? = nil,
+        escalationId: String? = nil,
         escalationQuestion: String? = nil,
         escalationOptions: [String]? = nil,
         escalationType: String? = nil,
@@ -1053,6 +1057,7 @@ public struct Pod: Identifiable, Sendable {
         prFixAttempts: Int = 0,
         maxPrFixAttempts: Int = 0,
         profileSnapshot: Profile? = nil,
+        fleetDisplay: PodFleetDisplayResponse? = nil,
         briefTitle: String? = nil,
         seriesId: String? = nil,
         seriesName: String? = nil,
@@ -1081,6 +1086,7 @@ public struct Pod: Identifiable, Sendable {
         self.model = model; self.startedAt = startedAt; self.runningAt = runningAt; self.updatedAt = updatedAt
         self.baseBranch = baseBranch
         self.contract = contract
+        self.escalationId = escalationId
         self.diffStats = diffStats; self.escalationQuestion = escalationQuestion
         self.escalationOptions = escalationOptions; self.escalationType = escalationType
         self.validationChecks = validationChecks; self.validationProgress = validationProgress; self.prUrl = prUrl
@@ -1095,6 +1101,7 @@ public struct Pod: Identifiable, Sendable {
         self.prFixAttempts = prFixAttempts
         self.maxPrFixAttempts = maxPrFixAttempts
         self.profileSnapshot = profileSnapshot
+        self.fleetDisplay = fleetDisplay
         self.briefTitle = briefTitle
         self.seriesId = seriesId; self.seriesName = seriesName; self.seriesDescription = seriesDescription
         self.seriesDesign = seriesDesign
@@ -1127,6 +1134,7 @@ public struct Pod: Identifiable, Sendable {
         updatedAt: Date = Date(),
         baseBranch: String? = nil,
         diffStats: DiffStats? = nil,
+        escalationId: String? = nil,
         escalationQuestion: String? = nil,
         escalationOptions: [String]? = nil,
         escalationType: String? = nil,
@@ -1150,6 +1158,7 @@ public struct Pod: Identifiable, Sendable {
         prFixAttempts: Int = 0,
         maxPrFixAttempts: Int = 0,
         profileSnapshot: Profile? = nil,
+        fleetDisplay: PodFleetDisplayResponse? = nil,
         seriesId: String? = nil,
         seriesName: String? = nil,
         seriesDescription: String? = nil,
@@ -1163,6 +1172,7 @@ public struct Pod: Identifiable, Sendable {
             startedAt: startedAt, updatedAt: updatedAt,
             baseBranch: baseBranch,
             diffStats: diffStats,
+            escalationId: escalationId,
             escalationQuestion: escalationQuestion, escalationOptions: escalationOptions,
             escalationType: escalationType,
             validationChecks: validationChecks, validationProgress: validationProgress,
@@ -1177,6 +1187,7 @@ public struct Pod: Identifiable, Sendable {
             prFixAttempts: prFixAttempts,
             maxPrFixAttempts: maxPrFixAttempts,
             profileSnapshot: profileSnapshot,
+            fleetDisplay: fleetDisplay,
             seriesId: seriesId, seriesName: seriesName, seriesDescription: seriesDescription,
             dependsOnPodIds: dependsOnPodIds,
             dependencyStartedAt: dependencyStartedAt

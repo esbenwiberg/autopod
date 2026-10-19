@@ -21,6 +21,7 @@ case "$1" in
   fetch) exit 0 ;;
   rev-parse) echo cafebabecafebabecafebabecafebabecafebabe ;;
   cat-file) exit 0 ;;
+  merge-base) [ "${DEPLOY_TEST_TARGET_ANCESTOR:-0}" = 1 ] ;;
   diff) exit 0 ;;
 esac
 EOF
@@ -64,14 +65,22 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "${remote_script:-}" ] || { echo 'missing remote script' >&2; exit 1; }
 case "$remote_script" in
-  *'echo live:'*) printf 'live:deadbeef\nactive\n' ;;
+  *'echo live:'*)
+    printf 'live:deadbeef\nactive\n'
+    [ -z "$DEPLOY_TEST_DATA_DIR" ] || printf 'datadir:%s\n' "$DEPLOY_TEST_DATA_DIR"
+    ;;
   *'BUILD DONE'*)
     if [[ "$remote_script" == *'copy current release'* ]]; then
       [[ "$remote_script" == *'bind target Git identity'* ]]
       [[ "$remote_script" == *'rm -rf "$NEW/.git"'* ]]
       [[ "$remote_script" == *'mv "$TMP/.git" "$NEW/.git"'* ]]
+      [[ "$remote_script" == *'rm -rf "$NEW/packages/daemon/.autopod-data"'* ]]
     fi
     echo 'BUILD DONE'
+    if [ "${DEPLOY_TEST_RELEASE_DRIFT:-0}" = 1 ]; then
+      mkdir -p "$AUTOPOD_DEPLOY_RELEASES/newer123/packages/daemon"
+      ln -sfn "$AUTOPOD_DEPLOY_RELEASES/newer123" "$AUTOPOD_DEPLOY_CURRENT_LINK"
+    fi
     ;;
   *'REVIEWER_CLI_PREWARM_OK'*) echo 'REVIEWER_CLI_PREWARM_OK' ;;
   *'VERIFY_MARKER='*) sh -c "$remote_script" ;;
@@ -128,6 +137,7 @@ run_deploy() {
     DEPLOY_TEST_TRUNCATE_REMOTE="${DEPLOY_TEST_TRUNCATE_REMOTE:-0}" \
     DEPLOY_TEST_RELEASE_MODE="${DEPLOY_TEST_RELEASE_MODE:-valid}" \
     DEPLOY_TEST_DRAIN_REMOVED="$tmp/drain-removed" \
+    DEPLOY_TEST_DATA_DIR="${DEPLOY_TEST_DATA_DIR-/data/autopod/data}" \
     bash "$script" --target cafebabe --yes --skip-playwright-prewarm "$@"
 }
 
@@ -135,6 +145,42 @@ reset_fixture() {
   ln -sfn "$tmp/releases/deadbeef" "$tmp/current"
   rm -f "$tmp/restarted" "$tmp/az-count" "$tmp/health-count" "$tmp/drain-removed"
 }
+
+# A newer deployed descendant must not be replaced by an older requested target,
+# even when --force was supplied. Refuse before build, maintenance or restart.
+reset_fixture
+if DEPLOY_TEST_TARGET_ANCESTOR=1 run_deploy --force >"$tmp/ancestor-out" 2>&1; then
+  echo 'deployment unexpectedly downgraded a newer descendant release' >&2
+  exit 1
+fi
+grep -qF 'already includes target' "$tmp/ancestor-out"
+[ "$(cat "$tmp/az-count")" = 1 ]
+[ ! -e "$tmp/restarted" ]
+[ ! -e "$tmp/drain-removed" ]
+[ "$(readlink "$tmp/current")" = "$tmp/releases/deadbeef" ]
+
+# Runtime data inside a release is deleted by pruning. Refuse before any build
+# unless the unit pins an absolute DATA_DIR outside the releases tree.
+for data_dir in '' 'relative/data' "$tmp/releases/deadbeef/packages/daemon/.autopod-data" "$tmp/current/data"; do
+  reset_fixture
+  if DEPLOY_TEST_DATA_DIR="$data_dir" run_deploy >"$tmp/data-dir-out" 2>&1; then
+    echo "deployment accepted unsafe DATA_DIR '$data_dir'" >&2
+    exit 1
+  fi
+  grep -qE 'no absolute DATA_DIR|lives inside a release' "$tmp/data-dir-out"
+  [ "$(cat "$tmp/az-count")" = 1 ]
+  [ ! -e "$tmp/restarted" ]
+done
+
+# Another deployment may finish while this one stages its build. Preserve it.
+reset_fixture
+if DEPLOY_TEST_RELEASE_DRIFT=1 run_deploy >"$tmp/drift-out" 2>&1; then
+  echo 'deployment unexpectedly replaced a concurrently deployed release' >&2
+  exit 1
+fi
+grep -qF 'live release changed during staging' "$tmp/drift-out"
+[ ! -e "$tmp/restarted" ]
+[ "$(readlink "$tmp/current")" = "$tmp/releases/newer123" ]
 
 # The first API snapshot is empty, but the atomic VM gate sees one pod just
 # before restart. The same remote script must refuse before systemctl executes.

@@ -670,7 +670,20 @@ export interface PodSummary {
 }
 
 /** Lightweight pod representation for monitoring and discovery consumers. */
+/** Read-only, credential-free identity from the captured launch, never launch authority. */
+export type PodRepositoryDisplay =
+  | { kind: 'repository'; remote: string }
+  | { kind: 'empty' }
+  | { kind: 'unavailable' };
+
+export interface PodFleetDisplay {
+  repository: PodRepositoryDisplay;
+  progress: Pod['progress'];
+}
+
 export interface CompactPod {
+  /** Absent on older daemons; present with null progress means no reported milestone. */
+  display?: PodFleetDisplay;
   finalization?: Pod['finalization'];
   /** Read-only list diagnostics. Raw control-plane reads still reject corrupt state. */
   recordDiagnostics?: Array<{

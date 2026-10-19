@@ -139,7 +139,7 @@ it('installs an agent helper that routes final output through the reviewed Codex
       "'sandbox_workspace_write.network_access': args.network_enabled or bool(args.github_repository)",
     );
     expect(install?.[1][6]).toContain(
-      "codex_sandbox = 'workspace-write' if args.network_enabled or args.github_repository else args.sandbox",
+      "codex_sandbox = 'workspace-write' if args.network_enabled or args.github_repository or args.public_read else args.sandbox",
     );
     expect(install?.[1][6]).toContain(
       "'Continue the same assigned work inside the same managed worker. '",
@@ -691,74 +691,98 @@ it('retries a transient sandbox control exec instead of closing the live channel
   }
 });
 
-it('publishes a large sandbox response through the files data plane instead of argv', async () => {
-  vi.useFakeTimers();
-  const { request, exec } = setup();
-  request.route.executionTarget = 'sandbox';
-  const raw = JSON.stringify({
-    model: request.route.model,
-    input: [{ role: 'user', content: 'Fact.' }],
-    reasoning: { effort: request.route.reasoning },
-    stream: true,
-    store: false,
-  });
-  let read = false;
-  exec.mockImplementation(async (_ref, argv) => {
-    if (argv[0] === 'codex')
-      return {
-        exitCode: 0,
-        stdout: '--ephemeral --output-last-message --sandbox --last',
-        stderr: '',
-      };
-    const code = argv[2] ?? '';
-    if (code.includes('urllib.request')) return { exitCode: 0, stdout: '204', stderr: '' };
-    if (code.includes('p.stat().st_size')) {
-      if (read) return { exitCode: 0, stdout: '', stderr: '' };
-      read = true;
-      return {
-        exitCode: 0,
-        stdout: JSON.stringify({
-          body: raw,
-          digest: sha256(raw).slice(7),
-          ticket: 'a'.repeat(36),
-        }),
-        stderr: '',
-      };
-    }
-    return { exitCode: 0, stdout: '', stderr: '' };
-  });
-  const writeFile = vi.fn<ContainerManager['writeFile']>().mockResolvedValue();
-  const response = `data: ${'x'.repeat(400 * 1024)}\n\n`;
-  const channel = new ContainerCodexChannel(
-    { execInContainer: exec, writeFile } as unknown as ContainerManager,
-    request.route,
-    4095,
-  );
-  let close: (() => void) | undefined;
-  try {
-    close = await channel.attach({
-      podId: 'managed-one',
-      runtimeRef: 'ref',
-      stateRoot: '/run/dispatcher-managed-one',
-      invoke: vi.fn(async () => ({ state: 'observed' as const, value: response })),
+it.each(['local', 'sandbox'] as const)(
+  'publishes a large %s response through the files data plane instead of argv',
+  async (target) => {
+    vi.useFakeTimers();
+    const { request, exec } = setup();
+    request.route.executionTarget = target;
+    const raw = JSON.stringify({
+      model: request.route.model,
+      input: [{ role: 'user', content: 'Fact.' }],
+      reasoning: { effort: request.route.reasoning },
+      stream: true,
+      store: false,
     });
-    await vi.advanceTimersByTimeAsync(2_500);
-    expect(writeFile).toHaveBeenCalledTimes(1);
-    expect(writeFile.mock.calls[0]?.slice(0, 2)).toEqual([
-      'ref',
-      '/run/dispatcher-managed-one/channel-response.tmp',
-    ]);
-    expect(JSON.parse(String(writeFile.mock.calls[0]?.[2]))).toMatchObject({ body: response });
-    const publication = exec.mock.calls.find((call) =>
-      String(call[1][2] ?? '').includes('staged-response'),
+    let read = false;
+    exec.mockImplementation(async (_ref, argv) => {
+      if (argv[0] === 'codex')
+        return {
+          exitCode: 0,
+          stdout: '--ephemeral --output-last-message --sandbox --last',
+          stderr: '',
+        };
+      const code = argv[2] ?? '';
+      if (code.includes('urllib.request')) return { exitCode: 0, stdout: '204', stderr: '' };
+      if (code.includes('p.stat().st_size')) {
+        if (read) return { exitCode: 0, stdout: '', stderr: '' };
+        read = true;
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            body: raw,
+            digest: sha256(raw).slice(7),
+            ticket: 'a'.repeat(36),
+          }),
+          stderr: '',
+        };
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    });
+    const writeFile = vi.fn<ContainerManager['writeFile']>().mockResolvedValue();
+    const response = `data: ${'x'.repeat(400 * 1024)}\n\n`;
+    const channel = new ContainerCodexChannel(
+      { execInContainer: exec, writeFile } as unknown as ContainerManager,
+      request.route,
+      4095,
     );
-    expect(publication?.[1]).not.toContain(response);
-    expect(publication?.[1].at(-1)).toBe('a'.repeat(36));
-  } finally {
-    close?.();
-    vi.useRealTimers();
-  }
-});
+    let close: (() => void) | undefined;
+    try {
+      close = await channel.attach({
+        podId: 'managed-one',
+        runtimeRef: 'ref',
+        stateRoot: '/run/dispatcher-managed-one',
+        invoke: vi.fn(async () => ({ state: 'observed' as const, value: response })),
+      });
+      await vi.advanceTimersByTimeAsync(2_500);
+      if (target === 'sandbox') {
+        expect(writeFile).toHaveBeenCalledTimes(1);
+        expect(writeFile.mock.calls[0]?.slice(0, 2)).toEqual([
+          'ref',
+          '/run/dispatcher-managed-one/channel-response.tmp',
+        ]);
+        expect(JSON.parse(String(writeFile.mock.calls[0]?.[2]))).toMatchObject({ body: response });
+      } else {
+        expect(writeFile).not.toHaveBeenCalled();
+        const chunks = exec.mock.calls.filter((call) =>
+          String(call[1][2]).includes('base64.b64decode'),
+        );
+        expect(chunks.length).toBeGreaterThan(1);
+        expect(chunks[0]?.[1][5]).toBe('true');
+        expect(chunks.slice(1).every((call) => call[1][5] === 'false')).toBe(true);
+        expect(
+          chunks.every(
+            (call) =>
+              call[2]?.user === 'root' &&
+              call[1].every((arg) => Buffer.byteLength(arg) < 128 * 1024),
+          ),
+        ).toBe(true);
+        const payload = Buffer.concat(
+          chunks.map((call) => Buffer.from(call[1][6] ?? '', 'base64')),
+        ).toString('utf8');
+        expect(JSON.parse(payload)).toMatchObject({ body: response, ticket: 'a'.repeat(36) });
+      }
+      const publication = exec.mock.calls.find((call) =>
+        String(call[1][2] ?? '').includes('staged-response'),
+      );
+      expect(publication?.[1]).not.toContain(response);
+      expect(publication?.[1].at(-1)).toBe('a'.repeat(36));
+    } finally {
+      close?.();
+      vi.useRealTimers();
+    }
+  },
+);
 
 async function waitForJson(path: string): Promise<Record<string, unknown>> {
   const deadline = Date.now() + 5_000;
@@ -932,6 +956,50 @@ it('the Python loopback channel accepts only bounded allowlisted agent failure m
   }
 });
 
+it('releases the request lock before publishing an HTTP response', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'autopod-codex-response-order-'));
+  chmodSync(root, 0o700);
+  const script = fileURLToPath(new URL('./runtime/codex_channel.py', import.meta.url));
+  const wrapper = `
+import importlib.util,json,pathlib,sys,threading,time,types
+root=pathlib.Path(sys.argv[1])
+spec=importlib.util.spec_from_file_location('channel',sys.argv[2])
+module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+class DelayedLock:
+ def __init__(self): self.lock=threading.Lock()
+ def acquire(self,**kwargs): return self.lock.acquire(**kwargs)
+ def release(self):
+  (root/'release-ready.json').write_text(json.dumps({'ready':True}))
+  while not (root/'release-proceed').exists(): time.sleep(0.01)
+  self.lock.release()
+module.threading=types.SimpleNamespace(Lock=DelayedLock)
+module.serve(root,0,10,module.AGENT_MAX_REQUEST)
+`;
+  const child = spawn('python3', ['-B', '-c', wrapper, root, script], { stdio: 'pipe' });
+  try {
+    const ready = await waitForJson(join(root, 'channel-ready.json'));
+    const endpoint = `http://127.0.0.1:${ready.port as number}/failure`;
+    const request = {
+      method: 'POST',
+      body: JSON.stringify({ phase: 'agent', reason: 'context-window-exceeded', exitCode: 1 }),
+      headers: { 'Content-Type': 'application/json' },
+    };
+    const pending = fetch(endpoint, request);
+    await waitForJson(join(root, 'release-ready.json'));
+    const observed = await Promise.race([
+      pending.then(() => 'response'),
+      new Promise<string>((resolve) => setTimeout(() => resolve('pending'), 100)),
+    ]);
+    writeFileSync(join(root, 'release-proceed'), 'continue');
+    expect((await pending).status).toBe(204);
+    expect(observed).toBe('pending');
+    expect((await fetch(endpoint, request)).status).toBe(204);
+  } finally {
+    child.kill('SIGTERM');
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 it('the Python loopback channel delivers and acknowledges a queued follow-up', async () => {
   const root = mkdtempSync(join(tmpdir(), 'autopod-codex-followup-'));
   chmodSync(root, 0o700);
@@ -964,4 +1032,18 @@ it('the Python loopback channel delivers and acknowledges a queued follow-up', a
     child.kill('SIGTERM');
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+it('uses outer confinement only for local Docker agent commands', () => {
+  const { request } = setup();
+  const command = (target: 'local' | 'sandbox') =>
+    codexAgentCommand(
+      { ...request.route, executionTarget: target },
+      'fixture-repo',
+      'report.md',
+      false,
+    );
+  expect(command('local')).toContain('--outer-container-sandbox');
+  expect(command('sandbox')).not.toContain('--outer-container-sandbox');
+  expect(command('local')).toContain('read-only');
 });

@@ -368,14 +368,35 @@ describe('buildProviderEnv', () => {
       const result = await buildProviderEnv(profile, 'pod-1', logger);
 
       expect(result.env.CLAUDE_CODE_USE_FOUNDRY).toBe('1');
-      expect(result.env.ANTHROPIC_BASE_URL).toBe('https://foundry.azure.com/v1');
-      expect(result.env.CLAUDE_FOUNDRY_PROJECT).toBe('my-project');
+      // Foundry mode ignores ANTHROPIC_BASE_URL — a bare /v1 maps to /anthropic.
+      expect(result.env.ANTHROPIC_FOUNDRY_BASE_URL).toBe('https://foundry.azure.com/anthropic');
+      expect(result.env.ANTHROPIC_BASE_URL).toBeUndefined();
+      expect(result.env.CLAUDE_FOUNDRY_PROJECT).toBeUndefined();
       // Raw key must NOT be in env — written to a secret file
-      expect(result.env.ANTHROPIC_API_KEY).toBeUndefined();
-      expect(result.env.ANTHROPIC_API_KEY_FILE).toBe('/run/autopod/foundry-api-key');
+      expect(result.env.ANTHROPIC_FOUNDRY_API_KEY).toBeUndefined();
+      expect(result.env.ANTHROPIC_API_KEY_FILE).toBeUndefined();
+      expect(result.env.ANTHROPIC_FOUNDRY_AUTH_TOKEN_FILE).toBeUndefined();
+      expect(result.env.ANTHROPIC_FOUNDRY_API_KEY_FILE).toBe('/run/autopod/foundry-api-key');
       expect(result.secretFiles[0]?.content).toBe('foundry-key-123');
       expect(result.containerFiles).toHaveLength(2); // .claude.json + settings.json
       expect(result.requiresPostExecPersistence).toBe(false);
+    });
+
+    it('defaults a bare resource endpoint to the /anthropic base', async () => {
+      const profile = makeProfile({
+        modelProvider: 'foundry',
+        providerCredentials: {
+          provider: 'foundry',
+          endpoint: 'https://my-res.services.ai.azure.com/',
+          apiKey: 'k',
+        },
+      });
+
+      const result = await buildProviderEnv(profile, 'pod-1', logger);
+
+      expect(result.env.ANTHROPIC_FOUNDRY_BASE_URL).toBe(
+        'https://my-res.services.ai.azure.com/anthropic',
+      );
     });
 
     it('throws when credentials mismatch provider', async () => {
@@ -425,9 +446,10 @@ describe('buildProviderEnv', () => {
       const result = await freshBuildProviderEnv(profile, 'pod-1', logger);
 
       expect(result.env.CLAUDE_CODE_USE_FOUNDRY).toBe('1');
-      expect(result.env.ANTHROPIC_BASE_URL).toBe('https://foundry.azure.com/v1');
-      expect(result.env.ANTHROPIC_API_KEY).toBeUndefined();
-      expect(result.env.ANTHROPIC_API_KEY_FILE).toBe('/run/autopod/foundry-api-key');
+      expect(result.env.ANTHROPIC_FOUNDRY_BASE_URL).toBe('https://foundry.azure.com/anthropic');
+      // Entra tokens are bearer credentials, not api-key header values.
+      expect(result.env.ANTHROPIC_FOUNDRY_API_KEY_FILE).toBeUndefined();
+      expect(result.env.ANTHROPIC_FOUNDRY_AUTH_TOKEN_FILE).toBe('/run/autopod/foundry-api-key');
       expect(result.secretFiles).toHaveLength(1);
       expect(result.secretFiles[0]?.content).toBe('entra-bearer-xyz');
       expect(mockGetAzureToken).toHaveBeenCalledWith(
@@ -547,18 +569,19 @@ describe('buildProviderEnv', () => {
 
       // Anthropic env vars must NOT be set on the openai surface
       expect(result.env.CLAUDE_CODE_USE_FOUNDRY).toBeUndefined();
-      expect(result.env.ANTHROPIC_BASE_URL).toBeUndefined();
-      expect(result.env.ANTHROPIC_API_KEY_FILE).toBeUndefined();
+      expect(result.env.ANTHROPIC_FOUNDRY_BASE_URL).toBeUndefined();
+      expect(result.env.ANTHROPIC_FOUNDRY_API_KEY_FILE).toBeUndefined();
 
       // OpenAI/Azure-OpenAI env vars set instead
       expect(result.env.CODEX_HOME).toBe('/home/autopod/.codex');
-      expect(result.env.OPENAI_BASE_URL).toBe('https://my-foundry.openai.azure.com');
+      expect(result.env.AUTOPOD_CODEX_MODEL_PROVIDER).toBe('azure-foundry');
+      expect(result.env.OPENAI_BASE_URL).toBe('https://my-foundry.openai.azure.com/openai/v1');
       expect(result.env.AZURE_OPENAI_ENDPOINT).toBe('https://my-foundry.openai.azure.com');
       expect(result.env.OPENAI_API_KEY_FILE).toBe('/run/autopod/foundry-openai-key');
       expect(result.env.AZURE_OPENAI_API_KEY_FILE).toBe('/run/autopod/foundry-openai-key');
       expect(result.env.OPENAI_API_VERSION).toBe('2024-12-01-preview');
       expect(result.env.AZURE_OPENAI_API_VERSION).toBe('2024-12-01-preview');
-      expect(result.env.CLAUDE_FOUNDRY_PROJECT).toBe('gpt-deployment');
+      expect(result.env.CLAUDE_FOUNDRY_PROJECT).toBeUndefined();
 
       expect(result.secretFiles).toHaveLength(1);
       expect(result.secretFiles[0]?.path).toBe('/run/autopod/foundry-openai-key');

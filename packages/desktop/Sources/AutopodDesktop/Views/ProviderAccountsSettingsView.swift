@@ -37,6 +37,7 @@ struct ProviderAccountsSettingsView: View {
   @State private var inFlightAction: String?
   @State private var deleteTarget: PublicProviderAccountResponse?
   @State private var apiKeyTarget: PublicProviderAccountResponse?
+  @State private var foundryTarget: PublicProviderAccountResponse?
   @State private var expandedFailoverAccounts: Set<String> = []
   @State private var failoverDrafts: [String: ProviderFailoverPolicyResponse] = [:]
   @State private var failoverSaveErrors: [String: String] = [:]
@@ -100,8 +101,8 @@ struct ProviderAccountsSettingsView: View {
       ProviderAccountCreateSheet(
         isPresented: $showCreateSheet,
         providers: providerCatalog?.providers ?? []
-      ) { name, provider, id, apiKey in
-        try await createAccount(name: name, provider: provider, id: id, apiKey: apiKey)
+      ) { name, provider, id, credentials in
+        try await createAccount(name: name, provider: provider, id: id, credentials: credentials)
       }
     }
     .sheet(isPresented: $showImportSheet) {
@@ -134,6 +135,24 @@ struct ProviderAccountsSettingsView: View {
           provider: provider
         ) { apiKey in
           try await replaceAPIKey(account, apiKey: apiKey)
+        }
+      }
+    }
+    .sheet(
+      isPresented: Binding(
+        get: { foundryTarget != nil },
+        set: { if !$0 { foundryTarget = nil } }
+      )
+    ) {
+      if let account = foundryTarget {
+        FoundryCredentialsSheet(
+          isPresented: Binding(
+            get: { foundryTarget != nil },
+            set: { if !$0 { foundryTarget = nil } }
+          ),
+          accountName: account.name
+        ) { draft in
+          try await replaceFoundryCredentials(account, draft: draft)
         }
       }
     }
@@ -587,7 +606,7 @@ struct ProviderAccountsSettingsView: View {
     name: String,
     provider: String,
     id: String?,
-    apiKey: String?
+    credentials: NewProviderAccountCredentials?
   ) async throws {
     guard let api else { throw DaemonError.networkError("Not connected to daemon") }
     guard let catalogProvider = providerCatalog?.provider(id: provider) else {
@@ -604,12 +623,26 @@ struct ProviderAccountsSettingsView: View {
         "\(catalogProvider.displayName) does not advertise API-key authentication."
       )
     }
-    _ = try await api.createProviderAccount(
-      name: name,
-      provider: provider,
-      id: id,
-      apiKey: catalogProvider.canAcceptGenericAPIKey ? apiKey : nil
-    )
+    switch credentials {
+    case .foundry(let draft):
+      // Validate before creating so a typo never leaves an unauthenticated account behind.
+      let payload = try draft.payload()
+      _ = try await api.createProviderAccount(
+        name: name,
+        provider: provider,
+        id: id,
+        credentials: payload
+      )
+    case .apiKey(let apiKey):
+      _ = try await api.createProviderAccount(
+        name: name,
+        provider: provider,
+        id: id,
+        apiKey: catalogProvider.canAcceptGenericAPIKey ? apiKey : nil
+      )
+    case nil:
+      _ = try await api.createProviderAccount(name: name, provider: provider, id: id)
+    }
     await loadAccounts()
   }
 
@@ -699,6 +732,19 @@ struct ProviderAccountsSettingsView: View {
   }
 
   @MainActor
+  private func replaceFoundryCredentials(
+    _ account: PublicProviderAccountResponse,
+    draft: FoundryCredentialsDraft
+  ) async throws {
+    guard let api else { throw DaemonError.networkError("Not connected to daemon") }
+    let payload = try draft.payload()
+    inFlightAction = "auth:\(account.id)"
+    defer { inFlightAction = nil }
+    _ = try await api.updateProviderAccount(account.id, fields: ["credentials": payload])
+    await loadAccounts()
+  }
+
+  @MainActor
   private func link(_ account: PublicProviderAccountResponse, profileName: String) async {
     guard let api else { return }
     inFlightAction = "link:\(account.id)"
@@ -784,6 +830,15 @@ struct ProviderAccountsSettingsView: View {
       .buttonStyle(.borderless)
       .disabled(isAccountBusy(account.id))
       .help(account.hasCredentials ? "Replace API key" : "Add API key")
+    } else if account.provider == "foundry" {
+      Button {
+        foundryTarget = account
+      } label: {
+        Image(systemName: account.hasCredentials ? "arrow.triangle.2.circlepath" : "person.badge.key")
+      }
+      .buttonStyle(.borderless)
+      .disabled(isAccountBusy(account.id))
+      .help(account.hasCredentials ? "Replace Foundry endpoint and key" : "Add Foundry endpoint and key")
     } else if account.provider == "pi" {
       Menu {
         ForEach(ProfileAuthenticator.PiOAuthProvider.allCases, id: \.rawValue) { providerId in
@@ -882,15 +937,128 @@ private struct ProviderAPIKeySheet: View {
   }
 }
 
+private enum NewProviderAccountCredentials {
+  case apiKey(String)
+  case foundry(FoundryCredentialsDraft)
+}
+
+/// Endpoint / key / surface rows for a Foundry account. Rendered inside a `Grid`.
+private struct FoundryCredentialsFields: View {
+  @Binding var draft: FoundryCredentialsDraft
+
+  var body: some View {
+    GridRow {
+      Text("Endpoint").foregroundStyle(.secondary)
+      TextField("https://<resource>.services.ai.azure.com/anthropic", text: $draft.endpoint)
+        .textFieldStyle(.roundedBorder)
+        .font(.system(.body, design: .monospaced))
+        .frame(width: 300)
+    }
+    GridRow {
+      Text("API Key").foregroundStyle(.secondary)
+      SecureField("Foundry API key", text: $draft.apiKey)
+        .textFieldStyle(.roundedBorder)
+        .frame(width: 300)
+    }
+    GridRow {
+      Text("Surface").foregroundStyle(.secondary)
+      Picker("", selection: $draft.surface) {
+        ForEach(FoundryCredentialsDraft.Surface.allCases) { surface in
+          Text(surface.label).tag(surface)
+        }
+      }
+      .labelsHidden()
+      .frame(width: 220)
+    }
+    if draft.surface == .openai {
+      GridRow {
+        Text("API Version").foregroundStyle(.secondary)
+        TextField("2024-12-01-preview (optional)", text: $draft.apiVersion)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(.body, design: .monospaced))
+          .frame(width: 300)
+      }
+    }
+    GridRow {
+      Text("")
+      Text("Set the profile model to your Foundry deployment name — Foundry routes by deployment, not model ID.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .frame(width: 300, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+}
+
+private struct FoundryCredentialsSheet: View {
+  @Binding var isPresented: Bool
+  let accountName: String
+  let onSave: (FoundryCredentialsDraft) async throws -> Void
+
+  @State private var draft = FoundryCredentialsDraft()
+  @State private var isSaving = false
+  @State private var errorMessage: String?
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      Text("Foundry Credentials")
+        .font(.headline)
+      Text("Replaces the endpoint and key for \(accountName). The stored secret is never displayed.")
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+
+      if let errorMessage {
+        Text(errorMessage)
+          .font(.caption)
+          .foregroundStyle(.red)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
+      Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+        FoundryCredentialsFields(draft: $draft)
+      }
+
+      HStack {
+        Spacer()
+        Button("Cancel") { isPresented = false }
+          .keyboardShortcut(.cancelAction)
+        Button("Save") {
+          Task { await save() }
+        }
+        .keyboardShortcut(.defaultAction)
+        .disabled(!draft.isComplete || isSaving)
+      }
+    }
+    .padding(20)
+    .frame(width: 460)
+  }
+
+  @MainActor
+  private func save() async {
+    isSaving = true
+    errorMessage = nil
+    defer { isSaving = false }
+    do {
+      try await onSave(draft)
+      draft.apiKey = ""
+      isPresented = false
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+}
+
 private struct ProviderAccountCreateSheet: View {
   @Binding var isPresented: Bool
   let providers: [ProviderCatalogProvider]
-  let onCreate: (String, String, String?, String?) async throws -> Void
+  let onCreate: (String, String, String?, NewProviderAccountCredentials?) async throws -> Void
 
   @State private var name = ""
   @State private var accountId = ""
   @State private var provider = "openai"
   @State private var apiKey = ""
+  @State private var foundry = FoundryCredentialsDraft()
   @State private var isSaving = false
   @State private var errorMessage: String?
 
@@ -969,6 +1137,9 @@ private struct ProviderAccountCreateSheet: View {
                 .frame(width: 260)
             }
           }
+          if selectedProvider.id == "foundry" {
+            FoundryCredentialsFields(draft: $foundry)
+          }
         }
       }
 
@@ -994,11 +1165,12 @@ private struct ProviderAccountCreateSheet: View {
           trimmedName.isEmpty || isSaving || selectedProvider?.policy.runnable != true
             || (selectedProvider?.implementation.kind == "generic-pi-api"
               && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            || (provider == "foundry" && !foundry.isComplete)
         )
       }
     }
     .padding(20)
-    .frame(width: 420)
+    .frame(width: 460)
     .onAppear {
       if !providers.contains(where: { $0.id == provider && $0.policy.runnable }),
          let first = providers.first(where: { $0.policy.runnable }) {
@@ -1014,8 +1186,11 @@ private struct ProviderAccountCreateSheet: View {
     defer { isSaving = false }
     do {
       let secret = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-      try await onCreate(trimmedName, provider, trimmedId, secret.isEmpty ? nil : secret)
+      let credentials: NewProviderAccountCredentials? =
+        provider == "foundry" ? .foundry(foundry) : (secret.isEmpty ? nil : .apiKey(secret))
+      try await onCreate(trimmedName, provider, trimmedId, credentials)
       apiKey = ""
+      foundry.apiKey = ""
       isPresented = false
     } catch {
       errorMessage = error.localizedDescription

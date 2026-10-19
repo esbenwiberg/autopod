@@ -120,6 +120,45 @@ async function fixture(failover = false) {
 }
 
 describe('isolated reviewer execution', () => {
+  it('prepares writable private runtime homes before root-owned credential injection', async () => {
+    const f = await fixture();
+    await f.execute({ prompt: 'Review', timeout: 5000 });
+    expect(f.manager.execInContainer).toHaveBeenCalledWith(
+      'review-container',
+      [
+        'sh',
+        '-c',
+        'umask 077; for dir do mkdir -p -- "$dir" && test -w "$dir" || exit 1; done',
+        'reviewer-home',
+        '/home/autopod/.claude',
+        '/home/autopod/.codex',
+      ],
+      { timeout: expect.any(Number) },
+    );
+    expect(vi.mocked(f.manager.execInContainer).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(f.manager.writeFile).mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it('cleans up an unwritable runtime home without injecting credentials or dispatching', async () => {
+    const f = await fixture();
+    vi.mocked(f.manager.execInContainer).mockResolvedValueOnce({
+      stdout: '',
+      stderr: 'Permission denied',
+      exitCode: 1,
+    });
+    await expect(f.execute({ prompt: 'Review', timeout: 5000 })).rejects.toThrow(
+      'Cannot prepare isolated reviewer runtime home',
+    );
+    expect(f.manager.writeFile).not.toHaveBeenCalled();
+    expect(f.manager.execStreaming).not.toHaveBeenCalled();
+    expect(f.manager.kill).toHaveBeenCalledWith('review-container');
+    expect(f.db.prepare('SELECT state,cleanup FROM isolated_reviewer_runs').get()).toEqual({
+      state: 'failed',
+      cleanup: 'clean',
+    });
+  });
+
   function providerFailure(f: Awaited<ReturnType<typeof fixture>>, usage?: Record<string, number>) {
     vi.mocked(f.manager.execStreaming).mockImplementationOnce(async () => ({
       stdout: Readable.from([JSON.stringify({ result: 'Service unavailable', usage })]),

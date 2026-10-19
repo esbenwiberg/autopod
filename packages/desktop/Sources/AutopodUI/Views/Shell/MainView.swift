@@ -15,6 +15,7 @@ public struct MainView: View {
     public var isConnected: Bool
     public var connectionLabel: String
     public var connectionState: String
+    public var activityStreamConnected: Bool
     public var isLoading: Bool
     public var actions: PodActions
     public var profileNames: [String]
@@ -49,6 +50,7 @@ public struct MainView: View {
     public var onSelectSession: ((String?) -> Void)?
     public var onRefreshDiff: ((String) -> Void)?
     public var onShowSettings: (() -> Void)?
+    public var settingsWorkspace: ((DesktopSettingsRoute) -> AnyView)?
     public var onEditProfile: ((String) -> Void)?
     public var loadFiles: ((String) async throws -> [SessionFileEntry])?
     public var loadArtifacts: ((String) async throws -> [SessionFileEntry])?
@@ -60,8 +62,8 @@ public struct MainView: View {
     public var loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])?
     public var loadActionAudit: ((String, String?) async throws -> ActionAuditResponse)?
     public var loadQualityScores: (() async throws -> [PodQualityScore])?
-    public var loadCostAnalytics: (() async throws -> CostAnalyticsResponse)?
-    public var loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)?
+    public var loadCostAnalytics: ((Int) async throws -> CostAnalyticsResponse)?
+    public var loadReliabilityAnalytics: ((Int) async throws -> ReliabilityAnalyticsResponse)?
     public var loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)?
     public var loadSafetyAnalytics: ((Int) async throws -> SafetyAnalyticsResponse)?
     public var loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)?
@@ -76,6 +78,8 @@ public struct MainView: View {
     // Scheduled Jobs
     public var onRunCatchup: ((ScheduledJob) -> Void)?
     public var onSkipCatchup: ((ScheduledJob) -> Void)?
+    public var scheduledWorkspaceActions: ScheduledWorkspaceActions?
+    public var scanWorkspace: ((ScheduledJob, Binding<Bool>) -> AnyView)?
     public var onOpenScanReports: ((ScheduledJob) -> Void)?
   public var onTriggerJob: ((ScheduledJob) -> Void)?
     public var onCreateJob: ((CreateScheduledJobRequest) -> Void)?
@@ -86,6 +90,8 @@ public struct MainView: View {
     public var onDeleteJobTemplate: ((ScheduledJobTemplate) -> Void)?
 
     // Memory
+    public var memoryLoading: Bool
+    public var memoryWorkspaceActions: MemoryWorkspaceActions?
     public var memoryEntries: [MemoryEntry]
     public var activeMemories: [MemoryEntry]
     public var pendingMemoryCandidates: [MemoryCandidate]
@@ -128,6 +134,7 @@ public struct MainView: View {
         isConnected: Bool = true,
         connectionLabel: String = "localhost:3000",
         connectionState: String = "Connected",
+        activityStreamConnected: Bool = false,
         isLoading: Bool = false,
         actions: PodActions = .preview,
         profileNames: [String] = ["my-app", "webapp", "backend"],
@@ -154,6 +161,7 @@ public struct MainView: View {
         onSelectSession: ((String?) -> Void)? = nil,
         onRefreshDiff: ((String) -> Void)? = nil,
         onShowSettings: (() -> Void)? = nil,
+        settingsWorkspace: ((DesktopSettingsRoute) -> AnyView)? = nil,
         onEditProfile: ((String) -> Void)? = nil,
         loadFiles: ((String) async throws -> [SessionFileEntry])? = nil,
         loadArtifacts: ((String) async throws -> [SessionFileEntry])? = nil,
@@ -165,8 +173,8 @@ public struct MainView: View {
         loadFirewallDenials: ((String, String?) async throws -> [FirewallDenialResponse])? = nil,
         loadActionAudit: ((String, String?) async throws -> ActionAuditResponse)? = nil,
         loadQualityScores: (() async throws -> [PodQualityScore])? = nil,
-        loadCostAnalytics: (() async throws -> CostAnalyticsResponse)? = nil,
-        loadReliabilityAnalytics: (() async throws -> ReliabilityAnalyticsResponse)? = nil,
+        loadCostAnalytics: ((Int) async throws -> CostAnalyticsResponse)? = nil,
+        loadReliabilityAnalytics: ((Int) async throws -> ReliabilityAnalyticsResponse)? = nil,
         loadQualityAnalytics: ((Int) async throws -> QualityAnalyticsResponse)? = nil,
         loadSafetyAnalytics: ((Int) async throws -> SafetyAnalyticsResponse)? = nil,
         loadThroughputAnalytics: ((Int) async throws -> ThroughputAnalyticsResponse)? = nil,
@@ -178,6 +186,8 @@ public struct MainView: View {
         onRunCatchup: ((ScheduledJob) -> Void)? = nil,
         onSkipCatchup: ((ScheduledJob) -> Void)? = nil,
         onOpenScanReports: ((ScheduledJob) -> Void)? = nil,
+        scheduledWorkspaceActions: ScheduledWorkspaceActions? = nil,
+        scanWorkspace: ((ScheduledJob, Binding<Bool>) -> AnyView)? = nil,
     onTriggerJob: ((ScheduledJob) -> Void)? = nil,
         onCreateJob: ((CreateScheduledJobRequest) -> Void)? = nil,
         onEditJob: ((String, UpdateScheduledJobRequest) -> Void)? = nil,
@@ -209,7 +219,8 @@ public struct MainView: View {
         onSelectMemory: ((String) -> Void)? = nil,
         onSelectMemoryCandidate: ((String) -> Void)? = nil,
         onCreateMemory: ((MemoryScope, String?, String, String) -> Void)? = nil,
-        onLoadMemories: (() async -> Void)? = nil
+        onLoadMemories: (() async -> Void)? = nil,
+        memoryWorkspaceActions: MemoryWorkspaceActions? = nil, memoryLoading: Bool = false
     ) {
         self.pods = pods
         self.managedPods = managedPods
@@ -224,6 +235,7 @@ public struct MainView: View {
         self.isConnected = isConnected
         self.connectionLabel = connectionLabel
         self.connectionState = connectionState
+        self.activityStreamConnected = activityStreamConnected
         self.isLoading = isLoading
         self.actions = actions
         self.profileNames = profileNames
@@ -250,6 +262,7 @@ public struct MainView: View {
         self.onSelectSession = onSelectSession
         self.onRefreshDiff = onRefreshDiff
         self.onShowSettings = onShowSettings
+        self.settingsWorkspace = settingsWorkspace
         self.onEditProfile = onEditProfile
         self.loadFiles = loadFiles
         self.loadArtifacts = loadArtifacts
@@ -273,6 +286,7 @@ public struct MainView: View {
         self.qualityScores = qualityScores
         self.onRunCatchup = onRunCatchup
         self.onSkipCatchup = onSkipCatchup
+        self.scheduledWorkspaceActions = scheduledWorkspaceActions; self.scanWorkspace = scanWorkspace
         self.onOpenScanReports = onOpenScanReports
     self.onTriggerJob = onTriggerJob
         self.onCreateJob = onCreateJob
@@ -305,14 +319,23 @@ public struct MainView: View {
         self.onSelectMemory = onSelectMemory
         self.onSelectMemoryCandidate = onSelectMemoryCandidate
         self.onCreateMemory = onCreateMemory
+        self.memoryLoading = memoryLoading
+        self.memoryWorkspaceActions = memoryWorkspaceActions
         self.onLoadMemories = onLoadMemories
     }
 
-    @State private var sidebarSelection: SidebarItem = .attention
+    @State private var sidebarSelection: SidebarItem = DesktopIdentity.isPreview ? .all : .attention
+    @AppStorage("autopod.desktop.redesign") private var redesign = DesktopIdentity.isPreview
+    @State private var repositoryID: String?
+    @State private var villageSelectedSource: VillageActor.Source = .native
+    @State private var villageShowsDetails = false
+    @State private var villageSearch = ""
+    @Environment(\.accessibilityReduceMotion) private var villageReducedMotion
     @State private var showDeleteSeriesConfirmation = false
     @State private var showCreateSheet = false
     @State private var showCreateSeriesSheet = false
     @State private var showCommandPalette = false
+    @State private var selectedDesktopSeriesID: String?
     @State private var pipelineExpanded = true
     @State private var spawnFollowUpInitiator: Pod?
     /// When set, the Create Series sheet opens pre-filled with this pod's
@@ -327,6 +350,25 @@ public struct MainView: View {
     @State private var selectedAnalyticsCard: AnalyticsCardKind?
     @State private var selectedDetailTab: DetailTab?
     @State private var requestedDetailTab: DetailTab?
+
+    private var isDesktopSeriesWorkspace: Bool {
+        guard redesign else { return false }
+        if sidebarSelection == .seriesAll { return true }
+        if case .series = sidebarSelection { return true }
+        return false
+    }
+
+    private var selectedDesktopSeries: DesktopSeriesGroup? {
+        let groups = DesktopSeriesGroup.groups(pods, includeCompleted: true)
+        let id: String?
+        if case .series(let seriesID) = sidebarSelection { id = seriesID }
+        else { id = selectedDesktopSeriesID }
+        return groups.first { $0.id == id }
+    }
+
+    private func openSeriesPod(_ id: String, tab: DetailTab) {
+        openFleetPod(id, tab: tab)
+    }
 
     private var selectedSession: Pod? {
         pods.first { $0.id == selectedSessionId }
@@ -356,18 +398,20 @@ public struct MainView: View {
             browseScope: browseScope,
             query: searchText,
             sortOrder: sortOrder,
-            selectedPodId: selectedSessionId
+            selectedPodId: selectedSessionId,
+            repositoryID: repositoryID, profiles: profileDetails
         )
     }
 
     /// Filters pods by a free-text query. Matches against the pod's name (id),
     /// brief title, task description, profile, and series name so users can find
     /// pods by anything they'd recognise on the card. Empty query is a no-op.
-    static func searchPods(_ pods: [Pod], query: String) -> [Pod] {
+    static func searchPods(_ pods: [Pod], query: String, profiles: [Profile] = []) -> [Pod] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return pods }
         return pods.filter { pod in
-            pod.id.localizedCaseInsensitiveContains(trimmed)
+            (DesktopRepository.resolve(pod, profiles: profiles)?.label.localizedCaseInsensitiveContains(trimmed) ?? false)
+                || pod.id.localizedCaseInsensitiveContains(trimmed)
                 || (pod.briefTitle?.localizedCaseInsensitiveContains(trimmed) ?? false)
                 || pod.task.localizedCaseInsensitiveContains(trimmed)
                 || pod.profileName.localizedCaseInsensitiveContains(trimmed)
@@ -406,18 +450,23 @@ public struct MainView: View {
         query: String = "",
         sortOrder: SortOrder = .created,
         selectedPodId: String? = nil,
-        limit: Int = defaultBrowseRecentLimit
+        limit: Int = defaultBrowseRecentLimit,
+        repositoryID: String? = nil,
+        profiles: [Profile] = []
     ) -> [Pod] {
+        let scoped = repositoryID.map { id in
+            pods.filter { DesktopRepository.resolve($0, profiles: profiles)?.id == id }
+        } ?? pods
         let base = selection == .all
             ? browsePods(
-                pods,
+                scoped,
                 scope: browseScope,
                 query: query,
                 selectedPodId: selectedPodId,
                 limit: limit
             )
-            : filterPods(pods, for: selection)
-        return sortPods(searchPods(base, query: query), by: sortOrder)
+            : filterPods(scoped, for: selection)
+        return sortPods(searchPods(base, query: query, profiles: profiles), by: sortOrder)
     }
 
     private static func recentBrowsePods(_ pods: [Pod], limit: Int) -> [Pod] {
@@ -458,7 +507,7 @@ public struct MainView: View {
         case .workspaces:            pods.filter { $0.isWorkspace }
         case .completed:             pods.filter { [.complete, .killed].contains($0.status) && !$0.isWorkspace }
         case .all:                   pods
-        case .managedPods:           []
+        case .managedPods, .village, .profilesWorkspace, .settingsWorkspace: []
         case .analytics:             []
         case .history:               []
         case .memory:                []
@@ -481,51 +530,328 @@ public struct MainView: View {
         }
     }
 
-    public var body: some View {
-        NavigationSplitView {
-            SidebarView(
-                pods: pods,
-                selection: $sidebarSelection,
-                showCreateSheet: $showCreateSheet,
-                showCreateSeriesSheet: $showCreateSeriesSheet,
-                isConnected: isConnected,
-                connectionLabel: connectionLabel,
-                pendingMemoryCount: pendingMemoryCount,
-                scheduledJobCount: scheduledJobs.count,
-                catchupPendingCount: scheduledJobs.filter { $0.catchupPending }.count,
-                managedPodCount: managedPods.count,
-                onShowSettings: onShowSettings
+    @State private var analyticsDays = 30
+    @State private var settingsRoute: DesktopSettingsRoute = .appearance
+    @State private var configurationKind: ConfigurationKind = .profile
+    @State private var configurationToOpen: String?
+    @State private var scanWorkspaceJob: ScheduledJob?
+    @State private var configurationDirty = false
+    @State private var configurationBusy = false
+    @State private var pendingWorkspaceAction: (() -> Void)?
+    @State private var showWorkspaceDiscard = false
+    @State private var configurationReset = UUID()
+
+    private var sidebarBinding: Binding<SidebarItem> {
+        Binding(
+            get: { sidebarSelection },
+            set: { destination in
+                guard destination != sidebarSelection else { return }
+                requestWorkspace { sidebarSelection = destination }
+            })
+    }
+
+    private func requestWorkspace(_ action: @escaping () -> Void) {
+        guard !configurationBusy else { return }
+        if redesign && configurationDirty {
+            pendingWorkspaceAction = action
+            showWorkspaceDiscard = true
+        } else {
+            action()
+        }
+    }
+
+    private var workspaceSidebar: some View {
+        SidebarView(
+            pods: pods, selection: sidebarBinding, showCreateSheet: $showCreateSheet,
+            showCreateSeriesSheet: $showCreateSeriesSheet, isConnected: isConnected,
+            connectionLabel: connectionLabel, pendingMemoryCount: pendingMemoryCount,
+            scheduledJobCount: scheduledJobs.count,
+            catchupPendingCount: scheduledJobs.filter { $0.catchupPending }.count,
+            managedPodCount: managedPods.count, onShowSettings: onShowSettings)
+    }
+
+    @ViewBuilder private var configurationWorkspace: some View {
+        if sidebarSelection == .managedPods {
+            DesktopManagedPodsWorkspace(pods: managedPods, selection: $selectedManagedPodId, api: managedPodAPI,
+                isLoading: managedPodsLoading, error: managedPodsError, isConnected: isConnected,
+                refresh: { await onRefreshManagedPods?() }).id(configurationReset)
+        } else if sidebarSelection == .memory {
+            memoryWorkspace.id(configurationReset)
+        } else if sidebarSelection == .history {
+            DesktopHistoryWorkspace(pods: pods, configuration: configurationActions, refresh: onRefresh,
+                openPod: { id in openFleetPod(id) },
+                isConnected: isConnected, isLoading: isLoading, loadError: loadError)
+        } else if sidebarSelection == .analytics {
+            DesktopAnalyticsWorkspace(selected: $selectedAnalyticsCard, days: $analyticsDays, isConnected: isConnected,
+                viewHistory: { sidebarSelection = .history }, overview: { _ in AnyView(analyticsOverview) },
+                detail: { card, _ in AnyView(analyticsDetail(card)) })
+                .id(configurationReset)
+        } else if sidebarSelection == .scheduledJobs, let scheduledWorkspaceActions {
+            if let job = scanWorkspaceJob, let scanWorkspace {
+                scanWorkspace(job, Binding(get: { scanWorkspaceJob != nil }, set: { if !$0 { scanWorkspaceJob = nil } }))
+                  .id(configurationReset)
+            } else {
+                DesktopSchedulesView(
+                    jobs: scheduledJobs, templates: scheduledJobTemplates, profiles: profileNames,
+                    configuration: configurationActions, actions: scheduledWorkspaceActions,
+                    openReports: { job in if scanWorkspace != nil { scanWorkspaceJob = job } else { onOpenScanReports?(job) } },
+                    openPod: { id in openFleetPod(id) },
+                    onDirty: { configurationDirty = $0 }, onBusy: { configurationBusy = $0 })
+                    .id(configurationReset)
+            }
+        } else if sidebarSelection == .settingsWorkspace {
+            if let settingsWorkspace {
+                settingsWorkspace(settingsRoute).id(settingsRoute)
+            } else {
+                ContentUnavailableView {
+                    Label("Settings", systemImage: "gearshape")
+                } description: {
+                    Text("Open desktop preferences to manage this connection.")
+                } actions: {
+                    Button("Open Settings") { onShowSettings?() }
+                }
+            }
+        } else if let configurationActions {
+            ConfigurationLibraryView(
+                actions: configurationActions, initialKind: configurationKind,
+                profileToOpen: $configurationToOpen,
+                onDirtyChanged: { configurationDirty = $0 }, onBusyChanged: { configurationBusy = $0 }
             )
-        } content: {
-            if sidebarSelection == .managedPods {
-                ManagedPodsView(
-                    pods: managedPods,
-                    selection: $selectedManagedPodId,
-                    isLoading: managedPodsLoading,
-                    error: managedPodsError,
-                    onRefresh: { await onRefreshManagedPods?() }
+            .id(configurationReset)
+        } else {
+            ContentUnavailableView {
+                Label("Profiles", systemImage: "person.crop.rectangle.stack")
+            } description: {
+                Text("Open profile settings for this daemon's legacy configuration.")
+            } actions: {
+                Button("Open Profiles") { onShowSettings?() }
+            }
+        }
+    }
+
+    public var body: some View {
+        Group {
+            if redesign && ([.profilesWorkspace, .settingsWorkspace, .history, .analytics, .memory, .managedPods].contains(sidebarSelection) || (sidebarSelection == .scheduledJobs && scheduledWorkspaceActions != nil)) {
+                NavigationSplitView {
+                    workspaceSidebar
+                } detail: {
+                    configurationWorkspace.frame(minWidth: 650, maxWidth: .infinity, maxHeight: .infinity)
+                }.navigationSplitViewStyle(.balanced)
+            } else {
+                podNavigation
+            }
+        }
+
+        .environment(
+            \.desktopOpenProviderAccounts,
+            {
+                configurationDirty = false
+                settingsRoute = .providerAccounts
+                sidebarSelection = .settingsWorkspace
+            }
+        )
+        .environment(
+            \.desktopOpenConfiguration,
+            { kind in
+                configurationKind = kind
+                configurationReset = UUID()
+                sidebarSelection = .profilesWorkspace
+            }
+        )
+        .environment(\.desktopWorkspaceDirty, { configurationDirty = $0 })
+        .environment(\.desktopWorkspaceBusy, { configurationBusy = $0 })
+        .confirmationDialog("Discard unsaved workspace changes?", isPresented: $showWorkspaceDiscard) {
+            Button("Discard changes", role: .destructive) {
+                let action = pendingWorkspaceAction
+                pendingWorkspaceAction = nil; configurationDirty = false; configurationReset = UUID(); scanWorkspaceJob = nil
+                action?()
+            }
+            Button("Keep editing", role: .cancel) { pendingWorkspaceAction = nil }
+        } message: {
+            Text("Your workspace draft has not been saved.")
+        }
+        .environment(\.desktopRedesign, redesign)
+        .environment(\.desktopRepositories, repositoriesByPod)
+        .environment(\.desktopRepositoryFilter, { repositoryID = $0 })
+        .environment(\.desktopPodSelection, { selectedSessionId = $0 })
+        .modifier(DesktopAppearanceModifier())
+        .tint(redesign ? DesktopTheme.accent : .accentColor)
+        .onChange(of: sidebarSelection) { _, selection in
+            if redesign, case .series(let id) = selection {
+                selectedDesktopSeriesID = id
+                sidebarSelection = .seriesAll
+            }
+        }
+        .onChange(of: redesign) { _, enabled in
+            if !enabled {
+                repositoryID = nil
+                if [.profilesWorkspace, .settingsWorkspace].contains(sidebarSelection) {
+                    sidebarSelection = .all
+                }
+            } else if case .series(let id) = sidebarSelection {
+                selectedDesktopSeriesID = id
+                sidebarSelection = .seriesAll
+            }
+        }
+        .onChange(of: repositoryID) { _, _ in
+            if let selectedSessionId, !filteredSessions.contains(where: { $0.id == selectedSessionId }) {
+                self.selectedSessionId = filteredSessions.first?.id
+            }
+        }
+        .onChange(of: connectionLabel) { _, _ in
+            repositoryID = nil; configurationDirty = false; configurationBusy = false;
+            configurationToOpen = nil; scanWorkspaceJob = nil
+            pendingWorkspaceAction = nil; showWorkspaceDiscard = false; configurationReset = UUID()
+        }
+        .sheet(isPresented: $showCreateSheet) {
+            if let configurationActions {
+                ComposableCreatePodSheet(isPresented: $showCreateSheet, actions: configurationActions, onCreated: { openFleetPod($0) })
+            } else {
+                CreateSessionSheet(
+                    isPresented: $showCreateSheet,
+                    actions: actions,
+                    profileNames: profileNames,
+                    profileDetails: profileDetails
                 )
-                .frame(minWidth: 600)
-            } else if sidebarSelection == .analytics {
-                AnalyticsView(
-                    pods: pods,
-                    loadScores: loadQualityScores,
-                    loadCost: loadCostAnalytics,
-                    loadReliability: loadReliabilityAnalytics,
-                    loadQualityAnalytics: loadQualityAnalytics,
-                    loadSafetyAnalytics: loadSafetyAnalytics,
-                    loadThroughputAnalytics: loadThroughputAnalytics,
-                    loadEscalationsAnalytics: loadEscalationsAnalytics,
-                    loadModelsAnalytics: loadModelsAnalytics,
-                    loadMemoryAnalytics: loadMemoryAnalytics,
-                    selectedCard: $selectedAnalyticsCard
-                )
-                .frame(minWidth: 600)
-            } else if sidebarSelection == .history {
-                HistoryView(pods: pods, actions: wiredActions, profileNames: profileNames, configurationActions: configurationActions)
-                    .frame(minWidth: 600)
-            } else if sidebarSelection == .memory {
-                MemoryManagementView(
+            }
+        }
+        .sheet(isPresented: $showCreateSeriesSheet) {
+            CreateSeriesSheet(
+                isPresented: $showCreateSeriesSheet,
+                actions: actions,
+                profileNames: profileNames,
+                configurationActions: configurationActions,
+                onSeriesCreated: { seriesId in
+                    sidebarSelection = .series(seriesId)
+                }
+            )
+        }
+        .sheet(item: $seriesFromPod) { initiator in
+            CreateSeriesSheet(
+                isPresented: Binding(
+                    get: { seriesFromPod != nil },
+                    set: { if !$0 { seriesFromPod = nil } }
+                ),
+                actions: actions,
+                profileNames: profileNames,
+                configurationActions: configurationActions,
+                initialBaseBranch: initiator.branch,
+                initialTargetBranch: initiator.baseBranch,
+                initialProfile: initiator.profileName,
+                initialSyncPodId: initiator.isTerminal ? nil : initiator.id,
+                onSeriesCreated: { seriesId in
+                    seriesFromPod = nil
+                    sidebarSelection = .series(seriesId)
+                }
+            )
+        }
+        .sheet(item: $spawnFollowUpInitiator) { initiator in
+            SpawnDependentSheet(
+                isPresented: Binding(
+                    get: { spawnFollowUpInitiator != nil },
+                    set: { if !$0 { spawnFollowUpInitiator = nil } }
+                ),
+                initiator: initiator,
+                candidatePods: pods,
+                actions: actions,
+                profileNames: profileNames,
+                configurationActions: configurationActions,
+                onPodCreated: { openFleetPod($0) }
+            )
+        }
+        .onChange(of: selectedSessionId) { _, newId in
+            onSelectSession?(newId)
+        }
+        .overlay {
+            if showCommandPalette {
+                ZStack(alignment: .top) {
+                    Color.black.opacity(0.2)
+                        .ignoresSafeArea()
+                        .onTapGesture { showCommandPalette = false }
+                        .allowsHitTesting(true)
+                    CommandPalette(
+                        isPresented: $showCommandPalette,
+                        pods: pods,
+                        profiles: profileDetails,
+                        actions: actions,
+                        onSelectSession: { id in openFleetPod(id) },
+                        onCreatePod: {
+                            showCreateSheet = true
+                        },
+                        onShowProfilePods: { name in
+                            requestWorkspace {
+                                searchText = ""; repositoryID = nil; sidebarSelection = .profile(name)
+                            }
+                        },
+                        onEditProfile: { name in
+                            if redesign && configurationActions != nil {
+                                requestWorkspace {
+                                    configurationReset = UUID(); configurationKind = .profile
+                                    configurationToOpen = name; sidebarSelection = .profilesWorkspace
+                                }
+                            } else {
+                                onEditProfile?(name)
+                            }
+                        }
+                    )
+                    .padding(.top, 80)
+                }
+            }
+        }
+        .background {
+            // Hidden button to catch Cmd+K
+            Button("") { showCommandPalette.toggle() }
+                .keyboardShortcut("k", modifiers: .command)
+                .hidden()
+            // Hidden button to catch Cmd+R (refresh pods)
+            Button("") { Task { await onRefresh?() } }
+                .keyboardShortcut("r", modifiers: .command)
+                .hidden()
+        }
+    }
+
+    private var analyticsOverview: some View {
+        AnalyticsView(pods: pods, loadScores: loadQualityScores, loadCost: loadCostAnalytics,
+            loadReliability: loadReliabilityAnalytics, loadQualityAnalytics: loadQualityAnalytics,
+            loadSafetyAnalytics: loadSafetyAnalytics, loadThroughputAnalytics: loadThroughputAnalytics,
+            loadEscalationsAnalytics: loadEscalationsAnalytics, loadModelsAnalytics: loadModelsAnalytics,
+            loadMemoryAnalytics: loadMemoryAnalytics, selectedCard: $selectedAnalyticsCard)
+    }
+
+    private func analyticsDetail(_ card: AnalyticsCardKind?) -> some View {
+        AnalyticsRightPaneView(
+            card: card,
+            pods: pods,
+            loadScores: loadQualityScores,
+            loadCost: loadCostAnalytics,
+            loadReliability: loadReliabilityAnalytics,
+            loadQuality: loadQualityAnalytics,
+            loadSafety: loadSafetyAnalytics,
+            loadThroughput: loadThroughputAnalytics,
+            loadEscalations: loadEscalationsAnalytics,
+            loadModels: loadModelsAnalytics,
+            loadMemory: loadMemoryAnalytics,
+            verifyAuditChain: isConnected ? verifyAuditChain : nil,
+            onSelectPod: { sessionId in
+                openFleetPod(sessionId)
+            },
+            onQualitySelectPod: { sessionId in
+                openFleetPod(sessionId, tab: .work)
+            },
+            onSafetySelectPod: { sessionId in
+                openFleetPod(sessionId, tab: .work)
+            },
+            onThroughputSelectPod: { sessionId in
+                openFleetPod(sessionId, tab: .work)
+            },
+            onEscalationsSelectPod: { sessionId in
+                openFleetPod(sessionId, tab: .work)
+            }
+                    )
+    }
+
+    private var memoryWorkspace: some View {
+        MemoryManagementView(
                     entries: memoryEntries,
                     activeMemories: activeMemories,
                     pendingCandidates: pendingMemoryCandidates,
@@ -571,10 +897,57 @@ public struct MainView: View {
                         }
                     },
                     profileNames: profileNames,
-                    configurationActions: configurationActions
+                    configurationActions: configurationActions, workspaceActions: memoryWorkspaceActions,
+                    isConnected: isConnected, isLoading: memoryLoading, refresh: onLoadMemories
                 )
                 .frame(minWidth: 600)
                 .task { await onLoadMemories?() }
+    }
+
+    private var podNavigation: some View {
+        NavigationSplitView {
+            SidebarView(
+                pods: pods,
+                selection: sidebarBinding,
+                showCreateSheet: $showCreateSheet,
+                showCreateSeriesSheet: $showCreateSeriesSheet,
+                isConnected: isConnected,
+                connectionLabel: connectionLabel,
+                pendingMemoryCount: pendingMemoryCount,
+                scheduledJobCount: scheduledJobs.count,
+                catchupPendingCount: scheduledJobs.filter { $0.catchupPending }.count,
+                managedPodCount: managedPods.count,
+                onShowSettings: onShowSettings
+            )
+        } content: {
+            Group {
+            if sidebarSelection == .village {
+                VillageView(
+                    snapshotForDate: villageSnapshot,
+                    isConnected: isConnected, activityStreamConnected: activityStreamConnected,
+                    managedError: managedPodsError,
+                    refreshManaged: onRefreshManagedPods,
+                    onSelect: selectVillageActor,
+                    search: $villageSearch
+                )
+                .frame(minWidth: 600)
+            } else if sidebarSelection == .managedPods {
+                ManagedPodsView(
+                    pods: managedPods,
+                    selection: $selectedManagedPodId,
+                    isLoading: managedPodsLoading,
+                    error: managedPodsError,
+                    onRefresh: { await onRefreshManagedPods?() }
+                )
+                .frame(minWidth: 600)
+            } else if sidebarSelection == .analytics {
+                analyticsOverview
+                .frame(minWidth: 600)
+            } else if sidebarSelection == .history {
+                HistoryView(pods: pods, actions: wiredActions, profileNames: profileNames, configurationActions: configurationActions)
+                    .frame(minWidth: 600)
+            } else if sidebarSelection == .memory {
+                memoryWorkspace
             } else if sidebarSelection == .scheduledJobs {
                 ScheduledJobsView(
                     jobs: scheduledJobs,
@@ -599,6 +972,8 @@ public struct MainView: View {
             } else if sidebarSelection == .featureOverview {
                 FeatureOverviewView(selectedFeature: $selectedFeature)
                     .frame(minWidth: 600)
+            } else if isDesktopSeriesWorkspace {
+                DesktopSeriesNavigation(pods: pods, selectedID: $selectedDesktopSeriesID)
             } else if sidebarSelection == .seriesAll {
                 SeriesListView(
                     pods: pods,
@@ -617,254 +992,198 @@ public struct MainView: View {
                     }
                     contentArea
                 }
-                .frame(minWidth: 500)
+                .frame(minWidth: redesign ? 420 : 500)
             }
+            }.navigationSplitViewColumnWidth(min: isDesktopSeriesWorkspace ? 260 : 420, ideal: isDesktopSeriesWorkspace ? 300 : 820, max: isDesktopSeriesWorkspace ? 400 : 1500)
         } detail: {
-            if sidebarSelection == .managedPods {
-                if let pod = managedPods.first(where: { $0.id == selectedManagedPodId }) {
-                    ManagedPodDetailView(pod: pod, api: managedPodAPI)
-                } else {
-                    VStack(spacing: 10) {
-                        Image(systemName: "shippingbox")
-                            .font(.system(size: 36))
-                            .foregroundStyle(.tertiary)
-                        Text("Select a managed pod")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                if sidebarSelection == .village && villageShowsDetails {
+                    HStack {
+                        Button { villageShowsDetails = false } label: {
+                            Label("Village pods", systemImage: "chevron.left")
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding()
+                    Divider()
                 }
-            } else if sidebarSelection == .analytics {
-                AnalyticsRightPaneView(
-                    card: selectedAnalyticsCard,
-                    pods: pods,
-                    loadScores: loadQualityScores,
-                    loadCost: loadCostAnalytics,
-                    loadReliability: loadReliabilityAnalytics,
-                    loadQuality: loadQualityAnalytics,
-                    loadSafety: loadSafetyAnalytics,
-                    loadThroughput: loadThroughputAnalytics,
-                    loadEscalations: loadEscalationsAnalytics,
-                    loadModels: loadModelsAnalytics,
-                    loadMemory: loadMemoryAnalytics,
-                    verifyAuditChain: verifyAuditChain,
-                    onSelectPod: { sessionId in
-                        let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                        selectedAnalyticsCard = result.card
-                        sidebarSelection = result.sidebar
-                        selectedSessionId = result.session
-                    },
-                    onQualitySelectPod: { sessionId in
-                        let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                        selectedAnalyticsCard = result.card
-                        sidebarSelection = result.sidebar
-                        selectedSessionId = result.session
-                        requestedDetailTab = .work
-                    },
-                    onSafetySelectPod: { sessionId in
-                        let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                        selectedAnalyticsCard = result.card
-                        sidebarSelection = result.sidebar
-                        selectedSessionId = result.session
-                        requestedDetailTab = .work
-                    },
-                    onThroughputSelectPod: { sessionId in
-                        let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                        selectedAnalyticsCard = result.card
-                        sidebarSelection = result.sidebar
-                        selectedSessionId = result.session
-                        requestedDetailTab = .work
-                    },
-                    onEscalationsSelectPod: { sessionId in
-                        let result = Self.analyticsSelectPodResult(sessionId: sessionId)
-                        selectedAnalyticsCard = result.card
-                        sidebarSelection = result.sidebar
-                        selectedSessionId = result.session
-                        requestedDetailTab = .work
+                if sidebarSelection == .village && !villageShowsDetails {
+                    TimelineView(.periodic(from: .now, by: 5)) { context in
+                        VillagePodListView(snapshot: villageSnapshot(context.date), onSelect: selectVillageActor)
                     }
-                )
-            } else if sidebarSelection == .salesPitch {
-                VStack(spacing: 10) {
-                    Image(systemName: "bolt.fill")
-                        .font(.system(size: 36))
-                        .foregroundStyle(
-                            .linearGradient(
-                                colors: [.blue, .purple],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                } else if sidebarSelection == .managedPods || (sidebarSelection == .village && villageSelectedSource == .managed) {
+                    if let pod = managedPods.first(where: { $0.id == selectedManagedPodId }) {
+                        ManagedPodDetailView(pod: pod, api: managedPodAPI)
+                    } else {
+                        VStack(spacing: 10) {
+                            Image(systemName: "shippingbox")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.tertiary)
+                            Text("Select a managed pod")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } else if sidebarSelection == .analytics {
+                    analyticsDetail(selectedAnalyticsCard)
+                } else if sidebarSelection == .salesPitch {
+                    VStack(spacing: 10) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 36))
+                            .foregroundStyle(
+                                .linearGradient(
+                                    colors: [.blue, .purple],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
                             )
-                        )
-                    Text("Autopod")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if sidebarSelection == .featureOverview {
-                if let feature = selectedFeature {
-                    FeatureDetailPanelView(feature: feature) { related in
-                        selectedFeature = related
-                    }
-                } else {
-                    VStack(spacing: 10) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 36))
-                            .foregroundStyle(.tertiary)
-                        Text("Select a feature")
+                        Text("Autopod")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if sidebarSelection == .featureOverview {
+                    if let feature = selectedFeature {
+                        FeatureDetailPanelView(feature: feature) { related in
+                            selectedFeature = related
+                        }
+                    } else {
+                        VStack(spacing: 10) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.tertiary)
+                            Text("Select a feature")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } else if isDesktopSeriesWorkspace {
+                    if let group = selectedDesktopSeries {
+                        DesktopSeriesWorkspace(group: group, qualityScores: qualityScores, actions: wiredActions,
+                            eventsForPod: eventsForPod, loadEventsForPod: loadEventsForPod,
+                            loadQuality: loadQuality, openPod: openSeriesPod)
+                    } else {
+                        ContentUnavailableView("Select a series", systemImage: "rectangle.3.group")
+                    }
+                } else if let pod = selectedSession {
+                    DetailPanelView(
+                        pod: pod,
+                        events: selectedSessionEvents,
+                        actions: wiredActions,
+                        seriesPods: pod.seriesId.map { sid in pods.filter { $0.seriesId == sid } } ?? [],
+                        qualityScores: qualityScores,
+                        onSelectPod: { selectedSessionId = $0 },
+                        eventsForPod: eventsForPod,
+                        loadEventsForPod: loadEventsForPod,
+                        relatedEventLoadStateForPod: relatedEventLoadStateForPod,
+                        diffResponse: sessionDiffs[pod.id],
+                        terminalState: terminalState,
+                        terminalDataPipe: terminalDataPipe,
+                        onTerminalSendData: onTerminalSendData,
+                        onTerminalResize: onTerminalResize,
+                        onTerminalConnect: { onTerminalConnect?(pod.id) },
+                        onTerminalDisconnect: onTerminalDisconnect,
+                        onRefreshDiff: { onRefreshDiff?(pod.id) },
+                        loadFiles: loadFiles,
+                        loadArtifacts: loadArtifacts,
+                        loadContent: loadContent,
+                        loadQuality: loadQuality,
+                        loadCost: loadCost,
+                        loadPreviewStatus: loadPreviewStatus,
+                        loadValidationHistory: loadValidationHistory,
+                        loadFirewallDenials: loadFirewallDenials,
+                        loadActionAudit: loadActionAudit,
+                        isLoadingLogs: isLoadingLogs,
+                        logsLoadError: logsLoadError,
+                        limitedLogCount: limitedLogCount,
+                        onReloadLogs: onReloadLogs,
+                        onLoadAllLogs: onLoadAllLogs,
+                        onLaunchSeriesFromPod: { seriesFromPod = $0 },
+                        selectedTab: $selectedDetailTab,
+                        requestedTab: $requestedDetailTab,
+                        configurationActions: configurationActions
+                    )
+                    .id(pod.id)
+                } else {
+                    emptyDetail
                 }
-            } else if let pod = selectedSession {
-                DetailPanelView(
-                    pod: pod,
-                    events: selectedSessionEvents,
-                    actions: wiredActions,
-                    seriesPods: pod.seriesId.map { sid in pods.filter { $0.seriesId == sid } } ?? [],
-                    qualityScores: qualityScores,
-                    onSelectPod: { selectedSessionId = $0 },
-                    eventsForPod: eventsForPod,
-                    loadEventsForPod: loadEventsForPod,
-                    relatedEventLoadStateForPod: relatedEventLoadStateForPod,
-                    diffResponse: sessionDiffs[pod.id],
-                    terminalState: terminalState,
-                    terminalDataPipe: terminalDataPipe,
-                    onTerminalSendData: onTerminalSendData,
-                    onTerminalResize: onTerminalResize,
-                    onTerminalConnect: { onTerminalConnect?(pod.id) },
-                    onTerminalDisconnect: onTerminalDisconnect,
-                    onRefreshDiff: { onRefreshDiff?(pod.id) },
-                    loadFiles: loadFiles,
-                    loadArtifacts: loadArtifacts,
-                    loadContent: loadContent,
-                    loadQuality: loadQuality,
-                    loadCost: loadCost,
-                    loadPreviewStatus: loadPreviewStatus,
-                    loadValidationHistory: loadValidationHistory,
-                    loadFirewallDenials: loadFirewallDenials,
-                    loadActionAudit: loadActionAudit,
-                    isLoadingLogs: isLoadingLogs,
-                    logsLoadError: logsLoadError,
-                    limitedLogCount: limitedLogCount,
-                    onReloadLogs: onReloadLogs,
-                    onLoadAllLogs: onLoadAllLogs,
-                    onLaunchSeriesFromPod: { seriesFromPod = $0 },
-                    selectedTab: $selectedDetailTab,
-                    requestedTab: $requestedDetailTab
-                )
-                .id(pod.id)
-            } else {
-                emptyDetail
             }
+            .navigationSplitViewColumnWidth(min: isDesktopSeriesWorkspace ? 560 : 350, ideal: isDesktopSeriesWorkspace ? 1100 : 720, max: isDesktopSeriesWorkspace ? 1800 : 1400)
         }
         .navigationSplitViewStyle(.balanced)
-        .sheet(isPresented: $showCreateSheet) {
-            if let configurationActions {
-                ComposableCreatePodSheet(isPresented: $showCreateSheet, actions: configurationActions)
-            } else {
-            CreateSessionSheet(
-                isPresented: $showCreateSheet,
-                actions: actions,
-                profileNames: profileNames,
-                profileDetails: profileDetails
-            )
-            }
-        }
-        .sheet(isPresented: $showCreateSeriesSheet) {
-            CreateSeriesSheet(
-                isPresented: $showCreateSeriesSheet,
-                actions: actions,
-                profileNames: profileNames,
-                configurationActions: configurationActions,
-                onSeriesCreated: { seriesId in
-                    sidebarSelection = .series(seriesId)
-                }
-            )
-        }
-        .sheet(item: $seriesFromPod) { initiator in
-            CreateSeriesSheet(
-                isPresented: Binding(
-                    get: { seriesFromPod != nil },
-                    set: { if !$0 { seriesFromPod = nil } }
-                ),
-                actions: actions,
-                profileNames: profileNames,
-                configurationActions: configurationActions,
-                initialBaseBranch: initiator.branch,
-                initialTargetBranch: initiator.baseBranch,
-                initialProfile: initiator.profileName,
-                initialSyncPodId: initiator.isTerminal ? nil : initiator.id,
-                onSeriesCreated: { seriesId in
-                    seriesFromPod = nil
-                    sidebarSelection = .series(seriesId)
-                }
-            )
-        }
-        .sheet(item: $spawnFollowUpInitiator) { initiator in
-            SpawnDependentSheet(
-                isPresented: Binding(
-                    get: { spawnFollowUpInitiator != nil },
-                    set: { if !$0 { spawnFollowUpInitiator = nil } }
-                ),
-                initiator: initiator,
-                candidatePods: pods,
-                actions: actions,
-                profileNames: profileNames,
-                configurationActions: configurationActions,
-                onPodCreated: { newId in
-                    selectedSessionId = newId
-                }
-            )
-        }
-        .onChange(of: selectedSessionId) { _, newId in
-            onSelectSession?(newId)
-        }
-        .overlay {
-            if showCommandPalette {
-                ZStack(alignment: .top) {
-                    Color.black.opacity(0.2)
-                        .ignoresSafeArea()
-                        .onTapGesture { showCommandPalette = false }
-                        .allowsHitTesting(true)
-                    CommandPalette(
-                        isPresented: $showCommandPalette,
-                        pods: pods,
-                        profiles: profileDetails,
-                        actions: actions,
-                        onSelectSession: { id in
-                            sidebarSelection = .all
-                            selectedSessionId = id
-                        },
-                        onCreatePod: {
-                            showCreateSheet = true
-                        },
-                        onShowProfilePods: { name in
-                            searchText = ""
-                            sidebarSelection = .profile(name)
-                        },
-                        onEditProfile: { name in
-                            onEditProfile?(name)
-                        }
-                    )
-                    .padding(.top, 80)
-                }
-            }
-        }
-        .background {
-            // Hidden button to catch Cmd+K
-            Button("") { showCommandPalette.toggle() }
-                .keyboardShortcut("k", modifiers: .command)
-                .hidden()
-            // Hidden button to catch Cmd+R (refresh pods)
-            Button("") { Task { await onRefresh?() } }
-                .keyboardShortcut("r", modifiers: .command)
-                .hidden()
-        }
     }
 
     // MARK: - Content toolbar
 
+    @ViewBuilder
     private var contentToolbar: some View {
+        if redesign { redesignedToolbar } else { legacyToolbar }
+    }
+
+    private var repositoriesByPod: [String: DesktopRepository] {
+        Dictionary(uniqueKeysWithValues: pods.compactMap { pod in
+            DesktopRepository.resolve(pod, profiles: profileDetails).map { (pod.id, $0) }
+        })
+    }
+
+    private var repositories: [DesktopRepository] {
+        Array(Set(repositoriesByPod.values.map(\.id))).compactMap { id in
+            repositoriesByPod.values.first { $0.id == id }
+        }.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
+    }
+
+    private var redesignedToolbar: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(sidebarSelection == .all ? "All pods" : sidebarSelection.label)
+                        .font(.system(size: 26, weight: .semibold)).tracking(-0.7)
+                    Text("\(filteredSessions.count) \(filteredSessions.count == 1 ? "pod" : "pods") · \(repositories.first { $0.id == repositoryID }?.label ?? "All repositories")")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Button { showCreateSheet = true } label: { Label("New pod", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent).controlSize(.regular).keyboardShortcut("n", modifiers: .command)
+                Menu {
+                    Button("New series") { showCreateSeriesSheet = true }
+                    Divider()
+                    Picker("View", selection: $viewMode) { Text("Cards").tag(ViewMode.cards); Text("List").tag(ViewMode.list) }
+                    Picker("Card density", selection: $cardDensity) {
+                        ForEach(CardDensity.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    Picker("Sort", selection: $sortOrder) {
+                        ForEach(SortOrder.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                    if sidebarSelection == .all {
+                        Picker("Browse", selection: $browseScope) {
+                            ForEach(BrowseScope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                    }
+                    Divider()
+                    Button("Refresh") { Task { await onRefresh?() } }
+                } label: { Image(systemName: "ellipsis") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Fleet options")
+            }
+            HStack(spacing: 10) {
+                searchField(width: nil)
+                Picker("Repository", selection: $repositoryID) {
+                    Text("All repositories").tag(nil as String?)
+                    ForEach(repositories) { Text($0.label).tag(Optional($0.id)) }
+                }.labelsHidden().controlSize(.regular)
+                    .frame(minWidth: 110, idealWidth: 180, maxWidth: 230)
+                    .accessibilityLabel("Filter by repository")
+                if repositoryID != nil {
+                    Button { repositoryID = nil } label: { Image(systemName: "xmark.circle") }
+                        .buttonStyle(.plain).help("Clear repository filter")
+                }
+            }
+        }.padding(24).background(DesktopTheme.canvas)
+    }
+
+    private var legacyToolbar: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
                 toolbarTitle
@@ -1154,6 +1473,11 @@ public struct MainView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if filteredSessions.isEmpty {
+            VStack(spacing: 12) {
+                ContentUnavailableView("No matching pods", systemImage: "line.3.horizontal.decrease", description: Text("Try another repository or search."))
+                Button("Clear filters") { repositoryID = nil; searchText = "" }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             switch viewMode {
             case .cards:
@@ -1164,7 +1488,48 @@ public struct MainView: View {
         }
     }
 
+    @ViewBuilder
     private var cardGrid: some View {
+        if redesign { redesignedGrid } else { legacyCardGrid }
+    }
+
+    private var redesignedGrid: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                if sidebarSelection == .all || sidebarSelection == .active {
+                    fleetGroup("Needs attention", pods: filteredSessions.filter { $0.status.needsAttention })
+                    fleetGroup("In progress & recent", pods: filteredSessions.filter { !$0.status.needsAttention })
+                } else { fleetGroup(nil, pods: filteredSessions) }
+            }.padding(24)
+            browseArchiveFooter(visibleCount: filteredSessions.count)
+        }.background(DesktopTheme.canvas)
+    }
+
+    @ViewBuilder
+    private func fleetGroup(_ title: String?, pods group: [Pod]) -> some View {
+        if !group.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                if let title {
+                    HStack(spacing: 8) {
+                        Text(title).font(.caption.weight(.semibold))
+                        Text("\(group.count)").font(.caption).foregroundStyle(.secondary)
+                        DesktopTheme.line.frame(height: 1)
+                    }
+                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 14)], spacing: 14) {
+                    ForEach(group) { pod in
+                        SessionCardFinal(pod: pod, actions: wiredActions, density: cardDensity,
+                            isSelected: selectedSessionId == pod.id,
+                            onSpawnFollowUp: { spawnFollowUpInitiator = $0 },
+                            onLaunchSeriesFromPod: { seriesFromPod = $0 }, qualityScore: qualityScores[pod.id])
+                            .onTapGesture { selectedSessionId = pod.id }
+                    }
+                }
+            }
+        }
+    }
+
+    private var legacyCardGrid: some View {
         let sessions = filteredSessions
         return ScrollView {
             LazyVGrid(
@@ -1206,9 +1571,10 @@ public struct MainView: View {
     @ViewBuilder
     private func browseArchiveFooter(visibleCount: Int) -> some View {
         let queryIsEmpty = searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if sidebarSelection == .all && browseScope == .recent && queryIsEmpty && visibleCount < pods.count {
+        let total = repositoryID.map { id in pods.filter { repositoriesByPod[$0.id]?.id == id }.count } ?? pods.count
+        if sidebarSelection == .all && browseScope == .recent && queryIsEmpty && visibleCount < total {
             HStack(spacing: 8) {
-                Text("Showing \(visibleCount) of \(pods.count)")
+                Text("Showing \(visibleCount) of \(total)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Archive") {
@@ -1230,10 +1596,48 @@ public struct MainView: View {
         current == tapping ? nil : tapping
     }
 
-    /// Returns the state tuple produced by the `onSelectPod` handler in the detail pane.
-    /// Extracted for unit testing without constructing the full view.
-    static func analyticsSelectPodResult(sessionId: String) -> (card: AnalyticsCardKind?, sidebar: SidebarItem, session: String) {
-        (card: nil, sidebar: .all, session: sessionId)
+    /// Shared destination for explicit navigation from another workspace into the fleet.
+    static func fleetPodDestination(sessionId: String)
+        -> (card: AnalyticsCardKind?, sidebar: SidebarItem, session: String, query: String, repositoryID: String?) {
+        (card: nil, sidebar: .all, session: sessionId, query: "", repositoryID: nil)
+    }
+
+    private func openFleetPod(_ id: String, tab: DetailTab? = nil) {
+        requestWorkspace {
+            let destination = Self.fleetPodDestination(sessionId: id)
+            selectedAnalyticsCard = destination.card
+            searchText = destination.query
+            repositoryID = destination.repositoryID
+            sidebarSelection = destination.sidebar
+            selectedSessionId = destination.session
+            if let tab { selectedDetailTab = tab; requestedDetailTab = tab }
+        }
+    }
+
+    private func selectVillageActor(_ actor: VillageActor) {
+        villageSelectedSource = actor.source
+        if actor.source == .managed { selectedManagedPodId = actor.podId }
+        else { selectedSessionId = actor.podId }
+        villageShowsDetails = true
+    }
+
+    private func villageSnapshot(_ now: Date) -> VillageSnapshot {
+        let actors = pods.map { VillageScene.native($0, events: eventsForPod?($0.id) ?? [], now: now) }
+            + managedPods.map(VillageScene.managed)
+        let query = villageSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let visible = actors.filter { actor in
+            !actor.isFinished && (query.isEmpty ||
+                [actor.title, actor.profile, actor.model, actor.podId].contains {
+                    $0.localizedCaseInsensitiveContains(query)
+                })
+        }.sorted { $0.id < $1.id }
+        return VillageSnapshot(
+            connected: isConnected, activityStreamConnected: activityStreamConnected,
+            managedDataFresh: isConnected && managedPodsError == nil, reducedMotion: villageReducedMotion,
+            selectedActorId: villageSelectedSource == .managed
+                ? selectedManagedPodId.map { "managed:\($0)" }
+                : selectedSessionId.map { "native:\($0)" }, actors: visible
+        )
     }
 
     // MARK: - Empty detail

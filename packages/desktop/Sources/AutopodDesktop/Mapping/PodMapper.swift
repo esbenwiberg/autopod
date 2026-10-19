@@ -112,6 +112,7 @@ public enum PodMapper {
       escalationQuestion: response.pendingEscalationSummary,
       containerUrl: response.previewUrl.flatMap(URL.init(string:)),
       hasWebUi: response.hasWebUi,
+      phase: response.display?.progress.map { PhaseProgress(current: $0.currentPhase, total: $0.totalPhases, description: $0.description) },
       latestActivity: latestActivity,
       errorSummary: response.failureReason,
       inputTokens: response.inputTokens ?? 0,
@@ -119,6 +120,7 @@ public enum PodMapper {
       costUsd: response.costUsd ?? 0,
       tokenTelemetryAccuracy:
         TokenTelemetryAccuracy(rawValue: response.tokenTelemetryAccuracy ?? "partial") ?? .partial,
+      fleetDisplay: response.display,
       briefTitle: response.title,
       seriesId: response.seriesId,
       seriesName: response.seriesName,
@@ -152,6 +154,12 @@ public enum PodMapper {
     }()
 
     // Map escalation from pending escalation
+    let escalationId: String? = {
+      guard let escalation = response.pendingEscalation,
+            escalation.response == nil, !escalation.id.isEmpty else { return nil }
+      return escalation.id
+    }()
+
     let escalationQuestion: String? = {
       guard let esc = response.pendingEscalation, esc.response == nil else { return nil }
       if esc.type == "action_approval", let actionName = esc.payload.actionName {
@@ -489,6 +497,7 @@ public enum PodMapper {
       baseBranch: response.baseBranch,
       contract: response.contract,
       diffStats: diffStats,
+      escalationId: escalationId,
       escalationQuestion: escalationQuestion,
       escalationOptions: escalationOptions,
       escalationType: escalationType,
@@ -513,6 +522,7 @@ public enum PodMapper {
       prFixAttempts: response.prFixAttempts ?? 0,
       maxPrFixAttempts: response.maxPrFixAttempts ?? 0,
       profileSnapshot: profileSnapshotMapped,
+      fleetDisplay: response.display,
       briefTitle: response.briefTitle,
       seriesId: response.seriesId,
       seriesName: response.seriesName,

@@ -368,6 +368,42 @@ describe('provider account routes', () => {
     expect(profileStore.getRaw('base').providerCredentials?.provider).toBe('max');
   });
 
+  it.each([{ accountId: undefined }, { accountId: 'existing-foundry' }])(
+    'refuses to import keyless Foundry credentials without touching the profile (%o)',
+    async ({ accountId }) => {
+      const keyless = {
+        provider: 'foundry' as const,
+        endpoint: 'https://res.services.ai.azure.com',
+      };
+      profileStore.create({
+        ...validProfile,
+        name: 'base',
+        modelProvider: 'foundry',
+        providerCredentials: keyless,
+      });
+      providerAccountStore.create({
+        id: 'existing-foundry',
+        name: 'Existing Foundry',
+        provider: 'foundry',
+        credentials: { ...keyless, apiKey: 'original-key' },
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/provider-accounts/import-from-profile',
+        payload: { profileName: 'base', ...(accountId ? { accountId } : {}) },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.body).toContain('keyless Foundry');
+      expect(profileStore.getRaw('base').providerCredentials).toEqual(keyless);
+      expect(providerAccountStore.get('existing-foundry').credentials).toMatchObject({
+        apiKey: 'original-key',
+      });
+      expect(providerAccountStore.list()).toHaveLength(1);
+    },
+  );
+
   it('creates a missing stable account id while importing legacy profile credentials', async () => {
     profileStore.create({
       ...validProfile,

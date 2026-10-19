@@ -26,7 +26,8 @@ let package = Package(
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
                 .product(name: "MarkdownUI", package: "swift-markdown-ui"),
             ],
-            path: "Sources/AutopodUI"
+            path: "Sources/AutopodUI",
+            resources: [.copy("Resources/Village")]
         ),
         .target(
             name: "AutopodClient",

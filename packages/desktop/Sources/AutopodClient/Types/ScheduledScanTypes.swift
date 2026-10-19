@@ -17,6 +17,17 @@ public struct ScheduledRunResponse: Codable, Sendable {
   public let id: String
   public let status: String
   public var isReport: Bool { kind == "scan_report" }
+  /// One-line outcome for a manual run, so a fast or empty scan is still visibly a result.
+  public var summary: String {
+    guard isReport else { return "Pod \(id) started." }
+    switch status {
+    case "empty_delta": return "Scan finished: no changes in the scanned range, so nothing was checked."
+    case "complete": return "Scan report ready."
+    case "incomplete": return "Scan finished incomplete; open the report for diagnostics."
+    case "collecting": return "Scan started; the report is still collecting."
+    default: return "Scan report \(status)."
+    }
+  }
 }
 public struct ScheduledScanFinding: Codable, Identifiable, Sendable {
   public let id: String

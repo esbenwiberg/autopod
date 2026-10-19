@@ -348,6 +348,128 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     expect(cost.json().total).toBe(4);
   });
 
+  it('ships captured repository and milestones before detail hydration without snapshot bodies or secrets', async () => {
+    for (const [id, repository] of [
+      [
+        'captured-fleet',
+        { config: { remote: 'https://user:token@github.com/acme/captured.git?key=hidden#secret' } },
+      ],
+      ['empty-fleet', null],
+      ['broken-fleet', { config: { remote: ['invalid'] } }],
+    ] as const) {
+      insertPod(db, { id, status: 'running', completedAt: undefined });
+      db.prepare(
+        'UPDATE pods SET launch_config_digest=?, progress=?, profile_snapshot=? WHERE id=?',
+      ).run(
+        'captured',
+        JSON.stringify({
+          phase: 'Work',
+          description: 'Reported milestone',
+          currentPhase: 3,
+          totalPhases: 9,
+        }),
+        JSON.stringify({ repoUrl: 'https://github.com/acme/wrong-mutable-profile.git' }),
+        id,
+      );
+      db.prepare(`INSERT INTO pod_launch_snapshots(pod_id,digest,payload,request_digest,created_at)
+        VALUES (?, 'captured', ?, 'request', datetime('now'))`).run(
+        id,
+        JSON.stringify({
+          repository,
+          secretMarker: 'never-return-this',
+          task: 'x'.repeat(1_000_000),
+        }),
+      );
+    }
+    insertPod(db, { id: 'missing-fleet', status: 'running', completedAt: undefined });
+    db.prepare("UPDATE pods SET launch_config_digest='missing' WHERE id='missing-fleet'").run();
+    const parse = JSON.parse;
+    const parser = vi.spyOn(JSON, 'parse').mockImplementation((...args) => {
+      if (args[0].length > 256 * 1024) throw new Error('Full launch crossed into Node');
+      return parse(...args);
+    });
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/pods?compact=true&page=true&limit=10',
+      });
+      expect(response.statusCode).toBe(200);
+      const pods = response.json().pods as Array<{ id: string; display: unknown }>;
+      expect(pods.find((p) => p.id === 'captured-fleet')?.display).toEqual({
+        repository: { kind: 'repository', remote: 'https://github.com/acme/captured.git' },
+        progress: {
+          phase: 'Work',
+          description: 'Reported milestone',
+          currentPhase: 3,
+          totalPhases: 9,
+        },
+      });
+      expect(pods.find((p) => p.id === 'empty-fleet')?.display).toMatchObject({
+        repository: { kind: 'empty' },
+      });
+      for (const id of ['broken-fleet', 'missing-fleet'])
+        expect(pods.find((p) => p.id === id)?.display).toMatchObject({
+          repository: { kind: 'unavailable' },
+        });
+      for (const marker of ['never-return-this', 'hidden', 'wrong-mutable-profile', 'user:token'])
+        expect(response.body).not.toContain(marker);
+      expect(Buffer.byteLength(response.body)).toBeLessThan(16 * 1024);
+    } finally {
+      parser.mockRestore();
+    }
+    const detail = await app.inject({ method: 'GET', url: '/pods/captured-fleet' });
+    expect(detail.json().display.repository).toEqual({
+      kind: 'repository',
+      remote: 'https://github.com/acme/captured.git',
+    });
+  });
+
+  it('uses the active captured phase and captured legacy repository; malformed milestone counts remain unavailable', async () => {
+    insertPod(db, { id: 'phase-fleet', status: 'running', completedAt: undefined });
+    db.prepare("UPDATE pods SET launch_config_digest='phase' WHERE id='phase-fleet'").run();
+    db.prepare(`INSERT INTO pod_launch_phases(pod_id,digest,parent_digest,payload,created_at)
+      VALUES ('phase-fleet','phase','original',?,datetime('now'))`).run(
+      JSON.stringify({ repository: { config: { remote: 'https://github.com/acme/phase.git' } } }),
+    );
+    insertPod(db, { id: 'legacy-fleet', status: 'running', completedAt: undefined });
+    db.prepare("UPDATE pods SET profile_snapshot=? WHERE id='legacy-fleet'").run(
+      JSON.stringify({ repoUrl: 'git@github.com:acme/legacy.git' }),
+    );
+    for (const [index, currentPhase, totalPhases] of [
+      [0, 10, 9],
+      [1, -1, 9],
+      [2, 1.5, 9],
+      [3, 1, 0],
+      [4, '3', 9],
+    ] as const) {
+      const id = `invalid-progress-${index}`;
+      insertPod(db, { id, status: 'running', completedAt: undefined });
+      db.prepare('UPDATE pods SET progress=? WHERE id=?').run(
+        JSON.stringify({ phase: 'Work', description: 'Progress', currentPhase, totalPhases }),
+        id,
+      );
+    }
+    const response = await app.inject({
+      method: 'GET',
+      url: '/pods?compact=true&page=true&limit=10',
+    });
+    expect(response.statusCode).toBe(200);
+    const pods = response.json().pods as Array<{
+      id: string;
+      display: { repository: unknown; progress: unknown };
+    }>;
+    expect(pods.find((p) => p.id === 'phase-fleet')?.display.repository).toEqual({
+      kind: 'repository',
+      remote: 'https://github.com/acme/phase.git',
+    });
+    expect(pods.find((p) => p.id === 'legacy-fleet')?.display.repository).toEqual({
+      kind: 'repository',
+      remote: 'ssh://github.com/acme/legacy.git',
+    });
+    for (const pod of pods.filter((p) => p.id.startsWith('invalid-progress-')))
+      expect(pod.display.progress).toBeNull();
+  });
+
   it('projects compact history without parsing large unrelated evidence or returning settled output', async () => {
     insertPod(db, { id: 'bounded-list', status: 'complete' });
     const large = 'large-evidence-marker '.repeat(100_000);
@@ -1155,6 +1277,7 @@ describe('GET /pods/analytics/reliability', () => {
       createEscalation: vi.fn(),
       resolveEscalation: vi.fn(),
       getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getAutoPauseCount: vi.fn().mockReturnValue(0),
       getMaxAiCalls: vi.fn().mockReturnValue(5),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3),
       getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
@@ -1530,6 +1653,7 @@ describe('GET /pods/analytics/quality', () => {
       createEscalation: vi.fn(),
       resolveEscalation: vi.fn(),
       getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getAutoPauseCount: vi.fn().mockReturnValue(0),
       getMaxAiCalls: vi.fn().mockReturnValue(5),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3),
       getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
@@ -1779,6 +1903,7 @@ describe('GET /pods/analytics/memory', () => {
       createEscalation: vi.fn(),
       resolveEscalation: vi.fn(),
       getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getAutoPauseCount: vi.fn().mockReturnValue(0),
       getMaxAiCalls: vi.fn().mockReturnValue(5),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3),
       getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
@@ -2032,6 +2157,7 @@ describe('POST /pods safety_events instrumentation', () => {
       createEscalation: vi.fn(),
       resolveEscalation: vi.fn(),
       getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getAutoPauseCount: vi.fn().mockReturnValue(0),
       getMaxAiCalls: vi.fn().mockReturnValue(5),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3),
       getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
@@ -2243,6 +2369,7 @@ describe('GET /pods/analytics/throughput', () => {
       createEscalation: vi.fn(),
       resolveEscalation: vi.fn(),
       getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getAutoPauseCount: vi.fn().mockReturnValue(0),
       getMaxAiCalls: vi.fn().mockReturnValue(5),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3),
       getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
@@ -2474,6 +2601,7 @@ describe('GET /pods/analytics/escalations', () => {
       createEscalation: vi.fn(),
       resolveEscalation: vi.fn(),
       getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getAutoPauseCount: vi.fn().mockReturnValue(0),
       getMaxAiCalls: vi.fn().mockReturnValue(5),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3),
       getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
@@ -2704,6 +2832,7 @@ describe('GET /pods/analytics/models', () => {
       createEscalation: vi.fn(),
       resolveEscalation: vi.fn(),
       getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getAutoPauseCount: vi.fn().mockReturnValue(0),
       getMaxAiCalls: vi.fn().mockReturnValue(5),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3),
       getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
@@ -2950,6 +3079,7 @@ describe('GET /pods/:podId/preview/status', () => {
       createEscalation: vi.fn(),
       resolveEscalation: vi.fn(),
       getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getAutoPauseCount: vi.fn().mockReturnValue(0),
       getMaxAiCalls: vi.fn().mockReturnValue(5),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3),
       getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
@@ -3315,6 +3445,7 @@ describe('POST /pods/:podId/spawn-fix', () => {
       createEscalation: vi.fn(),
       resolveEscalation: vi.fn(),
       getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getAutoPauseCount: vi.fn().mockReturnValue(0),
       getMaxAiCalls: vi.fn().mockReturnValue(5),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3),
       getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
@@ -3664,6 +3795,7 @@ describe('POST /pods/:podId/update-from-base', () => {
       createEscalation: vi.fn(),
       resolveEscalation: vi.fn(),
       getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getAutoPauseCount: vi.fn().mockReturnValue(0),
       getMaxAiCalls: vi.fn().mockReturnValue(5),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3),
       getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
@@ -3873,6 +4005,7 @@ describe('POST /pods approve routes', () => {
       createEscalation: vi.fn(),
       resolveEscalation: vi.fn(),
       getAiEscalationCount: vi.fn().mockReturnValue(0),
+      getAutoPauseCount: vi.fn().mockReturnValue(0),
       getMaxAiCalls: vi.fn().mockReturnValue(5),
       getAutoPauseThreshold: vi.fn().mockReturnValue(3),
       getHumanResponseTimeout: vi.fn().mockReturnValue(3600),

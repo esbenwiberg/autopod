@@ -11,6 +11,7 @@ extension ConfigurationDocument {
 }
 
 struct ConfigurationSection<Content: View>: View {
+  @Environment(\.desktopRedesign) private var redesign
   let title: String
   var subtitle: String = ""
   @ViewBuilder var content: () -> Content
@@ -24,7 +25,10 @@ struct ConfigurationSection<Content: View>: View {
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(16)
-    .background(.background, in: RoundedRectangle(cornerRadius: 12))
+    .background(
+      redesign ? DesktopTheme.canvas : Color(nsColor: .windowBackgroundColor),
+      in: RoundedRectangle(cornerRadius: 12)
+    )
     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
   }
 }
@@ -94,5 +98,16 @@ struct ConfigurationAgentTargetEditor: View {
         ForEach(["auto", "low", "medium", "high", "xhigh"], id: \.self) { Text($0.capitalized).tag($0) }
       }
     }
+  }
+}
+
+struct DesktopConfigurationGroupBoxStyle: GroupBoxStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    VStack(alignment: .leading, spacing: 16) {
+      configuration.label.font(.subheadline.weight(.semibold))
+      configuration.content
+    }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+      .background(DesktopTheme.canvas, in: RoundedRectangle(cornerRadius: 9))
+      .overlay(RoundedRectangle(cornerRadius: 9).stroke(DesktopTheme.line, lineWidth: 1))
   }
 }

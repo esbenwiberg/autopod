@@ -2011,6 +2011,100 @@ describe('LocalWorktreeManager', () => {
       ]);
     });
 
+    describe('ADO token rejection', () => {
+      const adoRepo = 'https://dev.azure.com/org/project/_git/repo';
+      const authFailure = () =>
+        Object.assign(new Error('Command failed: git fetch'), {
+          stderr: `fatal: Authentication failed for '${adoRepo}/'`,
+        });
+
+      function mockFetchRejectingToken(rejected: (token: string) => boolean) {
+        const fetchTokens: string[] = [];
+        execFileMock.mockImplementation(
+          (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+            const cb = resolveCallback(arg3, arg4);
+            const env = (arg3 as { env?: Record<string, string> }).env ?? {};
+            const bearer = Object.values(env).find((v) => v.startsWith('Authorization: Bearer '));
+            const token = bearer?.slice('Authorization: Bearer '.length);
+            if (args[0] === 'fetch' && token) {
+              fetchTokens.push(token);
+              if (rejected(token)) {
+                cb(authFailure(), { stdout: '', stderr: '' });
+                return {} as ChildProcess;
+              }
+            }
+            cb(null, { stdout: '', stderr: '' });
+            return {} as ChildProcess;
+          },
+        );
+        return fetchTokens;
+      }
+
+      it('drops the rejected token and retries provisioning once with a fresh one', async () => {
+        const getToken = vi
+          .fn<() => Promise<string>>()
+          .mockResolvedValueOnce('stale-token')
+          .mockResolvedValueOnce('fresh-token');
+        const invalidate = vi.fn();
+        manager = new LocalWorktreeManager({
+          cacheDir,
+          worktreeDir,
+          logger,
+          githubAuth: fakeGitHubAuth(),
+          azureDevOpsAuth: { getToken, invalidate },
+        });
+        const fetchTokens = mockFetchRejectingToken((t) => t === 'stale-token');
+
+        await expect(
+          manager.create({ repoUrl: adoRepo, branch: 'feat/retry', baseBranch: 'main' }),
+        ).resolves.toMatchObject({ worktreePath: expect.any(String) });
+
+        expect(invalidate).toHaveBeenCalledTimes(1);
+        expect(getToken).toHaveBeenCalledTimes(2);
+        expect(fetchTokens[0]).toBe('stale-token');
+        expect(fetchTokens).toContain('fresh-token');
+      });
+
+      it('retries only once, then surfaces the credential error', async () => {
+        const getToken = vi.fn<() => Promise<string>>().mockResolvedValue('dead-token');
+        const invalidate = vi.fn();
+        manager = new LocalWorktreeManager({
+          cacheDir,
+          worktreeDir,
+          logger,
+          githubAuth: fakeGitHubAuth(),
+          azureDevOpsAuth: { getToken, invalidate },
+        });
+        mockFetchRejectingToken(() => true);
+
+        const err = await manager
+          .create({ repoUrl: adoRepo, branch: 'feat/no-loop', baseBranch: 'main' })
+          .catch((e: unknown) => e);
+
+        expect(err).toBeInstanceOf(GitCredentialError);
+        expect((err as GitCredentialError).service).toBe('ado');
+        expect(getToken).toHaveBeenCalledTimes(2);
+        expect(invalidate).toHaveBeenCalledTimes(2);
+      });
+
+      it('does not retry when the auth provider cannot invalidate its cache', async () => {
+        const getToken = vi.fn<() => Promise<string>>().mockResolvedValue('dead-token');
+        manager = new LocalWorktreeManager({
+          cacheDir,
+          worktreeDir,
+          logger,
+          githubAuth: fakeGitHubAuth(),
+          azureDevOpsAuth: { getToken },
+        });
+        mockFetchRejectingToken(() => true);
+
+        await expect(
+          manager.create({ repoUrl: adoRepo, branch: 'feat/no-cache', baseBranch: 'main' }),
+        ).rejects.toBeInstanceOf(GitCredentialError);
+        expect(getToken).toHaveBeenCalledTimes(1);
+      });
+    });
+
     it('clones bare repo and creates worktree when repo does not exist', async () => {
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {

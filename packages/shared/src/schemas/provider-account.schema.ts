@@ -49,9 +49,14 @@ const maxSetupTokenCredentialsSchema = z.object({
 
 const foundryCredentialsSchema = z.object({
   provider: z.literal('foundry'),
-  endpoint: z.string().url(),
-  projectId: z.string().min(1),
-  apiKey: z.string().optional(),
+  // The API key is sent to this URL — never allow plaintext transport.
+  endpoint: z
+    .string()
+    .url()
+    .refine((value) => value.startsWith('https://'), 'Foundry endpoint must use https'),
+  projectId: z.string().min(1).optional(),
+  // Provider accounts have no keyless path yet (Entra tokens expire mid-pod).
+  apiKey: z.string().trim().min(1),
   apiSurface: z.enum(['anthropic', 'openai']).optional(),
   apiVersion: z.string().min(1).optional(),
 });

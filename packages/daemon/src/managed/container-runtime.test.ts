@@ -1,8 +1,15 @@
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ManagedPodRequest } from '@autopod/shared';
 import { expect, it, vi } from 'vitest';
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
-import { ManagedContainerRuntime, type ReviewedContainerBoundary } from './container-runtime.js';
+import {
+  ManagedContainerRuntime,
+  type ReviewedContainerBoundary,
+  STOP_SUPERVISOR,
+} from './container-runtime.js';
 
 function fixture() {
   const request: ManagedPodRequest = JSON.parse(
@@ -53,6 +60,59 @@ function fixture() {
   );
   return { request, config, runtime, ensure, exec, binding };
 }
+
+it('tears down an exited sandbox after its execution profile is retired without enabling its route', async () => {
+  const f = fixture();
+  f.request.route.executionTarget = 'sandbox';
+  const kill = vi.fn(async () => {});
+  f.binding.manager.kill = kill;
+  const replacement = { ...f.binding, route: { ...f.request.route, model: 'replacement' } };
+  const runtime = new ManagedContainerRuntime(
+    [replacement, { ...replacement, profileId: 'another-profile' }],
+    () => ({ request: f.request, podId: 'pod-one', createdAt: 100, observedExit: true }),
+    'fixture-supervisor',
+  );
+  await expect(runtime.preflight(f.request)).rejects.toThrow('managed-route-unavailable');
+  await expect(runtime.cleanup('owned-sandbox')).resolves.toBe(true);
+  expect(kill).toHaveBeenCalledExactlyOnceWith('owned-sandbox');
+  expect(f.exec).not.toHaveBeenCalled();
+  expect(f.ensure).not.toHaveBeenCalled();
+});
+
+it.each(['unbound', 'exit-unobserved', 'local', 'ambiguous-manager', 'network-cleanup'])(
+  'refuses retired-profile teardown when %s',
+  async (failure) => {
+    const f = fixture();
+    f.request.route.executionTarget = failure === 'local' ? 'local' : 'sandbox';
+    const kill = vi.fn(async () => {});
+    f.binding.manager.kill = kill;
+    const replacement = {
+      ...f.binding,
+      route: { ...f.request.route, model: 'replacement' },
+      ...(failure === 'network-cleanup' ? { cleanupNetwork: async () => {} } : {}),
+    };
+    const runtime = new ManagedContainerRuntime(
+      failure === 'ambiguous-manager'
+        ? [replacement, { ...replacement, manager: { ...f.binding.manager } }]
+        : [replacement],
+      () =>
+        failure === 'unbound'
+          ? null
+          : {
+              request: f.request,
+              podId: 'pod-one',
+              createdAt: 100,
+              observedExit: failure !== 'exit-unobserved',
+            },
+      'fixture-supervisor',
+    );
+    await expect(runtime.cleanup('owned-sandbox')).rejects.toThrow(
+      failure === 'unbound' ? 'managed-runtime-unbound' : 'managed-route-unavailable',
+    );
+    expect(kill).not.toHaveBeenCalled();
+    expect(f.exec).not.toHaveBeenCalled();
+  },
+);
 it('read-only/no-web mounts and exact routes reach the trusted guard with no worker credential', async () => {
   const f = fixture();
   await f.runtime.ensure('pod-one', f.request, () => {});
@@ -201,46 +261,53 @@ it('does not export artifacts after a nonzero managed agent exit', async () => {
   expect(f.binding.manager.extractManagedOutput).not.toHaveBeenCalled();
 });
 
-it('syncs a stopped sandbox source workspace back before source freezing', async () => {
-  const f = fixture();
-  f.request.route.executionTarget = 'sandbox';
-  f.request.profileSnapshot.route.executionTarget = 'sandbox';
-  f.request.effectiveGrant.route.executionTarget = 'sandbox';
-  const repository = f.request.effectiveGrant.scope.repositories[0];
-  const volume = f.config.volumes?.[0];
-  if (!repository || !volume) throw new Error('fixture-source-binding-missing');
-  repository.access = 'write';
-  f.request.outputs.source = {
-    mode: 'draft-pr',
-    repository: 'fixture-repo',
-    remote: 'fixture-remote',
-    head: 'worker/fixture',
-    base: 'main',
-  };
-  volume.readOnly = false;
-  await f.runtime.ensure('pod-one', f.request, () => {});
-  f.exec.mockResolvedValueOnce({
-    exitCode: 0,
-    stdout: JSON.stringify({
-      observedExit: true,
-      state: 'exited',
-      consumedTokens: 12,
-      specDigest: f.request.executionSpecDigest,
+it.each(['local', 'sandbox'] as const)(
+  'prepares stopped %s source without overwriting local Git metadata',
+  async (target) => {
+    const f = fixture();
+    f.request.route.executionTarget = target;
+    f.request.profileSnapshot.route.executionTarget = target;
+    f.request.effectiveGrant.route.executionTarget = target;
+    const repository = f.request.effectiveGrant.scope.repositories[0];
+    const volume = f.config.volumes?.[0];
+    if (!repository || !volume) throw new Error('fixture-source-binding-missing');
+    repository.access = 'write';
+    f.request.outputs.source = {
+      mode: 'draft-pr',
+      repository: 'fixture-repo',
+      remote: 'fixture-remote',
+      head: 'worker/fixture',
+      base: 'main',
+    };
+    volume.readOnly = false;
+    await f.runtime.ensure('pod-one', f.request, () => {});
+    f.exec.mockResolvedValueOnce({
       exitCode: 0,
-    }),
-    stderr: '',
-  });
+      stdout: JSON.stringify({
+        observedExit: true,
+        state: 'exited',
+        consumedTokens: 12,
+        specDigest: f.request.executionSpecDigest,
+        exitCode: 0,
+      }),
+      stderr: '',
+    });
 
-  await f.runtime.extractSource('container-one', 'fixture-repo');
+    await f.runtime.extractSource('container-one', 'fixture-repo');
 
-  expect(f.binding.manager.extractDirectoryFromContainer).toHaveBeenCalledWith(
-    'container-one',
-    '/repositories/fixture-repo',
-    '/fixture/repo',
-    ['.git', 'node_modules'],
-    expect.objectContaining({ assertCurrent: expect.any(Function) }),
-  );
-});
+    if (target === 'local') {
+      expect(f.binding.manager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+      return;
+    }
+    expect(f.binding.manager.extractDirectoryFromContainer).toHaveBeenCalledWith(
+      'container-one',
+      '/repositories/fixture-repo',
+      '/fixture/repo',
+      ['.git', 'node_modules'],
+      expect.objectContaining({ assertCurrent: expect.any(Function) }),
+    );
+  },
+);
 
 it('projects only an allowlisted channel request-limit diagnostic after exit', async () => {
   const f = fixture();
@@ -364,5 +431,87 @@ it.each([
     consumedTokens: 12,
     exitCode: 1,
     limitation,
+  });
+});
+
+it.each(['deleted', 'running', 'unknown'] as const)(
+  'exec failure falls back to authoritative %s state without inventing success',
+  async (state) => {
+    const f = fixture();
+    f.exec.mockRejectedValueOnce(new Error('sandbox exec unavailable'));
+    f.binding.manager.getStatus = vi.fn(async () => state);
+    await expect(f.runtime.observe('container-one')).resolves.toEqual({
+      state: state === 'deleted' ? 'stopped' : 'unknown',
+      consumedTokens: 0,
+    });
+  },
+);
+
+it('pre-start cancellation creates a bound tombstone and prevents a delayed real supervisor launch', () => {
+  const root = mkdtempSync(join(tmpdir(), 'managed-stop-'));
+  try {
+    const specDigest = `sha256:${'a'.repeat(64)}`;
+    const stopped = spawnSync('python3', ['-c', STOP_SUPERVISOR, root, specDigest], {
+      encoding: 'utf8',
+    });
+    expect(stopped.status, stopped.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(join(root, 'execution.json'), 'utf8'))).toEqual({
+      state: 'cancelled-before-start',
+      specDigest,
+      consumedTokens: 0,
+      observedExit: true,
+    });
+    // Replaying provisioning after stop must not start a worker, even when its
+    // grant file arrives late. A missing argv would throw if Popen were reached.
+    writeFileSync(join(root, 'launch.json'), '{}');
+    const supervisor = readFileSync(new URL('./runtime/supervisor.py', import.meta.url), 'utf8');
+    const replay = spawnSync(
+      'python3',
+      ['-c', `${supervisor}\nsupervise(Path(sys.argv[1]))`, root],
+      { encoding: 'utf8' },
+    );
+    expect(replay.status, replay.stderr).toBe(0);
+    const again = spawnSync('python3', ['-c', STOP_SUPERVISOR, root, specDigest], {
+      encoding: 'utf8',
+    });
+    expect(again.status, again.stderr).toBe(0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it('does not claim pre-start cancellation while the actual launch lock is held', () => {
+  const root = mkdtempSync(join(tmpdir(), 'managed-stop-lock-'));
+  try {
+    const code = `import fcntl,pathlib,subprocess,sys
+root=pathlib.Path(sys.argv[1]);lock=(root/'launch.lock').open('a')
+fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+result=subprocess.run(['python3','-c',sys.argv[2],str(root),'sha256:'+'a'*64])
+assert result.returncode==1
+assert not (root/'execution.json').exists()
+`;
+    const result = spawnSync('python3', ['-c', code, root, STOP_SUPERVISOR], { encoding: 'utf8' });
+    expect(result.status, result.stderr).toBe(0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it('reports the trusted never-started receipt without a fabricated process exit code', async () => {
+  const f = fixture();
+  f.exec.mockResolvedValueOnce({
+    exitCode: 0,
+    stderr: '',
+    stdout: JSON.stringify({
+      specDigest: f.request.executionSpecDigest,
+      observedExit: true,
+      state: 'cancelled-before-start',
+      consumedTokens: 0,
+    }),
+  });
+  await expect(f.runtime.observe('container-one')).resolves.toEqual({
+    state: 'stopped',
+    consumedTokens: 0,
+    limitation: 'managed-worker-never-started',
   });
 });

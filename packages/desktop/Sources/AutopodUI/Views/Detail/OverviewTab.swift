@@ -5,6 +5,7 @@ import SwiftUI
 
 /// Overview tab — pod metadata, escalation, plan progress, activity feed.
 struct OverviewTab: View {
+    @Environment(\.desktopRedesign) private var redesign
     let pod: Pod
     let events: [AgentEvent]
     var actions: PodActions = .preview
@@ -20,7 +21,23 @@ struct OverviewTab: View {
     var loadPreviewStatus: ((String) async throws -> PreviewStatus)? = nil
     var onOpenReadiness: () -> Void = {}
 
-    @State private var replyText = ""
+    @State private var replySurface = DecisionReplySurface()
+    private var replyContext: DecisionReplyContext {
+        .init(handlerID: actions.decisionReply.contextID, podID: pod.id, decisionID: pod.escalationId, awaitingInput: pod.status == .awaitingInput)
+    }
+    private var replySnapshot: DecisionReplySnapshot {
+        actions.decisionReply.snapshot(pod.id, pod.escalationId)
+    }
+    private var replyText: Binding<String> {
+        Binding(get: { replySnapshot.text }, set: { text in
+            if let decision = pod.escalationId { actions.decisionReply.edit(pod.id, decision, text) }
+        })
+    }
+    private var replyNotice: some View {
+        DecisionReplyNotice(snapshot: replySnapshot, surface: replySurface, unknown: pod.escalationId == nil) {
+            replySurface.prepareTask(replyContext, actions: actions.decisionReply)
+        }
+    }
     @State private var infrastructureExpanded = false
     @State private var quality: PodQualitySignals? = nil
     @State private var poller = PreviewPoller()
@@ -36,7 +53,8 @@ struct OverviewTab: View {
                     WorktreeCompromisedBanner()
                 }
 
-                if pod.status == .awaitingInput, let question = pod.escalationQuestion {
+                if pod.status == .awaitingInput, !pod.isFixDeliveryFailure {
+                    let question = pod.escalationQuestion ?? "Agent needs input"
                     if pod.escalationType == "action_approval" {
                         actionApprovalCard(question)
                     } else {
@@ -58,6 +76,48 @@ struct OverviewTab: View {
 
                 overviewSnapshotGrid
 
+                if redesign {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), alignment: .top)], alignment: .leading, spacing: 16) {
+                        resourceCards
+                    }
+                } else { resourceCards }
+
+                if let checks = pod.validationChecks {
+                    validationSummary(checks)
+                }
+
+                if pod.linkedSessionId != nil {
+                    chainSection
+                }
+
+                activityFeed
+            }
+            .padding(redesign ? 24 : 20)
+        }
+        .onAppear { prepareReplySurface(replyContext) }
+        .onChange(of: replyContext) { _, context in prepareReplySurface(context) }
+        .task(id: pod.id) {
+            await fetchQuality()
+        }
+        .onAppear {
+            startPollingIfNeeded()
+        }
+        .onDisappear {
+            poller.stop()
+            replySurface.unmount()
+        }
+        .onChange(of: pod.status) { _, newStatus in
+            poller.stopIfTerminal(status: newStatus)
+            if !newStatus.isTerminal { startPollingIfNeeded() }
+        }
+        .onChange(of: pod.id) { _, _ in
+            poller.stop()
+            startPollingIfNeeded()
+        }
+    }
+
+    @ViewBuilder
+    private var resourceCards: some View {
                 if pod.hasWebUi {
                     compactPreviewCard
                 }
@@ -77,41 +137,12 @@ struct OverviewTab: View {
                     commitSection
                 }
 
-                if let checks = pod.validationChecks {
-                    validationSummary(checks)
-                }
-
-                if pod.linkedSessionId != nil {
-                    chainSection
-                }
-
-                activityFeed
-            }
-            .padding(20)
-        }
-        .task(id: pod.id) {
-            await fetchQuality()
-        }
-        .onAppear {
-            startPollingIfNeeded()
-        }
-        .onDisappear {
-            poller.stop()
-        }
-        .onChange(of: pod.status) { _, newStatus in
-            poller.stopIfTerminal(status: newStatus)
-            if !newStatus.isTerminal { startPollingIfNeeded() }
-        }
-        .onChange(of: pod.id) { _, _ in
-            poller.stop()
-            startPollingIfNeeded()
-        }
     }
 
     // MARK: - Overview summary
 
     private var overviewStatusStrip: some View {
-        let accent = pod.status.color
+        let accent = redesign && !pod.status.needsAttention ? DesktopTheme.accent : pod.status.color
         return HStack(alignment: .top, spacing: 12) {
             Image(systemName: overviewStatusIcon)
                 .font(.system(size: 18, weight: .semibold))
@@ -276,7 +307,7 @@ struct OverviewTab: View {
             Spacer(minLength: 0)
         }
         .padding(10)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -364,7 +395,7 @@ struct OverviewTab: View {
             .tint(running && reachable ? .green : nil)
         }
         .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(accentColor.opacity(0.16), lineWidth: 1))
     }
@@ -481,8 +512,7 @@ struct OverviewTab: View {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(options, id: \.self) { option in
                         Button {
-                            replyText = option
-                            sendReply()
+                            sendReply(option)
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: "circle")
@@ -495,6 +525,8 @@ struct OverviewTab: View {
                         }
                         .buttonStyle(.bordered)
                         .tint(.orange)
+                        .disabled(!replySnapshot.canSubmit)
+                        .accessibilityIdentifier("decision-overview-option-\(option)")
                     }
                 }
 
@@ -511,10 +543,11 @@ struct OverviewTab: View {
             }
 
             HStack(spacing: 8) {
-                TextField("Type your reply...", text: $replyText)
+                TextField("Type your reply...", text: replyText)
+                    .disabled(!replySnapshot.canEdit)
                     .textFieldStyle(.plain)
                     .padding(8)
-                    .background(Color(nsColor: .controlBackgroundColor))
+                    .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .onSubmit { sendReply() }
 
@@ -525,8 +558,9 @@ struct OverviewTab: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
-                .disabled(replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!replySnapshot.canSubmit || replySnapshot.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
+            replyNotice
         }
         .padding(14)
         .background(Color.orange.opacity(0.06))
@@ -555,23 +589,25 @@ struct OverviewTab: View {
 
             HStack(spacing: 8) {
                 Button {
-                    replyText = "approved"
-                    sendReply()
+                    sendReply("approved")
                 } label: {
                     Label("Approve", systemImage: "checkmark.circle.fill")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.green)
+                .accessibilityIdentifier("decision-overview-approve")
 
                 Button {
-                    replyText = "rejected"
-                    sendReply()
+                    sendReply("rejected")
                 } label: {
                     Label("Reject", systemImage: "xmark.circle.fill")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
+                .accessibilityIdentifier("decision-overview-reject")
             }
+            .disabled(!replySnapshot.canSubmit)
+            replyNotice
         }
         .padding(14)
         .background(Color.purple.opacity(0.06))
@@ -584,8 +620,10 @@ struct OverviewTab: View {
 
     // MARK: - Progress
 
+    @ViewBuilder
     private func progressSection(_ phase: PhaseProgress) -> some View {
-        AgentPhaseProgressView(phase: phase, variant: .compact)
+        if redesign { ReportedMilestoneView(phase: phase) }
+        else { AgentPhaseProgressView(phase: phase, variant: .compact) }
     }
 
     // MARK: - Memory suggestions
@@ -645,7 +683,7 @@ struct OverviewTab: View {
             }
         }
         .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -697,7 +735,7 @@ struct OverviewTab: View {
             .padding(.vertical, 7)
         }
         .padding(.horizontal, 12)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -919,7 +957,7 @@ struct OverviewTab: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -1011,7 +1049,7 @@ struct OverviewTab: View {
             }
         }
         .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
@@ -1037,7 +1075,7 @@ struct OverviewTab: View {
             }
         }
         .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -1163,7 +1201,7 @@ struct OverviewTab: View {
                     }
                 }
                 .padding(10)
-                .background(Color(nsColor: .controlBackgroundColor))
+                .background(redesign ? DesktopTheme.canvas : Color(nsColor: .controlBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }
@@ -1222,11 +1260,17 @@ struct OverviewTab: View {
 
     // MARK: - Reply
 
-    private func sendReply() {
-        let text = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        replyText = ""
-        Task { await actions.reply(pod.id, text) }
+    private func prepareReplySurface(_ context: DecisionReplyContext) {
+        replySurface.mount(context)
+        if pod.status == .awaitingInput, !pod.isFixDeliveryFailure {
+            replySurface.prepareTask(context, actions: actions.decisionReply)
+        }
+    }
+
+    private func sendReply(_ selectedAnswer: String? = nil) {
+        guard let decision = pod.escalationId, replySnapshot.canSubmit else { return }
+        if let selectedAnswer { actions.decisionReply.edit(pod.id, decision, selectedAnswer) }
+        _ = actions.decisionReply.submit(pod.id, decision)
     }
 }
 

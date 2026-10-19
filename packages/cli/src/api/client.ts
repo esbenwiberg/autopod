@@ -340,6 +340,14 @@ export class AutopodClient {
     return this.request('GET', `/pods/${encodeURIComponent(id)}/cost`);
   }
 
+  async raiseTaskBudget(
+    id: string,
+    tokenBudget: number | null,
+    expectedBudget: number | null,
+  ): Promise<TaskExecutionSummary> {
+    return this.request('POST', `/pods/${id}/budget`, { tokenBudget, expectedBudget });
+  }
+
   async getTaskExecution(id: string): Promise<TaskExecutionSummary> {
     return this.request('GET', `/pods/${id}/task-execution`);
   }
@@ -376,6 +384,27 @@ export class AutopodClient {
   }
   async resumePod(id: string): Promise<{ ok: boolean; action: string }> {
     return this.request('POST', `/pods/${id}/resume`);
+  }
+
+  async getPodFile(
+    id: string,
+    filePath: string,
+  ): Promise<{
+    path: string;
+    content: string;
+    size: number;
+    encoding?: 'base64';
+  }> {
+    return this.request(
+      'GET',
+      `/pods/${encodeURIComponent(id)}/files/content?path=${encodeURIComponent(filePath)}`,
+    );
+  }
+
+  async listPodFiles(
+    id: string,
+  ): Promise<{ files: Array<{ path: string; size: number; modified: number }> }> {
+    return this.request('GET', `/pods/${encodeURIComponent(id)}/files`);
   }
 
   async sendMessage(id: string, message: string): Promise<void> {
@@ -927,6 +956,11 @@ export class AutopodClient {
 
     if (response.status === 401) {
       // Single retry with fresh token
+      try {
+        await response.body?.cancel();
+      } catch {
+        // A closed/errored rejected body must not prevent the existing auth retry.
+      }
       try {
         token = await this.getToken();
         response = await fetch(url, {

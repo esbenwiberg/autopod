@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   type AgentRoute,
+  CONTAINER_HOME_DIR,
   type EffectiveLaunchConfig,
   PROVIDER_CATALOG,
   type Pod,
@@ -287,6 +288,24 @@ export class IsolatedReviewer {
         guard();
         if (!containerId) throw new Error('Reviewer allocation returned no identity');
         const allocatedContainer = containerId;
+        // Azure file injection creates missing parent directories as root. Prepare runtime
+        // state as the same non-root user that runs the reviewer before injecting credentials.
+        const home = await bounded(
+          manager.execInContainer(
+            allocatedContainer,
+            [
+              'sh',
+              '-c',
+              'umask 077; for dir do mkdir -p -- "$dir" && test -w "$dir" || exit 1; done',
+              'reviewer-home',
+              `${CONTAINER_HOME_DIR}/.claude`,
+              `${CONTAINER_HOME_DIR}/.codex`,
+            ],
+            { timeout: Math.max(1, Math.min(5_000, deadline - Date.now())) },
+          ),
+        );
+        guard();
+        if (home.exitCode !== 0) throw new Error('Cannot prepare isolated reviewer runtime home');
         // No workspace, main-account home, tool-pack, MCP, registry or source credentials are copied.
         for (const file of [
           { path: '/run/autopod/agent-shim.sh', content: SYSTEM_CREDENTIAL_SHIM },

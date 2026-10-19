@@ -39,12 +39,24 @@ describe('artifact snapshot publication', () => {
         throw new Error('broken archive');
       },
     );
-    await expect(collectArtifactSnapshot(config)).rejects.toThrow('Artifact preservation failed');
+    await expect(collectArtifactSnapshot(config)).rejects.toMatchObject({
+      code: 'ARTIFACT_PRESERVATION_FAILED',
+      cause: new Error('broken archive'),
+    });
     expect(await readFile(path.join(published, 'report.md'), 'utf8')).toBe('complete report');
     expect((await readdir(root)).sort()).toEqual(
       [path.basename(published), `${path.basename(published)}.receipt.json`].sort(),
     );
     expect(config.containerManager.kill).not.toHaveBeenCalled();
+  });
+
+  it('forwards excludes and preserves the complete workspace by default', async () => {
+    const config = options();
+    await collectArtifactSnapshot(config);
+    await collectArtifactSnapshot({ ...config, excludes: ['.git', 'node_modules'] });
+    const calls = vi.mocked(config.containerManager.extractDirectoryFromContainer).mock.calls;
+    expect(calls[0]?.[3]).toBeUndefined();
+    expect(calls[1]?.[3]).toEqual(['.git', 'node_modules']);
   });
 
   it('does not publish a copy after its lifecycle changed', async () => {
@@ -74,9 +86,10 @@ describe('artifact snapshot publication', () => {
         await writeFile(path.join(target, 'report.md'), 'late completion');
       },
     );
-    await expect(collectArtifactSnapshot({ ...config, timeoutMs: 10 })).rejects.toThrow(
-      'Artifact preservation failed',
-    );
+    await expect(collectArtifactSnapshot({ ...config, timeoutMs: 10 })).rejects.toMatchObject({
+      code: 'ARTIFACT_PRESERVATION_FAILED',
+      cause: new Error('Artifact copy timed out after 10ms'),
+    });
     expect((await readdir(root)).every((name) => name.startsWith('.collect-'))).toBe(true);
     finish();
     await vi.waitFor(async () => {

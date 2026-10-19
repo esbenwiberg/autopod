@@ -157,7 +157,20 @@ export class ManagedControls {
       cleanup: row.cleanup as ControlResult['cleanup'],
     };
   }
+  private workerNeverStarted(podId: string): boolean {
+    const row = this.service.db
+      .prepare(
+        `SELECT p.observed_exit,r.limitations_json FROM managed_pods p
+       JOIN managed_results r ON r.pod_id=p.pod_id WHERE p.pod_id=?`,
+      )
+      .get(podId) as { observed_exit: number; limitations_json: string } | undefined;
+    return Boolean(
+      row?.observed_exit &&
+        (JSON.parse(row.limitations_json) as string[]).includes('managed-worker-never-started'),
+    );
+  }
   private artifactExportImpossible(podId: string): boolean {
+    if (this.workerNeverStarted(podId)) return true;
     const stored = this.service.db
       .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
       .get(podId) as { limitations_json: string } | undefined;
@@ -187,6 +200,30 @@ export class ManagedControls {
     const request: ControlRequest = parseManagedRecord('ControlRequestSchema', raw);
     if (!['revoke', 'stop', 'cleanup'].includes(request.operation))
       throw new Error('managed-control-unavailable');
+    if (request.operation === 'cleanup') {
+      const replay = this.service.db
+        .transaction(() => {
+          const row = this.service.row(installation, podId);
+          this.bind(row, request);
+          const stored = this.service.db
+            .prepare('SELECT result_json FROM managed_controls WHERE pod_id=? AND operation_key=?')
+            .get(podId, key) as { result_json: string | null } | undefined;
+          if (!stored?.result_json && row.cleanup !== 'observed') return undefined;
+          // A committed receipt already passed output-retention checks. Retrying teardown
+          // must not reopen removed workspaces or depend on a still-enrolled source profile.
+          this.reserve(row, key, request, request.operation);
+          if (!row.observed_exit) throw new Error('managed-cleanup-before-exit');
+          this.service.db
+            .prepare('UPDATE managed_controls SET result_json=? WHERE pod_id=? AND operation_key=?')
+            .run(canonical(this.result(row)), podId, key);
+          return row;
+        })
+        .immediate();
+      if (replay) {
+        if (replay.cleanup === 'observed') return this.result(replay);
+        return this.cleanupRuntime(installation, replay);
+      }
+    }
     let unchangedFailedSource = false;
     let sourceCaptureFailed = false;
     if (request.operation === 'cleanup') {
@@ -206,6 +243,7 @@ export class ManagedControls {
       );
       if (
         row.runtime_ref &&
+        !this.workerNeverStarted(podId) &&
         spec.outputs.source.mode !== 'none' &&
         !hasCandidate &&
         this.artifactExportImpossible(podId) &&
@@ -240,7 +278,11 @@ export class ManagedControls {
           ) {
             throw new Error('managed-artifact-export-pending');
           }
-          if (row.runtime_ref && spec.outputs.source.mode !== 'none') {
+          if (
+            row.runtime_ref &&
+            !this.workerNeverStarted(podId) &&
+            spec.outputs.source.mode !== 'none'
+          ) {
             if (!this.service.source) throw new Error('managed-source-candidate-pending');
             try {
               this.service.source.candidate(installation, podId);
@@ -288,29 +330,27 @@ export class ManagedControls {
       .immediate();
     if (admitted.prior) return admitted.prior;
     const row = admitted.row;
+    if (request.operation === 'cleanup') return this.cleanupRuntime(installation, row);
     if (row.runtime_ref) {
-      if (request.operation === 'cleanup') {
-        const observed = await this.service.runtime.cleanup?.(row.runtime_ref);
-        if (observed)
-          this.service.db
-            .prepare("UPDATE managed_pods SET cleanup='observed' WHERE pod_id=?")
-            .run(podId);
-      } else {
-        // Failure does not undo a durable revocation. The independent watchdog retries.
-        await this.service.runtime.stop(row.runtime_ref).catch(() => {});
-      }
-    }
-    if (!row.runtime_ref && row.observed_exit && request.operation === 'cleanup') {
-      const removed = await this.service.runtime.cleanupUnallocated?.(
-        podId,
-        JSON.parse(row.request_json) as ManagedPodRequest,
-      );
-      if (removed)
-        this.service.db
-          .prepare("UPDATE managed_pods SET cleanup='observed' WHERE pod_id=?")
-          .run(podId);
+      // Failure does not undo a durable revocation. The independent watchdog retries.
+      await this.service.runtime.stop(row.runtime_ref).catch(() => {});
     }
     return this.result(this.service.row(installation, podId));
+  }
+
+  private async cleanupRuntime(installation: string, row: ManagedPodRow): Promise<ControlResult> {
+    if (!row.observed_exit) throw new Error('managed-cleanup-before-exit');
+    const removed = row.runtime_ref
+      ? await this.service.runtime.cleanup?.(row.runtime_ref)
+      : await this.service.runtime.cleanupUnallocated?.(
+          row.pod_id,
+          JSON.parse(row.request_json) as ManagedPodRequest,
+        );
+    if (removed)
+      this.service.db
+        .prepare("UPDATE managed_pods SET cleanup='observed' WHERE pod_id=?")
+        .run(row.pod_id);
+    return this.result(this.service.row(installation, row.pod_id));
   }
   async send(
     installation: string,

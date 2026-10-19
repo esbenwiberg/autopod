@@ -14,6 +14,7 @@ import type { PodsitterRepository } from '../podsitter/podsitter-repository.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import { persistProviderAccountCredentials } from '../providers/credential-persistence.js';
 import { buildProviderAccountEnv } from '../providers/env-builder.js';
+import { foundryCodexConfigArgs, foundryEndpointHost } from '../providers/foundry-endpoint.js';
 import type { ProviderEnvResult } from '../providers/types.js';
 import {
   classifyProviderError,
@@ -123,7 +124,10 @@ export class SystemDecisionRunner {
         deadline,
         'provider authentication',
       );
-      const invocation = buildSystemRuntimeInvocation(input);
+      const invocation = buildSystemRuntimeInvocation({
+        ...input,
+        codexConfigArgs: foundryCodexConfigArgs(providerEnv.env),
+      });
       if (input.executionTarget === 'local') {
         networkProvisioningAttempted = true;
         networkProvisioning = this.buildLocalNetworkConfig(
@@ -841,23 +845,14 @@ export function providerRequiredHosts(
     for (const host of piHosts[credentials.providerId] ?? []) hosts.add(host);
   }
   if (credentials?.provider === 'foundry') {
-    try {
-      const endpoint = new URL(credentials.endpoint);
-      const hostname = endpoint.hostname.toLowerCase();
-      const isFoundryHost =
-        hostname.endsWith('.services.ai.azure.com') ||
-        hostname.endsWith('.openai.azure.com') ||
-        hostname.endsWith('.cognitiveservices.azure.com');
-      if (endpoint.protocol !== 'https:' || endpoint.port || !isFoundryHost) {
-        throw new Error('unsafe endpoint');
-      }
-      hosts.add(hostname);
-    } catch {
+    const hostname = foundryEndpointHost(credentials.endpoint);
+    if (!hostname) {
       throw new SystemDecisionConfigurationError(
         'Foundry provider account has an invalid endpoint',
         'PROVIDER_ACCOUNT_ENDPOINT_INVALID',
       );
     }
+    hosts.add(hostname);
   }
   return [...hosts];
 }

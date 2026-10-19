@@ -3,7 +3,7 @@ import { type Dirent, createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { AutopodError, CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/shared';
+import { AutopodError, CONTAINER_HOME_DIR } from '@autopod/shared';
 import type {
   AgentEvent,
   ExecutionTarget,
@@ -19,6 +19,10 @@ import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import type { EventBus } from '../pods/event-bus.js';
 import type { PodRepository } from '../pods/pod-repository.js';
+import {
+  CODEX_FOUNDRY_PROVIDER,
+  foundryCodexProviderSettings,
+} from '../providers/foundry-endpoint.js';
 import { CodexGoalRuntimeSession } from './codex-goal-runtime-session.js';
 import { admitCodexRecovery } from './codex-recovery-admission.js';
 import { codexStateDirForPod } from './codex-state-store.js';
@@ -1288,12 +1292,31 @@ export class CodexRuntime implements Runtime {
     env?: Record<string, string>,
   ): Promise<void> {
     const hasEffort = reasoningEffort !== undefined && reasoningEffort !== 'auto';
-    const useSandboxChatGptHttp = executionTarget === 'sandbox' && !env?.OPENAI_API_KEY?.trim();
-    if ((!mcpServers || mcpServers.length === 0) && !hasEffort && !useSandboxChatGptHttp) return;
+    const foundryProvider = foundryCodexProviderSettings(env);
+    const useSandboxChatGptHttp =
+      !foundryProvider && executionTarget === 'sandbox' && !env?.OPENAI_API_KEY?.trim();
+    if (
+      (!mcpServers || mcpServers.length === 0) &&
+      !hasEffort &&
+      !useSandboxChatGptHttp &&
+      !foundryProvider
+    )
+      return;
 
     const sections: string[] = [];
     if (hasEffort) {
       sections.push(`model_reasoning_effort = ${tomlStringVal(reasoningEffort)}`);
+    }
+    if (foundryProvider) {
+      // Codex ignores OPENAI_BASE_URL and would send the agent to api.openai.com
+      // without credentials; a custom provider routes it to the Foundry v1 API.
+      sections.push(`model_provider = ${tomlStringVal(CODEX_FOUNDRY_PROVIDER)}`);
+      sections.push(
+        [
+          `[model_providers.${CODEX_FOUNDRY_PROVIDER}]`,
+          ...foundryProvider.map(([key, value]) => `${key} = ${JSON.stringify(value)}`),
+        ].join('\n'),
+      );
     }
     if (useSandboxChatGptHttp) {
       // ACA Sandbox host allow rules are enforced by an inspecting egress proxy.
@@ -1333,20 +1356,17 @@ export class CodexRuntime implements Runtime {
       sections.push(lines.join('\n'));
     }
 
-    const uploadPath =
-      executionTarget === 'sandbox'
-        ? `${MCP_CONFIG_PATH}.pending-${randomUUID()}`
-        : MCP_CONFIG_PATH;
-    await this.containerManager.writeFile(containerId, uploadPath, `${sections.join('\n\n')}\n`);
-    const secureCommand =
-      executionTarget === 'sandbox'
-        ? runtimeConfigInstallCommand(uploadPath, MCP_CONFIG_PATH)
-        : [
-            'sh',
-            '-c',
-            `chown ${CONTAINER_USER}:${CONTAINER_USER} '${MCP_CONFIG_PATH}' && chmod 0600 '${MCP_CONFIG_PATH}'`,
-          ];
-    const timeout = executionTarget === 'sandbox' ? SANDBOX_CONFIG_COMMAND_TIMEOUT_MS : 5_000;
+    const content = `${sections.join('\n\n')}\n`;
+    if (executionTarget !== 'sandbox') {
+      // Docker pods drop every capability, so root cannot chown/chmod the container user's file
+      // afterwards. The upload itself lands it as the container user with 0600, or throws.
+      await this.containerManager.writeFile(containerId, MCP_CONFIG_PATH, content, { mode: 0o600 });
+      return;
+    }
+    const uploadPath = `${MCP_CONFIG_PATH}.pending-${randomUUID()}`;
+    await this.containerManager.writeFile(containerId, uploadPath, content);
+    const secureCommand = runtimeConfigInstallCommand(uploadPath, MCP_CONFIG_PATH);
+    const timeout = SANDBOX_CONFIG_COMMAND_TIMEOUT_MS;
     try {
       for (let attempt = 1; attempt <= SANDBOX_CONFIG_COMMAND_ATTEMPTS; attempt++) {
         try {
@@ -1363,23 +1383,19 @@ export class CodexRuntime implements Runtime {
               `Failed to secure Codex MCP config (exit ${secureConfig.exitCode}): the image must support readable uploads and atomic writes in the Codex config directory for its effective exec user`,
             );
           }
-          if (executionTarget === 'sandbox') {
-            const readable = await this.containerManager.execInContainer(
-              containerId,
-              ['test', '-r', MCP_CONFIG_PATH],
-              { timeout },
+          const readable = await this.containerManager.execInContainer(
+            containerId,
+            ['test', '-r', MCP_CONFIG_PATH],
+            { timeout },
+          );
+          if (readable.exitCode !== 0)
+            throw new Error(
+              'Failed to secure Codex MCP config: effective runtime user cannot read the installed config',
             );
-            if (readable.exitCode !== 0)
-              throw new Error(
-                'Failed to secure Codex MCP config: effective runtime user cannot read the installed config',
-              );
-          }
           return;
         } catch (error) {
           const retryableTimeout =
-            executionTarget === 'sandbox' &&
-            error instanceof AutopodError &&
-            error.code === 'AZURE_SANDBOX_TIMEOUT';
+            error instanceof AutopodError && error.code === 'AZURE_SANDBOX_TIMEOUT';
           if (!retryableTimeout || attempt === SANDBOX_CONFIG_COMMAND_ATTEMPTS) throw error;
           this.logger.warn(
             { containerId, attempt, timeout },
@@ -1388,24 +1404,22 @@ export class CodexRuntime implements Runtime {
         }
       }
     } finally {
-      if (executionTarget === 'sandbox') {
-        try {
-          const cleanup = await this.containerManager.execInContainer(
-            containerId,
-            ['rm', '-f', uploadPath],
-            { timeout, user: 'root' },
-          );
-          if (cleanup.exitCode !== 0)
-            this.logger.warn(
-              { containerId },
-              'Could not remove staged Codex config; container cleanup required',
-            );
-        } catch {
+      try {
+        const cleanup = await this.containerManager.execInContainer(
+          containerId,
+          ['rm', '-f', uploadPath],
+          { timeout, user: 'root' },
+        );
+        if (cleanup.exitCode !== 0)
           this.logger.warn(
             { containerId },
             'Could not remove staged Codex config; container cleanup required',
           );
-        }
+      } catch {
+        this.logger.warn(
+          { containerId },
+          'Could not remove staged Codex config; container cleanup required',
+        );
       }
     }
   }

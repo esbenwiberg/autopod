@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Full log viewer — streaming events with filters, auto-scroll, and search.
 public struct LogStreamView: View {
+    @Environment(\.desktopRedesign) private var redesign
     public let events: [AgentEvent]
     public let sessionBranch: String
     public var isLoading: Bool
@@ -69,7 +70,7 @@ public struct LogStreamView: View {
             Divider()
             logContent
         }
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(redesign ? DesktopTheme.surface : Color(nsColor: .textBackgroundColor))
     }
 
     // MARK: - Toolbar
@@ -79,6 +80,7 @@ public struct LogStreamView: View {
             HStack {
                 Image(systemName: "text.line.last.and.arrowtriangle.forward")
                     .foregroundStyle(.secondary)
+                if redesign { Text("Logs").font(.title3.weight(.semibold)) }
                 Text(sessionBranch)
                     .font(.system(.subheadline, design: .monospaced).weight(.medium))
                 Spacer()
@@ -120,6 +122,13 @@ public struct LogStreamView: View {
                 .help(pinnedToBottom ? "Auto-scroll on" : "Auto-scroll off")
             }
 
+            if redesign {
+                TextField("Filter logs…", text: $searchText).textFieldStyle(.roundedBorder)
+                    .font(.caption).accessibilityIdentifier("desktop-log-search")
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 75, maximum: 110), alignment: .leading)], alignment: .leading, spacing: 6) {
+                    ForEach(filterPillTypes, id: \.self) { filter in filterPill(filter) }
+                }
+            } else {
             HStack(spacing: 6) {
                 // Search
                 HStack(spacing: 4) {
@@ -142,10 +151,11 @@ public struct LogStreamView: View {
                     filterPill(filter)
                 }
             }
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
+        .background { if redesign { DesktopTheme.surface } else { Rectangle().fill(.ultraThinMaterial) } }
     }
 
     private func filterPill(_ filter: LogEventFilter) -> some View {

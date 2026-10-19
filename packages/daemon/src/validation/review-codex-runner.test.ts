@@ -300,6 +300,49 @@ describe('runCodexReview', () => {
     expect(harness.execs[0]?.command[2]).not.toContain('--model');
   });
 
+  it('routes isolated Foundry reviews through -c provider overrides', async () => {
+    const harness = createHarness();
+
+    await runCodexReview({
+      podId: 'pod-1',
+      containerId: 'container-1',
+      containerManager: harness.manager,
+      model: 'gpt-deployment',
+      prompt: 'review prompt',
+      env: {
+        AUTOPOD_CODEX_MODEL_PROVIDER: 'azure-foundry',
+        OPENAI_BASE_URL: 'https://res.services.ai.azure.com/openai/v1',
+        OPENAI_API_KEY_FILE: '/run/autopod/foundry-openai-key',
+      },
+      isolated: true,
+      timeout: 1234,
+    });
+
+    const script = harness.execs[0]?.command[2] ?? '';
+    expect(script).toContain('--ignore-user-config');
+    expect(script).toContain(`'-c' 'model_provider="azure-foundry"'`);
+    expect(script).toContain(
+      `'-c' 'model_providers.azure-foundry.base_url="https://res.services.ai.azure.com/openai/v1"'`,
+    );
+    expect(script).toContain(`'-c' 'model_providers.azure-foundry.env_key="OPENAI_API_KEY"'`);
+  });
+
+  it('adds no provider overrides for plain OpenAI reviews', async () => {
+    const harness = createHarness();
+
+    await runCodexReview({
+      podId: 'pod-1',
+      containerId: 'container-1',
+      containerManager: harness.manager,
+      model: 'auto',
+      prompt: 'review prompt',
+      env: { OPENAI_API_KEY_FILE: '/run/autopod/openai-api-key' },
+      timeout: 1234,
+    });
+
+    expect(harness.execs[0]?.command[2]).not.toContain('model_provider');
+  });
+
   it('passes reviewer env through to the container exec', async () => {
     const harness = createHarness();
 

@@ -1060,6 +1060,73 @@ describe('SandboxContainerManager', () => {
   });
 
   describe('extractDirectoryFromContainer', () => {
+    it('resumes the retained idle sandbox before reading its preserved files', async () => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-idle-preservation-'));
+      const client = new TerminalFakeClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      client.seedFile(id, '/state/research.md', Buffer.from('settled worker evidence'));
+      await client.suspend(id);
+      const list = client.listFiles.bind(client);
+      vi.spyOn(client, 'listFiles').mockImplementation(async (...args) => {
+        if ((await client.getStatus(id)) !== 'running') throw new Error('GlobalSandboxNotRunning');
+        return list(...args);
+      });
+      try {
+        await mgr.extractDirectoryFromContainer(id, '/state', hostDir);
+        expect(readFileSync(join(hostDir, 'research.md'), 'utf8')).toBe('settled worker evidence');
+        expect(client.resumeCalls).toEqual([id]);
+        expect(client.created).toHaveLength(1);
+        expect(client.execCalls).toHaveLength(0);
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves the old destination when resuming the source fails', async () => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-resume-failed-'));
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      client.seedFile(id, '/state/research.md', Buffer.from('new evidence'));
+      vi.spyOn(client, 'resume').mockRejectedValue(new Error('source resume unavailable'));
+      const listing = vi.spyOn(client, 'listFiles');
+      try {
+        writeFileSync(join(hostDir, 'research.md'), 'original destination');
+        await expect(mgr.extractDirectoryFromContainer(id, '/state', hostDir)).rejects.toThrow(
+          'source resume unavailable',
+        );
+        expect(listing).not.toHaveBeenCalled();
+        expect(readFileSync(join(hostDir, 'research.md'), 'utf8')).toBe('original destination');
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
+    });
+
+    it('rechecks lifecycle ownership after resuming the source', async () => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-resume-superseded-'));
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      let current = true;
+      vi.spyOn(client, 'resume').mockImplementation(async () => {
+        current = false;
+      });
+      const listing = vi.spyOn(client, 'listFiles');
+      try {
+        await expect(
+          mgr.extractDirectoryFromContainer(id, '/state', hostDir, undefined, {
+            assertCurrent() {
+              if (!current) throw new Error('source lifecycle superseded');
+            },
+          }),
+        ).rejects.toThrow('source lifecycle superseded');
+        expect(listing).not.toHaveBeenCalled();
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
+    });
+
     it.each(['abort', 'supersede'] as const)(
       'does not publish an extracted snapshot after %s',
       async (reason) => {

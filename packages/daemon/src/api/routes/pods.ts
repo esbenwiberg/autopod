@@ -20,6 +20,7 @@ import type { ActionAuditRepository } from '../../actions/audit-repository.js';
 import type { CompactPodSource } from '../../pods/compact-pod-projection.js';
 import { aggregateCost, parseDays } from '../../pods/cost-aggregation.js';
 import { dispatchRerunRequest } from '../../pods/dispatch-rerun-request.js';
+import { escalationDisplaySummary } from '../../pods/escalation-display.js';
 import type { EscalationRepository } from '../../pods/escalation-repository.js';
 import {
   type EscalationsAnalyticsScope,
@@ -137,6 +138,24 @@ function compactText(value: string | null | undefined, maxChars = COMPACT_SUMMAR
   return value === null || value === undefined ? null : value.slice(0, maxChars);
 }
 
+function compactMilestoneProgress(progress: CompactPodSource['progress']) {
+  if (
+    !progress ||
+    !Number.isSafeInteger(progress.currentPhase) ||
+    !Number.isSafeInteger(progress.totalPhases) ||
+    progress.totalPhases <= 0 ||
+    progress.currentPhase < 0 ||
+    progress.currentPhase > progress.totalPhases
+  )
+    return null;
+  return {
+    phase: progress.phase.slice(0, 160),
+    description: progress.description.slice(0, 240),
+    currentPhase: progress.currentPhase,
+    totalPhases: progress.totalPhases,
+  };
+}
+
 function compactPod(
   pod: CompactPodSource,
   request: FastifyRequest,
@@ -153,6 +172,10 @@ function compactPod(
     finalization: pod.finalization,
     title,
     taskExcerpt: pod.task.slice(0, COMPACT_TASK_MAX_CHARS),
+    display: {
+      repository: pod.repositoryDisplay ?? { kind: 'unavailable' },
+      progress: compactMilestoneProgress(pod.progress),
+    },
     taskSummary: compactText(pod.taskSummary?.actualSummary),
     profileName: pod.profileName,
     status: pod.status,
@@ -178,7 +201,7 @@ function compactPod(
     mergeBlockReason: compactText(pod.mergeBlockReason),
     lastCorrectionMessage: compactText(pod.lastCorrectionMessage),
     lastRecoveryTrigger: pod.lastRecoveryTrigger,
-    pendingEscalationSummary: compactText(pod.pendingEscalation?.question),
+    pendingEscalationSummary: compactText(escalationDisplaySummary(pod.pendingEscalation)),
     progressSummary: reviewProgress
       ? reviewProgressSummary(reviewProgress)
       : pod.progress
@@ -718,12 +741,22 @@ export function podRoutes(
   // GET /pods/:podId — get pod
   app.get('/pods/:podId', async (request) => {
     const { podId } = request.params as { podId: string };
-    return serializePodForRequest(
+    const wire = serializePodForRequest(
       podManager.getSession(podId),
       request,
       providerAttemptRepo,
       eventRepo,
-    );
+    ) as Record<string, unknown>;
+    if (podRepo?.getRepositoryForDisplay) {
+      const pod = podManager.getSession(podId);
+      wire.display = {
+        repository: podRepo.getRepositoryForDisplay(podId),
+        progress: compactMilestoneProgress(pod.progress),
+      };
+    }
+    if (podManager.getArtifactResumeObservation)
+      wire.artifactResumeObservation = podManager.getArtifactResumeObservation(podId);
+    return wire;
   });
 
   // Task projection deliberately avoids deserializing the pod's contract/validation JSON.

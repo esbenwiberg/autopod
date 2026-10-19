@@ -36,6 +36,12 @@ function isContainerReference(value: unknown): value is string {
 
 export interface TaskExecutionLedger {
   register(podId: string): void;
+  raiseBudget(
+    podId: string,
+    tokenBudget: number | null,
+    expectedBudget: number | null,
+    actorId: string,
+  ): TaskExecutionSummary;
   snapshot(podId: string): TaskExecutionSummary;
   /** Unsettled durable evidence; not proof that a provider process is still alive. */
   hasActiveRun(podId: string): boolean;
@@ -397,9 +403,15 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     const { identityUnavailable: mergeIdentityUnavailable, ...merge } = mergeProjection;
     if (mergeIdentityUnavailable)
       diagnostics.push('Merge identity unavailable; reconcile retained journal records');
-    const root = db
+    const original = db
       .prepare('SELECT token_budget AS budget FROM retained_pods WHERE id = ?')
       .get(identity.rootPodId) as { budget: number | null } | undefined;
+    const changed = db
+      .prepare(
+        'SELECT token_budget AS budget FROM task_budget_changes WHERE task_id=? ORDER BY sequence DESC LIMIT 1',
+      )
+      .get(identity.taskId) as { budget: number | null } | undefined;
+    const root = changed ?? original;
     if (!root) diagnostics.push('Task budget source unavailable');
     const budgetCheck: NonNullable<TaskExecutionSummary['budgetCheck']> = !root
       ? { status: 'unavailable', reason: 'Task budget source unavailable.' }
@@ -472,6 +484,41 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     };
   }
   return {
+    raiseBudget: db.transaction((podId, tokenBudget, expectedBudget, actorId) => {
+      if (
+        !actorId ||
+        (tokenBudget !== null && (!Number.isSafeInteger(tokenBudget) || tokenBudget <= 0))
+      )
+        throw new AutopodError('Choose a positive token limit or off', 'TASK_BUDGET_INVALID', 400);
+      const current = snapshot(podId);
+      if (current.tokenBudget !== expectedBudget)
+        throw new AutopodError(
+          'Task budget changed; refresh and try again',
+          'TASK_BUDGET_CHANGED',
+          409,
+        );
+      if (
+        tokenBudget !== null &&
+        (current.tokenBudget === null || tokenBudget < current.tokenBudget)
+      )
+        throw new AutopodError(
+          'This control raises or removes a limit; choose limits when launching',
+          'TASK_BUDGET_NOT_INCREASED',
+          400,
+        );
+      if (tokenBudget !== current.tokenBudget)
+        db.prepare(
+          'INSERT INTO task_budget_changes(task_id,pod_id,previous_budget,token_budget,actor_id,created_at) VALUES(?,?,?,?,?,?)',
+        ).run(
+          current.taskId,
+          podId,
+          current.tokenBudget,
+          tokenBudget,
+          actorId,
+          new Date().toISOString(),
+        );
+      return snapshot(podId);
+    }),
     register,
     snapshot,
     hasActiveRun: (podId) =>

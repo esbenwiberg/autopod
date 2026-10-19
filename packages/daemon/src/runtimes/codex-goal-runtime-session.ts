@@ -70,6 +70,9 @@ export class CodexGoalRuntimeSession implements NativeGoalSession {
   resume(remainingTokens: number | null) {
     return this.ready().resume(remainingTokens);
   }
+  updateBudget(remainingTokens: number | null) {
+    return this.ready().updateBudget(remainingTokens);
+  }
   pause() {
     return this.ready().pause();
   }

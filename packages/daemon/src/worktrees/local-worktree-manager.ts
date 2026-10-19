@@ -557,138 +557,161 @@ export class LocalWorktreeManager implements WorktreeManager {
 
     // Ensure bare repo exists, fetch latest, and create worktree — all inside the
     // per-repo lock so the ref cannot change between fetch and worktree add.
-    await this.repoLocks.run(cacheKey, async () => {
-      const valid = await this.isBareRepoValid(bareRepoPath);
-      if (!valid) {
-        // Remove any incomplete/stale directory before cloning
-        await fs.rm(bareRepoPath, { recursive: true, force: true });
-        this.logger.info({ repoUrl, bareRepoPath }, 'Cloning bare repo');
-        // Clone with auth URL so the initial fetch authenticates, then immediately
-        // reset origin to the clean URL — containers mount the bare repo and must
-        // not be able to read the PAT from git config.
-        try {
-          await git(['clone', '--bare', remote.url, bareRepoPath], {
-            credential: remote.credential,
-            credentialUrl: remote.url,
-          });
-        } catch (err) {
-          throw this.requiredRemoteFetchFailure(err, baseBranch, 'base', 'clone');
-        }
-        await git(['remote', 'set-url', 'origin', repoUrl], {
-          cwd: bareRepoPath,
-        });
-      }
-
-      // Always fetch to populate refs/remotes/origin/* — git clone --bare only creates
-      // refs/heads/*, so worktree add would fail without this fetch on a fresh clone.
-      // Use auth URL directly so the credential is never persisted in git config.
-      this.logger.info({ bareRepoPath }, 'Fetching latest into bare repo');
-      // Explicit refspec per CLAUDE.md — wildcard fetches fail on Azure File Share.
-      // Required base/start refs are remote-only. A stale bare-cache head must never
-      // satisfy a new pod: fetch and worktree creation remain under one repo lock.
-      const baseBranchRef = await this.fetchBranchRef({
-        remote,
-        bareRepoPath,
-        branch: baseBranch,
-        purpose: 'base',
-        branchPurpose: 'base',
-      });
-      const startBranchRef =
-        startBranch === baseBranch
-          ? baseBranchRef
-          : await this.fetchBranchRef({
-              remote,
-              bareRepoPath,
-              branch: startBranch,
-              purpose: 'start',
-              branchPurpose: 'start',
+    const prepareWorktree = (remote: AuthenticatedRemote) =>
+      this.repoLocks.run(cacheKey, async () => {
+        const valid = await this.isBareRepoValid(bareRepoPath);
+        if (!valid) {
+          // Remove any incomplete/stale directory before cloning
+          await fs.rm(bareRepoPath, { recursive: true, force: true });
+          this.logger.info({ repoUrl, bareRepoPath }, 'Cloning bare repo');
+          // Clone with auth URL so the initial fetch authenticates, then immediately
+          // reset origin to the clean URL — containers mount the bare repo and must
+          // not be able to read the PAT from git config.
+          try {
+            await git(['clone', '--bare', remote.url, bareRepoPath], {
+              credential: remote.credential,
+              credentialUrl: remote.url,
             });
-
-      // If the requested branch already exists on the remote, fetch it and use it
-      // as the start point so we don't blow away existing work with -B.
-      let startPoint = startBranchRef;
-      if (branch !== startBranch) {
-        try {
-          await git(['fetch', remote.url, `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
+          } catch (err) {
+            throw this.requiredRemoteFetchFailure(err, baseBranch, 'base', 'clone');
+          }
+          await git(['remote', 'set-url', 'origin', repoUrl], {
             cwd: bareRepoPath,
-            credential: remote.credential,
-            credentialUrl: remote.url,
           });
-          // Fetch succeeded — branch exists on remote, use it as start point
-          startPoint = `refs/remotes/origin/${branch}`;
-          this.logger.info({ branch }, 'Branch exists on remote — resuming from it');
-        } catch {
-          // Branch doesn't exist on remote yet — normal for new pods
-          this.logger.info(
-            { branch, startBranch },
-            'Branch not found on remote — creating from startBranch',
-          );
         }
-      }
 
-      // Clean up stale worktree registration if a previous pod left one behind
-      // (e.g. killed pod whose cleanup didn't fully complete).
-      // Always try both git worktree remove AND fs.rm — either alone can leave remnants.
-      await git(['worktree', 'remove', '--force', worktreePath], {
-        cwd: bareRepoPath,
-      }).catch(() => {});
-      await fs.rm(worktreePath, { recursive: true, force: true }).catch(() => {});
-      await git(['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {});
-
-      // -B force-creates branch to handle retry scenarios
-      this.logger.info({ worktreePath, branch, startPoint }, 'Creating worktree');
-      try {
-        await git(['worktree', 'add', '-B', branch, worktreePath, startPoint], {
-          cwd: bareRepoPath,
+        // Always fetch to populate refs/remotes/origin/* — git clone --bare only creates
+        // refs/heads/*, so worktree add would fail without this fetch on a fresh clone.
+        // Use auth URL directly so the credential is never persisted in git config.
+        this.logger.info({ bareRepoPath }, 'Fetching latest into bare repo');
+        // Explicit refspec per CLAUDE.md — wildcard fetches fail on Azure File Share.
+        // Required base/start refs are remote-only. A stale bare-cache head must never
+        // satisfy a new pod: fetch and worktree creation remain under one repo lock.
+        const baseBranchRef = await this.fetchBranchRef({
+          remote,
+          bareRepoPath,
+          branch: baseBranch,
+          purpose: 'base',
+          branchPurpose: 'base',
         });
-      } catch (addErr: unknown) {
-        // Handle "branch already used by worktree at X" — stale/orphaned worktree from a
-        // previous pod run (e.g. old branch-name-derived paths before sessionId naming).
-        const msg = addErr instanceof Error ? addErr.message : String(addErr);
-        const match = /already used by worktree at '(.+)'/.exec(msg);
-        if (match?.[1]) {
-          const conflictPath = match[1];
-          this.logger.warn(
-            { conflictPath, branch },
-            'Branch locked by orphaned worktree — removing and retrying',
-          );
-          await git(['worktree', 'remove', '--force', conflictPath], {
-            cwd: bareRepoPath,
-          }).catch(() => {});
-          await fs.rm(conflictPath, { recursive: true, force: true }).catch(() => {});
-          await git(['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {});
+        const startBranchRef =
+          startBranch === baseBranch
+            ? baseBranchRef
+            : await this.fetchBranchRef({
+                remote,
+                bareRepoPath,
+                branch: startBranch,
+                purpose: 'start',
+                branchPurpose: 'start',
+              });
+
+        // If the requested branch already exists on the remote, fetch it and use it
+        // as the start point so we don't blow away existing work with -B.
+        let startPoint = startBranchRef;
+        if (branch !== startBranch) {
+          try {
+            await git(
+              ['fetch', remote.url, `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+              {
+                cwd: bareRepoPath,
+                credential: remote.credential,
+                credentialUrl: remote.url,
+              },
+            );
+            // Fetch succeeded — branch exists on remote, use it as start point
+            startPoint = `refs/remotes/origin/${branch}`;
+            this.logger.info({ branch }, 'Branch exists on remote — resuming from it');
+          } catch {
+            // Branch doesn't exist on remote yet — normal for new pods
+            this.logger.info(
+              { branch, startBranch },
+              'Branch not found on remote — creating from startBranch',
+            );
+          }
+        }
+
+        // Clean up stale worktree registration if a previous pod left one behind
+        // (e.g. killed pod whose cleanup didn't fully complete).
+        // Always try both git worktree remove AND fs.rm — either alone can leave remnants.
+        await git(['worktree', 'remove', '--force', worktreePath], {
+          cwd: bareRepoPath,
+        }).catch(() => {});
+        await fs.rm(worktreePath, { recursive: true, force: true }).catch(() => {});
+        await git(['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {});
+
+        // -B force-creates branch to handle retry scenarios
+        this.logger.info({ worktreePath, branch, startPoint }, 'Creating worktree');
+        try {
           await git(['worktree', 'add', '-B', branch, worktreePath, startPoint], {
             cwd: bareRepoPath,
           });
-        } else {
-          throw addErr;
+        } catch (addErr: unknown) {
+          // Handle "branch already used by worktree at X" — stale/orphaned worktree from a
+          // previous pod run (e.g. old branch-name-derived paths before sessionId naming).
+          const msg = addErr instanceof Error ? addErr.message : String(addErr);
+          const match = /already used by worktree at '(.+)'/.exec(msg);
+          if (match?.[1]) {
+            const conflictPath = match[1];
+            this.logger.warn(
+              { conflictPath, branch },
+              'Branch locked by orphaned worktree — removing and retrying',
+            );
+            await git(['worktree', 'remove', '--force', conflictPath], {
+              cwd: bareRepoPath,
+            }).catch(() => {});
+            await fs.rm(conflictPath, { recursive: true, force: true }).catch(() => {});
+            await git(['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {});
+            await git(['worktree', 'add', '-B', branch, worktreePath, startPoint], {
+              cwd: bareRepoPath,
+            });
+          } else {
+            throw addErr;
+          }
         }
-      }
 
-      // Defense-in-depth against daemon-injected tooling artifacts leaking into PRs.
-      // For workspace pods we still write /workspace/.mcp.json (the user's interactive
-      // claude needs project-level discovery); the per-worktree info/exclude makes git
-      // ignore it so it can never be staged. This is per-clone, not committed, and
-      // invisible to the user.
-      //
-      // `.autopod/pi-handoff.md` is the mirrored copy of the pod's handoff
-      // instructions (Pi → workspace). Excluding it here keeps it out of the
-      // host-side auto-commit paths — both the plain `ap complete` push
-      // (`mergeBranch`) and the promote-time `commitPendingChanges` run
-      // `git add -A` in this worktree and honour this shared info/exclude — so
-      // the handoff can never accidentally ship. The user can still stage it
-      // deliberately with `git add -f`.
-      await this.appendWorktreeExcludes(worktreePath, [
-        '.mcp.json',
-        '.autopod/pi-handoff.md',
-        '.autopod/provider-failover.md',
-      ]).catch((err) => {
-        this.logger.warn(
-          { err, worktreePath },
-          'Failed to write info/exclude — daemon artifacts may leak into commits',
-        );
+        // Defense-in-depth against daemon-injected tooling artifacts leaking into PRs.
+        // For workspace pods we still write /workspace/.mcp.json (the user's interactive
+        // claude needs project-level discovery); the per-worktree info/exclude makes git
+        // ignore it so it can never be staged. This is per-clone, not committed, and
+        // invisible to the user.
+        //
+        // `.autopod/pi-handoff.md` is the mirrored copy of the pod's handoff
+        // instructions (Pi → workspace). Excluding it here keeps it out of the
+        // host-side auto-commit paths — both the plain `ap complete` push
+        // (`mergeBranch`) and the promote-time `commitPendingChanges` run
+        // `git add -A` in this worktree and honour this shared info/exclude — so
+        // the handoff can never accidentally ship. The user can still stage it
+        // deliberately with `git add -f`.
+        await this.appendWorktreeExcludes(worktreePath, [
+          '.mcp.json',
+          '.autopod/pi-handoff.md',
+          '.autopod/provider-failover.md',
+        ]).catch((err) => {
+          this.logger.warn(
+            { err, worktreePath },
+            'Failed to write info/exclude — daemon artifacts may leak into commits',
+          );
+        });
       });
-    });
+    try {
+      await prepareWorktree(remote);
+    } catch (err) {
+      // classifyRemoteError already dropped the rejected token; one retry with a
+      // fresh one recovers from a cached token that ADO stopped accepting.
+      if (
+        !(
+          err instanceof GitCredentialError &&
+          err.service === 'ado' &&
+          this.azureDevOpsAuth?.invalidate
+        )
+      )
+        throw err;
+      this.logger.warn(
+        { repoUrl, op: err.op },
+        'Azure DevOps rejected the daemon token — retrying once with a fresh token',
+      );
+      await prepareWorktree(await this.getAuthenticatedRemoteForRepo(repoUrl));
+    }
 
     // Resolve HEAD inside the worktree so callers (pod-manager) can persist
     // startCommitSha *before* the container starts. Without this the diff
@@ -1622,7 +1645,7 @@ export class LocalWorktreeManager implements WorktreeManager {
         credentialUrl: remote.url,
       });
     } catch (err) {
-      throw classifyGitError(sanitizeGitError(err), 'push');
+      throw this.classifyRemoteError(sanitizeGitError(err), 'push');
     }
     return confirm();
   }
@@ -1647,7 +1670,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     } catch (err) {
       const code = (err as { code?: unknown }).code;
       if (code !== 2) {
-        throw classifyGitError(sanitizeGitError(err), 'fetch');
+        throw this.classifyRemoteError(sanitizeGitError(err), 'fetch');
       }
     }
 
@@ -1661,7 +1684,7 @@ export class LocalWorktreeManager implements WorktreeManager {
       this.logger.info({ worktreePath, branch, sourceRef }, 'Published local branch ref to origin');
       return { branch, created: true };
     } catch (err) {
-      throw classifyGitError(sanitizeGitError(err), 'push');
+      throw this.classifyRemoteError(sanitizeGitError(err), 'push');
     }
   }
 
@@ -2111,6 +2134,19 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
   }
 
+  /**
+   * classifyGitError plus cache hygiene: an ADO auth rejection means the cached
+   * Entra token is dead (revoked, wrong tenant), so drop it rather than replay
+   * it on every git operation until it expires.
+   */
+  private classifyRemoteError(err: unknown, op: string): unknown {
+    const classified = classifyGitError(err, op);
+    if (classified instanceof GitCredentialError && classified.service === 'ado') {
+      this.azureDevOpsAuth?.invalidate?.();
+    }
+    return classified;
+  }
+
   private requiredRemoteFetchFailure(
     fetchErr: unknown,
     branch: string,
@@ -2118,7 +2154,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     op: 'clone' | 'fetch',
   ): Error {
     const sanitized = sanitizeGitError(fetchErr);
-    const classified = classifyGitError(sanitized, op);
+    const classified = this.classifyRemoteError(sanitized, op);
     if (classified instanceof GitCredentialError) return classified;
     const detail = classified instanceof Error ? classified.message : String(classified);
     this.logger.debug(

@@ -54,6 +54,7 @@ function harness() {
   return {
     controller,
     checkpoint,
+    observe,
     records,
     advance: (ms: number) => {
       time += ms;
@@ -72,11 +73,60 @@ describe('WorkspaceCheckpointController interval and durability lease', () => {
     expect(h.checkpoint).toHaveBeenCalledWith('pod', 'interval', expect.any(Number));
   });
 
-  it('durability lease marks dirty work degraded and blocks destruction', async () => {
+  it('does not report degraded durability when the verified checkpoint matches the live tree', async () => {
+    const h = harness();
+    expect((await h.controller.poll('pod')).checkpointed).toBe(true);
+    h.advance(60_001);
+    // An idle agent leaves the same dirty tree in place: the checkpoint still covers it.
+    expect((await h.controller.poll('pod')).degraded).toBe(false);
+    h.advance(600_000);
+    expect((await h.controller.poll('pod')).degraded).toBe(false);
+    expect(h.checkpoint).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports degraded durability once unverified work outlives the lease', async () => {
+    const h = harness();
+    await h.controller.poll('pod');
+    const edited: WorkspaceFingerprint = { ...fingerprint, tree: 'e'.repeat(40) };
+    h.observe.mockResolvedValue(edited);
+    h.checkpoint.mockResolvedValue({
+      ...success(2),
+      promoted: false,
+      materialized: false,
+      error: {
+        phase: 'promotion',
+        code: 'LINEAGE_CONFLICT',
+        retryable: false,
+        message: 'feature branch diverged from checkpoint source',
+      },
+    });
+    h.advance(30_000);
+    expect((await h.controller.poll('pod')).degraded).toBe(true);
+    h.advance(10_000);
+    // Inside the lease, the last verified checkpoint is still recent enough.
+    expect((await h.controller.poll('pod')).degraded).toBe(false);
+    h.advance(50_001);
+    expect((await h.controller.poll('pod')).degraded).toBe(true);
+    expect(await h.controller.mayDestroy('pod')).toBe(false);
+  });
+
+  it('reports degraded durability for dirty work that was never checkpointed', async () => {
+    const h = harness();
+    h.checkpoint.mockResolvedValue({
+      ...success(1),
+      promoted: false,
+      materialized: false,
+      error: { phase: 'capture', code: 'CHECKPOINT_FAILED', retryable: false, message: 'boom' },
+    });
+    await h.controller.poll('pod');
+    h.advance(1_000);
+    expect((await h.controller.poll('pod')).degraded).toBe(true);
+  });
+
+  it('keeps the lease on destruction even when the checkpoint still matches', async () => {
     const h = harness();
     await h.controller.poll('pod');
     h.advance(60_001);
-    expect((await h.controller.poll('pod')).degraded).toBe(true);
     expect(await h.controller.mayDestroy('pod')).toBe(false);
   });
 

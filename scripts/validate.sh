@@ -42,15 +42,32 @@ done
 
 ERRORS=0
 
+# Successful installs stay concise; failed installs retain the cause as well as
+# trailing stack frames. Capture the original status before printing diagnostics.
+run_install() {
+  local install_log install_status
+  install_log="$(mktemp)" || return $?
+  if npx pnpm install "$@" >"$install_log" 2>&1; then
+    tail -3 "$install_log"
+    rm -f "$install_log"
+    return 0
+  else
+    install_status=$?
+    cat "$install_log"
+    rm -f "$install_log"
+    return "$install_status"
+  fi
+}
+
 # ─── Install ──────────────────────────────────────────────────
 if [ "$QUICK" = false ]; then
   step "Installing dependencies"
-  if npx pnpm install --frozen-lockfile 2>&1 | tail -3; then
+  if run_install --frozen-lockfile; then
     ok "Dependencies installed"
   else
     # Fallback without frozen lockfile (for local dev)
     warn "Frozen lockfile failed, trying regular install"
-    npx pnpm install 2>&1 | tail -3
+    run_install
   fi
 fi
 

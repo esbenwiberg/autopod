@@ -6,6 +6,7 @@ struct AgentPhaseProgressView: View {
         case detailed
     }
 
+    @Environment(\.desktopRedesign) private var redesign
     let phase: PhaseProgress
     var variant: Variant = .compact
     var showChrome: Bool = true
@@ -17,7 +18,8 @@ struct AgentPhaseProgressView: View {
 
     var body: some View {
         Group {
-            if showChrome {
+            if redesign { ReportedMilestoneView(phase: phase) }
+            else if showChrome {
                 content
                     .padding(14)
                     .background(Color(nsColor: .controlBackgroundColor))

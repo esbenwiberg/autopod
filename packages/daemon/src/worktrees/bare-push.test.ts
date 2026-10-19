@@ -1,10 +1,15 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type RunGit, autopodStagingRef, pushCommitsToBareViaStagingRef } from './bare-push.js';
+import {
+  type RunGit,
+  autopodStagingRef,
+  deriveBareRepoPath,
+  pushCommitsToBareViaStagingRef,
+} from './bare-push.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -100,6 +105,18 @@ describe('bare push via staging ref', () => {
 
   afterEach(async () => {
     await rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it('derives the common directory of a real linked worktree', async () => {
+    const { bare, hostWt } = await buildFixture(tmpRoot);
+    expect(await deriveBareRepoPath(hostWt)).toBe(await realpath(bare));
+  });
+
+  it('resolves relative Git common directories against an ordinary working tree', async () => {
+    const ordinary = path.join(tmpRoot, 'ordinary');
+    await git(tmpRoot, ['init', ordinary]);
+    expect((await git(ordinary, ['rev-parse', '--git-common-dir'])).stdout.trim()).toBe('.git');
+    expect(await deriveBareRepoPath(ordinary)).toBe(path.join(ordinary, '.git'));
   });
 
   it('REGRESSION: direct `git push <bare> HEAD` is rejected by denyCurrentBranch', async () => {

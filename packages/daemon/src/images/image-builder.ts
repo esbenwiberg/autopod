@@ -238,6 +238,16 @@ export class ImageBuilder {
       if ((error as { statusCode?: number }).statusCode !== 404) throw error;
     }
     if (!cached) {
+      // Docker's implicit FROM pull has no registry credentials. Materialize the exact
+      // resolved base through the authenticated registry client before a cold build.
+      if (this.acr?.canPull(inputs.pinnedBase)) {
+        const pulled = await boundedDockerCall(this.acr.pullPinned(inputs.pinnedBase), {
+          label: 'environment-base-pull',
+          timeoutMs: 600_000,
+        });
+        if (pulled !== inputs.pinnedBase)
+          throw new Error('Environment base changed during authenticated pull');
+      }
       await this.buildFromDockerfile(
         generateEnvironmentDockerfile(inputs),
         localTag,

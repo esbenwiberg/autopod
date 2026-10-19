@@ -56,6 +56,9 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
             pass
 
         def reply(self, status, body=b''):
+            if getattr(self, 'defer_reply', False):
+                self.pending_reply = (status, body)
+                return
             try:
                 self.send_response(status)
                 self.send_header('Content-Type', 'text/event-stream' if status == 200 else 'application/json')
@@ -96,10 +99,17 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
             if not serial.acquire(blocking=False):
                 self.reply(409)
                 return
+            self.pending_reply = None
+            self.defer_reply = True
             try:
                 self.handle_post()
             finally:
+                self.defer_reply = False
                 serial.release()
+            # All spool reads and writes are complete before the response becomes
+            # visible. A client may issue its next request as soon as it sees it.
+            if self.pending_reply is not None:
+                self.reply(*self.pending_reply)
 
         def handle_post(self):
             self.connection.settimeout(5)
@@ -153,7 +163,7 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
                 self.reply(501)
                 return
             github = self.path == '/github'
-            if self.path not in ('/v1/responses', '/github') or self.headers.get('Authorization') or self.headers.get('Transfer-Encoding'):
+            if self.path not in ('/v1/responses', '/github', '/public-read') or self.headers.get('Authorization') or self.headers.get('Transfer-Encoding'):
                 self.reply(403)
                 return
             try:
@@ -173,7 +183,11 @@ def serve(root, port, lifetime, maximum_request=REPORT_MAX_REQUEST):
                 if len(data) != length:
                     raise ValueError('truncated')
                 raw = data.decode('utf8')
-                prefix = 'github-' if github else 'channel-'
+                public = self.path == '/public-read'
+                prefix = 'public-' if public else 'github-' if github else 'channel-'
+                if public and (length > 4096 or not (root / 'public-enabled').exists()):
+                    self.reply(403)
+                    return
                 if github and not (root / 'github-enabled').exists():
                     self.reply(403)
                     return

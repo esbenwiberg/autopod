@@ -19,10 +19,14 @@ func reviewRequiredPrimaryAction(for checks: ValidationChecks?) -> ReviewRequire
 }
 
 /// Detail panel — shown when a pod is selected. Tabbed around operator questions:
-/// Overview, Work, Validation, Evidence, Diff, Logs, Terminal, and Series.
+/// Overview, Work, Validation, Readiness, Evidence, Diff, Logs, and Terminal.
 public struct DetailPanelView: View {
+    @Environment(\.desktopRedesign) private var redesign
+    @Environment(\.desktopRepositories) private var repositories
+    @Environment(\.desktopRepositoryFilter) private var filterRepository
     public let pod: Pod
     public let events: [AgentEvent]
+    public var configurationActions: LaunchConfigurationActions?
     public var actions: PodActions
     /// All pods in the currently-selected pod's series, for the Series tab.
     /// Empty when the pod is standalone.
@@ -100,8 +104,10 @@ public struct DetailPanelView: View {
         onLoadAllLogs: (() -> Void)? = nil,
         onLaunchSeriesFromPod: ((Pod) -> Void)? = nil,
         selectedTab: Binding<DetailTab?> = .constant(nil),
-        requestedTab: Binding<DetailTab?> = .constant(nil)
+        requestedTab: Binding<DetailTab?> = .constant(nil),
+        configurationActions: LaunchConfigurationActions? = nil
     ) {
+        self.configurationActions = configurationActions
         self.pod = pod; self.events = events; self.actions = actions
         self.seriesPods = seriesPods
         self.qualityScores = qualityScores
@@ -141,10 +147,12 @@ public struct DetailPanelView: View {
     @State private var didCopyName: Bool = false
     @State private var showRelatedEventsDebug: Bool = false
 
+    private var pendingControl: PendingPodControl? { actions.pendingControl(pod.id) }
+
     private var isTerminalAvailable: Bool { pod.pod.agentMode == .interactive }
-    private var activeTab: DetailTab { selectedTab ?? Self.defaultTab(for: pod) }
+    private var activeTab: DetailTab { selectedTab == .series ? Self.defaultTab(for: pod) : selectedTab ?? Self.defaultTab(for: pod) }
     private var isEvidenceAvailable: Bool {
-        pod.hasWorktree
+        redesign || pod.hasWorktree
         || pod.pod.output == .artifact
         || !(pod.validationChecks?.proofOfWorkScreenshots?.isEmpty ?? true)
         || !(pod.validationChecks?.taskReviewScreenshots?.isEmpty ?? true)
@@ -184,7 +192,7 @@ public struct DetailPanelView: View {
         terminalAvailable: Bool
     ) -> Bool {
         switch tab {
-        case .series: return pod.seriesId != nil
+        case .series: return false
         case .evidence: return evidenceAvailable
         case .terminal: return terminalAvailable
         default: return true
@@ -368,24 +376,7 @@ public struct DetailPanelView: View {
                     requestedSection: $requestedEvidenceSection
                 )
                 case .terminal:   EmptyView()
-                case .series:
-                    SeriesPipelineView(
-                        pods: seriesPods,
-                        qualityScores: qualityScores,
-                        selectedPodId: pod.id,
-                        onSelectPod: { onSelectPod?($0) },
-                        panelEnabled: true,
-                        actions: actions,
-                        eventsForPod: { id in
-                            // For the currently-focused pod, prefer the live events array
-                            // (it's already being streamed). For siblings, fall back to the
-                            // store lookup.
-                            id == pod.id ? events : (eventsForPod?(id) ?? [])
-                        },
-                        loadEventsForPod: loadEventsForPod,
-                        loadQuality: loadQuality,
-                        requestTab: { tab in requestedTab = tab }
-                    )
+                case .series: EmptyView() // Retained as an input compatibility case; never selectable.
                 }
 
                 if isTerminalAvailable {
@@ -409,7 +400,7 @@ public struct DetailPanelView: View {
         // (banners, expanded headers) can't propagate a larger min upwards
         // through NavigationSplitView and grow the whole window.
         .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(redesign ? DesktopTheme.surface : Color(nsColor: .windowBackgroundColor))
         .onAppear {
             resolveSelectedTabForCurrentPod()
             consumeRequestedTab(requestedTab)
@@ -420,6 +411,49 @@ public struct DetailPanelView: View {
         }
         .onChange(of: requestedTab) { _, tab in
             consumeRequestedTab(tab)
+        }
+        .confirmationDialog("Delete pod \(pod.id)?", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                Task { await actions.delete(pod.id) }
+            }
+            .disabled(pendingControl != nil)
+            .accessibilityIdentifier("pod-control-delete-confirm-\(pod.id)")
+        } message: {
+            Text("This will permanently remove the pod record.")
+        }
+        .sheet(isPresented: $showSpawnFixSheet) {
+            if redesign {
+              PodRepairSheet(isPresented: $showSpawnFixSheet, pod: pod, kind: .prFix, relatedPods: seriesPods,
+                actions: actions, configuration: configurationActions, onSelect: onSelectPod)
+            } else { SpawnFixSheet(
+                podId: pod.id,
+                message: $spawnFixMessage,
+                isPresented: $showSpawnFixSheet,
+                onSpawn: { message in
+                    await actions.spawnFix(pod.id, message.isEmpty ? nil : message)
+                }
+            ) }
+        }
+        .sheet(item: $repairKind) { kind in
+          PodRepairSheet(isPresented: Binding(get: { repairKind != nil }, set: { if !$0 { repairKind = nil } }),
+            pod: pod, kind: kind, relatedPods: seriesPods, actions: actions, configuration: configurationActions, onSelect: onSelectPod)
+        }
+        .sheet(isPresented: $showForkComposer) {
+          if let configurationActions {
+            FollowUpLaunchSheet(isPresented: $showForkComposer, kind: .fork, initiator: pod, candidatePods: [],
+              actions: configurationActions, onCreated: onSelectPod)
+          } else {
+            VStack(spacing: 20) {
+              ContentUnavailableView("Connect to fork this pod", systemImage: "arrow.triangle.branch", description: Text("Source configuration must be available before reviewing a fork."))
+              Button("Close") { showForkComposer = false }
+            }.padding(24).frame(width: 500, height: 300)
+          }
+        }
+        .sheet(isPresented: $showForceCompleteSheet) {
+            forceCompleteSheet
+        }
+        .sheet(isPresented: $showKickSheet) {
+            kickSheet
         }
         .sheet(isPresented: $showRejectFeedback) { rejectFeedbackSheet }
         .sheet(isPresented: $showNudgeInput) { nudgeSheet }
@@ -469,7 +503,46 @@ public struct DetailPanelView: View {
 
     // MARK: - Header
 
+    @ViewBuilder
     private var detailHeader: some View {
+        if redesign { redesignedHeader } else { legacyDetailHeader }
+    }
+
+    private var redesignedHeader: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Circle().fill(pod.status.color).frame(width: 5, height: 5)
+                Text(pod.status.label.capitalized).font(.system(size: 10, weight: .semibold)).foregroundStyle(pod.status.color)
+                Spacer()
+                Button { copyPodName() } label: {
+                    Text(pod.id).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                }.buttonStyle(.plain).help(didCopyName ? "Copied" : "Copy pod ID")
+                Menu { headerActions } label: { Image(systemName: "ellipsis").frame(width: 24, height: 22) }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .help("Pod actions").accessibilityLabel("Pod actions")
+                    .accessibilityIdentifier("detail-pod-actions")
+            }
+            Text(pod.desktopTitle).font(.system(size: 25, weight: .semibold)).tracking(-0.5)
+                .lineLimit(3).textSelection(.enabled)
+            if let repository = repositories[pod.id] {
+                Button { filterRepository?(repository.id) } label: {
+                    Label(repository.label, systemImage: "folder").font(.callout.weight(.medium))
+                        .foregroundStyle(DesktopTheme.accent).lineLimit(1).truncationMode(.middle)
+                }.buttonStyle(.plain).help(repository.isSnapshot ? "Filter by captured repository" : "Current profile repository; original snapshot unavailable")
+            } else { Text(pod.desktopRepositoryPlaceholder).font(.caption).foregroundStyle(.secondary) }
+            Label(pod.branch, systemImage: "arrow.triangle.branch")
+                .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            if !pod.task.isEmpty {
+                Text(pod.task).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            if let fixLifecycle = pod.prFixLifecycleLabel {
+                Text(fixLifecycle).font(.caption2).foregroundStyle(.secondary)
+            }
+            if let pendingControl { PendingControlNotice(kind: pendingControl, podId: pod.id) }
+        }.padding(24).frame(maxWidth: .infinity, alignment: .leading).background(DesktopTheme.surface)
+    }
+
+    private var legacyDetailHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Pick whichever fits horizontally — wide single row, else wrap
             // the action buttons onto a second (scrollable) row so they can't
@@ -480,7 +553,7 @@ public struct DetailPanelView: View {
                     podIdentity
                     Spacer(minLength: 8)
                     readinessHeaderPill
-                    headerActions
+                    HStack(spacing: 6) { headerActions }
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -490,11 +563,15 @@ public struct DetailPanelView: View {
                         readinessHeaderPill
                     }
                     ScrollView(.horizontal, showsIndicators: false) {
-                        headerActions
+                        HStack(spacing: 6) { headerActions }
                     }
                 }
             }
 
+            if let pendingControl {
+                PendingControlNotice(kind: pendingControl, podId: pod.id)
+                    .padding(.top, 6)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -663,7 +740,7 @@ public struct DetailPanelView: View {
 
     @ViewBuilder
     private var headerActions: some View {
-        HStack(spacing: 6) {
+        Group {
             // Recover Worktree — surfaced whenever the worktree is compromised,
             // regardless of pod status. Every other action path (Create PR,
             // Resume, Rework, Restart) is disabled while the flag is set, so
@@ -702,8 +779,10 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -723,8 +802,10 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -785,8 +866,10 @@ public struct DetailPanelView: View {
                     Button {
                         Task { await actions.pause(pod.id) }
                     } label: {
-                        Label("Pause", systemImage: "pause.circle")
+                        Label(pendingControl == .pause ? "Pausing…" : "Pause", systemImage: "pause.circle")
                     }
+                    .disabled(pendingControl != nil)
+                    .accessibilityIdentifier("pod-control-pause-\(pod.id)")
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .tint(.yellow)
@@ -794,8 +877,10 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -814,8 +899,10 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -842,8 +929,10 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -851,7 +940,7 @@ public struct DetailPanelView: View {
             case .awaitingInput:
                 if pod.isFixDeliveryFailure {
                     Button {
-                        Task { await actions.resume(pod.id) }
+                        routeRepair(.resume)
                     } label: {
                         Label("Retry Push", systemImage: "arrow.up.circle")
                     }
@@ -888,7 +977,7 @@ public struct DetailPanelView: View {
                 } else {
                     // Validation failed — rework/fix actions are primary
                     Button {
-                        Task { await actions.rework(pod.id) }
+                        routeRepair(.rework)
                     } label: {
                         Label(reworkActionTitle, systemImage: "arrow.clockwise")
                     }
@@ -897,7 +986,7 @@ public struct DetailPanelView: View {
                     .tint(.orange)
                     .help(reworkActionHelp)
                     Button {
-                        Task { await actions.fixManually(pod.id) }
+                        routeRepair(.manual)
                     } label: {
                         Label("Fix Manually", systemImage: "wrench.and.screwdriver")
                     }
@@ -921,7 +1010,7 @@ public struct DetailPanelView: View {
                             guard !isInfrastructureResumePending else { return }
                             isInfrastructureResumePending = true
                             defer { isInfrastructureResumePending = false }
-                            await actions.resume(pod.id)
+                            if redesign { repairKind = .resume } else { await actions.resume(pod.id) }
                         case .fixReview, .extendAttempts:
                             await actions.extendAttempts(pod.id, 2)
                         }
@@ -944,7 +1033,7 @@ public struct DetailPanelView: View {
                         ? "Add retry budget and re-run the agent with the failed review findings as feedback."
                         : "Add retry budget and re-run validation.")
                 Button {
-                    Task { await actions.fixManually(pod.id) }
+                    routeRepair(.manual)
                 } label: {
                     Label("Fix Manually", systemImage: "wrench.and.screwdriver")
                 }
@@ -954,8 +1043,10 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -974,8 +1065,10 @@ public struct DetailPanelView: View {
                 Button {
                     Task { await actions.kill(pod.id) }
                 } label: {
-                    Label("Kill", systemImage: "xmark.circle")
+                    Label(pendingControl?.isKill == true ? "Killing…" : "Kill", systemImage: "xmark.circle")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-kill-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.red)
@@ -987,7 +1080,7 @@ public struct DetailPanelView: View {
                     // endpoint re-provisions a fresh container against the
                     // existing worktree. No tokens spent.
                     Button {
-                        Task { await actions.rework(pod.id) }
+                        routeRepair(.rework)
                     } label: {
                         Label("Restart", systemImage: "arrow.clockwise")
                     }
@@ -1005,7 +1098,7 @@ public struct DetailPanelView: View {
                     // cheapest path: pushes/opens the PR if validation passed, otherwise
                     // re-runs validation only. Disabled when the worktree is unrecoverable.
                     Button {
-                        Task { await actions.resume(pod.id) }
+                        routeRepair(.resume)
                     } label: {
                         Label(pod.isFixDeliveryFailure ? "Retry Push" : "Resume",
                               systemImage: pod.isFixDeliveryFailure ? "arrow.up.circle" : "arrow.uturn.forward")
@@ -1022,7 +1115,7 @@ public struct DetailPanelView: View {
                         ? "Retry pushing the already-validated fix branch. No agent rework, no token spend."
                         : "Retry the cheapest recovery path — push + open PR if validation passed, otherwise re-run validation. No agent rework, no token spend.")
                     Button {
-                        Task { await actions.rework(pod.id) }
+                        routeRepair(.rework)
                     } label: {
                         Label(reworkActionTitle, systemImage: "arrow.clockwise")
                     }
@@ -1032,7 +1125,7 @@ public struct DetailPanelView: View {
                     .help(reworkActionHelp)
                 }
                 Button {
-                    Task { await actions.fixManually(pod.id) }
+                    routeRepair(.manual)
                 } label: {
                     Label("Fix Manually", systemImage: "wrench.and.screwdriver")
                 }
@@ -1066,12 +1159,14 @@ public struct DetailPanelView: View {
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-delete-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
             case .killed:
                 Button {
-                    Task { await actions.rework(pod.id) }
+                    routeRepair(.rework)
                 } label: {
                     Label(pod.isWorkspace ? "Restart" : "Rework",
                           systemImage: "arrow.clockwise")
@@ -1088,6 +1183,8 @@ public struct DetailPanelView: View {
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-delete-\(pod.id)")
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
@@ -1148,6 +1245,8 @@ public struct DetailPanelView: View {
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
+                    .disabled(pendingControl != nil)
+                    .accessibilityIdentifier("pod-control-delete-\(pod.id)")
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
@@ -1164,29 +1263,7 @@ public struct DetailPanelView: View {
                 .help("Inspect related pod events")
             }
         }
-        .confirmationDialog("Delete pod \(pod.id)?", isPresented: $showDeleteConfirmation) {
-            Button("Delete", role: .destructive) {
-                Task { await actions.delete(pod.id) }
-            }
-        } message: {
-            Text("This will permanently remove the pod record.")
-        }
-        .sheet(isPresented: $showSpawnFixSheet) {
-            SpawnFixSheet(
-                podId: pod.id,
-                message: $spawnFixMessage,
-                isPresented: $showSpawnFixSheet,
-                onSpawn: { message in
-                    await actions.spawnFix(pod.id, message.isEmpty ? nil : message)
-                }
-            )
-        }
-        .sheet(isPresented: $showForceCompleteSheet) {
-            forceCompleteSheet
-        }
-        .sheet(isPresented: $showKickSheet) {
-            kickSheet
-        }
+
     }
 
     @State private var showNudgeInput = false
@@ -1196,6 +1273,8 @@ public struct DetailPanelView: View {
     @State private var showRejectFeedback = false
     @State private var rejectFeedbackText = ""
     @State private var showDeleteConfirmation = false
+    @State private var repairKind: PodRepairKind?
+    @State private var showForkComposer = false
     @State private var showSpawnFixSheet = false
     @State private var spawnFixMessage = ""
     @State private var showHandoffSheet = false
@@ -1686,9 +1765,22 @@ public struct DetailPanelView: View {
         .frame(minWidth: 380)
     }
 
+    private func routeRepair(_ kind: PodRepairKind) {
+      if redesign { repairKind = kind; return }
+      Task {
+        switch kind {
+        case .manual: _ = await actions.fixManually(pod.id)
+        case .rework: await actions.rework(pod.id)
+        case .resume: await actions.resume(pod.id)
+        case .revalidate: await actions.revalidate(pod.id)
+        case .prFix: showSpawnFixSheet = true
+        }
+      }
+    }
+
     private var forkButton: some View {
         Button {
-            Task { await actions.fork(pod.id) }
+            if redesign { showForkComposer = true } else { Task { await actions.fork(pod.id) } }
         } label: {
             Label("Fork", systemImage: "arrow.triangle.branch")
         }
@@ -1702,14 +1794,35 @@ public struct DetailPanelView: View {
     private var visibleTabs: [DetailTab] {
         DetailTab.allCases.filter { tab in
             switch tab {
-            case .series: return pod.seriesId != nil
+            case .series: return false
             case .evidence: return isEvidenceAvailable
             default: return true
             }
         }
     }
 
+    @ViewBuilder
     private var tabBar: some View {
+        if redesign {
+            DetailTabFlowLayout(spacing: 0) {
+                ForEach(visibleTabs, id: \.self) { tab in
+                    Button { selectedTab = tab } label: {
+                        Text(tab.label).font(.system(size: 12, weight: activeTab == tab ? .semibold : .regular))
+                            .foregroundStyle(activeTab == tab ? .primary : .secondary)
+                            .padding(.horizontal, 10).padding(.vertical, 12)
+                            .overlay(alignment: .bottom) {
+                                if activeTab == tab { DesktopTheme.accent.frame(height: 2) }
+                            }
+                    }.buttonStyle(.plain)
+                        .disabled(tab == .terminal && !isTerminalAvailable)
+                        .accessibilityAddTraits(activeTab == tab ? .isSelected : [])
+                        .accessibilityIdentifier("detail-tab-\(tab.label.lowercased())")
+                }
+            }.padding(.horizontal, 14).background(DesktopTheme.surface)
+        } else { legacyTabBar }
+    }
+
+    private var legacyTabBar: some View {
         ViewThatFits(in: .horizontal) {
             tabBarRow(showLabels: true)
                 .fixedSize(horizontal: true, vertical: false)

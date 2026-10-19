@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { AzureBlobArtifactStore, ManagedIdentityBlobTransport } from './artifact-store.js';
 import type { ManagedComponentsConfig } from './bootstrap.js';
+import { FileBlobTransport } from './file-blob-transport.js';
 
 const bindingSchema = z
   .object({
@@ -15,9 +16,11 @@ const bindingSchema = z
 const configSchema = z
   .object({
     bindings: z.array(bindingSchema).min(1).max(32),
-    blobContainerUrl: z.string().url().startsWith('https://'),
+    blobContainerUrl: z.string().url().startsWith('https://').optional(),
+    artifactDirectory: z.string().refine(path.isAbsolute).optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => Boolean(value.blobContainerUrl) !== Boolean(value.artifactDirectory));
 export type ManagedCliConfig = z.infer<typeof configSchema>;
 /** Non-secret opt-in only. No execution enablement knob, tokens, or development auth. */
 export function parseManagedCliConfig(
@@ -31,11 +34,25 @@ export function parseManagedCliConfig(
     const keys = value.bindings.map((b) => JSON.stringify([b.issuer, b.audience, b.objectId]));
     if (new Set(keys).size !== keys.length) throw new Error('ambiguous');
     // Validates endpoint shape without issuing a token or contacting storage.
-    new ManagedIdentityBlobTransport(value.blobContainerUrl);
+    if (value.blobContainerUrl) new ManagedIdentityBlobTransport(value.blobContainerUrl);
     return value;
   } catch {
     throw new Error('managed-cli-config-invalid');
   }
+}
+
+export function createManagedArtifactStore(config: ManagedCliConfig, db: Database.Database) {
+  const transport = config.artifactDirectory
+    ? new FileBlobTransport(config.artifactDirectory)
+    : new ManagedIdentityBlobTransport(config.blobContainerUrl!);
+  return new AzureBlobArtifactStore(transport, async (id) => {
+    const row = db
+      .prepare('SELECT blob_manifest_name FROM artifact_exports WHERE artifact_id=?')
+      .get(id) as { blob_manifest_name: string } | undefined;
+    if (!row?.blob_manifest_name.endsWith('/manifest.json'))
+      throw new Error('artifact-unregistered');
+    return row.blob_manifest_name.slice(0, -'/manifest.json'.length);
+  });
 }
 
 export function composeDarkManagedCli(
@@ -61,17 +78,7 @@ export function composeDarkManagedCli(
     allowedEffects: [],
     network: { profileId: 'managed-cli-dark', destinations: [] },
   };
-  const store = new AzureBlobArtifactStore(
-    new ManagedIdentityBlobTransport(config.blobContainerUrl),
-    async (id) => {
-      const row = db
-        .prepare('SELECT blob_manifest_name FROM artifact_exports WHERE artifact_id=?')
-        .get(id) as { blob_manifest_name: string } | undefined;
-      if (!row || !row.blob_manifest_name.endsWith('/manifest.json'))
-        throw new Error('artifact-unregistered');
-      return row.blob_manifest_name.slice(0, -'/manifest.json'.length);
-    },
-  );
+  const store = createManagedArtifactStore(config, db);
   const components: ManagedComponentsConfig = {
     db,
     store,

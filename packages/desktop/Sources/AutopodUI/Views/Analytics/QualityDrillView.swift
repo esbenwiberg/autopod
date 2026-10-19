@@ -37,7 +37,9 @@ struct QualityDrillView: View {
 
     @State private var response: QualityAnalyticsResponse?
     @State private var selectedBand: QualityBand = .all
-    @State private var days: Int = 30
+    @Environment(\.desktopAnalyticsWindow) private var workspaceDays
+    @State private var localDays: Int = 30
+    private var days: Int { workspaceDays ?? localDays }
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var sortOrder: [KeyPathComparator<PodQualityScore>] = [
@@ -77,17 +79,17 @@ struct QualityDrillView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 40)
                     } else {
-                        histogramSection(r)
-                        Divider()
-                        reasonTilesSection
-                        Divider()
-                        scoresTableSection
+                    DesktopAnalyticsColumns {
+                        histogramSection(r).desktopAnalyticsPanel()
+                        reasonTilesSection.desktopAnalyticsPanel()
+                        scoresTableSection.desktopAnalyticsPanel()
+                    }
                     }
                 }
             }
             .padding(24)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DesktopAnalyticsBackground())
         .task(id: days) { await fetchData() }
     }
 
@@ -106,7 +108,7 @@ struct QualityDrillView: View {
             HStack(spacing: 8) {
                 bandChips
                 Spacer()
-                daysPicker
+                if workspaceDays == nil { daysPicker }
             }
             if let summary = response?.summary {
                 Text("Process v\(summary.algorithmVersion ?? 3) · \(summary.totalPodsScored) comparable · \(summary.legacyRowsExcluded ?? 0) legacy excluded · \(summary.unavailableRows ?? 0) unavailable")
@@ -117,7 +119,7 @@ struct QualityDrillView: View {
     }
 
     private var daysPicker: some View {
-        Picker("Days", selection: $days) {
+        Picker("Days", selection: $localDays) {
             Text("7d").tag(7)
             Text("14d").tag(14)
             Text("30d").tag(30)
@@ -203,7 +205,7 @@ struct QualityDrillView: View {
 
     private var reasonTilesSection: some View {
         let filtered = filteredScores  // computed once; shared with tile counts and table
-        let total = filtered.count
+        let total = selectedBand == .all ? (response?.summary.totalPodsScored ?? filtered.count) : filtered.count
         let reasons = selectedBand == .all
             ? (response?.reasons ?? QualityReasons(
                 lowReadEditRatio: 0, editsWithoutPriorRead: 0,

@@ -27,7 +27,7 @@ import {
 } from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
-import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { ContainerManager, ExecOptions } from '../interfaces/container-manager.js';
 import type {
   ValidationEngine,
   ValidationEngineConfig,
@@ -304,8 +304,9 @@ interface TestRunResult extends InfrastructureAwareResult {
  * worktree to "exactly what's committed" — which is the only thing validation
  * should be evaluating.
  *
- * Cleanup is best-effort: failures are logged and swallowed. Losing cleanup is
- * degraded mode, not broken mode.
+ * Ordinary cleanup is best-effort. Sandbox validation first adopts this pod's
+ * verified host checkpoint so captured uncommitted work becomes its candidate.
+ * Failure to adopt that checkpoint blocks validation and preserves the workspace.
  */
 async function resetWorktreeToHead(
   containerManager: ContainerManager,
@@ -313,23 +314,60 @@ async function resetWorktreeToHead(
   log?: Logger,
 ): Promise<void> {
   const cmd = 'git reset --hard HEAD && git clean -fd';
+  let containerCmd = cmd;
+  if (config.executionTarget === 'sandbox' && config.worktreePath) {
+    // The live worker HEAD intentionally excludes daemon snapshot commits.
+    // Adopt only this pod's host-verified checkpoint before removing untracked
+    // files, otherwise cleanup erases deliverable work and the next checkpoint
+    // incorrectly supersedes the preserved candidate with its empty baseline.
+    const checkpoint = (
+      await execFileAsync('git', ['rev-parse', 'HEAD'], {
+        cwd: config.worktreePath,
+      })
+    ).stdout.trim();
+    const sourceHead = await resolveSandboxCheckpointSourceHead(
+      config.worktreePath,
+      config.podId,
+      checkpoint,
+    );
+    if (!sourceHead || !/^[a-f0-9]{40}$/.test(checkpoint)) {
+      throw new AutopodError(
+        'Verified sandbox validation checkpoint unavailable',
+        'SANDBOX_VALIDATION_CHECKPOINT_UNAVAILABLE',
+        503,
+      );
+    }
+    containerCmd = `git reset --hard ${checkpoint} && git clean -fd`;
+  }
 
   // Container side — feeds Lint/SAST/Build/Tests/Health/Pages/Facts.
   // Always run at /workspace (repo root) regardless of buildWorkDir, so
   // untracked files anywhere in the worktree are removed, not just the
   // build subdir.
   try {
-    const result = await containerManager.execInContainer(config.containerId, ['sh', '-c', cmd], {
-      cwd: '/workspace',
-      timeout: 30_000,
-    });
+    const result = await containerManager.execInContainer(
+      config.containerId,
+      ['sh', '-c', containerCmd],
+      {
+        cwd: '/workspace',
+        timeout: 30_000,
+      },
+    );
     if (result.exitCode !== 0) {
+      if (containerCmd !== cmd) {
+        throw new AutopodError(
+          'Sandbox could not adopt its verified validation checkpoint',
+          'SANDBOX_VALIDATION_CHECKPOINT_UNAVAILABLE',
+          503,
+        );
+      }
       log?.warn(
         { exitCode: result.exitCode, stderr: result.stderr.slice(0, 500) },
         'pre-validation worktree reset returned non-zero in container — continuing',
       );
     }
   } catch (err) {
+    if (containerCmd !== cmd) throw err;
     log?.warn({ err }, 'pre-validation worktree reset failed in container — continuing');
   }
 
@@ -1581,7 +1619,9 @@ async function runBuild(
 
   let result: { stdout: string; stderr: string; exitCode: number };
   try {
-    result = await containerManager.execInContainer(
+    result = await runValidationCommand(
+      containerManager,
+      config.executionTarget,
       config.containerId,
       wrapValidationExecCommand(config.buildCommand, config.extraExecEnv),
       {
@@ -1686,7 +1726,9 @@ async function runTests(
   const testCwd = config.buildWorkDir ? `/workspace/${config.buildWorkDir}` : '/workspace';
   let result: { stdout: string; stderr: string; exitCode: number };
   try {
-    result = await containerManager.execInContainer(
+    result = await runValidationCommand(
+      containerManager,
+      config.executionTarget,
       config.containerId,
       wrapValidationExecCommand(config.testCommand, config.extraExecEnv),
       {
@@ -1833,12 +1875,59 @@ function validationInfrastructureOutput(error: unknown, partial = ''): string {
   );
 }
 
+async function runValidationCommand(
+  containerManager: ContainerManager,
+  executionTarget: ValidationEngineConfig['executionTarget'],
+  containerId: string,
+  command: string[],
+  options: ExecOptions,
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  if (executionTarget !== 'sandbox') {
+    return containerManager.execInContainer(containerId, command, options);
+  }
+
+  const handle = await containerManager.execStreaming(containerId, command, options);
+  let stdout = '';
+  let stderr = '';
+  const readStdout = (async () => {
+    for await (const chunk of handle.stdout) stdout = (stdout + String(chunk)).slice(-50_000);
+  })();
+  const readStderr = (async () => {
+    for await (const chunk of handle.stderr) stderr = (stderr + String(chunk)).slice(-50_000);
+  })();
+  try {
+    const [, , exitCode] = await Promise.all([readStdout, readStderr, handle.exitCode]);
+    return { stdout, stderr, exitCode };
+  } catch (err) {
+    // Native exec finalizes both streams before settling the exit promise. Drain
+    // their buffered bytes even when Promise.all rejects on an unverified exit.
+    await Promise.allSettled([readStdout, readStderr]);
+    if (err instanceof Error) {
+      Object.assign(err, { partialOutput: `${stdout}\n${stderr}`.slice(-50_000) });
+    }
+    throw err;
+  }
+}
+
 function classifyValidationInfrastructureFailure(
   phase: ValidationInfrastructureFailure['phase'],
   error: unknown,
   executionTarget?: ValidationEngineConfig['executionTarget'],
 ): ValidationInfrastructureFailure | null {
   if (error instanceof ValidationCommandInfrastructureError) return error.failure;
+
+  if (
+    error instanceof AutopodError &&
+    (error.code === 'EXEC_EXIT_UNVERIFIED' || error.code === 'AZURE_SANDBOX_EXEC_INVALID_RESPONSE')
+  ) {
+    return {
+      phase,
+      code: error.code,
+      statusCode: error.statusCode,
+      message: error.message,
+      retryable: false,
+    };
+  }
 
   if (executionTarget === 'sandbox') {
     const message = error instanceof Error ? error.message : String(error);

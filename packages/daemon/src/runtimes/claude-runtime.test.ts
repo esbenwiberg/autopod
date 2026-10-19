@@ -113,8 +113,8 @@ describe('ClaudeRuntime', () => {
         });
 
       // Short aliases → full model IDs
-      expect(buildArgs('sonnet')).toContain('claude-sonnet-5');
-      expect(buildArgs('opus')).toContain('claude-opus-5');
+      expect(buildArgs('sonnet')).toContain('claude-sonnet-5-5');
+      expect(buildArgs('opus')).toContain('claude-opus-5-5');
       expect(buildArgs('haiku')).toContain('claude-haiku-4-5');
 
       // Full model IDs pass through unchanged

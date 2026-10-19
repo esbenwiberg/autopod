@@ -22,13 +22,12 @@ describe('MODEL_PRICING', () => {
       cachedInputPer1M: 0.5,
       outputPer1M: 25,
     });
+    // Sonnet 5's $2/$10 launch price became its standard price.
     expect(MODEL_PRICING['claude-sonnet-5']).toEqual({
-      inputPer1M: 3,
-      cachedInputPer1M: 0.3,
-      outputPer1M: 15,
+      inputPer1M: 2,
+      cachedInputPer1M: 0.2,
+      outputPer1M: 10,
     });
-    expect(CLAUDE_DEFAULT_MODEL).toBe('claude-opus-5');
-    expect(CLAUDE_REVIEWER_MODEL).toBe('claude-sonnet-5');
     expect(CLAUDE_DEFAULT_MODEL).not.toBe('claude-fable-5');
     expect(MODEL_CANONICAL).toEqual({
       opus: 'claude-opus-4-7',
@@ -38,6 +37,39 @@ describe('MODEL_PRICING', () => {
     expect(canonicalModelKey('claude-fable-5')).toBe('claude-fable-5');
     expect(canonicalModelKey('claude-opus-5')).toBe('claude-opus-5');
     expect(canonicalModelKey('claude-sonnet-5')).toBe('claude-sonnet-5');
+  });
+
+  it('has Claude 5.5 and GPT-6 standard pricing with non-default cache multipliers', () => {
+    expect(MODEL_PRICING['claude-fable-5-1']).toEqual({
+      inputPer1M: 10,
+      cachedInputPer1M: 0.25,
+      outputPer1M: 50,
+    });
+    expect(MODEL_PRICING['claude-opus-5-5']).toEqual({
+      inputPer1M: 4,
+      cachedInputPer1M: 0.2,
+      outputPer1M: 20,
+    });
+    expect(MODEL_PRICING['claude-sonnet-5-5']).toEqual({
+      inputPer1M: 2,
+      cachedInputPer1M: 0.2,
+      outputPer1M: 10,
+    });
+    expect(MODEL_PRICING['gpt-6-astra']).toEqual({
+      inputPer1M: 10,
+      cachedInputPer1M: 1,
+      outputPer1M: 50,
+    });
+    expect(MODEL_PRICING['gpt-6.1-sol']).toEqual({
+      inputPer1M: 2,
+      cachedInputPer1M: 0.1,
+      outputPer1M: 10,
+    });
+    expect(CLAUDE_DEFAULT_MODEL).toBe('claude-opus-5-5');
+    expect(CLAUDE_REVIEWER_MODEL).toBe('claude-sonnet-5-5');
+    expect(CLAUDE_DEFAULT_MODEL).not.toBe('claude-fable-5-1');
+    for (const model of ['claude-fable-5-1', 'claude-opus-5-5', 'gpt-6.1-sol', 'gpt-6-luna'])
+      expect(canonicalModelKey(model)).toBe(model);
   });
 
   it('contains full claude model IDs', () => {

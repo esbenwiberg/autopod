@@ -7,7 +7,10 @@ struct ScheduledLaunchSelectionEditor: View {
   @Binding var selection: [String: ConfigurationJSON]
   let task: String
   var repositoryLocked = false
+  var advancedOnly = false
+  var includeAdvanced = true
   @State private var showPim = false
+  @State private var showAdvanced = false
   @State private var advanced = ""
   @State private var error: String?
   @State private var preview: EffectiveLaunchPreview?
@@ -27,6 +30,7 @@ struct ScheduledLaunchSelectionEditor: View {
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
+      if !advancedOnly {
       Picker("Repository", selection: Binding(get: {
         selection["emptyWorkspace"]?.bool == true ? "__empty" : selection["repositoryId"]?.string ?? ""
       }, set: { id in
@@ -84,7 +88,9 @@ struct ScheduledLaunchSelectionEditor: View {
       }
       Text("Preset edits apply to future runs. A run already admitted keeps its configuration.")
         .font(.caption).foregroundStyle(.secondary)
-      DisclosureGroup("Advanced selection JSON") {
+      }
+      if includeAdvanced {
+      DisclosureGroup("Advanced selection JSON", isExpanded: advancedOnly ? .constant(true) : $showAdvanced) {
         Text("Allocation, sidecars, individual overrides and reference repositories.").font(.caption)
         TextEditor(text: $advanced).font(.system(.caption, design: .monospaced)).frame(height: 160)
         Button("Apply JSON") {
@@ -96,6 +102,7 @@ struct ScheduledLaunchSelectionEditor: View {
             selection = parsed; error = nil
           } catch { self.error = error.localizedDescription }
         }
+      }
       }
       Button(resolving ? "Checking…" : "Preview configuration") {
         resolving = true
@@ -121,7 +128,7 @@ struct ScheduledLaunchSelectionEditor: View {
     .onAppear { advanced = ConfigurationJSON.object(selection).formatted() }
     .onChange(of: selection) { _, value in advanced = ConfigurationJSON.object(value).formatted(); preview = nil }
     .sheet(isPresented: $showPim) {
-      PimSelectionSheet(selected: pim, discover: actions.discoverPim) { values in
+      PimSelectionSheet(selected: pim, cached: actions.cachedPim(), discover: actions.discoverPim) { values in
         var next = overrides; next["pim"] = .array(values.map(ConfigurationJSON.object)); selection["overrides"] = .object(next)
       }
     }

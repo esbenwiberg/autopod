@@ -69,7 +69,8 @@ private final class EventStreamResyncURLProtocol: URLProtocol, @unchecked Sendab
       return
     }
 
-    Task {
+    let request = self.request
+    Task { @Sendable [self, request, handler] in
       do {
         let (response, data) = try await handler(request)
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

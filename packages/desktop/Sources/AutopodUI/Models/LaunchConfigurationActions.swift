@@ -3,6 +3,7 @@ import Foundation
 
 @MainActor
 public struct LaunchConfigurationActions {
+  public var connectionID: String? = nil
   public var documents: [ConfigurationDocument]
   public var listDeployments: () async throws -> [ConfigurationJSON] = { throw DaemonError.badRequest("Deployment is unavailable") }
   public var reviewDeployment: (String) async throws -> ConfigurationJSON = { _ in throw DaemonError.badRequest("Deployment is unavailable") }
@@ -21,7 +22,10 @@ public struct LaunchConfigurationActions {
   public var discoverGitHubRepositories: () async throws -> [ConfigurationJSON]
   public var discoverGitHubWorkflows: (String) async throws -> [ConfigurationJSON]
   public var loadProviderAccounts: () async throws -> [PublicProviderAccountResponse]
-  public var discoverPim: () async throws -> ConfigurationJSON
+  /// `true` bypasses the daemon's discovery cache.
+  public var discoverPim: (Bool) async throws -> ConfigurationJSON
+  /// Last discovery seen this connection, so the picker opens populated while it revalidates.
+  public var cachedPim: () -> ConfigurationJSON? = { nil }
   public var saveFromLaunch: (ConfigurationJSON) async throws -> ConfigurationJSON
   public init(documents: [ConfigurationDocument], capabilities: ConfigurationJSON, loadError: String? = nil,
     reload: @escaping () async -> Void,
@@ -32,7 +36,7 @@ public struct LaunchConfigurationActions {
     discoverGitHubRepositories: @escaping () async throws -> [ConfigurationJSON],
     discoverGitHubWorkflows: @escaping (String) async throws -> [ConfigurationJSON],
     loadProviderAccounts: @escaping () async throws -> [PublicProviderAccountResponse],
-    discoverPim: @escaping () async throws -> ConfigurationJSON,
+    discoverPim: @escaping (Bool) async throws -> ConfigurationJSON,
     saveFromLaunch: @escaping (ConfigurationJSON) async throws -> ConfigurationJSON,
     listWatchers: @escaping () async throws -> [WatcherBindingResponse] = { throw DaemonError.badRequest("Issue watcher configuration is unavailable") },
     saveWatcher: @escaping (WatcherBindingWrite) async throws -> WatcherBindingResponse = { _ in throw DaemonError.badRequest("Issue watcher configuration is unavailable") },

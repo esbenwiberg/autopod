@@ -41,14 +41,17 @@ import {
   hashDiff,
   runPreSubmitReview,
 } from '../validation/pre-submit-review.js';
-import { persistEscalation } from './escalation-coordinator.js';
+import { isBlockingEscalation, persistEscalation } from './escalation-coordinator.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { MemoryRepository } from './memory-repository.js';
 import type { MemoryUsageRepository } from './memory-usage-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
+import type {
+  SessionBridgeContainerFactory,
+  SessionBridgeManagerPort,
+} from './pod-bridge-ports.js';
 import { computePodDiff, summarizeDiff } from './pod-diff-fetcher.js';
-import type { ContainerManagerFactory, PodManager } from './pod-manager.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
 import {
@@ -65,7 +68,7 @@ import {
 } from './runtime-resolver.js';
 
 export interface SessionBridgeDependencies {
-  podManager: PodManager;
+  podManager: SessionBridgeManagerPort;
   scopedTools?: (podId: string) => ScopedPodTools | undefined;
   podRepo: PodRepository;
   eventBus: EventBus;
@@ -77,7 +80,7 @@ export interface SessionBridgeDependencies {
   memoryRepo?: MemoryRepository;
   memoryUsageRepo?: MemoryUsageRepository;
   makeActionEngine?: (profile: PodExecutionSettings) => ActionEngine;
-  containerManagerFactory: ContainerManagerFactory;
+  containerManagerFactory: SessionBridgeContainerFactory;
   pendingRequestsByPod: Map<string, PendingRequests>;
   logger: Logger;
   hostBrowserRunner?: HostBrowserRunner;
@@ -181,12 +184,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           'Escalation created',
         );
         // Transition pod to awaiting_input so the TUI shows the pending question/approval
-        if (
-          escalation.type === 'ask_human' ||
-          escalation.type === 'report_blocker' ||
-          escalation.type === 'action_approval' ||
-          escalation.type === 'request_credential'
-        ) {
+        if (isBlockingEscalation(escalation)) {
           podManager.notifyEscalation(escalation.podId, escalation);
         }
       });
@@ -215,6 +213,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
 
     getAiEscalationCount(podId: string): number {
       return escalationRepo.countBySessionAndType(podId, 'ask_ai');
+    },
+
+    getAutoPauseCount(podId: string): number {
+      return (
+        escalationRepo.countBySessionAndType(podId, 'ask_ai') +
+        escalationRepo.countBySessionAndType(podId, 'report_blocker')
+      );
     },
 
     getMaxAiCalls(podId: string): number {

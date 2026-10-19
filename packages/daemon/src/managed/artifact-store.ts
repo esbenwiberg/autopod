@@ -158,6 +158,7 @@ async function materialize(
   const staging = `${destination}.${randomUUID()}.staging`;
   await mkdir(staging, { mode: 0o700 });
   const directories = new Set([staging]);
+  let published = false;
   try {
     for (const [name, bytes] of files) {
       const file = path.join(staging, name);
@@ -171,11 +172,19 @@ async function materialize(
       await writeFile(file, bytes, { flag: 'wx', mode: 0o444 });
     }
     // The runtime must additionally mount this tree read-only; modes alone are not isolation.
-    for (const directory of [...directories].sort().reverse()) await chmod(directory, 0o555);
+    // macOS requires the directory being renamed to retain owner write access.
+    // Seal its children now, then the root before returning it for any mount.
+    for (const directory of [...directories].sort().reverse()) {
+      if (directory !== staging) await chmod(directory, 0o555);
+    }
     await rename(staging, destination);
+    published = true;
+    await chmod(destination, 0o555);
   } catch (error) {
-    for (const directory of directories) await chmod(directory, 0o700).catch(() => {});
-    await rm(staging, { recursive: true, force: true });
+    const root = published ? destination : staging;
+    for (const directory of directories)
+      await chmod(path.join(root, path.relative(staging, directory)), 0o700).catch(() => {});
+    await rm(root, { recursive: true, force: true });
     throw error;
   }
 }

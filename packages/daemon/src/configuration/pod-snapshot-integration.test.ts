@@ -10,6 +10,89 @@ import { resolveLaunchExecutionSettings } from './launch-execution-settings.js';
 import { createLaunchSnapshotRepository } from './launch-snapshot.js';
 
 describe('pod manager launch snapshot integration', () => {
+  it.each(['queued', 'validated'] as const)(
+    'reconciles composed children admitted after a %s parent',
+    async (parentStatus) => {
+      const ctx = createTestContext();
+      try {
+        const { services, store } = createTestConfiguration(ctx.db);
+        const accounts = createProviderAccountStore(ctx.db);
+        accounts.create({
+          id: 'account',
+          name: 'Main',
+          provider: 'openai',
+          credentials: {
+            provider: 'openai',
+            authJson: JSON.stringify({ OPENAI_API_KEY: 'fixture' }),
+          },
+        });
+        services.resolveAgentRoute = async (route) => resolveLaunchAgentRoute(route, accounts);
+        store.write({
+          kind: 'ai',
+          id: 'ai',
+          name: 'AI',
+          expectedRevision: 1,
+          payload: { main: { providerAccountId: 'account', runtime: 'codex', model: 'gpt-5' } },
+        });
+        const snapshots = createLaunchSnapshotRepository(ctx.db, store);
+        const enqueueSession = vi.fn((id: string) => {
+          expect(snapshots.get(id)).not.toBeNull();
+        });
+        const manager = createPodManager({
+          ...ctx.deps,
+          enqueueSession,
+          providerAccountStore: accounts,
+          launchConfiguration: {
+            read: snapshots.get,
+            executionSettings: (config) =>
+              resolveLaunchExecutionSettings(config, { image: `sha256:${'a'.repeat(64)}` }),
+            assertCurrentCapabilities: async () => {},
+            prepareEnvironment: async () => 'fixture',
+          },
+        });
+        const create = manager.createResolvedSession?.bind(manager);
+        if (!create) throw new Error('Missing fixture admission');
+        const admit = (task: string, parents: string[] = []) =>
+          admitLaunch({
+            request: { repositoryId: 'repo-a', task, work: { dependsOnPodIds: parents } },
+            actorId: 'user',
+            services,
+            snapshots,
+            createPod: (config) => create(config, 'user').id,
+          });
+        const parent = await admit('Research');
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        // Establish the prior lifecycle receipt without running a model in this integration fixture.
+        ctx.podRepo.update(parent.podId, { status: parentStatus });
+        enqueueSession.mockClear();
+        const child = await admit('Implement', [parent.podId]);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (parentStatus === 'validated') {
+          expect(enqueueSession).toHaveBeenCalledExactlyOnceWith(child.podId);
+          expect(ctx.podRepo.getOrThrow(child.podId)).toMatchObject({
+            baseBranch: 'main',
+            dependencyStartedAt: expect.any(String),
+          });
+          const childConfig = snapshots.get(child.podId);
+          if (!childConfig?.repository) throw new Error('Missing child repository');
+          expect(
+            ctx.podRepo.dispatchPreflight?.inspect(
+              child.podId,
+              1,
+              childConfig.repository.config.remote,
+              'main',
+              'a'.repeat(40),
+            ).status,
+          ).toBe('admitted');
+          manager.rehydrateDependentSessions();
+          expect(ctx.podRepo.getOrThrow(child.podId).baseBranch).toBe('main');
+        } else expect(enqueueSession).not.toHaveBeenCalled();
+      } finally {
+        ctx.db.close();
+      }
+    },
+  );
+
   it('admits Goal state with the snapshot atomically and refuses ordinary completion or execution', async () => {
     const ctx = createTestContext();
     try {

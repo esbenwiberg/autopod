@@ -1,6 +1,6 @@
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearAzureTokenCache, getAzureToken } from './azure-token.js';
+import { clearAzureTokenCache, getAzureToken, invalidateAzureToken } from './azure-token.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -32,6 +32,24 @@ function mockAzCliFailure() {
   vi.doMock('node:child_process', () => ({ execFile }));
   return execFile;
 }
+
+function mockAzCliStderrFailure(stderr: string) {
+  const execFile = vi.fn(
+    (_cmd: string, _args: readonly string[], _opts: unknown, cb: ExecFileCallback) =>
+      cb(Object.assign(new Error('Command failed: az account get-access-token'), { stderr })),
+  );
+  vi.doMock('node:child_process', () => ({ execFile }));
+  return execFile;
+}
+
+/** Unsigned JWT carrying only a `tid` claim — enough for the tenant guard. */
+function jwtForTenant(tid: string): string {
+  const payload = Buffer.from(JSON.stringify({ tid })).toString('base64url');
+  return `eyJhbGciOiJub25lIn0.${payload}.sig`;
+}
+
+const ADO_TENANT = 'ee357b2a-1bf9-42a6-baab-9772d85b28c1';
+const VM_TENANT = '0d3aa8f9-8168-4bc2-bda1-c3972e6d9352';
 
 function mockDefaultAzureCredentialToken(token: string) {
   const getToken = vi.fn().mockResolvedValue({
@@ -187,6 +205,63 @@ describe('getAzureToken', () => {
     });
 
     expect(home.token).not.toBe(guest.token);
+    expect(execFile).toHaveBeenCalledTimes(2);
+  });
+
+  describe('pinned tenant', () => {
+    it('rejects a fallback token issued for another tenant and does not cache it', async () => {
+      const execFile = mockAzCliStderrFailure('ERROR: msal token cache lock timeout');
+      const getToken = mockDefaultAzureCredentialToken(jwtForTenant(VM_TENANT));
+
+      await expect(getAzureToken(SCOPE, logger, { tenantId: ADO_TENANT })).rejects.toThrow(
+        new RegExp(`token for tenant '${VM_TENANT}' instead of '${ADO_TENANT}'`),
+      );
+      await expect(getAzureToken(SCOPE, logger, { tenantId: ADO_TENANT })).rejects.toThrow();
+
+      // Nothing was cached: the second call went back to az CLI first.
+      expect(execFile).toHaveBeenCalledTimes(2);
+      expect(getToken).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects an opaque fallback token whose tenant cannot be verified', async () => {
+      mockAzCliFailure();
+      mockDefaultAzureCredentialToken('opaque-token');
+
+      await expect(getAzureToken(SCOPE, logger, { tenantId: ADO_TENANT })).rejects.toThrow(
+        /tenant 'unknown'/,
+      );
+    });
+
+    it('accepts a fallback token issued for the pinned tenant', async () => {
+      mockAzCliFailure();
+      const token = jwtForTenant(ADO_TENANT.toUpperCase());
+      mockDefaultAzureCredentialToken(token);
+
+      await expect(getAzureToken(SCOPE, logger, { tenantId: ADO_TENANT })).resolves.toMatchObject({
+        token,
+      });
+    });
+  });
+
+  it('surfaces the az CLI stderr in the final error instead of swallowing it', async () => {
+    mockAzCliStderrFailure(
+      'AADSTS50173: The provided grant has expired.\nTo re-authenticate, please run:\naz login',
+    );
+    mockDefaultAzureCredentialFailure();
+
+    await expect(getAzureToken(SCOPE, logger)).rejects.toThrow(
+      /az CLI: AADSTS50173: The provided grant has expired\. To re-authenticate/,
+    );
+  });
+
+  it('re-acquires after invalidateAzureToken drops a rejected token', async () => {
+    const execFile = mockAzCliToken('first');
+    await getAzureToken(SCOPE, logger, { tenantId: ADO_TENANT });
+    await getAzureToken(SCOPE, logger, { tenantId: ADO_TENANT });
+    expect(execFile).toHaveBeenCalledTimes(1);
+
+    invalidateAzureToken(SCOPE, { tenantId: ADO_TENANT });
+    await getAzureToken(SCOPE, logger, { tenantId: ADO_TENANT });
     expect(execFile).toHaveBeenCalledTimes(2);
   });
 });

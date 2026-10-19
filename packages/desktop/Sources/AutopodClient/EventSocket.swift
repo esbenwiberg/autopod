@@ -26,6 +26,8 @@ public actor EventSocket {
   private var webSocketTask: URLSessionWebSocketTask?
   private var lastEventId: Int = 0
   private var reconnectAttempt = 0
+  private var generation: UInt64 = 0
+  private var connectionTask: Task<Void, Never>?
   private var receiveTask: Task<Void, Never>?
   private var heartbeatTask: Task<Void, Never>?
   private var lastPingAt: Date = .distantPast
@@ -47,6 +49,7 @@ public actor EventSocket {
     baseURL: URL,
     token: String,
     tokenProvider: DaemonAccessTokenProvider? = nil,
+    session: URLSession = .shared,
     onEvent: @escaping @Sendable (RawSystemEvent) -> Void,
     onStateChange: @escaping @Sendable (State) -> Void,
     onResyncRequired: @escaping @Sendable () -> Void = {}
@@ -54,7 +57,7 @@ public actor EventSocket {
     self.baseURL = baseURL
     self.token = DaemonAuth.normalizeBearerToken(token)
     self.tokenProvider = tokenProvider
-    self.pod = URLSession.shared
+    self.pod = session
     self.onEvent = onEvent
     self.onStateChange = onStateChange
     self.onResyncRequired = onResyncRequired
@@ -63,12 +66,18 @@ public actor EventSocket {
   // MARK: - Public API
 
   public func connect() {
-    guard state == .disconnected || state != .connecting else { return }
+    // The caller may have been cancelled while waiting to enter this actor.
+    guard !Task.isCancelled, state == .disconnected else { return }
+    generation &+= 1
+    let attempt = generation
     setState(.connecting)
-    Task { await doConnect() }
+    connectionTask = Task { [weak self] in await self?.doConnect(attempt: attempt) }
   }
 
   public func disconnect() {
+    generation &+= 1
+    connectionTask?.cancel()
+    connectionTask = nil
     receiveTask?.cancel()
     receiveTask = nil
     heartbeatTask?.cancel()
@@ -93,7 +102,8 @@ public actor EventSocket {
 
   // MARK: - Internal
 
-  private func doConnect() async {
+  private func doConnect(attempt: UInt64) async {
+    guard isCurrent(attempt) else { return }
     // Build WebSocket URL: ws(s)://host:port/events
     var components = URLComponents(url: baseURL.appendingPathComponent("events"), resolvingAgainstBaseURL: false)!
     // Switch scheme to ws/wss
@@ -101,19 +111,24 @@ public actor EventSocket {
     else if components.scheme == "https" { components.scheme = "wss" }
 
     guard let url = components.url else {
+      connectionTask = nil
       setState(.disconnected)
       return
     }
 
     var request = URLRequest(url: url)
-    request.setValue("Bearer \(await currentToken())", forHTTPHeaderField: "Authorization")
+    let token = await currentToken()
+    // Token providers may finish after cancellation or after a newer connect.
+    guard isCurrent(attempt) else { return }
+    connectionTask = nil
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     let ws = pod.webSocketTask(with: request)
     webSocketTask = ws
     ws.resume()
 
     // Start receiving
     receiveTask = Task { [weak self] in
-      await self?.receiveLoop(ws)
+      await self?.receiveLoop(ws, attempt: attempt)
     }
 
     // Connected — subscribe and replay
@@ -128,13 +143,22 @@ public actor EventSocket {
     }
 
     // Start heartbeat monitor
-    startHeartbeatMonitor()
+    startHeartbeatMonitor(ws, attempt: attempt)
   }
 
-  private func receiveLoop(_ ws: URLSessionWebSocketTask) async {
-    while !Task.isCancelled {
+  private func isCurrent(_ attempt: UInt64) -> Bool {
+    !Task.isCancelled && generation == attempt
+  }
+
+  private func owns(_ ws: URLSessionWebSocketTask, attempt: UInt64) -> Bool {
+    isCurrent(attempt) && webSocketTask === ws
+  }
+
+  private func receiveLoop(_ ws: URLSessionWebSocketTask, attempt: UInt64) async {
+    while owns(ws, attempt: attempt) {
       do {
         let message = try await ws.receive()
+        guard owns(ws, attempt: attempt) else { return }
         lastPingAt = Date()
 
         switch message {
@@ -161,35 +185,45 @@ public actor EventSocket {
         }
       } catch {
         // Connection lost — trigger reconnect
-        if !Task.isCancelled {
-            scheduleReconnect()
+        if owns(ws, attempt: attempt) {
+          scheduleReconnect(ws, attempt: attempt)
         }
         return
       }
     }
   }
 
-  private func startHeartbeatMonitor() {
+  private func startHeartbeatMonitor(_ ws: URLSessionWebSocketTask, attempt: UInt64) {
     heartbeatTask?.cancel()
     heartbeatTask = Task { [weak self] in
       while !Task.isCancelled {
-        try? await Task.sleep(for: .seconds(15))
-        guard !Task.isCancelled else { return }
-        guard let self else { return }
-        let elapsed = await Date().timeIntervalSince(self.lastPingAt)
-        if elapsed > Self.heartbeatTimeout {
-          await self.scheduleReconnect()
-          return
-        }
+        do { try await Task.sleep(for: .seconds(15)) }
+        catch { return }
+        guard let self, await self.checkHeartbeat(ws, attempt: attempt) else { return }
       }
     }
   }
 
-  private func scheduleReconnect() {
-    // Clean up current connection
+  private func checkHeartbeat(_ ws: URLSessionWebSocketTask, attempt: UInt64) -> Bool {
+    guard owns(ws, attempt: attempt) else { return false }
+    if Date().timeIntervalSince(lastPingAt) > Self.heartbeatTimeout {
+      scheduleReconnect(ws, attempt: attempt)
+      return false
+    }
+    return true
+  }
+
+  private func scheduleReconnect(_ ws: URLSessionWebSocketTask, attempt: UInt64) {
+    guard owns(ws, attempt: attempt) else { return }
+    // Invalidate the old receiver and heartbeat before either can act again.
+    generation &+= 1
+    let nextAttempt = generation
+    connectionTask?.cancel()
     receiveTask?.cancel()
+    receiveTask = nil
     heartbeatTask?.cancel()
-    webSocketTask?.cancel(with: .goingAway, reason: nil)
+    heartbeatTask = nil
+    ws.cancel(with: .goingAway, reason: nil)
     webSocketTask = nil
 
     reconnectAttempt += 1
@@ -197,11 +231,10 @@ public actor EventSocket {
 
     // Exponential backoff: 1, 2, 4, 8, 16, 16, 16...
     let delay = min(pow(2.0, Double(reconnectAttempt - 1)), Self.maxBackoff)
-
-    Task { [weak self] in
-      try? await Task.sleep(for: .seconds(delay))
-      guard !Task.isCancelled else { return }
-      await self?.doConnect()
+    connectionTask = Task { [weak self] in
+      do { try await Task.sleep(for: .seconds(delay)) }
+      catch { return }
+      await self?.doConnect(attempt: nextAttempt)
     }
   }
 

@@ -17,14 +17,16 @@ export async function reportBlocker(
 ): Promise<string> {
   const escalationId = generateId();
   const autoPauseThreshold = bridge.getAutoPauseThreshold(podId);
-  const currentCount = bridge.getAiEscalationCount(podId);
+  const currentCount = bridge.getAutoPauseCount(podId);
 
+  const requiresResponse = currentCount + 1 >= autoPauseThreshold;
   const escalation: EscalationRequest = {
     id: escalationId,
     podId,
     type: 'report_blocker',
     timestamp: new Date().toISOString(),
     payload: {
+      requiresResponse,
       description: input.description,
       attempted: input.attempted,
       needs: input.needs,
@@ -35,7 +37,7 @@ export async function reportBlocker(
   bridge.createEscalation(escalation);
   bridge.incrementEscalationCount(podId);
 
-  if (currentCount + 1 >= autoPauseThreshold) {
+  if (requiresResponse) {
     // Block and wait for human
     const timeoutMs = bridge.getHumanResponseTimeout(podId) * 1000;
     try {
@@ -44,7 +46,7 @@ export async function reportBlocker(
     } catch (err) {
       const isTimeout = err instanceof Error && err.message.includes('timed out');
       return isTimeout
-        ? 'Blocker reported, but no human response arrived before the timeout. Continue only if you can make safe progress without that answer.'
+        ? 'Blocker reported, but no human response arrived before the timeout. The pod remains awaiting input; do not continue work until the operator responds.'
         : `Blocker response wait was cancelled: ${err instanceof Error ? err.message : String(err)}`;
     }
   }

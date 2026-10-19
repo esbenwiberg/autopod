@@ -96,6 +96,11 @@ export class CodexAppServerGoalSession implements NativeGoalSession {
       tokenBudget: this.budget(remainingTokens, this.latest.tokensUsed),
     });
   }
+  async updateBudget(remainingTokens: number | null): Promise<NativeGoalObservation> {
+    if (this.inspectionOnly) throw new CodexRpcError('INSPECTION_ONLY');
+    if (!this.latest) throw new CodexRpcError('GOAL_RECONCILIATION_REQUIRED');
+    return this.set({ tokenBudget: this.budget(remainingTokens, this.latest.tokensUsed) });
+  }
   async pause(): Promise<NativeGoalObservation> {
     return this.set({ status: 'paused' });
   }

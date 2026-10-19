@@ -10,6 +10,15 @@ import { atomicPodChange } from '../db/unit-of-work.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { PodRepository } from './pod-repository.js';
 
+/** An advisory blocker must not publish a question that its tool will not wait for. */
+export function isBlockingEscalation(request: EscalationRequest): boolean {
+  if (request.type === 'report_blocker')
+    return !('requiresResponse' in request.payload) || request.payload.requiresResponse !== false;
+  return ['ask_human', 'action_approval', 'request_credential', 'validation_override'].includes(
+    request.type,
+  );
+}
+
 /** The durable question and its actionable pod state must commit together. */
 export function persistEscalation(
   pods: PodRepository,
@@ -19,13 +28,7 @@ export function persistEscalation(
 ): void {
   atomicPodChange(pods, () => {
     const pod = pods.getOrThrow(request.podId);
-    const blocking = [
-      'ask_human',
-      'report_blocker',
-      'action_approval',
-      'request_credential',
-      'validation_override',
-    ].includes(request.type);
+    const blocking = isBlockingEscalation(request);
     let existing: ReturnType<EscalationRepository['getOrThrow']> | undefined;
     try {
       existing = escalations.getOrThrow(request.id);

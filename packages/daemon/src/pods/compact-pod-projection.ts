@@ -1,4 +1,4 @@
-import type { CompactPod, Pod } from '@autopod/shared';
+import type { CompactPod, Pod, PodRepositoryDisplay } from '@autopod/shared';
 
 /** Only the source fields consumed by compact serialization; never a control-plane pod. */
 export type CompactPodSource = Pick<
@@ -9,7 +9,7 @@ export type CompactPodSource = Pick<
   | 'progress'
   | 'pendingEscalation'
   | 'validationAttempts'
->;
+> & { repositoryDisplay?: PodRepositoryDisplay };
 
 export const COMPACT_JSON_MAX_BYTES = 64 * 1024;
 export const COMPACT_JSON_FIELDS = [

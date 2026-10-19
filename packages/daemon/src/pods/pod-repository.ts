@@ -46,10 +46,12 @@ import {
   type DispatchPreflightLedger,
   createDispatchPreflightLedger,
 } from './dispatch-preflight-ledger.js';
+import { isDisplayEscalation } from './escalation-display.js';
 import {
   type ExecutionProvenanceLedger,
   createExecutionProvenanceLedger,
 } from './execution-provenance-ledger.js';
+import { displayRepository, repositoryDisplayColumns } from './pod-display-repository.js';
 import { type ProviderUsageProjection, readProviderUsage } from './provider-usage-projection.js';
 import {
   type SourcePublicationLedger,
@@ -59,7 +61,7 @@ import { type TaskRetryLedger, createTaskRetryLedger } from './task-retry-ledger
 
 export interface NewPod {
   intentionalRerun?: IntentionalRerun;
-  dispatchRepository?: string;
+  dispatchRepository?: string | null;
   rerunRequestHash?: string;
   id: string;
   profileName: string;
@@ -274,6 +276,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   hasUnansweredDecision?(podId: string): boolean;
   insert(pod: NewPod): void;
   getOrThrow(id: string): Pod;
+  getRepositoryForDisplay?(id: string): import('@autopod/shared').PodRepositoryDisplay;
   /** Read one live or archived pod without admitting further execution. */
   getForHistory?(id: string): Pod;
   update(id: string, changes: PodUpdates): void;
@@ -620,10 +623,11 @@ function rowToDisplaySession(source: Record<string, unknown>): Pod {
       row.task_summary = null;
     }
   }
-  for (const [field, keys] of [
-    ['pending_escalation', ['question']],
-    ['progress', ['phase', 'description']],
-  ] as const) {
+  if (row.pending_escalation && !isDisplayEscalation(JSON.parse(String(row.pending_escalation)))) {
+    diagnostics.push({ field: 'pending_escalation', code: 'invalid_shape' });
+    row.pending_escalation = null;
+  }
+  for (const [field, keys] of [['progress', ['phase', 'description']]] as const) {
     if (!row[field]) continue;
     const value = JSON.parse(String(row[field])) as Record<string, unknown>;
     if (value && keys.some((key) => typeof value[key] !== 'string')) {
@@ -1344,17 +1348,34 @@ export function createPodRepository(db: Database.Database): PodRepository {
       });
     },
 
+    getRepositoryForDisplay(id: string) {
+      const row = db
+        .prepare(`SELECT ${repositoryDisplayColumns('retained_pods')},
+        CASE WHEN length(CAST(profile_snapshot AS BLOB)) <= 65536 THEN profile_snapshot END AS profile_snapshot
+        FROM retained_pods WHERE id=?`)
+        .get(id) as Record<string, unknown> | undefined;
+      if (!row) return { kind: 'unavailable' };
+      const pod = rowToDisplaySession(row);
+      return displayRepository(row, pod.profileSnapshot?.repoUrl);
+    },
+
     listCompactForDisplay(filters?: PodFilters): CompactPodSource[] {
-      return Array.from(listRows(filters, COMPACT_POD_COLUMNS), (row) => {
-        const pod = rowToDisplaySession(row);
-        for (const field of COMPACT_JSON_FIELDS) {
-          if (row[`${field}_oversized`]) pod.recordDiagnostics?.push({ field, code: 'size_limit' });
-        }
-        return {
-          ...pod,
-          finalization: completionJournal.getForDisplay?.(pod.id, pod.lifecycleGeneration) ?? null,
-        };
-      });
+      return Array.from(
+        listRows(filters, `${COMPACT_POD_COLUMNS}, ${repositoryDisplayColumns('pods')}`),
+        (row) => {
+          const pod = rowToDisplaySession(row);
+          for (const field of COMPACT_JSON_FIELDS) {
+            if (row[`${field}_oversized`])
+              pod.recordDiagnostics?.push({ field, code: 'size_limit' });
+          }
+          return {
+            ...pod,
+            repositoryDisplay: displayRepository(row, pod.profileSnapshot?.repoUrl),
+            finalization:
+              completionJournal.getForDisplay?.(pod.id, pod.lifecycleGeneration) ?? null,
+          };
+        },
+      );
     },
 
     listForDisplay(filters?: PodFilters): Pod[] {

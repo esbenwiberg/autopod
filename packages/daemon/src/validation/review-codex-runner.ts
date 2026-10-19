@@ -8,6 +8,7 @@ import type {
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
 import type { BeforeReviewerLaunch } from '../interfaces/reviewer-launch.js';
+import { foundryCodexConfigArgs } from '../providers/foundry-endpoint.js';
 import type { ReviewerOutputContract } from './review-structured-output.js';
 import { prepareReviewerLaunch } from './reviewer-launch-preflight.js';
 
@@ -122,6 +123,8 @@ export async function runCodexReview(
       ...(config.reasoningEffort && config.reasoningEffort !== 'auto'
         ? [`-c ${shellQuote(`model_reasoning_effort=${JSON.stringify(config.reasoningEffort)}`)}`]
         : []),
+      // Isolated reviews pass --ignore-user-config, so Foundry routing must ride on -c.
+      ...foundryCodexConfigArgs(config.env).map(shellQuote),
       '--output-last-message',
       shellQuote(outputPath),
       ...(config.outputContract ? [`--output-schema ${shellQuote(schemaPath)}`] : []),

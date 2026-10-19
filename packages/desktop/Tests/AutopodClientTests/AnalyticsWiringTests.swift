@@ -153,14 +153,14 @@ import Testing
 // MARK: - onSelectPod handler
 
 @MainActor @Test func analyticsSelectPodClearsCardAndNavigates() {
-    let result = MainView.analyticsSelectPodResult(sessionId: "abc123")
+    let result = MainView.fleetPodDestination(sessionId: "abc123")
     #expect(result.card == nil)
     #expect(result.sidebar == .all)
     #expect(result.session == "abc123")
 }
 
 @MainActor @Test func analyticsSelectPodWithDifferentSessionId() {
-    let result = MainView.analyticsSelectPodResult(sessionId: "xyz-pod-9876")
+    let result = MainView.fleetPodDestination(sessionId: "xyz-pod-9876")
     #expect(result.card == nil)
     #expect(result.sidebar == .all)
     #expect(result.session == "xyz-pod-9876")

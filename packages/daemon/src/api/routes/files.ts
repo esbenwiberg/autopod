@@ -69,9 +69,8 @@ export function filesRoutes(
 
     const extensions = parseExtensions(query.ext);
 
-    const publishedArtifact =
-      pod.status === 'complete' && pod.options?.output === 'artifact' ? pod.artifactsPath : null;
-    if (containerManagerFactory && pod.containerId && !publishedArtifact) {
+    const preservedSnapshot = pod.status === 'complete' ? pod.artifactsPath : null;
+    if (containerManagerFactory && pod.containerId && !preservedSnapshot) {
       const cm = containerManagerFactory.get(pod.executionTarget);
       const fromContainer = await tryListFromContainer(cm, pod.containerId, extensions);
       if (fromContainer) {
@@ -80,7 +79,7 @@ export function filesRoutes(
       }
     }
 
-    const rootPath = publishedArtifact ?? pod.worktreePath ?? pod.artifactsPath;
+    const rootPath = preservedSnapshot ?? pod.worktreePath ?? pod.artifactsPath;
     if (!rootPath) {
       reply.status(404);
       return { error: 'No files available for this pod' };
@@ -113,9 +112,8 @@ export function filesRoutes(
 
     const isBinary = isBinaryPath(relPath);
 
-    const publishedArtifact =
-      pod.status === 'complete' && pod.options?.output === 'artifact' ? pod.artifactsPath : null;
-    if (containerManagerFactory && pod.containerId && !publishedArtifact) {
+    const preservedSnapshot = pod.status === 'complete' ? pod.artifactsPath : null;
+    if (containerManagerFactory && pod.containerId && !preservedSnapshot) {
       const cm = containerManagerFactory.get(pod.executionTarget);
       const fromContainer = await tryReadFromContainer(cm, pod.containerId, relPath, isBinary);
       if (fromContainer === 'too-large') {
@@ -127,7 +125,7 @@ export function filesRoutes(
       }
     }
 
-    const rootPath = publishedArtifact ?? pod.worktreePath ?? pod.artifactsPath;
+    const rootPath = preservedSnapshot ?? pod.worktreePath ?? pod.artifactsPath;
     if (!rootPath) {
       reply.status(404);
       return { error: 'No files available for this pod' };

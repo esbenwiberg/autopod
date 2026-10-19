@@ -106,8 +106,9 @@ public actor DaemonAPI {
     try await request("GET", "/configuration/github/repositories/\(repositoryId)/workflows")
   }
 
-  public func discoverPimEligibility() async throws -> ConfigurationJSON {
-    try await request("GET", "/pim/eligibility")
+  /// The daemon caches discovery; `fresh` bypasses that cache for an explicit user refresh.
+  public func discoverPimEligibility(fresh: Bool = false) async throws -> ConfigurationJSON {
+    try await request("GET", "/pim/eligibility", query: fresh ? ["fresh": "1"] : [:])
   }
   public func saveProfileFromLaunch(_ body: ConfigurationJSON) async throws -> ConfigurationJSON {
     try await request("POST", "/profiles/from-launch", body: encode(body))
@@ -242,6 +243,8 @@ public actor DaemonAPI {
     try await request("POST", "/pods", body: try encode(body))
   }
 
+  static let approvalTimeout: TimeInterval = 300
+
   public func approvePod(_ id: String, squash: Bool? = nil, reason: String? = nil) async throws {
     let trimmedReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
     let body: Data? = if squash != nil || trimmedReason?.isEmpty == false {
@@ -249,7 +252,19 @@ public actor DaemonAPI {
     } else {
       nil
     }
-    let _: OkResponse = try await request("POST", "/pods/\(id)/approve", body: body)
+    // Approval runs delivery inline: it may wait for advisory QA, resume a suspended
+    // sandbox to preserve reports (bounded at 120s), then push/create the PR.
+    do {
+      let _: OkResponse = try await request(
+        "POST", "/pods/\(id)/approve", body: body, timeout: Self.approvalTimeout
+      )
+    } catch DaemonError.networkError {
+      // The daemon keeps going after the client gives up. Don't invite a blind retry.
+      throw DaemonError.networkError(
+        "Approval is still running on the daemon or the connection dropped. "
+          + "Check the pod's activity log before approving again."
+      )
+    }
   }
 
   public func rejectPod(_ id: String, feedback: String? = nil) async throws {
@@ -705,11 +720,14 @@ public actor DaemonAPI {
     name: String,
     provider: String,
     id: String? = nil,
-    apiKey: String? = nil
+    apiKey: String? = nil,
+    credentials: [String: String]? = nil
   ) async throws -> PublicProviderAccountResponse {
     var fields: [String: Any] = ["name": name, "provider": provider]
     if let id { fields["id"] = id }
-    if let apiKey {
+    if let credentials {
+      fields["credentials"] = credentials
+    } else if let apiKey {
       fields["credentials"] = [
         "provider": "api-key",
         "providerId": provider,
@@ -1104,7 +1122,8 @@ public actor DaemonAPI {
     _ method: String,
     _ path: String,
     query: [String: String] = [:],
-    body: Data? = nil
+    body: Data? = nil,
+    timeout: TimeInterval = 30
   ) async throws -> T {
     let url = try makeRequestURL(path, query: query)
 
@@ -1112,7 +1131,7 @@ public actor DaemonAPI {
     req.httpMethod = method
     req.setValue(try await authorizationHeader(), forHTTPHeaderField: "Authorization")
     req.setValue("application/json", forHTTPHeaderField: "Accept")
-    req.timeoutInterval = 30
+    req.timeoutInterval = timeout
 
     if let body {
       req.setValue("application/json", forHTTPHeaderField: "Content-Type")

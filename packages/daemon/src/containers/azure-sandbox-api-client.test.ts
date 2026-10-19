@@ -2,8 +2,10 @@ import { createHash } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
+import { createLocalValidationEngine } from '../validation/local-validation-engine.js';
 import { AzureSandboxApiClient, type WebSocketLike } from './azure-sandbox-api-client.js';
 import { type SandboxExecChunk, SandboxInfrastructureError } from './sandbox-api-client.js';
+import { SandboxContainerManager } from './sandbox-container-manager.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -428,6 +430,57 @@ describe('AzureSandboxApiClient', () => {
     });
   });
 
+  it('collects a six-minute observed test exit through the real sandbox streaming seam', async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, sockets, requests } = makeStreamingClient(
+        (socket) => {
+          socket.onopen?.({});
+          socket.emit({ type: 'stdout', data: Buffer.from('tests started\n').toString('base64') });
+          setTimeout(() => {
+            socket.emit({
+              type: 'stdout',
+              data: Buffer.from('tests complete\n').toString('base64'),
+            });
+            socket.emit({ type: 'exit_code', exitCode: 0 });
+          }, 360_000);
+        },
+        [{ status: 200, body: { stdout: '', stderr: '', exitCode: 0 } }, ...STREAM_SETUP_RESPONSES],
+      );
+      const engine = createLocalValidationEngine(new SandboxContainerManager(client, logger));
+      const resultPromise = engine.validate({
+        podId: 'seam-pod',
+        containerId: 'sbx-1',
+        previewUrl: '',
+        buildCommand: '',
+        startCommand: '',
+        healthPath: '',
+        healthTimeout: 1,
+        smokePages: [],
+        attempt: 1,
+        task: 'Test streaming result collection',
+        diff: '',
+        hasWebUi: false,
+        executionTarget: 'sandbox',
+        testCommand: 'npm test',
+        skipPhases: ['review'],
+      });
+      await vi.waitFor(() => expect(sockets).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(360_000);
+      const result = await resultPromise;
+      expect(result.test?.status).toBe('pass');
+      expect(result.test?.duration).toBeGreaterThanOrEqual(360_000);
+      expect(result.test?.stdout).toContain('tests complete');
+      expect(
+        requests
+          .filter((request) => request.url.includes('executeShellCommand'))
+          .some((request) => String(request.init?.body).includes('npm test')),
+      ).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('executes buffered shell commands and maps the response', async () => {
     const { client, requests } = makeClient([
       { status: 200, body: { stdout: 'out', stderr: 'err', exitCode: 7 } },
@@ -447,6 +500,18 @@ describe('AzureSandboxApiClient', () => {
       workingDirectory: '/workspace',
       user: 'root',
     });
+  });
+
+  it('retains an unknown buffered execution outcome after fetch failure without replay', async () => {
+    const fetch = vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    });
+    const { client } = makeClient([], { fetch });
+    await expect(client.exec('sbx-1', ['npm', 'test'])).rejects.toMatchObject({
+      code: 'EXEC_EXIT_UNVERIFIED',
+      statusCode: 409,
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it('rejects buffered exec responses that omit the exit code', async () => {

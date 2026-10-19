@@ -56,6 +56,21 @@ public enum ClaudeModelCanonicalizer {
 
 public enum RuntimeModelOptions {
     private static let modelPricing: [String: RuntimeModelPrice] = [
+        "claude-fable-5-1": RuntimeModelPrice(
+            inputPer1M: 10,
+            cachedInputPer1M: 0.25,
+            outputPer1M: 50
+        ),
+        "claude-opus-5-5": RuntimeModelPrice(
+            inputPer1M: 4,
+            cachedInputPer1M: 0.2,
+            outputPer1M: 20
+        ),
+        "claude-sonnet-5-5": RuntimeModelPrice(
+            inputPer1M: 2,
+            cachedInputPer1M: 0.2,
+            outputPer1M: 10
+        ),
         "claude-fable-5": RuntimeModelPrice(
             inputPer1M: 10,
             cachedInputPer1M: 1,
@@ -67,9 +82,9 @@ public enum RuntimeModelOptions {
             outputPer1M: 25
         ),
         "claude-sonnet-5": RuntimeModelPrice(
-            inputPer1M: 3,
-            cachedInputPer1M: 0.3,
-            outputPer1M: 15
+            inputPer1M: 2,
+            cachedInputPer1M: 0.2,
+            outputPer1M: 10
         ),
         "claude-opus-4-8": RuntimeModelPrice(
             inputPer1M: 5,
@@ -100,6 +115,26 @@ public enum RuntimeModelOptions {
             inputPer1M: 1,
             cachedInputPer1M: 0.1,
             outputPer1M: 5
+        ),
+        "gpt-6-astra": RuntimeModelPrice(
+            inputPer1M: 10,
+            cachedInputPer1M: 1,
+            outputPer1M: 50
+        ),
+        "gpt-6.1-sol": RuntimeModelPrice(
+            inputPer1M: 2,
+            cachedInputPer1M: 0.1,
+            outputPer1M: 10
+        ),
+        "gpt-6-sol": RuntimeModelPrice(
+            inputPer1M: 2,
+            cachedInputPer1M: 0.2,
+            outputPer1M: 10
+        ),
+        "gpt-6-luna": RuntimeModelPrice(
+            inputPer1M: 0.1,
+            cachedInputPer1M: 0.01,
+            outputPer1M: 0.5
         ),
         "gpt-5.6-sol": RuntimeModelPrice(
             inputPer1M: 5,
@@ -169,6 +204,9 @@ public enum RuntimeModelOptions {
     ]
 
     private static let modelLabels: [String: String] = [
+        "claude-fable-5-1": "Fable 5.1",
+        "claude-opus-5-5": "Opus 5.5",
+        "claude-sonnet-5-5": "Sonnet 5.5",
         "claude-fable-5": "Fable 5",
         "claude-opus-5": "Opus 5",
         "claude-sonnet-5": "Sonnet 5",
@@ -178,6 +216,10 @@ public enum RuntimeModelOptions {
         "claude-sonnet-4-6": "Sonnet 4.6",
         "claude-sonnet-4-5": "Sonnet 4.5",
         "claude-haiku-4-5": "Haiku 4.5",
+        "gpt-6-astra": "GPT-6 Astra",
+        "gpt-6.1-sol": "GPT-6.1 Sol",
+        "gpt-6-sol": "GPT-6 Sol",
+        "gpt-6-luna": "GPT-6 Luna",
         "gpt-5.6-sol": "GPT-5.6 Sol",
         "gpt-5.6-terra": "GPT-5.6 Terra",
         "gpt-5.6-luna": "GPT-5.6 Luna",
@@ -307,6 +349,9 @@ public enum RuntimeModelOptions {
             switch role {
             case .defaultModel:
                 return [
+                    RuntimeModelOption(value: "claude-opus-5-5", label: "Opus 5.5"),
+                    RuntimeModelOption(value: "claude-sonnet-5-5", label: "Sonnet 5.5"),
+                    RuntimeModelOption(value: "claude-fable-5-1", label: "Fable 5.1"),
                     RuntimeModelOption(value: "claude-opus-5", label: "Opus 5"),
                     RuntimeModelOption(value: "claude-sonnet-5", label: "Sonnet 5"),
                     RuntimeModelOption(value: "claude-fable-5", label: "Fable 5"),
@@ -316,6 +361,9 @@ public enum RuntimeModelOptions {
                 ]
             case .reviewerModel:
                 return [
+                    RuntimeModelOption(value: "claude-sonnet-5-5", label: "Sonnet 5.5"),
+                    RuntimeModelOption(value: "claude-opus-5-5", label: "Opus 5.5"),
+                    RuntimeModelOption(value: "claude-fable-5-1", label: "Fable 5.1"),
                     RuntimeModelOption(value: "claude-sonnet-5", label: "Sonnet 5"),
                     RuntimeModelOption(value: "claude-opus-5", label: "Opus 5"),
                     RuntimeModelOption(value: "claude-fable-5", label: "Fable 5"),
@@ -327,6 +375,9 @@ public enum RuntimeModelOptions {
         case .codex:
             return [
                 RuntimeModelOption(value: "auto", label: "Auto"),
+                RuntimeModelOption(value: "gpt-6.1-sol", label: "GPT-6.1 Sol"),
+                RuntimeModelOption(value: "gpt-6-astra", label: "GPT-6 Astra"),
+                RuntimeModelOption(value: "gpt-6-luna", label: "GPT-6 Luna"),
                 RuntimeModelOption(value: "gpt-5.6-sol", label: "GPT-5.6 Sol"),
                 RuntimeModelOption(value: "gpt-5.6-terra", label: "GPT-5.6 Terra"),
                 RuntimeModelOption(value: "gpt-5.6-luna", label: "GPT-5.6 Luna"),

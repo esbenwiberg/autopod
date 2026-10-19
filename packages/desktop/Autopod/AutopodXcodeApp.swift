@@ -19,9 +19,19 @@ struct AutopodXcodeApp: App {
   @State private var eventStream: EventStream?
   @State private var terminalManager: TerminalManager?
   @State private var showSetup = false
+  @State private var designFixtures = DesktopIdentity.usesDesignFixtures
+  @State private var wiringGate = DesktopConnectionWiringGate()
+
+  private var activeConnectionIdentity: DesktopConnectionIdentity? {
+    DesktopConnectionIdentity(isConnected: connectionManager.isConnected,
+      connectionID: connectionManager.connection?.id, api: connectionManager.api)
+  }
 
   var body: some Scene {
-    Window("Autopod", id: "main") {
+    Window(DesktopIdentity.displayName, id: "main") {
+      if designFixtures {
+        DesktopDesignPreview(onConnect: { designFixtures = false })
+      } else {
       AppRootView(
         connectionManager: connectionManager,
         podStore: podStore,
@@ -32,7 +42,8 @@ struct AutopodXcodeApp: App {
         actionHandler: actionHandler,
         eventStream: eventStream,
         terminalManager: terminalManager,
-        showSetup: $showSetup
+        showSetup: $showSetup,
+        onConnectionRecovered: { wireUpConnection(forceNewGeneration: true) }
       )
       .environment(\.controlActiveState, .key)
       .background(MainWindowPresenter())
@@ -50,17 +61,20 @@ struct AutopodXcodeApp: App {
           NotificationService.shared.registerCategories()
         }
       }
-      .onChange(of: connectionManager.isConnected) { _, connected in
-        if connected {
+      .onChange(of: activeConnectionIdentity) { _, identity in
+        if identity != nil {
           wireUpConnection()
         } else {
           eventStream?.disconnect()
           eventStream = nil
+          podStore.disconnect()
+          wiringGate.disconnect()
         }
+      }
       }
     }
     .windowStyle(.titleBar)
-    .defaultSize(width: 1200, height: 700)
+    .defaultSize(width: DesktopIdentity.isPreview ? 1680 : 1200, height: DesktopIdentity.isPreview ? 1000 : 700)
     .defaultLaunchBehavior(.presented)
     // Window's min size tracks the content's current min size — lets the user
     // shrink the window back down if a transient view (e.g. a warning banner)
@@ -72,8 +86,8 @@ struct AutopodXcodeApp: App {
 
     MenuBarExtra {
       MenuBarView(
-        pods: podStore.pods,
-        actions: actionHandler?.actions ?? .preview
+        pods: designFixtures ? [] : podStore.pods,
+        actions: designFixtures ? .preview : actionHandler?.actions ?? .preview
       )
     } label: {
       let count = podStore.attentionSessions.count
@@ -84,11 +98,14 @@ struct AutopodXcodeApp: App {
   }
 
   /// Configure stores and start streaming once the daemon connection is live.
-  private func wireUpConnection() {
-    guard let api = connectionManager.api,
-          let conn = connectionManager.connection else { return }
+  private func wireUpConnection(forceNewGeneration: Bool = false) {
+    guard let identity = activeConnectionIdentity,
+          let api = connectionManager.api,
+          let conn = connectionManager.connection,
+          wiringGate.admit(identity, force: forceNewGeneration) else { return }
 
-    podStore.configure(api: api)
+    eventStream?.disconnect()
+    podStore.configure(api: api, connectionID: conn.id)
     managedPodStore.configure(api: api)
     profileStore.configure(api: api)
     memoryStore.configure(api: api)

@@ -36,7 +36,7 @@ struct ConfigurationPreviewApp: App {
       },
       archive: { document in documents.removeAll { $0.id == document.id } },
       discoverGitHubRepositories: { [] }, discoverGitHubWorkflows: { _ in [] },
-      loadProviderAccounts: { [] }, discoverPim: { throw unavailable }, saveFromLaunch: { _ in throw unavailable })
+      loadProviderAccounts: { [] }, discoverPim: { _ in throw unavailable }, saveFromLaunch: { _ in throw unavailable })
   }
   private var unavailable: DaemonError { .badRequest("This local preview has no daemon or provider connection.") }
 }

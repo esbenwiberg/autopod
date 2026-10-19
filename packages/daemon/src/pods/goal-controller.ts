@@ -15,6 +15,9 @@ interface Active {
   fence: GoalAttemptFence;
   session: NativeGoalSession;
   control?: Promise<void>;
+  ready?: boolean;
+  budgetDirty?: boolean;
+  budgetUpdate?: Promise<void>;
 }
 
 /** Native goal achievement is one input to validation; this controller never publishes source. */
@@ -80,6 +83,8 @@ export class GoalController {
         this.observe(podId, execution, started);
         current = this.read(podId);
       }
+      execution.ready = true;
+      if (execution.budgetDirty) await this.refreshBudget(podId);
       if (current.state === 'active') {
         for await (const observation of session.observations()) {
           this.observe(podId, execution, observation);
@@ -135,6 +140,44 @@ export class GoalController {
       this.hooks.publish(this.read(podId));
     }
     return this.read(podId);
+  }
+
+  async refreshBudget(podId: string): Promise<void> {
+    const execution = this.active.get(podId);
+    // Stopped sessions consume the updated ledger allowance at their next explicit resume.
+    if (!execution) return;
+    execution.budgetDirty = true;
+    if (!execution.ready) return;
+    const update = (execution.budgetUpdate ?? Promise.resolve())
+      .catch(() => {})
+      .then(async () => {
+        if (this.active.get(podId) !== execution || this.read(podId).executionStopped) return;
+        this.check(podId, execution);
+        if (!execution.session.updateBudget)
+          configurationError(
+            'This native adapter cannot update a running budget',
+            'GOAL_BUDGET_UPDATE_UNAVAILABLE',
+            409,
+          );
+        const latest = await execution.session.get();
+        this.check(podId, execution);
+        if (!latest)
+          configurationError(
+            'Native Goal requires reconciliation',
+            'GOAL_RECONCILIATION_REQUIRED',
+            409,
+          );
+        this.observe(podId, execution, latest);
+        if (latest.state !== 'active') return;
+        this.observe(
+          podId,
+          execution,
+          await execution.session.updateBudget(this.hooks.account(this.read(podId))),
+        );
+        execution.budgetDirty = false;
+      });
+    execution.budgetUpdate = update;
+    await update;
   }
 
   async control(podId: string, revision: number, intent: 'pause' | 'cancel'): Promise<PodGoal> {

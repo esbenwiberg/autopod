@@ -15,8 +15,15 @@ struct SafetyDrillView: View {
     let verifyAuditChain: (() async throws -> AuditChainVerifyResponse)?
     let onSelectPod: ((String) -> Void)?
 
+    var initialSection = "Events"
+    @Environment(\.desktopRedesign) private var redesign
+    @State private var desktopSection = ""
+    private var section: String { desktopSection.isEmpty ? initialSection : desktopSection }
+
     @State private var response: SafetyAnalyticsResponse?
-    @State private var days: Int = 30
+    @Environment(\.desktopAnalyticsWindow) private var workspaceDays
+    @State private var localDays: Int = 30
+    private var days: Int { workspaceDays ?? localDays }
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var isVerifying = false
@@ -26,6 +33,9 @@ struct SafetyDrillView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 headerRow
+                if redesign {
+                    DesktopSectionPicker(title: "", items: ["Events", "Network", "Worktree & audit"], selection: Binding(get: { section }, set: { desktopSection = $0 }), label: { $0 })
+                }
 
                 if let err = loadError {
                     SafetyInlineErrorBanner(message: "Couldn't load safety data: \(err)")
@@ -39,27 +49,28 @@ struct SafetyDrillView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 40)
-                } else {
-                    piiHistogramSection
-                    Divider()
-                    sourceBreakdownSection
-                    Divider()
-                    quarantineHistogramSection
-                    Divider()
-                    injectionTableSection
-                    Divider()
-                    firewallDenialsSection
-                    Divider()
-                    auditChainSection
-                    Divider()
-                    worktreeSafetySection
-                    Divider()
-                    networkPolicySection
+                } else if response != nil {
+                    DesktopAnalyticsColumns {
+                        if !redesign || section == "Events" {
+                            piiHistogramSection.desktopAnalyticsPanel()
+                            sourceBreakdownSection.desktopAnalyticsPanel()
+                            quarantineHistogramSection.desktopAnalyticsPanel()
+                            injectionTableSection.desktopAnalyticsPanel()
+                        }
+                        if !redesign || section == "Network" {
+                            firewallDenialsSection.desktopAnalyticsPanel()
+                            networkPolicySection.desktopAnalyticsPanel()
+                        }
+                        if !redesign || section == "Worktree & audit" {
+                            worktreeSafetySection.desktopAnalyticsPanel()
+                            auditChainSection.desktopAnalyticsPanel()
+                        }
+                    }
                 }
             }
             .padding(24)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(DesktopAnalyticsBackground())
         .task(id: days) { await fetchData() }
     }
 
@@ -73,12 +84,12 @@ struct SafetyDrillView: View {
                 .font(.title3.weight(.semibold))
             Spacer()
             if isLoading { ProgressView().controlSize(.small) }
-            daysPicker
+            if workspaceDays == nil { daysPicker }
         }
     }
 
     private var daysPicker: some View {
-        Picker("Days", selection: $days) {
+        Picker("Days", selection: $localDays) {
             Text("7d").tag(7)
             Text("14d").tag(14)
             Text("30d").tag(30)

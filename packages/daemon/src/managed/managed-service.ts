@@ -39,7 +39,8 @@ export interface ManagedRuntimePort {
       | 'agent-channel-unavailable'
       | 'agent-followup-channel-failed'
       | 'agent-output-invalid'
-      | 'agent-cli-exit';
+      | 'agent-cli-exit'
+      | 'managed-worker-never-started';
   }>;
   stop(runtimeRef: string): Promise<void>;
   send?(runtimeRef: string, message: FollowUpEnvelope, key: string): Promise<void>;
@@ -71,6 +72,11 @@ export interface ManagedPodRow {
 
 /** A subordinate execution service: no legacy queue, series, fallback or user notification path. */
 export class ManagedPodService {
+  catalog?: {
+    assertInstallation(request: ManagedPodRequest, installation: string | undefined): void;
+    options(): unknown;
+    prepare(installation: string, request: unknown): Promise<ManagedPodRequest>;
+  };
   artifactPipeline?: ManagedArtifactPipeline;
   inputs?: ManagedArtifactInputs;
   source?: ManagedSourceDelivery;
@@ -120,6 +126,7 @@ export class ManagedPodService {
   async preflight(raw: unknown, installation?: string): Promise<ManagedPodRequest> {
     if (!this.enabled) throw new Error('managed-lane-disabled');
     const request = validateManagedRequest(raw);
+    this.catalog?.assertInstallation(request, installation);
     admitManagedRequest(request, this.admission, this.now());
     if (request.validation.autopod && !this.validation)
       throw new Error('managed-validation-unavailable');
@@ -359,6 +366,13 @@ export class ManagedPodService {
               this.onTransition?.(row, 'runtime-stopped', state);
             })
             .immediate();
+          if (state === 'killed') {
+            this.db
+              .prepare('UPDATE managed_pods SET revoked=1,stop_requested=1 WHERE pod_id=?')
+              .run(row.pod_id);
+          }
+          // Do not retry a stop against an already removed runtime.
+          continue;
         }
       }
       if (row.revoked || row.stop_requested || this.expired(row)) {

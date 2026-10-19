@@ -12,6 +12,7 @@ func unverifiedTerminationActionsRetainFailedState(action: String) async throws 
   let api = DaemonAPI(baseURL: URL(string: "https://termination-fixture.invalid")!, token: "synthetic",
     session: URLSession(configuration: configuration))
   let store = PodStore()
+  store.configure(api: api)
   store.upsertSession(Pod(id: action, status: .failed, branch: "retained", profileName: "test",
     model: "fixture", startedAt: Date()))
   let handler = ActionHandler(api: api, podStore: store, profileStore: ProfileStore())

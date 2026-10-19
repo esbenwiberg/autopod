@@ -17,6 +17,7 @@ export interface ReviewedContainerBoundary {
   dependencyCache?: { enrollmentId: string; path: string };
   /** Resolve the daemon-owned host workspace for an enrolled repository. */
   sourceWorkspace?(podId: string, repositoryId: string): string;
+  cleanupNetwork?(podId: string): Promise<void>;
   /** Trusted worktree provisioning and scope-derived network enforcement. */
   prepare(podId: string, request: ManagedPodRequest): Promise<ContainerSpawnConfig>;
   /** Attach the account-bound provider channel; hard-token routes may also attach a quota feed. */
@@ -34,6 +35,35 @@ const ROOT_WRITE = `import os,sys
 p=sys.argv[1]; os.makedirs(os.path.dirname(p),mode=0o700,exist_ok=True)
 fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
 with os.fdopen(fd,'w') as f: f.write(sys.argv[2]); f.flush(); os.fsync(f.fileno())
+`;
+
+// Share the supervisor's one-start lock so cancellation before provisioning
+// cannot race a delayed launch into creating a worker after authority withdrawal.
+export const STOP_SUPERVISOR = `import fcntl,json,os,pathlib,sys,time
+root=pathlib.Path(sys.argv[1]);root.mkdir(mode=0o700,parents=True,exist_ok=True)
+(root / 'revoked').write_text('true')
+lock=(root / 'launch.lock').open('a')
+try:
+ fcntl.flock(lock.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+except BlockingIOError: pass
+else:
+ receipt=root / 'execution.json'
+ if not receipt.exists():
+  temporary=root / 'execution.tmp'
+  with temporary.open('w') as stream:
+   json.dump({'state':'cancelled-before-start','specDigest':sys.argv[2],
+              'consumedTokens':0,'observedExit':True},stream)
+   stream.flush();os.fsync(stream.fileno())
+  os.replace(temporary,receipt)
+ fcntl.flock(lock.fileno(),fcntl.LOCK_UN)
+p=root / 'execution.json';deadline=time.monotonic()+3
+while time.monotonic()<deadline:
+ try:
+  value=json.loads(p.read_text())
+  if value.get('specDigest')==sys.argv[2] and value.get('observedExit'):sys.exit(0)
+ except (OSError,ValueError):pass
+ time.sleep(0.05)
+sys.exit(1)
 `;
 
 export const WORKER_WRITABLE = `import os,stat,sys
@@ -66,9 +96,12 @@ export class ManagedContainerRuntime implements ManagedRuntimePort {
   private readonly known = new Map<string, ReviewedContainerBoundary>();
   constructor(
     private readonly boundaries: readonly ReviewedContainerBoundary[],
-    private readonly lookup: (
-      ref: string,
-    ) => { request: ManagedPodRequest; podId: string; createdAt: number } | null,
+    private readonly lookup: (ref: string) => {
+      request: ManagedPodRequest;
+      podId: string;
+      createdAt: number;
+      observedExit?: boolean;
+    } | null,
     private readonly supervisorSource = readFileSync(
       fileURLToPath(new URL('./runtime/supervisor.py', import.meta.url)),
       'utf8',
@@ -92,7 +125,10 @@ export class ManagedContainerRuntime implements ManagedRuntimePort {
       !boundary.manager.extractManagedOutput ||
       !boundary.command.includes(request.route.model) ||
       (request.route.reasoning !== 'none' && !boundary.command.includes(request.route.reasoning)) ||
-      !boundary.image.includes('@sha256:') ||
+      !(
+        /@sha256:[a-f0-9]{64}$/.test(boundary.image) ||
+        (request.route.executionTarget === 'local' && /^sha256:[a-f0-9]{64}$/.test(boundary.image))
+      ) ||
       !(await boundary.quotaReady(request)) ||
       process.env.AUTOPOD_FAIL_OPEN_FIREWALL === '1'
     ) {
@@ -150,6 +186,7 @@ export class ManagedContainerRuntime implements ManagedRuntimePort {
     }
     const allowedMounts = new Set([
       '/output',
+      ...(request.task.contextFiles?.length ? ['/inputs/context'] : []),
       ...scope.repositories.map((repo) => `/repositories/${repo.enrollmentId}`),
       ...request.inputArtifacts.map((input) => input.mountPath),
     ]);
@@ -272,20 +309,25 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
       | 'agent-channel-unavailable'
       | 'agent-followup-channel-failed'
       | 'agent-output-invalid'
-      | 'agent-cli-exit';
+      | 'agent-cli-exit'
+      | 'managed-worker-never-started';
   }> {
     const { boundary, podId } = this.resolve(ref);
-    const result = await boundary.manager.execInContainer(
-      ref,
-      [
-        'python3',
-        '-c',
-        'import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text())',
-        `/run/dispatcher-${podId}/execution.json`,
-      ],
-      { user: 'root' },
-    );
-    if (result.exitCode !== 0) {
+    // An exec against a deleted sandbox throws rather than returning an exit
+    // code. Only the manager's explicit deleted/stopped state confirms exit.
+    const result = await boundary.manager
+      .execInContainer(
+        ref,
+        [
+          'python3',
+          '-c',
+          'import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text())',
+          `/run/dispatcher-${podId}/execution.json`,
+        ],
+        { user: 'root' },
+      )
+      .catch(() => null);
+    if (!result || result.exitCode !== 0) {
       const state = await boundary.manager.getStatus(ref);
       return {
         state:
@@ -320,7 +362,15 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
         | 'agent-followup-channel-failed'
         | 'agent-output-invalid'
         | 'agent-cli-exit'
+        | 'managed-worker-never-started'
         | undefined;
+      if (receipt.observedExit && receipt.state === 'cancelled-before-start') {
+        return {
+          state: 'stopped',
+          consumedTokens: receipt.consumedTokens,
+          limitation: 'managed-worker-never-started',
+        };
+      }
       if (receipt.observedExit) {
         if (receipt.state === 'quota-unavailable') limitation = 'agent-quota-feed-unavailable';
         const diagnostic = await boundary.manager.execInContainer(
@@ -406,7 +456,6 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
       (item) => item.enrollmentId === repositoryId,
     );
     if (
-      request.route.executionTarget !== 'sandbox' ||
       request.outputs.source.mode === 'none' ||
       request.outputs.source.repository !== repositoryId ||
       repository?.access !== 'write'
@@ -418,6 +467,9 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
       throw new Error('managed-agent-exit-failed');
     const destination = boundary.sourceWorkspace?.(podId, repositoryId);
     if (!destination) throw new Error('managed-source-workspace-unavailable');
+    // Local workers write the exact daemon-owned bind mount. Copying it onto itself
+    // would destroy Git metadata; source freezing still verifies the candidate below.
+    if (request.route.executionTarget === 'local') return;
     const assertCurrent = () => {
       const current = this.resolve(ref);
       if (
@@ -443,35 +495,46 @@ if not stat.S_ISDIR(actual.st_mode) or actual.st_uid!=0 or actual.st_mode & 0o02
     await boundary.sendMessage(ref, message, key);
   }
   async cleanup(ref: string): Promise<boolean> {
-    const { boundary } = this.resolve(ref);
-    if ((await this.observe(ref)).state !== 'stopped')
+    const record = this.lookup(ref);
+    if (!record) throw new Error('managed-runtime-unbound');
+    let boundary: ReviewedContainerBoundary;
+    try {
+      boundary = this.known.get(ref) ?? this.boundary(record.request);
+    } catch (error) {
+      // Retiring a model/profile must not strand an already-stopped Azure sandbox.
+      // Only teardown may use the unique configured sandbox manager; no command,
+      // provider channel, source access, or local network policy is inherited.
+      if (
+        !(error instanceof Error) ||
+        error.message !== 'managed-route-unavailable' ||
+        !record.observedExit ||
+        record.request.route.executionTarget !== 'sandbox'
+      )
+        throw error;
+      const matches = this.boundaries.filter(
+        (entry) => entry.route.executionTarget === 'sandbox' && !entry.cleanupNetwork,
+      );
+      const managers = new Set(matches.map((entry) => entry.manager));
+      if (managers.size !== 1 || !matches[0]) throw error;
+      await matches[0].manager.kill(ref);
+      return true;
+    }
+    const { podId, observedExit } = record;
+    // Durable exit evidence permits a retry after container removal succeeded but
+    // network cleanup failed. A Docker 404 alone never supplies exit evidence.
+    if (!observedExit && (await this.observe(ref)).state !== 'stopped')
       throw new Error('managed-cleanup-before-exit');
     await boundary.manager.kill(ref);
-    return (await boundary.manager.getStatus(ref)) === 'deleted';
+    // kill resolves after confirmed removal; Docker projects a subsequent 404 as unknown.
+    await boundary.cleanupNetwork?.(podId);
+    return true;
   }
   async stop(ref: string): Promise<void> {
-    const { boundary, podId } = this.resolve(ref);
-    await boundary.manager.execInContainer(
-      ref,
-      ['python3', '-c', ROOT_WRITE, `/run/dispatcher-${podId}/revoked`, 'true'],
-      { user: 'root' },
-    );
+    const { boundary, podId, request, observedExit } = this.resolve(ref);
+    if (observedExit) return;
     const observed = await boundary.manager.execInContainer(
       ref,
-      [
-        'python3',
-        '-c',
-        `import json,pathlib,sys,time
-p=pathlib.Path(sys.argv[1]);deadline=time.monotonic()+3
-while time.monotonic()<deadline:
- try:
-  if json.loads(p.read_text()).get('observedExit'):sys.exit(0)
- except (OSError,ValueError):pass
- time.sleep(0.05)
-sys.exit(1)
-`,
-        `/run/dispatcher-${podId}/execution.json`,
-      ],
+      ['python3', '-c', STOP_SUPERVISOR, `/run/dispatcher-${podId}`, request.executionSpecDigest],
       { user: 'root' },
     );
     if (observed.exitCode !== 0) throw new Error('managed-stop-not-yet-observed');

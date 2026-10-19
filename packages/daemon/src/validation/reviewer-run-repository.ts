@@ -54,8 +54,11 @@ export class ReviewerRunRepository {
       const total = task
         ? (task.recordedTotalTokens ?? task.recordedInputTokens + task.recordedOutputTokens)
         : pod.inputTokens + pod.outputTokens + totals.tokens;
-      const wholeBudget = task?.tokenBudget ?? budget.tokenBudget;
-      if (task?.budgetCheck?.status === 'unavailable')
+      const wholeBudget = task ? task.tokenBudget : budget.tokenBudget;
+      if (
+        task?.budgetCheck?.status === 'unavailable' &&
+        (wholeBudget === null || budget.tokenBudgetPolicy === 'hard')
+      )
         configurationError(
           'Reconcile task usage before starting a reviewer',
           'REVIEWER_RECONCILIATION_REQUIRED',

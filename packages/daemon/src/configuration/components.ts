@@ -368,6 +368,17 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
       },
     }),
     watchers,
+    async raiseBudget(podId, tokenBudget, expectedBudget, actorId) {
+      const ledger = options.pods.taskExecutions;
+      if (!ledger)
+        configurationError('Task accounting unavailable', 'TASK_IDENTITY_UNAVAILABLE', 503);
+      const summary = ledger.raiseBudget(podId, tokenBudget, expectedBudget, actorId);
+      const members = db
+        .prepare('SELECT pod_id AS podId FROM retained_task_executions WHERE task_id=?')
+        .all(summary.taskId) as { podId: string }[];
+      for (const member of members) await goals.refreshBudget(member.podId);
+      return ledger.snapshot(podId);
+    },
     goals: {
       get: goals.get,
       async control(podId, intent, revision) {

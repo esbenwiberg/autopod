@@ -362,6 +362,9 @@ export class DockerContainerManager implements ContainerManager {
         'NET_ADMIN',
         'SETGID',
         'SETUID',
+        // Managed setup owns mounts; the root supervisor must reap a different uid's
+        // process group before certifying exit. Worker execs drop uid and privileges.
+        ...(config.managedSpecDigest ? ['CHOWN', 'FOWNER', 'DAC_OVERRIDE', 'KILL'] : []),
         ...(config.enableCapabilityDrop ? ['SETPCAP'] : []),
       ];
       // On Linux, host.docker.internal is not auto-added for custom bridge networks.

@@ -149,11 +149,11 @@ func profileMapperRoundTripsPortableReasoningEffort(_ effort: ReasoningEffort) t
   let profile = Profile(name: "app", repoUrl: "https://github.com/org/app.git")
   let response = ProfileResponse()
 
-  #expect(profile.defaultModel == "claude-opus-5")
-  #expect(profile.reviewerModel == "claude-sonnet-5")
+  #expect(profile.defaultModel == "claude-opus-5-5")
+  #expect(profile.reviewerModel == "claude-sonnet-5-5")
   #expect(profile.reasoningEffort == .auto)
-  #expect(response.defaultModel == "claude-opus-5")
-  #expect(response.reviewerModel == "claude-sonnet-5")
+  #expect(response.defaultModel == "claude-opus-5-5")
+  #expect(response.reviewerModel == "claude-sonnet-5-5")
   #expect(response.reasoningEffort == .auto)
 }
 
@@ -224,9 +224,9 @@ func profileMapperRoundTripsPortableReasoningEffort(_ effort: ReasoningEffort) t
   let askAi = escalation?["askAi"] as? [String: Any]
 
   #expect(mapped.defaultModel == "claude-opus-4-8")
-  #expect(mapped.reviewerModel == "claude-sonnet-5")
+  #expect(mapped.reviewerModel == "claude-sonnet-5-5")
   #expect(mapped.escalationAskAiModel == "claude-opus-4-7")
-  #expect(askAi?["model"] as? String == "claude-sonnet-5")
+  #expect(askAi?["model"] as? String == "claude-sonnet-5-5")
 }
 
 @Test func profileMapperRoundTripsProviderAccountId() throws {

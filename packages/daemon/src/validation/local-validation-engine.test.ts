@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import { AutopodError, parseSpecContract } from '@autopod/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -2708,7 +2709,15 @@ describe('validate() — facts + review gate', () => {
       extractDirectoryFromContainer: fail('extractDirectoryFromContainer'),
       getStatus: fail('getStatus'),
       execInContainer,
-      execStreaming: fail('execStreaming'),
+      execStreaming: vi.fn(async function (this: ContainerManager, id, command, options) {
+        const result = await this.execInContainer(id, command, options);
+        return {
+          stdout: Readable.from([result.stdout]),
+          stderr: Readable.from([result.stderr]),
+          exitCode: Promise.resolve(result.exitCode),
+          kill: vi.fn(),
+        };
+      }),
     } as unknown as ContainerManager;
   }
 
@@ -2953,6 +2962,96 @@ human_review: []
     expect(result.infrastructureFailure).toBeUndefined();
     expect(result.lint?.status).toBe('pass');
   });
+
+  it('streams sandbox test results rather than holding one buffered request open', async () => {
+    const cm = stubContainerManager();
+    vi.mocked(cm.execInContainer).mockImplementation(async (_id, command) => {
+      if (command[2]?.includes('long-running-test')) throw new TypeError('fetch failed');
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    vi.mocked(cm.execStreaming).mockResolvedValue({
+      stdout: Readable.from(['progress\n', 'observed success\n']),
+      stderr: Readable.from([]),
+      exitCode: Promise.resolve(0),
+      kill: vi.fn(),
+    });
+    const result = await createLocalValidationEngine(cm).validate(
+      baseConfig({
+        executionTarget: 'sandbox',
+        testCommand: 'long-running-test',
+        startCommand: '',
+        smokePages: [],
+      }),
+    );
+    expect(result.test?.status).toBe('pass');
+    expect(result.test?.stdout).toContain('observed success');
+    expect(cm.execStreaming).toHaveBeenCalledTimes(1);
+    expect(
+      vi
+        .mocked(cm.execInContainer)
+        .mock.calls.some(([, cmd]) => cmd[2]?.includes('long-running-test')),
+    ).toBe(false);
+  });
+
+  it('retains buffered stream diagnostics when the sandbox exit is unverified', async () => {
+    const cm = stubContainerManager();
+    const exitCode = Promise.reject(
+      new AutopodError('Test process exit was not observed', 'EXEC_EXIT_UNVERIFIED', 409),
+    );
+    void exitCode.catch(() => {});
+    vi.mocked(cm.execStreaming).mockResolvedValue({
+      stdout: Readable.from(['test suite started\n', 'last test: preserves artifacts\n']),
+      stderr: Readable.from(['connection closed before exit\n']),
+      exitCode,
+      kill: vi.fn(),
+    });
+    const result = await createLocalValidationEngine(cm).validate(
+      baseConfig({
+        executionTarget: 'sandbox',
+        testCommand: 'unknown-outcome-test',
+        startCommand: '',
+        smokePages: [],
+      }),
+    );
+    expect(result.infrastructureFailure).toMatchObject({
+      phase: 'test',
+      code: 'EXEC_EXIT_UNVERIFIED',
+      retryable: false,
+    });
+    expect(result.test?.status).toBe('skip');
+    expect(result.test?.stdout).toContain('last test: preserves artifacts');
+    expect(result.test?.stdout).toContain('connection closed before exit');
+    expect(cm.execStreaming).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['EXEC_EXIT_UNVERIFIED', 'AZURE_SANDBOX_EXEC_INVALID_RESPONSE'])(
+    'blocks an unknown sandbox test outcome without replay: %s',
+    async (code) => {
+      const cm = stubContainerManager();
+      vi.mocked(cm.execInContainer).mockImplementation(async (_id, command) => {
+        if (command[2]?.includes('unknown-outcome-test')) {
+          throw new AutopodError('Test process exit was not observed', code, 502);
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      });
+      const result = await createLocalValidationEngine(cm).validate(
+        baseConfig({
+          executionTarget: 'sandbox',
+          testCommand: 'unknown-outcome-test',
+          startCommand: '',
+          smokePages: [],
+        }),
+      );
+      expect(result.infrastructureFailure).toMatchObject({ phase: 'test', code, retryable: false });
+      expect(result.overall).toBe('fail');
+      expect(result.test?.status).toBe('skip');
+      expect(
+        vi
+          .mocked(cm.execInContainer)
+          .mock.calls.filter(([, cmd]) => cmd[2]?.includes('unknown-outcome-test')),
+      ).toHaveLength(1);
+    },
+  );
 
   it('classifies typed sandbox transport failures by validation phase', async () => {
     const cases: Array<{
@@ -4590,6 +4689,92 @@ describe('validate() — pre-validation worktree reset', () => {
     expect(first.command[2]).toContain('git reset --hard HEAD');
     expect(first.command[2]).toContain('git clean -fd');
   });
+
+  it.each([true, false])(
+    'preserves sandbox outputs and admits only its verified checkpoint (owned=%s)',
+    async (owned) => {
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-checkpoint-reset-'));
+      const sandbox = path.join(tmpDir, 'sandbox');
+      const host = path.join(tmpDir, 'host');
+      const git = (...args: string[]) => execFileAsync('git', args, { cwd: sandbox });
+      try {
+        await fs.mkdir(sandbox);
+        await git('init', '--initial-branch=main');
+        await git('config', 'user.email', 'test@example.invalid');
+        await git('config', 'user.name', 'Test');
+        await git('config', 'commit.gpgsign', 'false');
+        await fs.writeFile(path.join(sandbox, 'README.md'), 'source baseline\n');
+        await git('add', '.');
+        await git('commit', '-m', 'baseline');
+        const sourceHead = (await git('rev-parse', 'HEAD')).stdout.trim();
+        await fs.mkdir(path.join(sandbox, 'dispatcher-output'));
+        await fs.writeFile(
+          path.join(sandbox, 'dispatcher-output', 'implement.md'),
+          'complete report\n',
+        );
+        await fs.writeFile(path.join(sandbox, 'proof.json'), '{"passed":true}\n');
+        await git('add', '.');
+        const tree = (await git('write-tree')).stdout.trim();
+        const snapshot = (
+          await execFileAsync(
+            'git',
+            ['commit-tree', tree, '-p', sourceHead, '-m', 'autopod sandbox checkpoint'],
+            {
+              cwd: sandbox,
+              env: {
+                ...process.env,
+                GIT_AUTHOR_NAME: 'Autopod',
+                GIT_AUTHOR_EMAIL: 'autopod@localhost',
+                GIT_COMMITTER_NAME: 'Autopod',
+                GIT_COMMITTER_EMAIL: 'autopod@localhost',
+              },
+            },
+          )
+        ).stdout.trim();
+        await git('reset', '--hard', snapshot);
+        await execFileAsync('git', ['clone', '--local', sandbox, host]);
+        await execFileAsync(
+          'git',
+          ['update-ref', `refs/autopod-quarantine/${owned ? 'pod-test' : 'other-pod'}/1`, snapshot],
+          { cwd: host },
+        );
+        // A daemon checkpoint does not advance the worker's live HEAD/index.
+        await git('reset', '--mixed', sourceHead);
+        const { cm } = recordingContainerManager();
+        vi.mocked(cm.execInContainer).mockImplementation(async (_id, command) => {
+          const result = await execFileAsync(command[0] ?? 'sh', command.slice(1), {
+            cwd: sandbox,
+          });
+          return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
+        });
+        const validation = createLocalValidationEngine(cm).validate(
+          minimalConfig({
+            executionTarget: 'sandbox',
+            worktreePath: host,
+          }),
+        );
+        if (owned) expect((await validation).overall).toBe('pass');
+        else {
+          await expect(validation).rejects.toThrow(
+            'Verified sandbox validation checkpoint unavailable',
+          );
+          expect(cm.execInContainer).not.toHaveBeenCalled();
+        }
+        expect(
+          await fs.readFile(path.join(sandbox, 'dispatcher-output', 'implement.md'), 'utf8'),
+        ).toBe('complete report\n');
+        expect(await fs.readFile(path.join(sandbox, 'proof.json'), 'utf8')).toBe(
+          '{"passed":true}\n',
+        );
+        expect((await git('rev-parse', 'HEAD')).stdout.trim()).toBe(owned ? snapshot : sourceHead);
+        expect(
+          await fs.readFile(path.join(host, 'dispatcher-output', 'implement.md'), 'utf8'),
+        ).toBe('complete report\n');
+      } finally {
+        await fs.rm(tmpDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('uses /workspace for cleanup even when buildWorkDir is set', async () => {
     // Cleanup is deliberately NOT scoped to buildWorkDir — we want untracked
