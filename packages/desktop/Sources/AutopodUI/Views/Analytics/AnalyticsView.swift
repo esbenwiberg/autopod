@@ -3,7 +3,7 @@ import SwiftUI
 
 // MARK: - AnalyticsView (Overview card grid)
 
-/// Analytics Overview — three clickable cards in the middle pane.
+/// Analytics Overview — independently loaded cards in the middle pane.
 /// Drill-in content is rendered by `AnalyticsRightPaneView` when a card is
 /// selected. `selectedCard` is held as `@State` in `MainView` so the selection
 /// persists across sidebar navigation.
@@ -33,20 +33,14 @@ public struct AnalyticsView: View {
     @Environment(\.desktopAnalyticsWindow) private var workspaceDays
     private var days: Int { workspaceDays ?? 30 }
     @State private var scores: [PodQualityScore] = []
-    @State private var scoresLoadError: String?
     @State private var costData: CostAnalyticsResponse?
-    @State private var costLoadError: String?
     @State private var reliabilityData: ReliabilityAnalyticsResponse?
-    @State private var reliabilityLoadError: String?
     @State private var qualityData: QualityAnalyticsResponse?
-    @State private var qualityLoadError: String?
     @State private var safetyData: SafetyAnalyticsResponse?
-    @State private var safetyLoadError: String?
     @State private var throughputData: ThroughputAnalyticsResponse?
-    @State private var throughputLoadError: String?
     @State private var escalationsData: EscalationsAnalyticsResponse?
     @State private var modelsData: ModelsAnalyticsResponse?
-    @State private var isLoading = true
+    @State private var completedWindows: [AnalyticsCardKind: Int] = [:]
     @State private var loadErrors: [String: String] = [:]
     @State private var memoryData: MemoryAnalyticsResponse?
 
@@ -87,8 +81,7 @@ public struct AnalyticsView: View {
             guard q.summary.totalPodsScored > 0 else { return "—" }
             return "\(Int(q.summary.avgScore.rounded()))"
         }
-        if qualityLoadError != nil { return "Error" }
-        if scoresLoadError != nil { return "Error" }
+        if loadErrors["Process health"] != nil { return "Error" }
         let measured = scores.compactMap(\.score)
         guard !measured.isEmpty else { return "—" }
         let total = measured.reduce(0, +)
@@ -306,15 +299,6 @@ public struct AnalyticsView: View {
                     if redesign { Text("Select an area to inspect its cohort, breakdown and evidence. Status reflects loaded records; other metrics use the selected trailing window.").font(.caption).foregroundStyle(.secondary) }
                 }
 
-                if isLoading { ProgressView("Loading analytics…").font(.caption) }
-                if !loadErrors.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(loadErrors.keys.sorted(), id: \.self) { key in
-                            Text("\(key): \(loadErrors[key] ?? "Unavailable")").font(.caption).foregroundStyle(.orange)
-                        }
-                        Text("Unavailable metrics are not zero. Open an area or refresh to retry.").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
                 LazyVGrid(
                     columns: redesign ? Array(repeating: GridItem(.flexible(), spacing: 18), count: width >= 1100 ? 3 : width >= 680 ? 2 : 1) : [GridItem(.adaptive(minimum: 280), spacing: 12)],
                     spacing: 12
@@ -329,9 +313,13 @@ public struct AnalyticsView: View {
                                 direction: AnalyticsCardDelta.Direction($0.deltaVsPrior.direction)
                             )
                         },
+                        isLoading: loadCost != nil && completedWindows[.cost] != days,
                         isSelected: selectedCard == .cost,
                         onClick: { selectedCard = selectedCard == .cost ? nil : .cost }
                     )
+                    .task(id: days) {
+                        await loadMetric(.cost, label: "Cost", using: loadCost) { costData = $0 }
+                    }
                     AnalyticsCard(
                         title: "Outcome Quality",
                         value: reliabilityCardValue,
@@ -343,62 +331,94 @@ public struct AnalyticsView: View {
                             )
                         },
                         subline: reliabilityDataIfPopulated == nil ? nil : "first validation passed; no rework",
+                        isLoading: loadReliability != nil && completedWindows[.reliability] != days,
                         isSelected: selectedCard == .reliability,
                         onClick: { selectedCard = selectedCard == .reliability ? nil : .reliability }
                     )
+                    .task(id: days) {
+                        await loadMetric(.reliability, label: "Outcome quality", using: loadReliability) { reliabilityData = $0 }
+                    }
                     AnalyticsCard(
                         title: "Throughput",
                         value: throughputCardValue,
                         sparkline: throughputCardSparkline,
                         delta: throughputCardDelta,
                         subline: throughputCardSubline,
+                        isLoading: loadThroughputAnalytics != nil && completedWindows[.throughput] != days,
                         isSelected: selectedCard == .throughput,
                         onClick: { selectedCard = selectedCard == .throughput ? nil : .throughput }
                     )
+                    .task(id: days) {
+                        await loadMetric(.throughput, label: "Throughput", using: loadThroughputAnalytics) { throughputData = $0 }
+                    }
                     AnalyticsCard(
                         title: "Process Health",
                         value: avgQualityValue,
                         sparkline: qualityCardSparkline,
                         delta: qualityCardDelta,
                         subline: qualityCardSubline,
+                        isLoading: (loadQualityAnalytics != nil || loadScores != nil) && completedWindows[.quality] != days,
                         isSelected: selectedCard == .quality,
                         onClick: { selectedCard = selectedCard == .quality ? nil : .quality }
                     )
+                    .task(id: days) {
+                        if loadQualityAnalytics != nil {
+                            await loadMetric(.quality, label: "Process health", using: loadQualityAnalytics) { qualityData = $0 }
+                        } else if let loadScores {
+                            await loadMetric(.quality, label: "Process health", using: { _ in try await loadScores() }) { scores = $0 }
+                        }
+                    }
                     AnalyticsCard(
                         title: "Safety",
                         value: safetyCardValue,
                         sparkline: safetyCardSparkline,
                         delta: safetyCardDelta,
                         subline: safetyCardSubline,
+                        isLoading: loadSafetyAnalytics != nil && completedWindows[.safety] != days,
                         isSelected: selectedCard == .safety,
                         onClick: { selectedCard = selectedCard == .safety ? nil : .safety }
                     )
+                    .task(id: days) {
+                        await loadMetric(.safety, label: "Safety", using: loadSafetyAnalytics) { safetyData = $0 }
+                    }
                     AnalyticsCard(
                         title: "Escalations",
                         value: escalationsCardValue,
                         sparkline: escalationsCardSparkline,
                         delta: escalationsCardDelta,
                         subline: escalationsCardSubline,
+                        isLoading: loadEscalationsAnalytics != nil && completedWindows[.escalations] != days,
                         isSelected: selectedCard == .escalations,
                         onClick: { selectedCard = selectedCard == .escalations ? nil : .escalations }
                     )
+                    .task(id: days) {
+                        await loadMetric(.escalations, label: "Escalations", using: loadEscalationsAnalytics) { escalationsData = $0 }
+                    }
                     AnalyticsCard(
                         title: "Models",
                         value: modelsCardValue,
                         sparkline: modelsCardSparkline,
                         delta: modelsCardDelta,
                         subline: modelsCardSubline,
+                        isLoading: loadModelsAnalytics != nil && completedWindows[.models] != days,
                         isSelected: selectedCard == .models,
                         onClick: { selectedCard = selectedCard == .models ? nil : .models }
                     )
+                    .task(id: days) {
+                        await loadMetric(.models, label: "Models", using: loadModelsAnalytics) { modelsData = $0 }
+                    }
                     AnalyticsCard(
                         title: "Memory loop",
                         value: memoryCardValue,
                         delta: memoryCardDelta,
                         subline: memoryCardSubline,
+                        isLoading: loadMemoryAnalytics != nil && completedWindows[.memory] != days,
                         isSelected: selectedCard == .memory,
                         onClick: { selectedCard = selectedCard == .memory ? nil : .memory }
                     )
+                    .task(id: days) {
+                        await loadMetric(.memory, label: "Memory loop", using: loadMemoryAnalytics) { memoryData = $0 }
+                    }
                     AnalyticsCard(
                         title: "Status distribution",
                         value: dominantStatusValue,
@@ -406,102 +426,42 @@ public struct AnalyticsView: View {
                         onClick: { selectedCard = selectedCard == .status ? nil : .status }
                     )
                 }
+                if !loadErrors.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(loadErrors.keys.sorted(), id: \.self) { key in
+                            Text("\(key): \(loadErrors[key] ?? "Unavailable")").font(.caption).foregroundStyle(.orange)
+                        }
+                        Text("Unavailable metrics are not zero. Open an area or refresh to retry.").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
             }
             .padding(24)
         }
         .background(DesktopAnalyticsBackground())
-        .task(id: days) {
-            isLoading = true
-            defer { isLoading = false }
-            // All fetches are independent — kick off concurrently and await all.
-            let scoreTask = Task {
-                if let loadScores {
-                    do {
-                        scores = try await loadScores()
-                        scoresLoadError = nil
-                    } catch {
-                        scoresLoadError = error.localizedDescription
-                    }
-                }
-            }
-            let costTask = Task {
-                if let loadCost {
-                    do {
-                        costData = try await loadCost(days)
-                        costLoadError = nil; loadErrors["Cost"] = nil
-                    } catch {
-                        costLoadError = error.localizedDescription; loadErrors["Cost"] = error.localizedDescription
-                    }
-                }
-            }
-            let reliabilityTask = Task {
-                if let loadReliability {
-                    do {
-                        reliabilityData = try await loadReliability(days)
-                        reliabilityLoadError = nil; loadErrors["Outcome quality"] = nil
-                    } catch {
-                        reliabilityLoadError = error.localizedDescription; loadErrors["Outcome quality"] = error.localizedDescription
-                    }
-                }
-            }
-            let qualityTask = Task {
-                if let loadQualityAnalytics {
-                    do {
-                        qualityData = try await loadQualityAnalytics(days)
-                        qualityLoadError = nil; loadErrors["Process health"] = nil
-                    } catch {
-                        qualityLoadError = error.localizedDescription; loadErrors["Process health"] = error.localizedDescription
-                    }
-                }
-            }
-            let safetyTask = Task {
-                if let loadSafetyAnalytics {
-                    do {
-                        safetyData = try await loadSafetyAnalytics(days)
-                        safetyLoadError = nil; loadErrors["Safety"] = nil
-                    } catch {
-                        safetyLoadError = error.localizedDescription; loadErrors["Safety"] = error.localizedDescription
-                    }
-                }
-            }
-            let throughputTask = Task {
-                if let loadThroughputAnalytics {
-                    do {
-                        throughputData = try await loadThroughputAnalytics(days)
-                        throughputLoadError = nil; loadErrors["Throughput"] = nil
-                    } catch {
-                        throughputLoadError = error.localizedDescription; loadErrors["Throughput"] = error.localizedDescription
-                    }
-                }
-            }
-            let escalationsTask = Task {
-                if let loadEscalationsAnalytics {
-                    do { escalationsData = try await loadEscalationsAnalytics(days); loadErrors["Escalations"] = nil }
-                    catch { loadErrors["Escalations"] = error.localizedDescription }
-                }
-            }
-            let modelsTask = Task {
-                if let loadModelsAnalytics {
-                    do { modelsData = try await loadModelsAnalytics(days); loadErrors["Models"] = nil }
-                    catch { loadErrors["Models"] = error.localizedDescription }
-                }
-            }
-            let memoryTask = Task {
-                if let loadMemoryAnalytics {
-                    do { memoryData = try await loadMemoryAnalytics(days); loadErrors["Memory loop"] = nil }
-                    catch { loadErrors["Memory loop"] = error.localizedDescription }
-                }
-            }
-            await scoreTask.value
-            await costTask.value
-            await reliabilityTask.value
-            await qualityTask.value
-            await safetyTask.value
-            await throughputTask.value
-            await escalationsTask.value
-            await modelsTask.value
-            await memoryTask.value
+    }
+
+    /// A card finishes independently. Cancelled requests cannot overwrite a newer window.
+    @MainActor
+    private func loadMetric<Value>(
+        _ kind: AnalyticsCardKind,
+        label: String,
+        using loader: ((Int) async throws -> Value)?,
+        apply: (Value) -> Void
+    ) async {
+        guard let loader else { return }
+        let requestedDays = days
+        completedWindows[kind] = nil
+        loadErrors[label] = nil
+        do {
+            let value = try await loader(requestedDays)
+            try Task.checkCancellation()
+            apply(value)
+            loadErrors[label] = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            loadErrors[label] = error.localizedDescription
         }
+        completedWindows[kind] = requestedDays
     }
 }
 

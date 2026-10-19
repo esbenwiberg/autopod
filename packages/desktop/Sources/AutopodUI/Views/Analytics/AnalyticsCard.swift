@@ -48,6 +48,7 @@ public struct AnalyticsCard: View {
     public let delta: AnalyticsCardDelta?
     /// Optional secondary label rendered below the delta line (e.g. "3 red pods").
     public let subline: String?
+    public let isLoading: Bool
     public let isSelected: Bool
     public let onClick: () -> Void
 
@@ -57,6 +58,7 @@ public struct AnalyticsCard: View {
         sparkline: [Double]? = nil,
         delta: AnalyticsCardDelta? = nil,
         subline: String? = nil,
+        isLoading: Bool = false,
         isSelected: Bool = false,
         onClick: @escaping () -> Void
     ) {
@@ -65,6 +67,7 @@ public struct AnalyticsCard: View {
         self.sparkline = sparkline
         self.delta = delta
         self.subline = subline
+        self.isLoading = isLoading
         self.isSelected = isSelected
         self.onClick = onClick
     }
@@ -74,26 +77,38 @@ public struct AnalyticsCard: View {
     @State private var isHovered = false
 
     public var body: some View {
-        if redesign { redesignedCard } else { legacyCard }
+        Group {
+            if redesign { redesignedCard } else { legacyCard }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(isLoading ? "Loading" : [value, subline, delta?.value].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { onClick() }
     }
     private var redesignedCard: some View {
         Button(action: onClick) {
-            VStack(alignment: .leading, spacing: 13) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack { Text(title).font(.callout).foregroundStyle(.secondary); Spacer(); Image(systemName: "arrow.up.right").font(.caption2).foregroundStyle(.secondary) }
-                HStack(alignment: .center, spacing: 20) {
-                    Text(value).font(.system(size: 31, weight: .medium)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
-                    Spacer(minLength: 0)
-                    if let sparkline { CardSparklineView(values: sparkline).frame(width: 110, height: 36) }
-                }
-                if let subline { Text(subline).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
-                if let delta {
-                    Label(delta.value, systemImage: delta.direction.systemImage).font(.caption).foregroundStyle(DesktopTheme.accent)
+                if isLoading {
+                    skeletonContent
+                } else {
+                    HStack(alignment: .center, spacing: 20) {
+                        Text(value).font(.system(size: 31, weight: .medium)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+                        Spacer(minLength: 0)
+                        if let sparkline { CardSparklineView(values: sparkline).frame(width: 110, height: 36) }
+                    }
+                    if let subline { Text(subline).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                    if let delta {
+                        Label(delta.value, systemImage: delta.direction.systemImage).font(.caption).foregroundStyle(DesktopTheme.accent)
+                    }
                 }
                 Spacer(minLength: 0)
                 Rectangle().fill(DesktopTheme.line).frame(height: 1)
                 Text(title == "Status distribution" ? "Loaded records · current snapshot" : "Trailing \(window ?? 30) days · inspect evidence ↗")
                     .font(.caption2).foregroundStyle(.secondary)
-            }.padding(22).frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
+            }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: 214, alignment: .topLeading)
                 .contentShape(Rectangle())
         }.buttonStyle(.plain)
             .background(isHovered || isSelected ? DesktopTheme.selection : DesktopTheme.canvas, in: RoundedRectangle(cornerRadius: 9))
@@ -107,31 +122,39 @@ public struct AnalyticsCard: View {
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
 
-                Text(value)
-                    .font(.largeTitle.bold())
+                if isLoading {
+                    skeletonContent
+                } else {
+                    Text(value)
+                        .font(.largeTitle.bold())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
 
-                if let sparkline {
-                    CardSparklineView(values: sparkline)
-                        .frame(height: 36)
-                }
-
-                if let delta {
-                    HStack(spacing: 4) {
-                        Image(systemName: delta.direction.systemImage)
-                        Text(delta.value)
+                    if let sparkline {
+                        CardSparklineView(values: sparkline)
+                            .frame(height: 36)
                     }
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(delta.direction.color)
-                }
 
-                if let subline {
-                    Text(subline)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if let delta {
+                        HStack(spacing: 4) {
+                            Image(systemName: delta.direction.systemImage)
+                            Text(delta.value)
+                        }
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(delta.direction.color)
+                    }
+
+                    if let subline {
+                        Text(subline)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
                 }
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 210, alignment: .topLeading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -156,6 +179,26 @@ public struct AnalyticsCard: View {
         .animation(.easeOut(duration: 0.15), value: isHovered)
         .animation(.easeOut(duration: 0.15), value: isSelected)
         .onHover { isHovered = $0 }
+    }
+
+    private var skeletonContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 20) {
+                skeletonBar(width: 116, height: 32)
+                Spacer(minLength: 0)
+                if redesign { skeletonBar(width: 110, height: 36) }
+            }
+            if !redesign { skeletonBar(width: nil, height: 36) }
+            skeletonBar(width: 150, height: 12)
+            skeletonBar(width: 74, height: 12)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func skeletonBar(width: CGFloat?, height: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 4)
+            .fill(Color.primary.opacity(0.08))
+            .frame(width: width, height: height)
     }
 }
 
