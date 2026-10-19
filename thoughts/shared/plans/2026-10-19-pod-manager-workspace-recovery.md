@@ -1,6 +1,6 @@
 # Slice31: complete workspace and recovery ownership
 
-Status: IMPLEMENTED — expanded regression/frozen qualification in progress.
+Status: COMPLETE — frozen implementation qualified and pushed.
 Date:2026-10-19. Qualified source:c00a32d0871721658ef22019955109f478bc3e0c.
 Documentation baseline:a5f98e7fe16a473f59f8da1acc8d3a1c16235e78.
 Branch:codex/pod-manager-workspace.
@@ -240,10 +240,10 @@ requires<=1,500line composition/delegates,327unit/73member/mutable-owner reconci
 and34's final frozen uncached clean pushed qualification. No merge/deployment implied.
 
 Automated:
-- [ ] Expanded SQLite-enabled regression passes with no new skip.
-- [ ] Full frozen uncached pipeline passes with actual runtime/count/gate evidence.
-- [ ] Proof/frozen hashes/clean pushed revision verified.
-- [ ] Plan/roadmap mark31 after proof; complete32research saved.
+- [x] Expanded SQLite-enabled regression passes with no new skip.
+- [x] Full frozen uncached pipeline passes with actual runtime/count/gate evidence.
+- [x] Proof/frozen hashes/clean pushed revision verified.
+- [x] Plan/roadmap mark31 after proof; complete32research saved.
 Manual:none for bounded scope; integration/deployment are separate actions.
 
 ## Compatibility and rollback
@@ -297,3 +297,46 @@ Allsource/test bytes are frozen. Evidence in .autopod-data/workspace-recovery in
 recipes, movement.json, public-comparison.json, semantic reports, commands/exits/logs
 and frozen-manifest.json. Expanded/full qualification, final proof/clean push and32
 research remain before31is complete. Full goal stays active through34.
+
+## Final qualification — 2026-10-19
+
+PROVEN. Frozen implementation33a5fc9c1d945a95e9b213df5499f07138a3d78f is pushed.
+Final full pipeline passes9,002Vitest cases/587passing files and35Node script cases;
+same ten inherited gated cases, no new skip. Expanded272-suite regression passes5,229
+cases/four inherited gates. Final direct72-suite run passes573cases, including53new
+cases/fifteen new suites and six actual private-file SQLite reopen boundaries. Frozen
+2,169package/script hashes and six root controls match after all qualification.
+
+Full command:
+
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+Pinned versions observed:Node22.23.3/pnpm9.15.4/SQLite3.49.2. Install uses frozen lock
+without fallback; all three Turbo groups are uncached(7/11/15tasks). Root lint retains
+82existing warnings and only inherited task-local2MiB processing allowance. No rule,
+dependency/configuration/selection relaxation. Build/declarations/typecheck, tests,
+dependency audit and secret scan pass. Supplemental21source diagnostics remain the
+same21original baseline diagnostics; allsixteen new test/fixture files have zero.
+
+| Claim | Observable evidence | Result |
+|---|---|---|
+| Complete workspace/recovery ownership retains original policies, receivers and state |27bodies, complete branch arrow, eight exact initializers/equivalent coordinator type,17recipes; unchanged1,192public cases;573direct cases | PROVEN |
+| Local persistence, cleanup failure and source retention survive actual boundaries |Six real private SQLite reopens; actual Git commitFiles retains unrelated staged code;272affected suites and full frozen pipeline | PROVEN within controlled external adapters |
+
+Evidence:.autopod-data/workspace-recovery/proof.json, frozen-manifest.json,
+movement.json, public-comparison.json, semantic reports and named commands/logs/exits.
+Initial scaffolding/fixture corrections and superseded direct-report limits remain
+recorded honestly. Expanded/full qualification pass on their first final runs; no
+runtime threshold relaxation/retry was required. Slice32research's first AST visitor
+had research-only recursive-node error; corrected script/log retained and product
+bytes unaffected. Saved research covers all27remaining admission/query/series bodies.
+
+Limits persist:controlled provider/container/Git transport/PIM/reconcile adapters;
+no live external/cloud/container/provider acceptance, messages, PR/main integration or
+deployment. Stop-watchdog does not drain dispatched operations; retry timer and one25s
+deletion deadline retain original behavior. No stronger atomicity/replay/termination
+claim. Original native fix alias limitation remains unchanged. Goal stays ACTIVE.
+
+Next:Slice32 admission/queries/series, then33stable facade/composition and34final
+327unit/73member/mutable-owner reconciliation with<=1,500line manager. Three milestones
+remain. Research:../research/2026-10-19-pod-manager-admission-queries.md.
