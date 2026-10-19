@@ -1,6 +1,6 @@
 # Slice 34: final ownership and regression qualification
 
-Status: IN PROGRESS. Authorized phase group: research → plan → audit/implement → qualify,
+Status: COMPLETE. Authorized phase group: research → plan → audit/implement → qualify,
 under the remaining-roadmap execution authority. Baseline: edd4fa089c6cad8407fb853fa0d389d9c129a581;
 product implementation: 0501aa6826dc80d0a42e74a866f233cd3de76e8b.
 
@@ -40,9 +40,9 @@ Recheck33architecture verifier on final source, all73entries,72declared protocol
 manager<=1500/public bodies<=10, no residual algorithms or broad domain manager imports.
 
 Automated criteria:
-- [ ] Exactly327unique rows reconcile without an unresolved or arbitrary owner.
-- [ ] All8special rows have explicit complete provenance; all73public entries reconcile.
-- [ ] Architecture and original-reference/default/protocol checks pass on final bytes.
+- [x] Exactly327unique rows reconcile without an unresolved or arbitrary owner.
+- [x] All8special rows have explicit complete provenance; all73public entries reconcile.
+- [x] Architecture and original-reference/default/protocol checks pass on final bytes.
 
 Human verification: no new manual acceptance is required for this local audit. Existing
 visual plans remain reference material; do not assert new visual/live acceptance.
@@ -59,9 +59,9 @@ Add focused missing lifecycle assertions only where needed, without altering pol
 fixtures, thresholds, skips or implementation merely to obtain green results.
 
 Automated criteria:
-- [ ] All26bindings have creating owner, consumers and executed cleanup/stop evidence.
-- [ ] Relevant owner, race, recovery, public and SQLite/reopen suites pass on final tree.
-- [ ] Any new assertions have scoped semantic checks; inherited diagnostics remain explicit.
+- [x] All26bindings have creating owner, consumers and executed cleanup/stop evidence.
+- [x] Relevant owner, race, recovery, public and SQLite/reopen suites pass on final tree.
+- [x] Any new assertions have scoped semantic checks; inherited diagnostics remain explicit.
 
 Human verification: none newly required. Product/persistence/credential policy changes
 would require a separate decision and are outside this audit.
@@ -77,11 +77,11 @@ Recheck hashes, public assertion bytes, architecture and all ownership reports a
 Commit/push authorized checkpoints and final report; no merge/deploy/PR is included.
 
 Automated criteria:
-- [ ] Frozen install, lint/build/DTS/typecheck/tests/audit/secret scan pass, no new skips.
-- [ ] Original1192public assertions unchanged; real SQLite and relevant recovery evidence pass.
-- [ ] Final source/test/root hashes match, architecture and327/73/26reports pass.
-- [ ] Clean pushed revision recorded; roadmap and this plan accurately completed.
-- [ ] Only after all required evidence passes, mark the active goal complete.
+- [x] Frozen install, lint/build/DTS/typecheck/tests/audit/secret scan pass, no new skips.
+- [x] Original1192public assertions unchanged; real SQLite and relevant recovery evidence pass.
+- [x] Final source/test/root hashes match, architecture and327/73/26reports pass.
+- [x] Clean pushed revision recorded; roadmap and this plan accurately completed.
+- [x] Only after all required evidence passes, mark the active goal complete.
 
 Human verification: live Docker/Azure/paid provider execution and integration/deployment
 are separately authorized work, not final acceptance gates or claims for this branch.
@@ -101,3 +101,57 @@ No performance claim is introduced by documentation and verification work.
 - ../research/2026-10-19-pod-manager-final-qualification.md (complete research)
 - ../plans/2026-10-19-pod-manager-facade-composition.md (Slice33qualification)
 - .autopod-data/facade-composition/proof.json and /tmp/verify-slice33-movement.cjs
+
+## Final outcome — 2026-10-19
+
+PROVEN on `234a3da83b0d54913d88a299a71b63e189e5d33b`. All 327 original units
+reconcile: 319 exact body/initializer/type rows and eight fully anchored split,
+composition or shorthand rows. The eight explicit proofs cover the complete original
+process/approval/validation algorithms and their final partitions, not facade samples.
+Thirty-one complete stage/port/source recipes match. All value owners are runtime
+reachable; all 73 public entries map to original rows. The final facade/contracts
+retain 72 declared protocols, 109 construction statements and 43 original references,
+including defaults, lazy receivers and original shorthand identity. Manager remains
+1,421 lines, public bodies at most 10 lines, with no residual algorithms, broad domain
+manager types or new runtime cycle.
+
+All 26 original mutable bindings have a single creating owner, explicit cooperating
+consumers and tested release/stop paths. Eighty executed cases support the stated
+cleanup contracts. The new seven-case suite directly exercises the actual composed
+validation workflows and accepted-extension recovery lifetime. It preserves replacement
+controllers and verifies current-owner release after success/supersession and extension
+failure. No product source changes were needed. One test suite was added; all 2,199
+predecessor package/script files remain unchanged. The new test file has zero semantic
+diagnostics, and scoped lint passes.
+
+Final direct qualification passes 920 cases in 108 suites without skips. All 1,192
+public case names/statuses and original assertion bytes are unchanged. The complete
+uncached repository pipeline passes 9,060 Vitest cases across 601 passing files plus
+35 Node script cases. The same ten infrastructure/live gates and 82 inherited lint
+warnings remain. Frozen install succeeded without fallback; build, declarations,
+typecheck, lint, tests, dependency audit and secret scan pass under Node 22.23.3,
+pnpm 9.15.4 and native SQLite 3.49.2. Turbo groups 7/11/15 are uncached. Only the inherited
+task-local 2 MiB lint input allowance applies; no rule, fixture, threshold or skip was
+relaxed. All 2,200 package/script hashes plus six root controls match after validation.
+All inventory, partition, architecture, public ownership and cleanup audits were rerun
+after the full pipeline and pass on those exact bytes.
+
+The initial new-test fixture referenced a non-exported local test helper and an unspied
+logger. It was corrected to the existing repository validation mock and an actual spy.
+An initial audit invocation had an options error, and the first cleanup mapping read
+before the expanded report finished. These were tooling/test-only corrections; logs
+remain. Final direct, public and full frozen runs pass; no full-run retry was needed.
+
+Complete row-by-row report:
+../verification/2026-10-19-pod-manager-final-qualification.md.
+Machine evidence: .autopod-data/final-qualification/proof.json, ownership-audit.json,
+partition-audit.json, mutable-state-audit.json, final-architecture.json, frozen manifests
+and command logs/exits. Earlier slice evidence remains in place. Actual SQLite reopens,
+local HTTP/Git/files/queue and controlled external adapters establish local compatibility;
+no new live Docker/Azure/paid-provider, PR/main integration or deployment acceptance is
+claimed. Original timeout/late-operation/coalescing/native-fix/memory-protocol/interface
+limits are retained explicitly in the report. No manual acceptance was newly required.
+
+All required finish gates are met. The completion documentation is committed and
+pushed as the final checkpoint; the tracker transition to complete follows that clean
+push. No numbered rewrite slice remains. Integration review is separately authorized.
