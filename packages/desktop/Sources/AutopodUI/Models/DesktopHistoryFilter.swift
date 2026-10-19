@@ -17,7 +17,7 @@ struct DesktopHistoryFilter {
             guard Self.needsAttention(pod) else { return false }
         } else if outcome != "all", pod.status.rawValue != outcome { return false }
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return needle.isEmpty || [pod.id, pod.desktopTitle, pod.task, repository?.label ?? "Unknown repository",
+        return needle.isEmpty || [pod.id, pod.desktopTitle, pod.task, repository?.label ?? pod.desktopRepositoryPlaceholder,
             pod.profileName, pod.errorSummary ?? ""].joined(separator: " ").localizedStandardContains(needle)
     }
     static func needsAttention(_ pod: Pod) -> Bool {

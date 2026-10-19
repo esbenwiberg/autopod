@@ -1,4 +1,5 @@
 import Foundation
+import AutopodClient
 import Testing
 @testable import AutopodUI
 
@@ -67,4 +68,20 @@ private func presentationPod(_ id: String, status: PodStatus = .complete,
     #expect(pod.desktopLifecycleStages == [.queued, .provisioning, .running, .complete])
     pod.status = .failed
     #expect(pod.desktopLifecycleStage == nil)
+}
+
+@MainActor @Test func modernCapturedIdentityWinsAndExplicitEmptyNeverFallsBackToMutableProfiles() {
+    let edited = Profile(name: "backend", repoUrl: "https://github.com/acme/wrong.git")
+    var pod = presentationPod("modern", snapshot: edited)
+    pod.fleetDisplay = PodFleetDisplayResponse(repository: .init(kind: "repository", remote: "https://github.com/acme/captured.git"))
+    #expect(DesktopRepository.resolve(pod, profiles: [edited])?.label == "acme/captured")
+    let filtered = MainView.visiblePods([pod], selection: .all, query: "acme/captured")
+    #expect(filtered.map(\.id) == ["modern"])
+    pod.fleetDisplay = PodFleetDisplayResponse(repository: .init(kind: "empty"))
+    #expect(DesktopRepository.resolve(pod, profiles: [edited]) == nil)
+    #expect(pod.desktopRepositoryPlaceholder == "Empty workspace")
+    #expect(DesktopHistoryFilter(query: "Empty workspace").matches(pod, repository: nil, now: Date()))
+    pod.fleetDisplay = PodFleetDisplayResponse(repository: .init(kind: "unavailable"))
+    #expect(DesktopRepository.resolve(pod, profiles: [edited]) == nil)
+    #expect(pod.desktopRepositoryPlaceholder == "Repository unavailable")
 }

@@ -64,7 +64,7 @@ public struct PipelineNodeView: View {
                         .foregroundStyle(.tertiary)
                 }
                 if redesign {
-                    Label(repositories[pod.id]?.label ?? "Repository unavailable", systemImage: "folder")
+                    Label(repositories[pod.id]?.label ?? pod.desktopRepositoryPlaceholder, systemImage: "folder")
                         .font(.caption2).foregroundStyle(DesktopTheme.accent).lineLimit(1)
                 }
                 if !redesign, let excerpt = briefExcerpt {

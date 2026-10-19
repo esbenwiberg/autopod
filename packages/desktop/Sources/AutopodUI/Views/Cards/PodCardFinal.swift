@@ -279,7 +279,7 @@ public struct SessionCardFinal: View {
                         .lineLimit(1).truncationMode(.middle).foregroundStyle(DesktopTheme.accent)
                 }.buttonStyle(.plain).help(repository.isSnapshot ? "Filter by captured repository" : "Filter by current profile repository; original snapshot unavailable")
             } else {
-                Label("Repository unavailable", systemImage: "folder").font(.caption2).foregroundStyle(.secondary)
+                Label(pod.desktopRepositoryPlaceholder, systemImage: "folder").font(.caption2).foregroundStyle(.secondary)
             }
             if let pendingControl { PendingControlNotice(kind: pendingControl, podId: pod.id) }
             if pod.queueLength > 0 {

@@ -112,7 +112,7 @@ struct DesktopSeriesWorkspace: View {
                 .accessibilityLabel("Series actions")
             }
             Text(group.name).font(.system(size: 27, weight: .semibold))
-            Label(repositoryLabels.isEmpty ? "Repository unavailable" : repositoryLabels.joined(separator: " · "), systemImage: "folder")
+            Label(repositoryLabels.isEmpty ? (!group.pods.isEmpty && group.pods.allSatisfy { $0.fleetDisplay?.repository.kind == "empty" } ? "Empty workspace" : "Repository unavailable") : repositoryLabels.joined(separator: " · "), systemImage: "folder")
                 .font(.caption).foregroundStyle(DesktopTheme.accent).textSelection(.enabled)
             if let description = group.description { Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(3) }
         }.padding(24)

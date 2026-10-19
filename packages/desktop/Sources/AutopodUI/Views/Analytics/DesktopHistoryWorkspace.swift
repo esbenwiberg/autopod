@@ -110,7 +110,7 @@ public struct DesktopHistoryWorkspace: View {
         Picker("Repository", selection: $filter.repository) {
             Text("All repositories").tag("all")
             ForEach(Dictionary(grouping: Array(repositories.values), by: \.id).values.compactMap { $0.first }.sorted { $0.label < $1.label }, id: \.id) { repo in Text(repo.label).tag(repo.id) }
-            Text("Unknown repository / legacy").tag("unknown")
+            Text("Unavailable or empty workspace").tag("unknown")
         }
         Picker("Profile", selection: $filter.profile) {
             Text("All profiles").tag("all")
@@ -125,7 +125,7 @@ public struct DesktopHistoryWorkspace: View {
         HStack(spacing: 18) {
             VStack(alignment: .leading, spacing: 7) {
                 Text(pod.desktopTitle).font(.callout.weight(.medium)).lineLimit(2)
-                Text("\(repositories[pod.id]?.label ?? "Unknown repository") · \(pod.profileName) · \(pod.id)")
+                Text("\(repositories[pod.id]?.label ?? pod.desktopRepositoryPlaceholder) · \(pod.profileName) · \(pod.id)")
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }.frame(maxWidth: .infinity, alignment: .leading)
             Text(pod.status.label).font(.caption2.weight(.medium)).foregroundStyle(pod.status.color)
@@ -148,7 +148,7 @@ public struct DesktopHistoryWorkspace: View {
                 }
                 Text(pod.desktopTitle).font(.system(size: 24, weight: .semibold)).textSelection(.enabled)
                 Button { filter.repository = repositories[pod.id]?.id ?? "unknown" } label: {
-                    Label(repositories[pod.id]?.label ?? "Unknown repository", systemImage: "line.3.horizontal.decrease.circle")
+                    Label(repositories[pod.id]?.label ?? pod.desktopRepositoryPlaceholder, systemImage: "line.3.horizontal.decrease.circle")
                 }.buttonStyle(.plain).font(.callout).foregroundStyle(DesktopTheme.accent)
                 if repositories[pod.id]?.isSnapshot == false { Text("Repository from current profile; snapshot unavailable.").font(.caption2).foregroundStyle(.secondary) }
                 PodLifecycleRail(pod: pod)

@@ -26,6 +26,10 @@ struct DesktopRepository: Hashable, Sendable, Identifiable {
     }
 
     static func resolve(_ pod: Pod, profiles: [Profile]) -> DesktopRepository? {
+        if let captured = pod.fleetDisplay?.repository {
+            guard captured.kind == "repository", let remote = captured.remote else { return nil }
+            return Self(url: remote)
+        }
         if let snapshot = pod.profileSnapshot { return Self(url: snapshot.repoUrl) }
         guard let profile = profiles.first(where: { $0.name == pod.profileName }) else { return nil }
         return Self(url: profile.repoUrl, isSnapshot: false)
@@ -39,6 +43,9 @@ enum DesktopLifecycleStage: String, CaseIterable, Sendable {
 }
 
 extension Pod {
+    var desktopRepositoryPlaceholder: String {
+        fleetDisplay?.repository.kind == "empty" ? "Empty workspace" : "Repository unavailable"
+    }
     var desktopTitle: String {
         if let briefTitle, !briefTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return briefTitle }
         if let first = task.split(whereSeparator: \.isNewline).first {

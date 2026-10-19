@@ -12,7 +12,8 @@ checks; see the [profile configuration audit](profile-configuration-audit.md).
 Full Preview sample saves/reopens were operated through computer use. Keep PR #439
 draft: [connected acceptance](connected-acceptance.md) now proves real configuration
 persistence and isolation, but FAILED repository identity/filtering and initial
-fleet milestone display. Those two blockers remain.
+fleet milestone display. Both are now repaired and proven against local repaired HTTP routes in the
+actual Preview; [hosted rollout/recheck remains pending](fleet-display-repair.md).
 
 ## Reviewed routes and controls
 

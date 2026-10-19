@@ -153,9 +153,17 @@ public final class PodStore {
     guard let current else { return incoming }
     if !preferIncomingOnEqual
       && (current.updatedAt > incoming.updatedAt || current.updatedAt == incoming.updatedAt) {
+      if current.updatedAt == incoming.updatedAt, current.fleetDisplay == nil,
+         incoming.fleetDisplay != nil {
+        var enriched = current
+        enriched.fleetDisplay = incoming.fleetDisplay
+        enriched.phase = incoming.phase
+        return enriched
+      }
       return current
     }
     var merged = incoming
+    merged.fleetDisplay = incoming.fleetDisplay ?? current.fleetDisplay
     if preserveCurrentDecision || current.updatedAt > incoming.updatedAt {
       copyDecision(from: current, to: &merged)
     }
@@ -185,10 +193,23 @@ public final class PodStore {
     preserveCurrentStatus: Bool,
     preserveCurrentDecision: Bool
   ) -> Pod {
-    guard incoming.updatedAt > hydrated.updatedAt else { return hydrated }
+    guard incoming.updatedAt > hydrated.updatedAt else {
+      if incoming.updatedAt == hydrated.updatedAt, hydrated.fleetDisplay == nil,
+         incoming.fleetDisplay != nil {
+        var enriched = hydrated
+        enriched.fleetDisplay = incoming.fleetDisplay
+        enriched.phase = incoming.phase
+        return enriched
+      }
+      return hydrated
+    }
     var merged = hydrated
     if !preserveCurrentStatus {
       merged.status = incoming.status
+    }
+    if incoming.fleetDisplay != nil {
+      merged.fleetDisplay = incoming.fleetDisplay
+      merged.phase = incoming.phase
     }
     merged.pod = incoming.pod
     merged.hasWorktree = incoming.hasWorktree

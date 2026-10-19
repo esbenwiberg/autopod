@@ -1,6 +1,10 @@
 # Connected desktop acceptance — 2026-10-19
 
-Verdict: **FAILED readiness**, with passing configuration persistence and app
+Original verdict: **FAILED readiness** at the revision below. The two failures
+are now repaired and proven locally; see [fleet display repair](fleet-display-repair.md).
+Hosted rollout/recheck remain pending, so readiness is still incomplete.
+
+The original run had passing configuration persistence and app
 isolation checks. PR #439 remains draft. Implementation tested:
 `9c64410d78be170f5520c8373f0b258a4ca28fc3`. Freshly fetched `origin/main` is
 `6e51d1ce9495235e6aac2e498393cd2dd9a0e66b`, already included in this branch.

@@ -48,6 +48,7 @@
       "**/.speclint-cache/**",
       "packages/desktop/.build/**",
       "packages/desktop/build/**",
+      "packages/desktop/build-preview/**",
       "tmp/**"
     ]
   }

@@ -38,7 +38,7 @@ struct PodActivityPanel: View {
                 VStack(alignment: .leading, spacing: 14) {
                     if redesign {
                         Text(pod.desktopTitle).font(.title3.weight(.semibold))
-                        Label(repositories[pod.id]?.label ?? "Repository unavailable", systemImage: "folder")
+                        Label(repositories[pod.id]?.label ?? pod.desktopRepositoryPlaceholder, systemImage: "folder")
                             .font(.caption).foregroundStyle(DesktopTheme.accent).textSelection(.enabled)
                     }
                     metaRow

@@ -529,7 +529,7 @@ public struct DetailPanelView: View {
                     Label(repository.label, systemImage: "folder").font(.callout.weight(.medium))
                         .foregroundStyle(DesktopTheme.accent).lineLimit(1).truncationMode(.middle)
                 }.buttonStyle(.plain).help(repository.isSnapshot ? "Filter by captured repository" : "Current profile repository; original snapshot unavailable")
-            } else { Text("Repository unavailable").font(.caption).foregroundStyle(.secondary) }
+            } else { Text(pod.desktopRepositoryPlaceholder).font(.caption).foregroundStyle(.secondary) }
             Label(pod.branch, systemImage: "arrow.triangle.branch")
                 .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             if !pod.task.isEmpty {
