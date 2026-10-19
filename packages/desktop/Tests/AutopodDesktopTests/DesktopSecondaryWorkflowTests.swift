@@ -155,6 +155,49 @@ import Testing
     host.close()
   }
 
+  @Test(arguments: [false, true])
+  func emptyLibraryPagesKeepTheirParentHeaderAtTheTop(light: Bool) async throws {
+    NSApplication.shared.finishLaunching()
+    for width in [CGFloat(900), CGFloat(1550)] {
+      for failed in [false, true] {
+        var actions = try secondaryActions()
+        actions.listDeployments = {
+          if failed { throw URLError(.notConnectedToInternet) }
+          return []
+        }
+        actions.listWatchers = {
+          if failed { throw URLError(.notConnectedToInternet) }
+          return []
+        }
+        let host = SecondaryHost(
+          ConfigurationLibraryView(actions: actions), width: width, height: 1000, light: light)
+        defer { host.close() }
+        for page in ["Deployments", "Issue watchers"] {
+          try host.press(page)
+          try await host.wait {
+            host.contains(
+              failed
+                ? "Unable to load"
+                : (page == "Deployments" ? "No deployment requests" : "No issue watchers"))
+          }
+          // Measure the integrated Profiles header, not an isolated child that
+          // cannot reveal the whole workspace collapsing and centering itself.
+          let header = try #require(
+            host.nodes.first {
+              secondaryAX($0, "accessibilityLabel") as? String == "Refresh configuration"
+            })
+          let value = secondaryAX(header, "accessibilityFrame")
+          let frame = try #require((value as? CGRect) ?? (value as? NSValue)?.rectValue)
+          let bounds = host.window.convertToScreen(
+            host.hosting.convert(host.hosting.bounds, to: nil))
+          let topInset = bounds.maxY - frame.maxY
+          #expect(topInset >= 0 && topInset < 100, "\(page) header inset: \(topInset)")
+          try host.capture("library-\(page)-\(Int(width))-\(failed)-\(light)")
+        }
+      }
+    }
+  }
+
   @Test(arguments: ["nudge", "reject", "force-complete", "kick", "handoff", "single-spec"])
   func podControlSheetsKeepThemedPresentationAndCancel(control: String) async throws {
     NSApplication.shared.finishLaunching()

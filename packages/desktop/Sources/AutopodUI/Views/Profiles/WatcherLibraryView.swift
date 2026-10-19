@@ -79,7 +79,11 @@ struct WatcherLibraryView: View {
           }
         }
       }
-    }.padding(redesign ? 26 : 16).background(redesign ? DesktopTheme.canvas : .clear).task {
+    }.padding(redesign ? 26 : 16)
+    .frame(
+      maxWidth: redesign ? .infinity : nil, maxHeight: redesign ? .infinity : nil,
+      alignment: .topLeading)
+    .background(redesign ? DesktopTheme.canvas : .clear).task {
       await load()
     }
     .sheet(item: $editor, onDismiss: { Task { await load() } }) { target in
