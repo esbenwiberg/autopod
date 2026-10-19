@@ -31,12 +31,23 @@ struct ConfigurationSection<Content: View>: View {
 
 struct ConfigurationCapabilitiesEditor: View {
   @Binding var values: [ConfigurationJSON]
+  var required = false
+  var suggestedCapabilities: [String] = []
   @State private var custom = ""
   private let suggestions = ["node", "python", "dotnet", "go", "pnpm", "playwright"]
   var body: some View {
-    ConfigurationSection(title: "Provided capabilities", subtitle: "Declare what this image already provides. These labels match tool-pack requirements; selecting one does not install software.") {
+    ConfigurationSection(
+      title: required ? "Required environment capabilities" : "Provided capabilities",
+      subtitle: required
+        ? "Select the capability labels this tool pack needs. AutoPod blocks a launch unless the chosen environment declares every selected label. Leave empty if this pack has no environment requirements."
+        : "Declare what this image already provides. These labels match tool-pack requirements; selecting one does not install software."
+    ) {
+      if required {
+        Text("Example: selecting python requires an environment with python in its Provided capabilities. Labels must match exactly, including capitalization.")
+          .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      }
       LazyVGrid(columns: [GridItem(.adaptive(minimum: 180))], alignment: .leading, spacing: 10) {
-        ForEach(Array(Set(suggestions + values.compactMap(\.string))).sorted(), id: \.self) { capability in
+        ForEach(Array(Set(suggestions + suggestedCapabilities + values.compactMap(\.string))).sorted(), id: \.self) { capability in
           Toggle(capability, isOn: Binding(get: { values.contains(.string(capability)) }, set: { enabled in
             values.removeAll { $0 == .string(capability) }
             if enabled { values.append(.string(capability)) }
@@ -44,12 +55,16 @@ struct ConfigurationCapabilitiesEditor: View {
         }
       }
       HStack {
-        TextField("Custom capability", text: $custom)
+        TextField("Custom capability label (e.g. serena)", text: $custom)
         Button("Add") {
           let value = custom.trimmingCharacters(in: .whitespacesAndNewlines)
           if !value.isEmpty && !values.contains(.string(value)) { values.append(.string(value)) }
           custom = ""
         }.disabled(custom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+      }
+      if required {
+        Text("These labels declare compatibility. They do not install or check software. Configure software in Environments and permissions in Access.")
+          .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
       }
     }
   }

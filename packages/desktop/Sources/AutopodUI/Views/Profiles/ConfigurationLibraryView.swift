@@ -999,7 +999,13 @@ struct ConfigurationEditorSheet: View {
       }
       ConfigurationObjectListEditor(title: "Skills", values: arrayBinding("skills"), initial: { ["name": .string(""), "source": .object(["type": .string("builtin")])] }) { SkillSourceEditor(fields: $0, repositories: actions.list(.repository)) }
       ConfigurationObjectListEditor(title: "MCP servers", values: arrayBinding("mcpServers"), initial: { ["name": .string(""), "transport": .object(["type": .string("http"), "url": .string(""), "headers": .object([:])])] }) { McpTransportEditor(fields: $0) }
-      ConfigurationStringListEditor(title: "Required capabilities", values: arrayBinding("requiredCapabilities"))
+      ConfigurationCapabilitiesEditor(
+        values: arrayBinding("requiredCapabilities"),
+        required: true,
+        suggestedCapabilities: actions.list(.environment).flatMap {
+          $0.payload["capabilities"]?.array?.compactMap(\.string) ?? []
+        }
+      )
       Text("Tool packs provide tools and instructions. Access is selected separately.").font(.caption).foregroundStyle(.secondary)
     }
   }
