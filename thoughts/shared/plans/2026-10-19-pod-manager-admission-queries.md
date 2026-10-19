@@ -1,6 +1,6 @@
 # Slice32: complete admission, queries and series ownership
 
-Status: PLANNED — next authorized implementation under standing grouped approval.
+Status: IMPLEMENTED — frozen expanded/full qualification in progress.
 Date:2026-10-19. Baseline:3d1ed855c49357e2b4fac2ef6bfec3d44ba03739.
 Qualified implementation:33a5fc9c1d945a95e9b213df5499f07138a3d78f.
 Branch:codex/pod-manager-workspace.
@@ -95,8 +95,8 @@ recipes for manager+eleven owners/contracts. Annotation equivalence is checked w
 actual TS types; no body/default/await/error/creation-data policy change permitted.
 
 Automated:
-- [ ] All2,169predecessor package/script hashes/six roots and public bytes match.
-- [ ] All27whole bodies/parameters/context annotations/references/recipes are captured.
+- [x] All2,169predecessor package/script hashes/six roots and public bytes match.
+- [x] All27whole bodies/parameters/context annotations/references/recipes are captured.
 Manual:none for bounded local compatibility, under standing grouped approval.
 
 ## Phase2: complete implementation and boundary evidence
@@ -134,11 +134,11 @@ and inherited72workspace/resource/operator/fix/delivery/approval suites. AST aud
 thin delegates/four receivers, effect-free constructors/construction/startup sequence.
 
 Automated:
-- [ ] Complete movement/default/context-type/full recipes/construction audit passes.
-- [ ] All73public members and receiver/live/captured contracts preserved.
-- [ ] Unchanged1,192public assertions/names/statuses and direct behavior tests pass.
-- [ ] At least four actual SQLite reopen/rollback/frozen-admission boundaries pass.
-- [ ] Build/lint/whitespace/semantic comparison pass, zero new-test diagnostics.
+- [x] Complete movement/default/context-type/full recipes/construction audit passes.
+- [x] All73public members and receiver/live/captured contracts preserved.
+- [x] Unchanged1,192public assertions/names/statuses and direct behavior tests pass.
+- [x] At least four actual SQLite reopen/rollback/frozen-admission boundaries pass.
+- [x] Build/lint/whitespace/semantic comparison pass, zero new-test diagnostics.
 Manual:none for bounded local extraction; live acceptance/integration separate scope.
 
 ## Phase3: frozen qualification and next responsibility
@@ -175,3 +175,44 @@ post-commit scheduling, native alias limitation, stale reviewer protocol and dis
 dependent/restart policies persist. Same import paths through re-exports. Revert
 manager and eleven source owners/contracts together. No unresolved choices remain.
 Full goal remains ACTIVE until34's actual architectural/regression finish gates pass.
+
+## Implementation checkpoint — 2026-10-19
+
+All27whole bodies/defaults/runtime parameters and all12full source recipes match.
+Seven contextually typed methods gained equivalent explicit annotations, including
+optional flags that were supplied by public contextual typing. Actual same-program
+public/owner parameter and result assignability passes both ways for allsixteen
+declared public protocols. deleteSeriesWithCascade remains the original seventeenth
+object entry outside the historical PodManager interface; the existing supplemental
+excess-property diagnostic is preserved, not fixed as a product/API change. Same73
+members/order/seventeen thin delegates/four dynamic receivers. Original constructor/
+startup statements are token-identical in order; all new factories only capture and
+define functions. All2,168other predecessor package/script files and six roots match.
+Manager3,096→2,247lines; eleven newsource files25–420lines. No replacement monolith.
+
+Public1,192names/statuses/assertion bytes pass. Final91-suite direct selection passes
+680cases:38new across ten suites,573inherited direct cases and69additional existing
+admission/memory/configuration/series collaborator cases. Six actual private-file
+SQLite reopen boundaries exercise legacy metadata, committed publication/rollback,
+frozen native configuration after preset edits, rolled-back native admission,
+dependent healing/frozen base and authenticated rerun receipt/replay. Actual event
+bus/ledgers/snapshot resolver/unit-of-work execute; discovery/provider/container/auth
+effects remain controlled. Integrity/FK and relevant unrelated rows are checked.
+Late MCP/series receiver replacement, live capability recheck around secret vending,
+memory scope/fallback/usage and exact prompt/timeout contracts pass.
+
+All11newtest/fixture files have zero semantic diagnostics. All18changed-source
+supplemental diagnostics match the original18manager diagnostics, including known
+stale memory reviewer protocol/public-interface limitations. Original scoped build/
+declarations passes; full frozen rebuild remains required. Scoped lint/whitespace
+pass without disabling rules. First fixture failures were schema-only credential/
+rerun types, untyped empty mock list, profile update stripping preflightConflictPolicy
+(now actual SQL setup like existing public test) and task identity belonging to the
+actual execution ledger rather than Pod. Assertions remain; raw first extended direct
+report retained in direct-first.json, alongside distinct early/corrected reports/logs.
+Initial duplicate-import/unused scaffolding and contextual optional AST audit handling
+were corrected without body changes. No unrelated product policy repair.
+
+Allsource/test bytes frozen at2191package/script files plus six root controls.
+Expanded/full qualification/proof,33research and clean pushed docs remain before32
+is complete. Goal stays ACTIVE through34.

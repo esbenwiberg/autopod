@@ -1,4 +1,3 @@
-import { isAcrQualifiedImage } from './provisioning-image-policy.js';
 import { createProvisioningMaterials } from './provisioning-materials.js';
 import {
   AGENT_ENV_PATH,
@@ -28,7 +27,6 @@ import type {
   ExecutionTarget,
   HistoryQuery,
   InjectedMcpServer,
-  MemoryEntry,
   OperatorActor,
   Pod,
   PodStatus,
@@ -38,21 +36,13 @@ import type {
   SpawnFixResponse,
   TaskRetryIdentity,
   UpdateFromBaseResponse,
-  ValidationOverride,
 } from '@autopod/shared';
-import {
-  AutopodError,
-  generatePodId,
-  outputModeFromPodOptions,
-  podOptionsFromOutputMode,
-  resolvePodOptions,
-} from '@autopod/shared';
+
 import type { Logger } from 'pino';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
 
-import { assertLaunchAgentAccount } from '../configuration/agent-route-resolution.js';
 import type { LaunchExecutionCredentials } from '../configuration/execution-credentials.js';
-import { launchPodOptions } from '../configuration/launch-pod-options.js';
+
 import { createContinuationContext } from './continuation-context.js';
 import { createContinuationControls } from './continuation-controls.js';
 import { buildManualReworkReason } from './continuation-policy.js';
@@ -72,7 +62,7 @@ import {
 import { createValidationWorkflowState } from './validation-workflow-state.js';
 
 import type { SidecarManager } from '../containers/sidecar-manager.js';
-import { getAutoAttachedSidecars, resolveSidecarSpec } from '../containers/sidecar-resolver.js';
+
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 
@@ -85,10 +75,8 @@ import type {
 } from '../interfaces/index.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ProfileStore } from '../profiles/index.js';
-import { assertNoExpiredPat } from '../profiles/pat-expiry.js';
-import type { ProviderAccountStore } from '../provider-accounts/index.js';
 
-import type { ProfileLlmClientResult } from '../providers/index.js';
+import type { ProviderAccountStore } from '../provider-accounts/index.js';
 
 import type {
   SandboxWorkspaceCheckpointArgs,
@@ -99,37 +87,24 @@ import { createAdvisoryValidation } from './advisory-validation.js';
 import { createArtifactFinalizer } from './artifact-finalizer.js';
 import type { ArtifactResumeObservation } from './artifact-resume-observation.js';
 
-import { admitComposablePod } from './composable-pod-admission.js';
-
-import { dispatchRequestHash } from './dispatch-preflight-ledger.js';
-
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
 
 import type { FixFeedbackRepository } from './fix-feedback-repository.js';
-import { mergeMcpServers } from './injection-merger.js';
 
-import type { MemoryRepository } from './memory-repository.js';
-import { prefilterMemories, selectRelevantMemories } from './memory-selector.js';
-import type { MemoryUsageRepository } from './memory-usage-repository.js';
 import type { NudgeRepository } from './nudge-repository.js';
 import type { PodRepository, PodStats } from './pod-repository.js';
 
-import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
-
 import type { ProgressEventRepository } from './progress-event-repository.js';
-import { projectMemoryScope } from './project-memory-scope.js';
+
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
-import { resolveProviderPreflight } from './provider-preflight.js';
+
 import type { QualityScoreRepository } from './quality-score-repository.js';
 
-import { deriveReferenceRepos } from './reference-repos.js';
 import { createReviewerContext } from './reviewer-context.js';
 
 import { createRuntimeResumeContext } from './runtime-resume-context.js';
-
-import { canKill } from './state-machine.js';
 
 import { createValidationAttemptStart } from './validation-attempt-start.js';
 import { createValidationEnvironment } from './validation-environment.js';
@@ -236,6 +211,7 @@ import { createResourcePreviewTimers } from './resource-preview-timers.js';
 import { createResourcePreview } from './resource-preview.js';
 import type { PodCreator } from './workspace-contracts.js';
 export type { PodCreator } from './workspace-contracts.js';
+import { mergeOverrides, warnIfSinglePrSeriesMissingSeriesMeta } from './admission-policy.js';
 import { createWorkspaceArtifactObservation } from './workspace-artifact-observation.js';
 import { createWorkspaceBranchSource } from './workspace-branch-source.js';
 import { createWorkspaceBranchSync } from './workspace-branch-sync.js';
@@ -254,42 +230,19 @@ import {
   createWorkspaceRecoveryState,
 } from './workspace-recovery-state.js';
 import { createWorkspaceWatchdog } from './workspace-watchdog.js';
+export { selectMemoryBriefingForPod } from './admission-memory-briefing.js';
+import { createAdmissionAnalysisWorkspaces } from './admission-analysis-workspaces.js';
+import { createAdmissionDependents } from './admission-dependents.js';
+import { createAdmissionExecutionContext } from './admission-execution-context.js';
+import { createAdmissionLegacy } from './admission-legacy.js';
+import { createAdmissionMemoryContext } from './admission-memory-context.js';
+import { createAdmissionQueries } from './admission-queries.js';
+import { createAdmissionResolved } from './admission-resolved.js';
+import { createAdmissionSeriesDeletion } from './admission-series-deletion.js';
 
 export type { ApproveSessionOptions, ApproveAllSkippedPod } from './approval-contracts.js';
 
 const execFileAsync = promisify(execFile);
-
-/**
- * Warn when a single-PR series pod is about to create a PR without the
- * series-level metadata it needs. With either `seriesName` or
- * `seriesDescription` missing, `buildPrTitle` falls back to using the brief's
- * task as the title and "Why" body — usually a sign that the client (CLI or
- * desktop) didn't forward `purpose.md` from the spec folder.
- */
-function warnIfSinglePrSeriesMissingSeriesMeta(pod: Pod, logger: Logger): void {
-  if (pod.prMode !== 'single' || !pod.seriesId) return;
-  if (pod.seriesDescription && pod.seriesName) return;
-  logger.warn(
-    {
-      podId: pod.id,
-      seriesId: pod.seriesId,
-      hasSeriesDescription: Boolean(pod.seriesDescription),
-      hasSeriesName: Boolean(pod.seriesName),
-    },
-    'Single-PR series pod is missing seriesName or seriesDescription — PR title and "Why" will fall back to the brief task. Verify the client forwarded purpose.md when creating the series.',
-  );
-}
-
-/** Merge new overrides into existing ones, deduplicating by findingId (latest wins). */
-function mergeOverrides(
-  existing: ValidationOverride[],
-  incoming: ValidationOverride[],
-): ValidationOverride[] {
-  const map = new Map<string, ValidationOverride>();
-  for (const o of existing) map.set(o.findingId, o);
-  for (const o of incoming) map.set(o.findingId, o);
-  return [...map.values()];
-}
 
 export interface ContainerManagerFactory {
   get(target: ExecutionTarget): ContainerManager;
@@ -702,72 +655,6 @@ export interface PodManager {
   }>;
 }
 
-function podMemoryScopeIds(pod: Pod): string[] {
-  return Array.from(new Set([pod.id, ...(pod.dependsOnPodIds ?? [])]));
-}
-
-function approvedMemoriesForPod(pod: Pod, memoryRepo: MemoryRepository): MemoryEntry[] {
-  return [
-    ...podMemoryScopeIds(pod).flatMap((podId) => memoryRepo.list('pod', podId, true)),
-    ...(!pod.launchConfigDigest ? memoryRepo.list('profile', pod.profileName, true) : []),
-    ...memoryRepo.list('global', null, true),
-  ];
-}
-
-export async function selectMemoryBriefingForPod(opts: {
-  pod: Pod;
-  profile: PodExecutionSettings;
-  memoryRepo: MemoryRepository;
-  usageRepo?: MemoryUsageRepository;
-  logger: Logger;
-  createReviewerClient?: (
-    profile: PodExecutionSettings,
-    reviewerModelId: string,
-    logger: Logger,
-  ) => Promise<ProfileLlmClientResult>;
-}): Promise<Awaited<ReturnType<typeof selectRelevantMemories>>> {
-  const { pod, profile, memoryRepo, usageRepo, logger } = opts;
-  if (pod.options.agentMode !== 'auto') {
-    return { selected: [], unavailableReason: null };
-  }
-
-  const candidates = prefilterMemories({
-    pod,
-    memories: approvedMemoriesForPod(pod, memoryRepo),
-  });
-  if (candidates.length === 0) {
-    return { selected: [], unavailableReason: null };
-  }
-
-  const reviewerModelId =
-    profile.reviewerModel || profile.defaultModel || pod.model || 'claude-haiku-4-5';
-  const createReviewerClient = opts.createReviewerClient ?? createProfileAnthropicClient;
-  let reviewerClient: ProfileLlmClientResult | null = null;
-  let reviewerUnavailableReason: string | undefined;
-  try {
-    reviewerClient = await createReviewerClient(profile, reviewerModelId, logger);
-    if (!reviewerClient.ok) {
-      reviewerUnavailableReason = reviewerClient.reason;
-    }
-  } catch (err) {
-    reviewerUnavailableReason = 'reviewer_model_client_unavailable';
-    logger.warn({ err, podId: pod.id }, 'Memory reviewer client unavailable — using fallback');
-  }
-
-  return selectRelevantMemories({
-    pod,
-    profile,
-    deps: {
-      memoryRepo,
-      usageRepo,
-      anthropicClient: reviewerClient?.ok ? reviewerClient.client : undefined,
-      reviewerModel: reviewerClient?.ok ? reviewerClient.model : undefined,
-      reviewerUnavailableReason,
-      logger,
-    },
-  });
-}
-
 export function createPodManager(deps: PodManagerDependencies): PodManager {
   const {
     podRepo,
@@ -801,6 +688,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   } = deps;
   const { assertExecutionTerminationVerified, assertGuidanceCollected, ownsLifecycle } =
     createCompletionGuards({ podRepo, nudgeRepo });
+  const admissionDependents = createAdmissionDependents({
+    podRepo,
+    logger,
+    eventBus,
+    enqueueSession,
+  });
+  const { maybeTriggerDependents } = admissionDependents;
 
   const { materializeSpecFiles, captureDeployBaselineHashes } =
     createProvisioningMaterials(execFileAsync);
@@ -810,67 +704,19 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     syncSandboxSeriesHandover,
   } = createProvisioningSandboxState(deps, { podRepo, containerManagerFactory, logger });
   const { installGhBinary, installAzViaPip } = createProvisioningToolInstallation({ logger });
-
-  function executionForPod(pod: Pod): PodExecutionSettings {
-    const resolved = deps.launchConfiguration?.read(pod.id);
-    if (resolved && deps.launchConfiguration)
-      return deps.launchConfiguration.executionSettings(resolved);
-    if (pod.launchConfigDigest)
-      throw new AutopodError(
-        'Immutable launch configuration is unavailable',
-        'SNAPSHOT_CORRUPT',
-        500,
-      );
-    return profileStore.get(pod.profileName);
-  }
-  function executionCredentialsFor(
-    config: EffectiveLaunchConfig,
-  ): LaunchExecutionCredentials | undefined {
-    const credentials = deps.launchConfiguration?.credentials;
-    if (!credentials && Object.keys(config.credentialReferences).length)
-      throw new AutopodError(
-        'Scoped execution credentials are unavailable',
-        'SECRET_EXECUTION_ADAPTER_REQUIRED',
-        503,
-      );
-    return credentials;
-  }
+  const { executionForPod, executionCredentialsFor, injectionsForPod, resolveGitCredential } =
+    createAdmissionExecutionContext(deps, { profileStore, daemonConfig });
 
   const { validationEnvironmentForPod } = createValidationEnvironment(deps, {
     executionCredentialsFor,
     containerManagerFactory,
   });
-
-  function injectionsForPod(pod: Pod): typeof daemonConfig {
-    return pod.launchConfigDigest
-      ? { mcpServers: [], claudeMdSections: [], skills: [] }
-      : daemonConfig;
-  }
   const { prManagerFactory } = createDeliveryProvider(rawPrManagerFactory, podRepo);
   const { scheduleHostFetchRetry } = createWorkspaceHostFetchRetry({
     podRepo,
     enqueueSession,
     emitActivityStatus: (podId, message) => emitActivityStatus(podId, message),
   });
-
-  async function resolveGitCredential(profile: PodExecutionSettings): Promise<string | undefined> {
-    if (profile.prProvider === 'ado') return deps.azureDevOpsAuth?.getToken();
-    if (!profile.repoUrl) {
-      throw new Error(`GitHub profile "${profile.name}" does not have a repository URL`);
-    }
-    let hostname: string;
-    try {
-      hostname = new URL(profile.repoUrl).hostname.toLowerCase();
-    } catch {
-      throw new Error(`GitHub profile "${profile.name}" has an invalid repository URL`);
-    }
-    if (hostname !== 'github.com') {
-      throw new Error(
-        `GitHub profile "${profile.name}" must use an exact github.com repository host`,
-      );
-    }
-    return (await deps.githubAuth?.resolveCredential())?.token;
-  }
 
   const { primeRuntimeForResume } = createRuntimeResumeContext(deps, {
     executionForPod,
@@ -1208,6 +1054,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       executionForPod,
       resolveEffectiveBoundProfile,
     });
+  const admissionMemory = createAdmissionMemoryContext(deps, {
+    getReviewerExecutor,
+    getEffectiveReviewerConfig,
+  });
 
   const { syncWorkspaceBack, recoverWorktreeFromContainer } = createWorkspaceTransfer({ logger });
 
@@ -1446,125 +1296,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityStatus,
     emitActivityError,
   });
-
-  /**
-   * After a pod reaches `validated`, enqueue any dependents whose *all*
-   * parents have now reached a completed-success state. Single-parent pods
-   * fire immediately; multi-parent (fan-in) pods wait for the last holdout.
-   *
-   * The dependent pod stacks on its first parent's branch — this matches the
-   * linear-chain mental model. Commits from other parents reach the child via
-   * handover files or the eventual PR merge, not the worktree.
-   */
-  function maybeTriggerDependents(completedPod: Pod): void {
-    const dependents = podRepo.getPodsDependingOn(completedPod.id);
-    for (const dep of dependents) {
-      // Also heal pods that were cascade-failed when this parent was previously killed.
-      // The mergeBlockReason marker identifies exactly those pods so we don't disturb
-      // genuinely-failed dependents that have their own failure reason.
-      const cascadeFailed =
-        dep.status === 'failed' &&
-        dep.mergeBlockReason === `dependency pod ${completedPod.id} failed`;
-      if (dep.status !== 'queued' && !cascadeFailed) continue;
-
-      const parentIds =
-        dep.dependsOnPodIds.length > 0
-          ? dep.dependsOnPodIds
-          : dep.dependsOnPodId
-            ? [dep.dependsOnPodId]
-            : [];
-      if (parentIds.length === 0) continue;
-
-      const parentsReady = parentIds.every((pid) => {
-        let parent: Pod;
-        try {
-          parent = pid === completedPod.id ? completedPod : podRepo.getOrThrow(pid);
-        } catch {
-          // Missing parent — treat as not ready rather than crashing.
-          return false;
-        }
-        if (isSinglePrSeriesPod(dep)) {
-          return parent.status === 'complete';
-        }
-        // Shared branch (single-mode siblings): the parent holds the Git worktree
-        // lock on the branch until it reaches 'complete' — worktree is cleaned up
-        // on completion, not on validation. Starting the child early races into
-        // an empty worktree and the repoint step fails. Wait for 'complete'.
-        if (parent.branch === dep.branch) {
-          return parent.status === 'complete';
-        }
-        if (dep.waitForMerge) {
-          // Stacked series: wait until the parent PR is fully merged.
-          return parent.status === 'complete';
-        }
-        // Accept any terminal-success status — a manually approved parent reaches
-        // 'complete' without passing through 'validated' in the dependent's view.
-        return (
-          parent.status === 'validated' ||
-          parent.status === 'approved' ||
-          parent.status === 'merging' ||
-          parent.status === 'merge_pending' ||
-          parent.status === 'complete'
-        );
-      });
-      if (!parentsReady) {
-        logger.debug(
-          {
-            podId: dep.id,
-            parentIds,
-            waitingOn: parentIds.filter((pid) => pid !== completedPod.id),
-          },
-          'Series: dependent pod still waiting on other parents',
-        );
-        continue;
-      }
-
-      // Determine base branch for the dependent pod:
-      // - Single-PR series, even if an older row has the wrong child branch:
-      //   keep pointing at the real base so the final PR targets main/default.
-      // - Single-branch (shared branch): same real-base rule.
-      // - Stacked with waitForMerge: parent branch is deleted post-merge; use parent's
-      //   baseBranch (main) so the dependent starts from the freshly-merged main.
-      // - Stacked without waitForMerge: stack directly on parent's branch (classic stacking).
-      const firstParentId = parentIds[0];
-      const firstParent = firstParentId
-        ? firstParentId === completedPod.id
-          ? completedPod
-          : podRepo.getOrThrow(firstParentId)
-        : completedPod;
-      const isSharedBranch = dep.branch === firstParent.branch;
-      let baseBranch: string;
-      if (dep.launchConfigDigest && dep.baseBranch) {
-        // Composed launches already froze their source binding at admission.
-        baseBranch = dep.baseBranch;
-      } else if (isSinglePrSeriesPod(dep) || isSharedBranch || dep.waitForMerge) {
-        baseBranch = firstParent.baseBranch ?? 'main';
-      } else {
-        baseBranch = firstParent.branch;
-      }
-
-      if (cascadeFailed) {
-        podRepo.update(dep.id, { status: 'queued', completedAt: null, mergeBlockReason: null });
-        eventBus.emit({
-          type: 'pod.status_changed',
-          timestamp: new Date().toISOString(),
-          podId: dep.id,
-          previousStatus: 'failed',
-          newStatus: 'queued',
-        });
-        logger.info(
-          { podId: dep.id, parentId: completedPod.id },
-          'Series: healed cascade-failed dependent — parent completed',
-        );
-      }
-      podRepo.update(dep.id, {
-        baseBranch,
-        dependencyStartedAt: new Date().toISOString(),
-      });
-      enqueueSession(dep.id);
-      logger.info({ podId: dep.id, parentIds, baseBranch }, 'Series: dependent pod enqueued');
-    }
-  }
   const { completeValidationPass } = createValidationPassDelivery({
     warnIfSinglePrSeriesMissingSeriesMeta,
     resolvePrBaseBranch,
@@ -2077,92 +1808,48 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     profileStore,
     eventBus,
   });
+  const admissionSeries = createAdmissionSeriesDeletion({ podRepo, logger });
+
+  const admissionQueries = createAdmissionQueries(deps, {
+    podRepo,
+    executionCredentialsFor,
+    executionForPod,
+    injectionsForPod,
+    validationRepo,
+  });
+
+  const admissionAnalysis = createAdmissionAnalysisWorkspaces(deps);
+
+  const admissionLegacy = createAdmissionLegacy(deps, {
+    podRepo,
+    profileStore,
+    providerAccountStore,
+    providerCatalog,
+    containerManagerFactory,
+    assertSandboxAgentStreamingExecSupported,
+    executionForPod,
+    logger,
+    eventBus,
+    enqueueSession,
+  });
+
+  const admissionResolved = createAdmissionResolved(deps, {
+    providerAccountStore,
+    providerCatalog,
+    containerManagerFactory,
+    assertSandboxAgentStreamingExecSupported,
+    podRepo,
+    eventBus,
+    enqueueSession,
+    maybeTriggerDependents,
+  });
 
   return {
     getLaunchConfiguration(podId: string): EffectiveLaunchConfig | null {
-      return deps.launchConfiguration?.read(podId) ?? null;
+      return admissionQueries.getLaunchConfiguration(podId);
     },
     createResolvedSession(config, userId, creator, actor): Pod {
-      if (!deps.launchConfiguration)
-        throw new AutopodError(
-          'Composable launch execution is unavailable',
-          'CONFIG_EXECUTION_UNAVAILABLE',
-          503,
-        );
-      if (!providerAccountStore)
-        throw new AutopodError(
-          'Provider account store is unavailable',
-          'PROVIDER_CREDENTIALS_MISSING',
-          503,
-        );
-      assertLaunchAgentAccount(
-        config.ai.main,
-        config.agentAccounts[config.ai.main.providerAccountId],
-        providerAccountStore,
-        providerCatalog,
-      );
-      const options = launchPodOptions(config);
-      const backend = containerManagerFactory.get(config.execution.target);
-      if (
-        options.agentMode === 'interactive' &&
-        config.execution.target !== 'local' &&
-        !backend.attachTerminal
-      )
-        throw new AutopodError(
-          'Selected backend cannot attach an interactive terminal',
-          'INVALID_CONFIGURATION',
-          400,
-        );
-      assertSandboxAgentStreamingExecSupported(
-        { name: config.profileId },
-        config.execution.target,
-        options,
-      );
-      if (
-        options.agentMode !== 'interactive' &&
-        config.execution.networkPolicy?.enabled &&
-        config.execution.networkPolicy.mode === 'deny-all'
-      )
-        throw new AutopodError(
-          'An agent requires outbound provider access',
-          'INVALID_CONFIGURATION',
-          400,
-        );
-      const sidecars = Object.keys(config.resolvedExecution.sidecars);
-      if (config.execution.target === 'sandbox' && sidecars.length)
-        throw new AutopodError(
-          'Sandbox sidecars are unavailable',
-          'UNSUPPORTED_SANDBOX_SIDECAR',
-          400,
-        );
-      if (sidecars.some((id) => !config.environment.sidecars.some((sidecar) => sidecar.id === id)))
-        throw new AutopodError(
-          'Sidecar was not admitted in the launch configuration',
-          'INVALID_SIDECAR',
-          400,
-        );
-      if (
-        config.intent === 'goal' &&
-        (!deps.launchConfiguration.goals || config.ai.main.runtime !== 'codex')
-      )
-        throw new AutopodError('Native Goal execution is unavailable', 'GOAL_UNAVAILABLE', 503);
-      const pod = admitComposablePod({
-        config,
-        userId,
-        creator,
-        actor,
-        pods: podRepo,
-        read: deps.launchConfiguration.read,
-        events: eventBus,
-        enqueue: enqueueSession,
-        reconcileDependencies: (parentId) => maybeTriggerDependents(podRepo.getOrThrow(parentId)),
-      });
-      if (config.intent === 'goal') {
-        if (!deps.launchConfiguration?.goals)
-          throw new AutopodError('Native Goal execution is unavailable', 'GOAL_UNAVAILABLE', 503);
-        deps.launchConfiguration.goals.initialize(pod, config);
-      }
-      return pod;
+      return admissionResolved.createResolvedSession(config, userId, creator, actor);
     },
     createSession(
       request: CreatePodRequest,
@@ -2170,383 +1857,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       creator?: PodCreator,
       actor?: OperatorActor,
     ): Pod {
-      if (deps.launchConfiguration)
-        throw new AutopodError(
-          'This daemon requires a resolved repository launch; upgrade the caller to the configuration API',
-          'CONFIG_API_VERSION_UNSUPPORTED',
-          410,
-        );
-      if (request.intentionalRerun && (actor?.type !== 'human' || actor.userId !== userId))
-        throw new AutopodError(
-          'Intentional rerun requires an authenticated human decision',
-          'UNAUTHORIZED_RERUN',
-          403,
-        );
-      if (request.intentionalRerun) {
-        if (!podRepo.dispatchPreflight)
-          throw new AutopodError('Durable rerun admission unavailable', 'RERUN_UNAVAILABLE', 503);
-        const existing = podRepo.dispatchPreflight.findRerun(request, userId);
-        if (existing) return podRepo.getOrThrow(existing);
-      }
-      const profile = profileStore.get(request.profileName);
-      assertNoExpiredPat(profile);
-      const providerPreflight = resolveProviderPreflight(profile, request.runtime, request.model, {
-        profileStore,
-        providerAccountStore,
-        manifest: providerCatalog,
-      });
-      const { runtime, model } = providerPreflight;
-      const executionTarget = request.executionTarget ?? profile.executionTarget ?? 'local';
-      const skipValidation = request.skipValidation ?? false;
-      const normalizedDependsOnPodIds =
-        request.dependsOnPodIds && request.dependsOnPodIds.length > 0
-          ? request.dependsOnPodIds
-          : request.dependsOnPodId
-            ? [request.dependsOnPodId]
-            : null;
-      const singlePrSeriesParent =
-        request.prMode === 'single' && request.seriesId && normalizedDependsOnPodIds?.[0]
-          ? podRepo.getOrThrow(normalizedDependsOnPodIds[0])
-          : null;
-      if (
-        singlePrSeriesParent &&
-        request.branch !== undefined &&
-        request.branch !== singlePrSeriesParent.branch
-      ) {
-        throw new AutopodError(
-          `Single-PR series dependent must use parent branch '${singlePrSeriesParent.branch}' (got '${request.branch}')`,
-          'INVALID_CONFIGURATION',
-          400,
-        );
-      }
-      const effectiveBaseBranch =
-        request.baseBranch ?? singlePrSeriesParent?.baseBranch ?? profile.defaultBranch ?? 'main';
-      const effectiveStartBranch =
-        request.startBranch ?? singlePrSeriesParent?.startBranch ?? effectiveBaseBranch;
-
-      // Resolve the effective PodOptions once, so both branch derivation and
-      // DB insertion use the exact same values.
-      const resolvedPod = resolvePodOptions(
-        profile.pod ?? (profile.outputMode ? podOptionsFromOutputMode(profile.outputMode) : null),
-        request.options ??
-          (request.outputMode ? podOptionsFromOutputMode(request.outputMode) : undefined),
-      );
-      if (
-        skipValidation &&
-        request.options?.validationSuite &&
-        request.options.validationSuite !== 'off'
-      ) {
-        throw new AutopodError(
-          `skipValidation cannot be combined with validationSuite='${request.options.validationSuite}'`,
-          'INVALID_CONFIGURATION',
-          400,
-        );
-      }
-      if (skipValidation) {
-        resolvedPod.validate = false;
-        resolvedPod.validationSuite = 'off';
-      }
-      if (resolvedPod.agentMode === 'interactive' && executionTarget !== 'local') {
-        const interactiveCm = containerManagerFactory.get(executionTarget);
-        if (!interactiveCm.attachTerminal) {
-          throw new AutopodError(
-            `Interactive pods on execution target '${executionTarget}' require a container backend with interactive terminal support (attachTerminal)`,
-            'INVALID_CONFIGURATION',
-            400,
-          );
-        }
-      }
-      if (executionTarget === 'sandbox') {
-        if (!profile.warmImageTag) {
-          throw new AutopodError(
-            `Sandbox execution for profile "${profile.name}" requires a warm image. Run \`ap profile warm ${profile.name} --rebuild\` with ACR_REGISTRY_URL configured first.`,
-            'SANDBOX_WARM_IMAGE_REQUIRED',
-            400,
-          );
-        }
-        if (!isAcrQualifiedImage(profile.warmImageTag)) {
-          throw new AutopodError(
-            `Sandbox warm image for profile "${profile.name}" must be an ACR-qualified image tag, got "${profile.warmImageTag}". Rebuild the warm image with ACR_REGISTRY_URL so profile.warmImageTag is stored as <registry>.azurecr.io/...`,
-            'SANDBOX_WARM_IMAGE_REQUIRED',
-            400,
-          );
-        }
-      }
-      assertSandboxAgentStreamingExecSupported(profile, executionTarget, resolvedPod);
-
-      // deny-all network policy blocks all outbound — incompatible with cloud-backed runtimes.
-      // Interactive pods run without an AI agent, so they're unaffected.
-      if (
-        resolvedPod.agentMode !== 'interactive' &&
-        profile.networkPolicy?.enabled &&
-        profile.networkPolicy?.mode === 'deny-all'
-      ) {
-        throw new AutopodError(
-          `Network policy 'deny-all' blocks all outbound traffic, but runtime '${runtime}' requires API access. Use 'restricted' mode instead — the default allowlist includes the model API.`,
-          'INVALID_CONFIGURATION',
-          400,
-        );
-      }
-
-      // Validate requireSidecars against the pod's profile at create time so
-      // typos and missing configs fail fast instead of silently no-oping at
-      // spawn. Privileged sidecars additionally require `trustedSource:true`.
-      //
-      // Auto-attach sidecars that the profile has enabled + trusted (currently
-      // just Dagger). Profiles can opt out per child via inheritance — sub-
-      // profiles set `sidecars.dagger.enabled:false` or `trustedSource:false`.
-      // Auto-attach is unioned with the explicit request so CLI/brief-level
-      // opt-in still works for sidecars not auto-attached.
-      const autoAttached = getAutoAttachedSidecars(profile);
-      const requestedSidecars = request.requireSidecars ?? [];
-      const requireSidecars = Array.from(new Set([...autoAttached, ...requestedSidecars]));
-      if (executionTarget === 'sandbox' && requireSidecars.length > 0) {
-        throw new AutopodError(
-          `Sidecars are not supported for sandbox execution yet (requested: ${requireSidecars.join(', ')}). Azure Sandboxes do not provide the Docker bridge network sidecars require.`,
-          'UNSUPPORTED_SANDBOX_SIDECAR',
-          400,
-        );
-      }
-      for (const name of requireSidecars) {
-        const spec = resolveSidecarSpec(profile, name);
-        if (!spec) {
-          throw new AutopodError(
-            `Pod requested sidecar '${name}' but profile '${profile.name}' has no matching enabled config`,
-            'INVALID_SIDECAR',
-            400,
-          );
-        }
-        if (spec.privileged === true && profile.trustedSource !== true) {
-          throw new AutopodError(
-            `Sidecar '${name}' runs privileged; profile '${profile.name}' must have trustedSource:true to enable it`,
-            'UNTRUSTED_PROFILE',
-            403,
-          );
-        }
-      }
-
-      const derivedReferenceRepos = deriveReferenceRepos(request.referenceRepos);
-
-      // Preflight overlap check: does this pod's `touches` scope overlap with
-      // any in-flight pod on the same repo + base? Computed BEFORE insert so
-      // the `block` policy refuses cleanly without leaving a half-created row.
-      // The `warn` path keeps the result and emits an event after the row
-      // exists (so it carries the new pod's ID).
-      let preflightConflicts: PreflightConflict[] = [];
-      const candidateTouches = request.touches ?? [];
-      if (candidateTouches.length > 0) {
-        try {
-          const candidateRepoUrl = profile.repoUrl ?? null;
-          const candidates = podRepo.listNonTerminal().map((p) => ({
-            pod: p,
-            repoUrl: executionForPod(p).repoUrl ?? null,
-          }));
-          preflightConflicts = findPreflightConflicts(
-            {
-              touches: candidateTouches,
-              repoUrl: candidateRepoUrl,
-              baseBranch: effectiveBaseBranch,
-            },
-            candidates,
-          );
-        } catch (err) {
-          // Best-effort: a failure inside the check itself must not block pod
-          // creation, so swallow and treat as "no conflicts found".
-          logger.debug({ err }, 'Preflight overlap check failed — treating as no conflicts');
-          preflightConflicts = [];
-        }
-
-        if (preflightConflicts.length > 0 && profile.preflightConflictPolicy === 'block') {
-          const ids = preflightConflicts.map((c) => c.conflictingPodId).join(', ');
-          throw new AutopodError(
-            `Pod creation blocked by profile.preflightConflictPolicy='block': touches scope overlaps in-flight pods [${ids}]`,
-            'PREFLIGHT_CONFLICT',
-            409,
-          );
-        }
-      }
-
-      let id: string;
-      for (let attempt = 0; attempt < 10; attempt++) {
-        id = generatePodId();
-        const effectiveOutputMode = outputModeFromPodOptions(resolvedPod);
-        let branch: string;
-        if (request.branch) {
-          branch = request.branch;
-        } else if (singlePrSeriesParent) {
-          branch = singlePrSeriesParent.branch;
-        } else if (resolvedPod.output === 'artifact') {
-          branch = `research/${id}`;
-        } else {
-          const prefix = request.branchPrefix ?? profile.branchPrefix ?? 'autopod/';
-          branch = `${prefix}${id}`;
-        }
-        // Workspace pods must not land on the default branch — `ap complete` would push
-        // directly to origin/main. Auto-generate a safe branch unless this pod was spawned
-        // by fixManually() (linkedPodId set), which intentionally inherits the worker's branch.
-        if (resolvedPod.agentMode === 'interactive' && !request.linkedPodId) {
-          if (branch === effectiveBaseBranch) {
-            const prefix = request.branchPrefix ?? profile.branchPrefix ?? 'autopod/';
-            branch = `${prefix}${id}`;
-          }
-        }
-        try {
-          podRepo.insert({
-            id,
-            profileName: request.profileName,
-            task: request.task,
-            status: 'queued',
-            model,
-            runtime,
-            providerAccountIdSnapshot: providerPreflight.account?.id ?? null,
-            providerIdSnapshot:
-              providerPreflight.manifestProvider?.id ??
-              providerPreflight.account?.provider ??
-              profile.modelProvider ??
-              null,
-            executionTarget,
-            branch,
-            userId,
-            creatorEmail: creator?.email ?? null,
-            creatorName: creator?.name ?? null,
-            maxValidationAttempts: profile.maxValidationAttempts ?? 3,
-            skipValidation,
-            contract: request.contract ?? null,
-            intentionalRerun: request.intentionalRerun,
-            dispatchRepository: profile.repoUrl,
-            rerunRequestHash: request.intentionalRerun ? dispatchRequestHash(request) : undefined,
-            options: resolvedPod,
-            outputMode: effectiveOutputMode,
-            startBranch: effectiveStartBranch !== effectiveBaseBranch ? effectiveStartBranch : null,
-            baseBranch: effectiveBaseBranch,
-            // Persist durable handoff instructions immediately so they survive
-            // independently of the originating Pi session and are visible on the
-            // pod the moment it is created. Trimmed (schema already rejects empty).
-            handoffInstructions: request.handoffInstructions?.trim() || null,
-            specFiles: request.specFiles && request.specFiles.length > 0 ? request.specFiles : null,
-            specContextFiles:
-              request.specContextFiles && request.specContextFiles.length > 0
-                ? request.specContextFiles
-                : null,
-            linkedPodId: request.linkedPodId ?? null,
-            pimGroups: (() => {
-              if (request.pimGroups != null) return request.pimGroups;
-              // Fall back to profile-level pimActivations (group type only — stored as PimGroupConfig)
-              const groupActivations = (profile.pimActivations ?? [])
-                .filter((a): a is Extract<typeof a, { type: 'group' }> => a.type === 'group')
-                .map(({ groupId, displayName, duration, justification }) => ({
-                  groupId,
-                  displayName,
-                  duration,
-                  justification,
-                }));
-              return groupActivations.length > 0 ? groupActivations : null;
-            })(),
-            prUrl: request.prUrl ?? null,
-            tokenBudget:
-              request.tokenBudget !== undefined
-                ? request.tokenBudget
-                : (profile.tokenBudget ?? null),
-            referenceRepos: derivedReferenceRepos.length > 0 ? derivedReferenceRepos : null,
-            scheduledJobId: request.scheduledJobId ?? null,
-            dependsOnPodIds: normalizedDependsOnPodIds,
-            dependsOnPodId: request.dependsOnPodId ?? null,
-            seriesId: request.seriesId ?? null,
-            seriesName: request.seriesName ?? null,
-            seriesDescription: request.seriesDescription ?? null,
-            seriesDesign: request.seriesDesign ?? null,
-            briefTitle: request.briefTitle ?? null,
-            touches: request.touches && request.touches.length > 0 ? request.touches : null,
-            doesNotTouch:
-              request.doesNotTouch && request.doesNotTouch.length > 0 ? request.doesNotTouch : null,
-            prMode: request.prMode ?? null,
-            waitForMerge: request.waitForMerge ?? false,
-            requireSidecars: requireSidecars.length > 0 ? requireSidecars : null,
-            autoApprove: request.autoApprove ?? false,
-            disableAskHuman: request.disableAskHuman ?? false,
-          });
-          break;
-        } catch (err: unknown) {
-          if (
-            err instanceof Error &&
-            err.message.includes('UNIQUE constraint failed') &&
-            attempt < 9
-          ) {
-            continue;
-          }
-          throw err;
-        }
-      }
-      // biome-ignore lint/style/noNonNullAssertion: id is guaranteed non-null after the retry loop above
-      id = id!;
-
-      const pod = podRepo.getOrThrow(id);
-
-      const publishCommittedPod = () => {
-        eventBus.emit({
-          type: 'pod.created',
-          timestamp: new Date().toISOString(),
-          pod: {
-            id: pod.id,
-            profileName: pod.profileName,
-            task: pod.task,
-            status: pod.status,
-            model: pod.model,
-            runtime: pod.runtime,
-            branch: pod.branch,
-            baseBranch: pod.baseBranch,
-            duration: null,
-            filesChanged: pod.filesChanged,
-            createdAt: pod.createdAt,
-          },
-        });
-
-        // Emit the preflight overlap warning (computed before insert above) now
-        // that the new pod has an ID. The `block` policy already short-circuited
-        // earlier; reaching this point means the policy is `warn` or unset.
-        if (preflightConflicts.length > 0) {
-          eventBus.emit({
-            type: 'pod.preflight_overlap',
-            timestamp: new Date().toISOString(),
-            podId: id,
-            conflicts: preflightConflicts.map((c) => ({
-              conflictingPodId: c.conflictingPodId,
-              conflictingPodTask: c.conflictingPodTask,
-              conflictingPodStatus: c.conflictingPodStatus,
-              overlappingGlobs: c.overlappingGlobs,
-            })),
-          });
-          logger.warn(
-            {
-              podId: id,
-              conflictingPodIds: preflightConflicts.map((c) => c.conflictingPodId),
-            },
-            'Pod created with preflight overlap on in-flight pods — possible merge conflict',
-          );
-        }
-
-        // Dependent pods must not start until their predecessors reach `validated`;
-        // maybeTriggerDependents() will enqueue them at that point. A pod counts
-        // as dependent if either the new multi-parent array or the legacy single
-        // field is populated.
-        const hasDeps = (request.dependsOnPodIds?.length ?? 0) > 0 || !!request.dependsOnPodId;
-        if (!hasDeps) {
-          enqueueSession(id);
-        }
-        logger.info(
-          {
-            podId: id,
-            profile: request.profileName,
-            branch: pod.branch,
-            baseBranch: pod.baseBranch,
-            startBranch: pod.startBranch,
-          },
-          'Pod created',
-        );
-      };
-      if (podRepo.afterInsertCommitted) podRepo.afterInsertCommitted(pod.id, publishCommittedPod);
-      else publishCommittedPod();
-      return pod;
+      return admissionLegacy.createSession(request, userId, creator, actor);
     },
 
     createHistoryWorkspace(
@@ -2555,54 +1866,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       historyQuery: HistoryQuery,
       creator?: PodCreator,
     ): Pod {
-      // Encode query params into the task field with a [history] prefix
-      const queryJson = JSON.stringify(historyQuery);
-      const task = `[history] History analysis workspace | ${queryJson}`;
-      return this.createSession(
-        {
-          profileName,
-          task,
-          outputMode: 'workspace',
-          skipValidation: true,
-        },
+      return admissionAnalysis.createHistoryWorkspace.call(
+        this,
+        profileName,
         userId,
+        historyQuery,
         creator,
       );
     },
 
     createMemoryWorkspace(profileName: string, userId: string, creator?: PodCreator): Pod {
-      const globalMems = deps.memoryRepo?.listByScope('global', true) ?? [];
-      const profileMems = deps.memoryRepo?.list('profile', profileName, true) ?? [];
-      const all = [...globalMems, ...profileMems];
-
-      const formatted = all
-        .map((m) => `### ${m.path}\n${m.rationale ? `Why: ${m.rationale}\n\n` : ''}${m.content}`)
-        .join('\n\n---\n\n');
-
-      const task = [
-        `[memory-analysis] Review ${all.length} memories and draft a fix plan`,
-        '',
-        'You have been given a snapshot of memories from this project.',
-        'Your job:',
-        '1. Identify gotchas, bugs, and missing config that can be fixed in the repo',
-        '2. For each fixable item, draft the specific change or PR needed',
-        '3. Prioritize and optionally implement the most critical fixes',
-        '',
-        '## Memories',
-        '',
-        formatted,
-      ].join('\n');
-
-      return this.createSession(
-        {
-          profileName,
-          task,
-          outputMode: 'workspace',
-          skipValidation: true,
-        },
-        userId,
-        creator,
-      );
+      return admissionAnalysis.createMemoryWorkspace.call(this, profileName, userId, creator);
     },
     resumeNativeGoal(podId: string, revision: number) {
       return continuationControls.resumeNativeGoal(podId, revision);
@@ -2755,29 +2029,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
     getReviewerExecutor,
     getProjectMemoryScope(pod) {
-      return projectMemoryScope(pod, deps.launchConfiguration?.read(pod.id));
+      return admissionMemory.getProjectMemoryScope(pod);
     },
     getLaunchMemoryContext(pod) {
-      const executor = getReviewerExecutor(pod, 'memory');
-      if (!executor)
-        throw new AutopodError(
-          'Launch memory requires composable configuration',
-          'CONFIG_SNAPSHOT_UNAVAILABLE',
-          503,
-        );
-      const profile = getEffectiveReviewerConfig(pod).profile;
-      return {
-        profile,
-        projectScope: projectMemoryScope(pod, deps.launchConfiguration?.read(pod.id)),
-        reviewer: {
-          model: profile.reviewerModel ?? profile.defaultModel ?? pod.model,
-          async generateText({ systemPrompt, userMessage }) {
-            return (
-              await executor({ prompt: `${systemPrompt}\n\n${userMessage}`, timeout: 20_000 })
-            ).stdout;
-          },
-        },
-      };
+      return admissionMemory.getLaunchMemoryContext(pod);
     },
 
     deleteSession(podId: string): Promise<void> {
@@ -2803,7 +2058,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     getSession(podId: string): Pod {
-      return podRepo.getOrThrow(podId);
+      return admissionQueries.getSession(podId);
     },
 
     refreshReadinessAfterQualityScore(podId: string): boolean {
@@ -2816,143 +2071,39 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     },
 
     async getDeploymentConfiguration(podId) {
-      const pod = podRepo.getOrThrow(podId);
-      const launch = deps.launchConfiguration?.read(podId);
-      if (launch) {
-        await deps.launchConfiguration?.assertCurrentCapabilities(launch);
-        const deployment =
-          (await executionCredentialsFor(launch)?.deployment(launch)) ??
-          executionForPod(pod).deployment;
-        await deps.launchConfiguration?.assertCurrentCapabilities(launch);
-        return deployment;
-      }
-      return executionForPod(pod).deployment;
+      return admissionQueries.getDeploymentConfiguration(podId);
     },
 
     async getInjectedMcpServer(podId, name) {
-      const pod = podRepo.getOrThrow(podId);
-      const launch = deps.launchConfiguration?.read(podId);
-      if (launch) {
-        if (pod.status !== 'running')
-          throw new AutopodError('Pod is not running', 'POD_NOT_RUNNING', 409);
-        await deps.launchConfiguration?.assertCurrentCapabilities(launch);
-        const credentials = executionCredentialsFor(launch);
-        if (credentials) {
-          const server = await credentials.httpServer(launch, name);
-          await deps.launchConfiguration?.assertCurrentCapabilities(launch);
-          return server;
-        }
-      }
-      return this.getInjectedMcpServers(podId).find((server) => server.name === name);
+      return admissionQueries.getInjectedMcpServer.call(this, podId, name);
     },
 
     getInjectedMcpServers(podId: string): InjectedMcpServer[] {
-      const pod = podRepo.getOrThrow(podId);
-      const profile = executionForPod(pod);
-      return mergeMcpServers(injectionsForPod(pod).mcpServers, profile.mcpServers);
+      return admissionQueries.getInjectedMcpServers(podId);
     },
 
     listSessions(filters?) {
-      return podRepo.list(filters);
+      return admissionQueries.listSessions(filters);
     },
 
     getSessionStats(filters?) {
-      return podRepo.getStats(filters);
+      return admissionQueries.getSessionStats(filters);
     },
 
     getSeriesPods(seriesId: string): Pod[] {
-      return podRepo.getPodsBySeries(seriesId);
+      return admissionQueries.getSeriesPods(seriesId);
     },
 
     rehydrateDependentSessions(): void {
-      const PARENT_DONE = new Set([
-        'validated',
-        'approved',
-        'merging',
-        'merge_pending',
-        'complete',
-      ]);
-      const stuckDeps = podRepo
-        .list({ status: 'queued' })
-        .filter((p) => p.dependsOnPodIds.length > 0 || !!p.dependsOnPodId);
-
-      for (const dep of stuckDeps) {
-        const parentIds =
-          dep.dependsOnPodIds.length > 0
-            ? dep.dependsOnPodIds
-            : dep.dependsOnPodId
-              ? [dep.dependsOnPodId]
-              : [];
-        if (parentIds.length === 0) continue;
-
-        const allParentsDone = parentIds.every((pid) => {
-          try {
-            const parent = podRepo.getOrThrow(pid);
-            if (isSinglePrSeriesPod(dep)) {
-              return parent.status === 'complete';
-            }
-            // Shared branch: parent must reach 'complete' before its worktree
-            // releases the branch lock. See maybeTriggerDependents for rationale.
-            if (parent.branch === dep.branch) {
-              return parent.status === 'complete';
-            }
-            return PARENT_DONE.has(parent.status);
-          } catch {
-            return false;
-          }
-        });
-        if (!allParentsDone) continue;
-
-        // Enqueue each stuck pod directly (once per pod) rather than calling
-        // maybeTriggerDependents which iterates *all* dependents of the parent
-        // and would fire multiple times if called once per stuck dep in the loop.
-        const firstParentId = parentIds[0];
-        if (!firstParentId) continue;
-        try {
-          const firstParent = podRepo.getOrThrow(firstParentId);
-          const baseBranch =
-            dep.launchConfigDigest && dep.baseBranch
-              ? dep.baseBranch
-              : isSinglePrSeriesPod(dep) || dep.waitForMerge || dep.branch === firstParent.branch
-                ? (firstParent.baseBranch ?? 'main')
-                : firstParent.branch;
-          podRepo.update(dep.id, {
-            baseBranch,
-            dependencyStartedAt: new Date().toISOString(),
-          });
-          enqueueSession(dep.id);
-          logger.info(
-            { podId: dep.id, firstParentId, baseBranch },
-            'Series: rehydrated stuck dependent pod',
-          );
-        } catch {
-          logger.warn({ podId: dep.id }, 'rehydrate: failed to enqueue dependent');
-        }
-      }
+      admissionDependents.rehydrateDependentSessions();
     },
 
     async deleteSeriesWithCascade(seriesId: string): Promise<void> {
-      const seriesPods = podRepo.getPodsBySeries(seriesId);
-      if (seriesPods.length === 0) {
-        throw new AutopodError(`Series ${seriesId} not found`, 'NOT_FOUND', 404);
-      }
-      for (const pod of seriesPods) {
-        if (canKill(pod.status)) {
-          await this.killSession(pod.id).catch((err) =>
-            logger.warn({ err, podId: pod.id, seriesId }, 'Series delete: kill failed, continuing'),
-          );
-        }
-        await this.deleteSession(pod.id).catch((err) =>
-          logger.warn({ err, podId: pod.id, seriesId }, 'Series delete: delete failed, continuing'),
-        );
-      }
-      logger.info({ seriesId, count: seriesPods.length }, 'Series deleted');
+      return admissionSeries.deleteSeriesWithCascade.call(this, seriesId);
     },
 
     getValidationHistory(podId: string) {
-      // Verify pod exists
-      podRepo.getOrThrow(podId);
-      return validationRepo?.getForSession(podId) ?? [];
+      return admissionQueries.getValidationHistory(podId);
     },
 
     approveAllValidated(): Promise<{ approved: string[]; skipped: ApproveAllSkippedPod[] }> {
