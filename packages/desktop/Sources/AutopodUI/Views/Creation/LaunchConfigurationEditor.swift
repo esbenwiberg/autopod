@@ -27,8 +27,7 @@ struct LaunchConfigurationEditor: View {
   private var executionTarget: String { request.overrides?.execution?["target"]?.string ?? profile?.payload["execution"]?["target"]?.string ?? "local" }
   private var backend: ConfigurationJSON? { actions.capabilities["execution"]?.array?.first { $0["target"]?.string == executionTarget } }
   private var nativeGoalAvailable: Bool {
-    let ai = actions.list(.ai).first { $0.id == (request.selections?.aiId ?? profile?.payload["aiId"]?.string) }
-    let main = request.overrides?.ai?["main"] ?? ai?.payload["main"]
+    let main = context.details(.ai)["main"]
     return actions.capabilities["nativeGoals"]?.array?.contains { $0["available"]?.bool == true && $0["runtime"]?.string == main?["runtime"]?.string && $0["accountId"]?.string == main?["providerAccountId"]?.string && $0["backend"]?.string == executionTarget } ?? false
   }
 

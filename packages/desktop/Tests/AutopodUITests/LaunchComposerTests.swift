@@ -187,6 +187,38 @@ import Testing
     #expect(fixture.resolutions[0] == fixture.resolutions[1])
   }
 
+  @Test(arguments: [false, true], ["local", "sandbox"])
+  func nativeGoalUsesAcceptedAccountAndInheritedRoute(partialOverride: Bool, target: String) async throws {
+    let fixture = LaunchComposerFixture()
+    var actions = fixture.actions
+    var capabilities = actions.capabilities.object ?? [:]
+    capabilities["nativeGoals"] = .array([.object([
+      "runtime": .string("codex"), "accountId": .string("sample-account"),
+      "backend": .string(target), "available": .bool(true)
+    ])])
+    actions.capabilities = .object(capabilities)
+    actions.launch = { value in fixture.launches.append(value); return "native-goal-fixture" }
+    var request = fixture.request
+    request.overrides = LaunchOverrides()
+    request.overrides?.execution = ["target": .string(target)]
+    if partialOverride { request.overrides?.ai = ["main": .object(["model": .string("Another model")])] }
+    let host = LaunchComposerHost(ComposableCreatePodSheet(isPresented: .constant(true), actions: actions, initialRequest: request), width: 900)
+    defer { host.close() }
+    try await host.wait { host.enabled("launch-preview") }
+    #expect(host.enabled("launch-intent-goal"))
+    guard host.enabled("launch-intent-goal") else { return }
+    try host.press("launch-intent-goal")
+    try host.capture("native-goal-\(target)-\(partialOverride)")
+    try host.press("launch-preview")
+    try await host.wait { host.enabled("launch-submit") }
+    #expect(fixture.resolutions.last?.intent == "goal")
+    try host.press("launch-submit")
+    try await host.wait { !fixture.launches.isEmpty }
+    #expect(fixture.launches[0].intent == "goal")
+    #expect(fixture.launches[0].overrides?.execution?["target"]?.string == target)
+    #expect(fixture.launches[0].expectedDigest == String(repeating: "a", count: 64))
+  }
+
   @Test(arguments: [false, true]) func latePreviewCannotRestoreReviewAfterConfigurationReload(series: Bool) async throws {
     let fixture = LaunchComposerFixture(); fixture.holdResolve = true
     let host = LaunchComposerHost(ReactiveLaunchFixture(fixture: fixture, series: series), width: 1280)
@@ -269,7 +301,7 @@ import Testing
   }
   func preview(_ request: ComposableLaunchRequest) throws -> EffectiveLaunchPreview {
     try JSONDecoder().decode(EffectiveLaunchPreview.self, from: Data(ConfigurationJSON.object([
-      "digest": .string(String(repeating: "a", count: 64)), "task": .string(request.task), "intent": .string("task"),
+      "digest": .string(String(repeating: "a", count: 64)), "task": .string(request.task), "intent": .string(request.intent ?? "task"),
       "workflow": .object(["agentMode": .string("auto"), "output": .string("pr"), "completion": .string("approval")]),
       "ai": .object(["main": .object(["model": .string("Sample model"), "runtime": .string("codex")])]),
       "resolvedExecution": .object(["target": .string("local"), "main": .object(["memoryGb": .number(8), "cpus": .number(2)])]),
