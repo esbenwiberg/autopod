@@ -1,19 +1,19 @@
 # Pod-manager rewrite: remaining roadmap, slices 19–34
 
-Status: Slices 19–31 COMPLETE. Slices 1–31 complete; 3 milestones remain (32–34).
+Status: Slices 19–32 COMPLETE. Slices 1–32 complete; 2 milestones remain (33–34).
 Date: 2026-10-18. Baseline: ecc324ca4a403d49397dd63cecb1a881e653ad06.
 Branch: codex/pod-manager-workspace.
 
 ## Finite scope and count
 
-3 remaining delivery milestones: Slice 32 through final qualification at 34.
-The bounded baseline roadmap below included 16 (19–34); Slices 19–31 are complete.
+2 remaining delivery milestones: Slice 33 through final qualification at 34.
+The bounded baseline roadmap below included 16 (19–34); Slices 19–32 are complete.
 The milestones define scope; their effort varies, and they do not provide a time estimate. Recent slices moved small helpers;
 future milestones deliberately complete whole responsibilities and can contain
 multiple independently tested implementation phases within their numbered slice.
 
 At roadmap baseline the manager had 16,521 total lines and 73 public object members.
-After Slice 31 it has 3,096 lines and the same public interface. A TypeScript
+After Slice 32 it has 2,247 lines and the same public interface. A TypeScript
 AST inventory below assigns every one of 327 non-import top-level declarations,
 manager-closure declarations/statements and public members to an owning milestone.
 Nested implementation blocks inherit their containing workflow; processPod has an
@@ -44,7 +44,7 @@ corrections and unrelated bugs have their own work, outside this compatibility r
 | 29 | Operator lifecycle controls — COMPLETE | Own complete message/rejection/pause/kill lifetimes, nudge/escalation/bulk and credential/tool controls. | Ten bodies/two initializers/three receivers/shared state recipes match;1,192 public cases,33new direct cases/three SQLite reopens and full frozen qualification pass. |
 | 30 | Resources, network and preview — COMPLETE | Own full cleanup/network/preview/polling/advisory lifetimes and shared state. |25bodies/13initializers/network protocol/construction recipes match;1,192 public cases,51new direct cases/four SQLite reopens and full frozen qualification pass. Original timeout/late-cleanup limits retained. |
 | 31 | Workspace and recovery commands — COMPLETE | Own interactive completion, preservation/sync, promote/manual fix, artifact fences, delete/recover/kick/watchdog and host-fetch retries. | 27bodies/branch arrow/nine state bindings/full recipes match;1,192public cases,53new direct cases/six SQLite reopens and full frozen qualification pass. |
-| 32 | Admission, queries and series | Own session creation/derived launch, history/memory workspaces, dependent sessions, series and read/configuration projections. | All 73 current public methods are either thin delegates or intentional service projections; admission snapshots remain unchanged. |
+| 32 | Admission, queries and series — COMPLETE | Own session creation/derived launch, history/memory workspaces, dependent sessions, series and read/configuration projections. | All27bodies/12recipes and73public entries preserved;38new direct cases/six SQLite reopens and full frozen qualification pass.33finishes delegate size/type/construction gates. |
 | 33 | Facade and dependency consolidation | Move public types to stable contracts, finish composition and narrow cross-workflow ports; remove residual implementation helpers. | Manager is composition plus delegates, at most 1,500 total lines; domain modules import no public PodManager or broad manager dependency bag. |
 | 34 | Final architectural and regression qualification | Reconcile the complete inventory against delivered owners; qualify frozen source and document integration readiness. | Architecture checks, full uncached pipeline, database/recovery evidence and final clean pushed revision pass. PR/main/deploy remain separately authorized. |
 
@@ -560,3 +560,26 @@ retained. No live provider/container/cloud acceptance or PR/main/deployment. Ori
 timeout/late-operation/native-fix-alias limits persist. Evidence:Slice31plan and
 .autopod-data/workspace-recovery/proof.json. Three milestones32–34remain; goal ACTIVE.
 Complete current-source32research saved in2026-10-19-pod-manager-admission-queries.md.
+
+## Slice32 qualification checkpoint (2026-10-19)
+
+Complete admission/query/memory-analysis/dependent-series responsibility:
+implementation2bbc454a. Manager3,096→2,247lines; eleven new source files25–420lines.
+All27whole bodies/runtime/defaults, seven explicit contextual annotations/sixteen
+declared public-owner protocols and12fullrecipes pass. Same73members/order with
+17thin delegates/four dynamic receivers; original construction/startup statements
+and effect-free new constructors preserve service identity/timing. Public1,192
+assertions unchanged;38new direct cases/ten suites and680total direct/91suites pass.
+Six actual private-file SQLite reopens cover metadata/commit/rollback/frozen native
+configuration after preset edits/dependent healing and authenticated rerun receipts.
+Expanded304-suite run:5,450pass/four identical inherited gates. Full frozen uncached
+pipeline:9,040Vitest pass/597passing files plus35Node cases; same ten full gated cases.
+Frozen2,191package/script hashes and six roots match. Node22.23.3/pnpm9.15.4/SQLite3.49.2,
+frozen install without fallback and all Turbo groups uncached. All18changed-source
+supplemental diagnostics match18original baseline; eleven new test/fixture files have
+zero diagnostics. Existing82rootlint warnings/input allowance retained. No live external
+acceptance/PR/main/deployment. Existing policy/alias/reviewer/interface limitations
+remain. Evidence:Slice32plan and .autopod-data/admission-queries/proof.json. Two milestones
+33–34remain; goal ACTIVE.33research records109construction statements/73members,13line
+trigger delegate and two remaining broad domain manager type consumers. Required final
+size/type/owner inventory gates remain outstanding rather than waived.

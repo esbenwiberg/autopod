@@ -1,6 +1,6 @@
 # Slice32: complete admission, queries and series ownership
 
-Status: IMPLEMENTED — frozen expanded/full qualification in progress.
+Status: COMPLETE — frozen implementation qualified and pushed.
 Date:2026-10-19. Baseline:3d1ed855c49357e2b4fac2ef6bfec3d44ba03739.
 Qualified implementation:33a5fc9c1d945a95e9b213df5499f07138a3d78f.
 Branch:codex/pod-manager-workspace.
@@ -161,10 +161,10 @@ Research33while32source stays frozen. Only after proof update plan/roadmap32comp
 commit/push docs and verify clean remote identity. Then two milestones33–34remain.
 
 Automated:
-- [ ] Expanded SQLite-enabled regression passes without new skip.
-- [ ] Full frozen uncached pipeline passes; counts/versions/skip/hash evidence saved.
-- [ ] Proof, clean pushed implementation/docs and source hashes verified.
-- [ ] Plan/roadmap32completion and complete33research saved.
+- [x] Expanded SQLite-enabled regression passes without new skip.
+- [x] Full frozen uncached pipeline passes; counts/versions/skip/hash evidence saved.
+- [x] Proof, clean pushed implementation/docs and source hashes verified.
+- [x] Plan/roadmap32completion and complete33research saved.
 Manual:none; PR/main/deployment/live provider/container acceptance separately authorized.
 
 ## Compatibility, limits and rollback
@@ -216,3 +216,50 @@ were corrected without body changes. No unrelated product policy repair.
 Allsource/test bytes frozen at2191package/script files plus six root controls.
 Expanded/full qualification/proof,33research and clean pushed docs remain before32
 is complete. Goal stays ACTIVE through34.
+
+## Final qualification — 2026-10-19
+
+PROVEN. Frozen implementation2bbc454a42f826dcf2683948297f0ac26cdafd6c is pushed.
+Full pipeline passes9,040Vitest cases/597passing files and35Node script cases; same
+ten inherited full gates and no new skip. Expanded304-suite regression passes5,450
+cases/four identical inherited gates. Final91-suite direct run passes680cases, with
+38new cases/ten suites and six actual private SQLite reopen boundaries. All2,191
+package/script hashes and six root controls match after qualification. Build/DTS/
+typecheck, lint, tests, audit and secret scan pass on the frozen final implementation.
+
+Full command:
+
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false TURBO_FORCE=true SKIP_DB_TESTS=0 ./scripts/validate.sh
+
+Observed versions:Node22.23.3/pnpm9.15.4/SQLite3.49.2. Frozen install has no fallback;
+allthree Turbo groups are uncached(7/11/15tasks). Only inherited root-lint2MiBprocessing
+allowance/82warnings; no rule/config/dependency/selection relaxation. All18supplemental
+changed-source diagnostics match18original manager diagnostics; eleven new test/
+fixture files have zero semantic diagnostics. All27bodies/defaults, seven contextual
+annotations, sixteen declared public/owner protocols,17delegates/four receivers and
+12fullrecipes pass. Same73members/order and original constructor/startup sequence.
+
+| Claim | Evidence | Result |
+|---|---|---|
+| Complete admission/query/series policy, live fields and receiver timing preserved |27whole bodies/12recipes;1,192unchanged public cases;680direct cases | PROVEN |
+| Immutable admission/rollback/rerun/healing persists at actual local boundaries |Six SQLite reopens with integrity/FK checks;304affected suites; full frozen uncached pipeline | PROVEN within controlled external adapters |
+
+Evidence:.autopod-data/admission-queries/proof.json, movement.json,
+public-comparison.json, frozen-manifest.json, semantic reports, exact commands/logs/
+exits and retained original failures. First full extended direct report is preserved
+as direct-first.json before the corrected rerun. Initial assertions were retained;
+corrected fixtures use actual profile policy SQL and task-execution identity.
+Expanded/full qualification pass on their first frozen runs; no runtime threshold
+adjustment or inherited test assertion change.
+
+Limits:controlled provider/container/discovery/credential transport/reviewer/deletion
+adapters. No paid/live provider, remote deletion, Docker/Azure/cloud acceptance,
+external messages, PR/main integration or deployment. Original native/legacy policy
+differences, waitForMerge restart distinction, analysis helper410gate, stale default
+reviewer protocol/interface diagnostics and native fix alias limitation persist.
+No stronger atomicity/replay/termination promise. Goal remains ACTIVE.
+
+Next:33stable contracts/composition/facade<=1,500lines and<=10line delegates/no broad
+domain manager imports, then34final327unit/73member/mutable-owner reconciliation and
+clean pushed frozen qualification. Two milestones remain. Complete33research saved
+at ../research/2026-10-19-pod-manager-facade-composition.md.
