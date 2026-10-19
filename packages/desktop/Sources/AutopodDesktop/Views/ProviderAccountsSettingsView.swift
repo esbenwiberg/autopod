@@ -81,6 +81,9 @@ struct ProviderAccountsSettingsView: View {
         ProgressView()
           .frame(maxWidth: .infinity)
         Spacer()
+      } else if redesign && accounts.isEmpty && errorMessage != nil {
+        ContentUnavailableView("Unable to load provider accounts", systemImage: "wifi.exclamationmark",
+          description: Text("Reconnect to the daemon and refresh. Stored accounts have not been changed."))
       } else if accounts.isEmpty {
         emptyState
       } else {

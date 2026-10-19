@@ -31,9 +31,12 @@ struct WatcherLibraryView: View {
       if redesign {
         if items.isEmpty && !loading {
           ContentUnavailableView(
-            "No issue watchers", systemImage: "eye",
+            error == nil ? "No issue watchers" : "Unable to load issue watchers",
+            systemImage: error == nil ? "eye" : "wifi.exclamationmark",
             description: Text(
-              "Create a watcher to route new issues into a saved launch configuration."))
+              error == nil
+                ? "Create a watcher to route new issues into a saved launch configuration."
+                : "Reconnect to the daemon and refresh. Existing watchers have not been changed."))
         } else {
           ScrollView {
             LazyVStack(spacing: 10) {

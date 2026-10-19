@@ -149,6 +149,8 @@ import Testing
       WatcherLibraryView(actions: unavailable), width: 900, height: 700, light: light)
     try await host.settle()
     #expect(host.contains("Watcher fixture is offline"))
+    #expect(host.contains("Unable to load issue watchers"))
+    #expect(!host.contains("No issue watchers"))
     try host.capture("watchers-error-\(light)")
     host.close()
   }

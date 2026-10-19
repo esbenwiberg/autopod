@@ -42,9 +42,12 @@ struct DeploymentLibraryView: View {
       if redesign {
         if runs.isEmpty {
           ContentUnavailableView(
-            "No deployment requests", systemImage: "shippingbox",
+            error == nil ? "No deployment requests" : "Unable to load deployments",
+            systemImage: error == nil ? "shippingbox" : "wifi.exclamationmark",
             description: Text(
-              "Deployment requests appear here for review before a published commit is deployed."))
+              error == nil
+                ? "Deployment requests appear here for review before a published commit is deployed."
+                : "Reconnect to the daemon and refresh before reviewing deployment requests."))
         } else {
           ScrollView {
             LazyVStack(spacing: 12) {

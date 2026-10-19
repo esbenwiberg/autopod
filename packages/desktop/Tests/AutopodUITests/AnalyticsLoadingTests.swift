@@ -78,8 +78,14 @@ extension AnalyticsLoadingTests {
         func frame(_ title: String) throws -> CGRect {
             let object = try #require(node(title))
             let frame = analyticsAX(object, "accessibilityFrame")
-            if let rect = frame as? CGRect { return rect }
-            return try #require(frame as? NSValue).rectValue
+            let screenFrame: CGRect
+            if let rect = frame as? CGRect { screenFrame = rect }
+            else { screenFrame = try #require(frame as? NSValue).rectValue }
+            // Accessibility frames use screen coordinates. Measure the card inside
+            // its hosting view so AppKit window placement cannot look like a layout jump.
+            let hostFrame = window.convertToScreen(hosting.convert(hosting.bounds, to: nil))
+            let localFrame = screenFrame.offsetBy(dx: -hostFrame.minX, dy: -hostFrame.minY)
+            return localFrame
         }
         func wait(_ condition: () -> Bool) async throws {
             let deadline = ContinuousClock.now.advanced(by: .seconds(5))
@@ -101,6 +107,17 @@ extension AnalyticsLoadingTests {
         try await wait { cost.pending[30] != nil && scores.pending[30] != nil && value("Cost") == "Loading" }
         #expect(value("Process Health") == "Loading")
         #expect(value("Status distribution") != "Loading")
+        // Finish the native window/scrollbar layout while both responses are held.
+        // In the full UI suite AppKit may reserve its scrollbar gutter one turn later.
+        var settledFrame = try frame("Cost")
+        var stableObservations = 0
+        try await wait {
+            guard let current = try? frame("Cost") else { return false }
+            if current == settledFrame { stableObservations += 1 }
+            else { settledFrame = current; stableObservations = 0 }
+            return stableObservations >= 3
+        }
+        #expect(cost.pending[30] != nil && scores.pending[30] != nil)
         let initialFrame = try frame("Cost")
         try capture("loading")
         let response = try JSONDecoder().decode(CostAnalyticsResponse.self, from: Data(#"{"total":46.02,"sparkline":[{"day":"2026-10-18","costUsd":12},{"day":"2026-10-19","costUsd":34.02}],"deltaVsPrior":{"value":-5,"direction":"down"},"byPhase":[],"byProfileModel":[],"top10":[],"waste":{"total":0,"podCount":0}}"#.utf8))
