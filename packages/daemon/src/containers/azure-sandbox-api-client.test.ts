@@ -10,6 +10,87 @@ import { SandboxContainerManager } from './sandbox-container-manager.js';
 const logger = pino({ level: 'silent' });
 
 describe('recoverable native sandbox Goal processes', () => {
+  it('delivers RPC stdin through ordered private packets instead of the EOF-only stream', async () => {
+    const socket = new MockWebSocket();
+    let saved: import('@autopod/shared').NativeGoalProcessIdentity | undefined;
+    let input: ((data: Buffer) => void) | undefined;
+    const { client } = makeClient([], {
+      webSocket: () => {
+        queueMicrotask(() => socket.onopen?.({}));
+        return socket;
+      },
+    });
+    vi.spyOn(client, 'exec').mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    const writes = vi.spyOn(client, 'writeFile').mockResolvedValue();
+    vi.spyOn(client, 'readFile').mockImplementation(async () =>
+      Buffer.from(JSON.stringify({ execId: saved?.execId, observedExit: true, exitCode: 0 })),
+    );
+    const stream = client.execStream('sbx-goal', ['codex', 'app-server'], {
+      stdin: true,
+      onProcessCreated(identity) {
+        saved = identity;
+      },
+      onStdinWriter(write) {
+        input = write;
+      },
+    });
+    const next = stream.next();
+    await vi.waitFor(() => expect(input).toBeTypeOf('function'));
+    input?.(Buffer.from('first\n'));
+    input?.(Buffer.from('second\n'));
+    await vi.waitFor(() => expect(writes).toHaveBeenCalledTimes(3));
+    expect(JSON.parse(socket.sent[0] ?? '{}').start.stdin).toBe(false);
+    expect(socket.sent).toHaveLength(1);
+    for (const [index, text] of ['first\n', 'second\n'].entries()) {
+      const call = writes.mock.calls[index + 1];
+      expect(call?.[1]).toBe(saved?.pidPath.replace('/state.json', `/input-${index + 1}.json`));
+      expect(JSON.parse(String(call?.[2]))).toEqual({
+        sequence: index + 1,
+        data: Buffer.from(text).toString('base64'),
+        length: Buffer.byteLength(text),
+        sha256: createHash('sha256').update(text).digest('hex'),
+      });
+    }
+    socket.emit({ type: 'exit_code', exitCode: 0 });
+    expect(await next).toEqual({ value: { exitCode: 0 }, done: false });
+    await stream.return();
+  });
+
+  it('stops the exact process after an input upload fails without retrying the mutation', async () => {
+    const socket = new MockWebSocket();
+    let saved: import('@autopod/shared').NativeGoalProcessIdentity | undefined;
+    let input: ((data: Buffer) => void) | undefined;
+    const { client } = makeClient([], {
+      webSocket: () => {
+        queueMicrotask(() => socket.onopen?.({}));
+        return socket;
+      },
+    });
+    vi.spyOn(client, 'exec').mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    const writes = vi.spyOn(client, 'writeFile').mockImplementation(async (_id, path) => {
+      if (path.endsWith('/input-1.json')) throw new Error('Input upload uncertain');
+    });
+    vi.spyOn(client, 'readFile').mockImplementation(async () =>
+      Buffer.from(JSON.stringify({ execId: saved?.execId, observedExit: true, exitCode: -15 })),
+    );
+    const stream = client.execStream('sbx-goal', ['codex', 'app-server'], {
+      stdin: true,
+      onProcessCreated(identity) {
+        saved = identity;
+      },
+      onStdinWriter(write) {
+        input = write;
+      },
+    });
+    const next = stream.next();
+    await vi.waitFor(() => expect(input).toBeTypeOf('function'));
+    input?.(Buffer.from('do-not-repeat\n'));
+    expect(await next).toEqual({ value: { exitCode: 143 }, done: false });
+    expect(writes.mock.calls.filter((call) => call[1].endsWith('/input-1.json'))).toHaveLength(1);
+    expect(writes.mock.calls.some((call) => call[1].endsWith('/stop'))).toBe(true);
+    await stream.return();
+  });
+
   it('reconciles a lost socket through private stop and observed-exit receipts', async () => {
     const socket = new MockWebSocket();
     let saved: import('@autopod/shared').NativeGoalProcessIdentity | undefined;

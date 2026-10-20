@@ -32,6 +32,16 @@ it.skipIf(!process.env.AUTOPOD_GOAL_SANDBOX_FIXTURE)(
     let readyTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       const manager = new SandboxContainerManager(client, logger);
+      const echo = await manager.execStreaming(
+        id,
+        ['sh', '-c', 'read line; printf "ECHO:%s\\n" "$line"'],
+        { stdin: true, onProcessCreated() {} },
+      );
+      echo.stdin?.write('native-goal-input\n');
+      let echoed = '';
+      for await (const value of echo.stdout) echoed += value.toString();
+      expect(echoed).toBe('ECHO:native-goal-input\n');
+      expect(await echo.exitCode).toBe(0);
       let identity: NativeGoalProcessIdentity | undefined;
       const stream = await manager.execStreaming(id, ['sh', '-c', 'echo READY; sleep 240 & wait'], {
         onProcessCreated(value) {

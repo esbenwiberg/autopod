@@ -31,6 +31,7 @@ import type {
 import {
   SANDBOX_GOAL_SUPERVISOR_ENV,
   sandboxGoalExit,
+  sandboxGoalInput,
   sandboxGoalProcess,
   sandboxGoalRoot,
   sandboxGoalSupervisor,
@@ -516,7 +517,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       await this.writeFile(
         sandboxId,
         scriptPath,
-        Buffer.from(sandboxGoalSupervisor(identity, command, options?.cwd, options?.env)),
+        Buffer.from(
+          sandboxGoalSupervisor(identity, command, options?.cwd, options?.env, options?.stdin),
+        ),
       );
       const staged = await this.exec(sandboxId, ['chmod', '0700', scriptPath], { user: 'root' });
       if (staged.exitCode !== 0) throw new Error('Sandbox Goal supervisor staging failed');
@@ -580,6 +583,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       failure ??= err;
       wake();
     };
+    let inputSequence = 0;
+    let inputBytes = 0;
+    let inputWrites = Promise.resolve();
 
     const timeoutTimer = options?.timeoutMs
       ? setTimeout(() => {
@@ -606,7 +612,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
               ? SANDBOX_GOAL_SUPERVISOR_ENV
               : { TERM: 'xterm-256color', LANG: 'C.UTF-8', ...options?.env },
             tty: false,
-            stdin: options?.stdin === true,
+            stdin: !identity && options?.stdin === true,
             height: 24,
             width: 80,
           },
@@ -624,6 +630,22 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       if (options?.stdin) {
         options.onStdinWriter?.((data) => {
           if (closed) return;
+          if (identity) {
+            try {
+              const packet = sandboxGoalInput(identity, ++inputSequence, data);
+              inputBytes += data.length;
+              if (inputBytes > 8 * 1024 * 1024) throw new Error('Sandbox Goal input queue full');
+              inputWrites = inputWrites.then(async () => {
+                if (closed || failure) return;
+                await this.writeFile(sandboxId, packet.path, packet.content);
+                inputBytes -= data.length;
+              });
+              void inputWrites.catch((error) => fail(error));
+            } catch (error) {
+              fail(error instanceof Error ? error : new Error('Sandbox Goal input failed'));
+            }
+            return;
+          }
           socket.send(JSON.stringify({ type: 'stdin', data: data.toString('base64') }));
         });
       }

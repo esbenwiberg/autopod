@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { NativeGoalProcessIdentity } from '@autopod/shared';
 import { z } from 'zod';
 
@@ -42,6 +43,27 @@ export function sandboxGoalRoot(identity: NativeGoalProcessIdentity): string {
   return identity.pidPath.slice(0, -'/state.json'.length);
 }
 
+/** The non-TTY Azure stream closes stdin. Use ordered, private, complete input packets. */
+export function sandboxGoalInput(
+  identity: NativeGoalProcessIdentity,
+  sequence: number,
+  data: Buffer,
+): { path: string; content: Buffer } {
+  if (!Number.isSafeInteger(sequence) || sequence < 1 || data.length > 2 * 1024 * 1024)
+    throw new Error('Invalid sandbox Goal input packet');
+  return {
+    path: `${sandboxGoalRoot(identity)}/input-${sequence}.json`,
+    content: Buffer.from(
+      JSON.stringify({
+        sequence,
+        data: data.toString('base64'),
+        length: data.length,
+        sha256: createHash('sha256').update(data).digest('hex'),
+      }),
+    ),
+  };
+}
+
 const receipt = z.object({
   execId: z.string(),
   observedExit: z.boolean(),
@@ -63,6 +85,7 @@ export function sandboxGoalSupervisor(
   command: string[],
   cwd?: string,
   environment?: Record<string, string>,
+  stdin = false,
 ): string {
   const spec = Buffer.from(
     JSON.stringify({
@@ -71,10 +94,11 @@ export function sandboxGoalSupervisor(
       command,
       cwd,
       environment,
+      stdin,
     }),
   ).toString('base64');
   return `#!/usr/bin/python3 -I
-import base64,fcntl,json,os,pathlib,signal,subprocess,sys,time
+import base64,binascii,fcntl,hashlib,json,os,pathlib,signal,subprocess,sys,time
 spec=json.loads(base64.b64decode('${spec}'))
 root=pathlib.Path(spec['root'])
 if os.geteuid()!=0 or root.is_symlink() or root.stat().st_uid!=0 or root.stat().st_mode & 0o077:
@@ -120,15 +144,37 @@ def stop(*_):
 signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
 env={**os.environ,**(spec.get('environment') or {}),'HOME':'/home/autopod','USER':'autopod','LOGNAME':'autopod'}
 try:
-    child=subprocess.Popen(spec['command'],cwd=spec.get('cwd') or '/',env=env,preexec_fn=isolate)
+    child=subprocess.Popen(spec['command'],cwd=spec.get('cwd') or '/',env=env,preexec_fn=isolate,stdin=subprocess.PIPE if spec['stdin'] else None)
 except Exception:
     publish({'observedExit':True,'exitCode':127});raise
+pending=bytearray();input_index=1;input_open=bool(child.stdin)
+if input_open:os.set_blocking(child.stdin.fileno(),False)
+def pump_input():
+    global input_index,input_open
+    if not input_open:return
+    path=root/('input-'+str(input_index)+'.json')
+    try:
+        # The files endpoint may expose an upload before it finishes. Never forward partial input.
+        if path.stat().st_size<=3*1024*1024:
+            packet=json.loads(path.read_bytes())
+            data=base64.b64decode(packet['data'],validate=True)
+            if packet['sequence']==input_index and len(data)==packet['length'] and len(data)<=2*1024*1024 and hashlib.sha256(data).hexdigest()==packet['sha256'] and len(pending)+len(data)<=8*1024*1024:
+                pending.extend(data);path.unlink();input_index+=1
+    except (FileNotFoundError,ValueError,KeyError,TypeError,binascii.Error):pass
+    if pending:
+        try:
+            written=os.write(child.stdin.fileno(),pending)
+            del pending[:written]
+        except BlockingIOError:pass
+        except BrokenPipeError:
+            input_open=False;pending.clear();child.stdin.close()
 while child.poll() is None:
     if (root/'stop').exists():
         send(child.pid,signal.SIGTERM)
         try:child.wait(timeout=1)
         except subprocess.TimeoutExpired:send(child.pid,signal.SIGKILL);child.wait(timeout=1)
         break
+    pump_input()
     time.sleep(0.05)
 send(child.pid,signal.SIGKILL)
 deadline=time.monotonic()+2
