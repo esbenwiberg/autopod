@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
@@ -67,11 +67,11 @@ it.skipIf(!process.env.AUTOPOD_CODEX_GOAL_FIXTURE_CLI)(
       expect(original.goal).toMatchObject({ status: 'paused', tokensUsed: 0 });
       await first.close();
       const second = open();
-      const inspection = new CodexAppServerGoalSession(second, {
-        model: 'unused',
-        cwd: root,
-        developerInstructions: '',
-      });
+      const inspection = new CodexAppServerGoalSession(
+        second,
+        { model: 'unused', cwd: root, developerInstructions: '' },
+        async (path) => readFileSync(path, 'utf8'),
+      );
       await inspection.openInspection(started.thread.id);
       expect(await inspection.get()).toMatchObject({ nativeStatus: 'paused', cumulativeTokens: 0 });
       expect(await inspection.pause()).toMatchObject({

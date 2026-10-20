@@ -27,6 +27,7 @@ export class CodexGoalRuntimeSession implements NativeGoalSession {
       spawn(): Promise<StreamingExecResult>;
       sessionOpened(id: string): void;
       stopped(): void;
+      readRollout?(path: string): Promise<string>;
     },
   ) {}
   async open(id: string | null): Promise<string> {
@@ -51,6 +52,7 @@ export class CodexGoalRuntimeSession implements NativeGoalSession {
       this.session = new CodexAppServerGoalSession(
         new CodexAppServerClient(process),
         this.options.config,
+        this.options.readRollout,
       );
       this.acquisitionUncertain = false;
     })();
@@ -81,6 +83,9 @@ export class CodexGoalRuntimeSession implements NativeGoalSession {
   }
   observations(): AsyncIterable<NativeGoalObservation> {
     return this.ready().observations();
+  }
+  reconcileUsage(): Promise<NativeGoalObservation | null> {
+    return this.session?.reconcileUsage() ?? Promise.resolve(null);
   }
   stop(): Promise<void> {
     if (this.termination) return this.termination;

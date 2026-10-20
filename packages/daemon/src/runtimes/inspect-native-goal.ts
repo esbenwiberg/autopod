@@ -11,6 +11,7 @@ import {
   terminateCodexAppServer,
 } from './codex-app-server-client.js';
 import { CodexAppServerGoalSession } from './codex-app-server-goal-session.js';
+import { codexGoalRolloutPath } from './codex-goal-usage.js';
 
 /** No account environment, agent shim, workspace config, thread load, or continuation RPC. */
 export async function inspectNativeGoal(input: {
@@ -21,6 +22,7 @@ export async function inspectNativeGoal(input: {
   observe(value: NativeGoalObservation): void;
 }): Promise<void> {
   let handle: StreamingExecResult | undefined;
+  let session: CodexAppServerGoalSession | undefined;
   try {
     handle = await input.manager.execStreaming(
       input.containerId,
@@ -43,11 +45,11 @@ export async function inspectNativeGoal(input: {
       },
     );
     if (!handle.stdin) throw new CodexRpcError('STDIN_UNAVAILABLE');
-    const session = new CodexAppServerGoalSession(new CodexAppServerClient(handle), {
-      model: 'unused',
-      cwd: '/',
-      developerInstructions: '',
-    });
+    session = new CodexAppServerGoalSession(
+      new CodexAppServerClient(handle),
+      { model: 'unused', cwd: '/', developerInstructions: '' },
+      (path) => input.manager.readFile(input.containerId, codexGoalRolloutPath(path)),
+    );
     await session.openInspection(input.sessionId);
     const saved = await session.get();
     if (!saved) throw new CodexRpcError('GOAL_RECONCILIATION_REQUIRED');
@@ -59,5 +61,7 @@ export async function inspectNativeGoal(input: {
     }
   } finally {
     if (handle) await terminateCodexAppServer(handle);
+    const final = await session?.reconcileUsage();
+    if (final) input.observe(final);
   }
 }

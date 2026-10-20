@@ -112,6 +112,7 @@ export class GoalController {
           this.observe(podId, execution, await session.pause());
         }
         await session.stop();
+        await this.reconcileUsage(podId, execution);
         this.hooks.confirmProcessStopped?.(podId, fence);
         this.repository.confirmStopped(podId, fence);
       }
@@ -122,6 +123,7 @@ export class GoalController {
       this.repository.attention(podId, fence, 'Native Goal needs reconciliation before continuing');
       try {
         await session.stop();
+        await this.reconcileUsage(podId, execution);
         this.hooks.confirmProcessStopped?.(podId, fence);
         this.repository.confirmStopped(podId, fence);
         if (budgetExhausted) this.repository.exhausted(podId, fence);
@@ -210,6 +212,7 @@ export class GoalController {
         } finally {
           // Even a rejected native mutation must stop compute; unconfirmed exit preserves the intent.
           await execution.session.stop();
+          await this.reconcileUsage(podId, execution);
           this.hooks.confirmProcessStopped?.(podId, execution.fence);
           this.repository.confirmStopped(podId, execution.fence);
           this.active.delete(podId);
@@ -232,6 +235,10 @@ export class GoalController {
     const goal = this.repository.get(podId);
     if (!goal) configurationError('Pod goal is unavailable', 'GOAL_NOT_FOUND', 404);
     return goal;
+  }
+  private async reconcileUsage(podId: string, execution: Active): Promise<void> {
+    const final = await execution.session.reconcileUsage?.();
+    if (final) this.observe(podId, execution, final);
   }
   private check(podId: string, execution: Active): void {
     this.hooks.assertCurrent(podId, execution.fence);

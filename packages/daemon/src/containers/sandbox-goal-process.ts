@@ -98,11 +98,15 @@ export function sandboxGoalSupervisor(
     }),
   ).toString('base64');
   return `#!/usr/bin/python3 -I
-import base64,binascii,fcntl,hashlib,json,os,pathlib,signal,subprocess,sys,time
+import base64,binascii,ctypes,fcntl,hashlib,json,os,pathlib,signal,subprocess,sys,time
 spec=json.loads(base64.b64decode('${spec}'))
 root=pathlib.Path(spec['root'])
 if os.geteuid()!=0 or root.is_symlink() or root.stat().st_uid!=0 or root.stat().st_mode & 0o077:
     raise RuntimeError('private-supervisor-required')
+if sys.platform!='linux' or not hasattr(os,'pidfd_open') or not hasattr(signal,'pidfd_send_signal'):
+    raise RuntimeError('owned-process-recovery-unavailable')
+# Adopt orphaned descendants even when a tool creates its own process group/session.
+if ctypes.CDLL(None).prctl(36,1,0,0,0)!=0:raise RuntimeError('subreaper-required')
 def publish(value):
     temp=root/'state.tmp'
     with os.fdopen(os.open(temp,os.O_CREAT|os.O_TRUNC|os.O_WRONLY|os.O_NOFOLLOW,0o600),'w') as f:
@@ -123,22 +127,37 @@ publish({'observedExit':False})
 def isolate():
     os.setsid()
     if sys.platform=='linux':
-        import ctypes
         if ctypes.CDLL(None).prctl(38,1,0,0,0)!=0:raise RuntimeError('no-new-privileges')
     os.setgroups([]);os.setgid(1000);os.setuid(1000)
-def alive(group):
-    if sys.platform=='linux':
-        for path in pathlib.Path('/proc').glob('[0-9]*/stat'):
-            try:
-                fields=path.read_text().rsplit(') ',1)[1].split()
-                if int(fields[2])==group and fields[0]!='Z':return True
-            except (FileNotFoundError,ProcessLookupError):pass
-        return False
-    try:os.killpg(group,0);return True
-    except ProcessLookupError:return False
-def send(group,sig):
-    try:os.killpg(group,sig)
-    except ProcessLookupError:pass
+def process_info(pid):
+    fields=pathlib.Path('/proc/'+str(pid)+'/stat').read_text().rsplit(') ',1)[1].split()
+    return (int(fields[1]),fields[0],fields[19])
+def descendants():
+    processes={}
+    for path in pathlib.Path('/proc').glob('[0-9]*/stat'):
+        try:processes[int(path.parent.name)]=process_info(int(path.parent.name))
+        except (FileNotFoundError,ProcessLookupError):pass
+    owned={os.getpid()}
+    while True:
+        children={pid for pid,info in processes.items() if info[0] in owned}
+        if children<=owned:break
+        owned.update(children)
+    return {pid:processes[pid] for pid in owned if pid!=os.getpid() and processes[pid][1]!='Z'}
+def signal_owned(sig):
+    for pid,info in descendants().items():
+        fd=None
+        try:
+            fd=os.pidfd_open(pid)
+            # Pin the observed process and refuse a PID reused between /proc and pidfd_open.
+            if process_info(pid)[2]==info[2]:signal.pidfd_send_signal(fd,sig)
+        except (FileNotFoundError,ProcessLookupError):pass
+        finally:
+            if fd is not None:os.close(fd)
+def reap():
+    while True:
+        try:
+            if os.waitpid(-1,os.WNOHANG)[0]==0:break
+        except ChildProcessError:break
 def stop(*_):
     (root/'stop').touch(mode=0o600)
 signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
@@ -170,16 +189,17 @@ def pump_input():
             input_open=False;pending.clear();child.stdin.close()
 while child.poll() is None:
     if (root/'stop').exists():
-        send(child.pid,signal.SIGTERM)
+        signal_owned(signal.SIGTERM)
         try:child.wait(timeout=1)
-        except subprocess.TimeoutExpired:send(child.pid,signal.SIGKILL);child.wait(timeout=1)
+        except subprocess.TimeoutExpired:signal_owned(signal.SIGKILL);child.wait(timeout=1)
         break
     pump_input()
     time.sleep(0.05)
-send(child.pid,signal.SIGKILL)
 deadline=time.monotonic()+2
-while alive(child.pid) and time.monotonic()<deadline:time.sleep(0.05)
-if alive(child.pid):raise RuntimeError('termination-unconfirmed')
+while descendants() and time.monotonic()<deadline:
+    signal_owned(signal.SIGKILL);reap();time.sleep(0.05)
+reap()
+if descendants():raise RuntimeError('termination-unconfirmed')
 publish({'observedExit':True,'exitCode':child.returncode})
 sys.exit(child.returncode if child.returncode>=0 else 128-child.returncode)
 `;

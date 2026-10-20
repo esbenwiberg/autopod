@@ -56,6 +56,28 @@ function fixture() {
 }
 
 describe('native Goal controller', () => {
+  it('settles final response usage after confirmed exit before releasing the attempt', async () => {
+    const f = fixture();
+    const native = session();
+    native.reconcileUsage = vi.fn(async () => {
+      expect(native.stop).toHaveBeenCalled();
+      expect(f.repository.get('pod')?.executionStopped).toBe(false);
+      return { ...observation(4, 'achieved'), cumulativeTokens: 75330 };
+    });
+    try {
+      const result = await f.controller.run('pod', f.goal.revision, f.fence, native);
+      expect(result).toMatchObject({
+        state: 'achieved',
+        observedTokens: 75330,
+        executionStopped: true,
+      });
+      expect(f.hooks.account).toHaveBeenLastCalledWith(
+        expect.objectContaining({ observedTokens: 75330 }),
+      );
+    } finally {
+      f.db.close();
+    }
+  });
   it('removes a running native limit without pausing or replacing its objective', async () => {
     const f = fixture();
     const native = session();

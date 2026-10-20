@@ -65,5 +65,7 @@ export interface NativeGoalSession {
   clear(): Promise<void>;
   /** Resolves only after process termination is confirmed. */
   stop(): Promise<void>;
+  /** Reconcile the durable full-thread counter after exit, including any final response. */
+  reconcileUsage?(): Promise<NativeGoalObservation | null>;
   observations(): AsyncIterable<NativeGoalObservation>;
 }

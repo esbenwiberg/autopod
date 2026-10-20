@@ -43,11 +43,19 @@ it.skipIf(!process.env.AUTOPOD_GOAL_SANDBOX_FIXTURE)(
       expect(echoed).toBe('ECHO:native-goal-input\n');
       expect(await echo.exitCode).toBe(0);
       let identity: NativeGoalProcessIdentity | undefined;
-      const stream = await manager.execStreaming(id, ['sh', '-c', 'echo READY; sleep 240 & wait'], {
-        onProcessCreated(value) {
-          identity = structuredClone(value);
+      const stream = await manager.execStreaming(
+        id,
+        [
+          'sh',
+          '-c',
+          'setsid sleep 240 & echo $! > /tmp/goal-fixture-detached.pid; echo READY; wait',
+        ],
+        {
+          onProcessCreated(value) {
+            identity = structuredClone(value);
+          },
         },
-      });
+      );
       const ready = (async () => {
         for await (const value of stream.stdout) {
           if (value.toString().includes('READY')) return true;
@@ -72,6 +80,15 @@ it.skipIf(!process.env.AUTOPOD_GOAL_SANDBOX_FIXTURE)(
       expect(await stream.exitCode).toBe(code);
       expect(await restarted.terminateRecordedExec(identity)).toBe(code);
       expect(await restarted.getStatus(id)).toBe('running');
+      expect(
+        (
+          await restarted.exec(id, [
+            'sh',
+            '-c',
+            '! kill -0 "$(cat /tmp/goal-fixture-detached.pid)" 2>/dev/null',
+          ])
+        ).exitCode,
+      ).toBe(0);
       const privateState = await restarted.exec(id, [
         'sh',
         '-c',

@@ -2,6 +2,7 @@ import type { NativeGoalObservation } from '@autopod/shared';
 import { z } from 'zod';
 import type { NativeGoalSession } from '../interfaces/native-goal.js';
 import { type CodexAppServerClient, CodexRpcError } from './codex-app-server-client.js';
+import { codexGoalRolloutTokens, codexThreadUsageSchema } from './codex-goal-usage.js';
 import {
   type CodexNativeGoal,
   codexGoalObservation,
@@ -24,9 +25,12 @@ export class CodexAppServerGoalSession implements NativeGoalSession {
   private sequence = 0;
   private latest: CodexNativeGoal | null = null;
   private inspectionOnly = false;
+  private threadTokens = 0;
+  private rolloutPath: string | null = null;
   constructor(
     private readonly client: Pick<CodexAppServerClient, 'request' | 'notify' | 'events' | 'close'>,
     private readonly config: CodexGoalThreadConfig,
+    private readonly readRollout?: (path: string) => Promise<string>,
   ) {}
 
   /** Binds stored Goal state without loading a thread or permitting continuation. */
@@ -71,17 +75,22 @@ export class CodexAppServerGoalSession implements NativeGoalSession {
       ...(sessionId ? { threadId: sessionId } : { ephemeral: false }),
     };
     const response = z
-      .object({ thread: z.object({ id: z.string().min(1) }) })
+      .object({
+        thread: z.object({ id: z.string().min(1), path: z.string().nullable().optional() }),
+      })
       .parse(await this.client.request(sessionId ? 'thread/resume' : 'thread/start', params));
     if (sessionId && response.thread.id !== sessionId) throw new CodexRpcError('SESSION_MISMATCH');
     this.threadId = response.thread.id;
+    this.rolloutPath = response.thread.path ?? this.rolloutPath;
     return this.threadId;
   }
   async get(): Promise<NativeGoalObservation | null> {
     const { goal } = responseSchema.parse(
       await this.client.request('thread/goal/get', { threadId: this.id() }),
     );
-    return goal ? this.accept(goal) : null;
+    if (!goal) return null;
+    await this.refreshUsage(goal.tokensUsed);
+    return this.accept(goal);
   }
   async start(objective: string, remainingTokens: number | null): Promise<NativeGoalObservation> {
     if (this.inspectionOnly) throw new CodexRpcError('INSPECTION_ONLY');
@@ -117,13 +126,29 @@ export class CodexAppServerGoalSession implements NativeGoalSession {
   stop(): Promise<void> {
     return this.client.close();
   }
+  async reconcileUsage(): Promise<NativeGoalObservation | null> {
+    if (!this.latest) return null;
+    await this.refreshUsage(this.latest.tokensUsed);
+    return this.accept(this.latest);
+  }
   async *observations(): AsyncIterable<NativeGoalObservation> {
     for await (const notification of this.client.events()) {
-      if (notification.method === 'thread/goal/updated') {
+      if (notification.method === 'thread/tokenUsage/updated') {
+        const usage = codexThreadUsageSchema.parse(notification.params);
+        if (usage.threadId !== this.id()) throw new CodexRpcError('SESSION_MISMATCH');
+        // Resume can replay an earlier notification; only the durable cumulative maximum advances.
+        if (usage.tokenUsage.total.totalTokens > this.threadTokens) {
+          this.threadTokens = usage.tokenUsage.total.totalTokens;
+          if (!this.rolloutPath) await this.refreshUsage(this.latest?.tokensUsed ?? 0);
+          if (this.latest) yield this.accept(this.latest);
+        }
+      } else if (notification.method === 'thread/goal/updated') {
         const params = z
           .object({ threadId: z.string(), goal: codexNativeGoalSchema })
           .parse(notification.params);
         if (params.threadId !== this.id()) throw new CodexRpcError('SESSION_MISMATCH');
+        if (!this.rolloutPath || params.goal.status === 'complete')
+          await this.refreshUsage(params.goal.tokensUsed);
         if (
           this.latest &&
           params.goal.updatedAt === this.latest.updatedAt &&
@@ -177,7 +202,35 @@ export class CodexAppServerGoalSession implements NativeGoalSession {
     )
       throw new CodexRpcError('USAGE_RESET_UNCONFIRMED');
     this.latest = goal;
-    return codexGoalObservation(goal, ++this.sequence);
+    return {
+      ...codexGoalObservation(goal, ++this.sequence),
+      cumulativeTokens: Math.max(this.threadTokens, goal.tokensUsed),
+    };
+  }
+  private async refreshUsage(nativeTokens: number): Promise<void> {
+    if (!this.readRollout) return;
+    if (!this.rolloutPath) {
+      try {
+        const response = z
+          .object({ thread: z.object({ id: z.string(), path: z.string().nullable() }) })
+          .parse(
+            await this.client.request('thread/read', { threadId: this.id(), includeTurns: false }),
+          );
+        if (response.thread.id !== this.id()) throw new CodexRpcError('SESSION_MISMATCH');
+        this.rolloutPath = response.thread.path;
+      } catch (error) {
+        if (error instanceof CodexRpcError && error.code === 'SESSION_MISMATCH') throw error;
+        // A newly created zero-use thread need not have materialized a rollout yet.
+        if (nativeTokens === 0 && this.threadTokens === 0) return;
+        throw error;
+      }
+    }
+    if (!this.rolloutPath) {
+      if (nativeTokens > 0) throw new CodexRpcError('USAGE_UNAVAILABLE');
+      return;
+    }
+    const total = codexGoalRolloutTokens(await this.readRollout(this.rolloutPath), this.id());
+    this.threadTokens = Math.max(this.threadTokens, total);
   }
   private async set(params: Record<string, unknown>): Promise<NativeGoalObservation> {
     const response = responseSchema.parse(
