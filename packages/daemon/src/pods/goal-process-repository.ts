@@ -1,6 +1,7 @@
 import type { GoalAttemptFence, NativeGoalProcessIdentity } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { configurationError } from '../configuration/configuration-store.js';
+import { sandboxGoalRoot } from '../containers/sandbox-goal-process.js';
 
 export interface GoalProcessOwner {
   podId: string;
@@ -44,12 +45,16 @@ export function createGoalProcessRepository(db: Database.Database) {
       role: GoalProcessRecord['role'],
     ) {
       assertOwner(owner);
-      if (
-        identity.backend !== 'docker' ||
-        identity.containerId !== owner.containerId ||
-        !/^[a-f0-9]{64}$/.test(identity.execId) ||
-        !/^\/tmp\/\.autopod-stream-exec-[a-f0-9-]{36}\.pid$/.test(identity.pidPath)
-      )
+      const pod = db
+        .prepare('SELECT execution_target AS target FROM pods WHERE id=?')
+        .get(owner.podId) as { target: string };
+      const validBackend =
+        pod.target === 'sandbox'
+          ? identity.backend === 'sandbox' && !!sandboxGoalRoot(identity)
+          : identity.backend === 'docker' &&
+            /^[a-f0-9]{64}$/.test(identity.execId) &&
+            /^\/tmp\/\.autopod-stream-exec-[a-f0-9-]{36}\.pid$/.test(identity.pidPath);
+      if (!validBackend || identity.containerId !== owner.containerId || !identity.execId)
         configurationError('Native Goal process identity is invalid', 'GOAL_PROCESS_INVALID', 409);
       db.prepare(`INSERT INTO pod_goal_processes(exec_id,pod_id,attempt_id,generation,
         configuration_digest,account_id,backend,container_id,pid_path,role,created_at)

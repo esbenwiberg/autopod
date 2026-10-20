@@ -26,7 +26,7 @@ export interface PodGoalServiceOptions {
   publish(goal: PodGoal): void;
   recovery?: {
     readConfig(podId: string): EffectiveLaunchConfig | null;
-    manager: ContainerManager;
+    manager: ContainerManager | ((target: 'local' | 'sandbox') => ContainerManager);
     inspect?: typeof inspectNativeGoal;
   };
 }
@@ -122,7 +122,13 @@ export function createPodGoalService(options: PodGoalServiceOptions) {
     }
     const recovery = options.recovery;
     const config = recovery?.readConfig(podId);
-    if (!recovery || !config || !recovery.manager.terminateRecordedExec)
+    const manager =
+      recovery && config
+        ? typeof recovery.manager === 'function'
+          ? recovery.manager(config.execution.target)
+          : recovery.manager
+        : undefined;
+    if (!recovery || !config || !manager?.terminateRecordedExec)
       configurationError(
         'Native Goal recovery is unavailable',
         'GOAL_RECONCILIATION_REQUIRED',
@@ -140,7 +146,7 @@ export function createPodGoalService(options: PodGoalServiceOptions) {
         );
       for (const record of records) {
         if (record.stoppedAt) continue;
-        const exitCode = await recovery.manager.terminateRecordedExec(record);
+        const exitCode = await manager.terminateRecordedExec(record);
         // Recovery has no live in-process starter: an exact backend identity plus an observed
         // exit closes the create-before-start-acknowledgement crash window as well.
         processes.confirmStopped(owner, record.execId, exitCode);
@@ -151,7 +157,7 @@ export function createPodGoalService(options: PodGoalServiceOptions) {
       if (current.nativeSessionId) {
         const inspect = recovery.inspect ?? inspectNativeGoal;
         await inspect({
-          manager: recovery.manager,
+          manager,
           containerId: owner.containerId,
           sessionId: current.nativeSessionId,
           hooks: {
@@ -244,6 +250,7 @@ export function createPodGoalService(options: PodGoalServiceOptions) {
           imageDigest: provenance.imageDigest ?? '',
           backend: pod.executionTarget,
           providerId: pod.providerIdSnapshot ?? '',
+          accountId: pod.providerAccountIdSnapshot ?? '',
         },
         options.evidence,
       );

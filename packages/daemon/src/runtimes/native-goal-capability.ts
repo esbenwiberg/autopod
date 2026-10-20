@@ -9,6 +9,7 @@ export const nativeGoalEvidenceSchema = z
     imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
     backend: z.enum(['local', 'sandbox']),
     providerId: z.string().min(1),
+    accountId: z.string().min(1),
     observedAt: z.string().datetime(),
     evidenceId: z.string().min(1),
     checks: z
@@ -32,6 +33,7 @@ export interface NativeGoalCapabilityIdentity {
   imageDigest: string;
   backend: 'local' | 'sandbox';
   providerId: string;
+  accountId: string;
 }
 export function nativeGoalCapability(
   identity: NativeGoalCapabilityIdentity,
@@ -50,12 +52,6 @@ export function nativeGoalCapability(
       available: false,
       reason: 'Claude native Goal lifecycle and evaluator usage recovery are not implemented',
     };
-  if (identity.backend !== 'local')
-    return {
-      available: false,
-      reason:
-        'This backend cannot yet recover the exact native Goal process after a daemon restart',
-    };
   for (const raw of evidence) {
     const parsed = nativeGoalEvidenceSchema.safeParse(raw);
     if (!parsed.success) continue;
@@ -65,7 +61,8 @@ export function nativeGoalCapability(
       item.runtimeVersion === identity.runtimeVersion &&
       item.imageDigest === identity.imageDigest &&
       item.backend === identity.backend &&
-      item.providerId === identity.providerId
+      item.providerId === identity.providerId &&
+      item.accountId === identity.accountId
     )
       return { available: true, evidenceId: item.evidenceId };
   }

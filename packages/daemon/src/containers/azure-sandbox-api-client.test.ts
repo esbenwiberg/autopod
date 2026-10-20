@@ -9,6 +9,285 @@ import { SandboxContainerManager } from './sandbox-container-manager.js';
 
 const logger = pino({ level: 'silent' });
 
+describe('recoverable native sandbox Goal processes', () => {
+  it('delivers RPC stdin through ordered private packets instead of the EOF-only stream', async () => {
+    const socket = new MockWebSocket();
+    let saved: import('@autopod/shared').NativeGoalProcessIdentity | undefined;
+    let input: ((data: Buffer) => void) | undefined;
+    const { client } = makeClient([], {
+      webSocket: () => {
+        queueMicrotask(() => socket.onopen?.({}));
+        return socket;
+      },
+    });
+    vi.spyOn(client, 'exec').mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    const writes = vi.spyOn(client, 'writeFile').mockResolvedValue();
+    vi.spyOn(client, 'readFile').mockImplementation(async () =>
+      Buffer.from(JSON.stringify({ execId: saved?.execId, observedExit: true, exitCode: 0 })),
+    );
+    const stream = client.execStream('sbx-goal', ['codex', 'app-server'], {
+      stdin: true,
+      onProcessCreated(identity) {
+        saved = identity;
+      },
+      onStdinWriter(write) {
+        input = write;
+      },
+    });
+    const next = stream.next();
+    await vi.waitFor(() => expect(input).toBeTypeOf('function'));
+    input?.(Buffer.from('first\n'));
+    input?.(Buffer.from('second\n'));
+    await vi.waitFor(() => expect(writes).toHaveBeenCalledTimes(3));
+    expect(JSON.parse(socket.sent[0] ?? '{}').start.stdin).toBe(false);
+    expect(socket.sent).toHaveLength(1);
+    for (const [index, text] of ['first\n', 'second\n'].entries()) {
+      const call = writes.mock.calls[index + 1];
+      expect(call?.[1]).toBe(saved?.pidPath.replace('/state.json', `/input-${index + 1}.json`));
+      expect(JSON.parse(String(call?.[2]))).toEqual({
+        sequence: index + 1,
+        data: Buffer.from(text).toString('base64'),
+        length: Buffer.byteLength(text),
+        sha256: createHash('sha256').update(text).digest('hex'),
+      });
+    }
+    socket.emit({ type: 'exit_code', exitCode: 0 });
+    expect(await next).toEqual({ value: { exitCode: 0 }, done: false });
+    await stream.return();
+  });
+
+  it('stops the exact process after an input upload fails without retrying the mutation', async () => {
+    const socket = new MockWebSocket();
+    let saved: import('@autopod/shared').NativeGoalProcessIdentity | undefined;
+    let input: ((data: Buffer) => void) | undefined;
+    const { client } = makeClient([], {
+      webSocket: () => {
+        queueMicrotask(() => socket.onopen?.({}));
+        return socket;
+      },
+    });
+    vi.spyOn(client, 'exec').mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    const writes = vi.spyOn(client, 'writeFile').mockImplementation(async (_id, path) => {
+      if (path.endsWith('/input-1.json')) throw new Error('Input upload uncertain');
+    });
+    vi.spyOn(client, 'readFile').mockImplementation(async () =>
+      Buffer.from(JSON.stringify({ execId: saved?.execId, observedExit: true, exitCode: -15 })),
+    );
+    const stream = client.execStream('sbx-goal', ['codex', 'app-server'], {
+      stdin: true,
+      onProcessCreated(identity) {
+        saved = identity;
+      },
+      onStdinWriter(write) {
+        input = write;
+      },
+    });
+    const next = stream.next();
+    await vi.waitFor(() => expect(input).toBeTypeOf('function'));
+    input?.(Buffer.from('do-not-repeat\n'));
+    expect(await next).toEqual({ value: { exitCode: 143 }, done: false });
+    expect(writes.mock.calls.filter((call) => call[1].endsWith('/input-1.json'))).toHaveLength(1);
+    expect(writes.mock.calls.some((call) => call[1].endsWith('/stop'))).toBe(true);
+    await stream.return();
+  });
+
+  it('reconciles a lost socket through private stop and observed-exit receipts', async () => {
+    const socket = new MockWebSocket();
+    let saved: import('@autopod/shared').NativeGoalProcessIdentity | undefined;
+    const { client } = makeClient([], {
+      webSocket: () => {
+        queueMicrotask(() => {
+          socket.onopen?.({});
+          socket.close();
+        });
+        return socket;
+      },
+    });
+    vi.spyOn(client, 'exec').mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    const writes = vi.spyOn(client, 'writeFile').mockResolvedValue();
+    vi.spyOn(client, 'readFile').mockImplementation(async () =>
+      Buffer.from(JSON.stringify({ execId: saved?.execId, observedExit: true, exitCode: -9 })),
+    );
+    const chunks = [];
+    for await (const chunk of client.execStream('sbx-goal', ['codex', 'app-server'], {
+      onProcessCreated(v) {
+        saved = v;
+      },
+    }))
+      chunks.push(chunk);
+    expect(chunks).toEqual([{ exitCode: 137 }]);
+    expect(
+      writes.mock.calls.some((call) => call[1] === saved?.pidPath.replace('/state.json', '/stop')),
+    ).toBe(true);
+  });
+  it('records identity before any start and requires the supervisor exit receipt', async () => {
+    const socket = new MockWebSocket();
+    let saved: import('@autopod/shared').NativeGoalProcessIdentity | undefined;
+    const webSocket = vi.fn(() => {
+      expect(saved?.backend).toBe('sandbox');
+      queueMicrotask(() => {
+        socket.onopen?.({});
+        socket.emit({ type: 'exit_code', exitCode: 143 });
+      });
+      return socket;
+    });
+    const { client } = makeClient([], { webSocket });
+    vi.spyOn(client, 'exec').mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    const writes = vi.spyOn(client, 'writeFile').mockResolvedValue();
+    vi.spyOn(client, 'readFile').mockImplementation(async () =>
+      Buffer.from(
+        JSON.stringify({
+          execId: saved?.execId,
+          observedExit: true,
+          exitCode: -15,
+        }),
+      ),
+    );
+    const started = vi.fn();
+    const chunks = [];
+    for await (const chunk of client.execStream('sbx-goal', ['codex', 'app-server'], {
+      stdin: true,
+      env: {
+        PYTHONPATH: '/workspace',
+        LD_PRELOAD: '/workspace/untrusted.so',
+        TOKEN: 'fixture-only',
+      },
+      onProcessCreated(identity) {
+        expect(webSocket).not.toHaveBeenCalled();
+        saved = identity;
+      },
+      onProcessStarted: started,
+    }))
+      chunks.push(chunk);
+    expect(saved?.pidPath).toBe(`/run/autopod-goal-exec-${saved?.execId}/state.json`);
+    expect(started).toHaveBeenCalledWith(saved);
+    expect(String(writes.mock.calls[0]?.[2])).toContain('private-supervisor-required');
+    const frame = JSON.parse(socket.sent[0] ?? '{}');
+    expect(frame.start.environment.PYTHONPATH).toBe('');
+    expect(frame.start.environment.LD_PRELOAD).toBe('');
+    expect(frame.start.environment.TOKEN).toBeUndefined();
+    expect(String(writes.mock.calls[0]?.[2])).toMatch(/^#!\/usr\/bin\/python3 -I\n/);
+    expect(chunks).toEqual([{ exitCode: 143 }]);
+  });
+
+  it('never opens a WebSocket when persistence refuses the new process owner', async () => {
+    const webSocket = vi.fn();
+    const { client } = makeClient([], { webSocket });
+    vi.spyOn(client, 'exec').mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    vi.spyOn(client, 'writeFile').mockResolvedValue();
+    const iterator = client.execStream('sbx-goal', ['codex', 'app-server'], {
+      onProcessCreated() {
+        throw new Error('Stale owner');
+      },
+    });
+    await expect(iterator.next()).rejects.toThrow('Stale owner');
+    expect(webSocket).not.toHaveBeenCalled();
+  });
+
+  it('rejects a socket exit without observed child termination', async () => {
+    let saved: import('@autopod/shared').NativeGoalProcessIdentity | undefined;
+    const socket = new MockWebSocket();
+    const { client } = makeClient([], {
+      webSocket: () => {
+        queueMicrotask(() => {
+          socket.onopen?.({});
+          socket.emit({ type: 'exit_code', exitCode: 0 });
+        });
+        return socket;
+      },
+    });
+    vi.spyOn(client, 'exec').mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    vi.spyOn(client, 'writeFile').mockResolvedValue();
+    vi.spyOn(client, 'readFile').mockImplementation(async () =>
+      Buffer.from(
+        JSON.stringify({
+          execId: saved?.execId,
+          observedExit: false,
+        }),
+      ),
+    );
+    await expect(
+      client
+        .execStream('sbx-goal', ['codex', 'app-server'], {
+          onProcessCreated(identity) {
+            saved = identity;
+          },
+        })
+        .next(),
+    ).rejects.toThrow('termination is unconfirmed');
+  });
+
+  it('recovers using the saved identity and files channel on a fresh client', async () => {
+    const { sandboxGoalProcess } = await import('./sandbox-goal-process.js');
+    const identity = sandboxGoalProcess('sbx-goal', '11111111-1111-4111-8111-111111111111');
+    const { client } = makeClient([]);
+    const write = vi.spyOn(client, 'writeFile').mockResolvedValue();
+    const exec = vi.spyOn(client, 'exec');
+    vi.spyOn(client, 'readFile').mockResolvedValue(
+      Buffer.from(
+        JSON.stringify({
+          execId: identity.execId,
+          observedExit: true,
+          exitCode: -9,
+        }),
+      ),
+    );
+    expect(await client.terminateRecordedExec(identity)).toBe(137);
+    expect(write).toHaveBeenCalledWith(
+      identity.containerId,
+      identity.pidPath.replace('/state.json', '/stop'),
+      Buffer.from(identity.execId),
+    );
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('refuses a receipt from a different process', async () => {
+    const { sandboxGoalProcess } = await import('./sandbox-goal-process.js');
+    const identity = sandboxGoalProcess('sbx-goal', '11111111-1111-4111-8111-111111111111');
+    const { client } = makeClient([]);
+    vi.spyOn(client, 'writeFile').mockResolvedValue();
+    vi.spyOn(client, 'readFile').mockResolvedValue(
+      Buffer.from(
+        JSON.stringify({
+          execId: 'different',
+          observedExit: true,
+          exitCode: 0,
+        }),
+      ),
+    );
+    await expect(client.terminateRecordedExec(identity)).rejects.toThrow('ownership changed');
+  });
+
+  it('fences a late start when the daemon crashed before its acknowledgement', async () => {
+    vi.useFakeTimers();
+    try {
+      const { sandboxGoalProcess } = await import('./sandbox-goal-process.js');
+      const identity = sandboxGoalProcess('sbx-goal', '11111111-1111-4111-8111-111111111111');
+      const { client } = makeClient([]);
+      vi.spyOn(client, 'writeFile').mockResolvedValue();
+      const read = vi
+        .spyOn(client, 'readFile')
+        .mockRejectedValue(new Error('Missing pre-start receipt'));
+      const exec = vi.spyOn(client, 'exec').mockImplementation(async () => {
+        read.mockResolvedValue(
+          Buffer.from(JSON.stringify({ execId: identity.execId, observedExit: true, exitCode: 0 })),
+        );
+        return { stdout: '', stderr: '', exitCode: 0 };
+      });
+      const recovery = client.terminateRecordedExec(identity);
+      await vi.advanceTimersByTimeAsync(4100);
+      expect(await recovery).toBe(0);
+      expect(exec).toHaveBeenCalledWith(
+        identity.containerId,
+        [identity.pidPath.replace('/state.json', '/supervisor.py'), '--cancel'],
+        { user: 'root', timeoutMs: 5000 },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 interface CapturedRequest {
   url: string;
   init?: RequestInit;

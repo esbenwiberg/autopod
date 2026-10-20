@@ -11,6 +11,7 @@ import {
   terminateCodexAppServer,
 } from './codex-app-server-client.js';
 import { CodexAppServerGoalSession } from './codex-app-server-goal-session.js';
+import { codexGoalRolloutPath } from './codex-goal-usage.js';
 
 /** No account environment, agent shim, workspace config, thread load, or continuation RPC. */
 export async function inspectNativeGoal(input: {
@@ -20,7 +21,16 @@ export async function inspectNativeGoal(input: {
   hooks: NativeGoalProcessHooks;
   observe(value: NativeGoalObservation): void;
 }): Promise<void> {
+  const home = `/tmp/.autopod-goal-inspection-${randomUUID()}`;
+  // Codex refuses an explicit CODEX_HOME that does not already exist.
+  const prepared = await input.manager.execInContainer(
+    input.containerId,
+    ['mkdir', '-m', '0700', home],
+    { timeout: 5000 },
+  );
+  if (prepared.exitCode !== 0) throw new CodexRpcError('INSPECTION_HOME_UNAVAILABLE');
   let handle: StreamingExecResult | undefined;
+  let session: CodexAppServerGoalSession | undefined;
   try {
     handle = await input.manager.execStreaming(
       input.containerId,
@@ -29,7 +39,7 @@ export async function inspectNativeGoal(input: {
         '-i',
         'PATH=/usr/local/bin:/usr/bin:/bin',
         `HOME=${CONTAINER_HOME_DIR}`,
-        `CODEX_HOME=/tmp/.autopod-goal-inspection-${randomUUID()}`,
+        `CODEX_HOME=${home}`,
         'codex',
         '-c',
         `sqlite_home="${CONTAINER_HOME_DIR}/.codex/sessions/.autopod-goal-state"`,
@@ -43,11 +53,11 @@ export async function inspectNativeGoal(input: {
       },
     );
     if (!handle.stdin) throw new CodexRpcError('STDIN_UNAVAILABLE');
-    const session = new CodexAppServerGoalSession(new CodexAppServerClient(handle), {
-      model: 'unused',
-      cwd: '/',
-      developerInstructions: '',
-    });
+    session = new CodexAppServerGoalSession(
+      new CodexAppServerClient(handle),
+      { model: 'unused', cwd: '/', developerInstructions: '' },
+      (path) => input.manager.readFile(input.containerId, codexGoalRolloutPath(path)),
+    );
     await session.openInspection(input.sessionId);
     const saved = await session.get();
     if (!saved) throw new CodexRpcError('GOAL_RECONCILIATION_REQUIRED');
@@ -59,5 +69,10 @@ export async function inspectNativeGoal(input: {
     }
   } finally {
     if (handle) await terminateCodexAppServer(handle);
+    const final = await session?.reconcileUsage();
+    if (final) input.observe(final);
+    await input.manager
+      .execInContainer(input.containerId, ['rm', '-rf', '--', home], { timeout: 5000 })
+      .catch(() => undefined);
   }
 }

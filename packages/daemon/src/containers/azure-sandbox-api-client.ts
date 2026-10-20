@@ -1,5 +1,10 @@
-import { createHash } from 'node:crypto';
-import { AutopodError, CONTAINER_HOME_DIR, CONTAINER_USER } from '@autopod/shared';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  AutopodError,
+  CONTAINER_HOME_DIR,
+  CONTAINER_USER,
+  type NativeGoalProcessIdentity,
+} from '@autopod/shared';
 import { DefaultAzureCredential } from '@azure/identity';
 import type { Logger } from 'pino';
 import { SandboxInfrastructureError } from './sandbox-api-client.js';
@@ -23,6 +28,14 @@ import type {
   SandboxTerminalOptions,
   SandboxTerminalSession,
 } from './sandbox-api-client.js';
+import {
+  SANDBOX_GOAL_SUPERVISOR_ENV,
+  sandboxGoalExit,
+  sandboxGoalInput,
+  sandboxGoalProcess,
+  sandboxGoalRoot,
+  sandboxGoalSupervisor,
+} from './sandbox-goal-process.js';
 
 const API_VERSION = '2026-02-01-preview';
 const ARM_SCOPE = 'https://management.azure.com/.default';
@@ -174,6 +187,7 @@ interface WireSandboxPort {
 }
 
 export class AzureSandboxApiClient implements SandboxApiClient {
+  readonly supportsExecRecovery = true;
   private readonly config: Required<
     Pick<
       AzureSandboxApiClientConfig,
@@ -491,10 +505,32 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     // "executable file not found in $PATH"). To run an arbitrary argv with
     // streaming output we stage the command as an executable wrapper script and
     // exec that single path instead. cwd/env fold into the script + start frame.
-    const scriptPath = await this.stageExecutableWrapper(
-      sandboxId,
-      streamExecScript(command, options?.cwd),
-    );
+    const identity = options?.onProcessCreated
+      ? sandboxGoalProcess(sandboxId, randomUUID())
+      : undefined;
+    let scriptPath: string;
+    if (identity) {
+      const root = sandboxGoalRoot(identity);
+      const prepared = await this.exec(sandboxId, ['mkdir', '-m', '0700', root], { user: 'root' });
+      if (prepared.exitCode !== 0) throw new Error('Sandbox Goal supervisor preparation failed');
+      scriptPath = `${root}/supervisor.py`;
+      await this.writeFile(
+        sandboxId,
+        scriptPath,
+        Buffer.from(
+          sandboxGoalSupervisor(identity, command, options?.cwd, options?.env, options?.stdin),
+        ),
+      );
+      const staged = await this.exec(sandboxId, ['chmod', '0700', scriptPath], { user: 'root' });
+      if (staged.exitCode !== 0) throw new Error('Sandbox Goal supervisor staging failed');
+      // Persist before obtaining a socket or sending any remote start request.
+      options?.onProcessCreated?.(identity);
+    } else {
+      scriptPath = await this.stageExecutableWrapper(
+        sandboxId,
+        streamExecScript(command, options?.cwd),
+      );
+    }
     const pidPath = `${scriptPath}.pid`;
 
     const token = await this.getAzureToken(DATA_SCOPE, 'data access token', 'AZURE_AUTH');
@@ -506,6 +542,13 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     const cancelRemote = () => {
       cancellation ??= (async () => {
         try {
+          if (identity) {
+            const exitCode = await this.terminateRecordedExec(identity);
+            exitReceived = true;
+            queue.push({ exitCode });
+            wake();
+            return;
+          }
           const termination = await this.exec(sandboxId, [
             'sh',
             '-c',
@@ -540,6 +583,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       failure ??= err;
       wake();
     };
+    let inputSequence = 0;
+    let inputBytes = 0;
+    let inputWrites = Promise.resolve();
 
     const timeoutTimer = options?.timeoutMs
       ? setTimeout(() => {
@@ -562,17 +608,44 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           type: 'start',
           start: {
             command: scriptPath,
-            environment: { TERM: 'xterm-256color', LANG: 'C.UTF-8', ...options?.env },
+            environment: identity
+              ? SANDBOX_GOAL_SUPERVISOR_ENV
+              : { TERM: 'xterm-256color', LANG: 'C.UTF-8', ...options?.env },
             tty: false,
-            stdin: options?.stdin === true,
+            stdin: !identity && options?.stdin === true,
             height: 24,
             width: 80,
           },
         }),
       );
+      if (identity) {
+        try {
+          options?.onProcessStarted?.(identity);
+        } catch (error) {
+          fail(error instanceof Error ? error : new Error('Sandbox Goal start ownership changed'));
+          void cancelRemote().catch(() => {});
+          return;
+        }
+      }
       if (options?.stdin) {
         options.onStdinWriter?.((data) => {
           if (closed) return;
+          if (identity) {
+            try {
+              const packet = sandboxGoalInput(identity, ++inputSequence, data);
+              inputBytes += data.length;
+              if (inputBytes > 8 * 1024 * 1024) throw new Error('Sandbox Goal input queue full');
+              inputWrites = inputWrites.then(async () => {
+                if (closed || failure) return;
+                await this.writeFile(sandboxId, packet.path, packet.content);
+                inputBytes -= data.length;
+              });
+              void inputWrites.catch((error) => fail(error));
+            } catch (error) {
+              fail(error instanceof Error ? error : new Error('Sandbox Goal input failed'));
+            }
+            return;
+          }
           socket.send(JSON.stringify({ type: 'stdin', data: data.toString('base64') }));
         });
       }
@@ -632,6 +705,15 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       while (true) {
         const chunk = queue.shift();
         if (chunk) {
+          if (identity && chunk.exitCode !== undefined) {
+            const code = sandboxGoalExit(
+              identity,
+              (await this.readFile(sandboxId, identity.pidPath)).toString('utf8'),
+            );
+            if (code === null) throw new Error('Sandbox Goal termination is unconfirmed');
+            yield { exitCode: code };
+            return;
+          }
           yield chunk;
           if (chunk.exitCode !== undefined) return;
           continue;
@@ -642,10 +724,52 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           notify = resolve;
         });
       }
+    } catch (error) {
+      if (!identity || !failure || exitReceived) throw error;
+      // Losing the RPC transport must stop this owned process. Only its private
+      // supervisor receipt can turn transport uncertainty into an observed exit.
+      const exitCode = await this.terminateRecordedExec(identity);
+      yield { exitCode };
     } finally {
       if (timeoutTimer) clearTimeout(timeoutTimer);
       socket.close();
     }
+  }
+
+  async terminateRecordedExec(identity: NativeGoalProcessIdentity): Promise<number> {
+    const root = sandboxGoalRoot(identity);
+    await this.writeFile(identity.containerId, `${root}/stop`, Buffer.from(identity.execId));
+    const readExit = async () => {
+      try {
+        return sandboxGoalExit(
+          identity,
+          (await this.readFile(identity.containerId, identity.pidPath)).toString('utf8'),
+        );
+      } catch (error) {
+        // A missing pre-start receipt is expected; malformed or rebound receipts are not.
+        if (
+          error instanceof SyntaxError ||
+          (error instanceof Error && error.message.includes('ownership changed'))
+        )
+          throw error;
+        return null;
+      }
+    };
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const code = await readExit();
+      if (code !== null) return code;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    // Close the recorded-before-start crash window. The same root-owned lock and
+    // stop marker prevent a late WebSocket start from ever launching the child.
+    const cancelled = await this.exec(identity.containerId, [`${root}/supervisor.py`, '--cancel'], {
+      user: 'root',
+      timeoutMs: 5000,
+    });
+    if (cancelled.exitCode !== 0) throw new Error('Sandbox Goal termination is unconfirmed');
+    const code = await readExit();
+    if (code === null) throw new Error('Sandbox Goal termination is unconfirmed');
+    return code;
   }
 
   /**

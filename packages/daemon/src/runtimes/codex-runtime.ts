@@ -24,6 +24,7 @@ import {
   foundryCodexProviderSettings,
 } from '../providers/foundry-endpoint.js';
 import { CodexGoalRuntimeSession } from './codex-goal-runtime-session.js';
+import { codexGoalRolloutPath } from './codex-goal-usage.js';
 import { admitCodexRecovery } from './codex-recovery-admission.js';
 import { codexStateDirForPod } from './codex-state-store.js';
 import {
@@ -189,14 +190,11 @@ export class CodexRuntime implements Runtime {
         model: config.model,
         cwd: config.workDir,
         developerInstructions: config.customInstructions ?? '',
+        externalSandbox: config.executionTarget === 'sandbox',
       },
       prepare: async () => {
         assertOwner();
-        if (
-          !hooks ||
-          config.executionTarget !== 'local' ||
-          !this.containerManager.supportsExecRecovery
-        )
+        if (!hooks || !this.containerManager.supportsExecRecovery)
           throw new AutopodError(
             'Recoverable native Goal execution is unavailable',
             'GOAL_UNAVAILABLE',
@@ -253,6 +251,8 @@ export class CodexRuntime implements Runtime {
         this.codexSessionIds.set(config.podId, id);
         this.podRepo.update(config.podId, { codexSessionId: id });
       },
+      readRollout: (path) =>
+        this.containerManager.readFile(config.containerId, codexGoalRolloutPath(path)),
       stopped: () => {
         if (this.handles.get(config.podId) === ownedHandle) this.handles.delete(config.podId);
         if (this.goalReservations.get(config.podId) === reservation)

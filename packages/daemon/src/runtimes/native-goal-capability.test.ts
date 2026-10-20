@@ -7,6 +7,7 @@ const identity = {
   imageDigest: `sha256:${'a'.repeat(64)}`,
   backend: 'local' as const,
   providerId: 'openai',
+  accountId: 'account',
 };
 const evidence = {
   ...identity,
@@ -32,8 +33,8 @@ describe('native Goal capability evidence', () => {
     });
     const sandbox = { ...identity, backend: 'sandbox' as const };
     expect(nativeGoalCapability(sandbox, [{ ...evidence, ...sandbox }])).toMatchObject({
-      available: false,
-      reason: expect.stringContaining('exact native Goal process'),
+      available: true,
+      evidenceId: 'fixture-record',
     });
   });
   it('requires all provider checks for the exact image/runtime/backend/provider', () => {
@@ -57,5 +58,8 @@ describe('native Goal capability evidence', () => {
       nativeGoalCapability({ ...identity, providerId: 'different' }, [evidence]),
     ).toMatchObject({ available: false });
     expect(nativeGoalCapability(identity, [evidence], true)).toMatchObject({ available: false });
+    expect(nativeGoalCapability({ ...identity, accountId: 'different' }, [evidence])).toMatchObject(
+      { available: false },
+    );
   });
 });

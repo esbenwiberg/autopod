@@ -13,7 +13,7 @@ export interface GoalAttemptFence {
 }
 /** Backend-issued identity captured durably before a native process can start. */
 export interface NativeGoalProcessIdentity {
-  backend: 'docker';
+  backend: 'docker' | 'sandbox';
   containerId: string;
   execId: string;
   pidPath: string;
@@ -65,5 +65,7 @@ export interface NativeGoalSession {
   clear(): Promise<void>;
   /** Resolves only after process termination is confirmed. */
   stop(): Promise<void>;
+  /** Reconcile the durable full-thread counter after exit, including any final response. */
+  reconcileUsage?(): Promise<NativeGoalObservation | null>;
   observations(): AsyncIterable<NativeGoalObservation>;
 }

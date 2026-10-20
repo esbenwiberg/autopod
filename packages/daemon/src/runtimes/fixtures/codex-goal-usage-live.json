@@ -1,0 +1,253 @@
+{
+  "source": "Actual Codex 0.160.1 / gpt-6.1-sol Goal canary on 2026-10-20; objective replaced, usage and lifecycle frames preserved",
+  "initialGoal": {
+    "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+    "status": "paused",
+    "tokenBudget": 60000,
+    "tokensUsed": 13230,
+    "timeUsedSeconds": 5,
+    "createdAt": 1792478868,
+    "updatedAt": 1792478874,
+    "objective": "Captured native Goal usage proof"
+  },
+  "events": [
+    {
+      "method": "thread/tokenUsage/updated",
+      "params": {
+        "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+        "tokenUsage": {
+          "total": {
+            "totalTokens": 13230,
+            "inputTokens": 13093,
+            "cachedInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 137,
+            "reasoningOutputTokens": 0
+          },
+          "last": {
+            "totalTokens": 13230,
+            "inputTokens": 13093,
+            "cachedInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 137,
+            "reasoningOutputTokens": 0
+          },
+          "modelContextWindow": 475000
+        }
+      }
+    },
+    {
+      "method": "thread/goal/updated",
+      "params": {
+        "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+        "goal": {
+          "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+          "status": "paused",
+          "tokenBudget": 60000,
+          "tokensUsed": 13230,
+          "timeUsedSeconds": 5,
+          "createdAt": 1792478868,
+          "updatedAt": 1792478875,
+          "objective": "Captured native Goal usage proof"
+        }
+      }
+    },
+    {
+      "method": "thread/goal/updated",
+      "params": {
+        "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+        "goal": {
+          "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+          "status": "active",
+          "tokenBudget": 60000,
+          "tokensUsed": 13230,
+          "timeUsedSeconds": 5,
+          "createdAt": 1792478868,
+          "updatedAt": 1792478876,
+          "objective": "Captured native Goal usage proof"
+        }
+      }
+    },
+    {
+      "method": "thread/goal/updated",
+      "params": {
+        "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+        "goal": {
+          "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+          "status": "active",
+          "tokenBudget": 60000,
+          "tokensUsed": 13230,
+          "timeUsedSeconds": 10,
+          "createdAt": 1792478868,
+          "updatedAt": 1792478882,
+          "objective": "Captured native Goal usage proof"
+        }
+      }
+    },
+    {
+      "method": "thread/tokenUsage/updated",
+      "params": {
+        "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+        "tokenUsage": {
+          "total": {
+            "totalTokens": 27955,
+            "inputTokens": 27670,
+            "cachedInputTokens": 12928,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 285,
+            "reasoningOutputTokens": 0
+          },
+          "last": {
+            "totalTokens": 14725,
+            "inputTokens": 14577,
+            "cachedInputTokens": 12928,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 148,
+            "reasoningOutputTokens": 0
+          },
+          "modelContextWindow": 475000
+        }
+      }
+    },
+    {
+      "method": "thread/tokenUsage/updated",
+      "params": {
+        "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+        "tokenUsage": {
+          "total": {
+            "totalTokens": 42784,
+            "inputTokens": 42463,
+            "cachedInputTokens": 22784,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 321,
+            "reasoningOutputTokens": 0
+          },
+          "last": {
+            "totalTokens": 14829,
+            "inputTokens": 14793,
+            "cachedInputTokens": 9856,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 36,
+            "reasoningOutputTokens": 0
+          },
+          "modelContextWindow": 475000
+        }
+      }
+    },
+    {
+      "method": "thread/goal/updated",
+      "params": {
+        "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+        "goal": {
+          "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+          "status": "active",
+          "tokenBudget": 60000,
+          "tokensUsed": 20000,
+          "timeUsedSeconds": 15,
+          "createdAt": 1792478868,
+          "updatedAt": 1792478887,
+          "objective": "Captured native Goal usage proof"
+        }
+      }
+    },
+    {
+      "method": "thread/goal/updated",
+      "params": {
+        "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+        "goal": {
+          "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+          "status": "active",
+          "tokenBudget": 60000,
+          "tokensUsed": 20000,
+          "timeUsedSeconds": 20,
+          "createdAt": 1792478868,
+          "updatedAt": 1792478891,
+          "objective": "Captured native Goal usage proof"
+        }
+      }
+    },
+    {
+      "method": "thread/tokenUsage/updated",
+      "params": {
+        "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+        "tokenUsage": {
+          "total": {
+            "totalTokens": 59006,
+            "inputTokens": 58524,
+            "cachedInputTokens": 37120,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 482,
+            "reasoningOutputTokens": 0
+          },
+          "last": {
+            "totalTokens": 16222,
+            "inputTokens": 16061,
+            "cachedInputTokens": 14336,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 161,
+            "reasoningOutputTokens": 0
+          },
+          "modelContextWindow": 475000
+        }
+      }
+    },
+    {
+      "method": "thread/goal/updated",
+      "params": {
+        "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+        "goal": {
+          "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+          "status": "active",
+          "tokenBudget": 60000,
+          "tokensUsed": 21886,
+          "timeUsedSeconds": 22,
+          "createdAt": 1792478868,
+          "updatedAt": 1792478893,
+          "objective": "Captured native Goal usage proof"
+        }
+      }
+    },
+    {
+      "method": "thread/goal/updated",
+      "params": {
+        "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+        "goal": {
+          "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+          "status": "complete",
+          "tokenBudget": 60000,
+          "tokensUsed": 21886,
+          "timeUsedSeconds": 22,
+          "createdAt": 1792478868,
+          "updatedAt": 1792478893,
+          "objective": "Captured native Goal usage proof"
+        }
+      }
+    },
+    {
+      "method": "thread/tokenUsage/updated",
+      "params": {
+        "threadId": "01a15810-f2c4-7381-976f-f2f36dc86097",
+        "tokenUsage": {
+          "total": {
+            "totalTokens": 75330,
+            "inputTokens": 74827,
+            "cachedInputTokens": 52992,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 503,
+            "reasoningOutputTokens": 0
+          },
+          "last": {
+            "totalTokens": 16324,
+            "inputTokens": 16303,
+            "cachedInputTokens": 15872,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 21,
+            "reasoningOutputTokens": 0
+          },
+          "modelContextWindow": 475000
+        }
+      }
+    }
+  ],
+  "finalRolloutTotal": 75330
+}
