@@ -179,9 +179,6 @@ public struct AppRootView: View {
           eventStream?.subscribeToSession(id)
           Task { await podStore.hydrateSessionIfNeeded(id) }
           Task { await podStore.loadDiff(id) }
-          if let api = connectionManager.api {
-            eventStream?.loadHistoricalEvents(podId: id, api: api)
-          }
         }
       },
       onRefreshDiff: { podId in
@@ -336,14 +333,8 @@ public struct AppRootView: View {
     )
     .environment(\.daemonAuthToken, connectionManager.activeToken ?? "")
     .environment(\.daemonBaseURL, connectionManager.api?.baseURL)
-    .task(id: podStore.selectedSessionId) {
-      // Fires on initial appear AND whenever the selected pod changes.
-      // `.onChange` (used by onSelectSession) doesn't fire on mount, so a pod
-      // that's already selected at launch would never trigger the historical fetch.
-      guard let id = podStore.selectedSessionId, let api = connectionManager.api else { return }
-      await podStore.hydrateSessionIfNeeded(id)
-      eventStream?.loadHistoricalEvents(podId: id, api: api)
-    }
+    .modifier(SelectedPodHistoryLoader(selectedPodID: podStore.selectedSessionId,
+      api: connectionManager.api, podStore: podStore, eventStream: eventStream))
     .alert("Error", isPresented: $showError) {
       Button("OK") { actionHandler?.clearError() }
     } message: {

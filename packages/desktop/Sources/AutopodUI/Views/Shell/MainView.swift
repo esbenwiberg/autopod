@@ -348,8 +348,8 @@ public struct MainView: View {
     @State private var searchText: String = ""
     @State private var selectedFeature: FeatureCategory?
     @State private var selectedAnalyticsCard: AnalyticsCardKind?
-    @State private var selectedDetailTab: DetailTab?
-    @State private var requestedDetailTab: DetailTab?
+    @State private var detailNavigation = DesktopDetailNavigation()
+    @State private var repositoryCache = DesktopRepositoryIndexCache()
 
     private var isDesktopSeriesWorkspace: Bool {
         guard redesign else { return false }
@@ -381,10 +381,10 @@ public struct MainView: View {
             let wasAlreadySelected = selectedSessionId == podId
             selectedSessionId = podId
             if wasAlreadySelected {
-                requestedDetailTab = .terminal
+                detailNavigation.requestedTab = .terminal
             } else {
                 // DetailPanelView is freshly created — delay so onChange can observe the change.
-                DispatchQueue.main.async { requestedDetailTab = .terminal }
+                DispatchQueue.main.async { detailNavigation.requestedTab = .terminal }
             }
             onTerminalConnect?(podId)
         }
@@ -399,18 +399,22 @@ public struct MainView: View {
             query: searchText,
             sortOrder: sortOrder,
             selectedPodId: selectedSessionId,
-            repositoryID: repositoryID, profiles: profileDetails
+            repositoryID: repositoryID, profiles: profileDetails,
+            repositoryIndex: repositoryCache.snapshot(pods: pods, profiles: profileDetails)
         )
     }
 
     /// Filters pods by a free-text query. Matches against the pod's name (id),
     /// brief title, task description, profile, and series name so users can find
     /// pods by anything they'd recognise on the card. Empty query is a no-op.
-    static func searchPods(_ pods: [Pod], query: String, profiles: [Profile] = []) -> [Pod] {
+    static func searchPods(_ pods: [Pod], query: String, profiles: [Profile] = [],
+                           repositoryIndex: DesktopRepositoryIndex? = nil) -> [Pod] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return pods }
         return pods.filter { pod in
-            (DesktopRepository.resolve(pod, profiles: profiles)?.label.localizedCaseInsensitiveContains(trimmed) ?? false)
+            let repository = if let repositoryIndex { repositoryIndex.byPodID[pod.id] }
+                else { DesktopRepository.resolve(pod, profiles: profiles) }
+            return (repository?.label.localizedCaseInsensitiveContains(trimmed) ?? false)
                 || pod.id.localizedCaseInsensitiveContains(trimmed)
                 || (pod.briefTitle?.localizedCaseInsensitiveContains(trimmed) ?? false)
                 || pod.task.localizedCaseInsensitiveContains(trimmed)
@@ -452,10 +456,14 @@ public struct MainView: View {
         selectedPodId: String? = nil,
         limit: Int = defaultBrowseRecentLimit,
         repositoryID: String? = nil,
-        profiles: [Profile] = []
+        profiles: [Profile] = [],
+        repositoryIndex: DesktopRepositoryIndex? = nil
     ) -> [Pod] {
         let scoped = repositoryID.map { id in
-            pods.filter { DesktopRepository.resolve($0, profiles: profiles)?.id == id }
+            pods.filter { pod in
+                if let repositoryIndex { return repositoryIndex.byPodID[pod.id]?.id == id }
+                return DesktopRepository.resolve(pod, profiles: profiles)?.id == id
+            }
         } ?? pods
         let base = selection == .all
             ? browsePods(
@@ -466,7 +474,7 @@ public struct MainView: View {
                 limit: limit
             )
             : filterPods(scoped, for: selection)
-        return sortPods(searchPods(base, query: query, profiles: profiles), by: sortOrder)
+        return sortPods(searchPods(base, query: query, profiles: profiles, repositoryIndex: repositoryIndex), by: sortOrder)
     }
 
     private static func recentBrowsePods(_ pods: [Pod], limit: Int) -> [Pod] {
@@ -630,6 +638,10 @@ public struct MainView: View {
     }
 
     public var body: some View {
+        let repositoryIndex = repositoryCache.snapshot(pods: pods, profiles: profileDetails)
+        let fleet = DesktopFleetPresentation(pods: pods, index: repositoryIndex,
+            selection: sidebarSelection, browseScope: browseScope, query: searchText,
+            sortOrder: sortOrder, selectedPodID: selectedSessionId, repositoryID: repositoryID)
         Group {
             if redesign && ([.profilesWorkspace, .settingsWorkspace, .history, .analytics, .memory, .managedPods].contains(sidebarSelection) || (sidebarSelection == .scheduledJobs && scheduledWorkspaceActions != nil)) {
                 NavigationSplitView {
@@ -638,7 +650,7 @@ public struct MainView: View {
                     configurationWorkspace.frame(minWidth: 650, maxWidth: .infinity, maxHeight: .infinity)
                 }.navigationSplitViewStyle(.balanced)
             } else {
-                podNavigation
+                podNavigation(fleet: fleet, repositoryIndex: repositoryIndex)
             }
         }
 
@@ -670,7 +682,7 @@ public struct MainView: View {
         } message: {
             Text("Your workspace draft has not been saved.")
         }
-        .environment(\.desktopRepositories, repositoriesByPod)
+        .environment(\.desktopRepositories, repositoryIndex.byPodID)
         .environment(\.desktopRepositoryFilter, { repositoryID = $0 })
         .environment(\.desktopPodSelection, { selectedSessionId = $0 })
         .onChange(of: sidebarSelection) { _, selection in
@@ -691,8 +703,9 @@ public struct MainView: View {
             }
         }
         .onChange(of: repositoryID) { _, _ in
-            if let selectedSessionId, !filteredSessions.contains(where: { $0.id == selectedSessionId }) {
-                self.selectedSessionId = filteredSessions.first?.id
+            let visible = filteredSessions
+            if let selectedSessionId, !visible.contains(where: { $0.id == selectedSessionId }) {
+                self.selectedSessionId = visible.first?.id
             }
         }
         .onChange(of: connectionLabel) { _, _ in
@@ -906,7 +919,7 @@ public struct MainView: View {
                 .task { await onLoadMemories?() }
     }
 
-    private var podNavigation: some View {
+    private func podNavigation(fleet: DesktopFleetPresentation, repositoryIndex: DesktopRepositoryIndex) -> some View {
         NavigationSplitView {
             SidebarView(
                 pods: pods,
@@ -986,13 +999,13 @@ public struct MainView: View {
                 .frame(minWidth: 500)
             } else {
                 VStack(spacing: 0) {
-                    contentToolbar
+                    contentToolbar(fleet: fleet, repositoryIndex: repositoryIndex)
                     Divider()
                     if case .series(let seriesId) = sidebarSelection {
                         seriesPipelineHeader(seriesId: seriesId)
                         Divider()
                     }
-                    contentArea
+                    contentArea(fleet: fleet)
                 }
                 .frame(minWidth: redesign ? 420 : 500)
             }
@@ -1071,43 +1084,45 @@ public struct MainView: View {
                         ContentUnavailableView("Select a series", systemImage: "rectangle.3.group")
                     }
                 } else if let pod = selectedSession {
-                    DetailPanelView(
-                        pod: pod,
-                        events: selectedSessionEvents,
-                        actions: wiredActions,
-                        seriesPods: pod.seriesId.map { sid in pods.filter { $0.seriesId == sid } } ?? [],
-                        qualityScores: qualityScores,
-                        onSelectPod: { selectedSessionId = $0 },
-                        eventsForPod: eventsForPod,
-                        loadEventsForPod: loadEventsForPod,
-                        relatedEventLoadStateForPod: relatedEventLoadStateForPod,
-                        diffResponse: sessionDiffs[pod.id],
-                        terminalState: terminalState,
-                        terminalDataPipe: terminalDataPipe,
-                        onTerminalSendData: onTerminalSendData,
-                        onTerminalResize: onTerminalResize,
-                        onTerminalConnect: { onTerminalConnect?(pod.id) },
-                        onTerminalDisconnect: onTerminalDisconnect,
-                        onRefreshDiff: { onRefreshDiff?(pod.id) },
-                        loadFiles: loadFiles,
-                        loadArtifacts: loadArtifacts,
-                        loadContent: loadContent,
-                        loadQuality: loadQuality,
-                        loadCost: loadCost,
-                        loadPreviewStatus: loadPreviewStatus,
-                        loadValidationHistory: loadValidationHistory,
-                        loadFirewallDenials: loadFirewallDenials,
-                        loadActionAudit: loadActionAudit,
-                        isLoadingLogs: isLoadingLogs,
-                        logsLoadError: logsLoadError,
-                        limitedLogCount: limitedLogCount,
-                        onReloadLogs: onReloadLogs,
-                        onLoadAllLogs: onLoadAllLogs,
-                        onLaunchSeriesFromPod: { seriesFromPod = $0 },
-                        selectedTab: $selectedDetailTab,
-                        requestedTab: $requestedDetailTab,
-                        configurationActions: configurationActions
-                    )
+                    DesktopDetailNavigationHost(navigation: detailNavigation) { selectedTab, requestedTab in
+                        DetailPanelView(
+                            pod: pod,
+                            events: selectedSessionEvents,
+                            actions: wiredActions,
+                            seriesPods: pod.seriesId.map { sid in pods.filter { $0.seriesId == sid } } ?? [],
+                            qualityScores: qualityScores,
+                            onSelectPod: { selectedSessionId = $0 },
+                            eventsForPod: eventsForPod,
+                            loadEventsForPod: loadEventsForPod,
+                            relatedEventLoadStateForPod: relatedEventLoadStateForPod,
+                            diffResponse: sessionDiffs[pod.id],
+                            terminalState: terminalState,
+                            terminalDataPipe: terminalDataPipe,
+                            onTerminalSendData: onTerminalSendData,
+                            onTerminalResize: onTerminalResize,
+                            onTerminalConnect: { onTerminalConnect?(pod.id) },
+                            onTerminalDisconnect: onTerminalDisconnect,
+                            onRefreshDiff: { onRefreshDiff?(pod.id) },
+                            loadFiles: loadFiles,
+                            loadArtifacts: loadArtifacts,
+                            loadContent: loadContent,
+                            loadQuality: loadQuality,
+                            loadCost: loadCost,
+                            loadPreviewStatus: loadPreviewStatus,
+                            loadValidationHistory: loadValidationHistory,
+                            loadFirewallDenials: loadFirewallDenials,
+                            loadActionAudit: loadActionAudit,
+                            isLoadingLogs: isLoadingLogs,
+                            logsLoadError: logsLoadError,
+                            limitedLogCount: limitedLogCount,
+                            onReloadLogs: onReloadLogs,
+                            onLoadAllLogs: onLoadAllLogs,
+                            onLaunchSeriesFromPod: { seriesFromPod = $0 },
+                            selectedTab: selectedTab,
+                            requestedTab: requestedTab,
+                            configurationActions: configurationActions
+                        )
+                    }
                     .id(pod.id)
                 } else {
                     emptyDetail
@@ -1121,29 +1136,18 @@ public struct MainView: View {
     // MARK: - Content toolbar
 
     @ViewBuilder
-    private var contentToolbar: some View {
-        if redesign { redesignedToolbar } else { legacyToolbar }
+    private func contentToolbar(fleet: DesktopFleetPresentation, repositoryIndex: DesktopRepositoryIndex) -> some View {
+        if redesign { redesignedToolbar(fleet: fleet, repositoryIndex: repositoryIndex) }
+        else { legacyToolbar(fleet: fleet) }
     }
 
-    private var repositoriesByPod: [String: DesktopRepository] {
-        Dictionary(uniqueKeysWithValues: pods.compactMap { pod in
-            DesktopRepository.resolve(pod, profiles: profileDetails).map { (pod.id, $0) }
-        })
-    }
-
-    private var repositories: [DesktopRepository] {
-        Array(Set(repositoriesByPod.values.map(\.id))).compactMap { id in
-            repositoriesByPod.values.first { $0.id == id }
-        }.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
-    }
-
-    private var redesignedToolbar: some View {
+    private func redesignedToolbar(fleet: DesktopFleetPresentation, repositoryIndex: DesktopRepositoryIndex) -> some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(sidebarSelection == .all ? "All pods" : sidebarSelection.label)
                         .font(.system(size: 26, weight: .semibold)).tracking(-0.7)
-                    Text("\(filteredSessions.count) \(filteredSessions.count == 1 ? "pod" : "pods") · \(repositories.first { $0.id == repositoryID }?.label ?? "All repositories")")
+                    Text("\(fleet.visible.count) \(fleet.visible.count == 1 ? "pod" : "pods") · \(repositoryIndex.repositories.first { $0.id == repositoryID }?.label ?? "All repositories")")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
@@ -1173,7 +1177,7 @@ public struct MainView: View {
                 searchField(width: nil)
                 Picker("Repository", selection: $repositoryID) {
                     Text("All repositories").tag(nil as String?)
-                    ForEach(repositories) { Text($0.label).tag(Optional($0.id)) }
+                    ForEach(repositoryIndex.repositories) { Text($0.label).tag(Optional($0.id)) }
                 }.labelsHidden().controlSize(.regular)
                     .frame(minWidth: 110, idealWidth: 180, maxWidth: 230)
                     .accessibilityLabel("Filter by repository")
@@ -1185,10 +1189,10 @@ public struct MainView: View {
         }.padding(24).background(DesktopTheme.canvas)
     }
 
-    private var legacyToolbar: some View {
+    private func legacyToolbar(fleet: DesktopFleetPresentation) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
-                toolbarTitle
+                toolbarTitle(fleet: fleet)
                 Spacer(minLength: 8)
                 searchField(width: 200)
                 toolbarControls(compact: false)
@@ -1197,7 +1201,7 @@ public struct MainView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    toolbarTitle
+                    toolbarTitle(fleet: fleet)
                     Spacer(minLength: 8)
                     refreshButton
                 }
@@ -1211,13 +1215,13 @@ public struct MainView: View {
         .padding(.vertical, 10)
     }
 
-    private var toolbarTitle: some View {
+    private func toolbarTitle(fleet: DesktopFleetPresentation) -> some View {
         HStack(spacing: 8) {
             Text(sidebarSelection.label)
                 .font(.headline)
                 .lineLimit(1)
                 .fixedSize()
-            Text("\(filteredSessions.count)")
+            Text("\(fleet.visible.count)")
                 .font(.system(.caption2).weight(.semibold))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
@@ -1434,7 +1438,7 @@ public struct MainView: View {
     // MARK: - Content area (cards or list)
 
     @ViewBuilder
-    private var contentArea: some View {
+    private func contentArea(fleet: DesktopFleetPresentation) -> some View {
         if isLoading && pods.isEmpty {
             VStack(spacing: 10) {
                 ProgressView()
@@ -1475,7 +1479,7 @@ public struct MainView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if filteredSessions.isEmpty {
+        } else if fleet.visible.isEmpty {
             VStack(spacing: 12) {
                 ContentUnavailableView("No matching pods", systemImage: "line.3.horizontal.decrease", description: Text("Try another repository or search."))
                 Button("Clear filters") { repositoryID = nil; searchText = "" }
@@ -1483,27 +1487,27 @@ public struct MainView: View {
         } else {
             switch viewMode {
             case .cards:
-                cardGrid
+                cardGrid(fleet: fleet)
             case .list:
-                sessionList
+                sessionList(fleet: fleet)
             }
         }
     }
 
     @ViewBuilder
-    private var cardGrid: some View {
-        if redesign { redesignedGrid } else { legacyCardGrid }
+    private func cardGrid(fleet: DesktopFleetPresentation) -> some View {
+        if redesign { redesignedGrid(fleet: fleet) } else { legacyCardGrid(fleet: fleet) }
     }
 
-    private var redesignedGrid: some View {
+    private func redesignedGrid(fleet: DesktopFleetPresentation) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 if sidebarSelection == .all || sidebarSelection == .active {
-                    fleetGroup("Needs attention", pods: filteredSessions.filter { $0.status.needsAttention })
-                    fleetGroup("In progress & recent", pods: filteredSessions.filter { !$0.status.needsAttention })
-                } else { fleetGroup(nil, pods: filteredSessions) }
+                    fleetGroup("Needs attention", pods: fleet.attention)
+                    fleetGroup("In progress & recent", pods: fleet.remainder)
+                } else { fleetGroup(nil, pods: fleet.visible) }
             }.padding(24)
-            browseArchiveFooter(visibleCount: filteredSessions.count)
+            browseArchiveFooter(visibleCount: fleet.visible.count, scopedTotal: fleet.scopedTotal)
         }.background(DesktopTheme.canvas)
     }
 
@@ -1531,8 +1535,8 @@ public struct MainView: View {
         }
     }
 
-    private var legacyCardGrid: some View {
-        let sessions = filteredSessions
+    private func legacyCardGrid(fleet: DesktopFleetPresentation) -> some View {
+        let sessions = fleet.visible
         return ScrollView {
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 260), spacing: 10)],
@@ -1553,27 +1557,27 @@ public struct MainView: View {
                 }
             }
             .padding(16)
-            browseArchiveFooter(visibleCount: sessions.count)
+            browseArchiveFooter(visibleCount: sessions.count, scopedTotal: fleet.scopedTotal)
         }
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private var sessionList: some View {
-        let sessions = filteredSessions
+    private func sessionList(fleet: DesktopFleetPresentation) -> some View {
+        let sessions = fleet.visible
         return List(selection: $selectedSessionId) {
             ForEach(sessions) { pod in
                 SessionListRow(pod: pod)
                     .tag(pod.id)
             }
-            browseArchiveFooter(visibleCount: sessions.count)
+            browseArchiveFooter(visibleCount: sessions.count, scopedTotal: fleet.scopedTotal)
         }
         .listStyle(.inset)
     }
 
     @ViewBuilder
-    private func browseArchiveFooter(visibleCount: Int) -> some View {
+    private func browseArchiveFooter(visibleCount: Int, scopedTotal: Int) -> some View {
         let queryIsEmpty = searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let total = repositoryID.map { id in pods.filter { repositoriesByPod[$0.id]?.id == id }.count } ?? pods.count
+        let total = scopedTotal
         if sidebarSelection == .all && browseScope == .recent && queryIsEmpty && visibleCount < total {
             HStack(spacing: 8) {
                 Text("Showing \(visibleCount) of \(total)")
@@ -1612,7 +1616,7 @@ public struct MainView: View {
             repositoryID = destination.repositoryID
             sidebarSelection = destination.sidebar
             selectedSessionId = destination.session
-            if let tab { selectedDetailTab = tab; requestedDetailTab = tab }
+            if let tab { detailNavigation.request(tab) }
         }
     }
 

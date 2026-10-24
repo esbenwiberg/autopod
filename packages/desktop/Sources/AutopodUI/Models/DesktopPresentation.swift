@@ -25,14 +25,36 @@ struct DesktopRepository: Hashable, Sendable, Identifiable {
         self.isSnapshot = isSnapshot
     }
 
-    static func resolve(_ pod: Pod, profiles: [Profile]) -> DesktopRepository? {
-        if let captured = pod.fleetDisplay?.repository {
-            guard captured.kind == "repository", let remote = captured.remote else { return nil }
-            return Self(url: remote)
+    enum Source: Equatable, Sendable {
+        case captured(kind: String, remote: String?)
+        case snapshot(String)
+        case legacy(String?)
+
+        func resolve(using normalize: (String, Bool) -> DesktopRepository? = {
+            DesktopRepository(url: $0, isSnapshot: $1)
+        }) -> DesktopRepository? {
+            switch self {
+            case .captured(let kind, let remote):
+                guard kind == "repository", let remote else { return nil }
+                return normalize(remote, true)
+            case .snapshot(let remote): return normalize(remote, true)
+            case .legacy(let remote):
+                guard let remote else { return nil }
+                return normalize(remote, false)
+            }
         }
-        if let snapshot = pod.profileSnapshot { return Self(url: snapshot.repoUrl) }
-        guard let profile = profiles.first(where: { $0.name == pod.profileName }) else { return nil }
-        return Self(url: profile.repoUrl, isSnapshot: false)
+    }
+
+    static func source(_ pod: Pod, legacyRemote: @autoclosure () -> String?) -> Source {
+        if let captured = pod.fleetDisplay?.repository {
+            return .captured(kind: captured.kind, remote: captured.remote)
+        }
+        if let snapshot = pod.profileSnapshot { return .snapshot(snapshot.repoUrl) }
+        return .legacy(legacyRemote())
+    }
+
+    static func resolve(_ pod: Pod, profiles: [Profile]) -> DesktopRepository? {
+        source(pod, legacyRemote: profiles.first { $0.name == pod.profileName }?.repoUrl).resolve()
     }
 }
 

@@ -6,6 +6,8 @@ import SwiftUI
 public struct DesktopDesignPreview: View {
   @State private var knowledge = DesktopKnowledgeFixtures()
   @State private var scheduleFixtures = DesktopScheduleFixtures()
+  @State private var usePerformanceFleet = false
+  @State private var performanceSelectedID: String? = "perf-0000"
   @State private var simulateAnalyticsFailure = false
   @State private var scanFixtures = DesktopScanFixtures()
   @State private var selectedID: String? = "retry-demo"
@@ -16,6 +18,10 @@ public struct DesktopDesignPreview: View {
   private let onConnect: () -> Void
   public init(onConnect: @escaping () -> Void = {}) { self.onConnect = onConnect }
   public var body: some View {
+    Group {
+      if usePerformanceFleet {
+        DesktopPerformanceFixtures.mainView(selection: $performanceSelectedID)
+      } else {
     MainView(pods: Self.pods, managedPods: DesktopKnowledgeFixtures.managedPods, managedPodAPI: knowledge.api, selectedManagedPodId: $knowledge.selectedManagedID, scheduledJobs: scheduleFixtures.jobs, scheduledJobTemplates: scheduleFixtures.templates, selectedSessionId: $selectedID,
       isConnected: true, connectionLabel: "Design fixtures", connectionState: "Sample data",
       actions: Self.fixtureActions,
@@ -63,11 +69,15 @@ public struct DesktopDesignPreview: View {
       onSelectMemory: { knowledge.selectedMemoryID = $0; knowledge.selectedCandidateID = nil },
       onSelectMemoryCandidate: { knowledge.selectedCandidateID = $0; knowledge.selectedMemoryID = nil },
       memoryWorkspaceActions: knowledge.actions)
+      }
+    }
       .toolbar {
         ToolbarItem(placement: .principal) {
         HStack {
           Text("Design fixtures · sample data").font(.caption)
           Menu("Fixture options") {
+            Toggle("Use 1,000 pod performance fixture", isOn: $usePerformanceFleet)
+              .onChange(of: usePerformanceFleet) { _, _ in performanceSelectedID = "perf-0000" }
             Toggle("Simulate configuration save conflict", isOn: $simulateConfigurationConflict)
             Toggle("Simulate schedule save failure", isOn: $scheduleFixtures.failWrites)
             Toggle("Simulate memory save failure", isOn: $knowledge.failWrites)
