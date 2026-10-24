@@ -676,3 +676,6 @@ export * from './schemas/launch-work.schema.js';
 export * from './types/configuration-credential.js';
 export * from './schemas/github-read.schema.js';
 export * from './schemas/series-launch.schema.js';
+
+export type { DiffFile, DiffCommit, DiffStats, DiffResponse } from './types/diff.js';
+export { parseDiff, statsForFiles } from './diff.js';

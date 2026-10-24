@@ -124,6 +124,22 @@ describe('AutopodClient', () => {
     });
   });
 
+  describe('getPodDiff', () => {
+    it('fetches the authenticated diff route and preserves the response', async () => {
+      const diff = { files: [], stats: { added: 0, removed: 0, changed: 0 }, commits: [] };
+      mockFetch.mockResolvedValueOnce(jsonResponse(diff));
+
+      expect(await client.getPodDiff('pod/id')).toEqual(diff);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3100/pods/pod%2Fid/diff',
+        expect.objectContaining({
+          method: 'GET',
+          headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+        }),
+      );
+    });
+  });
+
   describe('logs', () => {
     it('logs use persisted events', async () => {
       mockFetch.mockResolvedValueOnce(

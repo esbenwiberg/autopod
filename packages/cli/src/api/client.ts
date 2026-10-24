@@ -1,6 +1,7 @@
 import type {
   ConfigurationEntity,
   ConfigurationKind,
+  DiffResponse,
   DispatchPreflightEvidence,
   EffectiveLaunchConfig,
   ExecutionProvenance,
@@ -334,6 +335,10 @@ export class AutopodClient {
 
   async getSession(id: string): Promise<Pod> {
     return this.request<Pod>('GET', `/pods/${id}`);
+  }
+
+  async getPodDiff(id: string): Promise<DiffResponse> {
+    return this.request('GET', `/pods/${encodeURIComponent(id)}/diff`);
   }
 
   async getPodCost(id: string): Promise<PodCostBreakdownResponse> {
