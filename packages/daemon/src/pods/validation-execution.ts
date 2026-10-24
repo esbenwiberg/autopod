@@ -4,6 +4,7 @@ import type { ExecutionTarget, Pod, TaskRetryIdentity, ValidationResult } from '
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
+import { REVIEW_RETRY_BLOCKED } from '../interfaces/reviewer-executor.js';
 import type {
   ValidationEngine,
   ValidationEngineConfig,
@@ -204,7 +205,9 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
     if (isReviewInfrastructureOnlyFailure(result)) {
       emitActivityStatus(
         podId,
-        `${reviewInfrastructureFailureLabel(result)} after one Review retry — needs human review`,
+        result.reviewSkipReason?.includes(REVIEW_RETRY_BLOCKED)
+          ? `${reviewInfrastructureFailureLabel(result)} — Review not retried until reviewer usage is reconciled (ap reviewer-runs ${podId}) — needs human review`
+          : `${reviewInfrastructureFailureLabel(result)} after one Review retry — needs human review`,
       );
     }
 

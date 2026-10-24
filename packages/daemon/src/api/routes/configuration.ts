@@ -20,6 +20,7 @@ import {
   saveLaunchProfile,
 } from '../../configuration/save-launch-profile.js';
 import type { ConfigurationSecurityPolicyStore } from '../../configuration/security-policy.js';
+import type { ReviewerRunRecord } from '../../validation/reviewer-run-repository.js';
 
 export interface ConfigurationRouteDependencies {
   raiseBudget?: (
@@ -28,6 +29,16 @@ export interface ConfigurationRouteDependencies {
     expectedBudget: number | null,
     actorId: string,
   ) => Promise<import('@autopod/shared').TaskExecutionSummary>;
+  reviewerRuns?: {
+    list(podId: string): ReviewerRunRecord[];
+    reconcile(
+      podId: string,
+      runId: string,
+      actorId: string,
+      note: string,
+      usage?: { inputTokens: number; outputTokens: number },
+    ): Promise<ReviewerRunRecord>;
+  };
   deployments?: import('../../actions/deployment-service.js').DeploymentService;
   series?: import('../../configuration/series-launches.js').SeriesLaunches;
   watchers?: import('../../issue-watcher/watcher-binding-repository.js').WatcherBindingRepository;
@@ -79,6 +90,41 @@ export function configurationRoutes(
         .strict()
         .parse(request.body);
       return raiseBudget(podId, body.tokenBudget, body.expectedBudget, request.user.oid);
+    });
+  }
+  if (deps.reviewerRuns) {
+    const reviewerRuns = deps.reviewerRuns;
+    app.get('/pods/:podId/reviewer-runs', async (request) => {
+      const { podId } = z.object({ podId: configurationIdSchema }).parse(request.params);
+      return reviewerRuns.list(podId);
+    });
+    app.post('/pods/:podId/reviewer-runs/:runId/reconcile', async (request) => {
+      const { podId, runId } = z
+        .object({
+          podId: configurationIdSchema,
+          runId: z.string().regex(/^review-[0-9a-f-]{36}$/),
+        })
+        .parse(request.params);
+      const tokens = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+      const body = z
+        .object({
+          note: z.string().trim().min(1).max(2000),
+          inputTokens: tokens.optional(),
+          outputTokens: tokens.optional(),
+        })
+        .strict()
+        .refine(
+          (value) => (value.inputTokens === undefined) === (value.outputTokens === undefined),
+          {
+            message: 'inputTokens and outputTokens must be supplied together',
+          },
+        )
+        .parse(request.body);
+      const usage =
+        body.inputTokens !== undefined && body.outputTokens !== undefined
+          ? { inputTokens: body.inputTokens, outputTokens: body.outputTokens }
+          : undefined;
+      return reviewerRuns.reconcile(podId, runId, request.user.oid, body.note, usage);
     });
   }
   app.get('/pods/:podId/configuration', async (request) => {

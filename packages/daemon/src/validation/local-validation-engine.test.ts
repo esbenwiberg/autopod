@@ -3406,6 +3406,38 @@ human_review: []
     }
   });
 
+  it.each([
+    [null, 2],
+    ['reviewer run review-1 requires reconciliation', 1],
+  ])(
+    'retries an isolated reviewer timeout only without a retry blocker (%s)',
+    async (blocker, calls) => {
+      const executor = Object.assign(
+        vi.fn(async () => {
+          throw new CodexReviewError({ kind: 'timeout', message: 'review deadline', stderr: '' });
+        }),
+        { retryBlocker: vi.fn(() => blocker) },
+      );
+      const result = await createLocalValidationEngine(stubContainerManager()).validate(
+        baseConfig({
+          diff: '+const changed = true;',
+          reviewerModel: 'claude-sonnet-4-6',
+          reviewerExecutor: executor,
+        }),
+      );
+      expect(executor).toHaveBeenCalledTimes(calls);
+      expect(result).toMatchObject({
+        overall: 'fail',
+        taskReview: null,
+        reviewSkipKind: 'review-timeout',
+      });
+      if (blocker) {
+        expect(result.reviewSkipReason).toContain(`Review not retried: ${blocker}`);
+        expect(result.reviewSkipReason).toContain('ap reviewer-runs');
+      } else expect(result.reviewSkipReason).not.toContain('Review not retried');
+    },
+  );
+
   it('captures Tier 1 Claude review token usage', async () => {
     vi.mocked(runClaudeCli).mockResolvedValue({
       stdout: JSON.stringify({

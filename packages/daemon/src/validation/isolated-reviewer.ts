@@ -23,7 +23,12 @@ import {
   runContainerReviewer,
 } from './container-reviewer-runner.js';
 import { CodexReviewError, type CodexReviewTokenUsage } from './review-codex-runner.js';
-import { type ReviewerRunRepository, hasMeasuredReviewerUsage } from './reviewer-run-repository.js';
+import {
+  type ReviewerRunRecord,
+  type ReviewerRunRepository,
+  type ReviewerRunRow,
+  hasMeasuredReviewerUsage,
+} from './reviewer-run-repository.js';
 
 export interface IsolatedReviewerOptions {
   runs: ReviewerRunRepository;
@@ -46,7 +51,7 @@ export class IsolatedReviewer {
     route: AgentRoute,
     purpose: 'review' | 'memory' = 'review',
   ): ReviewerExecutor {
-    return async (input) => {
+    const execute: ReviewerExecutor = async (input) => {
       const requestId = randomUUID();
       const deadline = Date.now() + input.timeout;
       const key = (
@@ -92,6 +97,53 @@ export class IsolatedReviewer {
       }
       throw failure;
     };
+    execute.retryBlocker = () => this.options.runs.retryBlocker(pod.id);
+    return execute;
+  }
+
+  /**
+   * Operator closure of an uncertain run. Unconfirmed cleanup is retried first; inference is never
+   * retried. Without usage, the run's spend is accepted as unknown.
+   */
+  async reconcile(
+    podId: string,
+    runId: string,
+    actorId: string,
+    note: string,
+    usage?: { inputTokens: number; outputTokens: number },
+  ): Promise<ReviewerRunRecord> {
+    const run = this.options.runs.get(podId, runId);
+    if (!run) configurationError('Reviewer run not found', 'REVIEWER_RUN_NOT_FOUND', 404);
+    // Never reap a live attempt. 'pending' cleanup likewise belongs to its finally block.
+    if (run.state === 'preparing' || run.state === 'running')
+      configurationError('Reviewer run is still active', 'REVIEWER_RUN_ACTIVE', 409);
+    if (run.cleanup === 'uncertain') {
+      const clean = await this.cleanup({
+        id: run.id,
+        pod_id: run.podId,
+        execution_target: run.executionTarget,
+        container_id: run.containerId,
+      });
+      this.options.runs.cleaned(run.id, clean);
+      // A measured run only needed its cleanup confirmed.
+      if (clean && run.state !== 'uncertain')
+        return this.options.runs.get(podId, runId) as ReviewerRunRecord;
+    }
+    return this.options.runs.reconcile(podId, runId, actorId, note, usage);
+  }
+
+  private async cleanup(run: ReviewerRunRow): Promise<boolean> {
+    try {
+      if (run.container_id) await this.options.manager(run.execution_target).kill(run.container_id);
+      if (run.execution_target === 'local') {
+        if (!this.options.network) throw new Error('Reviewer network cleanup unavailable');
+        await this.options.network.removeNetworkForPod(run.id);
+      }
+      return true;
+    } catch (error) {
+      this.options.logger.warn({ err: error, runId: run.id }, 'Reviewer cleanup failed');
+      return false;
+    }
   }
 
   private attemptExecutor(
@@ -414,18 +466,7 @@ export class IsolatedReviewer {
   async recover(): Promise<void> {
     for (const run of this.options.runs.pending()) {
       this.options.runs.interrupt(run.id);
-      let clean = true;
-      try {
-        if (run.container_id)
-          await this.options.manager(run.execution_target).kill(run.container_id);
-        if (run.execution_target === 'local') {
-          if (!this.options.network) throw new Error('Reviewer network cleanup unavailable');
-          await this.options.network.removeNetworkForPod(run.id);
-        }
-      } catch {
-        clean = false;
-      }
-      this.options.runs.cleaned(run.id, clean);
+      this.options.runs.cleaned(run.id, await this.cleanup(run));
     }
   }
 }

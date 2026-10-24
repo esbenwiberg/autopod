@@ -5,8 +5,11 @@ import path from 'node:path';
 import { expect, it } from 'vitest';
 
 const script = path.resolve(import.meta.dirname, 'runtime/validation-supervisor.py');
+// The supervisor scrubs the environment, so the /usr/bin/git xcrun shim cannot be trusted on macOS.
 const git =
-  process.platform === 'darwin' ? '/Library/Developer/CommandLineTools/usr/bin/git' : 'git';
+  process.platform === 'darwin'
+    ? execFileSync('xcrun', ['--find', 'git'], { encoding: 'utf8' }).trim()
+    : 'git';
 
 async function setup(command: string, expiresAt = Math.floor(Date.now() / 1000) + 30) {
   const root = await mkdtemp(path.join(tmpdir(), 'managed-validation-supervisor-'));

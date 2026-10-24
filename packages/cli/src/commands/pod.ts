@@ -21,6 +21,7 @@ import { followLogs } from '../utils/log-follow.js';
 import { registerBudgetCommand } from './budget.js';
 import { registerGoalCommands } from './goal.js';
 import { registerLaunchCommand } from './launch.js';
+import { registerReviewerRunsCommand } from './reviewer-runs.js';
 
 const podColumns: ColumnDef<Pod>[] = [
   { header: 'ID', formatter: (s) => s.id.slice(0, 8), width: 10 },
@@ -137,6 +138,7 @@ function printApproveAllResult(result: {
 export function registerPodCommands(program: Command, getClient: () => AutopodClient): void {
   registerGoalCommands(program, getClient);
   registerBudgetCommand(program, getClient);
+  registerReviewerRunsCommand(program, getClient);
   program
     .command('execution-provenance <id>')
     .description('Inspect recorded runtime, image, build, resource and command preflight evidence')

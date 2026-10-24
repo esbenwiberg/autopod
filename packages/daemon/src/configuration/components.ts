@@ -204,13 +204,14 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
       resolveLaunchCredentialReferences(config, options.credentials),
     assertCapabilities: assertCurrent,
   };
+  const reviewerRuns = new ReviewerRunRepository(db, (id) => {
+    if (!options.pods.taskExecutions)
+      configurationError('Whole-task accounting is unavailable', 'TASK_BUDGET_UNAVAILABLE', 503);
+    return options.pods.taskExecutions.snapshot(id);
+  });
   const reviewer = new IsolatedReviewer({
     ...options.reviewer,
-    runs: new ReviewerRunRepository(db, (id) => {
-      if (!options.pods.taskExecutions)
-        configurationError('Whole-task accounting is unavailable', 'TASK_BUDGET_UNAVAILABLE', 503);
-      return options.pods.taskExecutions.snapshot(id);
-    }),
+    runs: reviewerRuns,
     accounts: options.accounts,
     logger: options.logger,
     readPod: (id) => options.pods.getOrThrow(id),
@@ -350,6 +351,11 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     reviewer,
   };
   const routes: ConfigurationRouteDependencies = {
+    reviewerRuns: {
+      list: (podId) => reviewerRuns.list(podId),
+      reconcile: (podId, runId, actorId, note, usage) =>
+        reviewer.reconcile(podId, runId, actorId, note, usage),
+    },
     deployments,
     series: createSeriesLaunches({
       db,
