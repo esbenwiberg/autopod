@@ -54,10 +54,13 @@ import Testing
                 throw error
             }
         }
-        func edit(_ placeholder: String, _ text: String) throws {
+        func textField(_ placeholder: String) -> NSTextField? {
             func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
-            let field = try #require(descendants(host.hosting).compactMap { $0 as? NSTextField }
-                .first { $0.placeholderString == placeholder })
+            return descendants(host.hosting).compactMap { $0 as? NSTextField }
+                .first { $0.placeholderString == placeholder }
+        }
+        func edit(_ placeholder: String, _ text: String) throws {
+            let field = try #require(textField(placeholder))
             host.window.makeFirstResponder(field)
             let editor = try #require(field.currentEditor() as? NSTextView)
             editor.insertText(text, replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
@@ -67,11 +70,21 @@ import Testing
         try edit("Search pods", "perf-0000")
         try await wait("fleet search") { host.contains("1 pod · fixture/repository-0") }
         host.press(try #require(host.find(label: "History")))
-        // Stop at the control: materializing every History row's AX subtree can
-        // dominate this functional check on older macOS accessibility clients.
-        try await wait("History search control") {
-            firstNode { host.value($0, "accessibilityIdentifier") as? String == "history-search" } != nil
+        // This is unmeasured workspace setup, not a cached selection transition.
+        // Locate the native field used by edit(), without depending on SwiftUI's
+        // version-specific AX identifier forwarding or enumerating 1,000 rows.
+        let historyStart = ContinuousClock.now
+        let historyDeadline = historyStart.advanced(by: .seconds(20))
+        while true {
+            host.layout()
+            if textField("Search tasks, repositories, pod IDs…") != nil { break }
+            guard ContinuousClock.now < historyDeadline else {
+                print("History native search control did not mount")
+                throw URLError(.timedOut)
+            }
+            try await Task.sleep(for: .milliseconds(1))
         }
+        print("History native search mounted after \(historyStart.duration(to: ContinuousClock.now))")
         try edit("Search tasks, repositories, pod IDs…", "perf-0999")
         try await wait("History search result") {
             let row = firstNode {
