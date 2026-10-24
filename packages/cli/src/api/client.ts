@@ -85,6 +85,28 @@ export interface SeriesResponse {
   statusCounts: Record<string, number>;
 }
 
+/** Daemon-owned isolated reviewer run; mirrors the daemon's ReviewerRunRecord. */
+export interface ReviewerRun {
+  id: string;
+  podId: string;
+  executionTarget: 'local' | 'sandbox';
+  containerId: string | null;
+  runtime: string;
+  model: string;
+  state: 'preparing' | 'running' | 'completed' | 'failed' | 'uncertain';
+  cleanup: 'pending' | 'clean' | 'uncertain';
+  failureKind: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  createdAt: string;
+  updatedAt: string;
+  reconciledAt: string | null;
+  reconciledBy: string | null;
+  reconciliationNote: string | null;
+  usageBasis: 'operator-reported' | 'unknown-accepted' | null;
+  requiresReconciliation: boolean;
+}
+
 export interface FirewallDenial {
   eventId: number;
   timestamp: string;
@@ -351,6 +373,22 @@ export class AutopodClient {
     expectedBudget: number | null,
   ): Promise<TaskExecutionSummary> {
     return this.request('POST', `/pods/${id}/budget`, { tokenBudget, expectedBudget });
+  }
+
+  async listReviewerRuns(id: string): Promise<ReviewerRun[]> {
+    return this.request('GET', `/pods/${id}/reviewer-runs`);
+  }
+
+  async reconcileReviewerRun(
+    id: string,
+    runId: string,
+    body: { note: string; inputTokens?: number; outputTokens?: number },
+  ): Promise<ReviewerRun> {
+    return this.request(
+      'POST',
+      `/pods/${id}/reviewer-runs/${encodeURIComponent(runId)}/reconcile`,
+      body,
+    );
   }
 
   async getTaskExecution(id: string): Promise<TaskExecutionSummary> {

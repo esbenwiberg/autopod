@@ -28,6 +28,7 @@ import {
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
 import type { ContainerManager, ExecOptions } from '../interfaces/container-manager.js';
+import { REVIEW_RETRY_BLOCKED } from '../interfaces/reviewer-executor.js';
 import type {
   ValidationEngine,
   ValidationEngineConfig,
@@ -838,7 +839,28 @@ export function createLocalValidationEngine(
                 },
               }
             : await runTaskReview(containerManager, config, log, reviewContext);
-          if (!useCanonicalCouncil && isReviewInfrastructureFailure(reviewRun)) {
+          // A timed-out reviewer leaves unmeasured usage that blocks the next reservation until an
+          // operator reconciles it; retrying would only produce a misleading second failure.
+          const retryBlocker =
+            !useCanonicalCouncil && isReviewInfrastructureFailure(reviewRun)
+              ? (config.reviewerExecutor?.retryBlocker?.() ?? null)
+              : null;
+          if (retryBlocker) {
+            log?.warn(
+              {
+                podId: config.podId,
+                attempt: config.attempt,
+                reviewSkipReason: reviewRun.skipReason,
+                retryBlocker,
+              },
+              'Review infrastructure failure; retry blocked until reviewer run is reconciled',
+            );
+            if (reviewRun.skipReason)
+              reviewRun = {
+                ...reviewRun,
+                skipReason: `${reviewRun.skipReason} — ${REVIEW_RETRY_BLOCKED}: ${retryBlocker}. Reconcile with \`ap reviewer-runs ${config.podId}\`.`,
+              };
+          } else if (!useCanonicalCouncil && isReviewInfrastructureFailure(reviewRun)) {
             log?.warn(
               {
                 podId: config.podId,

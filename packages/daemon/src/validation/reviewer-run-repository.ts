@@ -10,6 +10,40 @@ export interface ReviewerRunRow {
   container_id: string | null;
 }
 
+export interface ReviewerRunRecord {
+  id: string;
+  podId: string;
+  executionTarget: 'local' | 'sandbox';
+  containerId: string | null;
+  runtime: string;
+  model: string;
+  state: 'preparing' | 'running' | 'completed' | 'failed' | 'uncertain';
+  cleanup: 'pending' | 'clean' | 'uncertain';
+  failureKind: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  createdAt: string;
+  updatedAt: string;
+  reconciledAt: string | null;
+  reconciledBy: string | null;
+  reconciliationNote: string | null;
+  usageBasis: 'operator-reported' | 'unknown-accepted' | null;
+  /** True while this run blocks new reviewers and task-budget accounting. */
+  requiresReconciliation: boolean;
+}
+
+/** A run blocks new reviewers until it is finished, cleaned and its usage is known or accepted. */
+export const UNRECONCILED_REVIEWER_RUN = `(state IN ('preparing','running')
+  OR (state='uncertain' AND reconciled_at IS NULL) OR cleanup!='clean')`;
+
+const RECORD_COLUMNS = `id, pod_id AS podId, execution_target AS executionTarget,
+  container_id AS containerId, runtime, model,
+  state, cleanup, failure_kind AS failureKind, input_tokens AS inputTokens,
+  output_tokens AS outputTokens, created_at AS createdAt, updated_at AS updatedAt,
+  reconciled_at AS reconciledAt, reconciled_by AS reconciledBy,
+  reconciliation_note AS reconciliationNote, usage_basis AS usageBasis,
+  ${UNRECONCILED_REVIEWER_RUN} AS requiresReconciliation`;
+
 export function hasMeasuredReviewerUsage(
   usage?: CodexReviewTokenUsage,
 ): usage is CodexReviewTokenUsage {
@@ -40,7 +74,7 @@ export class ReviewerRunRepository {
       const totals = this.db
         .prepare(`SELECT
         COALESCE(SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)),0) AS tokens,
-        COALESCE(SUM(CASE WHEN state IN ('preparing','running','uncertain') OR cleanup!='clean' THEN 1 ELSE 0 END),0) AS pending
+        COALESCE(SUM(CASE WHEN ${UNRECONCILED_REVIEWER_RUN} THEN 1 ELSE 0 END),0) AS pending
         FROM isolated_reviewer_runs WHERE pod_id=?`)
         .get(pod.id) as { tokens: number; pending: number };
       if (totals.pending)
@@ -156,6 +190,87 @@ export class ReviewerRunRepository {
         "SELECT id,pod_id,execution_target,container_id FROM isolated_reviewer_runs WHERE cleanup!='clean'",
       )
       .all() as ReviewerRunRow[];
+  }
+
+  list(podId: string): ReviewerRunRecord[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT ${RECORD_COLUMNS} FROM isolated_reviewer_runs WHERE pod_id=? ORDER BY created_at DESC, id`,
+        )
+        .all(podId) as Array<ReviewerRunRecord & { requiresReconciliation: number }>
+    ).map((row) => ({ ...row, requiresReconciliation: !!row.requiresReconciliation }));
+  }
+
+  get(podId: string, runId: string): ReviewerRunRecord | null {
+    const row = this.db
+      .prepare(`SELECT ${RECORD_COLUMNS} FROM isolated_reviewer_runs WHERE pod_id=? AND id=?`)
+      .get(podId, runId) as (ReviewerRunRecord & { requiresReconciliation: number }) | undefined;
+    return row ? { ...row, requiresReconciliation: !!row.requiresReconciliation } : null;
+  }
+
+  /** Why an immediate re-review would be refused, or null when one may start. */
+  retryBlocker(podId: string): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT id FROM isolated_reviewer_runs WHERE pod_id=? AND ${UNRECONCILED_REVIEWER_RUN} ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(podId) as { id: string } | undefined;
+    return row ? `reviewer run ${row.id} requires reconciliation` : null;
+  }
+
+  /**
+   * Close an unmeasured run. Without usage the spend is accepted as unknown, regardless of
+   * budget policy: the operator explicitly takes responsibility for the unrecorded tokens.
+   */
+  reconcile(
+    podId: string,
+    runId: string,
+    actorId: string,
+    note: string,
+    usage?: { inputTokens: number; outputTokens: number },
+  ): ReviewerRunRecord {
+    if (
+      usage &&
+      ![usage.inputTokens, usage.outputTokens].every((n) => Number.isSafeInteger(n) && n >= 0)
+    )
+      configurationError('Reviewer usage must be non-negative integers', 'INVALID_USAGE', 400);
+    return this.db.transaction(() => {
+      const run = this.get(podId, runId);
+      if (!run) configurationError('Reviewer run not found', 'REVIEWER_RUN_NOT_FOUND', 404);
+      if (run.state === 'preparing' || run.state === 'running')
+        configurationError('Reviewer run is still active', 'REVIEWER_RUN_ACTIVE', 409);
+      if (run.cleanup !== 'clean')
+        configurationError(
+          'Reviewer cleanup is not confirmed',
+          'REVIEWER_CLEANUP_UNCONFIRMED',
+          409,
+        );
+      if (run.state !== 'uncertain' || run.reconciledAt)
+        configurationError(
+          'Reviewer run does not require reconciliation',
+          'REVIEWER_RUN_NOT_UNCERTAIN',
+          409,
+        );
+      const changed = this.db
+        .prepare(`UPDATE isolated_reviewer_runs SET input_tokens=?,output_tokens=?,usage_basis=?,
+          reconciled_at=?,reconciled_by=?,reconciliation_note=?,updated_at=?
+          WHERE id=? AND pod_id=? AND state='uncertain' AND cleanup='clean' AND reconciled_at IS NULL`)
+        .run(
+          usage?.inputTokens ?? null,
+          usage?.outputTokens ?? null,
+          usage ? 'operator-reported' : 'unknown-accepted',
+          new Date().toISOString(),
+          actorId,
+          note,
+          new Date().toISOString(),
+          runId,
+          podId,
+        ).changes;
+      if (changed !== 1)
+        configurationError('Reviewer run changed concurrently', 'REVIEWER_RUN_CHANGED', 409);
+      return this.get(podId, runId) as ReviewerRunRecord;
+    })();
   }
 
   interrupt(id: string): void {

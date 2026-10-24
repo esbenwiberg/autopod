@@ -340,4 +340,50 @@ describe('isolated reviewer execution', () => {
     expect(f.runs.pending()).toEqual([]);
     await f.execute({ prompt: 'Next measured review', timeout: 5000 });
   });
+
+  it('reports a retry blocker for unmetered usage until an operator accepts it', async () => {
+    const f = await fixture();
+    vi.mocked(f.manager.execStreaming).mockImplementation(async () => ({
+      stdout: Readable.from(['{"result":"Review"}']),
+      stderr: Readable.from([]),
+      exitCode: Promise.resolve(0),
+      kill: vi.fn(async () => {}),
+    }));
+    expect(f.execute.retryBlocker?.()).toBeNull();
+    await f.execute({ prompt: 'Review', timeout: 5000 });
+    expect(f.execute.retryBlocker?.()).toMatch(/requires reconciliation/);
+    const [run] = f.runs.list('pod');
+    if (!run) throw new Error('missing run');
+    await f.service.reconcile('pod', run.id, 'operator', 'Timed out at provider');
+    expect(f.execute.retryBlocker?.()).toBeNull();
+    await f.execute({ prompt: 'Retry review', timeout: 5000 });
+    expect(f.manager.spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries unconfirmed cleanup during reconciliation and never reruns inference', async () => {
+    const f = await fixture();
+    vi.mocked(f.manager.kill).mockRejectedValueOnce(new Error('transport unavailable'));
+    await expect(f.execute({ prompt: 'Review', timeout: 5000 })).rejects.toThrow('cleanup');
+    const [run] = f.runs.list('pod');
+    if (!run) throw new Error('missing run');
+    vi.mocked(f.manager.kill).mockRejectedValueOnce(new Error('still unavailable'));
+    await expect(f.service.reconcile('pod', run.id, 'operator', 'Reap')).rejects.toThrow(
+      'cleanup is not confirmed',
+    );
+    const reconciled = await f.service.reconcile('pod', run.id, 'operator', 'Reap');
+    expect(reconciled).toMatchObject({ state: 'completed', cleanup: 'clean' });
+    expect(f.manager.kill).toHaveBeenLastCalledWith('review-container');
+    expect(f.manager.execStreaming).toHaveBeenCalledOnce();
+    await f.execute({ prompt: 'Next measured review', timeout: 5000 });
+  });
+
+  it('refuses to reap a live reviewer even when its cleanup is already uncertain', async () => {
+    const f = await fixture();
+    const id = 'review-00000000-0000-4000-8000-000000000009';
+    f.runs.reserve(id, createPodRepository(f.db).getOrThrow('pod'), f.config, f.config.ai.main);
+    f.runs.attach(id, 'live-container');
+    f.runs.cleaned(id, false);
+    await expect(f.service.reconcile('pod', id, 'operator', 'x')).rejects.toThrow('still active');
+    expect(f.manager.kill).not.toHaveBeenCalled();
+  });
 });

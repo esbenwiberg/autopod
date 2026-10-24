@@ -176,6 +176,10 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
             `${row.id}: native Goal or isolated reviewer usage requires reconciliation`,
           );
         }
+        if (composable.reviewerUnknownAccepted > 0)
+          diagnostics.push(
+            `${row.id}: ${composable.reviewerUnknownAccepted} isolated reviewer run(s) accepted with unknown usage`,
+          );
       }
       const attempts = readProviderUsage(db, row.id, true);
       // The corrected append-only provider ledger is authoritative when present.
