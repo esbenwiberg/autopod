@@ -473,7 +473,8 @@ ap nudge <id> "<message>"                   # Send nudge (agent picks up async)
 # Validate & Preview
 ap validate <id>                            # Trigger validation manually
 ap open <id>                                # Open the pod's current preview URL, if one is available
-ap diff <id>                                # Show the last validation diff
+ap diff <id>                                # Show the current pod diff
+ap diff <id> --json                         # Diff files, statuses, patches, and stats
 ap update-from-base <id>                    # Rebase pod branch onto latest base and restart validation
 ap kick <id> --reason "stuck"               # Re-enqueue a stuck queued pod or free a stuck slot
 
@@ -491,6 +492,11 @@ ap kill --all-failed                        # Clean up all failures
 # Stats
 ap stats                                    # Aggregate counts by status, avg duration, total cost
 ```
+
+`ap diff` reads the daemon’s current diff endpoint. If that request fails, it falls
+back to the stored task-review diff when available. `--json` prints the full endpoint
+response; a fallback contains `files`, `stats`, and `source: "task-review"`. If neither
+source is available, the command fails instead of reporting an empty diff.
 
 ### Spec Utilities
 
