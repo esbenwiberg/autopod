@@ -37,6 +37,23 @@ import Testing
     @Test func historyOpensArchivedPodAndClearsFleetFiltersWithTabRetained() async throws {
         let host = try DesktopSelectionPerformanceHost()
         defer { host.close() }
+        func firstNode(where predicate: (NSObject) -> Bool) -> NSObject? {
+            func visit(_ node: NSObject) -> NSObject? {
+                if predicate(node) { return node }
+                for child in host.value(node, "accessibilityChildren") as? [NSObject] ?? [] {
+                    if let found = visit(child) { return found }
+                }
+                return nil
+            }
+            return visit(host.hosting)
+        }
+        func wait(_ checkpoint: String, _ predicate: () -> Bool) async throws {
+            do { try await host.wait(predicate) }
+            catch {
+                print("History navigation timed out at: \(checkpoint)")
+                throw error
+            }
+        }
         func edit(_ placeholder: String, _ text: String) throws {
             func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
             let field = try #require(descendants(host.hosting).compactMap { $0 as? NSTextField }
@@ -48,13 +65,27 @@ import Testing
         try await host.scope("repository")
         try await host.selectTab("work")
         try edit("Search pods", "perf-0000")
-        try await host.wait { host.contains("1 pod · fixture/repository-0") }
+        try await wait("fleet search") { host.contains("1 pod · fixture/repository-0") }
         host.press(try #require(host.find(label: "History")))
-        try await host.wait { host.find(id: "history-search") != nil }
+        // Stop at the control: materializing every History row's AX subtree can
+        // dominate this functional check on older macOS accessibility clients.
+        try await wait("History search control") {
+            firstNode { host.value($0, "accessibilityIdentifier") as? String == "history-search" } != nil
+        }
         try edit("Search tasks, repositories, pod IDs…", "perf-0999")
-        try await host.wait { host.contains("1 matching loaded records") }
-        host.press(try #require(host.find(label: "Open pod ↗")))
-        try await host.wait { host.inputs.selectedID == "perf-0999" && host.destination("work") }
+        try await wait("History search result") {
+            let row = firstNode {
+                host.label($0).hasPrefix("Fixture pod perf-")
+                    && $0.responds(to: NSSelectorFromString("accessibilityPerformPress"))
+            }
+            return row.map { host.label($0).contains("perf-0999") } ?? false
+        }
+        #expect(host.contains("1 matching loaded records"))
+        host.press(try #require(firstNode { host.label($0) == "Open pod ↗"
+            && $0.responds(to: NSSelectorFromString("accessibilityPerformPress")) }))
+        try await wait("archived Work destination") {
+            host.inputs.selectedID == "perf-0999" && host.destination("work")
+        }
         #expect(host.contains("51 pods · All repositories"))
         #expect(host.contains("Fixture summary for perf-0999"))
     }
