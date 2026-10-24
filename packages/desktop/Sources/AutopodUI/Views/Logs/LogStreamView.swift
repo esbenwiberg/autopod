@@ -65,17 +65,18 @@ public struct LogStreamView: View {
     }
 
     public var body: some View {
+        let visibleEvents = filteredEvents
         VStack(spacing: 0) {
-            toolbar
+            toolbar(visibleEvents: visibleEvents)
             Divider()
-            logContent
+            logContent(visibleEvents: visibleEvents)
         }
         .background(redesign ? DesktopTheme.surface : Color(nsColor: .textBackgroundColor))
     }
 
     // MARK: - Toolbar
 
-    private var toolbar: some View {
+    private func toolbar(visibleEvents: [AgentEvent]) -> some View {
         VStack(spacing: 8) {
             HStack {
                 Image(systemName: "text.line.last.and.arrowtriangle.forward")
@@ -89,7 +90,7 @@ public struct LogStreamView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Text("\(filteredEvents.count) events")
+                Text("\(visibleEvents.count) events")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if limitedEventCount != nil, let onLoadAll {
@@ -111,7 +112,7 @@ public struct LogStreamView: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(showCopiedFeedback ? .green : .secondary)
                 .help("Copy logs to clipboard")
-                .disabled(filteredEvents.isEmpty)
+                .disabled(visibleEvents.isEmpty)
                 Button {
                     pinnedToBottom.toggle()
                 } label: {
@@ -221,8 +222,11 @@ public struct LogStreamView: View {
 
     // MARK: - Log content
 
-    private var logContent: some View {
-        Group {
+    private func logContent(visibleEvents: [AgentEvent]) -> some View {
+        // Share within this render; new renders still use current locale and time zone.
+        let timestampFormatter = DateFormatter()
+        timestampFormatter.dateFormat = "HH:mm:ss"
+        return Group {
             if isLoading {
                 VStack(spacing: 10) {
                     ProgressView()
@@ -268,7 +272,7 @@ public struct LogStreamView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if filteredEvents.isEmpty {
+            } else if visibleEvents.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "line.3.horizontal.decrease.circle")
                         .font(.system(size: 24))
@@ -283,9 +287,10 @@ public struct LogStreamView: View {
                     ZStack(alignment: .bottomTrailing) {
                         ScrollView(.vertical) {
                             LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(filteredEvents) { event in
+                                ForEach(visibleEvents) { event in
                                     LogEventRow(
                                         event: event,
+                                        timestampText: timestampFormatter.string(from: event.timestamp),
                                         isExpanded: expandedEventId == event.id,
                                         onTap: {
                                             withAnimation(.easeOut(duration: 0.15)) {
@@ -302,7 +307,7 @@ public struct LogStreamView: View {
                                     }
                                     .id(event.id)
 
-                                    if event.id != filteredEvents.last?.id {
+                                    if event.id != visibleEvents.last?.id {
                                         Divider().padding(.leading, 80)
                                     }
                                 }
@@ -312,14 +317,12 @@ public struct LogStreamView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 4)
                         }
+                        .defaultScrollAnchor(.bottom, for: .initialOffset)
                         .onScrollGeometryChange(for: Bool.self) { geo in
                             geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 40
                         } action: { _, atBottom in
                             isNearBottom = atBottom
                             if atBottom { pinnedToBottom = true }
-                        }
-                        .onAppear {
-                            proxy.scrollTo("__bottom__", anchor: .bottom)
                         }
                         .onChange(of: events.count) {
                             if pinnedToBottom {
@@ -390,6 +393,7 @@ private enum LogEventFilter: Hashable {
 
 struct LogEventRow: View {
     let event: AgentEvent
+    let timestampText: String
     let isExpanded: Bool
     let onTap: () -> Void
 
@@ -397,7 +401,7 @@ struct LogEventRow: View {
         Button(action: onTap) {
             HStack(alignment: .top, spacing: 8) {
                 // Timestamp
-                Text(event.timeString)
+                Text(timestampText)
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.tertiary)
                     .frame(width: 55, alignment: .trailing)
