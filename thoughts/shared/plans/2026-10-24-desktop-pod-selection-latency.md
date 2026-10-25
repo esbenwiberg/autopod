@@ -5,7 +5,7 @@ author: Codex
 git_commit: 4c98ab935cb5100968a62e6d431e95f890700a5f
 branch: ""
 head_state: detached
-status: desktop_released_daemon_recovery_fix_approved
+status: desktop_and_daemon_released
 structure_approved: true
 implementation_approved: true
 research: thoughts/shared/research/2026-10-24-desktop-pod-selection-latency.md
@@ -460,11 +460,21 @@ If approved: implement this narrow repair, run the targeted workspace-recovery/r
 
 - [x] User approves this daemon-only scope extension. User replied “Approve PID cleanup fix and redeploy.”
 - [x] Regression reproduces the unlink permission error and passes with in-place clearing.
-- [ ] Targeted backend checks and required repository validation pass.
-- [ ] Repair is merged, deployed and verified with clean release identity, health, browser readiness and no recurrence of this preservation error.
+- [x] Targeted backend checks and required repository CI pass. Local dependency audit separately reports 32 pre-existing advisories; dependencies are unchanged.
+- [x] Repair is merged, deployed and verified with clean release identity, health, browser readiness and no recurrence of this preservation error.
 
-Next action: implement and verify the approved repair, merge it, and redeploy. Existing interruption authority remains limited to the same three pods. Do not report the hosted rollout complete while the service remains rolled back.
+The approved backend repair and rollout are now complete; evidence follows. Earlier human manual-check limitations remain unchanged.
 
 ### Approved PID cleanup implementation
 
 Applied the two approved shell-string replacements. The non-root test executes the production command through the container seam against a 0600 PID file in a 0555 directory (the same effective directory access as the agent in root-owned 0755 `/run/autopod`). It covers a real spawned worker, empty and invalid contents, unchanged inode/ownership/mode, and repeated cleanup. Root/Windows runs skip this POSIX permission reproduction. Against old code, the worker case failed with permission denied and invalid contents remained uncleared; with the fix all 23 workspace-recovery/reconciler tests passed. Logs: `/private/tmp/autopod-pid-cleanup-red.log`, `/private/tmp/autopod-pid-cleanup-green.log`.
+
+### PID repair merge and successful hosted retry
+
+- PR https://github.com/esbenwiberg/autopod/pull/452 merged as `8920bfc35676d0b9bff529f666bea7b781bdc864`. All PR CI checks passed: Linux repository build/typecheck/tests, secret scan, 599 Swift Testing tests + 13 XCTest checks, renderer contracts, and macOS app build. The non-root permission regression ran on Linux (not skipped). Logs: `/private/tmp/autopod-pid-cleanup-ci-success.log`, `/private/tmp/autopod-pid-cleanup-desktop-ci-success.log`.
+- Local `./scripts/validate.sh --quick` passed lint, build, typecheck, all tests (8,053 daemon tests passed, 12 skipped), and secret scan. Its overall exit was 1 solely because the unchanged dependency audit found 32 advisories (7 high, 18 moderate, 7 low). CI's audit is advisory and the workflow passed. No dependency changes or audit suppressions were made. Full local log: `/private/tmp/autopod-pid-cleanup-validation.log`.
+- A fresh deployment drain found only the three explicitly approved blockers and zero queued work. The normal deploy passed VM build, reviewer CLI checks, Chromium launch, exact changed shell-string verification in the built bundle, service health, external HTTPS 200, and exact clean build identity. Deployment completed `42c1c01e -> 8920bfc3`; maintenance drain released. Log: `/private/tmp/autopod-pid-cleanup-deploy.log`. Rollback remains `scripts/deploy-hosted-daemon.sh --rollback 42c1c01e`.
+- Current production recovery events for partial-penguin confirm worker quiescence at 16:25:35Z, a verified workspace checkpoint at 16:25:53Z, and workspace/session preservation plus sandbox suspension at 16:25:58Z on 2026-10-25. Both validated pods, all three container references, and partial-penguin's pending escalation ID remain unchanged. Snapshots: `/private/tmp/autopod-pid-cleanup-before-deploy.json`, `/private/tmp/autopod-pid-cleanup-after-deploy.json`.
+- Final current-invocation journal inspection passed: service active, zero error-level records, and explicit partial-penguin preservation/suspension confirmation. Log: `/private/tmp/autopod-pid-cleanup-journal.log`. The desktop Release remains installed with the previously verified binary hash; this backend-only repair changed no desktop source and did not require another rebuild or performance qualification. Human manual-check limitations earlier in this plan remain explicit.
+
+- Final installed app verification reconfirmed strict signature validity and executable SHA-256 `ba971687bf73029e7b1a17642ce1fe6b48ae4f072f31f7b91f893024bdbc49ab`. All authorized product changes are on main, the desktop rebuild/install is complete, and the hosted daemon is healthy on the merged repair. Only this documentation record follows the deployed product commit; it requires no additional restart.
