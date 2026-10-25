@@ -5,7 +5,7 @@ author: Codex
 git_commit: 4c98ab935cb5100968a62e6d431e95f890700a5f
 branch: ""
 head_state: detached
-status: preview_accepted_live_verification_pending
+status: desktop_released_daemon_recovery_fix_approved
 structure_approved: true
 implementation_approved: true
 research: thoughts/shared/research/2026-10-24-desktop-pod-selection-latency.md
@@ -427,3 +427,44 @@ The user subsequently instructed: “Okey get it all to main. Deploy. And rebuil
 - Hosted daemon is healthy at clean release `42c1c01e832d9d3d5b4241bd649cb2b587d4521d`. Read-only preflight found restart blockers select-pinniped (validated), sunny-whitefish (validated), and partial-penguin (awaiting_input). No forced restart or daemon deployment has been performed; the deployment skill requires explicit interruption approval for these exact pods.
 - The first correction passed locally but CI again timed out specifically at `History search control` (`/private/tmp/autopod-desktop-release-ci-retry-failed.log`), before the search/open assertions. Changed this unmeasured workspace-setup check to locate the native NSTextField by the same placeholder used by the actual edit helper, avoiding reliance on SwiftUI forwarding its AX identifier on older macOS. Setup has its own bounded 20-second wait and reports actual mount time; the immutable benchmark host still enforces its original five-second deadline. The native setup mounted in 1.201 seconds locally and the full History test passed in 3.079 seconds (`/private/tmp/autopod-desktop-history-native-readiness.log`). No product, fixture, timing-harness or assertion changes.
 - An additional full local UI process passed the revised History test and all other affected checks but hit the unchanged Village WebKit readiness failures documented in `docs/desktop/test-isolation.md` (five assertions in two tests). Both WebKit tests then passed in a fresh process in 0.835 seconds, without renderer/test changes. Logs: `/private/tmp/autopod-desktop-ui-ci-correction.log`, `/private/tmp/autopod-desktop-village-isolated-release.log`. Preserve the failed run; do not call it a passing full-suite run. CI's first two runs passed those unchanged WebKit checks.
+
+### Main integration and hosted rollout
+
+- Final PR CI passed all 599 Swift Testing tests and 13 XCTest checks, Village renderer contracts, the macOS app build, JavaScript build/tests and secret scan. Desktop CI: https://github.com/esbenwiberg/autopod/actions/runs/40143384053; success log `/private/tmp/autopod-desktop-release-ci-success.log`. The native History field mounted in 8.835 seconds on macOS CI, within its separate 20-second unmeasured setup bound. The selection benchmark's immutable five-second deadline is unchanged.
+- PR #451 merged as `d33c13fa0dc1187827d4b302b81daf746fd2914e`. Both this checkout and the primary main checkout were updated. The primary checkout's unrelated untracked drawing backup was preserved. Production desktop Release remains installed and verified; no desktop product source changed during the test corrections.
+- The ordinary hosted deploy stopped at its three-pod restart guard. The user explicitly approved interruption of select-pinniped (validated), sunny-whitefish (validated), and partial-penguin (awaiting_input). A fresh check under the deployment drain found only those pods and zero queued pods.
+- The first authorized staging attempt stopped at browser prewarm before activation; the old service remained healthy and the drain was released. The exact prewarm block passed independently. The full retry, with separate Azure response logging, passed build, reviewer CLI prewarm, Chromium launch, local health, external HTTPS 200 and exact clean build identity; it activated d33c13fa. Logs: `/private/tmp/autopod-desktop-approved-daemon-deploy.log`, `/private/tmp/autopod-desktop-prewarm-exact.log`, `/private/tmp/autopod-desktop-approved-daemon-retry.log`.
+- Startup journal inspection found `Sandbox worker quiesce failed ... rm: cannot remove '/run/autopod/agent.pid': Permission denied` while preserving partial-penguin. Followed the deployment skill's rollback rule and restored clean healthy release `42c1c01e832d9d3d5b4241bd649cb2b587d4521d`. Rollback log: `/private/tmp/autopod-desktop-daemon-rollback.log`. Released the maintenance drain after diagnosis. Partial-penguin remains awaiting_input, with its original container reference and pending escalation retained. No task was resumed, killed through the pod lifecycle, or answered by the operator.
+- `git diff 42c1c01e d33c13fa -- packages/daemon packages/shared packages/cli` is empty: the recovery defect is pre-existing and not introduced by the desktop change. Provisioning deliberately creates `/run/autopod` as root:root 0755 and `agent.pid` as autopod:autopod 0600 (`provisioning-agent-materials.ts`). `quiesceSandboxAgent` executes as the unprivileged agent and unlinks that file in both cleanup branches (`workspace-recovery-commands.ts`); owning the file does not grant write permission on its parent directory.
+- A non-root local permission reproduction confirmed unlink exits 1 while in-place clearing succeeds, retaining the empty file and its 0600 mode without granting directory write access. Proof: `/private/tmp/autopod-sandbox-pid-permission-repro.json`. Complete rollout evidence: `/private/tmp/autopod-desktop-release-evidence.json`.
+
+### Approved scope extension — sandbox PID cleanup
+
+**Expected:** the approved restart preserves interrupted sandbox work and the hosted release passes post-startup journal checks.
+
+**Found:** the existing recovery command cannot unlink an agent-owned PID file from the deliberately root-owned directory. Deployment was rolled back; the desktop fix is on main and installed, while the daemon remains on its healthy prior release.
+
+**Why it matters:** ignoring this error would claim preservation succeeded when it did not. Weakening `/run/autopod` permissions would undermine the existing secret-file boundary. The approved UI plan explicitly excludes daemon changes, so this backend repair needs separate scope approval.
+
+**Proposed adjustment:** change only the two PID cleanup strings in `packages/daemon/src/pods/workspace-recovery-commands.ts` from `rm -f "$pid_file"` to `: > "$pid_file"`. Keep the process termination sequence, file ownership/mode, directory permissions, API, lifecycle and pending-decision behavior unchanged. Add a non-root permission regression in the existing co-located test module, covering a terminated worker PID and the already-empty/invalid PID path. The test must fail against the current unlink behavior and pass against in-place clearing.
+
+```diff
+- 'case "$pid" in ""|*[!0-9]*) rm -f "$pid_file"; exit 0;; esac',
++ 'case "$pid" in ""|*[!0-9]*) : > "$pid_file"; exit 0;; esac',
+  ...
+- 'rm -f "$pid_file"',
++ ': > "$pid_file"',
+```
+
+If approved: implement this narrow repair, run the targeted workspace-recovery/reconciler tests and required repository checks, merge it to main, then retry the normal verified hosted rollout with the existing explicit interruption authority limited to the same three pods. Recheck the fleet before any restart; additional blocking pods require their own authority. The desktop rebuild is already complete and needs no product change for this backend-only repair.
+
+- [x] User approves this daemon-only scope extension. User replied “Approve PID cleanup fix and redeploy.”
+- [x] Regression reproduces the unlink permission error and passes with in-place clearing.
+- [ ] Targeted backend checks and required repository validation pass.
+- [ ] Repair is merged, deployed and verified with clean release identity, health, browser readiness and no recurrence of this preservation error.
+
+Next action: implement and verify the approved repair, merge it, and redeploy. Existing interruption authority remains limited to the same three pods. Do not report the hosted rollout complete while the service remains rolled back.
+
+### Approved PID cleanup implementation
+
+Applied the two approved shell-string replacements. The non-root test executes the production command through the container seam against a 0600 PID file in a 0555 directory (the same effective directory access as the agent in root-owned 0755 `/run/autopod`). It covers a real spawned worker, empty and invalid contents, unchanged inode/ownership/mode, and repeated cleanup. Root/Windows runs skip this POSIX permission reproduction. Against old code, the worker case failed with permission denied and invalid contents remained uncleared; with the fix all 23 workspace-recovery/reconciler tests passed. Logs: `/private/tmp/autopod-pid-cleanup-red.log`, `/private/tmp/autopod-pid-cleanup-green.log`.
