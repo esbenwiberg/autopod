@@ -434,7 +434,7 @@ function extractUrlPath(url: string): string {
  * E.g. "https://pkgs.dev.azure.com/myorg/_packaging/shared-libs/nuget/v3/index.json"
  *   → "myorg-shared-libs"
  */
-function deriveFeedName(url: string): string {
+export function deriveFeedName(url: string): string {
   // Try to extract org and feed from Azure DevOps URL pattern
   const match = url.match(/pkgs\.dev\.azure\.com\/([^/]+)(?:\/[^/]+)?\/_packaging\/([^/]+)/);
   let name: string;

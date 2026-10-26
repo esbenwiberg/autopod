@@ -45,6 +45,23 @@ const relativePath = z
     'Path must stay inside the workspace',
   );
 
+export const packageFeedSchema = z
+  .object({
+    type: z.enum(['npm', 'nuget']),
+    url: configurationUrlSchema.refine(
+      (value) => value.startsWith('https://') && !/\s/.test(value),
+      'Feeds require HTTPS without whitespace',
+    ),
+    scope: z
+      .string()
+      .regex(/^@[a-z0-9][a-z0-9._-]*$/)
+      .optional(),
+    credential: secretRef.nullable().default(null),
+    expiresAt: z.string().date().nullable().default(null),
+  })
+  .strict()
+  .refine((feed) => feed.type === 'npm' || !feed.scope, 'npm scope is only valid for npm feeds');
+
 export const repositorySetupSchema = z
   .object({
     id,
@@ -89,6 +106,7 @@ export const repositorySetupSchema = z
     integrations: z
       .object({
         prProvider: z.enum(['github', 'ado']).default('github'),
+        packageFeedIds: uniqueIds.optional(),
         privateRegistries: z
           .array(
             z
@@ -420,6 +438,7 @@ export const launchProfileSchema = z
 
 export const configurationPayloadSchemas = {
   repository: repositoryConfigSchema,
+  packageFeed: packageFeedSchema,
   environment: environmentPresetSchema,
   ai: aiPresetSchema,
   workflow: workflowPresetSchema,
@@ -429,6 +448,7 @@ export const configurationPayloadSchemas = {
 } as const;
 export const configurationKindSchema = z.enum([
   'repository',
+  'packageFeed',
   'environment',
   'ai',
   'workflow',

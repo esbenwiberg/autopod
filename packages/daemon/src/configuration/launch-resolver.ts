@@ -21,6 +21,7 @@ import {
   repositorySetupSchema,
   workflowPresetSchema,
 } from '@autopod/shared';
+import { deriveFeedName } from '../pods/registry-injector.js';
 import { assertAnalysisWorkspace } from './analysis-workspace.js';
 import { type ConfigurationStore, configurationError } from './configuration-store.js';
 import { deriveLaunch } from './derive-launch.js';
@@ -215,6 +216,28 @@ async function resolve(
   if (repository && setup) {
     origin('repository', repository, 'repository');
     setup = repositorySetupSchema.parse({ ...setup, ...overrides?.repositorySetup });
+    const feeds = (setup.integrations.packageFeedIds ?? []).map((id) => {
+      const feed = read('packageFeed', id);
+      origin(`packageFeeds.${id}`, feed, 'preset');
+      return feed.payload;
+    });
+    if (feeds.length) {
+      const registries = [...setup.integrations.privateRegistries, ...feeds];
+      const destinations = new Set<string>();
+      for (const registry of registries) {
+        const key =
+          registry.type === 'npm'
+            ? `npm:${registry.scope ?? 'default'}`
+            : `nuget:${deriveFeedName(registry.url)}`;
+        if (destinations.has(key))
+          configurationError(
+            'Package feeds conflict: select only one feed per npm scope/default or generated NuGet source name',
+            'PACKAGE_FEED_CONFLICT',
+          );
+        destinations.add(key);
+      }
+      setup.integrations.privateRegistries = registries;
+    }
   }
   if (setup?.integrations.deployment?.enabled && !services.deploymentAvailable)
     configurationError(

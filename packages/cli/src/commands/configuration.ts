@@ -10,6 +10,7 @@ import {
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { configurationId } from './launch-request.js';
+import { readSecret } from './provider-account.js';
 
 function revision(value: string): number {
   const parsed = Number(value);
@@ -171,6 +172,68 @@ export function registerConfigurationCommands(
   program: Command,
   getClient: () => AutopodClient,
 ): void {
+  const feeds = program
+    .command('package-feed')
+    .description('Reusable package feeds (PAT entry is interactive and never an argument)');
+  registerEntityCommands(feeds, 'packageFeed', getClient);
+  feeds.command('test <name-or-id>').action(async (name: string) => {
+    const client = getClient();
+    const id = await configurationId('packageFeed', name, (kind) =>
+      client.listConfigurations(kind),
+    );
+    const feed = await client.getConfiguration('packageFeed', id);
+    output(await client.testPackageFeed(id, feed.revision));
+  });
+  const credentials = feeds
+    .command('credential')
+    .description('Shared write-only registry credentials; rotation does not resume pods');
+  credentials
+    .command('list')
+    .action(async () => output(await getClient().listRegistryCredentials()));
+  credentials
+    .command('create')
+    .requiredOption('--name <name>')
+    .requiredOption('--origin <https-origin>')
+    .action(async (opts: { name: string; origin: string }) => {
+      if (!process.stdin.isTTY) throw new Error('Use an interactive terminal for PAT entry.');
+      const url = new URL(opts.origin);
+      if (url.protocol !== 'https:' || url.origin !== opts.origin)
+        throw new Error('Supply an HTTPS origin without a path.');
+      const value = await readSecret('Registry PAT (hidden): ');
+      try {
+        output(
+          await getClient().saveRegistryCredential(null, {
+            name: opts.name,
+            origins: [opts.origin],
+            purposes: ['registry-read'],
+            value,
+          }),
+        );
+      } catch {
+        throw new Error('Credential save was not confirmed. Reload metadata before retrying.');
+      }
+    });
+  credentials
+    .command('rotate <id>')
+    .requiredOption(
+      '--expected-revision <number>',
+      'Previously observed credential revision',
+      revision,
+    )
+    .action(async (id: string, opts: { expectedRevision: number }) => {
+      if (!process.stdin.isTTY) throw new Error('Use an interactive terminal for PAT entry.');
+      const value = await readSecret('Replacement shared registry PAT (hidden): ');
+      try {
+        output(
+          await getClient().saveRegistryCredential(id, {
+            expectedRevision: opts.expectedRevision,
+            value,
+          }),
+        );
+      } catch {
+        throw new Error('Credential rotation was not confirmed. Reload metadata before retrying.');
+      }
+    });
   const deployment = program
     .command('deployment')
     .description('Request and review deployment of the published default branch');
@@ -243,7 +306,10 @@ export function registerConfigurationCommands(
   presets
     .command('list')
     .alias('ls')
-    .requiredOption('--kind <kind>', 'environment, ai, workflow, github-access or tool-pack')
+    .requiredOption(
+      '--kind <kind>',
+      'environment, ai, workflow, github-access, tool-pack or package-feed',
+    )
     .option('--json', 'Full configuration JSON')
     .action(async (opts: { kind: string; json?: boolean }) => {
       const kinds: Record<string, ConfigurationKind> = {
@@ -252,11 +318,12 @@ export function registerConfigurationCommands(
         workflow: 'workflow',
         'github-access': 'githubAccess',
         'tool-pack': 'toolPack',
+        'package-feed': 'packageFeed',
       };
       const kind = kinds[opts.kind];
       if (!kind)
         throw new Error(
-          'Select a preset kind: environment, ai, workflow, github-access or tool-pack.',
+          'Select a preset kind: environment, ai, workflow, github-access, tool-pack or package-feed.',
         );
       const entries = await getClient().listConfigurations(kind);
       if (opts.json) output(entries);
@@ -272,6 +339,7 @@ export function registerConfigurationCommands(
     ['workflow', 'workflow'],
     ['github-access', 'githubAccess'],
     ['tool-pack', 'toolPack'],
+    ['package-feed', 'packageFeed'],
   ] as const)
     registerEntityCommands(presets.command(name), kind, getClient);
   const watcher = program.command('watcher').description('Configure repository issue watchers');

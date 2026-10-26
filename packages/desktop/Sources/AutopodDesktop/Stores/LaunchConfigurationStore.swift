@@ -120,6 +120,9 @@ public final class LaunchConfigurationStore {
       readLaunch: { id in try await self.onConnection(owner) { try await $0.getLaunchConfiguration(id) } })
     actions.connectionID = owner.uuidString
     actions.cachedPim = { self.pimDiscovery }
+    actions.listRegistryCredentials = { try await self.connectedAPI().listRegistryCredentials() }
+    actions.saveRegistryCredential = { try await self.connectedAPI().saveRegistryCredential($0, body: $1) }
+    actions.testPackageFeed = { try await self.connectedAPI().testPackageFeed($0, revision: $1) }
     actions.listDeployments = { try await self.connectedAPI().listDeployments() }
     actions.reviewDeployment = { try await self.connectedAPI().reviewDeployment($0) }
     actions.decideDeployment = { try await self.connectedAPI().decideDeployment($0, body: $1) }

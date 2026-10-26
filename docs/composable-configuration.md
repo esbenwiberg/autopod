@@ -51,6 +51,15 @@ Scheduled scans retain the configuration used when collecting each report. A hum
 
 The native library offers forms for project setups, tools, sidecars, instructions, skills and MCP connections; complete JSON remains available for advanced fields. For an isolated local interaction preview, run `swift run --package-path packages/desktop ConfigurationPreview`. It keeps edits in memory and connects to no daemon or provider.
 
+## Package feeds
+
+Reusable npm/NuGet feeds are configured in **Building blocks → Package feeds** and
+selected under each repository setup's **PR & registries**. The secure credential
+editor supports enrollment and revision-checked rotation without exposing PATs in
+configuration JSON. Existing inline registries are retained. See
+[Package feeds](package-feeds.md) for setup, connection-test limitations, adoption,
+and explicit recovery of credential-blocked pods.
+
 ## Access and Goals
 
 GitHub rules pair repository scope with operations. Workflows and branches have independent all/selected choices. Agent-requested reads, comments and workflow operations go through the daemon broker. Pods do not receive daemon GitHub/ADO publication credentials; source push, PR creation and merge remain control-plane operations.

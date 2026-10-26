@@ -36,7 +36,7 @@ public enum ConfigurationJSON: Codable, Hashable, Sendable {
 }
 
 public enum ConfigurationKind: String, Codable, CaseIterable, Sendable, Identifiable {
-  case repository, environment, ai, workflow, githubAccess, toolPack, profile
+  case repository, environment, ai, workflow, githubAccess, toolPack, packageFeed, profile
   public var id: String { rawValue }
   public var label: String {
     switch self {
@@ -46,6 +46,7 @@ public enum ConfigurationKind: String, Codable, CaseIterable, Sendable, Identifi
     case .workflow: "Workflows"
     case .githubAccess: "GitHub access"
     case .toolPack: "Tool packs"
+    case .packageFeed: "Package feeds"
     case .profile: "Profiles"
     }
   }
@@ -128,7 +129,7 @@ public struct LaunchOverrides: Codable, Equatable, Sendable {
     case .workflow: workflow = nil
     case .githubAccess: githubAccess = nil
     case .toolPack: toolPacks = nil
-    case .profile: break
+    case .profile, .packageFeed: break
     }
   }
 }
@@ -174,7 +175,7 @@ public struct ComposableLaunchRequest: Codable, Equatable, Sendable {
     case .ai: selections?.aiId = id
     case .workflow: selections?.workflowId = id
     case .githubAccess: selections?.githubAccess = id.map(LaunchAccessSelection.preset) ?? .noAccess
-    case .toolPack: break
+    case .toolPack, .packageFeed: break
     }
     overrides?.reset(kind)
   }

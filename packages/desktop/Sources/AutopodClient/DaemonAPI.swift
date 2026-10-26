@@ -68,6 +68,19 @@ public actor DaemonAPI {
     try await request("POST", "/deployments/\(id)/reconcile", body: encode(body))
   }
 
+  public func listRegistryCredentials() async throws -> [ConfigurationJSON] {
+    try await request("GET", "/configuration/credentials")
+  }
+  public func saveRegistryCredential(_ id: String?, body: ConfigurationJSON) async throws -> ConfigurationJSON {
+    if let id {
+      return try await request("PUT", "/configuration/credentials/\(id)", body: encode(body))
+    }
+    return try await request("POST", "/configuration/credentials", body: encode(body))
+  }
+  public func testPackageFeed(_ id: String, revision: Int) async throws -> ConfigurationJSON {
+    try await request("POST", "/configuration/package-feeds/\(id)/test", body: encode(["expectedRevision": revision]))
+  }
+
   public func configurationCapabilities() async throws -> ConfigurationJSON {
     try await request("GET", "/configuration/capabilities")
   }

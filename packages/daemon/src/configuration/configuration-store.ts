@@ -66,9 +66,17 @@ function hydrate<K extends ConfigurationKind>(row: EntityRow, kind: K): Configur
 }
 function references(entity: ConfigurationEntity): Array<{ kind: ConfigurationKind; id: string }> {
   if (entity.kind === 'repository') {
-    return entity.payload.usualProfileId
-      ? [{ kind: 'profile', id: entity.payload.usualProfileId }]
-      : [];
+    return [
+      ...(entity.payload.usualProfileId
+        ? [{ kind: 'profile' as const, id: entity.payload.usualProfileId }]
+        : []),
+      ...entity.payload.setups.flatMap((setup) =>
+        (setup.integrations.packageFeedIds ?? []).map((id) => ({
+          kind: 'packageFeed' as const,
+          id,
+        })),
+      ),
+    ];
   }
   if (entity.kind !== 'profile') return [];
   const p = entity.payload;

@@ -622,7 +622,7 @@ export function processSecretChunk(currentValue: string, chunk: string): SecretC
   return { value };
 }
 
-function readSecret(prompt: string): Promise<string> {
+export function readSecret(prompt: string): Promise<string> {
   if (!process.stdin.isTTY || !process.stdin.setRawMode) {
     return Promise.reject(
       new Error('Interactive secret entry requires a TTY; set AUTOPOD_PROVIDER_API_KEY instead.'),
