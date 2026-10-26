@@ -24,18 +24,19 @@ describe('canonical fix admission and recycling', () => {
       prUrl: 'https://github.com/org/repo/pull/99',
     });
   });
-  it('preserves current missing native profile-alias dispatch rejection with no partially admitted child', async () => {
+  it('admits a native fix using the frozen repository without a legacy profile alias', async () => {
     const f = createFixCycleFixture();
     await f.nativeParent(false);
-    await expect(
-      f.admission().maybeSpawnFixSession('native-parent', pendingStatus()),
-    ).rejects.toBeInstanceOf(TypeError);
-    expect(f.podRepo.getOrThrow('native-parent')).toMatchObject({
-      fixPodId: null,
-      prFixAttempts: 0,
+    await f.admission().maybeSpawnFixSession('native-parent', pendingStatus());
+    const parent = f.podRepo.getOrThrow('native-parent');
+    expect(parent.prFixAttempts).toBe(1);
+    expect(parent.fixPodId).toBeTruthy();
+    if (!parent.fixPodId) throw new Error('Missing native fix');
+    expect(f.podRepo.getOrThrow(parent.fixPodId)).toMatchObject({
+      linkedPodId: 'native-parent',
+      status: 'queued',
     });
-    expect(f.podRepo.list({}).filter((pod) => pod.linkedPodId === 'native-parent')).toEqual([]);
-    expect(f.admissionCaptured.enqueueSession).not.toHaveBeenCalled();
+    expect(f.admissionCaptured.enqueueSession).toHaveBeenCalledWith(parent.fixPodId);
   });
   it('keeps one canonical queued fix with parent/provider/branch ownership and feedback through SQLite reopen', async () => {
     const f = createFixCycleFixture(true);

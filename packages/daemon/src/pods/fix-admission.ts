@@ -185,6 +185,9 @@ export function createFixAdmission(
           podRepo.insert({
             id: fixId,
             profileName: config?.profileId ?? parent.profileName,
+            dispatchRepository: config
+              ? (config.repository?.config.remote ?? null)
+              : profile.repoUrl,
             task: config?.task ?? placeholderTask,
             status: 'queued',
             model: parent.model,
