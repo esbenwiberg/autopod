@@ -281,6 +281,16 @@ public struct SessionCardFinal: View {
             } else {
                 Label(pod.desktopRepositoryPlaceholder, systemImage: "folder").font(.caption2).foregroundStyle(.secondary)
             }
+            if let url = pod.prUrl {
+                Link(destination: url) {
+                    Label("PR #\(url.lastPathComponent)", systemImage: "arrow.up.right.square")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(DesktopTheme.accent)
+                }
+                .buttonStyle(.plain)
+                .help("Open pull request: \(url.absoluteString)")
+                .accessibilityIdentifier("pod-pr-link-\(pod.id)")
+            }
             if let pendingControl { PendingControlNotice(kind: pendingControl, podId: pod.id) }
             if pod.queueLength > 0 {
                 QueueChip(count: pod.queueLength) { showQueuePopover.toggle() }
