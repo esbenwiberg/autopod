@@ -164,7 +164,11 @@ describe('parseAdoRepoUrl', () => {
 });
 
 /** Minimal active PR body with repository.id for policy evaluations fetch. */
-const ACTIVE_PR = { status: 'active', mergeStatus: 'notSet', repository: { id: 'repo-guid-123' } };
+const ACTIVE_PR = {
+  status: 'active',
+  mergeStatus: 'notSet',
+  repository: { id: 'repo-guid-123', project: { id: 'project-guid-456' } },
+};
 
 /** Policy evaluation entry builder. */
 function policyEval(
@@ -621,7 +625,21 @@ describe('AdoPrManager.getPrStatus', () => {
     expect(status.ciFailures).toEqual([]);
   });
 
-  it('uses the correct policy evaluations URL with repository id and PR id', async () => {
+  it('fails closed when the PR project identity is unavailable', async () => {
+    const fetchMock = makeFetch([
+      { ok: true, body: { ...ACTIVE_PR, repository: { id: 'repo-only' } } },
+      { ok: true, body: { value: [] } },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+    const status = await new AdoPrManager(BASE_CONFIG).getPrStatus({ prUrl: PR_URL });
+    expect(status.mergeBlocked).toBe(true);
+    expect(status.blockReason).toContain('unavailable');
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/policy/evaluations'))).toBe(
+      false,
+    );
+  });
+
+  it('uses the CodeReview artifact with project identity, not repository identity', async () => {
     const fetchMock = makeFetch([
       { ok: true, body: ACTIVE_PR },
       { ok: true, body: { value: [] } },
@@ -636,7 +654,10 @@ describe('AdoPrManager.getPrStatus', () => {
     const calls = fetchMock.mock.calls as Array<[string, ...unknown[]]>;
     const policyUrl = calls[1]?.[0] ?? '';
     expect(policyUrl).toContain('/_apis/policy/evaluations');
-    expect(policyUrl).toContain('repo-guid-123');
+    expect(new URL(policyUrl).searchParams.get('artifactId')).toBe(
+      'vstfs:///CodeReview/CodeReviewId/project-guid-456/42',
+    );
+    expect(policyUrl).not.toContain('repo-guid-123');
     expect(policyUrl).toContain('42'); // PR id
   });
 

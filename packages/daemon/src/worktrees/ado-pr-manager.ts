@@ -595,7 +595,7 @@ export class AdoPrManager implements PrManager {
       targetRefName?: string;
       forkSource?: unknown;
       mergeStatus?: string;
-      repository: { id: string };
+      repository: { id: string; project?: { id: string } };
       lastMergeSourceCommit?: { commitId?: string };
     };
 
@@ -648,10 +648,12 @@ export class AdoPrManager implements PrManager {
     let reviewDecision: string | undefined;
     let squashRequired = false;
     try {
-      // ADO policy artifact ID for a pull request:
-      //   vstfs:///Git/PullRequestId/{repositoryId}/{pullRequestId}
+      // Policy evaluations use the CodeReview artifact and PROJECT identity,
+      // not a Git/PullRequestId artifact or repository identity (which returns []).
+      const projectId = pr.repository.project?.id;
+      if (!projectId) throw new Error('ADO PR project identity is unavailable');
       const artifactId = encodeURIComponent(
-        `vstfs:///Git/PullRequestId/${pr.repository.id}/${prId}`,
+        `vstfs:///CodeReview/CodeReviewId/${projectId}/${prId}`,
       );
       const evaluations = (await this.projectFetch(
         `/policy/evaluations?artifactId=${artifactId}&api-version=7.2-preview.1`,
