@@ -4,6 +4,9 @@ import Foundation
 @MainActor
 public struct LaunchConfigurationActions {
   public var connectionID: String? = nil
+  public var listRegistryCredentials: () async throws -> [ConfigurationJSON] = { throw DaemonError.badRequest("Credentials unavailable") }
+  public var saveRegistryCredential: (String?, ConfigurationJSON) async throws -> ConfigurationJSON = { _, _ in throw DaemonError.badRequest("Credentials unavailable") }
+  public var testPackageFeed: (String, Int) async throws -> ConfigurationJSON = { _, _ in throw DaemonError.badRequest("Feed testing unavailable") }
   public var documents: [ConfigurationDocument]
   public var listDeployments: () async throws -> [ConfigurationJSON] = { throw DaemonError.badRequest("Deployment is unavailable") }
   public var reviewDeployment: (String) async throws -> ConfigurationJSON = { _ in throw DaemonError.badRequest("Deployment is unavailable") }

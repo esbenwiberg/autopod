@@ -20,8 +20,9 @@ enum RepositorySetupSection: String, CaseIterable, Identifiable {
 struct RepositorySetupEditor: View {
   @Binding var fields: [String: ConfigurationJSON]
   @State private var section: RepositorySetupSection
-  init(fields: Binding<[String: ConfigurationJSON]>, initialSection: RepositorySetupSection = .commands) {
-    self._fields = fields; self._section = State(initialValue: initialSection)
+  var feeds: [ConfigurationDocument]
+  init(fields: Binding<[String: ConfigurationJSON]>, initialSection: RepositorySetupSection = .commands, feeds: [ConfigurationDocument] = []) {
+    self._fields = fields; self._section = State(initialValue: initialSection); self.feeds = feeds
   }
   private var integrations: Binding<[String: ConfigurationJSON]> { setupObject($fields, "integrations") }
   private var deployment: Binding<[String: ConfigurationJSON]> {
@@ -47,7 +48,7 @@ struct RepositorySetupEditor: View {
         case .validation: validation
         case .pages: ConfigurationSmokePagesEditor(fields: $fields)
         case .variables: ConfigurationValueMapEditor(title: "Build environment", context: "Available to repository setup, build and validation commands.", id: "setup-env", values: setupObject($fields, "buildEnv"))
-        case .registries: ConfigurationRegistryEditor(fields: integrations)
+        case .registries: ConfigurationRegistryEditor(fields: integrations, feeds: feeds)
         case .services:
           ConfigurationObjectListEditor(title: "ADO and Azure log access", values: Binding(get: { integrations.wrappedValue["serviceAccess"]?.array ?? [] }, set: { integrations.wrappedValue["serviceAccess"] = .array($0) }), initial: {
             ["id": .string("access-\(UUID().uuidString.prefix(8).lowercased())"), "service": .string("ado"), "organization": .string(""), "project": .string(""), "repository": .string(""), "operations": .array([.string("code.file")])]
@@ -182,13 +183,33 @@ private struct ConfigurationSmokeAssertionsEditor: View {
 
 struct ConfigurationRegistryEditor: View {
   @Binding var fields: [String: ConfigurationJSON]
+  var feeds: [ConfigurationDocument] = []
   private var registries: [ConfigurationJSON] { fields["privateRegistries"]?.array ?? [] }
   var body: some View {
     ConfigurationSection(title: "PR provider & registries", subtitle: "Repository-specific delivery and package feeds. Credentials stay enrolled with the daemon.") {
       Picker("Pull request provider", selection: setupText($fields, "prProvider", fallback: "github")) {
         Text("GitHub").tag("github"); Text("Azure DevOps").tag("ado")
       }.accessibilityIdentifier("setup-pr-provider")
-      if registries.isEmpty { Text("No private registries configured.").foregroundStyle(.secondary) }
+      Text("Package feeds").font(.headline)
+      Text("Create shared feeds in Building blocks → Package feeds. Selecting a feed applies to future launches.").font(.caption).foregroundStyle(.secondary)
+      ForEach(feeds) { feed in
+        Toggle(feed.name, isOn: Binding(get: { fields["packageFeedIds"]?.array?.contains(.string(feed.id)) ?? false }, set: { enabled in
+          var ids = fields["packageFeedIds"]?.array ?? []
+          ids.removeAll { $0 == .string(feed.id) }
+          if enabled { ids.append(.string(feed.id)) }
+          fields["packageFeedIds"] = .array(ids)
+        })).accessibilityIdentifier("setup-feed-\(feed.id)")
+      }
+      ForEach((fields["packageFeedIds"]?.array?.compactMap(\.string) ?? []).filter { id in !feeds.contains { $0.id == id } }, id: \.self) { id in
+        HStack {
+          Text("Unavailable feed: \(id)").foregroundStyle(.orange)
+          Button("Remove selection") { fields["packageFeedIds"] = .array((fields["packageFeedIds"]?.array ?? []).filter { $0 != .string(id) }) }
+        }
+      }
+      Divider()
+      Text("Legacy inline registries").font(.headline)
+      Text("Retained for compatibility. When adopting a shared feed, remove its duplicate inline entry before saving.").font(.caption).foregroundStyle(.secondary)
+      if registries.isEmpty { Text("No inline registries configured.").foregroundStyle(.secondary) }
       ForEach(registries.indices, id: \.self) { index in
         let row = Binding<[String: ConfigurationJSON]>(get: { registries.indices.contains(index) ? registries[index].object ?? [:] : [:] }, set: {
           var next = registries; guard next.indices.contains(index) else { return }; next[index] = .object($0); fields["privateRegistries"] = .array(next)

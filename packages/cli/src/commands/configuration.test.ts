@@ -6,6 +6,27 @@ import { registerConfigurationCommands, selectProfilePresets } from './configura
 
 afterEach(() => vi.restoreAllMocks());
 describe('configuration CLI', () => {
+  it('lists package feeds and tests the saved revision without any secret argument', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const entry = { id: 'feed', name: 'Company packages', revision: 3, archived: false };
+    const listConfigurations = vi.fn(async () => [entry]);
+    const getConfiguration = vi.fn(async () => entry);
+    const testPackageFeed = vi.fn(async () => ({ status: 'authenticated' }));
+    const program = new Command();
+    registerConfigurationCommands(
+      program,
+      () => ({ listConfigurations, getConfiguration, testPackageFeed }) as unknown as AutopodClient,
+    );
+    await program.parseAsync(['package-feed', 'list', '--json'], { from: 'user' });
+    expect(listConfigurations).toHaveBeenCalledWith('packageFeed');
+    await program.parseAsync(['package-feed', 'test', 'Company packages'], { from: 'user' });
+    expect(testPackageFeed).toHaveBeenCalledExactlyOnceWith('feed', 3);
+    const rotate = program.commands
+      .find((command) => command.name() === 'package-feed')
+      ?.commands.find((command) => command.name() === 'credential')
+      ?.commands.find((command) => command.name() === 'rotate');
+    expect(rotate?.options.map((option) => option.long)).toEqual(['--expected-revision']);
+  });
   it('keeps deployment requests separate from digest-bound operator approval', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const requestDeployment = vi.fn(async () => ({ state: 'awaiting_approval' }));

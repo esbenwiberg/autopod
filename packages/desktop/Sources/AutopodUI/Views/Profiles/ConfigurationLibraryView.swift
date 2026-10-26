@@ -27,6 +27,7 @@ private extension ConfigurationKind {
     case .workflow: "Workflow"
     case .githubAccess: "GitHub access"
     case .toolPack: "Tool pack"
+    case .packageFeed: "Package feed"
     case .profile: "Profile"
     }
   }
@@ -453,7 +454,7 @@ public struct ConfigurationLibraryView: View {
   }
 
   private var buildingBlockKinds: [ConfigurationKind] {
-    [.environment, .ai, .workflow, .githubAccess, .toolPack]
+    [.environment, .ai, .workflow, .githubAccess, .toolPack, .packageFeed]
   }
   private var buildingBlockCount: Int {
     buildingBlockKinds.reduce(0) { $0 + actions.list($1).count }
@@ -537,6 +538,9 @@ public struct ConfigurationLibraryView: View {
     case .toolPack:
       let capabilities = document.payload["requiredCapabilities"]?.array?.compactMap(\.string) ?? []
       return capabilities.isEmpty ? "Agent capabilities and integrations" : capabilities.joined(separator: " · ")
+    case .packageFeed:
+      let details = "\(document.payload["type"]?.string ?? "") · \(document.payload["url"]?.string ?? "")"
+      return [details, PackageFeedEditor.expiryWarning(document.payload["expiresAt"]?.string)].compactMap { $0 }.joined(separator: " · ")
     case .repository:
       return document.payload["remote"]?.string ?? document.name
     case .profile:
@@ -552,6 +556,7 @@ public struct ConfigurationLibraryView: View {
     case .workflow: "arrow.triangle.pull"
     case .githubAccess: "key"
     case .toolPack: "wrench.and.screwdriver"
+    case .packageFeed: "shippingbox.and.arrow.backward"
     case .profile: "person.crop.rectangle.stack"
     }
   }
@@ -563,6 +568,7 @@ public struct ConfigurationLibraryView: View {
     case .workflow: "Validation and delivery"
     case .githubAccess: "Scoped permissions"
     case .toolPack: "Agent capabilities"
+    case .packageFeed: "Shared package registry & credentials"
     default: ""
     }
   }
@@ -574,6 +580,7 @@ public struct ConfigurationLibraryView: View {
     case .workflow: "Validation, review, and daemon-owned delivery behavior."
     case .githubAccess: "Reusable repository permission scopes."
     case .toolPack: "Named skills and capabilities available to the agent."
+    case .packageFeed: "Configure npm/NuGet access once and select it in repository setups."
     default: ""
     }
   }
@@ -980,6 +987,7 @@ struct ConfigurationEditorSheet: View {
           case .repository: repositoryForm
           case .environment: environmentForm
           case .toolPack: toolPackForm
+          case .packageFeed: PackageFeedEditor(payload: $payload, document: document, actions: actions)
           }
           Button("Edit complete JSON…", systemImage: "curlybraces") {
             rawJSON = ConfigurationJSON.object(payload).formatted()
@@ -1101,6 +1109,7 @@ struct ConfigurationEditorSheet: View {
                 case .repository: repositoryForm
                 case .githubAccess: GitHubAccessRuleEditor(payload: $payload, actions: actions)
                 case .toolPack: toolPackForm
+                case .packageFeed: PackageFeedEditor(payload: $payload, document: document, actions: actions)
                 }
               }
             }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
@@ -1606,7 +1615,7 @@ struct ConfigurationEditorSheet: View {
           var current = payload["setups"]?.array ?? []
           guard let index = current.firstIndex(where: { $0["id"] == setups[selected]["id"] }) else { return }
           current[index] = .object(fields); payload["setups"] = .array(current)
-        })).id(setups[selected]["id"])
+        }), feeds: actions.list(.packageFeed)).id(setups[selected]["id"])
         Button("Remove this setup", role: .destructive) {
           var current = payload["setups"]?.array ?? []
           current.removeAll { $0["id"] == setups[selected]["id"] }
@@ -1665,6 +1674,7 @@ struct ConfigurationEditorSheet: View {
     case .repository: ["provider": .string("github"), "remote": .string(""), "providerRepositoryId": .null, "usualProfileId": .null, "setups": .array([.object(["id": .string("default"), "name": .string("Default"), "defaultBranch": .string("main"), "buildCommand": .null, "testCommand": .null])]), "defaultSetupId": .string("default"), "trustedSetupIds": .array([])]
     case .environment: ["template": .string("node22"), "baseImage": .null, "tools": .array([]), "prepareCommands": .array([]), "capabilities": .array([]), "sidecars": .array([])]
     case .toolPack: ["instructions": .array([]), "skills": .array([]), "mcpServers": .array([]), "requiredCapabilities": .array([])]
+    case .packageFeed: ["type": .string("npm"), "url": .string(""), "credential": .null, "expiresAt": .null]
     }
   }
 }

@@ -15,6 +15,7 @@ import {
   type LaunchResolutionServices,
   resolveLaunch,
 } from '../../configuration/launch-resolver.js';
+import { probePackageFeed } from '../../configuration/package-feed-probe.js';
 import {
   proposeLaunchProfile,
   saveLaunchProfile,
@@ -241,6 +242,38 @@ export function configurationRoutes(
   }
   if (deps.credentials) {
     const credentials = deps.credentials;
+    app.post('/configuration/package-feeds/:id/test', async (request) => {
+      const { id } = z.object({ id: configurationIdSchema }).parse(request.params);
+      const { expectedRevision } = z
+        .object({ expectedRevision: z.number().int().positive() })
+        .strict()
+        .parse(request.body);
+      const feed = store.get('packageFeed', id);
+      if (feed.revision !== expectedRevision)
+        configurationError('Feed changed; save or refresh before testing', 'CONFIG_CHANGED', 409);
+      if (!feed.payload.credential)
+        configurationError(
+          'Save a registry credential before testing',
+          'CONFIG_CREDENTIAL_MISSING',
+          409,
+        );
+      const metadata = credentials.get(feed.payload.credential.secretId);
+      const token = await credentials.resolve(
+        metadata.id,
+        metadata.createdAt,
+        'registry-read',
+        feed.payload.url,
+      );
+      const result = await probePackageFeed(feed.payload, token);
+      store.assertCurrent([feed]);
+      if (credentials.get(metadata.id).revision !== metadata.revision)
+        configurationError(
+          'Credential changed during connection test; test again',
+          'CONFIG_CREDENTIAL_CHANGED',
+          409,
+        );
+      return result;
+    });
     app.get('/configuration/credentials', async () => credentials.list());
     app.post('/configuration/credentials', async (request, reply) => {
       const created = await credentials.create(request.body);

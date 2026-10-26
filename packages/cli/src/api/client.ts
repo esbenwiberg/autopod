@@ -262,6 +262,26 @@ export class AutopodClient {
   }): Promise<IssueWatcherBinding> {
     return this.request('POST', '/configuration/watchers', input);
   }
+  async listRegistryCredentials(): Promise<
+    Array<{ id: string; revision: number; name: string; revoked: boolean }>
+  > {
+    return this.request('GET', '/configuration/credentials');
+  }
+
+  async saveRegistryCredential(id: string | null, body: unknown): Promise<unknown> {
+    return this.request(
+      id ? 'PUT' : 'POST',
+      `/configuration/credentials${id ? `/${encodeURIComponent(id)}` : ''}`,
+      body,
+    );
+  }
+
+  async testPackageFeed(id: string, expectedRevision: number): Promise<unknown> {
+    return this.request('POST', `/configuration/package-feeds/${encodeURIComponent(id)}/test`, {
+      expectedRevision,
+    });
+  }
+
   async listConfigurations<K extends ConfigurationKind>(
     kind: K,
   ): Promise<ConfigurationEntity<K>[]> {

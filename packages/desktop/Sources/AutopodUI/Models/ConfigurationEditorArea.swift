@@ -36,6 +36,7 @@ enum ConfigurationEditorArea: String, Identifiable, CaseIterable {
         case .githubAccess: [.rules, .advanced]
         case .toolPack: [.instructions, .integrations, .capabilities, .advanced]
         case .repository: [.overview, .setups, .trust, .advanced]
+        case .packageFeed: [.overview, .advanced]
         }
     }
 }
