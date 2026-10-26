@@ -174,12 +174,16 @@ function policyEval(
 ): {
   policyEvaluationId: string;
   status: string;
-  configuration: { isBlocking: boolean; settings: { displayName: string } };
+  configuration: { isBlocking: boolean; type: { id: string }; settings: { displayName: string } };
 } {
   return {
     policyEvaluationId: `eval-${displayName}`,
     status,
-    configuration: { isBlocking, settings: { displayName } },
+    configuration: {
+      isBlocking,
+      type: { id: '0609b952-1397-4640-95ec-e00a01b2c241' },
+      settings: { displayName },
+    },
   };
 }
 
@@ -352,6 +356,126 @@ describe('AdoPrManager.getPrStatus', () => {
     expect(status.blockReason).toContain('teamplanner unit PR validation');
   });
 
+  it('reports a failed build while reviewers wait, without treating administrative policies as CI', async () => {
+    const build = {
+      ...policyEval('PowerGantt PR Validation', 'rejected', true),
+      context: {
+        buildId: 81512,
+        lastMergeSourceCommitId: 'a'.repeat(40),
+        buildOutputPreview: {
+          errors: [{ message: "Cannot read file 'node_modules/pcf-scripts/tsconfig_base.json'" }],
+        },
+      },
+    };
+    const reviewer = policyEval('Minimum reviewers', 'queued', true);
+    reviewer.configuration.type.id = 'fa4e907d-c16b-4a4c-9dfa-4906e5d171dd';
+    const workItem = policyEval('Work item linking', 'rejected', true);
+    workItem.configuration.type.id = '40e92b44-2fe1-4dd6-b3d8-74a9c21d0c6e';
+    vi.stubGlobal(
+      'fetch',
+      makeFetch([
+        { ok: true, body: { ...ACTIVE_PR, lastMergeSourceCommit: { commitId: 'a'.repeat(40) } } },
+        { ok: true, body: { value: [reviewer, workItem, build] } },
+        { ok: true, body: { value: [] } },
+      ]),
+    );
+    const status = await new AdoPrManager(BASE_CONFIG).getPrStatus({ prUrl: PR_URL });
+    expect(status.mergeBlocked).toBe(true);
+    expect(status.reviewDecision).toBe('REVIEW_REQUIRED');
+    expect(status.blockReason).toContain('Work item linking');
+    expect(status.ciFailures).toEqual([
+      {
+        name: 'PowerGantt PR Validation',
+        conclusion: 'rejected',
+        detailsUrl: 'https://dev.azure.com/myorg/MyProject/_build/results?buildId=81512',
+        annotations: [
+          {
+            path: '',
+            message: "Cannot read file 'node_modules/pcf-scripts/tsconfig_base.json'",
+            annotationLevel: 'failure',
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('exposes squash-only policy as a method constraint rather than a code failure', async () => {
+    vi.stubGlobal(
+      'fetch',
+      makeFetch([
+        { ok: true, body: ACTIVE_PR },
+        {
+          ok: true,
+          body: {
+            value: [
+              {
+                status: 'rejected',
+                policyEvaluationId: 'strategy',
+                configuration: {
+                  isBlocking: true,
+                  type: { id: 'fa4e907d-c16b-4a4c-9dfa-4916e5d171ab' },
+                  settings: { allowSquash: true },
+                },
+              },
+            ],
+          },
+        },
+        { ok: true, body: { value: [] } },
+      ]),
+    );
+    const status = await new AdoPrManager(BASE_CONFIG).getPrStatus({ prUrl: PR_URL });
+    expect(status.squashRequired).toBe(true);
+    expect(status.mergeBlocked).toBe(false);
+    expect(status.ciFailures).toEqual([]);
+  });
+
+  it.each(['stale', 'expired', 'other-head'])(
+    'does not repair %s build evidence',
+    async (scenario) => {
+      vi.stubGlobal(
+        'fetch',
+        makeFetch([
+          { ok: true, body: { ...ACTIVE_PR, lastMergeSourceCommit: { commitId: 'a'.repeat(40) } } },
+          {
+            ok: true,
+            body: {
+              value: [
+                {
+                  ...policyEval('Build', 'rejected', true),
+                  context: {
+                    buildIsNotCurrent: scenario === 'stale',
+                    isExpired: scenario === 'expired',
+                    lastMergeSourceCommitId:
+                      scenario === 'other-head' ? 'b'.repeat(40) : 'a'.repeat(40),
+                  },
+                },
+              ],
+            },
+          },
+          { ok: true, body: { value: [] } },
+        ]),
+      );
+      const status = await new AdoPrManager(BASE_CONFIG).getPrStatus({ prUrl: PR_URL });
+      expect(status.mergeBlocked).toBe(true);
+      expect(status.ciFailures).toEqual([]);
+    },
+  );
+
+  it('blocks unknown policy evidence without inventing a CI failure', async () => {
+    vi.stubGlobal(
+      'fetch',
+      makeFetch([
+        { ok: true, body: ACTIVE_PR },
+        { ok: false, status: 403, body: {} },
+        { ok: true, body: { value: [] } },
+      ]),
+    );
+    const status = await new AdoPrManager(BASE_CONFIG).getPrStatus({ prUrl: PR_URL });
+    expect(status.mergeBlocked).toBe(true);
+    expect(status.blockReason).toContain('unavailable');
+    expect(status.ciFailures).toEqual([]);
+  });
+
   it('reports reviewComments from active threads', async () => {
     vi.stubGlobal(
       'fetch',
@@ -474,7 +598,8 @@ describe('AdoPrManager.getPrStatus', () => {
 
     // 404 = no policies configured — should not block, no CI failures
     expect(status.ciFailures).toEqual([]);
-    expect(status.blockReason).toBe('Waiting for policies to pass');
+    expect(status.blockReason).toBeNull();
+    expect(status.mergeBlocked).toBe(false);
     expect(status.open).toBe(true);
     expect(status.merged).toBe(false);
   });

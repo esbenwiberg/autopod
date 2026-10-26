@@ -75,6 +75,16 @@ calls `validateTransition` first.
 7. **Validation** — multi-phase: setup → lint → SAST → build → test → health → pages → facts → AI task review, with optional advisory browser QA
 8. **Readiness + completion** — compute Readiness Review, merge PR (if `autoMerge`) or push branch; transition to `complete`
 
+### PR approval and external gates
+
+Approval defers to `merge_pending` when the provider reports unresolved policies or CI failures.
+For ADO, build policies drive code-repair feedback; queued reviewers and work-item policies
+remain merge blockers but do not suppress failed-build feedback or become code-fix tasks.
+Build feedback includes bounded provider error previews and a build link. Squash-only branch
+policy selects squash when the caller has not explicitly chosen a method. Polling never changes
+an already-recorded merge method or clears an uncertain admitted merge request: that still
+requires reconciliation, not a status override.
+
 ### Retries and validation loops
 
 - Validation failures feed correction feedback back to the agent and loop (up to `maxValidationAttempts`, default 3)

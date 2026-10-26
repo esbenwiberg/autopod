@@ -645,6 +645,8 @@ export class AdoPrManager implements PrManager {
     // as "still running" indefinitely, preventing fix pods from ever spawning.
     const reasons: string[] = [];
     const ciFailures: CiFailureDetail[] = [];
+    let reviewDecision: string | undefined;
+    let squashRequired = false;
     try {
       // ADO policy artifact ID for a pull request:
       //   vstfs:///Git/PullRequestId/{repositoryId}/{pullRequestId}
@@ -662,7 +664,18 @@ export class AdoPrManager implements PrManager {
           status: string;
           configuration: {
             isBlocking: boolean;
-            settings: { displayName?: string };
+            type?: { id: string; displayName?: string };
+            settings: { displayName?: string; allowSquash?: boolean; allowNoFastForward?: boolean };
+          };
+          context?: {
+            buildId?: number;
+            buildDefinitionName?: string;
+            buildIsNotCurrent?: boolean;
+            isExpired?: boolean;
+            lastMergeSourceCommitId?: string;
+            buildOutputPreview?: {
+              errors?: Array<{ message: string }>;
+            };
           };
         }>;
       };
@@ -672,33 +685,85 @@ export class AdoPrManager implements PrManager {
       // fix pods that are needed for genuinely failing required checks.
       const required = evaluations.value.filter((e) => e.configuration.isBlocking);
 
-      const inFlightRequired = required.filter(
+      const isBuild = (e: (typeof required)[number]) =>
+        e.configuration.type?.id === '0609b952-1397-4640-95ec-e00a01b2c241';
+      const name = (e: (typeof required)[number]) =>
+        e.configuration.settings.displayName ??
+        e.context?.buildDefinitionName ??
+        e.configuration.type?.displayName ??
+        e.policyEvaluationId;
+      const squashPolicies = required.filter(
+        (e) =>
+          e.configuration.type?.id === 'fa4e907d-c16b-4a4c-9dfa-4916e5d171ab' &&
+          e.configuration.settings.allowSquash === true &&
+          e.configuration.settings.allowNoFastForward !== true &&
+          (e.status === 'approved' || e.status === 'rejected'),
+      );
+      squashRequired = squashPolicies.length > 0;
+      const administrative = required.filter(
+        (e) =>
+          !isBuild(e) &&
+          !squashPolicies.includes(e) &&
+          e.status !== 'approved' &&
+          e.status !== 'notApplicable',
+      );
+      for (const e of administrative) {
+        reasons.push(`Required policy: ${name(e)} (${e.status})`);
+        if (
+          e.configuration.type?.id === 'fa4e907d-c16b-4a4c-9dfa-4906e5d171dd' ||
+          e.configuration.type?.id === 'fd2167ab-b0be-447a-8ec8-39368250530e'
+        )
+          reviewDecision = 'REVIEW_REQUIRED';
+      }
+      const builds = required.filter(isBuild);
+      for (const e of builds) {
+        if (
+          !['approved', 'notApplicable', 'running', 'queued', 'rejected', 'broken'].includes(
+            e.status,
+          )
+        ) {
+          reasons.push(`Required build status unavailable: ${name(e)}`);
+        }
+      }
+      const inFlightRequired = builds.filter(
         (e) => e.status === 'running' || e.status === 'queued',
       );
 
       if (inFlightRequired.length > 0) {
-        reasons.push(
-          `CI in progress: ${inFlightRequired
-            .map((e) => e.configuration.settings.displayName ?? 'unknown')
-            .join(', ')}`,
-        );
+        reasons.push(`CI in progress: ${inFlightRequired.map(name).join(', ')}`);
         // ciFailures stays empty — don't spawn a fix while required checks are still running
       } else {
-        const failedRequired = required.filter(
+        const failedRequired = builds.filter(
           (e) => e.status === 'rejected' || e.status === 'broken',
         );
         if (failedRequired.length > 0) {
           reasons.push(
             `Required policies failed: ${failedRequired
-              .map((e) => `${e.configuration.settings.displayName ?? 'unknown'} (${e.status})`)
+              .map((e) => `${name(e)} (${e.status})`)
               .join(', ')}`,
           );
           for (const e of failedRequired) {
+            const context = e.context;
+            if (
+              context?.buildIsNotCurrent ||
+              context?.isExpired ||
+              (context?.lastMergeSourceCommitId &&
+                context.lastMergeSourceCommitId !== pr.lastMergeSourceCommit?.commitId)
+            )
+              continue;
             ciFailures.push({
-              name: e.configuration.settings.displayName ?? e.policyEvaluationId,
+              name: name(e),
               conclusion: e.status,
-              detailsUrl: null,
-              annotations: [],
+              detailsUrl: context?.buildId
+                ? `${this.orgUrl}/${encodeURIComponent(this.project)}/_build/results?buildId=${context.buildId}`
+                : null,
+              annotations: (context?.buildOutputPreview?.errors ?? [])
+                .slice(0, 10)
+                .map((error) => ({
+                  path: '',
+                  message: error.message.slice(0, 4000),
+                  annotationLevel: 'failure',
+                })),
             });
           }
         }
@@ -711,8 +776,8 @@ export class AdoPrManager implements PrManager {
           'ADO policy evaluations returned 404 — no branch policies configured',
         );
       } else {
-        // Permissions issue, unexpected API version, network error, etc.
-        // Log at warn so operators can see why auto-detection failed — fall through with empty ciFailures
+        reasons.push('Required policy status is unavailable');
+        // Unknown policy evidence must not authorize a merge.
         this.logger.warn(
           { err: evalErr, prUrl: config.prUrl },
           'ADO policy evaluations fetch failed — fix pods may not auto-spawn',
@@ -763,7 +828,10 @@ export class AdoPrManager implements PrManager {
       sourceTarget,
       merged: false,
       open: true,
-      blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for policies to pass',
+      blockReason: reasons.length > 0 ? reasons.join('; ') : null,
+      mergeBlocked: reasons.length > 0,
+      squashRequired,
+      reviewDecision,
       ciFailures,
       reviewComments,
     };

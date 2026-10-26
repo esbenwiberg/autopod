@@ -91,31 +91,50 @@ describe('approval delivery stages', () => {
     expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
     expect(f.pod().status).toBe('validated');
   });
-  it('returns halted for review-pending delivery, preserving the source intent and original poll callback', async () => {
-    const f = createDeliveryFixture();
-    f.podRepo.update('prepare', { prUrl: 'https://github.com/org/repo/pull/27' });
-    f.provider.getPrStatus.mockResolvedValue(pendingStatus({ reviewDecision: 'REVIEW_REQUIRED' }));
-    const captured = { ...f.mainCaptured, prManagerFactory: () => f.provider };
-    const context = await input(f);
-    const prepared =
-      await createApprovalDeliveryPreparation(captured).prepareApprovalDelivery(context);
-    if (prepared.kind !== 'ready') throw new Error('Unexpected halt');
-    const approved = f.events.transition(context.pod, 'approved');
-    const merging = f.events.transition(approved, 'merging');
-    const output = await createApprovalDeliveryExecution(captured).executeApprovalDelivery({
-      podId: 'prepare',
-      pod: context.pod,
-      options: {},
-      mergingAnchor: { ...context.pod, status: 'merging' },
-      s2: merging,
-      ...prepared,
-    });
-    expect(output).toEqual({ kind: 'halted' });
-    expect(f.pod().status).toBe('merge_pending');
-    expect(f.podRepo.mergeJournal?.find(f.pod())?.state).toBe('planned');
-    expect(f.mainCaptured.startMergePolling).toHaveBeenCalledWith('prepare');
-    expect(f.mainCaptured.cleanupContainerAfterAdvisorySettles).not.toHaveBeenCalled();
-  });
+  it.each(
+    [
+      pendingStatus({ reviewDecision: 'REVIEW_REQUIRED' }),
+      pendingStatus({ reviewDecision: 'REVIEW_REQUIRED', squashRequired: true }),
+      pendingStatus({ mergeBlocked: true, blockReason: 'Required work item missing' }),
+      pendingStatus({
+        ciFailures: [{ name: 'Build', conclusion: 'failure', detailsUrl: null, annotations: [] }],
+      }),
+    ].flatMap((status) => [true, false].map((existingPr) => ({ status, existingPr }))),
+  )(
+    'defers blocked delivery without admitting a merge request (%j)',
+    async ({ status, existingPr }) => {
+      const f = createDeliveryFixture();
+      f.podRepo.update('prepare', {
+        prUrl: existingPr ? 'https://github.com/org/repo/pull/27' : null,
+        options: { ...f.pod().options, output: 'pr' },
+      });
+      f.provider.getPrStatus.mockResolvedValue(status);
+      const captured = { ...f.mainCaptured, prManagerFactory: () => f.provider };
+      const context = await input(f);
+      const prepared =
+        await createApprovalDeliveryPreparation(captured).prepareApprovalDelivery(context);
+      if (prepared.kind !== 'ready') throw new Error('Unexpected halt');
+      const approved = f.events.transition(context.pod, 'approved');
+      const merging = f.events.transition(approved, 'merging');
+      const output = await createApprovalDeliveryExecution(captured).executeApprovalDelivery({
+        podId: 'prepare',
+        pod: context.pod,
+        options: {},
+        mergingAnchor: { ...context.pod, status: 'merging' },
+        s2: merging,
+        ...prepared,
+      });
+      expect(output).toEqual({ kind: 'halted' });
+      expect(f.pod().status).toBe('merge_pending');
+      expect(f.podRepo.mergeJournal?.find(f.pod())?.state).toBe('planned');
+      expect(f.podRepo.mergeJournal?.find(f.pod())?.request.config.squash).toBe(
+        status.squashRequired === true,
+      );
+      expect(f.provider.mergePr).not.toHaveBeenCalled();
+      expect(f.mainCaptured.startMergePolling).toHaveBeenCalledWith('prepare');
+      expect(f.mainCaptured.cleanupContainerAfterAdvisorySettles).not.toHaveBeenCalled();
+    },
+  );
   it('rejects a replacement lifecycle between prepared stage return and normal approval admission', async () => {
     const f = createDeliveryFixture();
     const preparation = createApprovalDeliveryPreparation(f.mainCaptured);

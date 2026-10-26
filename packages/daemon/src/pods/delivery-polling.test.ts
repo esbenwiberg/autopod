@@ -98,6 +98,77 @@ describe('owned merge polling', () => {
     expect(f.pollingCaptured.maybeSpawnFixSession).toHaveBeenCalledTimes(2);
     expect(f.provider.mergePr).not.toHaveBeenCalled();
   });
+  it('dispatches build repairs while reviewer and policy gates still block merging', async () => {
+    vi.useFakeTimers();
+    const f = createDeliveryFixture();
+    await f.planMerge();
+    const status = pendingStatus({
+      mergeBlocked: true,
+      reviewDecision: 'REVIEW_REQUIRED',
+      blockReason: 'Build failed; waiting for reviewer',
+      ciFailures: [{ name: 'Build', conclusion: 'failure', detailsUrl: null, annotations: [] }],
+    });
+    f.provider.getPrStatus.mockResolvedValue(status);
+    f.polling().startMergePolling('prepare');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.pollingCaptured.maybeSpawnFixSession).toHaveBeenCalledWith('prepare', status);
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+    expect(f.pod().status).toBe('merge_pending');
+  });
+
+  it('does not dispatch a source-changing repair over an unresolved admitted merge', async () => {
+    vi.useFakeTimers();
+    const f = createDeliveryFixture();
+    const planned = await f.planMerge();
+    f.podRepo.mergeJournal?.claim(
+      f.pod(),
+      f.pod(),
+      planned.publication.publicationId,
+      planned.entry.request.config,
+    );
+    f.provider.getPrStatus.mockResolvedValue(
+      pendingStatus({
+        mergeBlocked: true,
+        ciFailures: [{ name: 'Build', conclusion: 'failure', detailsUrl: null, annotations: [] }],
+      }),
+    );
+    f.polling().startMergePolling('prepare');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+    expect(f.pollingCaptured.maybeSpawnFixSession).not.toHaveBeenCalled();
+    expect(f.pod().mergeBlockReason).toContain('reconciliation');
+    expect(f.podRepo.mergeJournal?.find(f.pod())?.state).toBe('admitted');
+  });
+
+  it('does not change an already-planned merge method when branch policy changes', async () => {
+    vi.useFakeTimers();
+    const f = createDeliveryFixture();
+    await f.planMerge();
+    f.provider.getPrStatus.mockResolvedValue(pendingStatus({ squashRequired: true }));
+    f.polling().startMergePolling('prepare');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+    expect(f.pod().mergeBlockReason).toBe('Branch policy requires squash merge');
+    expect(f.podRepo.mergeJournal?.find(f.pod())?.request.config.squash).toBe(false);
+  });
+
+  it('waits without merging or spawning fixes for administrative blockers', async () => {
+    vi.useFakeTimers();
+    const f = createDeliveryFixture();
+    await f.planMerge();
+    f.provider.getPrStatus.mockResolvedValue(
+      pendingStatus({
+        mergeBlocked: true,
+        blockReason: 'Required work item missing',
+      }),
+    );
+    f.polling().startMergePolling('prepare');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+    expect(f.pollingCaptured.maybeSpawnFixSession).not.toHaveBeenCalled();
+    expect(f.pod().mergeBlockReason).toBe('Required work item missing');
+  });
+
   it('fences a stopped owner while provider status is in flight', async () => {
     vi.useFakeTimers();
     const f = createDeliveryFixture();
@@ -139,7 +210,10 @@ describe('owned merge polling', () => {
     restart.poll.resumeMergePolling();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.provider.getPrStatus).toHaveBeenCalledOnce();
-    expect(restart.next.pods.getOrThrow('prepare')).toEqual(original);
+    expect(restart.next.pods.getOrThrow('prepare')).toEqual({
+      ...original,
+      mergeBlockReason: 'Waiting',
+    });
     expect(restart.next.pods.mergeJournal?.find(original)?.publicationId).toBe(
       planned.publication.publicationId,
     );

@@ -145,6 +145,10 @@ export interface PrMergeStatus {
   merged: boolean;
   /** Whether the PR is still open (false = closed/abandoned without merging) */
   open: boolean;
+  /** Explicit provider gate evidence. Unknown policy evidence must also block mutation. */
+  mergeBlocked?: boolean;
+  /** Provider branch policy requires squash rather than a merge commit. */
+  squashRequired?: boolean;
   /** Human-readable reason the merge is blocked, if known */
   blockReason: string | null;
   /**

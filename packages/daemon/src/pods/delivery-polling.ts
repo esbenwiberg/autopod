@@ -141,7 +141,9 @@ export function createDeliveryPolling(captured: DeliveryPollingCaptured) {
             );
             if (!status.ciFailures.length && !status.reviewComments.length) {
               const reviewOk = !status.reviewDecision || status.reviewDecision === 'APPROVED';
-              if (reviewOk)
+              const methodBlocked = status.squashRequired && !entry.request.config.squash;
+              if (methodBlocked) status.blockReason = 'Branch policy requires squash merge';
+              if (reviewOk && !status.mergeBlocked && !methodBlocked)
                 await mergeQueue.enqueueMerge(
                   entry.request.config.expectedTarget.repository,
                   entry.request.config.expectedTarget.baseBranch,
@@ -164,6 +166,14 @@ export function createDeliveryPolling(captured: DeliveryPollingCaptured) {
                     return result.merged;
                   },
                 );
+              assertCurrent();
+              if (status.blockReason !== pod.mergeBlockReason) {
+                podRepo.update(podId, { mergeBlockReason: status.blockReason });
+                emitActivityStatus(
+                  podId,
+                  `Merge pending: ${status.blockReason ?? 'Waiting for confirmation'}`,
+                );
+              }
               // A later poll confirms cleanup. Never rebase or push over an
               // admitted request; a changed source needs its own validation.
               return;

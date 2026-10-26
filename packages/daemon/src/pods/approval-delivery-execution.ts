@@ -74,6 +74,7 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
         config,
       );
     };
+    let mergeSquash = options.squash;
     const planApprovalSource = (
       publication: Awaited<ReturnType<typeof publishApprovalBranch>>,
       prUrl: string,
@@ -93,7 +94,7 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
             branch: publication.branch,
             baseBranch,
           },
-          squash: options.squash,
+          squash: mergeSquash,
         },
       );
     };
@@ -211,8 +212,6 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
             }
           }
 
-          planApprovalSource(publishedSource, prUrl, mergeBaseBranch);
-
           // Daemon-side approval gate: check the PR's review decision before attempting
           // to merge. If the platform reports that a review is still required or changes
           // were requested, enter merge_pending and let the poller wait for approval.
@@ -228,6 +227,17 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
                 reason:
                   'The PR changed external disposition before merge admission; reconcile the retained source.',
               };
+            if (prStatus.squashRequired && mergeSquash === undefined) mergeSquash = true;
+            planApprovalSource(publishedSource, prUrl, mergeBaseBranch);
+            if (prStatus.squashRequired && mergeSquash !== true) {
+              return { kind: 'merge_pending', blockReason: 'Branch policy requires squash merge' };
+            }
+            if (prStatus.mergeBlocked || prStatus.ciFailures.length > 0) {
+              return {
+                kind: 'merge_pending',
+                blockReason: prStatus.blockReason ?? 'Waiting for required CI checks',
+              };
+            }
             if (prStatus.reviewDecision && prStatus.reviewDecision !== 'APPROVED') {
               const blockReason = `Waiting for PR review approval (current decision: ${prStatus.reviewDecision})`;
               logger.info(
@@ -259,7 +269,7 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
                 },
                 worktreePath,
                 prUrl,
-                squash: options?.squash,
+                squash: mergeSquash,
               }),
             );
 
@@ -383,7 +393,6 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
         assertApprovalCurrent(mergingAnchor);
         podRepo.update(podId, { prUrl: newPrUrl });
         emitActivityStatus(podId, `PR created: ${newPrUrl}`);
-        planApprovalSource(publishedSource, newPrUrl, baseBranch);
         const reviewStatus = await deliveryOperation(async () =>
           prManager.getPrStatus({ prUrl: newPrUrl, worktreePath: pod.worktreePath }),
         );
@@ -391,8 +400,18 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
           mergeReconciliation(
             'The PR has an external disposition without a recorded daemon merge.',
           );
-        if (reviewStatus.reviewDecision && reviewStatus.reviewDecision !== 'APPROVED') {
-          const blockReason = `Waiting for PR review approval (current decision: ${reviewStatus.reviewDecision})`;
+        if (reviewStatus.squashRequired && mergeSquash === undefined) mergeSquash = true;
+        planApprovalSource(publishedSource, newPrUrl, baseBranch);
+        if (
+          (reviewStatus.squashRequired && mergeSquash !== true) ||
+          reviewStatus.mergeBlocked ||
+          reviewStatus.ciFailures.length > 0 ||
+          (reviewStatus.reviewDecision && reviewStatus.reviewDecision !== 'APPROVED')
+        ) {
+          const blockReason =
+            reviewStatus.squashRequired && mergeSquash !== true
+              ? 'Branch policy requires squash merge'
+              : (reviewStatus.blockReason ?? 'Waiting for PR merge conditions');
           transition(s2, 'merge_pending', { mergeBlockReason: blockReason });
           assertApprovalCurrent({ ...pod, status: 'merge_pending' });
           startMergePolling(podId);
@@ -409,7 +428,7 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
             },
             worktreePath: pod.worktreePath,
             prUrl: newPrUrl,
-            squash: options?.squash,
+            squash: mergeSquash,
           }),
         );
         if (retryMergeResult.merged) {
