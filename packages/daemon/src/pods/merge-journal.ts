@@ -110,6 +110,11 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
           'SELECT disposition, result FROM merge_disposition_observations WHERE intent_id = ?',
         )
         .get(row.id)) as { disposition: 'pending' | 'merged'; result: string } | undefined;
+    const recovered =
+      attempt &&
+      db
+        .prepare('SELECT 1 FROM merge_operator_recoveries WHERE attempt_id = ? AND intent_id = ?')
+        .get(attempt.id, row.id);
     const status = db
       .prepare(
         'SELECT o.disposition, o.intent_id AS intentId FROM merge_status_observations o JOIN canonical_merge_intents i ON i.id = o.intent_id WHERE i.pr_identity = (SELECT pr_identity FROM canonical_merge_intents WHERE id = ?) ORDER BY o.sequence DESC LIMIT 1',
@@ -121,7 +126,7 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
       ...(status ? { prDisposition: status.disposition } : {}),
       attemptId: attempt?.id ?? null,
       request: requestFrom(row),
-      state: observation?.disposition ?? (attempt ? 'admitted' : 'planned'),
+      state: observation?.disposition ?? (attempt && !recovered ? 'admitted' : 'planned'),
       result: observation ? (JSON.parse(observation.result) as MergePrResult) : null,
     };
   }
@@ -211,7 +216,7 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
       );
     const uncertain = db
       .prepare(
-        'SELECT a.id FROM merge_attempts a JOIN canonical_merge_intents i ON i.id = a.intent_id WHERE i.pr_identity = ? AND NOT EXISTS (SELECT 1 FROM merge_observations o WHERE o.attempt_id = a.id) LIMIT 1',
+        'SELECT a.id FROM merge_attempts a JOIN canonical_merge_intents i ON i.id = a.intent_id WHERE i.pr_identity = ? AND NOT EXISTS (SELECT 1 FROM merge_observations o WHERE o.attempt_id = a.id) AND NOT EXISTS (SELECT 1 FROM merge_operator_recoveries r WHERE r.attempt_id = a.id AND r.intent_id = i.id) LIMIT 1',
       )
       .get(resource);
     if (uncertain)

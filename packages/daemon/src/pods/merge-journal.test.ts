@@ -2,11 +2,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { runMigrations } from '../db/migrate.js';
 import type { MergePrResult } from '../interfaces/pr-manager.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createMergeJournal } from './merge-journal.js';
+import { type MergeRecoveryInput, recoverUncertainMerge } from './merge-operator-recovery.js';
 import { createPodRepository } from './pod-repository.js';
 import { createSourcePublicationLedger } from './source-publication-ledger.js';
 
@@ -79,6 +80,79 @@ function fixture(
 }
 
 describe('durable merge journal', () => {
+  it.each(['valid', 'stale', 'wrong-head', 'scheduled', 'dirty', 'recent', 'other-attempt'])(
+    'requires explicit source-bound operator recovery (%s)',
+    (scenario) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-10-26T09:00:00Z'));
+      const f = fixture(undefined, true, 'https://dev.azure.com/org/Project/_git/Repo');
+      try {
+        const attemptId = f.journal.claim(f.pod, f.publicationPod, f.publicationId, f.config);
+        const before = f.db.prepare('SELECT * FROM merge_attempts').all();
+        f.repo.update(f.pod.id, { status: 'validated' });
+        vi.setSystemTime(
+          new Date(scenario === 'recent' ? '2026-10-26T09:01:00Z' : '2026-10-26T10:00:00Z'),
+        );
+        const input: MergeRecoveryInput = {
+          podId: f.pod.id,
+          attemptId: scenario === 'other-attempt' ? 'different' : attemptId,
+          headSha: f.proof.commitSha,
+          actor: 'operator',
+          reason: 'Explicitly accept unknown request outcome after checking provider and source',
+          local: { headSha: f.proof.commitSha, branch: 'feature', clean: scenario !== 'dirty' },
+          evidence: {
+            observedAt: scenario === 'stale' ? '2026-10-26T08:00:00Z' : new Date().toISOString(),
+            prUrl: f.config.prUrl,
+            pr: {
+              pullRequestId: 42,
+              status: 'active',
+              mergeStatus: 'succeeded',
+              repository: { webUrl: f.proof.repository },
+              sourceRefName: 'refs/heads/feature',
+              targetRefName: 'refs/heads/main',
+              lastMergeSourceCommit: {
+                commitId: scenario === 'wrong-head' ? 'c'.repeat(40) : f.proof.commitSha,
+              },
+              autoCompleteSetBy: scenario === 'scheduled' ? { id: 'user' } : null,
+            },
+          },
+        };
+        if (scenario !== 'valid') {
+          expect(() => recoverUncertainMerge(f.db, input, true)).toThrow('refused');
+          expect(f.journal.find(f.repo.getOrThrow(f.pod.id))?.state).toBe('admitted');
+        } else {
+          expect(recoverUncertainMerge(f.db, input, false).applied).toBe(false);
+          expect(f.journal.find(f.repo.getOrThrow(f.pod.id))?.state).toBe('admitted');
+          expect(recoverUncertainMerge(f.db, input, true).applied).toBe(true);
+          expect(createMergeJournal(f.db).find(f.repo.getOrThrow(f.pod.id))?.state).toBe('planned');
+          expect(f.db.prepare('SELECT * FROM merge_observations').all()).toEqual([]);
+          expect(f.db.prepare('SELECT * FROM merge_attempts').all()).toEqual(before);
+          expect(f.repo.getOrThrow(f.pod.id).status).toBe('validated');
+          expect(() => f.db.prepare('DELETE FROM merge_operator_recoveries').run()).toThrow(
+            'immutable',
+          );
+          f.repo.update(f.pod.id, { status: 'merging' });
+          const next = f.journal.claim(
+            f.repo.getOrThrow(f.pod.id),
+            f.publicationPod,
+            f.publicationId,
+            { ...f.config, squash: true },
+          );
+          expect(next).not.toBe(attemptId);
+          expect(() =>
+            f.journal.claim(f.repo.getOrThrow(f.pod.id), f.publicationPod, f.publicationId, {
+              ...f.config,
+              squash: true,
+            }),
+          ).toThrow('ambiguous');
+        }
+      } finally {
+        f.db.close();
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it('keeps historical alias admission and accounting consistent across a real database reopen', () => {
     const dir = mkdtempSync(join(tmpdir(), 'autopod-historical-merge-'));
     const path = join(dir, 'journal.db');
