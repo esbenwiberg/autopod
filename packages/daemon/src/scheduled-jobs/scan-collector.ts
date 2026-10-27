@@ -354,8 +354,8 @@ export async function collectScheduledScan(
             if (totalBytes >= 32 * 1024 * 1024 || result.findings.length >= 1000) break;
           }
         }
-        observation.version = [...versions].sort().join(';');
-        observation.evidenceHash = hash(JSON.stringify(evidence));
+        observation.version = versions.size ? [...versions].sort().join(';') : null;
+        if (evidence.length) observation.evidenceHash = hash(JSON.stringify(evidence));
         if (incomplete) throw new Error('Dependency coverage incomplete');
       }
       observation.findingCount = result.findings.length - beforeCount;
