@@ -166,6 +166,45 @@ describe('current-tree scheduled security checks', () => {
     }
   });
 
+  it('retains useful findings while unsupported content makes coverage incomplete', async () => {
+    const f = fixture();
+    try {
+      writeFileSync(join(f.dir, 'a-binary'), Buffer.from([0, 1, 2]));
+      writeFileSync(join(f.dir, 'source.ts'), `const key = "${'AKIA'}${'A'.repeat(16)}";`);
+      writeFileSync(join(f.dir, 'Cargo.toml'), '[package]');
+      writeFileSync(join(f.dir, 'package-lock.json'), '{}');
+      f.commit();
+      f.git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+      const result = await collectScheduledScan(
+        f.dir,
+        'fixture',
+        { ...policy, scope: undefined },
+        {
+          auditLockfile: async () => ({
+            version: 'fixture',
+            evidenceHash: 'evidence',
+            findings: [
+              {
+                identity: 'advisory',
+                ruleId: 'CVE-fixture',
+                severity: 'high',
+                summary: 'Current vulnerability',
+              },
+            ],
+          }),
+        },
+      );
+      expect(result.scanners.map((scanner) => scanner.status)).toEqual(['failed', 'failed']);
+      expect(result.findings.map((finding) => finding.scanner).sort()).toEqual([
+        'dependencies',
+        'secrets',
+      ]);
+      expect(result.scanners.every((scanner) => scanner.findingCount === null)).toBe(true);
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
   it('reports oversized tracked content and finding limits as incomplete', async () => {
     const f = fixture();
     const detector: Detector = {

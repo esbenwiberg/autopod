@@ -252,41 +252,50 @@ export async function collectScheduledScan(
         if (!detector.scanWithBaselineIdentity)
           throw new Error('Detector cannot report incomplete execution');
         await bounded(detector.warmup());
+        let incomplete = false;
         for (const file of scanFiles) {
           if (Date.now() >= deadline) throw new Error('Collection time budget exceeded');
           if (file.change === 'deleted') continue;
-          const current = await bounded(
-            detector.scanWithBaselineIdentity(await blob(result.headSha, file.path)),
-          );
-          if (!current) throw new Error('Secret scanner execution incomplete');
-          const baseline =
-            file.change === 'added'
-              ? []
-              : await bounded(
-                  detector.scanWithBaselineIdentity(await blob(result.baseSha, file.path)),
-                );
-          if (!baseline) throw new Error('Secret baseline unavailable');
-          const previous = new Map<string, number>();
-          for (const finding of baseline)
-            previous.set(finding.identity, (previous.get(finding.identity) ?? 0) + 1);
-          for (const { identity, finding } of current) {
-            const count = previous.get(identity) ?? 0;
-            if (count > 0) {
-              previous.set(identity, count - 1);
-              continue;
+          try {
+            const current = await bounded(
+              detector.scanWithBaselineIdentity(await blob(result.headSha, file.path)),
+            );
+            if (!current) throw new Error('Secret scanner execution incomplete');
+            const baseline =
+              file.change === 'added'
+                ? []
+                : await bounded(
+                    detector.scanWithBaselineIdentity(await blob(result.baseSha, file.path)),
+                  );
+            if (!baseline) throw new Error('Secret baseline unavailable');
+            const previous = new Map<string, number>();
+            for (const finding of baseline)
+              previous.set(finding.identity, (previous.get(finding.identity) ?? 0) + 1);
+            for (const { identity, finding } of current) {
+              const count = previous.get(identity) ?? 0;
+              if (count > 0) {
+                previous.set(identity, count - 1);
+                continue;
+              }
+              if (result.findings.length >= 1000) throw new Error('Finding budget exceeded');
+              result.findings.push({
+                id: hash(
+                  JSON.stringify([repository, scanner, file.path, finding.ruleId, identity]),
+                ),
+                scanner,
+                file: file.path,
+                line: finding.line,
+                ruleId: finding.ruleId ?? 'secret',
+                severity: finding.severity === 'medium' ? 'moderate' : finding.severity,
+                summary: 'Secret finding [REDACTED]',
+              });
             }
-            if (result.findings.length >= 1000) throw new Error('Finding budget exceeded');
-            result.findings.push({
-              id: hash(JSON.stringify([repository, scanner, file.path, finding.ruleId, identity])),
-              scanner,
-              file: file.path,
-              line: finding.line,
-              ruleId: finding.ruleId ?? 'secret',
-              severity: finding.severity === 'medium' ? 'moderate' : finding.severity,
-              summary: 'Secret finding [REDACTED]',
-            });
+          } catch {
+            incomplete = true;
+            if (totalBytes >= 32 * 1024 * 1024 || result.findings.length >= 1000) break;
           }
         }
+        if (incomplete) throw new Error('Secret coverage incomplete');
       } else {
         const files = scanFiles.filter(
           (file) =>
@@ -306,6 +315,7 @@ export async function collectScheduledScan(
         }
         const versions = new Set<string>();
         const evidence: string[] = [];
+        let incomplete = false;
         for (const file of files) {
           if (Date.now() >= deadline) throw new Error('Collection time budget exceeded');
           if (!/(^|\/)(package-lock\.json|npm-shrinkwrap\.json)$/.test(file.path)) {
@@ -319,27 +329,34 @@ export async function collectScheduledScan(
               )
             )
               continue;
-            throw new Error('Dependency scope has no supported lockfile');
+            incomplete = true;
+            continue;
           }
-          const scanned = await bounded(
-            deps.auditLockfile(file.path, (await blob(result.headSha, file.path)).content),
-          );
-          versions.add(scanned.version);
-          evidence.push(scanned.evidenceHash);
-          for (const finding of scanned.findings) {
-            if (result.findings.length >= 1000) throw new Error('Finding budget exceeded');
-            result.findings.push({
-              id: hash(JSON.stringify([repository, scanner, file.path, finding.identity])),
-              scanner,
-              file: file.path,
-              ruleId: finding.ruleId,
-              severity: finding.severity,
-              summary: finding.summary,
-            });
+          try {
+            const scanned = await bounded(
+              deps.auditLockfile(file.path, (await blob(result.headSha, file.path)).content),
+            );
+            versions.add(scanned.version);
+            evidence.push(scanned.evidenceHash);
+            for (const finding of scanned.findings) {
+              if (result.findings.length >= 1000) throw new Error('Finding budget exceeded');
+              result.findings.push({
+                id: hash(JSON.stringify([repository, scanner, file.path, finding.identity])),
+                scanner,
+                file: file.path,
+                ruleId: finding.ruleId,
+                severity: finding.severity,
+                summary: finding.summary,
+              });
+            }
+          } catch {
+            incomplete = true;
+            if (totalBytes >= 32 * 1024 * 1024 || result.findings.length >= 1000) break;
           }
         }
         observation.version = [...versions].sort().join(';');
         observation.evidenceHash = hash(JSON.stringify(evidence));
+        if (incomplete) throw new Error('Dependency coverage incomplete');
       }
       observation.findingCount = result.findings.length - beforeCount;
     } catch {
