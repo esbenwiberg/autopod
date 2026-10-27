@@ -191,6 +191,103 @@ function policyEval(
   };
 }
 
+describe('AdoPrManager externally merged source ancestry', () => {
+  const published = 'a'.repeat(40);
+  const merged = 'c'.repeat(40);
+  const request = {
+    prUrl: PR_URL,
+    publishedHeadSha: published,
+    mergedHeadSha: merged,
+    expectedTarget: {
+      repository: 'https://dev.azure.com/myorg/MyProject/_git/MyRepo',
+      branch: 'feature',
+      baseBranch: 'main',
+    },
+  };
+  const completed = {
+    status: 'completed',
+    pullRequestId: 42,
+    sourceRefName: 'refs/heads/feature',
+    targetRefName: 'refs/heads/main',
+    lastMergeSourceCommit: { commitId: merged },
+    // A squash result is NOT the source commit for ancestry comparison.
+    lastMergeCommit: { commitId: 'd'.repeat(40) },
+  };
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('proves inclusion using the provider graph and the pre-squash source head, without Git or mutation', async () => {
+    const fetchMock = makeFetch([
+      { ok: true, body: completed },
+      { ok: true, body: { baseCommit: published, targetCommit: merged, commonCommit: published } },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+    const proof = await new AdoPrManager(BASE_CONFIG).verifyMergedSourceAncestry(request);
+    expect(proof).toMatchObject({
+      publishedHeadSha: published,
+      mergedHeadSha: merged,
+      target: request.expectedTarget,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const url = new URL(fetchMock.mock.calls[1]?.[0] as string);
+    expect(url.pathname).toContain('/diffs/commits');
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+      baseVersion: published,
+      baseVersionType: 'commit',
+      targetVersion: merged,
+      targetVersionType: 'commit',
+      diffCommonCommit: 'true',
+      $top: '1',
+    });
+    for (const call of fetchMock.mock.calls) expect(call[1].method).toBe('GET');
+  });
+
+  it.each([
+    'unrelated',
+    'missing common',
+    'wrong base',
+    'wrong head',
+    'forbidden',
+    'wrong branch',
+    'fork',
+    'other PR',
+    'closed without merge',
+  ] as const)('does not authorize completion for %s', async (failure) => {
+    const pr = {
+      ...completed,
+      status: failure === 'closed without merge' ? 'abandoned' : 'completed',
+      pullRequestId: failure === 'other PR' ? 43 : 42,
+      sourceRefName: failure === 'wrong branch' ? 'refs/heads/other' : completed.sourceRefName,
+      forkSource: failure === 'fork' ? {} : undefined,
+    };
+    vi.stubGlobal(
+      'fetch',
+      makeFetch([
+        { ok: true, body: pr },
+        {
+          ok: failure !== 'forbidden',
+          status: failure === 'forbidden' ? 403 : 200,
+          body: {
+            baseCommit: failure === 'wrong base' ? 'e'.repeat(40) : published,
+            targetCommit: failure === 'wrong head' ? 'e'.repeat(40) : merged,
+            commonCommit:
+              failure === 'unrelated'
+                ? 'e'.repeat(40)
+                : failure === 'missing common'
+                  ? undefined
+                  : published,
+          },
+        },
+      ]),
+    );
+    const result = new AdoPrManager(BASE_CONFIG).verifyMergedSourceAncestry(request);
+    if (['unrelated', 'missing common', 'closed without merge'].includes(failure))
+      expect(await result).toBeNull();
+    else await expect(result).rejects.toThrow();
+  });
+});
+
 describe('AdoPrManager.getPrStatus', () => {
   beforeEach(() => {
     vi.unstubAllGlobals();

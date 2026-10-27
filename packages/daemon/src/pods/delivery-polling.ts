@@ -2,12 +2,19 @@ import type { PodStatus } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import {
   closedPrRecoveryReason,
+  confirmedMergeSource,
   inspectRetainedMergeSource,
   mergePublishedSource,
   reconcileMerge,
 } from '../worktrees/durable-merge.js';
-import { mergeReconciliation } from '../worktrees/merge-source-identity.js';
+import { reconcileFixPublication } from '../worktrees/fix-source-publication.js';
+import {
+  assertMergeSource,
+  assertMergeTarget,
+  mergeReconciliation,
+} from '../worktrees/merge-source-identity.js';
 import type { DeliveryPollingCaptured } from './delivery-contracts.js';
+import type { MergeJournalEntry } from './merge-journal.js';
 import type { PollOwnership } from './polling-coordinator.js';
 
 export function createDeliveryPolling(captured: DeliveryPollingCaptured) {
@@ -46,6 +53,8 @@ export function createDeliveryPolling(captured: DeliveryPollingCaptured) {
           return;
         }
 
+        const prUrl = pod.prUrl;
+        const publicationId = podRepo.sourcePublications?.fixForMerge(pod)?.publicationId;
         const assertCurrent = (
           options: { allowRemovedContainer?: boolean; status?: PodStatus } = {},
         ) => {
@@ -55,6 +64,16 @@ export function createDeliveryPolling(captured: DeliveryPollingCaptured) {
             { ...pod, status: options.status ?? pod.status },
             { allowRemovedContainer: options.allowRemovedContainer },
           );
+          if (
+            options.status === undefined &&
+            !options.allowRemovedContainer &&
+            podRepo.sourcePublications?.fixForMerge(pod)?.publicationId !== publicationId
+          )
+            throw new AutopodError(
+              'A fix publication superseded merge polling.',
+              'STALE_APPROVAL',
+              409,
+            );
           if (podRepo.getOrThrow(podId).prUrl !== pod.prUrl)
             throw new AutopodError(
               'Merge polling was superseded by another PR.',
@@ -79,8 +98,8 @@ export function createDeliveryPolling(captured: DeliveryPollingCaptured) {
         }
 
         const journal = podRepo.mergeJournal;
-        const entry = journal?.find(pod);
-        if (!journal || !entry) {
+        const initialEntry = journal?.find(pod);
+        if (!journal || !initialEntry) {
           assertCurrent();
           const reason =
             'Delivery history is unavailable. Original resources retained. Use Resume to revalidate the retained source before approving delivery.';
@@ -91,26 +110,54 @@ export function createDeliveryPolling(captured: DeliveryPollingCaptured) {
           return;
         }
 
+        let entry: MergeJournalEntry = initialEntry;
         const status = await pollOperation(async () =>
           prManager.getPrStatus({
-            prUrl: pod.prUrl,
+            prUrl,
           }),
         );
 
         // Reconcile the planned or admitted source before any subsequent mutation.
         try {
-          if (status.merged) {
-            await pollOperation(() => reconcileMerge(journal, pod, entry, prManager, status));
-            await pollOperation(() =>
-              inspectRetainedMergeSource(
-                journal,
-                podRepo.sourcePublications,
-                pod,
-                entry,
-                worktreeManager,
-              ),
-            );
-          } else {
+          const currentEntry = entry;
+          entry = await pollOperation(() =>
+            mergeQueue.enqueueMerge(
+              currentEntry.request.config.expectedTarget.repository,
+              currentEntry.request.config.expectedTarget.baseBranch,
+              async () => {
+                assertCurrent();
+                const reconciled = podRepo.sourcePublications
+                  ? reconcileFixPublication(
+                      journal,
+                      podRepo.sourcePublications,
+                      pod,
+                      currentEntry,
+                      status,
+                    )
+                  : currentEntry;
+                if (status.merged)
+                  await pollOperation(() =>
+                    reconcileMerge(journal, pod, reconciled, prManager, status),
+                  );
+                return reconciled;
+              },
+            ),
+          );
+          if (!status.merged) {
+            if (status.headSha)
+              assertMergeSource(entry.request.config.expectedHeadSha, status.headSha);
+            if (status.sourceTarget)
+              assertMergeTarget(entry.request.config.expectedTarget, status.sourceTarget);
+            if (pod.fixPodId) {
+              const fix = podRepo.getOrThrow(pod.fixPodId);
+              const handoff = podRepo.sourcePublications?.fixForMerge(pod);
+              const deliveredFix =
+                handoff?.confirmed &&
+                handoff.fixPodId === fix.id &&
+                handoff.fixGeneration === fix.lifecycleGeneration &&
+                ['validated', 'awaiting_input', 'complete'].includes(fix.status);
+              if (!deliveredFix && !['complete', 'killed', 'failed'].includes(fix.status)) return;
+            }
             if (status.open === false) {
               journal.observeStatus(entry.id, status);
               assertCurrent();
@@ -130,14 +177,16 @@ export function createDeliveryPolling(captured: DeliveryPollingCaptured) {
               mergeReconciliation(
                 'The earlier merge requires source-bound provider reconciliation; original resources retained.',
               );
-            const source = await pollOperation(() =>
-              inspectRetainedMergeSource(
-                journal,
-                podRepo.sourcePublications,
-                pod,
-                entry,
-                worktreeManager,
-              ),
+            const source = await pollOperation(async () =>
+              podRepo.sourcePublications?.fixForMerge(pod)?.publicationId === entry.publicationId
+                ? confirmedMergeSource(journal, podRepo.sourcePublications, pod, entry)
+                : inspectRetainedMergeSource(
+                    journal,
+                    podRepo.sourcePublications,
+                    pod,
+                    entry,
+                    worktreeManager,
+                  ),
             );
             if (!status.ciFailures.length && !status.reviewComments.length) {
               const reviewOk = !status.reviewDecision || status.reviewDecision === 'APPROVED';
@@ -158,7 +207,7 @@ export function createDeliveryPolling(captured: DeliveryPollingCaptured) {
                         prManager,
                         {
                           ...entry.request.config,
-                          worktreePath: pod.worktreePath,
+                          worktreePath: pod.worktreePath ?? undefined,
                           onPrepared: () => assertCurrent(),
                         },
                       ),
@@ -181,7 +230,8 @@ export function createDeliveryPolling(captured: DeliveryPollingCaptured) {
           }
         } catch (error) {
           assertCurrent();
-          const reason = `Merge reconciliation required. ${error instanceof Error ? error.message : String(error)}`;
+          const detail = error instanceof Error ? error.message : String(error);
+          const reason = `${status.merged ? 'PR merged; delivery' : 'Merge'} reconciliation required. ${detail}`;
           if (pod.mergeBlockReason !== reason) {
             podRepo.update(podId, { mergeBlockReason: reason });
             emitActivityStatus(podId, reason);
@@ -190,10 +240,37 @@ export function createDeliveryPolling(captured: DeliveryPollingCaptured) {
         }
 
         if (status.merged) {
-          emitActivityStatus(podId, 'PR merged successfully');
-          await cleanupContainer(pod, 'pr-merged-complete', 'kill', () =>
-            assertCurrent({ allowRemovedContainer: true }),
+          emitActivityStatus(
+            podId,
+            status.headSha === entry.request.config.expectedHeadSha
+              ? 'PR merged successfully'
+              : 'PR merged with additional commits; inclusion of the published source verified',
           );
+          // Provider evidence establishes delivery, not the continued existence
+          // of a local checkout. A missing/changed checkout only prevents cleanup.
+          let canCleanup = false;
+          try {
+            await pollOperation(() =>
+              inspectRetainedMergeSource(
+                journal,
+                podRepo.sourcePublications,
+                pod,
+                entry,
+                worktreeManager,
+              ),
+            );
+            canCleanup = true;
+          } catch (error) {
+            assertCurrent();
+            emitActivityStatus(
+              podId,
+              `PR delivery confirmed; local resources retained because cleanup safety could not be verified: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+          if (canCleanup)
+            await cleanupContainer(pod, 'pr-merged-complete', 'kill', () =>
+              assertCurrent({ allowRemovedContainer: true }),
+            );
           assertCurrent({ allowRemovedContainer: true });
           const mergedPod = transition(pod, 'complete', {
             completedAt: new Date().toISOString(),

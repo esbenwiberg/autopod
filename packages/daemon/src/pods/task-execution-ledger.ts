@@ -382,6 +382,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       SELECT i.pr_identity AS pr, MAX(
         EXISTS (SELECT 1 FROM merge_observations o WHERE o.intent_id = i.id AND o.disposition = 'merged')
         OR EXISTS (SELECT 1 FROM merge_disposition_observations o WHERE o.intent_id = i.id)
+        OR EXISTS (SELECT 1 FROM merge_external_observations o WHERE o.intent_id = i.id)
       ) AS merged,
       (SELECT o.disposition FROM merge_status_observations o JOIN canonical_merge_intents observed ON observed.id = o.intent_id
         WHERE observed.pr_identity = i.pr_identity AND observed.task_id = i.task_id ORDER BY o.sequence DESC LIMIT 1) AS lastStatus
