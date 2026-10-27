@@ -45,8 +45,9 @@ For failed/unverified cleanup, reconcile the owned execution through a supported
 provider mechanism before requesting validation-only Resume. Preserve the failed
 attempt/output and workspace artifacts. Review real failing assertions separately;
 cleanup alone never authorizes approval. If the provider cannot verify termination,
-leave the pod parked and escalate to the operator; Resume is not a termination
-bypass. A future automatic path needs durable validation process ownership,
+leave the pod parked and escalate to the operator. Do not use Resume or retry
+authorization as a substitute for termination reconciliation. This change does
+not add a provider reconciliation workflow. A future automatic path needs durable validation process ownership,
 verified termination/recreation with artifact preservation, bounded retry admission
 and retained attempt history.
 
@@ -60,12 +61,21 @@ suggests a timeout but does not prove historical process termination or establis
 a suitable larger budget. This PR changes no defaults, frozen pod configuration,
 production setup, schedules, or professional-mammal state.
 
-An operator considering a setup budget change should first collect complete suite
-wall-clock distributions on the same sandbox tier, investigate the observed test
-failures and compare healthy upper-percentile runtime with 600 seconds. Choose a
-finite budget with measured headroom, then update setup for future launches
-through normal configuration procedures. No specific increase is justified by a
-single incomplete run.
+The implementation pod's completed second `npx pnpm test` run passed in
+**732.08 seconds** (12m12.08s); the daemon alone took **694.93 seconds**, with
+8,158 passing tests and 11 skips. The first full run stopped on an unrelated CLI
+fixture watchdog before the daemon suite completed; that CLI case passed on the
+second run. These observations are separate from professional-mammal's partial
+failed output and do not establish its historical cause.
+
+The successful full run exceeds 600 seconds on this sandbox. An operator should
+review setup budgets for future launches: **900 seconds** is a provisional finite
+budget with about 23% headroom over this one measured full run. Collect repeated
+suite wall-clock measurements on the same sandbox tier and use a healthy upper
+percentile to confirm or revise it. This is an operator recommendation, not a
+configuration change in this PR; the current pod's frozen setup and production
+configuration remain untouched. Independent control-plane validation using a
+600-second budget can still time out until the operator addresses that mismatch.
 
 Desktop Swift checks require a Mac and must be verified there; Linux tests cover
 the daemon contracts, real process-group termination scripts and durable

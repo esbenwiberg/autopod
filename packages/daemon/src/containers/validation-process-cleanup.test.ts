@@ -8,7 +8,7 @@ import { terminatePidFileScript } from './azure-sandbox-api-client.js';
 
 const exec = promisify(execFile);
 
-it.each(['graceful', 'forced', 'stale'] as const)(
+it.skipIf(process.platform !== 'linux').each(['graceful', 'forced', 'stale'] as const)(
   'verifies owned process group cleanup: %s',
   async (mode) => {
     const dir = await mkdtemp(join(tmpdir(), 'validation-cleanup-'));
