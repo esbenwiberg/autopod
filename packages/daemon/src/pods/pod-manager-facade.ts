@@ -66,6 +66,7 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     providerContinuation,
     workspaceEscapeControls,
     workspaceWatchdog,
+    terminationReconciliation,
   } = captured;
   return {
     getLaunchConfiguration(podId: string): EffectiveLaunchConfig | null {
@@ -439,6 +440,9 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
 
     getArtifactResumeObservation(podId: string): ArtifactResumeObservation {
       return workspaceArtifactObservation.getArtifactResumeObservation(podId);
+    },
+    reconcileTermination(podId: string, runId: string, reason: string, actor: OperatorActor) {
+      return terminationReconciliation.reconcileTermination(podId, runId, reason, actor);
     },
     resumePod(podId: string): Promise<{
       action:

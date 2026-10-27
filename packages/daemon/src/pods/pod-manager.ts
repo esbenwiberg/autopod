@@ -177,6 +177,7 @@ export type {
   PodManagerDependencies,
 } from './pod-manager-contracts.js';
 import { createPodManagerFacade } from './pod-manager-facade.js';
+import { createTerminationReconciliation } from './termination-reconciliation.js';
 
 export type { ApproveSessionOptions, ApproveAllSkippedPod } from './approval-contracts.js';
 
@@ -1373,7 +1374,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     maybeTriggerDependents,
   });
 
+  const terminationReconciliation = createTerminationReconciliation({
+    podRepo,
+    getContainerManager: () => containerManagerFactory.get('sandbox'),
+    isAgentActive: (podId) => activeAgentRuns.has(podId),
+    emitActivityStatus,
+  });
+
   return createPodManagerFacade({
+    terminationReconciliation,
     admissionQueries,
     admissionResolved,
     admissionLegacy,

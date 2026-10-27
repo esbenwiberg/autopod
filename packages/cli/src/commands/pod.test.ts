@@ -21,6 +21,19 @@ function createMockClient() {
   return {
     listSessions: vi.fn().mockResolvedValue([]),
     getTaskExecution: vi.fn().mockRejectedValue(new Error('Unavailable on older daemon')),
+    getTerminationReconciliations: vi.fn().mockResolvedValue({
+      pending: [
+        {
+          runId: 'run-1',
+          podId: 'other-bonobo',
+          generation: 1,
+          cycle: 1,
+          resource: { containerId: 'sandbox-id', executionTarget: 'sandbox' },
+        },
+      ],
+      receipts: [],
+    }),
+    reconcileTermination: vi.fn().mockResolvedValue({ runId: 'run-1' }),
     getSession: vi.fn().mockResolvedValue({
       id: 'abcd1234',
       profileName: 'test',
@@ -61,6 +74,53 @@ function createMockClient() {
     continueProvider: vi.fn().mockResolvedValue({ ok: true, action: 'same-provider' }),
   } as unknown as AutopodClient;
 }
+
+describe('reconcile-termination command', () => {
+  async function run(...args: string[]) {
+    const client = createMockClient();
+    const program = new Command().exitOverride();
+    registerPodCommands(program, () => client);
+    await program.parseAsync(['node', 'ap', 'reconcile-termination', 'other-bonobo', ...args]);
+    return client;
+  }
+
+  it('inspects without performing a backend mutation', async () => {
+    const log = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      const client = await run('--json');
+      expect(client.getTerminationReconciliations).toHaveBeenCalledWith('other-bonobo');
+      expect(client.reconcileTermination).not.toHaveBeenCalled();
+      expect(JSON.parse(log.mock.calls.map(([chunk]) => String(chunk)).join(''))).toMatchObject({
+        pending: [{ runId: 'run-1' }],
+      });
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('submits exact run and human reason, without starting a worker', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const client = await run('--run', 'run-1', '--reason', 'Verified deletion of sandbox');
+      expect(client.reconcileTermination).toHaveBeenCalledWith(
+        'other-bonobo',
+        'run-1',
+        'Verified deletion of sandbox',
+      );
+      expect(client.getTerminationReconciliations).not.toHaveBeenCalled();
+      expect(log.mock.calls.flat().join(' ')).toContain('No worker started');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it.each([
+    ['--run', 'run-1'],
+    ['--reason', 'Verified deletion of sandbox'],
+  ])('requires both mutation flags: %s', async (...args) => {
+    await expect(run(...args)).rejects.toThrow('both --run and --reason');
+  });
+});
 
 describe('continue-provider command', () => {
   let program: Command;
