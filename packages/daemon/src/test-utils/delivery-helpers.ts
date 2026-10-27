@@ -60,6 +60,9 @@ export function createDeliveryFixture(disk = false) {
       return { merged: false, autoMergeScheduled: false };
     }),
     getPrStatus: vi.fn<PrManager['getPrStatus']>(async () => pendingStatus()),
+    verifyMergedSourceAncestry: vi.fn<NonNullable<PrManager['verifyMergedSourceAncestry']>>(
+      async () => null,
+    ),
   } satisfies PrManager;
   const prCaptured = {
     ...f.mainCaptured,
@@ -132,10 +135,10 @@ export function createDeliveryFixture(disk = false) {
     },
     validationRecord: undefined,
   });
-  async function planMerge() {
+  async function planMerge(options: { repository?: string; prUrl?: string } = {}) {
     f.podRepo.update('prepare', {
       status: 'merging',
-      prUrl: 'https://github.com/org/repo/pull/27',
+      prUrl: options.prUrl ?? 'https://github.com/org/repo/pull/27',
     });
     const pod = f.pod();
     const ledger = f.podRepo.sourcePublications;
@@ -144,7 +147,7 @@ export function createDeliveryFixture(disk = false) {
     const publication = await publishSource(
       ledger,
       pod,
-      'https://github.com/org/repo',
+      options.repository ?? 'https://github.com/org/repo',
       f.worktreeManager,
     );
     const entry = journal.plan(pod, pod, publication.publicationId, {

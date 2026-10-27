@@ -8433,9 +8433,9 @@ describe('PodManager', () => {
           });
           createPodManager(ctx.deps);
           await vi.advanceTimersByTimeAsync(0);
-          if (merged && !dirty) {
+          if (merged) {
             expect(manager.getSession(pod.id).status).toBe('complete');
-            expect(ctx.containerManager.kill).toHaveBeenCalledTimes(1);
+            expect(ctx.containerManager.kill).toHaveBeenCalledTimes(dirty ? 0 : 1);
             expect(
               ctx.db
                 .prepare(
@@ -8993,7 +8993,7 @@ describe('PodManager', () => {
     );
 
     it.each(['local-source', 'provider-source', 'decision'] as const)(
-      'retains a planned externally merged PR when %s prevents acceptance',
+      'separates external delivery acceptance from local cleanup safety (%s)',
       async (fault) => {
         vi.useFakeTimers();
         try {
@@ -9029,9 +9029,9 @@ describe('PodManager', () => {
           const restarted = createPodManager(ctx.deps);
           await vi.advanceTimersByTimeAsync(0);
           expect(restarted.getSession(pod.id)).toMatchObject({
-            status: 'merge_pending',
+            status: fault === 'local-source' ? 'complete' : 'merge_pending',
             containerId: 'retained-source',
-            completedAt: null,
+            completedAt: fault === 'local-source' ? expect.any(String) : null,
           });
           expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
           expect(ctx.containerManager.kill).not.toHaveBeenCalled();
@@ -10072,7 +10072,7 @@ describe('PodManager', () => {
     });
 
     it.each(['missing', 'existing'] as const)(
-      'requires retained source and avoids post-merge maintenance (%s parent worktree)',
+      'requires retained source before mutation but not after proven delivery (%s parent worktree)',
       async (worktree) => {
         vi.useFakeTimers();
         try {
@@ -10130,9 +10130,8 @@ describe('PodManager', () => {
           expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
 
           await vi.advanceTimersByTimeAsync(60_000);
-          expect(manager.getSession(pod.id).status).toBe(
-            worktree === 'existing' ? 'complete' : 'merge_pending',
-          );
+          expect(manager.getSession(pod.id).status).toBe('complete');
+          if (worktree === 'missing') expect(ctx.containerManager.kill).not.toHaveBeenCalled();
           expect(ctx.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
           expect(ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
         } finally {
@@ -21218,6 +21217,12 @@ describe('PodManager', () => {
         prUrl: 'https://github.com/org/repo/pull/42',
         worktreePath: '/tmp/worktree/abc',
       });
+      const evidence = seedPollDelivery(ctx, pod.id, true);
+      vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+        ...evidence,
+        merged: false,
+        open: true,
+      });
       return manager.getSession(pod.id);
     }
 
@@ -22382,29 +22387,46 @@ describe('PodManager', () => {
         prUrl: 'https://github.com/org/repo/pull/42',
         worktreePath: '/tmp/worktree/parent',
       });
+      const evidence = seedPollDelivery(ctx, parent.id, true);
+      vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
+        ...evidence,
+        merged: false,
+        open: true,
+      });
       const fix = manager.createSession(
         {
           profileName: 'test-profile',
           task: '[PR FIX] Address review feedback',
           linkedPodId: parent.id,
+          branch: ctx.podRepo.getOrThrow(parent.id).branch,
+          baseBranch: 'main',
         },
         'user-1',
       );
       ctx.podRepo.update(fix.id, {
         status,
         branch: parent.branch,
-        prUrl: parent.prUrl,
+        prUrl: ctx.podRepo.getOrThrow(parent.id).prUrl,
+        baseBranch: 'main',
         worktreePath: '/tmp/worktree/fix',
         lastValidationResult: makeValidationResult({ podId: fix.id }),
         mergeBlockReason: 'Validated fix could not be pushed: ssh: stale info',
       });
       ctx.podRepo.update(parent.id, { fixPodId: fix.id });
-      return { manager, parent, fix };
+      return { manager, parent: manager.getSession(parent.id), fix: manager.getSession(fix.id) };
     }
 
     it('retries delivery for a validated fix pod parked in awaiting_input', async () => {
       const ctx = createTestContext(undefined, { githubPat: 'test-pat' });
       const { manager, fix } = setupParkedFixDeliveryFailure(ctx);
+      expect(
+        ctx.podRepo.mergeJournal?.find(ctx.podRepo.getOrThrow(fix.linkedPodId ?? ''))?.request
+          .config.expectedTarget,
+      ).toEqual({
+        repository: 'https://github.com/org/repo',
+        branch: fix.branch,
+        baseBranch: fix.baseBranch,
+      });
 
       const result = await manager.resumePod(fix.id);
 
@@ -22422,8 +22444,8 @@ describe('PodManager', () => {
         expect.objectContaining({ force: true }),
       );
       const refreshed = manager.getSession(fix.id);
-      expect(refreshed.status).toBe('complete');
       expect(refreshed.mergeBlockReason).toBeNull();
+      expect(refreshed.status).toBe('complete');
     });
 
     it('retries delivery for an already-failed fix pod with the delivery marker', async () => {

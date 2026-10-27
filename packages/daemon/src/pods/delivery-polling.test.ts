@@ -223,6 +223,62 @@ describe('owned merge polling', () => {
     expect(f.db.pragma('integrity_check', { simple: true })).toBe('ok');
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
   });
+  it.each(['different source', 'missing worktree'] as const)(
+    'requires provider source proof, not a disposable checkout, for a merged PR with %s',
+    async (failure) => {
+      vi.useFakeTimers();
+      const f = createDeliveryFixture(true);
+      const planned = await f.planMerge();
+      const restart = f.reopenPolling();
+      vi.mocked(f.worktreeManager.pushBranch).mockClear();
+      const events: string[] = [];
+      restart.captured.eventBus.subscribe((event) => events.push(event.type));
+      f.provider.getPrStatus.mockResolvedValue(
+        pendingStatus({
+          merged: true,
+          open: false,
+          headSha: failure === 'different source' ? 'f'.repeat(40) : planned.publication.commitSha,
+          sourceTarget: {
+            repository: planned.publication.repository,
+            branch: 'branch',
+            baseBranch: 'main',
+          },
+        }),
+      );
+      if (failure === 'missing worktree') {
+        if (!f.worktreeManager.inspectSource) throw new Error('Missing source inspector');
+        vi.mocked(f.worktreeManager.inspectSource).mockRejectedValueOnce(
+          new Error('spawn git ENOENT'),
+        );
+      }
+      restart.poll.resumeMergePolling();
+      await vi.advanceTimersByTimeAsync(0);
+      const result = restart.next.pods.getOrThrow('prepare');
+      expect(result.status).toBe(failure === 'different source' ? 'merge_pending' : 'complete');
+      if (failure === 'different source') {
+        expect(result.mergeBlockReason).toContain(
+          'PR source does not match the confirmed published commit',
+        );
+        expect(restart.captured.maybeTriggerDependents).not.toHaveBeenCalled();
+        expect(events).not.toContain('pod.completed');
+      } else {
+        expect(result.mergeBlockReason).toBeNull();
+        expect(restart.captured.maybeTriggerDependents).toHaveBeenCalledOnce();
+        expect(events).toContain('pod.completed');
+      }
+      expect(result.containerId).toBe('container-123');
+      expect(result.worktreePath).toBeTruthy();
+      expect(restart.captured.cleanupContainer).not.toHaveBeenCalled();
+      expect(f.provider.mergePr).not.toHaveBeenCalled();
+      expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(f.provider.getPrStatus).toHaveBeenCalledTimes(failure === 'different source' ? 3 : 1);
+      restart.poll.stopMergePolling('prepare');
+      const final = f.reopen();
+      expect(final.pods.getOrThrow('prepare')).toEqual(result);
+    },
+  );
+
   it('confirms a source-bound merge after SQLite restart before cleanup/completion/dependents', async () => {
     vi.useFakeTimers();
     const f = createDeliveryFixture(true);

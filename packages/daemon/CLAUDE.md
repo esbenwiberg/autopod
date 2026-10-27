@@ -85,6 +85,14 @@ policy selects squash when the caller has not explicitly chosen a method. Pollin
 an already-recorded merge method or clears an uncertain admitted merge request: that still
 requires reconciliation, not a status override.
 
+Fix delivery records a parent-bound source handoff before publishing and plans a
+new merge intent without overwriting the original source. Already-merged ADO PRs
+may complete on provider-proven ancestry when a human extended the published
+branch. This is external-delivery evidence only: open PR mutations remain bound
+to the exact admitted SHA. Missing local worktrees prevent unsafe cleanup, not
+source-proven completion. See `docs/merge-operator-recovery.md` at the repository
+root for normal reconciliation and the explicit legacy-fix recovery command.
+
 ### Retries and validation loops
 
 - Validation failures feed correction feedback back to the agent and loop (up to `maxValidationAttempts`, default 3)

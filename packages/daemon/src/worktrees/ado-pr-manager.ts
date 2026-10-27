@@ -5,6 +5,8 @@ import type {
   CreatePrConfig,
   CreatePrResult,
   FoundPr,
+  MergeAncestryProof,
+  MergeAncestryRequest,
   MergePrConfig,
   MergePrResult,
   MergePrTarget,
@@ -581,6 +583,44 @@ export class AdoPrManager implements PrManager {
     }
 
     return { posted, skipped, resolved: 0, errors, resolutionErrors };
+  }
+
+  async verifyMergedSourceAncestry(
+    config: MergeAncestryRequest,
+  ): Promise<MergeAncestryProof | null> {
+    const published = expectedMergeSource(config.publishedHeadSha);
+    const merged = expectedMergeSource(config.mergedHeadSha);
+    if (!published || !merged) return null;
+    // Re-read the PR: neither an open PR nor a comparison in another repository
+    // can establish external delivery. lastMergeSourceCommit is the pre-squash
+    // source head; the squash commit on the target is deliberately never used.
+    const status = await this.getPrStatus({ prUrl: config.prUrl });
+    if (!status.merged || status.open) return null;
+    assertMergeSource(merged, status.headSha);
+    assertMergeTarget(config.expectedTarget, status.sourceTarget ?? {});
+    const query = new URLSearchParams({
+      baseVersion: published,
+      baseVersionType: 'commit',
+      targetVersion: merged,
+      targetVersionType: 'commit',
+      diffCommonCommit: 'true',
+      $top: '1',
+      'api-version': '7.1',
+    });
+    const comparison = (await this.adoFetch(`/diffs/commits?${query}`, { method: 'GET' })) as {
+      baseCommit?: string;
+      targetCommit?: string;
+      commonCommit?: string;
+    };
+    assertMergeSource(published, comparison?.baseCommit);
+    assertMergeSource(merged, comparison?.targetCommit);
+    if (sourceCommit(comparison?.commonCommit) !== published) return null;
+    return {
+      publishedHeadSha: published,
+      mergedHeadSha: merged,
+      target: { ...config.expectedTarget },
+      observedAt: new Date().toISOString(),
+    };
   }
 
   async getPrStatus(config: { prUrl: string }): Promise<PrMergeStatus> {

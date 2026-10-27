@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Pod } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type {
+  MergeAncestryProof,
   MergePrConfig,
   MergePrResult,
   MergePrTarget,
@@ -47,6 +48,7 @@ export interface MergeJournal {
   check(pod: Pod, entry: MergeJournalEntry): void;
   claim(pod: Pod, publicationPod: Pod, publicationId: string, config: MergePrConfig): string;
   observeDisposition(intentId: string, result: MergePrResult): void;
+  observeDescendant(intentId: string, status: PrMergeStatus, proof: MergeAncestryProof): void;
   observeStatus(intentId: string, status: PrMergeStatus): void;
   observe(
     attemptId: string,
@@ -97,9 +99,14 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
       .get(row.id) as { id: string } | undefined;
     const observation = (db
       .prepare(
-        "SELECT disposition, result FROM merge_observations WHERE intent_id = ? AND disposition = 'merged'",
+        "SELECT 'merged' AS disposition, result FROM merge_external_observations WHERE intent_id = ?",
       )
       .get(row.id) ??
+      db
+        .prepare(
+          "SELECT disposition, result FROM merge_observations WHERE intent_id = ? AND disposition = 'merged'",
+        )
+        .get(row.id) ??
       db
         .prepare(
           'SELECT disposition, result FROM merge_observations WHERE attempt_id = ? ORDER BY sequence DESC LIMIT 1',
@@ -203,7 +210,8 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
     const confirmed = db
       .prepare(`SELECT i.id FROM canonical_merge_intents i WHERE i.pr_identity = ?
       AND (EXISTS (SELECT 1 FROM merge_observations o WHERE o.intent_id = i.id AND o.disposition = 'merged')
-        OR EXISTS (SELECT 1 FROM merge_disposition_observations o WHERE o.intent_id = i.id)) LIMIT 1`)
+        OR EXISTS (SELECT 1 FROM merge_disposition_observations o WHERE o.intent_id = i.id)
+        OR EXISTS (SELECT 1 FROM merge_external_observations o WHERE o.intent_id = i.id)) LIMIT 1`)
       .get(resource);
     if (confirmed) return mergeReconciliation('This merge is already confirmed.');
     const lastStatus = db
@@ -314,6 +322,47 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
           intentId,
           disposition,
           JSON.stringify({ headSha: status.headSha, target: { ...request.config.expectedTarget } }),
+          new Date().toISOString(),
+        );
+      }).immediate();
+    },
+    observeDescendant(intentId, status, proof) {
+      if (db.inTransaction)
+        return mergeReconciliation(
+          'External merge evidence cannot share an uncommitted transaction.',
+        );
+      db.transaction(() => {
+        const row = db
+          .prepare(`SELECT ${columns} FROM canonical_merge_intents WHERE id = ?`)
+          .get(intentId) as IntentRow | undefined;
+        if (
+          !row ||
+          !status.merged ||
+          status.open ||
+          !status.headSha ||
+          !status.sourceTarget ||
+          !Number.isFinite(Date.parse(proof.observedAt))
+        )
+          return mergeReconciliation('Source-bound external merge evidence is unavailable.');
+        const request = requestFrom(row);
+        assertMergeSource(request.config.expectedHeadSha, proof.publishedHeadSha);
+        assertMergeSource(status.headSha, proof.mergedHeadSha);
+        assertMergeTarget(request.config.expectedTarget, status.sourceTarget);
+        assertMergeTarget(request.config.expectedTarget, proof.target);
+        const result: MergePrResult = {
+          merged: true,
+          autoMergeScheduled: false,
+          source: {
+            headSha: proof.mergedHeadSha,
+            target: { ...proof.target },
+            observedAt: proof.observedAt,
+          },
+        };
+        db.prepare(`INSERT OR IGNORE INTO merge_external_observations
+          (intent_id, evidence, result, ancestry, observed_at) VALUES (?, 'provider_ancestry', ?, ?, ?)`).run(
+          intentId,
+          JSON.stringify(result),
+          JSON.stringify(proof),
           new Date().toISOString(),
         );
       }).immediate();

@@ -1,19 +1,33 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createFixCycleFixture } from '../test-utils/fix-cycle-helpers.js';
+import { mockFixBranchPublication } from '../test-utils/mock-helpers.js';
+
+async function fixture(disk = false) {
+  const f = createFixCycleFixture(disk);
+  await f.planMerge();
+  vi.mocked(f.worktreeManager.pushBranch).mockClear().mockImplementation(mockFixBranchPublication);
+  return f;
+}
 import { createFixDelivery } from './fix-delivery.js';
 describe('validated fix delivery leaves parent merge ownership intact', () => {
   it('force-pushes with explicit credentials, replies only afterward and persists completion/history across reopen', async () => {
-    const f = createFixCycleFixture(true);
+    const f = await fixture(true);
     const fix = f.insertFix();
     const replies = vi.fn(async () => {});
     await createFixDelivery({
       ...f.deliveryCaptured,
       postFixPodReviewFeedbackReplies: replies,
     }).completeFixPodAfterPush(fix);
-    expect(f.worktreeManager.pushBranch).toHaveBeenCalledWith(f.directory, 'branch', {
-      force: true,
-      pat: 'synthetic-git-key',
-    });
+    expect(f.worktreeManager.pushBranch).toHaveBeenCalledWith(
+      f.directory,
+      'branch',
+      expect.objectContaining({
+        force: true,
+        pat: 'synthetic-git-key',
+        expectedRepository: 'https://github.com/org/repo',
+        onPrepared: expect.any(Function),
+      }),
+    );
     expect(vi.mocked(f.worktreeManager.pushBranch).mock.invocationCallOrder[0]).toBeLessThan(
       replies.mock.invocationCallOrder[0] ?? 0,
     );
@@ -35,7 +49,7 @@ describe('validated fix delivery leaves parent merge ownership intact', () => {
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
   });
   it('skips delivery for an already completed parent but retains the original fix completion path', async () => {
-    const f = createFixCycleFixture();
+    const f = await fixture();
     const fix = f.insertFix();
     f.podRepo.update('prepare', { status: 'complete' });
     await f.delivery().completeFixPodAfterPush(fix);
@@ -44,7 +58,7 @@ describe('validated fix delivery leaves parent merge ownership intact', () => {
     expect(f.fix().status).toBe('complete');
   });
   it('shares the actual merge queue and rechecks a parent that becomes terminal while waiting', async () => {
-    const f = createFixCycleFixture();
+    const f = await fixture();
     const fix = f.insertFix();
     let release = () => {};
     const gate = new Promise<void>((resolve) => {
@@ -67,7 +81,7 @@ describe('validated fix delivery leaves parent merge ownership intact', () => {
     expect(f.fix().status).toBe('complete');
   });
   it('rechecks terminal parent identity after rebase before publishing', async () => {
-    const f = createFixCycleFixture();
+    const f = await fixture();
     const fix = f.insertFix();
     vi.mocked(f.worktreeManager.rebaseOntoBase).mockImplementationOnce(async () => {
       f.podRepo.update('prepare', { status: 'complete' });
@@ -78,7 +92,7 @@ describe('validated fix delivery leaves parent merge ownership intact', () => {
     expect(f.fix().status).toBe('complete');
   });
   it('completes a conflicting fix without force-push or review replies', async () => {
-    const f = createFixCycleFixture();
+    const f = await fixture();
     const fix = f.insertFix();
     const replies = vi.fn(async () => {});
     vi.mocked(f.worktreeManager.rebaseOntoBase).mockResolvedValueOnce({
@@ -95,7 +109,7 @@ describe('validated fix delivery leaves parent merge ownership intact', () => {
     expect(f.fix().status).toBe('complete');
   });
   it('parks failed delivery without cleanup or merging the parent PR', async () => {
-    const f = createFixCycleFixture();
+    const f = await fixture();
     const fix = f.insertFix();
     vi.mocked(f.worktreeManager.pushBranch).mockRejectedValueOnce(
       new Error('synthetic rejected push'),

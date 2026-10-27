@@ -1,4 +1,9 @@
 import type { Pod } from '@autopod/shared';
+import {
+  assertFixPublicationAllowed,
+  publishFixSource,
+} from '../worktrees/fix-source-publication.js';
+import { mergeReconciliation } from '../worktrees/merge-source-identity.js';
 import { formatRebaseConflictReason } from './delivery-policy.js';
 import type { FixDeliveryCaptured } from './fix-contracts.js';
 import { isTerminalState } from './state-machine.js';
@@ -46,6 +51,20 @@ export function createFixDelivery(captured: FixDeliveryCaptured) {
             return;
           }
 
+          const parent = fixPod.linkedPodId ? podRepo.getOrThrow(fixPod.linkedPodId) : null;
+          const journal = podRepo.mergeJournal;
+          const entry = parent && journal?.find(parent);
+          if (!parent || !journal || !entry || !profile.repoUrl)
+            return mergeReconciliation(
+              'The parent delivery history is unavailable for fix publication.',
+            );
+          assertFixPublicationAllowed(journal, parent, entry);
+          const handoff = podRepo.sourcePublications?.fixForMerge(parent);
+          if (handoff && handoff.publicationId !== entry.publicationId)
+            return mergeReconciliation(
+              'The previous fix publication must be reconciled before another rebase.',
+            );
+
           emitActivityStatus(podId, `Rebasing onto origin/${baseBranch}…`);
           const rebaseResult = await worktreeManager.rebaseOntoBase({
             worktreePath,
@@ -76,10 +95,14 @@ export function createFixDelivery(captured: FixDeliveryCaptured) {
             return;
           }
 
-          await worktreeManager.pushBranch(worktreePath, branch, {
-            force: true,
-            pat: await resolveGitCredential(profile),
-          });
+          await publishFixSource(
+            podRepo,
+            parent,
+            fixPod,
+            profile.repoUrl,
+            worktreeManager,
+            await resolveGitCredential(profile),
+          );
           branchPushed = true;
           if (!rebaseResult.alreadyUpToDate) {
             emitActivityStatus(podId, 'Rebased fix branch pushed');

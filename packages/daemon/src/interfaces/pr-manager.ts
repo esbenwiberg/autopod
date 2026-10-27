@@ -88,8 +88,23 @@ export interface MergeSourceConfirmation {
   observedAt: string;
 }
 
+export interface MergeAncestryRequest {
+  prUrl: string;
+  publishedHeadSha: string;
+  mergedHeadSha: string;
+  expectedTarget: MergePrTarget;
+}
+
+/** Read-only provider proof that an already-merged source includes our publication. */
+export interface MergeAncestryProof {
+  publishedHeadSha: string;
+  mergedHeadSha: string;
+  target: MergePrTarget;
+  observedAt: string;
+}
+
 export interface MergePrResult {
-  /** Present only after the adapter verifies the requested source and final target. */
+  /** Confirmed merged source/target. A differing external source requires separate ancestry evidence. */
   source?: MergeSourceConfirmation;
   /** Whether the merge completed immediately */
   merged: boolean;
@@ -192,6 +207,8 @@ export interface PrManager {
   createPr(config: CreatePrConfig): Promise<CreatePrResult>;
   mergePr(config: MergePrConfig): Promise<MergePrResult>;
   getPrStatus(config: { prUrl: string; worktreePath?: string }): Promise<PrMergeStatus>;
+  /** Never authorizes a merge mutation; unsupported providers remain exact-source only. */
+  verifyMergedSourceAncestry?(config: MergeAncestryRequest): Promise<MergeAncestryProof | null>;
   replyToReviewFeedback?(config: {
     prUrl: string;
     worktreePath?: string;

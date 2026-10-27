@@ -92,6 +92,21 @@ export async function mockBranchPublication(
   return receipt;
 }
 
+export async function mockFixBranchPublication(
+  worktreePath: string,
+  branch: string,
+  options?: BranchPublicationOptions,
+): Promise<BranchPublicationReceipt> {
+  const receipt = {
+    ...(await mockBranchPublication(worktreePath, branch, { ...options, onPrepared: undefined })),
+    commitSha: 'c'.repeat(40),
+    treeSha: 'd'.repeat(40),
+    observedRemoteCommitSha: 'c'.repeat(40),
+  };
+  options?.onPrepared?.(receipt);
+  return receipt;
+}
+
 export async function mockCommittedPublication(
   config: MergeBranchConfig,
 ): Promise<BranchPublicationReceipt> {

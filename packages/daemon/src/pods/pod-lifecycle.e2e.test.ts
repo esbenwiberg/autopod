@@ -38,6 +38,7 @@ import {
   mockPrMerge,
   statusEvent,
 } from '../test-utils/mock-helpers.js';
+import { publishSource } from '../worktrees/durable-source-publication.js';
 import { type PodManager, createPodManager } from './pod-manager.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────
@@ -513,6 +514,27 @@ describe('Pod Lifecycle E2E', () => {
       ctx.podRepo.update(root.id, {
         prUrl: 'https://github.com/org/repo/pull/42',
         worktreePath: '/tmp/worktree/root',
+      });
+
+      // Real parents have a durable published source and a pending merge plan.
+      const parent = ctx.podRepo.getOrThrow(root.id);
+      const ledger = ctx.podRepo.sourcePublications;
+      const journal = ctx.podRepo.mergeJournal;
+      if (!ledger || !journal) throw new Error('Missing delivery repositories');
+      const source = await publishSource(
+        ledger,
+        parent,
+        'https://github.com/org/repo',
+        ctx.worktreeManager,
+      );
+      journal.plan(parent, parent, source.publicationId, {
+        prUrl: parent.prUrl ?? '',
+        expectedHeadSha: source.commitSha,
+        expectedTarget: {
+          repository: source.repository,
+          branch: source.branch,
+          baseBranch: 'main',
+        },
       });
 
       // Two rounds of feedback queued before the fix pod even starts.
