@@ -1,6 +1,7 @@
 import type {
   FirewallDeniedEvent,
   Pod,
+  QualityInspectionUnavailableReason,
   ReadinessArea,
   ReadinessAreaReview,
   ReadinessAreaStatus,
@@ -77,6 +78,8 @@ export interface ReadinessInputs {
   preflightOverlapCount?: number;
   qualityScore?: number | null;
   qualityScoreStage?: 'provisional' | 'terminal';
+  /** Why process health could not be scored, when known. */
+  qualityUnavailableReason?: QualityInspectionUnavailableReason | null;
   advisoryQaInFlight?: boolean;
   computedAt?: string;
 }
@@ -130,6 +133,7 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
     let qualityScore = persistedQuality?.score ?? null;
     let qualityScoreStage: ReadinessInputs['qualityScoreStage'] =
       persistedQuality === null ? undefined : 'terminal';
+    let qualityUnavailableReason = persistedQuality?.inspectionUnavailableReason ?? null;
     if (persistedQuality === null && deps.eventRepo && deps.escalationRepo) {
       const signals = computeQualitySignals(podId, {
         podRepo: deps.podRepo,
@@ -146,6 +150,10 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
       if (isQualityScoreEligible({ signals, hasPiAttempt, hasNonPiAttempt })) {
         qualityScore = computeScore({ signals, stage: { kind: 'provisional' } });
         qualityScoreStage = 'provisional';
+      } else {
+        qualityUnavailableReason =
+          signals.inspectionUnavailableReason ??
+          (hasPiAttempt && hasNonPiAttempt ? 'mixed_pi_runtime' : null);
       }
     }
     return deriveReadinessReview({
@@ -168,6 +176,7 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
       preflightOverlapCount: deps.eventRepo?.countForSession(podId, 'pod.preflight_overlap') ?? 0,
       qualityScore,
       qualityScoreStage,
+      qualityUnavailableReason,
       advisoryQaInFlight: options.advisoryQaInFlight,
     });
   };
@@ -553,10 +562,13 @@ function qualityArea(inputs: ReadinessInputs): {
 } {
   const score = inputs.qualityScore;
   if (score === null || score === undefined) {
+    const reason = inputs.qualityUnavailableReason;
     return area(
       'quality',
       'not_available',
-      'No eligible process-health score is available yet.',
+      reason
+        ? `Process health unavailable: ${QUALITY_UNAVAILABLE_REASONS[reason]}`
+        : 'No eligible process-health score is available yet.',
       [],
     );
   }
@@ -576,6 +588,15 @@ function qualityArea(inputs: ReadinessInputs): {
   }
   return area('quality', 'ready', `${label} is ${score}.`, []);
 }
+
+// Keep in sync with SessionQualityCard.unavailableReasonDescription on desktop.
+const QUALITY_UNAVAILABLE_REASONS: Record<QualityInspectionUnavailableReason, string> = {
+  no_activity: 'no quality-relevant activity was retained for this session.',
+  ambiguous_inspection: 'inspection commands could not be verified safely.',
+  unresolved_write: 'native write activity could not be resolved safely.',
+  mixed_pi_runtime: 'mixed Pi and non-Pi runtime evidence cannot be scored.',
+  historical_pi: 'historical Pi activity does not retain compatible evidence.',
+};
 
 function advisoryQaArea(inputs: ReadinessInputs): {
   area: ReadinessAreaReview;

@@ -601,6 +601,7 @@ human_review: []
     expect(md).toContain('Commit after every meaningful, reviewable unit of work');
     expect(md).toContain('Do NOT modify configuration files');
     expect(md).toContain('Self-review your diff');
+    expect(md).toContain('Read files you are about to change with a native file-read tool');
   });
 
   it('lists configured pre-completion commands in guidelines', () => {

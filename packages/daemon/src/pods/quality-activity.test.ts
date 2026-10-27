@@ -178,6 +178,129 @@ describe('normalizeQualityActivity', () => {
     });
   });
 
+  describe('segment-level shell evidence', () => {
+    const evidence = (command: string, cwd = '/workspace') => {
+      const result = normalizeQualityActivityEvidence(bash(command, cwd));
+      return { paths: result.activities.map((a) => a.path), ambiguous: result.ambiguousInspection };
+    };
+
+    it('credits provable reads even when other segments are unprovable', () => {
+      expect(
+        evidence(
+          'ls /autopod/spec/; cat /autopod/spec/contract.yaml | head -50; cd /workspace; sed -n 420,500p src/save.ts; grep -rn "needle" src --include=*.ts | grep -v test | head -40',
+        ),
+      ).toEqual({ paths: ['src/save.ts'], ambiguous: true });
+      expect(evidence('npm test && cat src/a.ts; git status')).toEqual({
+        paths: ['src/a.ts'],
+        ambiguous: false,
+      });
+      expect(evidence('git status\ncat src/a.ts\n# cat src/commented.ts')).toEqual({
+        paths: ['src/a.ts'],
+        ambiguous: false,
+      });
+    });
+
+    it('credits a read piped only through display filters', () => {
+      expect(evidence('cat src/a.ts | head -20')).toEqual({
+        paths: ['src/a.ts'],
+        ambiguous: false,
+      });
+      expect(evidence("cat package.json | grep -n '\"test\\|lint'")).toEqual({
+        paths: ['package.json'],
+        ambiguous: false,
+      });
+      expect(evidence('sed -n 1,40p src/a.ts 2>/dev/null | nl | tail -n 5')).toEqual({
+        paths: ['src/a.ts'],
+        ambiguous: false,
+      });
+    });
+
+    it.each([
+      'cat src/a.ts | wc -l',
+      'cat src/a.ts | grep needle src/b.ts',
+      'cat src/a.ts | grep -r needle',
+      'cat src/a.ts | sort -o src/sorted.ts',
+      'cat src/a.ts | tee copy.ts',
+      'find src -name a.ts | xargs cat',
+    ])('does not credit reads through non-display pipelines: %s', (command) => {
+      expect(evidence(command)).toEqual({ paths: [], ambiguous: true });
+    });
+
+    it('tracks literal cd targets and fails closed on unknown directories', () => {
+      expect(evidence('cd packages/web && cat app.ts')).toEqual({
+        paths: ['packages/web/app.ts'],
+        ambiguous: false,
+      });
+      expect(evidence('cd /tmp; cat ../workspace/src/a.ts')).toEqual({
+        paths: ['src/a.ts'],
+        ambiguous: false,
+      });
+      expect(evidence('cd /tmp/notes; cat research.md')).toEqual({ paths: [], ambiguous: false });
+      expect(evidence('cd $DIR; cat app.ts')).toEqual({ paths: [], ambiguous: true });
+      expect(evidence('cd; cat app.ts')).toEqual({ paths: [], ambiguous: true });
+    });
+
+    it('treats paths outside the workspace as proven non-repository reads', () => {
+      expect(evidence('cat /autopod/spec/contract.yaml')).toEqual({ paths: [], ambiguous: false });
+      expect(evidence('tail -80 /tmp/test.log')).toEqual({ paths: [], ambiguous: false });
+      expect(evidence('cat /workspace')).toEqual({ paths: [], ambiguous: true });
+    });
+
+    it('ignores heredoc bodies and does not treat heredoc writes as inspections', () => {
+      expect(
+        evidence(
+          "cat > src/new.test.ts <<'EOF'\ncat src/secret.ts; sed -n 1p src/x.ts\nEOF\ncat src/a.ts",
+        ),
+      ).toEqual({ paths: ['src/a.ts'], ambiguous: false });
+      expect(evidence('python3 - <<-EOF\n\tprint(open("src/a.ts").read())\n\tEOF')).toEqual({
+        paths: [],
+        ambiguous: false,
+      });
+      expect(evidence("cat > notes.md <<'EOF'\ncat src/a.ts")).toEqual({
+        paths: [],
+        ambiguous: false,
+      });
+    });
+
+    it('does not credit reads that only run after a failure', () => {
+      expect(evidence('test -f src/a.ts || cat src/b.ts; cat src/c.ts')).toEqual({
+        paths: ['src/c.ts'],
+        ambiguous: true,
+      });
+    });
+
+    it('stops crediting after commands that can change command resolution', () => {
+      expect(evidence('cat src/a.ts; export PATH=/tmp/bin; cat src/b.ts')).toEqual({
+        paths: ['src/a.ts'],
+        ambiguous: true,
+      });
+      expect(evidence('source env.sh && cat src/b.ts')).toEqual({ paths: [], ambiguous: true });
+      expect(evidence('set -e; code=0; cat src/b.ts')).toEqual({
+        paths: ['src/b.ts'],
+        ambiguous: false,
+      });
+    });
+
+    it('keeps subshells and command substitution opaque', () => {
+      expect(evidence('cat src/a.ts; (cat src/b.ts)')).toEqual({
+        paths: ['src/a.ts'],
+        ambiguous: true,
+      });
+      expect(
+        evidence('git stash; (npm run lint 2>&1 | tail -2); (npm run build | tail -4)'),
+      ).toEqual({ paths: [], ambiguous: false });
+      expect(evidence('echo "$(cat src/a.ts)"')).toEqual({ paths: [], ambiguous: true });
+    });
+
+    it('applies segment evaluation inside structured shell wrappers', () => {
+      expect(
+        normalizeQualityActivityEvidence(
+          bashArgv(['/bin/bash', '-lc', 'npm test 2>&1 | tail -5; cat src/a.ts']),
+        ),
+      ).toMatchObject({ activities: [{ path: 'src/a.ts' }], ambiguousInspection: false });
+    });
+  });
+
   it('does not make unrelated compound commands ambiguous', () => {
     const evidence = normalizeQualityActivityEvidence(bash('npm test && git status'));
     expect(evidence).toEqual({ activities: [], ambiguousInspection: false });

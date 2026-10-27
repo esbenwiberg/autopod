@@ -23,7 +23,14 @@ export interface QualityActivityEvidence {
 }
 
 const WORKSPACE_ROOT = '/workspace';
-const INSPECTION_AFTER_CONTROL = /(?:^|&&|\|\||[;|])\s*(?:cat|head|tail|sed|rg|grep)(?:\s|$)/;
+// After a single `|` these programs only filter stdin; `| xargs cat` still reads files.
+const INSPECTION_AFTER_CONTROL =
+  /(?:^|&&|\|\||[;(`\n])\s*(?:cat|head|tail|sed|rg|grep)(?:\s|$)|\|\s*xargs\b[^|;&]*\b(?:cat|head|tail|sed|rg|grep)\b/;
+const INSPECTION_STAGE = /^(?:xargs(?:\s+-\S+)*\s+)?(?:cat|head|tail|sed|rg|grep)(?:\s|$)/;
+/** Builtins/assignments that can change what later commands resolve to or where they run. */
+const SHELL_STATE_COMMAND =
+  /^(?:(?:export|declare|typeset|local|readonly)(?:\s+-\S+)*\s+)?(?:PATH|CDPATH|IFS|BASH_ENV|ENV)=|^(?:pushd|popd|source|\.|eval|exec|alias|shopt|unset|hash|enable|builtin|command|function|trap)(?:\s|$)/;
+const STDERR_REDIRECT = /(^|\s)2>(?:&1|\s*\/dev\/null)(?=\s|$)/g;
 const SHELL_LOGIN_INSPECTION =
   /^(?:\/bin\/)?(?:bash|sh)\s+-lc\s+['"]?\s*(?:cat|head|tail|sed|rg|grep)(?:\s|$)/;
 const EXPANDING_DOUBLE_QUOTE_META = new Set(['$', '`', '\n', '\r']);
@@ -69,8 +76,7 @@ export function normalizeQualityActivityEvidence(event: AgentEvent): QualityActi
   const cwd = stringInput(event, 'cwd') ?? stringInput(event, 'workdir') ?? WORKSPACE_ROOT;
   const argvEvidence = structuredShellEvidence(event, cwd);
   const shellEvidence =
-    argvEvidence ??
-    (command ? inspectedShellEvidence(command, cwd) : { paths: [], ambiguous: false });
+    argvEvidence ?? (command ? evaluateShellScript(command, cwd) : { paths: [], ambiguous: false });
   return {
     activities: shellEvidence.paths.map((path) => ({
       kind: 'inspection',
@@ -100,7 +106,7 @@ function structuredShellEvidence(
   const isShell =
     program === 'bash' || program === '/bin/bash' || program === 'sh' || program === '/bin/sh';
   if (isShell && flag === '-lc' && typeof script === 'string' && rest.length === 0) {
-    return inspectedShellEvidence(script, cwd, true);
+    return evaluateShellScript(script, cwd, true);
   }
   // A shell invocation with any other argv shape cannot prove where its script
   // begins or whether it is read-only. Do not fall back to its display command.
@@ -120,7 +126,9 @@ function inspectedArgvEvidence(
   // counting a zero-read session as complete evidence.
   if (argv[0]?.startsWith('/')) return { paths: [], ambiguous: true };
   const evidence = inspectedTokensEvidence(argv, cwd);
-  if (evidence.paths.length > 0 || evidence.ambiguous) return evidence;
+  if (evidence.resolved || evidence.ambiguous) {
+    return { paths: evidence.paths, ambiguous: evidence.ambiguous };
+  }
   return {
     paths: [],
     ambiguous:
@@ -204,48 +212,445 @@ function stringArrayInput(event: AgentToolUseEvent, key: string): string[] | nul
     : null;
 }
 
-function inspectedShellEvidence(
-  command: string,
+type ShellEvidence = { paths: string[]; ambiguous: boolean };
+
+interface ShellSegment {
+  text: string;
+  /** Runs only after an earlier `||` command failed, so it cannot prove a read happened. */
+  conditional: boolean;
+  /** Takes inline heredoc data on stdin; never a repository-file read. */
+  heredoc: boolean;
+}
+
+interface ShellScan {
+  segments: ShellSegment[];
+  /** Script text from the first construct that cannot be bounded safely (`$(`, backticks, groups). */
+  opaqueTail: string | null;
+}
+
+/**
+ * Evaluate a shell script one `;` / `&&` / `||` / newline segment at a time. A read is
+ * credited only when its own pipeline proves which repository file was displayed, so an
+ * unrelated or unprovable segment no longer erases reads proven elsewhere in the command.
+ * Anything the scanner cannot bound remains ambiguous when it looks like an inspection.
+ */
+function evaluateShellScript(
+  script: string,
   cwd: string,
   structuredWrapper = false,
-): { paths: string[]; ambiguous: boolean } {
-  if (hasUnsafeShellExpansion(command)) {
-    return { paths: [], ambiguous: structuredWrapper || looksLikeInspection(command) };
+): ShellEvidence {
+  const scan = scanShellScript(script);
+  const paths = new Set<string>();
+  let ambiguous = false;
+  let currentCwd: string | null = cwd;
+
+  for (let index = 0; index < scan.segments.length; index += 1) {
+    const segment = scan.segments[index];
+    const text = segment?.text.trim() ?? '';
+    if (!segment || !text || segment.heredoc) continue;
+
+    if (SHELL_STATE_COMMAND.test(text)) {
+      // PATH, alias, function, or sourced-script changes make every later segment
+      // unprovable. Stop crediting and judge the remainder conservatively.
+      const remainder = [
+        ...scan.segments.slice(index + 1).map((later) => later.text),
+        ...(scan.opaqueTail === null ? [] : [scan.opaqueTail]),
+      ].join('\n');
+      return { paths: [...paths], ambiguous: ambiguous || looksLikeInspection(remainder) };
+    }
+
+    if (/^cd(?:\s|$)/.test(text)) {
+      currentCwd = resolveCd(text, currentCwd);
+      continue;
+    }
+
+    const evidence = pipelineEvidence(text, currentCwd);
+    if (segment.conditional) {
+      ambiguous ||= evidence.ambiguous || evidence.paths.length > 0;
+    } else {
+      for (const path of evidence.paths) paths.add(path);
+      ambiguous ||= evidence.ambiguous;
+    }
   }
-  const compound = splitReadOnlyCompound(command);
-  if (compound !== null) {
-    if (compound.length === 0) {
-      return { paths: [], ambiguous: structuredWrapper || looksLikeInspection(command) };
+
+  if (scan.opaqueTail !== null) {
+    ambiguous ||= structuredWrapper || looksLikeInspection(scan.opaqueTail);
+  }
+  return { paths: [...paths], ambiguous };
+}
+
+/** Split a script into top-level command segments without interpreting anything. */
+function scanShellScript(script: string): ShellScan {
+  const segments: ShellSegment[] = [];
+  const pendingHeredocs: HeredocDelimiter[] = [];
+  let current = '';
+  let conditional = false;
+  let heredoc = false;
+  let quote: "'" | '"' | null = null;
+  let segmentStart = 0;
+
+  const push = (): void => {
+    segments.push({ text: current, conditional, heredoc });
+    current = '';
+    heredoc = false;
+  };
+  const opaque = (): ShellScan => ({ segments, opaqueTail: script.slice(segmentStart) });
+
+  for (let index = 0; index < script.length; index += 1) {
+    const character = script[index] ?? '';
+    const next = script[index + 1] ?? '';
+
+    if (quote === "'") {
+      current += character;
+      if (character === "'") quote = null;
+      continue;
     }
-    const parts = compound.map((part) => inspectedShellEvidence(part, cwd, structuredWrapper));
-    if (parts.some((part) => part.ambiguous || part.paths.length === 0)) {
-      return { paths: [], ambiguous: structuredWrapper || looksLikeInspection(command) };
+    if (quote === '"') {
+      if (character === '`' || (character === '$' && next === '(')) return opaque();
+      if (character === '\\') {
+        current += character + next;
+        index += 1;
+        continue;
+      }
+      current += character;
+      if (character === '"') quote = null;
+      continue;
     }
+
+    if (character === '\\') {
+      if (next !== '\n') current += character + next;
+      index += 1;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      current += character;
+      continue;
+    }
+    if (character === '#' && (current === '' || /\s$/.test(current))) {
+      while (index + 1 < script.length && script[index + 1] !== '\n') index += 1;
+      continue;
+    }
+    if ('`(){}'.includes(character)) return opaque();
+    if (character === '<' && next === '<' && script[index + 2] !== '<') {
+      const parsed = parseHeredocDelimiter(script, index + 2);
+      if (!parsed) return opaque();
+      pendingHeredocs.push(parsed.heredoc);
+      heredoc = true;
+      current += script.slice(index, parsed.end);
+      index = parsed.end - 1;
+      continue;
+    }
+    if (character === ';' || character === '\n' || character === '\r') {
+      if (character === ';' && next === ';') return opaque();
+      push();
+      conditional = false;
+      if (character === '\n' && pendingHeredocs.length > 0) {
+        const end = skipHeredocBodies(script, index + 1, pendingHeredocs);
+        pendingHeredocs.length = 0;
+        // An unterminated body is inline data through the end of the script.
+        if (end === null) return { segments, opaqueTail: null };
+        index = end - 1;
+      }
+      segmentStart = index + 1;
+      continue;
+    }
+    if (character === '&' && next === '&') {
+      push();
+      index += 1;
+      segmentStart = index + 1;
+      continue;
+    }
+    if (character === '|' && next === '|') {
+      push();
+      conditional = true;
+      index += 1;
+      segmentStart = index + 1;
+      continue;
+    }
+    if (character === '&') {
+      const previous = current.at(-1);
+      if (previous === '>' || previous === '<' || next === '>') {
+        current += character;
+        continue;
+      }
+      // Background job: the next command runs unconditionally.
+      push();
+      conditional = false;
+      segmentStart = index + 1;
+      continue;
+    }
+    current += character;
+  }
+
+  if (quote) return opaque();
+  push();
+  return { segments, opaqueTail: null };
+}
+
+interface HeredocDelimiter {
+  delimiter: string;
+  stripTabs: boolean;
+}
+
+function parseHeredocDelimiter(
+  script: string,
+  start: number,
+): { heredoc: HeredocDelimiter; end: number } | null {
+  let index = start;
+  let stripTabs = false;
+  if (script[index] === '-') {
+    stripTabs = true;
+    index += 1;
+  }
+  while (script[index] === ' ' || script[index] === '\t') index += 1;
+  let delimiter = '';
+  while (index < script.length) {
+    const character = script[index] ?? '';
+    if (character === "'" || character === '"') {
+      const close = script.indexOf(character, index + 1);
+      if (close === -1) return null;
+      delimiter += script.slice(index + 1, close);
+      index = close + 1;
+      continue;
+    }
+    if (character === '\\') {
+      delimiter += script[index + 1] ?? '';
+      index += 2;
+      continue;
+    }
+    if (/[\s;&|<>()]/.test(character)) break;
+    delimiter += character;
+    index += 1;
+  }
+  return delimiter ? { heredoc: { delimiter, stripTabs }, end: index } : null;
+}
+
+/** Returns the index after the last heredoc terminator, or null when a body never ends. */
+function skipHeredocBodies(
+  script: string,
+  start: number,
+  pending: HeredocDelimiter[],
+): number | null {
+  let position = start;
+  for (const { delimiter, stripTabs } of pending) {
+    for (;;) {
+      if (position >= script.length) return null;
+      const newline = script.indexOf('\n', position);
+      const lineEnd = newline === -1 ? script.length : newline;
+      let line = script.slice(position, lineEnd).replace(/\r$/, '');
+      if (stripTabs) line = line.replace(/^\t+/, '');
+      position = newline === -1 ? script.length : newline + 1;
+      if (line === delimiter) break;
+    }
+  }
+  return position;
+}
+
+function resolveCd(text: string, cwd: string | null): string | null {
+  const tokens = tokenizeShell(text);
+  // `cd`, `cd -`, options, or expansions leave the directory unknown.
+  if (!tokens || tokens.length !== 2) return null;
+  const target = tokens[1] ?? '';
+  if (!target || target.startsWith('-') || hasUnsafeShellExpansion(target)) return null;
+  const normalizedTarget = target.replaceAll('\\', '/');
+  if (normalizedTarget.startsWith('/')) return posix.normalize(normalizedTarget);
+  if (cwd === null || !cwd.startsWith('/')) return null;
+  return posix.normalize(`${cwd.replaceAll('\\', '/')}/${normalizedTarget}`);
+}
+
+/**
+ * A pipeline proves a read only when its first stage is a provable inspection and every
+ * later stage merely narrows what is displayed (`| head`, `| grep pattern`, ...).
+ */
+function pipelineEvidence(text: string, cwd: string | null): ShellEvidence {
+  const stages = splitPipeline(text);
+  const [source, ...filters] = stages ?? [];
+  if (!stages || source === undefined) {
+    return { paths: [], ambiguous: looksLikeInspectionStage(text) };
+  }
+  const sourceEvidence = stageEvidence(source, cwd);
+  const unsafeFilters = filters.filter((filter) => !isDisplayFilter(filter));
+  if (unsafeFilters.length > 0) {
     return {
-      paths: [...new Set(parts.flatMap((part) => part.paths))],
-      ambiguous: false,
+      paths: [],
+      ambiguous: sourceEvidence.inspection || unsafeFilters.some(looksLikeInspectionStage),
     };
   }
+  return { paths: sourceEvidence.paths, ambiguous: sourceEvidence.ambiguous };
+}
 
-  const tokens = tokenizeShell(command);
-  if (!tokens) {
-    return { paths: [], ambiguous: structuredWrapper || looksLikeInspection(command) };
-  }
-
+function stageEvidence(stage: string, cwd: string | null): ShellEvidence & { inspection: boolean } {
+  const text = withoutStderrRedirects(stage);
+  const inspection = looksLikeInspectionStage(text);
+  if (SHELL_LOGIN_INSPECTION.test(text)) return { paths: [], ambiguous: true, inspection };
+  if (hasUnsafeShellExpansion(text)) return { paths: [], ambiguous: inspection, inspection };
+  const tokens = tokenizeShell(text);
+  if (!tokens) return { paths: [], ambiguous: inspection, inspection };
   const evidence = inspectedTokensEvidence(tokens, cwd);
-  if (evidence.paths.length > 0 || evidence.ambiguous) return evidence;
-  return { paths: [], ambiguous: looksLikeInspection(command) };
+  return { paths: evidence.paths, ambiguous: evidence.ambiguous, inspection };
+}
+
+/** Quote-aware split on single `|`. `||` was already handled by the segment scanner. */
+function splitPipeline(text: string): string[] | null {
+  const stages: string[] = [];
+  let current = '';
+  let quote: "'" | '"' | null = null;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index] ?? '';
+    if (quote) {
+      current += character;
+      if (character === '\\' && quote === '"') {
+        current += text[index + 1] ?? '';
+        index += 1;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === '\\') {
+      current += character + (text[index + 1] ?? '');
+      index += 1;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      current += character;
+      continue;
+    }
+    if (character === '|') {
+      if (text[index + 1] === '&') return null;
+      stages.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += character;
+  }
+  if (quote) return null;
+  stages.push(current.trim());
+  return stages.every((stage) => stage.length > 0) ? stages : null;
+}
+
+/** Stages that only narrow already-displayed stdin and read no files of their own. */
+function isDisplayFilter(stage: string): boolean {
+  const tokens = tokenizeShell(withoutStderrRedirects(stage));
+  if (!tokens || tokens.length === 0) return false;
+  const [program, ...args] = tokens;
+  switch (program) {
+    case 'head':
+    case 'tail':
+      return isLineCountOnly(args);
+    case 'grep':
+    case 'rg':
+      return isPatternOnly(args);
+    case 'sed':
+      return args.length === 2 && args[0] === '-n' && /^\d+(?:,\d+)?p$/.test(args[1] ?? '');
+    case 'cat':
+    case 'nl':
+    case 'sort':
+    case 'uniq':
+      return args.every(
+        (arg) => arg.startsWith('-') && !arg.startsWith('-o') && !arg.startsWith('--output'),
+      );
+    default:
+      return false;
+  }
+}
+
+function isLineCountOnly(args: string[]): boolean {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? '';
+    if (['-n', '--lines', '-c', '--bytes'].includes(arg)) {
+      index += 1;
+      if (!/^[+-]?\d+$/.test(args[index] ?? '')) return false;
+      continue;
+    }
+    if (/^-[nc][+-]?\d+$/.test(arg) || /^-\d+$/.test(arg)) continue;
+    if (/^--(?:lines|bytes)=[+-]?\d+$/.test(arg)) continue;
+    return false;
+  }
+  return true;
+}
+
+function isPatternOnly(args: string[]): boolean {
+  const valueFlags = new Set([
+    '-e',
+    '--regexp',
+    '-m',
+    '--max-count',
+    '-A',
+    '-B',
+    '-C',
+    '--after-context',
+    '--before-context',
+    '--context',
+  ]);
+  let positional = 0;
+  let explicitPattern = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? '';
+    if (arg === '--') {
+      positional += args.length - index - 1;
+      break;
+    }
+    if (valueFlags.has(arg)) {
+      if (arg === '-e' || arg === '--regexp') explicitPattern = true;
+      index += 1;
+      if (args[index] === undefined) return false;
+      continue;
+    }
+    if (arg.startsWith('--')) {
+      if (arg.startsWith('--regexp=')) explicitPattern = true;
+      // Recursive and pattern-file modes read files instead of stdin.
+      if (/^--(?:recursive|dereference-recursive|file|files)\b/.test(arg)) return false;
+      continue;
+    }
+    if (arg.startsWith('-') && arg.length > 1) {
+      if (/[rRf]/.test(arg.slice(1))) return false;
+      continue;
+    }
+    positional += 1;
+  }
+  return explicitPattern ? positional === 0 : positional === 1;
+}
+
+function withoutStderrRedirects(text: string): string {
+  return text.replace(STDERR_REDIRECT, '$1').trim();
 }
 
 function hasUnsafeShellExpansion(command: string): boolean {
   return [...command].some((character) => ['*', '?', '[', ']', '~'].includes(character));
 }
 
+type OperandPath = { kind: 'repo'; path: string } | { kind: 'external' } | { kind: 'unknown' };
+
+/**
+ * Paths that lexically resolve outside the workspace (task specs, /tmp notes) are proven
+ * non-repository reads: neither credited nor ambiguous. The workspace root itself and
+ * unresolvable relative paths stay unknown.
+ */
+function classifyOperandPath(rawPath: string, cwd: string | null): OperandPath {
+  if (rawPath.includes('\0')) return { kind: 'unknown' };
+  const input = rawPath.replaceAll('\\', '/');
+  let absolute: string;
+  if (input.startsWith('/')) {
+    absolute = posix.normalize(input);
+  } else if (cwd === null || !cwd.startsWith('/')) {
+    return { kind: 'unknown' };
+  } else {
+    absolute = posix.normalize(`${cwd.replaceAll('\\', '/')}/${input}`);
+  }
+  if (absolute === WORKSPACE_ROOT || absolute === `${WORKSPACE_ROOT}/`) return { kind: 'unknown' };
+  if (!absolute.startsWith(`${WORKSPACE_ROOT}/`)) return { kind: 'external' };
+  const path = canonicalRepositoryPath(absolute);
+  return path ? { kind: 'repo', path } : { kind: 'unknown' };
+}
+
 function inspectedTokensEvidence(
   tokens: string[],
-  cwd: string,
-): { paths: string[]; ambiguous: boolean } {
-  if (tokens.length < 2) return { paths: [], ambiguous: false };
+  cwd: string | null,
+): ShellEvidence & { resolved: boolean } {
+  if (tokens.length < 2) return { paths: [], ambiguous: false, resolved: false };
   const [program, ...args] = tokens;
   let operands: string[];
 
@@ -268,16 +673,18 @@ function inspectedTokensEvidence(
       operands = ripgrepOperands(args);
       break;
     default:
-      return { paths: [], ambiguous: false };
+      return { paths: [], ambiguous: false, resolved: false };
   }
 
   if (operands.length === 0 || operands.some((operand) => operand === '-')) {
-    return { paths: [], ambiguous: isInspectionProgram(program) };
+    return { paths: [], ambiguous: isInspectionProgram(program), resolved: false };
   }
-  const paths = operands.map((operand) => canonicalRepositoryPath(operand, cwd));
-  return paths.every((path): path is string => path !== null)
-    ? { paths: [...new Set(paths)], ambiguous: false }
-    : { paths: [], ambiguous: true };
+  const classified = operands.map((operand) => classifyOperandPath(operand, cwd));
+  if (classified.some((operand) => operand.kind === 'unknown')) {
+    return { paths: [], ambiguous: true, resolved: false };
+  }
+  const paths = classified.flatMap((operand) => (operand.kind === 'repo' ? [operand.path] : []));
+  return { paths: [...new Set(paths)], ambiguous: false, resolved: true };
 }
 
 function isInspectionProgram(program: string | undefined): boolean {
@@ -288,54 +695,9 @@ function looksLikeInspection(command: string): boolean {
   return INSPECTION_AFTER_CONTROL.test(command) || SHELL_LOGIN_INSPECTION.test(command);
 }
 
-/** Split only simple `&&`/`;` sequences; every segment must later prove read-only. */
-function splitReadOnlyCompound(command: string): string[] | null {
-  const segments: string[] = [];
-  let segment = '';
-  let quote: "'" | '"' | null = null;
-  let escaped = false;
-  let foundSeparator = false;
-
-  for (let index = 0; index < command.length; index += 1) {
-    const character = command[index];
-    if (!character) return [];
-    if (escaped) {
-      segment += character;
-      escaped = false;
-      continue;
-    }
-    if (character === '\\' && quote !== "'") {
-      segment += character;
-      escaped = true;
-      continue;
-    }
-    if (quote) {
-      segment += character;
-      if (character === quote) quote = null;
-      continue;
-    }
-    if (character === "'" || character === '"') {
-      quote = character;
-      segment += character;
-      continue;
-    }
-    const pair = command.slice(index, index + 2);
-    if (character === ';' || pair === '&&') {
-      if (!segment.trim()) return [];
-      segments.push(segment.trim());
-      segment = '';
-      foundSeparator = true;
-      if (pair === '&&') index += 1;
-      continue;
-    }
-    if ('|&<>`(){}\n\r'.includes(character) || character === '$') return [];
-    segment += character;
-  }
-
-  if (!foundSeparator) return null;
-  if (escaped || quote || !segment.trim()) return [];
-  segments.push(segment.trim());
-  return segments;
+function looksLikeInspectionStage(stage: string): boolean {
+  const text = stage.trim();
+  return INSPECTION_STAGE.test(text) || SHELL_LOGIN_INSPECTION.test(text);
 }
 
 function tokenizeShell(command: string): string[] | null {
