@@ -372,6 +372,32 @@ describe('computeQualitySignals', () => {
     });
   });
 
+  it('credits reads proven inside compound Claude Bash commands', () => {
+    // Shape of a real Claude pod that only inspected files through chained Bash commands.
+    podRepo.insert(basePod({ runtime: 'claude' }));
+    eventRepo.insert(
+      toolUse('Bash', {
+        command:
+          'ls /autopod/spec/; cat /autopod/spec/contract.yaml | head -50; cd /workspace; sed -n 420,500p src/save.ts; grep -rn "orderField" src --include=*.ts | grep -v test | head -40',
+      }),
+    );
+    eventRepo.insert(
+      toolUse('Bash', {
+        command: "mkdir -p /tmp/notes; cat > /tmp/notes/research.md <<'EOF'\n## cat src/x.ts\nEOF",
+      }),
+    );
+    eventRepo.insert(toolUse('Bash', { command: 'cd /workspace; npm ci 2>&1 | tail -5' }));
+    eventRepo.insert(fileChange('/workspace/src/save.ts', 'modify'));
+
+    const signals = computeQualitySignals(POD_ID, deps);
+
+    expect(signals.inspectionAvailability).toBe('available');
+    expect(signals.inspectionUnavailableReason).toBeNull();
+    expect(signals.ambiguousInspectionCount).toBe(1);
+    expect(signals.readCount).toBe(1);
+    expect(signals.editsWithoutPriorRead).toBe(0);
+  });
+
   it('marks ambiguous shell inspection unavailable even without a mutation', () => {
     podRepo.insert(basePod({ runtime: 'codex' }));
     eventRepo.insert(toolUse('Bash', { command: 'cat src/a.ts | wc -l' }));
@@ -405,6 +431,13 @@ describe('computeQualitySignals', () => {
         cwd: '/workspace',
       }),
     );
+    eventRepo.insert(
+      toolUse('Bash', {
+        command: "/bin/bash -lc 'grep -rn needle src'",
+        argv: ['/bin/bash', '-lc', 'grep -rn needle src'],
+        cwd: '/workspace',
+      }),
+    );
     eventRepo.insert(fileChange('/workspace/src/a.ts', 'modify'));
     eventRepo.insert(fileChange('/workspace/src/b.ts', 'modify'));
 
@@ -412,6 +445,7 @@ describe('computeQualitySignals', () => {
 
     expect(signals.inspectionAvailability).toBe('available');
     expect(signals.inspectionUnavailableReason).toBeNull();
+    // Tailing a /tmp log is an external read; only the recursive grep is unprovable.
     expect(signals.ambiguousInspectionCount).toBe(1);
     expect(signals.readCount).toBe(1);
     expect(signals.editCount).toBe(2);

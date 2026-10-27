@@ -735,6 +735,11 @@ export function generateSystemInstructions(
         'If `status` comes back `fail`, address the issues and use the one available fresh re-review. When the limit is reached, disclose remaining uncertainty and finish for independent daemon validation.',
     );
 
+    lines.push(
+      '- **Read files you are about to change with a native file-read tool** (e.g. `Read`) when your runtime has one. ' +
+        'If you use the shell, keep each read a simple standalone command on a repository path (`sed -n 1,200p src/file.ts`, `cat src/file.ts | head -80`). ' +
+        'Process-health telemetry only credits reads it can attribute to a specific file; reads hidden in recursive greps, subshells, or command substitution look like blind edits.',
+    );
     lines.push('- Use ask_human when uncertain rather than guessing');
     lines.push('- Do NOT modify configuration files unless required by the task');
   }

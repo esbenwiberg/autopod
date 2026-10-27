@@ -702,6 +702,81 @@ describe('createReadinessService', () => {
     expect(insert).not.toHaveBeenCalled();
   });
 
+  it('explains why provisional process health is unavailable', () => {
+    const currentPod = pod({ lastValidationResult: validation() });
+    const podRepo = {
+      getOrThrow: () => currentPod,
+      update: () => undefined,
+      getPodsBySeries: () => [],
+    } as unknown as PodRepository;
+    const ambiguousRead: AgentToolUseEvent = {
+      type: 'tool_use',
+      timestamp: NOW,
+      tool: 'Bash',
+      input: { command: 'grep -rn needle src | head -20' },
+    };
+    const eventRepo = {
+      countForSession: () => 0,
+      getForSession: (_podId: string, options?: { type?: string }) =>
+        options?.type
+          ? []
+          : [
+              {
+                id: 1,
+                podId: currentPod.id,
+                type: 'pod.agent_activity',
+                payload: {
+                  type: 'pod.agent_activity',
+                  timestamp: NOW,
+                  podId: currentPod.id,
+                  event: ambiguousRead,
+                },
+                createdAt: NOW,
+              },
+            ],
+    } as unknown as EventRepository;
+    const escalationRepo = {
+      countBySessionAndTypes: () => 0,
+    } as unknown as EscalationRepository;
+
+    const result = createReadinessService({
+      podRepo,
+      eventRepo,
+      escalationRepo,
+      qualityScoreRepo: { get: () => null } as unknown as QualityScoreRepository,
+    }).computePodReadiness(currentPod.id);
+
+    expect(result.areas).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          area: 'quality',
+          status: 'not_available',
+          summary: 'Process health unavailable: inspection commands could not be verified safely.',
+        }),
+      ]),
+    );
+  });
+
+  it('explains a persisted unavailable process-health row', () => {
+    const review = deriveReadinessReview({
+      pod: pod({ lastValidationResult: validation() }),
+      latestValidation: validation(),
+      qualityScore: null,
+      qualityScoreStage: 'terminal',
+      qualityUnavailableReason: 'no_activity',
+    });
+    expect(review.areas).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          area: 'quality',
+          status: 'not_available',
+          summary:
+            'Process health unavailable: no quality-relevant activity was retained for this session.',
+        }),
+      ]),
+    );
+  });
+
   it('classifies known denied-egress hosts from stored firewall events as non-blocking', () => {
     const podWithEvents = pod({ lastValidationResult: validation() });
     const podRepo = {
