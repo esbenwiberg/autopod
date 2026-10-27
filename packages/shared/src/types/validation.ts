@@ -30,6 +30,8 @@ export interface ValidationInfrastructureFailure {
     /** Milliseconds, matching the container exec budget. */
     timeoutMs?: number;
     cleanup: 'confirmed' | 'failed' | 'unverified';
+    /** Present only when an actual exit frame or supervisor receipt was observed. */
+    observedExitCode?: number;
   };
 }
 

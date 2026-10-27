@@ -57,6 +57,7 @@ public struct ValidationExecutionInterruptionResponse: Codable, Sendable {
   public let cause: String
   public let timeoutMs: Int?
   public let cleanup: String
+  public let observedExitCode: Int?
 }
 
 public struct ValidationInfrastructureFailureResponse: Codable, Sendable {
@@ -80,13 +81,19 @@ public struct ValidationInfrastructureFailureResponse: Codable, Sendable {
     guard let execution else {
       return "Validation did not complete. " + message
     }
-    let cause = execution.cause == "timeout"
-      ? "Timed out after \(Double(execution.timeoutMs ?? 0) / 1000) seconds."
-      : "Execution cancelled."
+    let cause: String
+    if execution.cause == "timeout" {
+      cause = execution.timeoutMs.map { "Timed out after \(Double($0) / 1000) seconds." }
+        ?? "Execution timed out."
+    } else {
+      cause = "Execution cancelled."
+    }
     let cleanup = execution.cleanup == "confirmed"
-      ? "Owned process cleanup confirmed; command outcome remains unverified."
+      ? "Owned process cleanup confirmed."
       : "Cleanup \(execution.cleanup); termination must be reconciled."
-    return "\(cause) \(cleanup) Automatic retry blocked. Preserve and inspect partial test output before explicit validation Resume."
+    let outcome = execution.observedExitCode.map { "Command exit observed with code \($0); required validation is incomplete." }
+      ?? "Command outcome remains unverified."
+    return "\(cause) \(cleanup) \(outcome) Automatic retry blocked. Preserve and inspect partial test output before explicit validation Resume."
   }
 }
 

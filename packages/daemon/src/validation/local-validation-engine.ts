@@ -27,7 +27,7 @@ import {
 } from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
-import { ExecExitUnverifiedError } from '../containers/exec-exit-evidence.js';
+import { ExecInterruptedError } from '../containers/exec-exit-evidence.js';
 import type { ContainerManager, ExecOptions } from '../interfaces/container-manager.js';
 import { REVIEW_RETRY_BLOCKED } from '../interfaces/reviewer-executor.js';
 import type {
@@ -1941,7 +1941,9 @@ function classifyValidationInfrastructureFailure(
 
   if (
     error instanceof AutopodError &&
-    (error.code === 'EXEC_EXIT_UNVERIFIED' || error.code === 'AZURE_SANDBOX_EXEC_INVALID_RESPONSE')
+    (error.code === 'EXEC_EXIT_UNVERIFIED' ||
+      error.code === 'EXEC_INTERRUPTED' ||
+      error.code === 'AZURE_SANDBOX_EXEC_INVALID_RESPONSE')
   ) {
     return {
       phase,
@@ -1949,7 +1951,7 @@ function classifyValidationInfrastructureFailure(
       statusCode: error.statusCode,
       message: error.message,
       retryable: false,
-      ...(error instanceof ExecExitUnverifiedError && error.execution
+      ...(error instanceof ExecInterruptedError && error.execution
         ? { execution: error.execution }
         : {}),
     };

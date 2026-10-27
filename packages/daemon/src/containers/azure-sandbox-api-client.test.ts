@@ -986,26 +986,81 @@ describe('AzureSandboxApiClient', () => {
     expect(killBody).toContain('kill -KILL');
   });
 
-  it('reports timeout cleanup failure without claiming an observed exit', async () => {
-    const { client } = makeStreamingClient(
-      (socket) => socket.onopen?.({}),
-      [
-        ...STREAM_SETUP_RESPONSES,
-        { status: 409, body: { message: 'Concurrent exec unsupported' } },
-      ],
-    );
-    const chunks: SandboxExecChunk[] = [];
-    await expect(
-      (async () => {
-        for await (const chunk of client.execStream('sbx-1', ['test'], { timeoutMs: 1 }))
-          chunks.push(chunk);
-      })(),
-    ).rejects.toMatchObject({
-      code: 'AZURE_SANDBOX_TIMEOUT',
-      execution: { cause: 'timeout', cleanup: 'failed' },
-    });
-    expect(chunks.some((chunk) => chunk.exitCode !== undefined)).toBe(false);
-  });
+  it.each([409, 429])(
+    'reports timeout cleanup refusal %s without retry or observed exit',
+    async (status) => {
+      const { client, requests } = makeStreamingClient(
+        (socket) => socket.onopen?.({}),
+        [...STREAM_SETUP_RESPONSES, { status, body: { message: 'Concurrent exec unsupported' } }],
+      );
+      const chunks: SandboxExecChunk[] = [];
+      await expect(
+        (async () => {
+          for await (const chunk of client.execStream('sbx-1', ['test'], { timeoutMs: 1 }))
+            chunks.push(chunk);
+        })(),
+      ).rejects.toMatchObject({
+        code: 'AZURE_SANDBOX_TIMEOUT',
+        execution: { cause: 'timeout', cleanup: 'failed' },
+      });
+      expect(chunks.some((chunk) => chunk.exitCode !== undefined)).toBe(false);
+      expect(requests).toHaveLength(3);
+    },
+  );
+
+  it.each([undefined, 0, 143, 137])(
+    'waits for cleanup and preserves output/observed exit %s',
+    async (observedExitCode) => {
+      const { client, sockets } = makeStreamingClient((socket) => socket.onopen?.({}));
+      const originalExec = client.exec.bind(client);
+      let releaseCleanup: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        releaseCleanup = resolve;
+      });
+      let cleanupStarted: (() => void) | undefined;
+      const started = new Promise<void>((resolve) => {
+        cleanupStarted = resolve;
+      });
+      vi.spyOn(client, 'exec').mockImplementation(async (id, command, options) => {
+        if (command[2]?.includes('pid_file=')) {
+          cleanupStarted?.();
+          await gate;
+          sockets[0]?.emit({
+            type: 'stdout',
+            data: Buffer.from('FAIL during cleanup\n').toString('base64'),
+          });
+          if (observedExitCode !== undefined)
+            sockets[0]?.emit({ type: 'exit_code', exitCode: observedExitCode });
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        return originalExec(id, command, options);
+      });
+      let settled = false;
+      const chunks: SandboxExecChunk[] = [];
+      const pending = (async () => {
+        try {
+          for await (const _chunk of client.execStream('sbx-1', ['test'], { timeoutMs: 1 })) {
+            chunks.push(_chunk);
+          }
+        } finally {
+          settled = true;
+        }
+      })();
+      const rejection = expect(pending).rejects.toMatchObject({
+        execution: {
+          cause: 'timeout',
+          cleanup: 'confirmed',
+          ...(observedExitCode !== undefined ? { observedExitCode } : {}),
+        },
+      });
+      await started;
+      expect(settled).toBe(false);
+      releaseCleanup?.();
+      await rejection;
+      expect(chunks.map((chunk) => chunk.stdout ?? '').join('')).toContain('FAIL during cleanup');
+      expect(chunks.some((chunk) => chunk.exitCode !== undefined)).toBe(false);
+    },
+  );
 
   it('does not accept an exit frame with a missing exit code as success', async () => {
     const { client } = makeStreamingClient((socket) => {

@@ -589,6 +589,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     let inputWrites = Promise.resolve();
 
     let timeoutFailure: AutopodError | null = null;
+    let timedOutExitCode: number | undefined;
     const timeoutTimer = options?.timeoutMs
       ? setTimeout(() => {
           if (failure || exitReceived || closed) return;
@@ -710,7 +711,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       while (true) {
         const chunk = queue.shift();
         if (chunk) {
-          if (timeoutFailure && chunk.exitCode !== undefined) throw timeoutFailure;
+          if (timeoutFailure && chunk.exitCode !== undefined) {
+            timedOutExitCode = chunk.exitCode;
+            throw timeoutFailure;
+          }
           if (identity && chunk.exitCode !== undefined) {
             const code = sandboxGoalExit(
               identity,
@@ -742,8 +746,20 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         } catch (err) {
           this.logger.warn({ err, sandboxId }, 'Failed to terminate timed-out sandbox exec');
         }
+        // Keep bytes received during the termination grace period as well.
+        // An actual exit frame is evidence; cleanup's own exit code is not.
+        let observedExitCode = timedOutExitCode;
+        for (const chunk of queue.splice(0)) {
+          if (isObservedExitCode(chunk.exitCode)) observedExitCode = chunk.exitCode;
+          if (chunk.stdout || chunk.stderr) yield { stdout: chunk.stdout, stderr: chunk.stderr };
+        }
         Object.assign(timeoutFailure, {
-          execution: { cause: 'timeout', timeoutMs: options?.timeoutMs, cleanup },
+          execution: {
+            cause: 'timeout',
+            timeoutMs: options?.timeoutMs,
+            cleanup,
+            ...(observedExitCode !== undefined ? { observedExitCode } : {}),
+          },
         });
         throw timeoutFailure;
       }
