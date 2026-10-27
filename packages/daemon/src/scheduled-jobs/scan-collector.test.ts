@@ -79,7 +79,31 @@ describe('current-tree scheduled security checks', () => {
     }));
     const coordinator = createScanCoordinator({
       reports,
-      collector: { auditLockfile: audit },
+      collector: {
+        auditLockfile: audit,
+        secretVersion: async () => 'fixture',
+        secrets: {
+          name: 'secrets',
+          warmup: async () => {},
+          scan: async () => [],
+          scanWithBaselineIdentity: async (file) =>
+            file.content.includes('AKIA')
+              ? [
+                  {
+                    identity: 'existing-secret',
+                    finding: {
+                      detector: 'secrets',
+                      file: file.path,
+                      line: 1,
+                      ruleId: 'fixture-secret',
+                      severity: 'high',
+                      snippet: '[REDACTED]',
+                    },
+                  },
+                ]
+              : [],
+        },
+      },
       prepare: async () => ({ workdir: f.dir, repository: 'fixture', cleanup: async () => {} }),
       logger: pino({ level: 'silent' }),
     });
