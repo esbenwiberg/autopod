@@ -29,6 +29,7 @@ export async function collectArtifactSnapshot(options: {
     );
     error.cause = cause;
     if (
+      options.wakeupTimeoutMs !== undefined &&
       cause &&
       !(cause instanceof AutopodError && cause.code === 'ARTIFACT_PRESERVATION_FAILED')
     ) {
@@ -75,13 +76,23 @@ export async function collectArtifactSnapshot(options: {
         new Error(
           stage === 'wakeup'
             ? 'Retained sandbox wakeup timed out; it may still be locked or transitioning.'
-            : 'Workspace report export timed out.',
+            : options.wakeupTimeoutMs === undefined
+              ? `Artifact copy timed out after ${options.timeoutMs ?? 120_000}ms`
+              : 'Workspace report export timed out.',
         ),
       );
     }, ms);
   };
   const copy = Promise.resolve().then(() => {
     armDeadline();
+    if (options.wakeupTimeoutMs === undefined) {
+      return options.containerManager.extractDirectoryFromContainer(
+        containerId,
+        '/workspace',
+        staging,
+        options.excludes,
+      );
+    }
     return options.containerManager.extractDirectoryFromContainer(
       containerId,
       '/workspace',

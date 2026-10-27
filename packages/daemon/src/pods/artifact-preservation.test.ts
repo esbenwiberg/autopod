@@ -89,7 +89,7 @@ describe('artifact snapshot publication', () => {
     );
     await expect(collectArtifactSnapshot({ ...config, timeoutMs: 10 })).rejects.toMatchObject({
       code: 'ARTIFACT_PRESERVATION_FAILED',
-      cause: new Error('Workspace report export timed out.'),
+      cause: new Error('Artifact copy timed out after 10ms'),
     });
     expect((await readdir(root)).every((name) => name.startsWith('.collect-'))).toBe(true);
     finish();
