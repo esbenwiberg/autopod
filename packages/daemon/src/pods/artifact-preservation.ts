@@ -36,7 +36,8 @@ export async function collectArtifactSnapshot(options: {
         cause instanceof Error &&
         (cause.message.startsWith('Retained sandbox wakeup timed out') ||
           cause.message.startsWith('Workspace report export timed out') ||
-          (cause instanceof AutopodError && cause.code === 'SANDBOX_WAKEUP_TIMEOUT'));
+          (cause instanceof AutopodError &&
+            ['SANDBOX_WAKEUP_TIMEOUT', 'AZURE_SANDBOX_TIMEOUT'].includes(cause.code)));
       const detail =
         stage === 'wakeup'
           ? timedOut
@@ -65,6 +66,7 @@ export async function collectArtifactSnapshot(options: {
     if (timer) clearTimeout(timer);
     const ms =
       stage === 'wakeup' ? (options.wakeupTimeoutMs ?? 150_000) : (options.timeoutMs ?? 120_000);
+    if (!options.isCurrent()) throw failure();
     options.onStage?.(stage);
     timer = setTimeout(() => {
       expired = true;
@@ -78,9 +80,9 @@ export async function collectArtifactSnapshot(options: {
       );
     }, ms);
   };
-  armDeadline();
-  const copy = Promise.resolve().then(() =>
-    options.containerManager.extractDirectoryFromContainer(
+  const copy = Promise.resolve().then(() => {
+    armDeadline();
+    return options.containerManager.extractDirectoryFromContainer(
       containerId,
       '/workspace',
       staging,
@@ -98,8 +100,8 @@ export async function collectArtifactSnapshot(options: {
           }
         },
       },
-    ),
-  );
+    );
+  });
   // A timeout cannot cancel the adapter's copy. Remove its staging directory only
   // after it actually settles, and never publish it or delete the source container.
   void copy

@@ -187,6 +187,18 @@ describe('artifact snapshot publication', () => {
     },
   );
 
+  it('does not emit preparation progress after ownership changes during staging setup', async () => {
+    const config = options();
+    const onStage = vi.fn();
+    const isCurrent = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+    await expect(collectArtifactSnapshot({ ...config, isCurrent, onStage })).rejects.toMatchObject({
+      code: 'ARTIFACT_PRESERVATION_FAILED',
+    });
+    expect(onStage).not.toHaveBeenCalled();
+    expect(config.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+    expect(await readdir(root)).toEqual([]);
+  });
+
   it('rejects a missing container before creating an artifact path', async () => {
     const config = options();
     await mkdir(path.join(root, 'prior'));
