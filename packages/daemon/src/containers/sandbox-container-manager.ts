@@ -501,6 +501,7 @@ for root in sys.argv[1:]:
     // Resume the same sandbox; do not provision or restart an agent to copy files.
     await this.client.resume(containerId);
     assertDirectoryExtractionCurrent(options);
+    options?.onExportStarted?.();
     mkdirSync(hostPath, { recursive: true });
     if (!options) removeStaleSyncStagingDirs(hostPath);
 

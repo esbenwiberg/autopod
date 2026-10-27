@@ -3,6 +3,8 @@ import type { ArtifactOutput, NativeGoalProcessIdentity } from '@autopod/shared'
 
 /** Guard publication of a collected directory after asynchronous extraction. */
 export interface DirectoryExtractionOptions {
+  /** Called after verified wakeup, before export; permits separate wake/copy budgets. */
+  onExportStarted?: () => void;
   signal?: AbortSignal;
   /** Synchronous ownership check immediately before collection and publication; throws if stale. */
   assertCurrent?: () => void;

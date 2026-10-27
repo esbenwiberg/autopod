@@ -14,6 +14,53 @@ afterEach(() => {
 });
 
 describe('complete approval workflow', () => {
+  it('rejects overlapping approvals before readiness and releases the guard on failure', async () => {
+    const f = fixture();
+    f.validated();
+    let reject!: (error: Error) => void;
+    const readiness = vi.fn(
+      () =>
+        new Promise<never>((_, fail) => {
+          reject = fail;
+        }),
+    );
+    f.mainCaptured.resolveApprovalReadiness = readiness;
+    const workflow = f.workflow();
+    const first = workflow.approveSession('prepare');
+    const failure = expect(first).rejects.toThrow('synthetic readiness failure');
+    await expect(workflow.approveSession('prepare')).rejects.toMatchObject({
+      code: 'APPROVAL_IN_PROGRESS',
+      statusCode: 409,
+    });
+    expect(readiness).toHaveBeenCalledOnce();
+    reject(new Error('synthetic readiness failure'));
+    await failure;
+    readiness.mockRejectedValueOnce(new Error('explicit retry'));
+    await expect(workflow.approveSession('prepare')).rejects.toThrow('explicit retry');
+    expect(readiness).toHaveBeenCalledTimes(2);
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+  });
+  it('does not block another pod while readiness is pending', async () => {
+    const f = fixture();
+    f.validated();
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const original = f.mainCaptured.resolveApprovalReadiness;
+    f.mainCaptured.resolveApprovalReadiness = async (...args) => {
+      await gate;
+      return original(...args);
+    };
+    const workflow = f.workflow();
+    const pending = workflow.approveSession('prepare');
+    await expect(workflow.approveSession('missing-other-pod')).rejects.not.toMatchObject({
+      code: 'APPROVAL_IN_PROGRESS',
+    });
+    finish();
+    await pending;
+    expect(f.worktreeManager.mergeBranch).toHaveBeenCalledOnce();
+  });
   it('publishes changed source through real durable admission before completion and cleanup', async () => {
     const f = fixture();
     f.validated();

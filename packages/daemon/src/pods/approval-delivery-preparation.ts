@@ -114,6 +114,14 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
           cycle: pod.finalization?.cycle ?? 0,
           isCurrent,
           excludes: APPROVAL_SNAPSHOT_EXCLUDES,
+          wakeupTimeoutMs: 150_000,
+          onStage: (stage) =>
+            emitActivityStatus(
+              podId,
+              stage === 'wakeup'
+                ? 'Waking retained sandbox for approval…'
+                : 'Preserving workspace reports…',
+            ),
         });
         assertApprovalCurrent(pod);
         podRepo.update(podId, { artifactsPath });
@@ -123,8 +131,7 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
           'Approval workspace preservation failed; resources retained',
         );
         assertApprovalCurrent(pod);
-        const reason =
-          'Approval delivery failed. Workspace reports could not be preserved. Original resources retained; repair preservation and retry approval.';
+        const reason = `Approval delivery failed. ${error instanceof AutopodError && error.code === 'ARTIFACT_PRESERVATION_FAILED' ? error.message : 'Workspace preservation failed. Original resources retained; retry approval.'}`;
         podRepo.update(podId, { failureReason: reason });
         emitActivityError(podId, reason, false);
         throw error;

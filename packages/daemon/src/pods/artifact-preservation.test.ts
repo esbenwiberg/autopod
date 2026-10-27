@@ -10,6 +10,7 @@ beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'artifact-preservation-'));
 });
 afterEach(async () => {
+  vi.useRealTimers();
   await rm(root, { recursive: true, force: true });
 });
 
@@ -97,6 +98,105 @@ describe('artifact snapshot publication', () => {
     });
     expect(config.containerManager.kill).not.toHaveBeenCalled();
     expect(config.containerManager.stop).not.toHaveBeenCalled();
+  });
+
+  it('gives wakeup longer than the old shared budget and export a fresh deadline', async () => {
+    const config = options();
+    let beginExport!: () => void;
+    let finish!: () => void;
+    const wake = new Promise<void>((resolve) => {
+      beginExport = resolve;
+    });
+    const copy = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    vi.mocked(config.containerManager.extractDirectoryFromContainer).mockImplementation(
+      async (_id, _src, target, _exclude, extraction) => {
+        markStarted();
+        await wake;
+        extraction?.onExportStarted?.();
+        await copy;
+        await writeFile(path.join(target, 'report.md'), 'complete');
+      },
+    );
+    const stages: string[] = [];
+    vi.useFakeTimers();
+    const result = collectArtifactSnapshot({
+      ...config,
+      wakeupTimeoutMs: 150_000,
+      onStage: (stage) => stages.push(stage),
+    });
+    await started;
+    // Wakeup exceeds the old shared budget without consuming export time.
+    await vi.advanceTimersByTimeAsync(125_000);
+    beginExport();
+    await vi.advanceTimersByTimeAsync(119_000);
+    finish();
+    await result;
+    vi.useRealTimers();
+    expect(stages).toEqual(['wakeup', 'export']);
+  });
+
+  it.each(['wakeup', 'export'] as const)(
+    'attributes %s timeout and discards a late rejection without replacing a good receipt',
+    async (stage) => {
+      const config = options();
+      const previous = await collectArtifactSnapshot(config);
+      const receipt = await readFile(`${previous}.receipt.json`, 'utf8');
+      let started!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let failLate!: (error: Error) => void;
+      const delayed = new Promise<void>((_, reject) => {
+        failLate = reject;
+      });
+      vi.mocked(config.containerManager.extractDirectoryFromContainer).mockImplementation(
+        async (_id, _src, target, _exclude, extraction) => {
+          await writeFile(path.join(target, 'partial.txt'), 'unpublished');
+          if (stage === 'export') extraction?.onExportStarted?.();
+          started();
+          await delayed;
+        },
+      );
+      vi.useFakeTimers();
+      const result = expect(
+        collectArtifactSnapshot({ ...config, wakeupTimeoutMs: 50, timeoutMs: 50 }),
+      ).rejects.toMatchObject({
+        code: 'ARTIFACT_PRESERVATION_FAILED',
+        message: expect.stringContaining(
+          stage === 'wakeup' ? 'wakeup timed out' : 'export timed out',
+        ),
+      });
+      await ready;
+      await vi.advanceTimersByTimeAsync(50);
+      await result;
+      failLate(new Error('late extraction rejection'));
+      vi.useRealTimers();
+      await vi.waitFor(async () =>
+        expect((await readdir(root)).sort()).toEqual(
+          [path.basename(previous), `${path.basename(previous)}.receipt.json`].sort(),
+        ),
+      );
+      expect(await readFile(`${previous}.receipt.json`, 'utf8')).toBe(receipt);
+      expect(config.containerManager.kill).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not emit preparation progress after ownership changes during staging setup', async () => {
+    const config = options();
+    const onStage = vi.fn();
+    const isCurrent = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+    await expect(collectArtifactSnapshot({ ...config, isCurrent, onStage })).rejects.toMatchObject({
+      code: 'ARTIFACT_PRESERVATION_FAILED',
+    });
+    expect(onStage).not.toHaveBeenCalled();
+    expect(config.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+    expect(await readdir(root)).toEqual([]);
   });
 
   it('rejects a missing container before creating an artifact path', async () => {

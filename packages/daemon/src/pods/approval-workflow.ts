@@ -1,3 +1,4 @@
+import { AutopodError } from '@autopod/shared';
 import type { Pod } from '@autopod/shared';
 
 import type { ApprovalEntryCaptured, ApproveSessionOptions } from './approval-contracts.js';
@@ -21,7 +22,26 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
     executeApprovalDelivery,
   } = captured;
 
+  const inFlight = new Set<string>();
   async function approveSession(podId: string, options: ApproveSessionOptions = {}): Promise<void> {
+    if (inFlight.has(podId)) {
+      throw new AutopodError(
+        'Approval is already in progress. Wait for its outcome before retrying.',
+        'APPROVAL_IN_PROGRESS',
+        409,
+      );
+    }
+    inFlight.add(podId);
+    try {
+      await performApproval(podId, options);
+    } finally {
+      inFlight.delete(podId);
+    }
+  }
+  async function performApproval(
+    podId: string,
+    options: ApproveSessionOptions = {},
+  ): Promise<void> {
     const actor =
       options.actor ??
       (options.automation
@@ -29,7 +49,9 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
         : { type: 'automation' as const, id: 'direct-pod-manager' });
     const pod = podRepo.getOrThrow(podId);
     validateTransition(pod.id, pod.status, 'approved');
+    emitActivityStatus(podId, 'Preparing approval…');
     const readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
+    assertApprovalCurrent(pod);
     const approvalReason = assertApprovalAllowed(podId, readiness, options);
     const prepared = await prepareApprovalDelivery({
       podId,

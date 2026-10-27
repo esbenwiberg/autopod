@@ -964,11 +964,12 @@ public struct DetailPanelView: View {
                     Button {
                         routeApprovalFromHeader()
                     } label: {
-                        Label(activeReadinessStatus?.canApproveFromHeader == true ? "Approve" : "Review & Approve", systemImage: "checkmark")
+                        Label(actions.approvalPending(pod.id) ? "Preparing approval…" : activeReadinessStatus?.canApproveFromHeader == true ? "Approve" : "Review & Approve", systemImage: "checkmark")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .tint(activeReadinessStatus?.canApproveFromHeader == true ? .green : .orange)
+                    .disabled(actions.approvalPending(pod.id))
                     Button("Reject") {
                         showRejectFeedback = true
                     }

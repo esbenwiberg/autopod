@@ -266,7 +266,7 @@ public actor DaemonAPI {
       nil
     }
     // Approval runs delivery inline: it may wait for advisory QA, resume a suspended
-    // sandbox to preserve reports (bounded at 120s), then push/create the PR.
+    // sandbox (150s wake budget), preserve reports (120s export budget), then publish.
     do {
       let _: OkResponse = try await request(
         "POST", "/pods/\(id)/approve", body: body, timeout: Self.approvalTimeout

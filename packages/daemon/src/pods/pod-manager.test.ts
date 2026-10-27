@@ -8820,6 +8820,56 @@ describe('PodManager', () => {
         },
       );
 
+      it('coordinates manager callers per pod and releases failed approval for explicit retry', async () => {
+        const { ctx, manager, pod } = setup();
+        const other = manager.createSession(
+          { profileName: 'test-profile', task: 'Independent approval', options: pod.options },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          other.id,
+          validatedPodUpdates(other.id, {
+            containerId: 'other-approval-source',
+            worktreePath: '/tmp/other-wt',
+            filesChanged: 1,
+          }),
+        );
+        let fail!: (error: Error) => void;
+        const held = new Promise<void>((_, reject) => {
+          fail = reject;
+        });
+        let started!: () => void;
+        const collecting = new Promise<void>((resolve) => {
+          started = resolve;
+        });
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer)
+          .mockImplementationOnce(async () => {
+            started();
+            await held;
+          })
+          .mockResolvedValue(undefined);
+        const first = manager.approveSession(pod.id);
+        const failure = expect(first).rejects.toMatchObject({
+          code: 'ARTIFACT_PRESERVATION_FAILED',
+        });
+        await collecting;
+        await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+          code: 'APPROVAL_IN_PROGRESS',
+        });
+        await manager.approveSession(other.id);
+        expect(manager.getSession(other.id).status).toBe('complete');
+        expect(manager.getSession(pod.id).status).toBe('validated');
+        expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
+        fail(new Error('Synthetic export failure'));
+        await failure;
+        expect(manager.getSession(pod.id).containerId).toBe('approval-source');
+        await manager.approveSession(pod.id);
+        expect(manager.getSession(pod.id).status).toBe('complete');
+        expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(3);
+        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledTimes(2);
+        expect(ctx.containerManager.kill).toHaveBeenCalledTimes(2);
+      });
+
       it('retains validated resources and does not publish if report copying fails', async () => {
         const { ctx, manager, pod } = setup();
         vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(
