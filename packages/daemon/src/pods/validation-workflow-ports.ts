@@ -243,7 +243,7 @@ export interface ValidationPassContext {
 export type RevalidationPassContext = Omit<
   ValidationPassContext,
   'validationSyncOk' | 'attempt'
-> & { revalDefaultBranch: string; newCommits: boolean };
+> & { revalDefaultBranch: string; newCommits: boolean; checksOnly?: boolean };
 
 export type ValidationPassCaptured = Pick<
   ValidationWorkflowDependencies,

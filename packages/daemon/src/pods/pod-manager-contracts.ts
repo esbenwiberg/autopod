@@ -288,6 +288,7 @@ export interface PodManager {
   ): Promise<void>;
   /** Check worker retry permission before Rework can tear down or enqueue resources. */
   assertCanRework(podId: string): void;
+  assertCanRetryValidation(podId: string): void;
   triggerValidation(
     podId: string,
     options?: { force?: boolean; validationOnly?: boolean },
@@ -299,7 +300,7 @@ export interface PodManager {
    *  findings. */
   revalidateSession(
     podId: string,
-    options?: { force?: boolean },
+    options?: { force?: boolean; checksOnly?: boolean },
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }>;
   /** Create a linked workspace pod on the same branch as a failed worker pod for human fixes. */
   fixManually(

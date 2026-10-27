@@ -72,7 +72,7 @@ export function createValidationRevalidationWorkflow(
   async function revalidateSession(
     this: Pick<ValidationWorkflowCalls, 'approveSession'>,
     podId: string,
-    options?: { force?: boolean },
+    options?: { force?: boolean; checksOnly?: boolean },
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
     assertExecutionTerminationVerified(podId);
     assertGuidanceCollected(podId);
@@ -95,6 +95,12 @@ export function createValidationRevalidationWorkflow(
     const revalidationWorktreePath = pod.worktreePath;
     let newCommits = false;
     const requeueValidationOnly = (message: string): { newCommits: boolean; result: 'fail' } => {
+      if (options?.checksOnly)
+        throw new AutopodError(
+          'Retained validation resource is unavailable. Restore it or request Fix validation; no new worker or delivery was queued.',
+          'VALIDATION_RESOURCE_UNAVAILABLE',
+          409,
+        );
       emitActivityStatus(podId, message);
       podRepo.update(podId, {
         validationAttempts: 0,
@@ -366,7 +372,9 @@ export function createValidationRevalidationWorkflow(
         return { newCommits, result: 'fail' };
       }
 
-      const skipValidatedPod = applySkipValidationDecision(s2, result);
+      const skipValidatedPod = options?.checksOnly
+        ? undefined
+        : applySkipValidationDecision(s2, result);
       if (skipValidatedPod) {
         maybeTriggerDependents(skipValidatedPod);
         if (skipValidatedPod.containerId) {
@@ -402,6 +410,7 @@ export function createValidationRevalidationWorkflow(
           newCommits,
           validationConfig,
           validationRecord,
+          checksOnly: options?.checksOnly,
         });
       }
 
@@ -464,7 +473,9 @@ export function createValidationRevalidationWorkflow(
         'Validation failed before checks could complete',
       );
       emitActivityError(podId, failureReason);
-      transition(s2, 'failed', { failureReason });
+      if (s2.status === 'failed') podRepo.update(podId, { failureReason });
+      else if (!isTerminalState(s2.status) && s2.status !== 'killing')
+        transition(s2, 'failed', { failureReason });
       return { newCommits, result: 'fail' };
     }
   }

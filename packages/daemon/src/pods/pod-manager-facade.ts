@@ -209,6 +209,9 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     cleanupPodResourcesForRecovery(podId: string): Promise<void> {
       return workspaceRecoveryCommands.cleanupPodResourcesForRecovery(podId);
     },
+    assertCanRetryValidation(podId: string): void {
+      continuationControls.assertCanRetryValidation(podId);
+    },
     assertCanRework(
       podId: string,
     ): ReturnType<PodFacadeOwners['continuationControls']['assertCanRework']> {
@@ -226,7 +229,7 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     },
     revalidateSession(
       podId: string,
-      options?: { force?: boolean },
+      options?: { force?: boolean; checksOnly?: boolean },
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
       return validationRevalidationWorkflow.revalidateSession.call(
         { approveSession: (...args) => this.approveSession(...args) },

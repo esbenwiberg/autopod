@@ -51,6 +51,7 @@ import type { SafetyEventsRepository } from '../../safety/safety-events-reposito
 import { CONTROL_PLANE_RATE_LIMIT_MAX, rateLimitIdentity } from '../plugins/rate-limit.js';
 import { resolvePublicPreviewOrigin, rewritePreviewUrlForBrowser } from '../preview-url.js';
 import { serializePodForWire, serializeValidationResult } from '../wire-serializers.js';
+import { validationRecoveryRoutes } from './validation-recovery.js';
 
 function humanActor(request: FastifyRequest): OperatorActor {
   return {
@@ -492,6 +493,7 @@ export function podRoutes(
   // Rework can include a full sandbox filesystem sync. Keep it detached from the
   // desktop request and coalesce repeats after a client-side timeout.
   const reworkRuns = new Map<string, Promise<void>>();
+  const validationRecovery = validationRecoveryRoutes(app, podManager, (id) => reworkRuns.has(id));
   const hostedDeployDrainSchema = z.object({
     ttlSeconds: z.number().int().min(60).max(3_600).default(1_800),
   });
@@ -1258,6 +1260,12 @@ export function podRoutes(
       await podManager.triggerValidation(podId, { force: true });
       return { ok: true };
     }
+    if (validationRecovery.isActive(podId))
+      throw new AutopodError(
+        'Validation recovery is already running.',
+        'RECOVERY_IN_PROGRESS',
+        409,
+      );
     podManager.assertCanRework(podId);
     if (!reworkRuns.has(podId)) {
       const run = podManager
