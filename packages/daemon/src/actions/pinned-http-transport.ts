@@ -2,7 +2,7 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 import { Readable, pipeline } from 'node:stream';
-import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
+import { createGunzip, createInflate } from 'node:zlib';
 
 import { ActionBoundaryError } from './action-diagnostics.js';
 
@@ -31,7 +31,9 @@ export function createPinnedHttpTransport(options: { ca?: string } = {}): Pinned
     }
     const headers = new Headers(init.headers);
     headers.set('host', url.host);
-    headers.set('accept-encoding', 'gzip, deflate, br');
+    // Brotli is deliberately not advertised or decoded: the decoder processes
+    // untrusted upstream bytes and has had memory-safety bugs (CVE-2026-111497).
+    headers.set('accept-encoding', 'gzip, deflate');
     const request = url.protocol === 'https:' ? httpsRequest : httpRequest;
     return new Promise<Response>((resolve, reject) => {
       // The original hostname stays in the URL (Host, SNI and certificate
@@ -74,9 +76,7 @@ export function createPinnedHttpTransport(options: { ca?: string } = {}): Pinned
               ? createGunzip()
               : encoding === 'deflate'
                 ? createInflate()
-                : encoding === 'br'
-                  ? createBrotliDecompress()
-                  : undefined;
+                : undefined;
           if (encoding && encoding !== 'identity' && !decoder) {
             incoming.destroy();
             reject(new Error('Unsupported HTTP response encoding'));
