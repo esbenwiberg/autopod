@@ -188,6 +188,7 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
         '--window-hours <hours>',
         'Strict rolling first-parent committer-time net delta; base and head must match',
       )
+      .option('--scope <scope>', 'current_tree or delta', 'current_tree')
       .option('--judgment <mode>', 'none or bounded (may incur configured provider cost)', 'none');
   const parseScan = (opts: {
     base: string;
@@ -195,9 +196,11 @@ export function registerScheduleCommands(program: Command, getClient: () => Auto
     scanners: string;
     judgment: string;
     windowHours?: string;
+    scope?: string;
   }) =>
     scheduledScanPolicyInputSchema.parse({
       version: 1,
+      scope: opts.scope,
       baseRef: opts.base,
       headRef: opts.head,
       scanners: opts.scanners.split(','),

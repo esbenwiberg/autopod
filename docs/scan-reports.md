@@ -21,3 +21,33 @@ Malformed, oversized or unsupported stored evidence remains stored. The review s
 Reconcile the original evidence before recording a new decision or launching a repair. You can remove an unavailable selection from a local draft; this does not delete an already-recorded decision. Recorded decisions remain in history.
 
 API clients should use `GET /scan-reports/:id/review` and its finding/decision continuation endpoints. `evidenceDiagnostics` describes unavailable report fields, while `diagnostics` identifies unreadable or unenumerated review records. The legacy report list retains its array shape with per-report diagnostics. A legacy detail read that encounters unavailable evidence returns the paged review with explicit continuation cursors. Mutation endpoints still reject unavailable authority with a reconciliation error.
+
+## Security scope
+
+Manual Run and cron use the same deterministic collector. Policies without `scope`
+(including existing Security scan schedules) now check `current_tree`: secrets in
+current tracked text content and current dependency manifests at the frozen head SHA.
+The recorded Git delta and optional rolling window remain context; an unchanged HEAD
+still runs security checks. Existing secrets are not subtracted as baseline findings.
+Historical reports keep their original evidence and status.
+
+Set `scope: "delta"` in API policies, use CLI `--scope delta`, or select desktop
+Delta-only checks to retain new-findings-only delta behavior. Only these runs may
+finish `empty_delta` with scanners `skipped_empty`. Current-tree successful checks
+finish `complete`, even with an empty delta. Completion is not a clean verdict when
+there are findings; unavailable or failed checks finish `incomplete` with unknown counts.
+
+Dependency audits currently support npm lockfile v2/v3 (`package-lock.json` or
+`npm-shrinkwrap.json`) and send dependency metadata to the public npm advisory service.
+Other recognized ecosystems, or a manifest without a supported lockfile, report
+incomplete coverage. Auditing uses an isolated temporary directory, ignores scripts,
+and never installs repository code or applies fixes. Advisory checks run even when
+manifests did not change.
+
+Collection is bounded: 10,000 current-tree paths, 200 delta paths, 2 MiB per Git
+command/blob, 32 MiB aggregate blob reads, 1,000 findings, and a 60-second scanner
+budget (Git commands additionally have 15-second limits). Unsupported binary content,
+exceeded limits, detector failures and unavailable advisory services cannot establish
+a clean result. Partial findings remain redacted and durable; inspect diagnostics
+and arrange a narrower or supported scan when coverage is incomplete. Reports and
+triage remain immutable evidence; repair launches still require human selection.

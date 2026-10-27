@@ -30,6 +30,7 @@ struct ScanInboxView: View {
   @State private var error = ""
   @State private var message = ""
   @State private var busy = false
+  @State private var deltaOnly = false
   @State private var baseRef = "main"
   @State private var headRef = "main"
   @State private var secrets = true
@@ -47,6 +48,7 @@ struct ScanInboxView: View {
     _reportId = State(initialValue: initialDetail?.report.id ?? "")
     _section = State(initialValue: initialSection); _policyOpen = State(initialValue: showPolicy)
     if let policy = job.scan {
+      _deltaOnly = State(initialValue: policy.scope == "delta")
       _baseRef = State(initialValue: policy.baseRef); _headRef = State(initialValue: policy.headRef)
       _secrets = State(initialValue: policy.scanners.contains("secrets"))
       _dependencies = State(initialValue: policy.scanners.contains("dependencies"))
@@ -62,10 +64,10 @@ struct ScanInboxView: View {
       && (!rollingWindow || (baseRef == headRef && (1...720).contains(windowHours)))
   }
   private func setBusy(_ value: Bool) { busy = value; workspaceBusy?(value) }
-  private var sameBranchWithoutWindow: Bool { !rollingWindow && baseRef == headRef }
+  private var sameBranchWithoutWindow: Bool { deltaOnly && !rollingWindow && baseRef == headRef }
   private var draftKey: String { "autopod.scan-triage.\(api.baseURL.absoluteString).\(reportId)" }
   private var policyKey: String {
-    "\(baseRef)|\(headRef)|\(rollingWindow)|\(windowHours)|\(secrets)|\(dependencies)|\(judgment)"
+    "\(deltaOnly)|\(baseRef)|\(headRef)|\(rollingWindow)|\(windowHours)|\(secrets)|\(dependencies)|\(judgment)"
   }
   private var policyDirty: Bool { savedPolicyKey != nil && savedPolicyKey != policyKey }
   private var useWorkspace: Bool { embedded && redesign }
@@ -84,6 +86,7 @@ struct ScanInboxView: View {
       } message: { Text("This dispatches a repair pod for the recorded selection. Findings remain unresolved until a human records their resolution.") }
       .task {
         if let policy = job.scan {
+          deltaOnly = policy.scope == "delta"
           baseRef = policy.baseRef; headRef = policy.headRef
           secrets = policy.scanners.contains("secrets"); dependencies = policy.scanners.contains("dependencies")
           judgment = policy.judgment == "bounded"
@@ -209,11 +212,12 @@ struct ScanInboxView: View {
         LabeledContent("Head branch") {
           TextField("Head branch", text: $headRef).accessibilityLabel("Head branch").frame(maxWidth: 400)
         }
+        Toggle("Delta-only checks", isOn: $deltaOnly)
         Toggle("Rolling time window on one branch", isOn: $rollingWindow)
         if rollingWindow {
           Stepper("Last \(windowHours) hours (base and head must match)", value: $windowHours, in: 1...720)
         }
-        Text("The exact freshly fetched branch delta is collected. Empty deltas stay empty.")
+        Text("Security checks cover the current tracked tree, even without changes. Delta-only checks cover new findings in the selected range.")
           .font(.caption).foregroundStyle(.secondary)
         if sameBranchWithoutWindow {
           Text("Base and head are the same branch. Turn on the rolling time window to scan recent commits.")
@@ -266,6 +270,7 @@ struct ScanInboxView: View {
                 if let window = collection.window { Text("Window: \(window.start) → \(window.end) · \(window.selectedCommits.count) first-parent commits · net delta") }
                 Text("Base: \(collection.baseSha ?? "unavailable")")
                 Text("Head: \(collection.headSha ?? "unavailable")")
+                Text("Scan scope: \(collection.scope ?? "delta") · \(collection.scannedPaths?.count ?? collection.files.count) paths")
                 ForEach(collection.files, id: \.path) { file in Text("\(file.change): \(file.path)") }
               }
               ForEach(collection.diagnostics, id: \.self) { Text($0) }
@@ -368,10 +373,11 @@ struct ScanInboxView: View {
         VStack(alignment: .leading) {
           TextField("Base branch", text: $baseRef)
           TextField("Head branch", text: $headRef)
+          Toggle("Delta-only checks", isOn: $deltaOnly)
           Toggle("Rolling time window on one branch", isOn: $rollingWindow)
           if rollingWindow { Stepper("Last \(windowHours) hours (base and head must match)", value: $windowHours, in: 1...720) }
           HStack { Toggle("Secrets", isOn: $secrets); Toggle("Dependencies", isOn: $dependencies); Toggle("Bounded judgment", isOn: $judgment) }
-          Text("The exact freshly fetched branch delta is collected. Empty deltas stay empty. npm dependency metadata goes to the public npm advisory service. Bounded judgment may incur configured provider cost.").font(.caption)
+          Text("Security checks cover the current tracked tree, even without changes. Delta-only checks cover new findings in the selected range. npm dependency metadata goes to the public npm advisory service. Bounded judgment may incur configured provider cost.").font(.caption)
           if sameBranchWithoutWindow { Text("Base and head are the same branch, so the delta is always empty. Turn on the rolling time window to scan recent commits.").font(.caption).foregroundStyle(.orange) }
           Button("Save report-only policy") { Task { await savePolicy() } }.disabled(busy || !policyCanSave)
         }.textFieldStyle(.roundedBorder)
@@ -402,6 +408,7 @@ struct ScanInboxView: View {
                 if let window = collection.window { Text("Window: \(window.start) → \(window.end) · \(window.selectedCommits.count) first-parent commits · net delta") }
                 Text("Base: \(collection.baseSha ?? "unavailable")")
                 Text("Head: \(collection.headSha ?? "unavailable")")
+                Text("Scan scope: \(collection.scope ?? "delta") · \(collection.scannedPaths?.count ?? collection.files.count) paths")
                 ForEach(collection.files, id: \.path) { file in Text("\(file.change): \(file.path)") }
               }
               ForEach(collection.diagnostics, id: \.self) { Text($0) }
@@ -533,7 +540,7 @@ struct ScanInboxView: View {
     setBusy(true); defer { setBusy(false) }
     do {
       let scanners = (secrets ? ["secrets"] : []) + (dependencies ? ["dependencies"] : [])
-      _ = try await api.updateScheduledJob(job.id, UpdateScheduledJobRequest(scan: ScheduledScanPolicy(baseRef: baseRef, headRef: headRef, scanners: scanners, judgment: judgment ? "bounded" : "none", windowHours: rollingWindow ? windowHours : nil)))
+      _ = try await api.updateScheduledJob(job.id, UpdateScheduledJobRequest(scan: ScheduledScanPolicy(baseRef: baseRef, headRef: headRef, scanners: scanners, judgment: judgment ? "bounded" : "none", windowHours: rollingWindow ? windowHours : nil, scope: deltaOnly ? "delta" : "current_tree")))
       savedPolicyKey = policyKey; workspaceDirty?(false)
       message = "Report-only policy saved. The schedule's enabled state is unchanged."; error = ""
     } catch { self.error = error.localizedDescription }
