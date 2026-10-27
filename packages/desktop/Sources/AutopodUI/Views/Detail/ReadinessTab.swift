@@ -458,12 +458,12 @@ struct ReadinessTab: View {
                 let reason = approvalReason.trimmingCharacters(in: .whitespacesAndNewlines)
                 Task { await actions.approve(pod.id, reason.isEmpty ? nil : reason) }
             } label: {
-                Label(approvalButtonLabel, systemImage: "checkmark")
+                Label(actions.approvalPending(pod.id) ? "Preparing approval…" : approvalButtonLabel, systemImage: "checkmark")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
             .tint(decisionStatus == .ready ? .green : .orange)
-            .disabled(!canApprove)
+            .disabled(!canApprove || actions.approvalPending(pod.id))
             .help(approvalHelp)
         }
         .readinessPanel()

@@ -10,6 +10,7 @@ import AutopodUI
 public final class ActionHandler {
 
   public private(set) var pendingAction: String?
+  public private(set) var pendingApprovals: Set<String> = []
   public private(set) var lastError: String?
   /// Error from the most recent preview call, or nil on success. Separate
   /// from lastError so the series sheet doesn't pick up unrelated failures.
@@ -217,6 +218,7 @@ public final class ActionHandler {
         $0.linkedSessionId == id || $0.id == source.fixPodId || (source.seriesId != nil && $0.seriesId == source.seriesId)
       })
     })
+    result.approvalPending = { [weak self] id in self?.pendingApprovals.contains(id) == true }
     return result
   }
 
@@ -249,14 +251,19 @@ public final class ActionHandler {
   // MARK: - Actions
 
   public func approve(_ podId: String, reason: String? = nil) async {
-    pendingAction = "approve-\(podId)"
+    guard pendingApprovals.insert(podId).inserted else { return }
+    let marker = "approve-\(podId)"
+    pendingAction = marker
+    defer {
+      pendingApprovals.remove(podId)
+      if pendingAction == marker { pendingAction = nil }
+    }
     do {
       try await perform { try await api.approvePod(podId, reason: reason) }
       // Status is updated by the daemon event after readiness gates accept the approval.
     } catch {
       lastError = error.localizedDescription
     }
-    pendingAction = nil
   }
 
   public func reject(_ podId: String, feedback: String?) async {

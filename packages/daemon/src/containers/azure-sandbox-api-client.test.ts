@@ -1832,3 +1832,112 @@ describe('listSandboxes', () => {
     expect(await client.listSandboxes()).toEqual([]);
   });
 });
+
+describe('bounded retained sandbox resume', () => {
+  it.each([
+    { states: ['Stopped', 'Running'], locked: true, posts: 1 },
+    { states: ['Stopped', 'Stopped', 'Running'], locked: true, posts: 2 },
+    { states: ['Resuming', 'Running'], locked: false, posts: 0 },
+    { states: ['Running'], locked: false, posts: 0 },
+  ])(
+    'observes Running without duplicate accepted operations: $states',
+    async ({ states, locked, posts }) => {
+      vi.useFakeTimers();
+      try {
+        const responses: MockHttpResponse[] = [];
+        let submitted = false;
+        for (const state of states) {
+          responses.push({ status: 200, body: { state } });
+          if (state === 'Stopped' && !submitted) {
+            responses.push(
+              locked ? { status: 409, body: { title: 'ResourceLocked' } } : { status: 202 },
+            );
+            if (!locked) submitted = true;
+          }
+        }
+        const { client, requests } = makeClient(responses, { pollIntervalMs: 10 });
+        const attempts = Promise.all([
+          client.resume('synthetic-worker'),
+          client.resume('synthetic-worker'),
+        ]);
+        await vi.runAllTimersAsync();
+        await attempts;
+        expect(requests.filter((r) => r.init?.method === 'POST')).toHaveLength(posts);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([
+    { status: 409, body: { title: 'OtherConflict' } },
+    { status: 403, body: { title: 'Forbidden' } },
+    { status: 404, body: { title: 'NotFound' } },
+  ])('does not blindly retry resume rejection $status', async (rejection) => {
+    const { client, requests } = makeClient([
+      { status: 200, body: { state: 'Stopped' } },
+      rejection,
+    ]);
+    await expect(client.resume('synthetic-worker')).rejects.toThrow();
+    expect(requests).toHaveLength(2);
+  });
+
+  it.each(['Failed', 'Deleted', 'Deleting', 'Terminated'])(
+    'rejects terminal %s without a POST',
+    async (state) => {
+      const { client, requests } = makeClient([{ status: 200, body: { state } }]);
+      await expect(client.resume('synthetic-worker')).rejects.toMatchObject({
+        code: 'SANDBOX_WAKEUP_FAILED',
+      });
+      expect(requests).toHaveLength(1);
+    },
+  );
+
+  it('bounds a hung HTTP call and releases the resume guard', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi
+        .fn()
+        .mockImplementationOnce(() => new Promise<Response>(() => {}))
+        .mockResolvedValue(new Response(JSON.stringify({ state: 'Running' })));
+      const { client } = makeClient([], { fetch, resumeTimeoutMs: 50 });
+      const result = expect(client.resume('synthetic-worker')).rejects.toMatchObject({
+        code: 'SANDBOX_WAKEUP_TIMEOUT',
+      });
+      await vi.advanceTimersByTimeAsync(50);
+      await result;
+      await client.resume('synthetic-worker');
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([true, false])('bounds persistent locks/transitions (locked=$0)', async (locked) => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn(
+        async (_url: string | URL, init?: RequestInit) =>
+          new Response(
+            JSON.stringify(
+              init?.method === 'POST'
+                ? { title: 'ResourceLocked' }
+                : { state: locked ? 'Stopped' : 'Resuming' },
+            ),
+            { status: init?.method === 'POST' ? 409 : 200 },
+          ),
+      );
+      const { client } = makeClient([], { fetch, resumeTimeoutMs: 50, pollIntervalMs: 10 });
+      const result = expect(client.resume('synthetic-worker')).rejects.toMatchObject({
+        code: 'SANDBOX_WAKEUP_TIMEOUT',
+      });
+      await vi.advanceTimersByTimeAsync(50);
+      await result;
+      const calls = fetch.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(100);
+      expect(fetch).toHaveBeenCalledTimes(calls);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

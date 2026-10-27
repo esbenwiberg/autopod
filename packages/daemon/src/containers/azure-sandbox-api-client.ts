@@ -100,6 +100,7 @@ export interface AzureSandboxApiClientConfig {
   resolveImageDigest?: ImageDigestResolver;
   /** Test seam. Defaults to 3s to match the Python SDK poller. */
   pollIntervalMs?: number;
+  resumeTimeoutMs?: number;
   /**
    * Retry/backoff for the Azure Sandboxes data-plane rate limiter (HTTP 429,
    * 600 req/min). The platform returns `retryAfterSeconds`; we honor it (clamped
@@ -203,6 +204,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private readonly webSocketFactory: WebSocketFactory;
   private readonly resolveImageDigest?: ImageDigestResolver;
   private readonly pollIntervalMs: number;
+  private readonly resumeTimeoutMs: number;
   private readonly retryMaxAttempts: number;
   private readonly retryMaxDelayMs: number;
   private readonly retryBaseDelayMs: number;
@@ -227,6 +229,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     this.webSocketFactory = config.webSocket ?? defaultWebSocketFactory;
     this.resolveImageDigest = config.resolveImageDigest;
     this.pollIntervalMs = config.pollIntervalMs ?? 3000;
+    this.resumeTimeoutMs = config.resumeTimeoutMs ?? 145_000;
     this.retryMaxAttempts = config.retry?.maxAttempts ?? 6;
     this.retryMaxDelayMs = config.retry?.maxDelayMs ?? 30_000;
     this.retryBaseDelayMs = config.retry?.baseDelayMs ?? 1000;
@@ -1039,17 +1042,97 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     );
   }
 
+  private readonly resumes = new Map<string, Promise<void>>();
+
   async resume(sandboxId: string): Promise<void> {
-    const current = await this.getSandbox(sandboxId).catch(() => null);
-    if (current?.state === 'Running') return;
-    await this.requestData('POST', `${this.sandboxPath(sandboxId)}/resume`, {
-      okStatuses: [200, 202, 204],
+    const existing = this.resumes.get(sandboxId);
+    if (existing) return existing;
+    const operation = this.reconcileResume(sandboxId);
+    this.resumes.set(sandboxId, operation);
+    try {
+      await operation;
+    } finally {
+      if (this.resumes.get(sandboxId) === operation) this.resumes.delete(sandboxId);
+    }
+  }
+
+  private async reconcileResume(sandboxId: string): Promise<void> {
+    const controller = new AbortController();
+    const timeoutMs = this.resumeTimeoutMs;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(
+          new AutopodError(
+            'Retained sandbox wakeup timed out while waiting for Running (possibly locked or transitioning).',
+            'SANDBOX_WAKEUP_TIMEOUT',
+            504,
+          ),
+        );
+      }, timeoutMs);
     });
-    await this.pollState(
-      () => this.getSandbox(sandboxId),
-      (sandbox) => sandbox.state === 'Running',
-      `sandbox ${sandboxId} resume`,
-    );
+    const check = () => controller.signal.throwIfAborted();
+    const requestOptions = {
+      signal: controller.signal,
+      singleAttempt: true,
+      timeoutMs: Math.min(timeoutMs, 15_000),
+    };
+    const reconcile = async () => {
+      let submitted = false;
+      while (true) {
+        check();
+        const current = await this.requestData<SandboxResponse>(
+          'GET',
+          this.sandboxPath(sandboxId),
+          requestOptions,
+        );
+        check();
+        if (current.state === 'Running') return;
+        if (['Failed', 'Deleted', 'Deleting', 'Terminated'].includes(current.state ?? '')) {
+          throw new AutopodError(
+            'Retained sandbox cannot be woken from its terminal state.',
+            'SANDBOX_WAKEUP_FAILED',
+            502,
+          );
+        }
+        if (stoppedStates.has(current.state ?? '') && !submitted) {
+          // Only ResourceLocked proves this POST was rejected before execution.
+          const response = await this.request(
+            'data',
+            'POST',
+            `${this.dataEndpoint}${this.sandboxPath(sandboxId)}/resume`,
+            {
+              ...requestOptions,
+              params: { 'api-version': API_VERSION },
+              okStatuses: [200, 202, 204, 409],
+            },
+          );
+          check();
+          if (response.status === 409) {
+            const body = (await readJsonOrEmpty(response)) as { title?: string };
+            check();
+            if (body.title !== 'ResourceLocked') {
+              throw new AutopodError(
+                'Sandbox resume returned an unrelated conflict.',
+                'SANDBOX_WAKEUP_CONFLICT',
+                409,
+              );
+            }
+          } else {
+            submitted = true;
+          }
+        }
+        // Transitional/unknown states are observed, never resumed blindly.
+        await sleep(this.pollIntervalMs);
+      }
+    };
+    try {
+      await Promise.race([reconcile(), deadline]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      controller.abort();
+    }
   }
 
   async getStatus(sandboxId: string): Promise<SandboxStatus> {
@@ -1454,6 +1537,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       'AZURE_AUTH',
     );
 
+    options.signal?.throwIfAborted();
     const url = withQuery(baseUrl, options.params);
     const okStatuses = options.okStatuses ?? [200, 201, 202, 204];
 
@@ -1482,7 +1566,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           method,
           headers,
           body: options.json !== undefined ? JSON.stringify(options.json) : options.body,
-          signal: controller?.signal,
+          signal:
+            options.signal && controller
+              ? AbortSignal.any([options.signal, controller.signal])
+              : (options.signal ?? controller?.signal),
         });
       } catch (err) {
         if (controller && isAbortError(err)) {
@@ -1672,6 +1759,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
 }
 
 interface RequestOptions {
+  signal?: AbortSignal;
   singleAttempt?: boolean;
   params?: Record<string, string | undefined>;
   headers?: Record<string, string>;

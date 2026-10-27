@@ -896,13 +896,13 @@ public struct SessionCardFinal: View {
                         Button {
                             Task { await actions.approve(pod.id, nil) }
                         } label: {
-                            Label(approveLabel, systemImage: "checkmark")
+                            Label(actions.approvalPending(pod.id) ? "Preparing approval…" : approveLabel, systemImage: "checkmark")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .tint(pod.readinessReview?.status == .ready ? .green : .orange)
-                        .disabled(pod.readinessReview?.status != .ready)
+                        .disabled(pod.readinessReview?.status != .ready || actions.approvalPending(pod.id))
                         .help(pod.readinessReview?.status == .ready
                             ? "Approve this ready pod."
                             : "Open the pod detail Readiness tab to review and approve.")
