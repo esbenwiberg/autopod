@@ -11,6 +11,7 @@ public final class ActionHandler {
 
   public private(set) var pendingAction: String?
   public private(set) var pendingApprovals: Set<String> = []
+  private var bulkApprovalPending = false
   public private(set) var lastError: String?
   /// Error from the most recent preview call, or nil on success. Separate
   /// from lastError so the series sheet doesn't pick up unrelated failures.
@@ -590,14 +591,25 @@ public final class ActionHandler {
   }
 
   public func approveAllValidated() async {
+    guard !bulkApprovalPending else { return }
+    bulkApprovalPending = true
+    // Own only new markers so bulk completion cannot clear an individual request.
+    let owned = Set(podStore.pods.filter {
+      $0.status == .validated && !pendingApprovals.contains($0.id)
+    }.map(\.id))
+    pendingApprovals.formUnion(owned)
     pendingAction = "approve-all"
+    defer {
+      bulkApprovalPending = false
+      pendingApprovals.subtract(owned)
+      if pendingAction == "approve-all" { pendingAction = nil }
+    }
     do {
       _ = try await perform { try await api.approveAllValidated() }
       try await perform { await podStore.loadSessions() }
     } catch {
       lastError = error.localizedDescription
     }
-    pendingAction = nil
   }
 
   public func killAllFailed() async {

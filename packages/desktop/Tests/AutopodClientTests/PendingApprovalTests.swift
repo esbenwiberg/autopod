@@ -30,3 +30,19 @@ func approvalCoordinatesEntryPointsAndResets(outcome: String) async throws {
     }
   }
 }
+
+@MainActor @Test func bulkApprovalMarksCardsAndPreventsRepeatedRequests() async throws {
+  try await withConfirmedActionFixture(initial: .validated) { fixture in
+    let task = fixture.start { await fixture.handler.approveAllValidated() }
+    let request = try await fixture.peer.next()
+    #expect(fixture.handler.actions.approvalPending(fixture.id))
+    await fixture.handler.approveAllValidated()
+    await fixture.handler.actions.approve(fixture.id, nil)
+    #expect(fixture.peer.requests.count == 1)
+    request.respond(status: 409, body: #"{"error":"Synthetic bulk rejection"}"#)
+    await task.value
+    #expect(!fixture.handler.actions.approvalPending(fixture.id))
+    #expect(fixture.handler.pendingAction == nil)
+    fixture.expectState(.validated)
+  }
+}
