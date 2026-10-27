@@ -1837,6 +1837,7 @@ describe('bounded retained sandbox resume', () => {
   it.each([
     { states: ['Stopped', 'Running'], locked: true, posts: 1 },
     { states: ['Stopped', 'Stopped', 'Running'], locked: true, posts: 2 },
+    { states: ['Stopped', 'Stopped', 'Running'], locked: false, posts: 1 },
     { states: ['Resuming', 'Running'], locked: false, posts: 0 },
     { states: ['Running'], locked: false, posts: 0 },
   ])(
@@ -1892,6 +1893,62 @@ describe('bounded retained sandbox resume', () => {
       expect(requests).toHaveLength(1);
     },
   );
+
+  it('retries a rejected lock only after observing stopped, then observes an accepted resume', async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, requests } = makeClient(
+        [
+          { status: 200, body: { state: 'Stopped' } },
+          { status: 409, body: { title: 'ResourceLocked' } },
+          { status: 200, body: { state: 'Stopping' } },
+          { status: 200, body: { state: 'Stopped' } },
+          { status: 202 },
+          { status: 200, body: { state: 'Stopped' } },
+          { status: 200, body: { state: 'Running' } },
+        ],
+        { pollIntervalMs: 10 },
+      );
+      const resume = client.resume('synthetic-worker');
+      await vi.runAllTimersAsync();
+      await resume;
+      expect(requests.map((r) => r.init?.method)).toEqual([
+        'GET',
+        'POST',
+        'GET',
+        'GET',
+        'POST',
+        'GET',
+        'GET',
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not POST after a timed-out observation settles late', async () => {
+    vi.useFakeTimers();
+    try {
+      let observe!: (response: Response) => void;
+      const fetch = vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            observe = resolve;
+          }),
+      );
+      const { client } = makeClient([], { fetch, resumeTimeoutMs: 50 });
+      const result = expect(client.resume('synthetic-worker')).rejects.toMatchObject({
+        code: 'SANDBOX_WAKEUP_TIMEOUT',
+      });
+      await vi.advanceTimersByTimeAsync(50);
+      await result;
+      observe(new Response(JSON.stringify({ state: 'Stopped' })));
+      await vi.runAllTimersAsync();
+      expect(fetch).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('bounds a hung HTTP call and releases the resume guard', async () => {
     vi.useFakeTimers();
