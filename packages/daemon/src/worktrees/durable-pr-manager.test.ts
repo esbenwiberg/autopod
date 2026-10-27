@@ -58,6 +58,48 @@ function fixture(db = createTestDb()) {
 }
 
 describe('durable PR delivery boundary', () => {
+  it('forwards optional ancestry verification with the provider receiver intact', async () => {
+    const f = fixture();
+    try {
+      const request = {
+        prUrl: 'https://github.com/org/repo/pull/1',
+        publishedHeadSha: 'a'.repeat(40),
+        mergedHeadSha: 'c'.repeat(40),
+        expectedTarget: {
+          repository: 'https://github.com/org/repo',
+          branch: 'feature',
+          baseBranch: 'main',
+        },
+      };
+      const proof = {
+        publishedHeadSha: request.publishedHeadSha,
+        mergedHeadSha: request.mergedHeadSha,
+        target: request.expectedTarget,
+        observedAt: new Date().toISOString(),
+      };
+      f.provider.verifyMergedSourceAncestry = vi.fn(async function (this: PrManager) {
+        expect(this).toBe(f.provider);
+        return proof;
+      });
+      const manager = requireValue(
+        createDurablePrManagerFactory(f.ledger, () => f.provider)(f.config.profile),
+      );
+      expect(await requireValue(manager.verifyMergedSourceAncestry)(request)).toEqual(proof);
+      expect(f.provider.verifyMergedSourceAncestry).toHaveBeenCalledWith(request);
+      expect(f.provider.mergePr).not.toHaveBeenCalled();
+    } finally {
+      f.db.close();
+    }
+  });
+
+  it('leaves ancestry verification unavailable for unsupported providers', () => {
+    const f = fixture();
+    try {
+      expect(f.manager.verifyMergedSourceAncestry).toBeUndefined();
+    } finally {
+      f.db.close();
+    }
+  });
   it('does not create while an unanswered earlier decision is hidden by legacy pointer drift', async () => {
     const f = fixture();
     const decision = {

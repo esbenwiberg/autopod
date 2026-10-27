@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createDeliveryFixture, pendingStatus } from '../test-utils/delivery-helpers.js';
 import { reconcileMerge } from '../worktrees/durable-merge.js';
+import { createDurablePrManagerFactory } from '../worktrees/durable-pr-manager.js';
+import { createDeliveryLedger } from './delivery-ledger.js';
 
 async function fixture() {
   const f = createDeliveryFixture(true);
+  f.prCaptured.prManagerFactory.mockImplementation((profile) =>
+    createDurablePrManagerFactory(createDeliveryLedger(f.db), () => f.provider)(profile),
+  );
   const original = await f.planMerge();
   const status = pendingStatus({
     merged: true,

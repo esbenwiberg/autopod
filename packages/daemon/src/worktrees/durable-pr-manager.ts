@@ -61,6 +61,7 @@ export function createDurablePrManagerFactory(
         return operation;
       },
       findPr: provider.findPr?.bind(provider),
+      verifyMergedSourceAncestry: provider.verifyMergedSourceAncestry?.bind(provider),
       async mergePr(config) {
         const result = await provider.mergePr(config);
         // Preserve confirmed provider disposition before the lifecycle caller
