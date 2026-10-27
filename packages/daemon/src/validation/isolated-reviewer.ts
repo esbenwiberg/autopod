@@ -42,6 +42,23 @@ export interface IsolatedReviewerOptions {
   assertAllowed(config: EffectiveLaunchConfig): Promise<void>;
 }
 
+type ReviewerStage =
+  | 'launch policy'
+  | 'provider credentials'
+  | 'network setup'
+  | 'sandbox allocation'
+  | 'runtime home setup'
+  | 'credential injection'
+  | 'reviewer launch'
+  | 'reviewer CLI'
+  | 'credential persistence';
+
+/**
+ * Headroom between the runner's deadline and the attempt deadline. Covers kill confirmation
+ * (≤5s), exit confirmation (≤5s) and reading the CLI log back out of the sandbox.
+ */
+const REVIEWER_DIAGNOSTIC_GRACE_MS = 20_000;
+
 export class IsolatedReviewer {
   constructor(private readonly options: IsolatedReviewerOptions) {}
 
@@ -155,6 +172,13 @@ export class IsolatedReviewer {
   ): ReviewerExecutor {
     return async (input) => {
       const deps = this.options;
+      const startedAt = Date.now();
+      let stage: ReviewerStage = 'launch policy';
+      const timedOut = () =>
+        new ContainerReviewerUnavailableError(
+          `Isolated reviewer timed out during ${stage} after ${Math.round((Date.now() - startedAt) / 1000)}s`,
+          { kind: 'timeout' },
+        );
       if (!['claude', 'codex'].includes(route.runtime))
         configurationError(
           'This runtime has no isolated reviewer adapter',
@@ -212,7 +236,7 @@ export class IsolatedReviewer {
         deps.assertAllowed(config),
         AbortSignal.timeout(Math.max(1, attempt.deadline - Date.now())),
       );
-      if (Date.now() >= attempt.deadline) throw new Error('Isolated reviewer timed out');
+      if (Date.now() >= attempt.deadline) throw timedOut();
       assertCurrent();
       deps.runs.reserve(id, deps.readPod(pod.id), config, route, attempt);
       let containerId: string | null = null;
@@ -234,7 +258,7 @@ export class IsolatedReviewer {
               timer = setTimeout(
                 () => {
                   expired = true;
-                  reject(new Error('Isolated reviewer timed out'));
+                  reject(timedOut());
                 },
                 Math.max(1, deadline - Date.now()),
               );
@@ -245,7 +269,7 @@ export class IsolatedReviewer {
         }
       };
       const guard = () => {
-        if (expired || Date.now() >= deadline) throw new Error('Isolated reviewer timed out');
+        if (expired || Date.now() >= deadline) throw timedOut();
         assertCurrent();
       };
       let watch: ReturnType<typeof setInterval> | undefined;
@@ -255,6 +279,7 @@ export class IsolatedReviewer {
         if (!catalog)
           configurationError('Reviewer provider is unavailable', 'REVIEWER_PROVIDER_UNAVAILABLE');
         const hosts = providerRequiredHosts(account, catalog.requiredHosts);
+        stage = 'provider credentials';
         const auth = await bounded(
           buildProviderAccountEnv(route.providerAccountId, deps.logger, {
             providerAccountStore: deps.accounts,
@@ -271,6 +296,7 @@ export class IsolatedReviewer {
               503,
             );
           networkPending = true;
+          stage = 'network setup';
           network = await bounded(
             deps.network
               .buildNetworkConfig(
@@ -305,6 +331,7 @@ export class IsolatedReviewer {
         }
         guard();
         allocationPending = true;
+        stage = 'sandbox allocation';
         containerId = await bounded(
           manager
             .spawn({
@@ -342,6 +369,7 @@ export class IsolatedReviewer {
         const allocatedContainer = containerId;
         // Azure file injection creates missing parent directories as root. Prepare runtime
         // state as the same non-root user that runs the reviewer before injecting credentials.
+        stage = 'runtime home setup';
         const home = await bounded(
           manager.execInContainer(
             allocatedContainer,
@@ -359,6 +387,7 @@ export class IsolatedReviewer {
         guard();
         if (home.exitCode !== 0) throw new Error('Cannot prepare isolated reviewer runtime home');
         // No workspace, main-account home, tool-pack, MCP, registry or source credentials are copied.
+        stage = 'credential injection';
         for (const file of [
           { path: '/run/autopod/agent-shim.sh', content: SYSTEM_CREDENTIAL_SHIM },
           ...auth.containerFiles,
@@ -380,6 +409,12 @@ export class IsolatedReviewer {
             void manager.kill(reviewerContainer).catch(() => deps.runs.cleaned(id, false));
           }
         }, 1000);
+        stage = 'reviewer launch';
+        // The runner's own deadline must fire first: only its timeout path kills the CLI and reads
+        // the staged CLI log before the sandbox is destroyed. If the outer deadline wins, the hang
+        // is recorded with no evidence of what the CLI was doing.
+        const remaining = deadline - Date.now();
+        const diagnosticGrace = Math.min(REVIEWER_DIAGNOSTIC_GRACE_MS, Math.floor(remaining / 10));
         result = await bounded(
           runContainerReviewer({
             podId: pod.id,
@@ -392,7 +427,7 @@ export class IsolatedReviewer {
             model: route.model,
             reasoningEffort: route.reasoningEffort,
             prompt: input.prompt,
-            timeout: Math.max(1, deadline - Date.now()),
+            timeout: Math.max(1, remaining - diagnosticGrace),
             outputContract: input.outputContract,
             env: auth.env,
             isolated: true,
@@ -404,11 +439,13 @@ export class IsolatedReviewer {
                 guard();
                 deps.runs.running(id);
                 dispatched = true;
+                stage = 'reviewer CLI';
               };
             },
           }),
         );
         guard();
+        stage = 'credential persistence';
         await bounded(
           persistProviderAccountCredentials(
             allocatedContainer,
@@ -436,6 +473,18 @@ export class IsolatedReviewer {
           failedUsage = error.tokenUsage;
           failureKind = error.kind;
         }
+        deps.logger.warn(
+          {
+            podId: pod.id,
+            runId: id,
+            stage,
+            dispatched,
+            elapsedMs: Date.now() - startedAt,
+            kind: failureKind,
+            message: error instanceof Error ? error.message.slice(0, 1_000) : String(error),
+          },
+          'Isolated reviewer attempt failed',
+        );
         throw error;
       } finally {
         if (watch) clearInterval(watch);

@@ -1,4 +1,4 @@
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import type { Pod } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +11,7 @@ import {
   insertConfigurationTestPod,
 } from '../test-utils/configuration-helpers.js';
 import { createMockContainerManager, createTestDb } from '../test-utils/mock-helpers.js';
+import { ContainerReviewerUnavailableError } from './container-reviewer-runner.js';
 import { IsolatedReviewer } from './isolated-reviewer.js';
 import { ReviewerRunRepository } from './reviewer-run-repository.js';
 
@@ -385,5 +386,55 @@ describe('isolated reviewer execution', () => {
     f.runs.cleaned(id, false);
     await expect(f.service.reconcile('pod', id, 'operator', 'x')).rejects.toThrow('still active');
     expect(f.manager.kill).not.toHaveBeenCalled();
+  });
+
+  it('lets the runner deadline win so a stalled CLI surfaces its staged log', async () => {
+    const f = await fixture();
+    let exit: (code: number) => void = () => {};
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    vi.mocked(f.manager.execStreaming).mockImplementation(async () => ({
+      stdout,
+      stderr,
+      exitCode: new Promise<number>((resolve) => {
+        exit = resolve;
+      }),
+      // Remote kill and log readback are network round trips in a real sandbox.
+      kill: vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        stdout.end();
+        stderr.end();
+        exit(143);
+      }),
+    }));
+    vi.mocked(f.manager.readFile).mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      return 'API Error 529 overloaded; retrying in 32s';
+    });
+
+    const error = await f.execute({ prompt: 'Review', timeout: 2_000 }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ContainerReviewerUnavailableError);
+    expect(error).toMatchObject({ kind: 'timeout' });
+    expect((error as Error).message).toMatch(/^Container reviewer timed out after \d+ms: /);
+    expect((error as Error).message).toContain('API Error 529 overloaded');
+    expect(f.db.prepare('SELECT state, failure_kind FROM isolated_reviewer_runs').get()).toEqual({
+      state: 'uncertain',
+      failure_kind: 'timeout',
+    });
+  });
+
+  it('names the stage that consumed the attempt deadline', async () => {
+    const f = await fixture();
+    vi.mocked(f.manager.writeFile).mockImplementation(() => new Promise<void>(() => {}));
+
+    const error = await f.execute({ prompt: 'Review', timeout: 200 }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ContainerReviewerUnavailableError);
+    expect(error).toMatchObject({ kind: 'timeout' });
+    expect((error as Error).message).toMatch(
+      /^Isolated reviewer timed out during credential injection after \d+s$/,
+    );
+    expect(f.manager.execStreaming).not.toHaveBeenCalled();
   });
 });
