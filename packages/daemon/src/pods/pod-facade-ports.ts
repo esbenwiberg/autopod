@@ -62,7 +62,7 @@ export interface PodFacadeOwners {
   >;
   continuationControls: Pick<
     ReturnType<typeof createContinuationControls>,
-    'resumeNativeGoal' | 'assertCanRework' | 'resumePod'
+    'resumeNativeGoal' | 'assertCanRework' | 'assertCanRetryValidation' | 'resumePod'
   >;
   processWorkflow: Pick<ReturnType<typeof createAgentProcessWorkflow>, 'processPod'>;
   agentEventConsumption: Pick<ReturnType<typeof createAgentEventConsumption>, 'consumeAgentEvents'>;

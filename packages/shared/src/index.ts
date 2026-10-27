@@ -1,5 +1,10 @@
 // Types
 export type {
+  ValidationRecoveryAction,
+  ValidationRecoveryAvailability,
+  ValidationRecoveryState,
+} from './types/validation-recovery.js';
+export type {
   UnverifiedTaskRun,
   TerminationReconciliationReceipt,
   TerminationReconciliationState,

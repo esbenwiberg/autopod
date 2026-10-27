@@ -443,6 +443,14 @@ public actor DaemonAPI {
     try await request("POST", "/pods/\(id)/retry-authorizations", body: encode(input))
   }
 
+  public func getValidationRecovery(_ id: String) async throws -> ValidationRecoveryState {
+    try await request("GET", "/pods/\(id)/validation-recovery")
+  }
+
+  public func requestValidationRecovery(_ id: String, input: ValidationRecoveryRequest) async throws {
+    let _: OkResponse = try await request("POST", "/pods/\(id)/validation-recovery", body: encode(input))
+  }
+
   public func resumePod(_ id: String) async throws -> ResumeResponse {
     try await request("POST", "/pods/\(id)/resume")
   }

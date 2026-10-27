@@ -11,6 +11,10 @@ import type {
 import { sandboxStartupRetryInput } from './sandbox-startup-admission.js';
 import { isReviewInfrastructureOnlyFailure } from './validation-infrastructure.js';
 import {
+  assertFailedValidationRecoverable,
+  assertValidationExecutionSettled,
+} from './validation-recovery-policy.js';
+import {
   WORKER_RETRY_BACKOFFS_MS,
   unavailableWorkerInputs,
   workerBindingHash,
@@ -108,9 +112,38 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
     });
   }
 
+  function assertCanRetryValidation(podId: string): void {
+    assertExecutionTerminationVerified(podId);
+    assertGuidanceCollected(podId);
+    const pod = podRepo.getOrThrow(podId);
+    assertFailedValidationRecoverable(pod);
+    if (!pod.containerId)
+      throw new AutopodError(
+        'Retained validation resource is unavailable. Restore it or request Fix validation.',
+        'VALIDATION_RESOURCE_UNAVAILABLE',
+        409,
+      );
+    if (podRepo.taskExecutions?.hasActiveRun(podId))
+      throw new AutopodError(
+        'A worker is still settling; wait for its recorded termination.',
+        'TASK_AGENT_RUN_ACTIVE',
+        409,
+      );
+    if (deps.launchConfiguration?.read(podId)?.intent === 'goal') {
+      const goal = deps.launchConfiguration.goals?.get(podId);
+      if (goal?.state !== 'achieved' || !goal.executionStopped)
+        throw new AutopodError(
+          'Use the revision-bound native Goal controls.',
+          'GOAL_NATIVE_RESUME_REQUIRED',
+          409,
+        );
+    }
+  }
+
   function assertCanRework(podId: string): void {
     assertExecutionTerminationVerified(podId);
     const pod = podRepo.getOrThrow(podId);
+    assertValidationExecutionSettled(pod);
     if (deps.launchConfiguration?.read(podId)?.intent === 'goal') {
       const goal = deps.launchConfiguration.goals?.get(podId);
       if (goal?.state !== 'achieved' || !goal.executionStopped)
@@ -408,5 +441,5 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
     return { action: 'revalidate' };
   }
 
-  return { resumeNativeGoal, assertCanRework, resumePod };
+  return { resumeNativeGoal, assertCanRework, assertCanRetryValidation, resumePod };
 }

@@ -624,14 +624,21 @@ public struct ValidationTab: View {
     Group {
       if redesign {
         VStack(spacing: 0) {
-            HStack {
-              Text("Validation").font(.title3.weight(.semibold))
-              Spacer(minLength: 12)
-              headerView.fixedSize(horizontal: true, vertical: false)
+            ViewThatFits(in: .horizontal) {
+              HStack {
+                Text("Validation").font(.title3.weight(.semibold))
+                Spacer(minLength: 12)
+                headerView.fixedSize(horizontal: true, vertical: false)
+              }
+              VStack(alignment: .leading, spacing: 10) {
+                Text("Validation").font(.title3.weight(.semibold))
+                headerView
+              }
             }.padding(.horizontal, 20).padding(.vertical, 14)
             Divider()
             ScrollView {
               VStack(alignment: .leading, spacing: 20) {
+                recoveryControls
                 validationSummaryPanel
                 desktopPhaseNavigation
                 phaseDetailPanel.frame(maxWidth: .infinity, alignment: .leading)
@@ -654,6 +661,7 @@ public struct ValidationTab: View {
 
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {
+          recoveryControls
           validationSummaryPanel
           phaseDetailPanel
         }
@@ -843,12 +851,13 @@ public struct ValidationTab: View {
                 Text("Approving…").lineLimit(1)
               }
             } else {
-              Label("Force Approve", systemImage: "checkmark.seal.fill").lineLimit(1)
+              Label("Override validation…", systemImage: "exclamationmark.shield").lineLimit(1)
             }
           }
           .buttonStyle(.bordered)
           .controlSize(.small)
-          .tint(.green)
+          .tint(.orange)
+          .foregroundStyle(.orange)
           .disabled(isForceApproving)
           .popover(isPresented: $showForceApprovePopover) {
             forceApprovePopover
@@ -862,6 +871,15 @@ public struct ValidationTab: View {
         .font(.caption)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
+  @ViewBuilder
+  private var recoveryControls: some View {
+    if selectedHistory == nil && (pod.status == .failed || pod.status == .reviewRequired) {
+      ValidationRecoveryControls(podId: pod.id, status: pod.status.rawValue, actions: actions)
+        // A selection/daemon change must not retain another pod's request controller.
+        .id("\(actions.retryDraftScope).\(pod.id)")
     }
   }
 
@@ -944,7 +962,7 @@ public struct ValidationTab: View {
         .font(.caption)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
-      TextField("Reason (optional)", text: $forceApproveReason).textFieldStyle(.roundedBorder)
+      TextField("Reason (required)", text: $forceApproveReason).textFieldStyle(.roundedBorder)
       HStack {
         Button("Cancel") { showForceApprovePopover = false }
           .buttonStyle(.plain).foregroundStyle(.secondary)
@@ -961,7 +979,8 @@ public struct ValidationTab: View {
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.small)
-        .tint(.green)
+        .tint(.orange)
+        .disabled(forceApproveReason.trimmingCharacters(in: .whitespacesAndNewlines).count < 10)
       }
     }
     .padding(16)
@@ -1112,6 +1131,10 @@ public struct ValidationTab: View {
         .compactMap { $0 }.joined(separator: " ")
     }
     if let failed = displayedPhases.first(where: { phaseStatus($0) == .failed }) {
+      if failed == .lint, let output = progress?.lintOutput ?? displayedChecks?.lintOutput,
+         let summary = validationFailureSummary(output) {
+        return [summary, contractSummary].compactMap { $0 }.joined(separator: "\n")
+      }
       return [failed.displayName + " failed.", contractSummary].compactMap { $0 }.joined(separator: " ")
     }
     if let pending = displayedPhases.first(where: { phaseStatus($0) == .pendingHuman }) {
@@ -1289,7 +1312,15 @@ public struct ValidationTab: View {
           .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
       }
       if let output, !output.isEmpty {
-        outputBlock(title: "Lint Output", text: output, expanded: $expandedLintOutput, color: status.color)
+        if status == .failed, let summary = validationFailureSummary(output) {
+          Text(summary)
+            .font(.system(.callout, design: .monospaced))
+            .foregroundStyle(.red)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+        }
+        outputBlock(title: "Lint Output", text: output, expanded: $expandedLintOutput, color: .secondary)
       }
     }
   }
