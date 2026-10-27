@@ -7,6 +7,7 @@ import {
 } from '@autopod/shared';
 import { DefaultAzureCredential } from '@azure/identity';
 import type { Logger } from 'pino';
+import { isObservedExitCode } from './exec-exit-evidence.js';
 import { SandboxInfrastructureError } from './sandbox-api-client.js';
 import type {
   CreateSandboxOptions,
@@ -439,7 +440,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       response = await this.requestData<ExecResponse>(
         'POST',
         `${this.sandboxPath(sandboxId)}/executeShellCommand`,
-        { json: body, timeoutMs: options?.timeoutMs },
+        { json: body, timeoutMs: options?.timeoutMs, singleAttempt: options?.singleAttempt },
       );
     } catch (err) {
       // A lost response cannot establish whether this command ran remotely.
@@ -549,11 +550,11 @@ export class AzureSandboxApiClient implements SandboxApiClient {
             wake();
             return;
           }
-          const termination = await this.exec(sandboxId, [
-            'sh',
-            '-c',
-            terminatePidFileScript(pidPath),
-          ]);
+          const termination = await this.exec(
+            sandboxId,
+            ['sh', '-c', terminatePidFileScript(pidPath)],
+            { timeoutMs: 5_000, singleAttempt: true },
+          );
           if (termination.exitCode !== 0) {
             throw new AutopodError(
               `Remote sandbox exec termination was not verified (exit ${termination.exitCode})`,
@@ -587,18 +588,18 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     let inputBytes = 0;
     let inputWrites = Promise.resolve();
 
+    let timeoutFailure: AutopodError | null = null;
     const timeoutTimer = options?.timeoutMs
       ? setTimeout(() => {
-          fail(
-            new AutopodError(
-              `Sandbox streaming exec on ${sandboxId} timed out after ${options.timeoutMs}ms`,
-              'AZURE_SANDBOX_TIMEOUT',
-              504,
-            ),
+          if (failure || exitReceived || closed) return;
+          timeoutFailure = new AutopodError(
+            `Sandbox streaming exec on ${sandboxId} timed out after ${options.timeoutMs}ms`,
+            'AZURE_SANDBOX_TIMEOUT',
+            504,
           );
-          void cancelRemote().catch((err) => {
-            this.logger.warn({ err, sandboxId }, 'Failed to terminate timed-out sandbox exec');
-          });
+          // Wake the consumer first, but settle bounded cleanup in its catch
+          // before reporting the timeout. Never equate socket close with exit.
+          fail(timeoutFailure);
         }, options.timeoutMs)
       : null;
 
@@ -661,8 +662,12 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           const text = Buffer.from(frame.data ?? '', 'base64').toString('utf-8');
           queue.push(frame.type === 'stdout' ? { stdout: text } : { stderr: text });
         } else if (frame.type === 'exit_code') {
+          if (!isObservedExitCode(frame.exitCode)) {
+            fail(new Error('Sandbox exec received an invalid exit code'));
+            return;
+          }
           exitReceived = true;
-          queue.push({ exitCode: Number(frame.exitCode ?? 0) });
+          queue.push({ exitCode: frame.exitCode });
           socket.close();
         } else if (frame.type === 'error') {
           fail(
@@ -705,6 +710,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       while (true) {
         const chunk = queue.shift();
         if (chunk) {
+          if (timeoutFailure && chunk.exitCode !== undefined) throw timeoutFailure;
           if (identity && chunk.exitCode !== undefined) {
             const code = sandboxGoalExit(
               identity,
@@ -715,7 +721,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
             return;
           }
           yield chunk;
-          if (chunk.exitCode !== undefined) return;
+          if (chunk.exitCode !== undefined) {
+            if (timeoutFailure) throw timeoutFailure;
+            return;
+          }
           continue;
         }
         if (failure) throw failure;
@@ -725,6 +734,19 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         });
       }
     } catch (error) {
+      if (timeoutFailure) {
+        let cleanup: 'confirmed' | 'failed' = 'failed';
+        try {
+          await cancelRemote();
+          cleanup = 'confirmed';
+        } catch (err) {
+          this.logger.warn({ err, sandboxId }, 'Failed to terminate timed-out sandbox exec');
+        }
+        Object.assign(timeoutFailure, {
+          execution: { cause: 'timeout', timeoutMs: options?.timeoutMs, cleanup },
+        });
+        throw timeoutFailure;
+      }
       if (!identity || !failure || exitReceived) throw error;
       // Losing the RPC transport must stop this owned process. Only its private
       // supervisor receipt can turn transport uncertainty into an observed exit.
@@ -1762,7 +1784,10 @@ function streamExecScript(command: string[], cwd?: string): string {
     '  exec env AUTOPOD_STREAM_SESSION=1 setsid -w "$0"',
     'fi',
     'umask 077',
-    'echo $$ > "$0.pid"',
+    'stat=$(cat /proc/$$/stat) || exit 1',
+    'rest=${stat##*) }; set -- $rest',
+    'start=$(printf \'%s\' "${20}")',
+    'printf \'%s %s\\n\' "$$" "$start" > "$0.pid"',
   ]);
 }
 
@@ -1786,18 +1811,24 @@ function sandboxRuntimeUserScript(scriptBody: string, prelude: string[] = []): s
   ].join('\n');
 }
 
-function terminatePidFileScript(pidPath: string): string {
+export function terminatePidFileScript(pidPath: string): string {
   return [
     `pid_file=${shellQuote(pidPath)}`,
     '[ -s "$pid_file" ] || exit 1',
-    'pid=$(cat "$pid_file")',
+    'read -r pid start < "$pid_file" || exit 1',
+    'case "$start" in *[!0-9]*|"") exit 1;; esac',
     'case "$pid" in *[!0-9]*|"") exit 1;; esac',
+    '[ "$pid" -gt 1 ] || exit 1',
     '[ -d /proc/1 ] || exit 1',
     'group_alive() { for stat_file in /proc/[0-9]*/stat; do [ -r "$stat_file" ] || continue; stat=$(cat "$stat_file") || return 0; rest=${stat##*) }; set -- $rest; [ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0; done; return 1; }',
+    // A stale PID receipt must never signal an unrelated reused process group.
+    'stat=$(cat /proc/"$pid"/stat) || exit 1',
+    'rest=${stat##*) }; set -- $rest',
+    '[ "$3" = "$pid" ] && [ "${20}" = "$start" ] || exit 1',
     'kill -TERM -"$pid" 2>/dev/null || true',
     'i=0',
     'while group_alive && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
-    'kill -KILL -"$pid" 2>/dev/null || true',
+    'if group_alive; then kill -KILL -"$pid" 2>/dev/null || true; fi',
     'i=0',
     'while group_alive && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
     'group_alive && exit 1',

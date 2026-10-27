@@ -20,6 +20,10 @@ export function isValidationInfrastructureOnlyFailure(result: ValidationResult):
 export function validationInfrastructureFailureLabel(result: ValidationResult): string {
   const failure = result.infrastructureFailure;
   if (!failure) return 'Validation infrastructure failure';
+  if (failure.execution?.cause === 'timeout') {
+    const budget = failure.execution.timeoutMs;
+    return `Validation timed out${budget === undefined ? '' : ` after ${budget / 1_000}s`} during ${failure.phase}; cleanup ${failure.execution.cleanup}; automatic retry blocked`;
+  }
   return `Validation infrastructure failure during ${failure.phase}`;
 }
 

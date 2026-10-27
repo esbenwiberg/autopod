@@ -1104,7 +1104,7 @@ public struct ValidationTab: View {
     }
     if let failure = displayedChecks?.infrastructureFailure {
       let phase = ValidationPhase(rawValue: failure.phase)?.displayName ?? failure.phase
-      return ["\(phase) could not run because validation infrastructure failed.", contractSummary]
+      return ["\(phase): \(failure.executionSummary)", contractSummary]
         .compactMap { $0 }.joined(separator: " ")
     }
     if let reviewInfrastructureSummary {
@@ -1255,7 +1255,7 @@ public struct ValidationTab: View {
         status: status,
         passLabel: "All tests passed",
         failLabel: displayedChecks?.infrastructureFailure?.phase == ValidationPhase.test.rawValue
-          ? "Tests could not run — validation infrastructure failed"
+          ? "Tests did not complete — inspect output and recovery details"
           : "Tests failed",
                      skipLabel: setupFailed
                        ? "Setup failed — tests skipped"

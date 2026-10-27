@@ -53,19 +53,40 @@ public struct ScreenshotRefResponse: Codable, Sendable, Hashable {
 
 // MARK: - Validation result (mirrors packages/shared/src/types/validation.ts)
 
+public struct ValidationExecutionInterruptionResponse: Codable, Sendable {
+  public let cause: String
+  public let timeoutMs: Int?
+  public let cleanup: String
+}
+
 public struct ValidationInfrastructureFailureResponse: Codable, Sendable {
   public let phase: String
   public let code: String
   public let statusCode: Int?
   public let message: String
   public let retryable: Bool
+  public let execution: ValidationExecutionInterruptionResponse?
 
-  public init(phase: String, code: String, statusCode: Int?, message: String, retryable: Bool) {
+  public init(phase: String, code: String, statusCode: Int?, message: String, retryable: Bool, execution: ValidationExecutionInterruptionResponse? = nil) {
     self.phase = phase
     self.code = code
     self.statusCode = statusCode
     self.message = message
     self.retryable = retryable
+    self.execution = execution
+  }
+
+  public var executionSummary: String {
+    guard let execution else {
+      return "Validation did not complete. " + message
+    }
+    let cause = execution.cause == "timeout"
+      ? "Timed out after \(Double(execution.timeoutMs ?? 0) / 1000) seconds."
+      : "Execution cancelled."
+    let cleanup = execution.cleanup == "confirmed"
+      ? "Owned process cleanup confirmed; command outcome remains unverified."
+      : "Cleanup \(execution.cleanup); termination must be reconciled."
+    return "\(cause) \(cleanup) Automatic retry blocked. Preserve and inspect partial test output before explicit validation Resume."
   }
 }
 

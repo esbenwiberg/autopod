@@ -27,6 +27,7 @@ import {
 } from '@autopod/shared';
 import { generateValidationScript, parsePageResults } from '@autopod/validator';
 import type { Logger } from 'pino';
+import { ExecExitUnverifiedError } from '../containers/exec-exit-evidence.js';
 import type { ContainerManager, ExecOptions } from '../interfaces/container-manager.js';
 import { REVIEW_RETRY_BLOCKED } from '../interfaces/reviewer-executor.js';
 import type {
@@ -1771,7 +1772,7 @@ async function runTests(
     if (infrastructureFailure) {
       log?.warn(
         { err, duration, infrastructureFailure },
-        'test command could not run because validation infrastructure failed',
+        'test command did not complete because validation infrastructure failed',
       );
       return {
         status: 'skip',
@@ -1948,6 +1949,9 @@ function classifyValidationInfrastructureFailure(
       statusCode: error.statusCode,
       message: error.message,
       retryable: false,
+      ...(error instanceof ExecExitUnverifiedError && error.execution
+        ? { execution: error.execution }
+        : {}),
     };
   }
 

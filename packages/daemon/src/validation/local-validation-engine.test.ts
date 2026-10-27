@@ -6,6 +6,7 @@ import { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import { AutopodError, parseSpecContract } from '@autopod/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ExecExitUnverifiedError } from '../containers/exec-exit-evidence.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type {
   ValidationEngineConfig,
@@ -3021,6 +3022,41 @@ human_review: []
     expect(result.test?.status).toBe('skip');
     expect(result.test?.stdout).toContain('last test: preserves artifacts');
     expect(result.test?.stdout).toContain('connection closed before exit');
+    expect(cm.execStreaming).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains failed test output and explicit timeout cleanup evidence without retry', async () => {
+    const cm = stubContainerManager();
+    const exitCode = Promise.reject(
+      new ExecExitUnverifiedError({
+        cause: 'timeout',
+        timeoutMs: 600_000,
+        cleanup: 'failed',
+      }),
+    );
+    void exitCode.catch(() => {});
+    vi.mocked(cm.execStreaming).mockResolvedValue({
+      stdout: Readable.from(['FAIL real test assertion\n']),
+      stderr: Readable.from(['assertion expected true, received false\n']),
+      exitCode,
+      kill: vi.fn(),
+    });
+    const result = await createLocalValidationEngine(cm).validate(
+      baseConfig({
+        executionTarget: 'sandbox',
+        testCommand: 'test',
+        startCommand: '',
+        smokePages: [],
+      }),
+    );
+    expect(result.overall).toBe('fail');
+    expect(result.infrastructureFailure).toMatchObject({
+      retryable: false,
+      execution: { cause: 'timeout', timeoutMs: 600_000, cleanup: 'failed' },
+    });
+    expect(result.test?.stdout).toContain('FAIL real test assertion');
+    expect(result.test?.stdout).toContain('assertion expected true, received false');
+    expect(result.test?.duration).toBeGreaterThanOrEqual(0);
     expect(cm.execStreaming).toHaveBeenCalledTimes(1);
   });
 

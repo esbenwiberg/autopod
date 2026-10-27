@@ -846,6 +846,37 @@ describe('validation execution durable effects', () => {
     }
   });
 
+  it.each(['confirmed', 'failed', 'unverified'] as const)(
+    'durably blocks repeated timeout after %s cleanup',
+    async (cleanup) => {
+      const f = fixture();
+      try {
+        const failed: ValidationResult = {
+          ...result('infra'),
+          test: { status: 'skip', duration: 600751, stdout: 'FAIL real test' },
+          infrastructureFailure: {
+            phase: 'test',
+            code: 'EXEC_EXIT_UNVERIFIED',
+            retryable: false,
+            message: 'Timeout; command exit is unverified',
+            execution: { cause: 'timeout', timeoutMs: 600_000, cleanup },
+          },
+        };
+        f.engine.mockResolvedValueOnce(failed);
+        expect(await f.run()).toBe(failed);
+        await expect(f.run()).rejects.toBeInstanceOf(TaskRetryBlockedError);
+        expect(f.engine).toHaveBeenCalledOnce();
+        expect(f.reopen().state).toMatchObject({
+          admissionCount: 1,
+          executedCount: 1,
+          latest: { outcome: 'nonretryable' },
+        });
+      } finally {
+        f.close();
+      }
+    },
+  );
+
   it('retains the invocation ledger reference when its repository property changes during execution', async () => {
     const f = fixture();
     try {

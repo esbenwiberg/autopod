@@ -833,7 +833,10 @@ describe('AzureSandboxApiClient', () => {
         '  exec env AUTOPOD_STREAM_SESSION=1 setsid -w "$0"',
         'fi',
         'umask 077',
-        'echo $$ > "$0.pid"',
+        'stat=$(cat /proc/$$/stat) || exit 1',
+        'rest=${stat##*) }; set -- $rest',
+        'start=$(printf \'%s\' "${20}")',
+        'printf \'%s %s\\n\' "$$" "$start" > "$0.pid"',
         'if [ "$(id -u)" = "0" ]; then',
         "  exec env HOME=/home/autopod USER=autopod LOGNAME=autopod su -m -s /bin/sh autopod -c 'cd /workspace || exit 1\nexec echo hello'",
         'fi',
@@ -972,12 +975,50 @@ describe('AzureSandboxApiClient', () => {
           // No output is expected before timeout.
         }
       })(),
-    ).rejects.toThrow(/timed out/);
+    ).rejects.toMatchObject({
+      code: 'AZURE_SANDBOX_TIMEOUT',
+      execution: { cause: 'timeout', timeoutMs: 1, cleanup: 'confirmed' },
+    });
 
     expect(sockets[0]?.closed).toBe(true);
     const killBody = JSON.stringify(jsonBody(requests[2] ?? failRequest()));
     expect(killBody).toContain('kill -TERM');
     expect(killBody).toContain('kill -KILL');
+  });
+
+  it('reports timeout cleanup failure without claiming an observed exit', async () => {
+    const { client } = makeStreamingClient(
+      (socket) => socket.onopen?.({}),
+      [
+        ...STREAM_SETUP_RESPONSES,
+        { status: 409, body: { message: 'Concurrent exec unsupported' } },
+      ],
+    );
+    const chunks: SandboxExecChunk[] = [];
+    await expect(
+      (async () => {
+        for await (const chunk of client.execStream('sbx-1', ['test'], { timeoutMs: 1 }))
+          chunks.push(chunk);
+      })(),
+    ).rejects.toMatchObject({
+      code: 'AZURE_SANDBOX_TIMEOUT',
+      execution: { cause: 'timeout', cleanup: 'failed' },
+    });
+    expect(chunks.some((chunk) => chunk.exitCode !== undefined)).toBe(false);
+  });
+
+  it('does not accept an exit frame with a missing exit code as success', async () => {
+    const { client } = makeStreamingClient((socket) => {
+      socket.onopen?.({});
+      socket.onmessage?.({ data: JSON.stringify({ type: 'exit_code' }) });
+    }, STREAM_SETUP_RESPONSES);
+    await expect(
+      (async () => {
+        for await (const _chunk of client.execStream('sbx-1', ['test'])) {
+          /* drain */
+        }
+      })(),
+    ).rejects.toThrow('invalid exit code');
   });
 
   it('fails the exec stream when the socket closes before an exit code', async () => {
