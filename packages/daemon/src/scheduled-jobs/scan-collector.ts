@@ -57,7 +57,7 @@ async function secretVersion(): Promise<string> {
   return versions.join(';');
 }
 
-/** Reads exact Git objects. No fallback refs, always-scan expansion, checkout scripts or agent. */
+/** Reads immutable Git objects only; never executes repository scripts. */
 export async function collectScheduledScan(
   workdir: string,
   repository: string,
@@ -65,7 +65,9 @@ export async function collectScheduledScan(
   deps: ScheduledCollectorDeps = {},
   asOf = new Date().toISOString(),
 ): Promise<ScheduledScanCollection> {
+  const currentTree = policy.scope !== 'delta';
   const result: ScheduledScanCollection = {
+    scope: currentTree ? 'current_tree' : 'delta',
     version: 1,
     repository,
     baseSha: null,
@@ -78,8 +80,11 @@ export async function collectScheduledScan(
   };
   const git = async (...args: string[]) =>
     (await exec('git', args, { cwd: workdir, timeout: 15000, maxBuffer: 2 * 1024 * 1024 })).stdout;
+  let totalBytes = 0;
   const blob = async (sha: string, path: string) => {
     const content = await git('cat-file', 'blob', `${sha}:${path}`);
+    totalBytes += Buffer.byteLength(content);
+    if (totalBytes > 32 * 1024 * 1024) throw new Error('Total content budget exceeded');
     if (Buffer.byteLength(content) > 2 * 1024 * 1024 || content.includes('\0'))
       throw new Error('File exceeds supported text scope');
     return { path, content, sizeBytes: Buffer.byteLength(content) };
@@ -177,8 +182,12 @@ export async function collectScheduledScan(
         change: change === 'A' ? 'added' : change === 'D' ? 'deleted' : 'modified',
       });
     }
-    // Stack detection uses names as context only; it never adds paths to the scan.
+    // Preserve delta context independently of the explicit current-tree scan scope.
     const names = (await git('ls-tree', '-r', '--name-only', '-z', result.headSha)).split('\0');
+    if (currentTree) {
+      result.scannedPaths = names.filter(Boolean);
+      if (result.scannedPaths.length > 10000) throw new Error('Tree path budget exceeded');
+    }
     result.stacks = [
       ...new Set(
         names.flatMap((name) =>
@@ -194,11 +203,11 @@ export async function collectScheduledScan(
     ].sort();
   } catch {
     result.diagnostics.push(
-      'Exact delta enumeration unavailable; no fallback or wider scope was scanned.',
+      'Exact scan scope enumeration unavailable or exceeded resource limits; no clean result is available.',
     );
     return result;
   }
-  if (!result.files.length) {
+  if (!currentTree && !result.files.length) {
     result.scanners = policy.scanners.map((scanner) => ({
       scanner,
       version: null,
@@ -208,6 +217,25 @@ export async function collectScheduledScan(
     return result;
   }
   const deadline = Date.now() + 60000;
+  const scanFiles = currentTree
+    ? (result.scannedPaths ?? []).map((path) => ({ path, change: 'added' as const }))
+    : result.files;
+  const bounded = async <T>(operation: Promise<T>): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        operation,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error('Collection time budget exceeded')),
+            Math.max(1, deadline - Date.now()),
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   for (const scanner of policy.scanners) {
     const observation: ScheduledScannerResult = {
       scanner,
@@ -220,21 +248,23 @@ export async function collectScheduledScan(
     try {
       if (scanner === 'secrets') {
         const detector = deps.secrets ?? createSecretlintDetector();
-        observation.version = await (deps.secretVersion ?? secretVersion)();
+        observation.version = await bounded((deps.secretVersion ?? secretVersion)());
         if (!detector.scanWithBaselineIdentity)
           throw new Error('Detector cannot report incomplete execution');
-        await detector.warmup();
-        for (const file of result.files) {
+        await bounded(detector.warmup());
+        for (const file of scanFiles) {
           if (Date.now() >= deadline) throw new Error('Collection time budget exceeded');
           if (file.change === 'deleted') continue;
-          const current = await detector.scanWithBaselineIdentity(
-            await blob(result.headSha, file.path),
+          const current = await bounded(
+            detector.scanWithBaselineIdentity(await blob(result.headSha, file.path)),
           );
           if (!current) throw new Error('Secret scanner execution incomplete');
           const baseline =
             file.change === 'added'
               ? []
-              : await detector.scanWithBaselineIdentity(await blob(result.baseSha, file.path));
+              : await bounded(
+                  detector.scanWithBaselineIdentity(await blob(result.baseSha, file.path)),
+                );
           if (!baseline) throw new Error('Secret baseline unavailable');
           const previous = new Map<string, number>();
           for (const finding of baseline)
@@ -245,6 +275,7 @@ export async function collectScheduledScan(
               previous.set(identity, count - 1);
               continue;
             }
+            if (result.findings.length >= 1000) throw new Error('Finding budget exceeded');
             result.findings.push({
               id: hash(JSON.stringify([repository, scanner, file.path, finding.ruleId, identity])),
               scanner,
@@ -252,21 +283,21 @@ export async function collectScheduledScan(
               line: finding.line,
               ruleId: finding.ruleId ?? 'secret',
               severity: finding.severity === 'medium' ? 'moderate' : finding.severity,
-              summary: 'New secret finding [REDACTED]',
+              summary: 'Secret finding [REDACTED]',
             });
           }
         }
       } else {
-        const files = result.files.filter(
+        const files = scanFiles.filter(
           (file) =>
             file.change !== 'deleted' &&
-            /(^|\/)(package(?:-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|packages\.lock\.json|requirements\.txt|poetry\.lock)$/.test(
+            /(^|\/)(package(?:-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|packages\.lock\.json|requirements\.txt|poetry\.lock|pyproject\.toml|Pipfile(?:\.lock)?|Cargo\.(?:toml|lock)|go\.(?:mod|sum)|Gemfile(?:\.lock)?|composer\.(?:json|lock)|[^/]+\.(?:csproj|fsproj))$/.test(
               file.path,
             ),
         );
         if (!files.length) {
           observation.status = 'not_applicable';
-          observation.diagnostic = 'No dependency manifests or lockfiles in the exact delta.';
+          observation.diagnostic = 'No dependency manifests or lockfiles in the selected scope.';
           continue;
         }
         if (!deps.auditLockfile) {
@@ -281,18 +312,22 @@ export async function collectScheduledScan(
             const lock = file.path.replace(/package\.json$/, 'package-lock.json');
             if (
               file.path.endsWith('package.json') &&
-              files.some((candidate) => candidate.path === lock)
+              files.some(
+                (candidate) =>
+                  candidate.path === lock ||
+                  candidate.path === file.path.replace(/package\.json$/, 'npm-shrinkwrap.json'),
+              )
             )
               continue;
-            throw new Error('Dependency scope has no supported changed lockfile');
+            throw new Error('Dependency scope has no supported lockfile');
           }
-          const scanned = await deps.auditLockfile(
-            file.path,
-            (await blob(result.headSha, file.path)).content,
+          const scanned = await bounded(
+            deps.auditLockfile(file.path, (await blob(result.headSha, file.path)).content),
           );
           versions.add(scanned.version);
           evidence.push(scanned.evidenceHash);
-          for (const finding of scanned.findings)
+          for (const finding of scanned.findings) {
+            if (result.findings.length >= 1000) throw new Error('Finding budget exceeded');
             result.findings.push({
               id: hash(JSON.stringify([repository, scanner, file.path, finding.identity])),
               scanner,
@@ -301,6 +336,7 @@ export async function collectScheduledScan(
               severity: finding.severity,
               summary: finding.summary,
             });
+          }
         }
         observation.version = [...versions].sort().join(';');
         observation.evidenceHash = hash(JSON.stringify(evidence));
