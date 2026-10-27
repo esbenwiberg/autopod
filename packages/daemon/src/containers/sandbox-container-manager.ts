@@ -708,11 +708,11 @@ for root in sys.argv[1:]:
         if (!streamsFinalized && !stderr.destroyed && !stderr.readableEnded) {
           stderr.push(String(err instanceof Error ? err.message : err));
         }
-        if (code === undefined) throw unverifiedExecExit();
+        if (code === undefined) throw unverifiedExecExit(err, cancelled);
       } finally {
         finalizeStreams();
       }
-      if (code === undefined) throw unverifiedExecExit();
+      if (code === undefined) throw unverifiedExecExit(undefined, cancelled);
       return code;
     })();
 

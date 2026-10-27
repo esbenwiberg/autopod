@@ -968,6 +968,27 @@ describe('SandboxContainerManager', () => {
       await expect(readStream(stream.stdout)).resolves.toBe('retained output');
     });
 
+    it.each(['confirmed', 'failed'] as const)(
+      'preserves timeout cause with %s cleanup without inventing an exit',
+      async (cleanup) => {
+        const client = new StreamingFakeClient();
+        vi.spyOn(client, 'execStream').mockImplementation(async function* () {
+          yield { stdout: 'FAIL observed test case\n' };
+          throw Object.assign(new AutopodError('timed out', 'AZURE_SANDBOX_TIMEOUT', 504), {
+            execution: { cause: 'timeout', timeoutMs: 600_000, cleanup },
+          });
+        });
+        const mgr = new SandboxContainerManager(client, logger);
+        const id = await mgr.spawn(baseConfig);
+        const stream = await mgr.execStreaming(id, ['cmd']);
+        await expect(stream.exitCode).rejects.toMatchObject({
+          code: 'EXEC_EXIT_UNVERIFIED',
+          execution: { cause: 'timeout', timeoutMs: 600_000, cleanup },
+        });
+        await expect(readStream(stream.stdout)).resolves.toContain('FAIL observed test case');
+      },
+    );
+
     it('execStreaming exposes writable stdin for native streams', async () => {
       const client = new StreamingFakeClient();
       const mgr = new SandboxContainerManager(client, logger);
@@ -995,6 +1016,9 @@ describe('SandboxContainerManager', () => {
 
       await expect(output).resolves.toBe('');
       await expect(stream.exitCode).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
+      await expect(stream.exitCode).rejects.toMatchObject({
+        execution: { cause: 'cancelled', cleanup: 'unverified' },
+      });
       expect(client.cancelCalls).toBe(1);
     });
 

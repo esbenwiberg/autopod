@@ -878,3 +878,24 @@ private func decodeProfileWithAdvisoryBrowserQa(
   #expect(current.releaseSummary == "abc · modified source")
   #expect(current.backupSummary.contains("stale"))
 }
+
+@Test func validationTimeoutSummaryPreservesBudgetAndCleanup() throws {
+  let json = """
+  {"phase":"test","code":"EXEC_EXIT_UNVERIFIED","retryable":false,
+   "message":"Timeout", "execution":{"cause":"timeout","timeoutMs":600000,"cleanup":"failed"}}
+  """
+  let failure = try JSONDecoder().decode(ValidationInfrastructureFailureResponse.self, from: Data(json.utf8))
+  #expect(failure.executionSummary.contains("600.0 seconds"))
+  #expect(failure.executionSummary.contains("Cleanup failed"))
+  #expect(failure.executionSummary.contains("Automatic retry blocked"))
+  #expect(failure.executionSummary.contains("partial test output"))
+}
+
+@Test func legacyValidationInfrastructureSummaryDoesNotClaimTestsNeverRan() throws {
+  let json = """
+  {"phase":"test","code":"EXEC_EXIT_UNVERIFIED","retryable":false,"message":"Exit unknown"}
+  """
+  let failure = try JSONDecoder().decode(ValidationInfrastructureFailureResponse.self, from: Data(json.utf8))
+  #expect(failure.execution == nil)
+  #expect(failure.executionSummary == "Validation did not complete. Exit unknown")
+}

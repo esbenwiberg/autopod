@@ -54,6 +54,8 @@ export interface CreateSandboxOptions {
 }
 
 export interface SandboxExecOptions {
+  /** Cleanup must not spend the normal data-plane rejection/backoff budget. */
+  singleAttempt?: boolean;
   onProcessCreated?: (identity: NativeGoalProcessIdentity) => void;
   onProcessStarted?: (identity: NativeGoalProcessIdentity) => void;
   cwd?: string;

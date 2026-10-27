@@ -24,6 +24,15 @@ export interface ValidationInfrastructureFailure {
   message: string;
   /** Whether an explicit validation retry may succeed without changing repository code. */
   retryable: boolean;
+  /** Optional for old records. Cleanup never implies a successful test outcome. */
+  execution?: {
+    cause: 'timeout' | 'cancelled';
+    /** Milliseconds, matching the container exec budget. */
+    timeoutMs?: number;
+    cleanup: 'confirmed' | 'failed' | 'unverified';
+    /** Present only when an actual exit frame or supervisor receipt was observed. */
+    observedExitCode?: number;
+  };
 }
 
 export interface ValidationResult {
