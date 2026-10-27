@@ -30,6 +30,7 @@ import type { PodRepository } from './pod-repository.js';
 import type { createResourceNetwork } from './resource-network.js';
 import type { createResourcePreviewControls } from './resource-preview-controls.js';
 import type { createReviewerContext } from './reviewer-context.js';
+import type { createTerminationReconciliation } from './termination-reconciliation.js';
 import type { createValidationEnvironment } from './validation-environment.js';
 import type { createWorkspaceArtifactObservation } from './workspace-artifact-observation.js';
 import type { createWorkspaceBranchSync } from './workspace-branch-sync.js';
@@ -153,6 +154,7 @@ export interface PodFacadeOwners {
     'getArtifactResumeObservation'
   >;
   providerContinuation: Pick<ReturnType<typeof createProviderContinuation>, 'continueProvider'>;
+  terminationReconciliation: ReturnType<typeof createTerminationReconciliation>;
   workspaceEscapeControls: Pick<
     ReturnType<typeof createWorkspaceEscapeControls>,
     'forceComplete' | 'kickPod'

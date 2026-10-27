@@ -445,6 +445,20 @@ export class AutopodClient {
       ...(stage === 'validation' ? {} : { stage }),
     });
   }
+  async getTerminationReconciliations(
+    id: string,
+  ): Promise<import('@autopod/shared').TerminationReconciliationState> {
+    return this.request('GET', `/pods/${id}/termination-reconciliations`);
+  }
+
+  async reconcileTermination(
+    id: string,
+    runId: string,
+    reason: string,
+  ): Promise<import('@autopod/shared').TerminationReconciliationReceipt> {
+    return this.request('POST', `/pods/${id}/termination-reconciliations`, { runId, reason });
+  }
+
   async resumePod(id: string): Promise<{ ok: boolean; action: string }> {
     return this.request('POST', `/pods/${id}/resume`);
   }

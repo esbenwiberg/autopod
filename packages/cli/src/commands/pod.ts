@@ -342,6 +342,47 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       );
     });
   program
+    .command('reconcile-termination <id>')
+    .description(
+      'Inspect unsettled worker ownership; --run and --reason reconcile confirmed deletion',
+    )
+    .option('--run <id>', 'Exact recorded run ID; required with --reason')
+    .option('--reason <text>', 'Human reason for reconciliation (10–4000 characters)')
+    .option('--json', 'Output JSON')
+    .action(async (id: string, opts: { run?: string; reason?: string; json?: boolean }) => {
+      if (Boolean(opts.run) !== Boolean(opts.reason))
+        throw new Error('Apply requires both --run and --reason; omit both to inspect.');
+      const client = getClient();
+      const podId = await resolvePodId(client, id);
+      if (opts.run && opts.reason) {
+        const receipt = await client.reconcileTermination(podId, opts.run, opts.reason);
+        withJsonOutput(opts, receipt, (value) => {
+          console.log(`Reconciled run ${value.runId}: recorded sandbox confirmed deleted.`);
+          console.log('Exit code remains unknown. No worker started or retry permission granted.');
+          console.log(
+            `Inspect ap retry-state ${podId} --stage worker before requesting ap rework ${podId}.`,
+          );
+        });
+      } else {
+        const state = await client.getTerminationReconciliations(podId);
+        withJsonOutput(opts, state, (value) => {
+          for (const run of value.pending)
+            console.log(
+              `${run.runId}: owner ${run.podId}, generation ${run.generation}, sandbox ${run.resource?.containerId ?? 'ownership unavailable'}`,
+            );
+          if (!value.pending.length) console.log('No unresolved termination claims.');
+          for (const receipt of value.receipts)
+            console.log(
+              `Reconciled ${receipt.runId} for ${receipt.podId} at ${receipt.reconciledAt}: ${receipt.reason}`,
+            );
+          if (value.pending.length)
+            console.log(
+              'To reconcile, use the owner pod ID with --run <run-id> --reason <human-reason>. Only backend-confirmed deletion is accepted.',
+            );
+        });
+      }
+    });
+  program
     .command('resume <id>')
     .description(
       'Resume artifact collection, delivery or validation using the existing task budget and provider binding',

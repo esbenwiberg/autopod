@@ -397,6 +397,12 @@ export interface PodManager {
    * Updates prUrl on success. Throws if the pod is not complete or already has a PR.
    */
   retryCreatePr(podId: string): Promise<void>;
+  reconcileTermination(
+    podId: string,
+    runId: string,
+    reason: string,
+    actor: OperatorActor,
+  ): Promise<import('@autopod/shared').TerminationReconciliationReceipt>;
   /**
    * Operator escape hatch for `failed` pods: advance the pod from where it died
    * without re-running the agent. Picks the cheapest action that fits the pod's

@@ -1,4 +1,9 @@
 // Types
+export type {
+  UnverifiedTaskRun,
+  TerminationReconciliationReceipt,
+  TerminationReconciliationState,
+} from './types/termination-reconciliation.js';
 export { deploymentRequestSchema } from './schemas/deployment.schema.js';
 export type { DeploymentRequest } from './schemas/deployment.schema.js';
 export type {
