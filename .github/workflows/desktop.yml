@@ -51,9 +51,9 @@ jobs:
 
       - name: Test village renderer contract
         run: |
-          npx --no-install pnpm install --frozen-lockfile --filter autopod
+          "$PNPM_HOME/pnpm" install --frozen-lockfile --filter autopod
           node --test packages/desktop/Tests/VillageHost/*.test.mjs scripts/update-village-renderer.test.mjs
-          npx --no-install pnpm village:check
+          "$PNPM_HOME/pnpm" village:check
 
       - name: Build macOS app
         run: >-
