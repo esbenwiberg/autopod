@@ -42,6 +42,7 @@ export function createOperatorRejection(captured: OperatorRejectionCaptured) {
     }
 
     const assertRejectionCurrent = () => {
+      podRepo.sourceAdoptions?.assertAvailable(podId);
       podRepo.deletionOwnership?.assertTaskAvailable(podId);
       assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
       assertAgentContinuationCurrent(pod, pod.containerId, {

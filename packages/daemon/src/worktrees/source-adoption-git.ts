@@ -9,10 +9,32 @@ function sourceAdoptionError(message: string, code = 'SOURCE_ADOPTION_BLOCKED'):
 }
 
 export type AdoptionGit = (args: string[]) => Promise<{ stdout: string; stderr: string }>;
-export async function inspectAdoptionGit(git: AdoptionGit, branch: string) {
+export function safeAdoptionGit(run: AdoptionGit): AdoptionGit {
+  return (args) =>
+    run([
+      '--no-replace-objects',
+      '-c',
+      'core.fsmonitor=false',
+      '-c',
+      'core.hooksPath=/dev/null',
+      ...args,
+    ]);
+}
+export async function inspectAdoptionGit(run: AdoptionGit, branch: string) {
+  const git = safeAdoptionGit(run);
+  const config = (await git(['config', '--null', '--list'])).stdout.split('\0');
+  if (
+    config.some((value) => /^filter\./i.test(value) || /^core\.sparsecheckout\ntrue$/i.test(value))
+  )
+    sourceAdoptionError('Executable filters/sparse source need explicit materialization policy');
   const name = (await git(['symbolic-ref', '--short', 'HEAD'])).stdout.trim();
   const head = (await git(['rev-parse', 'HEAD'])).stdout.trim();
   const tree = (await git(['rev-parse', 'HEAD^{tree}'])).stdout.trim();
+  if (
+    /^160000 /m.test((await git(['ls-tree', '-r', 'HEAD'])).stdout) ||
+    /^160000 /m.test((await git(['ls-files', '--stage'])).stdout)
+  )
+    sourceAdoptionError('Submodules need recursive source custody');
   const dirty = (
     await git([
       'status',
@@ -48,9 +70,10 @@ export async function inspectAdoptionGit(git: AdoptionGit, branch: string) {
 }
 export async function preparePinnedAdoption(
   config: PrepareSourceAdoption,
-  git: AdoptionGit,
+  run: AdoptionGit,
   fetch: (targetRef: string) => Promise<void>,
 ): Promise<{ bundle: string; bundleHash: string; tree: string }> {
+  const git = safeAdoptionGit(run);
   config.assertCurrent();
   if (
     !/^[a-zA-Z0-9-]+$/.test(config.id) ||
@@ -101,8 +124,9 @@ export async function preparePinnedAdoption(
 }
 export async function applyPinnedAdoption(
   config: PrepareSourceAdoption,
-  git: AdoptionGit,
+  run: AdoptionGit,
 ): Promise<void> {
+  const git = safeAdoptionGit(run);
   config.assertCurrent();
   const old = await inspectAdoptionGit(git, config.branch);
   if (old.head !== config.oldHead) sourceAdoptionError('Source changed before fast-forward');

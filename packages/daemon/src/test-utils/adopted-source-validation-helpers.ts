@@ -1,3 +1,4 @@
+import type { Profile } from '@autopod/shared';
 import { vi } from 'vitest';
 import { sourcePodFingerprint } from '../pods/source-adoption-repository.js';
 import { captureValidationOwnership } from '../pods/validation-ownership.js';
@@ -68,10 +69,27 @@ export function createAdoptedSourceValidationFixture(
       tree: 'c'.repeat(40),
     },
   });
-  const generation = f.podRepo.incrementLifecycleGeneration(id);
+  const generation = journal.owned('source-checks', () =>
+    f.podRepo.incrementLifecycleGeneration(id),
+  );
   journal.advance('source-checks', 'preserved', 'applying', { generation });
   journal.advance('source-checks', 'applying', 'adopted');
   journal.advance('source-checks', 'adopted', 'checking');
+  const harness = createSourceRevalidationHarness(f, profile);
+  const run = () =>
+    journal.owned('source-checks', () =>
+      harness.workflow().revalidateAdoptedSource(id, {
+        operationId: 'source-checks',
+        verifySource: harness.verifySource,
+      }),
+    );
+  return { f, id, journal, ...harness, run };
+}
+export function createSourceRevalidationHarness(
+  f: ReturnType<typeof createOperatorFixture>,
+  profile: Profile,
+) {
+  const id = f.pod().id;
   const result = {
     ...createPassingValidationResult(id, 4),
     setup: { status: 'pass' as const, output: 'Fixture dependency preparation', duration: 1 },
@@ -143,17 +161,11 @@ export function createAdoptedSourceValidationFixture(
   const verifySource = vi.fn(async () => {});
   const live: ValidationWorkflowLiveDependencies = {};
   const workflow = () => createValidationRevalidationWorkflow(live, captured);
-  const run = () =>
-    workflow().revalidateAdoptedSource(id, { operationId: 'source-checks', verifySource });
   return {
-    f,
-    id,
-    journal,
     captured,
     verifySource,
     live,
     workflow,
-    run,
     result,
     validationRepo,
     oldReview,

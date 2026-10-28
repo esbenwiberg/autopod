@@ -139,7 +139,10 @@ export function createValidationWorkflowControls(
     assertExecutionTerminationVerified(expectedPod.id);
     let claimed = false;
     const ownership = captureValidationOwnership(expectedPod, {
-      readCurrent: () => podRepo.getOrThrow(expectedPod.id),
+      readCurrent: () => {
+        podRepo.sourceAdoptions?.assertAvailable(expectedPod.id);
+        return podRepo.getOrThrow(expectedPod.id);
+      },
       isCurrentInvocation: () =>
         !podRepo.taskExecutions?.hasUnverifiedTermination(expectedPod.id) &&
         (claimed

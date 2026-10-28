@@ -3,6 +3,11 @@ import type Database from 'better-sqlite3';
 import { sourceAdoptionError, sourceHash } from './source-adoption-identity.js';
 import type { SourceAdoptionStage, SourceAdoptionState } from './source-adoption-types.js';
 import { type SourceCommandJournal, createSourceCommandJournal } from './source-command-journal.js';
+import {
+  assertSourceAvailable,
+  assertSourceDeliveryAllowed,
+  sourceOwnerScope,
+} from './source-custody-guards.js';
 export { sourceAdoptionError, sourceHash } from './source-adoption-identity.js';
 export function sourcePodFingerprint(pod: Pod): string {
   return sourceHash([
@@ -40,6 +45,7 @@ export interface SourceAdoptionBinding {
   targetHead: string;
   /** Human-admitted, source-bound dependency preparation; executed by normal validation admission. */
   dependencySetupCommand?: string;
+  requestHash?: string;
 }
 export interface SourcePreservation {
   host: string;
@@ -79,6 +85,9 @@ export function sourceAdoptionState(row: SourceAdoptionRecord): SourceAdoptionSt
 }
 export interface SourceAdoptionRepository {
   readonly commands: SourceCommandJournal;
+  owned<T>(id: string, operation: () => T): T;
+  assertControlPlaneSettled(podId: string): void;
+  taskPodIds(podId: string): string[];
   get(id: string): SourceAdoptionRecord | null;
   list(podId: string): SourceAdoptionRecord[];
   assertAvailable(podId: string, owner?: string): void;
@@ -104,6 +113,7 @@ export interface SourceAdoptionRepository {
   ): void;
   fail(id: string, code: string): void;
   observeChecksResult(id: string, result: ValidationResult): void;
+  observePriorEvidence(id: string, pod: Pod): void;
   claimChecksInvocation(id: string, assertCurrent: () => void): void;
   retains(containerId: string): boolean;
   retainedContainerIds(): string[];
@@ -157,21 +167,51 @@ export function createSourceAdoptionRepository(db: Database.Database): SourceAdo
     db
       .prepare('INSERT INTO source_adoption_events(adoption_id,event,created_at) VALUES(?,?,?)')
       .run(id, JSON.stringify(value), new Date().toISOString());
-  const assertAvailable = (podId: string, owner?: string) => {
-    const blocked = db
-      .prepare(`SELECT id FROM source_adoptions WHERE completed_at IS NULL AND
-      (task_id=(SELECT task_id FROM task_executions WHERE pod_id=?) OR pod_id=?
-      OR json_extract(binding,'$.containerId')=(SELECT container_id FROM pods WHERE id=?)
-      OR json_extract(binding,'$.worktreePath')=(SELECT worktree_path FROM pods WHERE id=?))`)
-      .all(podId, podId, podId, podId) as { id: string }[];
-    if (blocked.some((row) => row.id !== owner))
-      sourceAdoptionError(
-        'Source adoption owns this task/resource. Observe its durable operation; do not retry another worker, validation or delivery.',
-        'SOURCE_ADOPTION_IN_PROGRESS',
-      );
-  };
+  const assertAvailable = (podId: string, owner?: string) =>
+    assertSourceAvailable(db, podId, owner);
   return {
     commands,
+    owned<T>(id: string, operation: () => T): T {
+      const row = get(id);
+      if (!row || row.stage === 'checked' || row.error)
+        sourceAdoptionError('No active source owner exists');
+      return sourceOwnerScope(db).run(id, operation);
+    },
+    taskPodIds(podId: string) {
+      return (
+        db.prepare('SELECT pod_id AS id FROM task_executions WHERE task_id=?').all(task(podId)) as {
+          id: string;
+        }[]
+      ).map((row) => row.id);
+    },
+    assertControlPlaneSettled(podId: string) {
+      const taskId = task(podId);
+      const publication = db
+        .prepare(
+          'SELECT 1 FROM source_publication_intents i LEFT JOIN source_publication_receipts r ON r.intent_id=i.id WHERE i.task_id=? AND r.intent_id IS NULL LIMIT 1',
+        )
+        .get(taskId);
+      const delivery = db
+        .prepare(
+          `SELECT 1 FROM delivery_intents WHERE task_id=? AND state IN ('creating','uncertain') LIMIT 1`,
+        )
+        .get(taskId);
+      const merge = db
+        .prepare(
+          `SELECT 1 FROM merge_intents i JOIN merge_attempts a ON a.intent_id=i.id WHERE i.task_id=? AND NOT EXISTS(SELECT 1 FROM merge_observations o WHERE o.intent_id=i.id AND o.disposition='merged') LIMIT 1`,
+        )
+        .get(taskId);
+      const competing = db
+        .prepare(
+          `SELECT 1 FROM pods p JOIN task_executions e ON e.pod_id=p.id WHERE e.task_id=? AND p.status NOT IN ('failed','review_required','validated','complete','killed','rejected') LIMIT 1`,
+        )
+        .get(taskId);
+      if (publication || delivery || merge || competing)
+        sourceAdoptionError(
+          'Original publication/PR/merge mutation requires reconciliation before source adoption; no rejected outcome is inferred.',
+          'SOURCE_DELIVERY_UNSETTLED',
+        );
+    },
     get,
     list(podId: string) {
       return (
@@ -303,6 +343,22 @@ export function createSourceAdoptionRepository(db: Database.Database): SourceAdo
       ).run(id, row.podId, row.adoptedGeneration, new Date().toISOString());
       event(id, { observation: 'checks-invocation-claimed', generation: row.adoptedGeneration });
     }),
+    observePriorEvidence(id: string, pod: Pod) {
+      const row = get(id);
+      if (
+        !row ||
+        row.stage !== 'preserved' ||
+        row.podId !== pod.id ||
+        row.binding.generation !== pod.lifecycleGeneration
+      )
+        sourceAdoptionError('Prior evidence must be captured before mutation admission');
+      event(id, {
+        observation: 'prior-evidence-before-source-invalidation',
+        validation: pod.lastValidationResult,
+        preSubmitReview: pod.preSubmitReview,
+        validationWaiver: pod.validationWaiver,
+      });
+    },
     observeChecksResult(id: string, result: ValidationResult) {
       if (!get(id)) sourceAdoptionError('Source checks observation has no original admission');
       event(id, { observation: 'unaccepted-validation-result', result });
@@ -324,7 +380,13 @@ export function createSourceAdoptionRepository(db: Database.Database): SourceAdo
       ).map((row) => row.id);
     },
     assertDeletable(podId: string) {
-      if (db.prepare('SELECT 1 FROM source_adoptions WHERE task_id=?').get(task(podId)))
+      if (
+        db
+          .prepare(
+            'SELECT 1 FROM source_adoptions WHERE pod_id=? OR task_id=(SELECT task_id FROM task_executions WHERE pod_id=?) LIMIT 1',
+          )
+          .get(podId, podId)
+      )
         sourceAdoptionError(
           'Source adoption custody retains original source/reports; cleanup has not been authorized.',
           'SOURCE_CUSTODY_HELD',
@@ -342,11 +404,7 @@ export function createSourceAdoptionRepository(db: Database.Database): SourceAdo
         );
     },
     assertDeliveryAllowed(podId: string) {
-      if (db.prepare('SELECT 1 FROM source_adoptions WHERE task_id=?').get(task(podId)))
-        sourceAdoptionError(
-          'Source adoption authorizes checks only. Publishing/merging requires a separately reviewed delivery decision; keep the original PR target and no-merge constraint.',
-          'SOURCE_ADOPTION_DELIVERY_HELD',
-        );
+      assertSourceDeliveryAllowed(db, podId);
     },
   };
 }

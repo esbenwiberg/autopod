@@ -60,7 +60,9 @@ describe('durable source adoption custody', () => {
   it('holds original data and delivery even after current pointers are cleared', () => {
     const f = fixture();
     f.claim();
-    f.f.podRepo.update(f.pod.id, { containerId: null });
+    expect(() => f.f.podRepo.update(f.pod.id, { containerId: null })).toThrow();
+    // Out-of-band legacy pointer loss is not admission to release the original resource.
+    f.f.db.prepare('UPDATE pods SET container_id=NULL WHERE id=?').run(f.pod.id);
     expect(f.repo.retains(f.binding.containerId)).toBe(true);
     expect(() => f.repo.assertDeletable(f.pod.id)).toThrow();
     expect(() => f.repo.assertDeliveryAllowed(f.pod.id)).toThrow();

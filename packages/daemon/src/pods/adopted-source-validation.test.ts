@@ -43,8 +43,10 @@ describe('source-bound checks-only revalidation', () => {
   });
   it('accepts a legitimately invalidated formerly-validated pod, not an old pass', async () => {
     const s = createAdoptedSourceValidationFixture();
-    s.f.events.transition(s.f.pod(), 'validating');
-    s.f.events.transition(s.f.pod(), 'validated');
+    s.journal.owned('source-checks', () => {
+      s.f.events.transition(s.f.pod(), 'validating');
+      s.f.events.transition(s.f.pod(), 'validated');
+    });
     await expect(s.run()).resolves.toMatchObject({ result: 'pass' });
   });
   it('does not let ordinary checks-only recovery pull advanced source after adoption custody exists', async () => {
@@ -75,7 +77,9 @@ describe('source-bound checks-only revalidation', () => {
   );
   it('refuses an old canonical pass which mutation admission did not invalidate', async () => {
     const s = createAdoptedSourceValidationFixture();
-    s.f.podRepo.update(s.id, { lastValidationResult: s.result });
+    s.journal.owned('source-checks', () =>
+      s.f.podRepo.update(s.id, { lastValidationResult: s.result }),
+    );
     await expect(s.run()).rejects.toMatchObject({ code: 'SOURCE_VALIDATION_NOT_INVALIDATED' });
     expect(s.verifySource).not.toHaveBeenCalled();
     expect(s.f.pod().lastValidationResult).toEqual(s.result);
@@ -175,8 +179,13 @@ describe('source-bound checks-only revalidation', () => {
     const run = s.run();
     const rejection = expect(run).rejects.toMatchObject({ code: 'STALE_VALIDATION_EXECUTION' });
     await vi.waitFor(() => expect(s.captured.validationEnvironmentForPod).toHaveBeenCalled());
-    s.f.podRepo.incrementLifecycleGeneration(s.id);
-    s.f.events.transition(s.f.pod(), 'failed', { failureReason: 'New owner failure' });
+    expect(() => s.f.podRepo.incrementLifecycleGeneration(s.id)).toThrow();
+    // Simulate an external/legacy replacement, not an authorized competing control.
+    s.f.db
+      .prepare(
+        "UPDATE pods SET lifecycle_generation=lifecycle_generation+1,status='failed',failure_reason='New owner failure' WHERE id=?",
+      )
+      .run(s.id);
     reject(new Error('Old credential await rejected'));
     await rejection;
     expect(s.f.pod().failureReason).toBe('New owner failure');

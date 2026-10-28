@@ -66,6 +66,7 @@ export function createContinuationContext(deps: ContinuationLiveDependencies, ca
   async function recordContinuationProvenance(pod: Pod, containerId: string): Promise<void> {
     await preflightAgentContinuation(pod, containerId, {
       containerManager: containerManagerFactory.get(pod.executionTarget),
+      assertAvailable: () => podRepo.sourceAdoptions?.assertAvailable(pod.id),
       readCurrent: () => podRepo.getOrThrow(pod.id),
       hasPendingDecision: () =>
         podRepo.hasUnansweredDecision?.(pod.id) ??

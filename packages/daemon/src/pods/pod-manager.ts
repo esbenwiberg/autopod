@@ -9,6 +9,10 @@ export {
   AGENT_SHIM_SCRIPT,
 } from './provisioning-runtime-files.js';
 import { execFile } from 'node:child_process';
+import path from 'node:path';
+import { createControlOperationRegistry } from './control-operation-registry.js';
+import { createSourceAdoptionController } from './source-adoption-controller.js';
+import { sourceAdoptionError } from './source-adoption-identity.js';
 
 import { promisify } from 'node:util';
 
@@ -1382,50 +1386,94 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityStatus,
   });
 
-  return createPodManagerFacade({
-    terminationReconciliation,
-    admissionQueries,
-    admissionResolved,
-    admissionLegacy,
-    admissionAnalysis,
-    continuationControls,
-    processWorkflow,
-    agentEventConsumption,
-    completionWorkflow,
-    operatorMessages,
-    approvalWorkflow,
-    operatorRejection,
-    operatorPause,
-    operatorControls,
-    operatorKill,
-    workspacePromotion,
-    workspaceCompletion,
-    workspaceBranchSync,
-    workspaceRecoveryCommands,
-    validationTriggerWorkflow,
-    validationRevalidationWorkflow,
-    workspaceManualFix,
-    touchHeartbeat,
-    getEffectiveReviewerConfig,
-    buildReviewerExecEnv,
-    getReviewerExecutor,
-    admissionMemory,
-    workspaceDeletion,
-    resourcePreviewControls,
-    approvalControls,
-    podRepo,
-    validationEnvironmentForPod,
-    executionForPod,
-    admissionDependents,
-    admissionSeries,
-    validationWorkflowControls,
-    fixControls,
-    resourceNetwork,
-    operatorTools,
-    retryCreatePr,
-    workspaceArtifactObservation,
-    providerContinuation,
-    workspaceEscapeControls,
-    workspaceWatchdog,
+  const controlOperations = createControlOperationRegistry((podId) => {
+    if (podRepo.sourceAdoptions?.hasCustody(podId))
+      sourceAdoptionError(
+        'Source/report custody owns this task. Use source-recovery status/actions; competing controls cannot mutate or release it.',
+        'SOURCE_CUSTODY_HELD',
+      );
   });
+  const sourceAdoption = createSourceAdoptionController({
+    podRepo,
+    worktreeManager,
+    getContainerManager: (target) => containerManagerFactory.get(target),
+    executionForPod,
+    isNativeGoal: (podId) =>
+      deps.launchConfiguration?.read(podId)?.intent === 'goal' ||
+      Boolean(deps.launchConfiguration?.goals?.get(podId)),
+    assertGuidanceCollected,
+    assertIdle: (podId) => {
+      if (
+        controlOperations.isActive(podId) ||
+        activeAgentRuns.has(podId) ||
+        validationAbortControllers.has(podId) ||
+        infrastructureResumeRuns.has(podId) ||
+        artifactResumeRuns.has(podId) ||
+        artifactCompletionRuns.has(podId) ||
+        attemptExtensionRuns.has(podId)
+      )
+        sourceAdoptionError(
+          'An original worker/validation/recovery invocation remains active',
+          'SOURCE_ORIGINAL_INVOCATION_ACTIVE',
+        );
+    },
+    revalidate: validationRevalidationWorkflow.revalidateAdoptedSource,
+    archiveRoot: path.join(
+      process.env.DATA_DIR ??
+        (process.env.DB_PATH
+          ? path.dirname(path.resolve(process.env.DB_PATH))
+          : path.join(process.cwd(), '.autopod-data')),
+      'source-adoptions',
+    ),
+    emit: emitActivityStatus,
+  });
+  return controlOperations.wrap(
+    createPodManagerFacade({
+      sourceAdoption,
+      terminationReconciliation,
+      admissionQueries,
+      admissionResolved,
+      admissionLegacy,
+      admissionAnalysis,
+      continuationControls,
+      processWorkflow,
+      agentEventConsumption,
+      completionWorkflow,
+      operatorMessages,
+      approvalWorkflow,
+      operatorRejection,
+      operatorPause,
+      operatorControls,
+      operatorKill,
+      workspacePromotion,
+      workspaceCompletion,
+      workspaceBranchSync,
+      workspaceRecoveryCommands,
+      validationTriggerWorkflow,
+      validationRevalidationWorkflow,
+      workspaceManualFix,
+      touchHeartbeat,
+      getEffectiveReviewerConfig,
+      buildReviewerExecEnv,
+      getReviewerExecutor,
+      admissionMemory,
+      workspaceDeletion,
+      resourcePreviewControls,
+      approvalControls,
+      podRepo,
+      validationEnvironmentForPod,
+      executionForPod,
+      admissionDependents,
+      admissionSeries,
+      validationWorkflowControls,
+      fixControls,
+      resourceNetwork,
+      operatorTools,
+      retryCreatePr,
+      workspaceArtifactObservation,
+      providerContinuation,
+      workspaceEscapeControls,
+      workspaceWatchdog,
+    }),
+  );
 }

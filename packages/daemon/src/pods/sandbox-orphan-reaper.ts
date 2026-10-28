@@ -150,6 +150,7 @@ export class SandboxOrphanReaper {
 
       for (const sandbox of batch) {
         if (
+          this.deps.podRepo.sourceAdoptions?.retains(sandbox.id) ||
           this.deps.podRepo.externalDeliveries?.retains(sandbox.id) ||
           this.deps.podRepo.listReferencedContainerIds().includes(sandbox.id) ||
           this.hasRecoveryOwner(sandbox)

@@ -19,8 +19,14 @@ export class AgentContinuationSupersededError extends AutopodError {
 export function assertAgentContinuationCurrent(
   pod: Pod,
   containerId: string | null,
-  deps: { readCurrent(): Pod; hasPendingDecision(): boolean; expectedStatus?: Pod['status'] },
+  deps: {
+    readCurrent(): Pod;
+    hasPendingDecision(): boolean;
+    expectedStatus?: Pod['status'];
+    assertAvailable?(): void;
+  },
 ): Pod {
+  deps.assertAvailable?.();
   const current = deps.readCurrent();
   if (
     current.lifecycleGeneration !== pod.lifecycleGeneration ||
@@ -51,12 +57,16 @@ export async function prepareRetainedAgentContinuation(
   containerId: string,
   deps: {
     containerManager: ContainerManager;
-    podRepo: Pick<PodRepository, 'getOrThrow' | 'hasUnansweredDecision' | 'taskExecutions'>;
+    podRepo: Pick<
+      PodRepository,
+      'getOrThrow' | 'hasUnansweredDecision' | 'taskExecutions' | 'sourceAdoptions'
+    >;
     resolveProfile(pod: Pod): PodExecutionSettings;
   },
 ): Promise<void> {
   const assertCurrent = () => {
     const current = assertAgentContinuationCurrent(pod, containerId, {
+      assertAvailable: () => deps.podRepo.sourceAdoptions?.assertAvailable(pod.id),
       readCurrent: () => deps.podRepo.getOrThrow(pod.id),
       hasPendingDecision: () =>
         deps.podRepo.hasUnansweredDecision?.(pod.id) ??
@@ -102,6 +112,7 @@ export async function preflightAgentContinuation(
     containerManager: ContainerManager;
     readCurrent(): Pod;
     hasPendingDecision(): boolean;
+    assertAvailable?(): void;
     resolveProfile(pod: Pod): PodExecutionSettings;
     provenance?: ExecutionProvenanceLedger;
   },

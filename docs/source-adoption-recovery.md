@@ -1,147 +1,137 @@
-# Exact-source adoption: foundation only
+# Exact-source adoption and fresh checks
 
-**Not yet an operator workflow. No HTTP/CLI operation is exposed, no current-source
-validation is certified by these helpers, and no rollout/retry is authorized.**
-The private checks-only path now uses the real revalidation workflow, but its
-source-coordinator/real-backend binding, admission/cleanup fences, authenticated
-API/CLI and supported ambiguity reconciliation remain work in progress. Do not deploy this checkpoint as a pod-recovery solution.
+**Controller, production guards, authenticated API and CLI are implemented;
+release qualification is in progress. This is not a deployment, a live-pod
+recovery receipt, or permission to bypass original execution uncertainty.**
 
-This is a bounded follow-up to retained-continuation/wakeup recovery. An advanced
-remote branch cannot be approved using an old pass, force-pushed backwards, or
-silently fast-forwarded while continuing to display historical validation.
+An advanced human-repaired branch cannot be approved using an old pass or
+force-pushed backwards. This operation preserves the old work, fast-forwards
+only the requested exact source in both workspaces, and runs fresh checks.
+**It never authorizes publication, approval, PR merge, cleanup or report release.**
 
-## Implemented building blocks
+## Supported controls (after releasing this version)
 
-- `219_source_adoptions.sql` and `source-adoption-repository.ts` provide immutable
-  task/resource/source bindings, a single unsettled task claim, immutable audit
-  events, monotonic phases and explicit human reasons. A repeated request ID
-  observes only the same binding/actor/reason; it cannot admit different work.
-- Custody/availability/delivery assertions are **library guards, not yet wired
-  into production admissions or cleanup**. Historical resources remain held in
-  this journal even after pointers change or checks succeed. There is no expiry,
-  waiver, deletion permission, grant or counter reset. Existing task accounting
-  is read, never rewritten.
-- `source-adoption-preservation.ts` captures host and retained `/workspace`
-  independently, including ignored binary reports and installed dependencies.
-  There is no exclude list. Host source/copy fingerprints must agree before and
-  after copying. Both snapshots must pass the existing generation/cycle/path/
-  content/mode receipt verification. A stale/partial copy is never published as a
-  complete snapshot. Originals are never killed or deleted by this helper.
-- Private archives require a fresh namespace disjoint from the original workspace
-  (neither ancestor nor descendant); indirect symlinks are checked before mkdir.
-  An existing archive directory is never reused/chmodded. The archive root is
-  mode0700. Container export carries ownership/abort guards across SDK awaits. Symlinks are preserved as links, **not proof that their external
-  targets were archived**. Reports outside `/workspace`, provider snapshot copies
-  and global dependency caches are not certified here. Original resource custody
-  is still necessary. Existing receipt bounds remain100,000 files/links,
-  100,000 directories and1GiB; oversized capture fails closed without exclusions.
-- `source-adoption-git.ts` and the optional `WorktreeManager` methods pin an exact
-  remote branch head in an isolated reference namespace. Production preparation
-  verifies the authenticated remote repository identity. Unexpected remote
-  movement, dirty/untracked source, hidden index flags/sparse source, submodules
-  and non-fast-forward ancestry are refused, not repaired automatically.
-- A full Git bundle preserves both old and target history and has a streamed
-  SHA256. Completed bundles are published atomically without replacing existing
-  evidence. Its references are not publication receipts. A fixture independently
-  reconstructs both trees from that bundle. Preparation never changes HEAD or
-  workspace files. Application requires matching pinned references/bundle and
-  uses a local fast-forward with hooks/autostash disabled and
-  `--no-overwrite-ignore`: it refuses ignored-report collisions rather than
-  overwriting them. There is no hard reset, clean, auto-commit, rebase, push,
-  branch retarget or provider PR merge.
+- `GET /pods/:podId/source-adoptions` reads durable operations, including failures
+  and partial application after HTTP loss or daemon restart. It does not probe,
+  wake or mutate a provider resource.
+- `POST /pods/:podId/source-adoptions` admits an explicit authenticated human
+  request: `id`, `expectedGeneration`, `oldHeadSha`, `targetHeadSha`,
+  `dependencySetupCommand`, `reason`. Repository, worktree, provider/resource and
+  actor identity come from the daemon, never caller-supplied paths/credentials.
+- `ap source-recovery <pod-id> --json` inspects. To request adoption:
 
-## Private checks integration (not an exposed recovery operation)
+  ```sh
+  ap source-recovery "$POD_ID" \
+    --request-id "$RECOVERY_ID" --generation "$ORIGINAL_GENERATION" \
+    --old-head "$ORIGINAL_FULL_SHA" --head "$REPAIRED_REMOTE_FULL_SHA" \
+    --setup 'npm ci' --reason 'Validate this exact repaired source without delivery'
+  ```
 
-`validation-revalidation-workflow.ts:revalidateAdoptedSource` accepts only a
-checking-stage durable admission with original task/resource/source bindings and
-an already-invalidated current result. It refuses native Goals, phase skips and
-waivers, requires source-bound dependency preparation, and claims one invocation
-before external awaits. Migration220 records that claim immutably: **not a
-worker start, backend dispatch, termination or usage receipt**. A second caller
-or daemon restart cannot replay it. Normal revalidation refuses existing source
-custody rather than pulling/reconciling a branch behind the source protocol.
+  Choose/retain the request ID BEFORE submitting. All six mutation flags are
+  required; no omitted SHA/epoch is guessed. A repeated identical ID observes
+  only that original request. Different input/actor conflicts. It cannot restart
+  stopped work. A lost response requires observation, not another request ID,
+  another worker, a grant, or blind replay.
 
-The private path does not pull, graft/reset/auto-commit, wake a stopped resource,
-replace a missing one, reset attempt history, consult old review batches or
-pre-submit passes, waive failures, publish source/screenshots, trigger dependent
-work or approve/merge. It calls the existing validation execution/retry machinery;
-no permission/grant or task-wide budget reset is manufactured. Setup execution
-must actually pass before an overall pass is accepted. The admitted setup command
-is immutable source-operation input (or the frozen configured command), not a
-claim that arbitrary dependencies were cryptographically certified.
+## Admission and exclusivity
 
-Ownership is rechecked after successful AND rejected awaits. The coordinator's
-real-source verifier runs before preparation/checks and after execution, and the
-actual validation invocation is rechecked again after that last asynchronous
-verification. Only then may canonical result publication happen. Returned results
-are retained as explicitly **unaccepted** observations before certification, so
-source drift cannot silently destroy execution evidence or become a current pass.
-A provider404 never clears the original resource pointer in this path. No
-controller is yet exposed that can supply this capability on a real pod.
+The coordinator checks original task-wide worker settlement and the OLD canonical
+validation execution fence before invalidation or wake. Active controls,
+validation/worker/recovery invocations, unanswered decisions, unacknowledged human
+guidance, native Goals, interactive workspaces, validation phase bypasses and
+uncertain publication/PR/merge admissions refuse adoption. **An old unconfirmed
+publication is not retrospectively declared rejected.** Such legacy delivery
+uncertainty needs separately supported evidence/reconciliation first.
 
-## Native auxiliary command custody (coordinator wiring still pending)
+Migrations219–221 bind immutable task/source/provider/resource/actor evidence,
+monotonic phases, a unique active task owner, one checks invocation and witnessed
+native command steps. The new controller composes them; it does not replace the
+existing task execution/retry/usage ledger. There is no implicit waiver, new
+retry grant, expiry or task-wide accounting reset.
 
-`source-command-journal.ts`/`source-command-runner.ts` record each fixed source
-operation step before requesting native streaming exec. Migration221 makes each
-step's admission/observations immutable and unique. Adapters must support
-recoverable exec identities; buffered exec fallback codes are not exit evidence.
-An identity is durably admitted by the adapter's before-start callback, with exact
-backend/container checks. Another pending command blocks the next step.
+A private connection-scoped async owner permits only the coordinator's epoch and
+validation metadata updates. Competing facade mutations, lifecycle updates,
+worker starts, source publication/PR/merge admissions, Kill/Delete, resource
+cleanup and both sandbox reapers honor source custody. Pre-existing facade
+controls remain visible through their external awaits, preventing a new source
+claim while they are active. Read-only status remains available. Source checks
+passing still leaves readiness risky and **delivery/report custody held**.
 
-Timeout revokes only known-unsent work; late callbacks cannot start through that
-revocation. Already-admitted work remains held, even if kill/transport fails.
-Only an observed streaming exit or deliberate exact-identity backend termination
-can settle it. A late exit is recorded against its original command, never a new
-lifecycle. Nonzero exits stay nonzero. Reconciliation does not repeat Git. Source
-custody cannot be marked checked with an unsettled auxiliary command. Output is
-bounded; truncated inspection output fails closed. These are infrastructure
-process observations, not coding-worker/token-usage receipts or retry grants.
+## Preservation and application
 
-`source-container-adoption.ts` now provides the real retained-container adapter:
-exact backend/engine/provider namespace plus fresh Running observation, fixed
-isolated Python/system-Git inspection, bounded private bundle transfer with two
-SHA256 verifications, local bundle import and FF-only application with
-`--no-overwrite-ignore`. It never resumes/replaces a resource or uses buffered
-exec. Unique command steps prevent replay after a lost result. A lost chunk
-write stops before assembly; it is not retried. Local real-Git adapter tests
-preserve binary ignored reports, reject ignored collisions and namespace changes,
-and retain old workspace receipts. These are not live Docker/Azure tests.
+1. Bind exact repository/branch/base, generation, runtime/provider/account,
+   original host/container commit and backend namespace. Docker binds the actual
+   engine plus full inspected container ID; Azure binds configured endpoint,
+   region/subscription/resource-group/group and original ID. Labels are not proof.
+2. Observe/wake ONLY the original resource through the durable wakeup protocol.
+   Unknown/deleted resources never allocate replacements. Legacy stopped Azure
+   resources with unresolved old restore/copy outcomes remain blocked.
+3. Independently archive ALL host and retained `/workspace` bytes, including
+   ignored binary reports, dependencies and Git metadata, BEFORE fetching refs.
+   Both copies must pass generation/path/content/mode receipts. Fresh private
+   archives are physically disjoint from source, mode0700, never reused/chmodded.
+   Existing bounds remain100k files/links,100k directories and1GiB per snapshot;
+   oversize or partial capture fails closed without excluding files.
+4. Fetch and pin the exact requested remote head through daemon-authenticated
+   Git, refuse unexpected movement/non-FF/dirty or hidden/sparse/submodule source,
+   and preserve old+target history in a SHA256-verified no-replace bundle.
+   System Git/interpreter isolation and pre-status filter checks prevent repository
+   imports, hooks, filters, grafts or replacement objects from falsifying identity.
+5. Atomically capture prior canonical evidence, advance the epoch once, invalidate
+   CURRENT validation/review/waiver evidence and admit mutation. Historical
+   readiness/approval and original task/run/start-commit/accounting stay intact.
+6. Apply the pinned source to both workspaces by local FF only, with
+   `--no-overwrite-ignore`, no hooks/autostash/reset/clean/rebase/auto-commit/push
+   or provider PR merge. Native command identity is admitted before start; only
+   actually observed exit settles it. A negative signal exit is known non-success,
+   not a fabricated zero or a transport sentinel. Partial success remains applying
+   and held; there is no automatic second FF or rollback.
 
-This is still not a source-adoption controller or a public action. Original
-execution/provider ownership, quiescence, atomic lifecycle invalidation, all
-competing-operation/cleanup fences, host hardening and supported reconciliation
-must be composed by that coordinator before using the adapter on real pods.
+Private bundle transfer is bounded and verified on both ends. Writes are
+single-attempt and ownership-fenced after auth. Docker tar must not widen parent
+permissions; Sandbox source chunks avoid its buffered root chmod/chown path.
+A lost chunk response stops before assembly, never retries the write. Originals
+and snapshots remain retained. A fresh isolated local Docker fixture qualified
+actual namespace/native exec/export/transfer/FF, ignored binary retention and
+15 observed native command exits; its validation engine was mocked. Azure file/
+mode behavior and actual hosted-pod validation remain unqualified.
 
-## Required before exposing it
+## Fresh source-bound validation
 
-1. Bind actual lifecycle/generation/resource namespace, physical worktree,
-   launch/provider/profile/contract,
-   branch/base/repository and both live source identities. Enforce pending
-   decisions/guidance, quiescent Git state, original worker/validation termination
-   and native-Goal restrictions before any mutation. Lease all competing admissions, pauses,
-   delivery and cleanup; labels and saved DTOs are not ownership proof.
-2. Wake only the exact retained resource through the existing durable wakeup
-   protocol. Legacy stopped resources and pre-journal unknown operations remain
-   blocked. No replacement worker, clone or speculative repeated restore.
-3. Verify complete old host/container snapshots and the bundle before changing
-   files. Atomically journal mutation admission, advance the ownership epoch and
-   invalidate canonical current validation without erasing historical results,
-   approvals, unknown usage or task-wide retry/budget history.
-4. Apply only the requested pinned source to both workspaces. Journal container
-   mutation dispatch/observed exit. Lost transport or crash during application
-   keeps custody and requires observation; never blindly replay in-place writes.
-5. Admit **real** current-source checks through existing retry/execution ledgers.
-   Pin source throughout, verify configured dependency preparation and fresh
-   review, skip ordinary remote pulls/grafts/auto-commits, and verify exact clean
-   source before publishing a result. No old-pass/prior-review substitution,
-   coding worker, bypass, publication, dependent trigger, approval or merge.
-6. Preserve original PR target/no-merge instructions. A checks pass cannot release
-   delivery or report custody. A factual exact-source external delivery receipt
-   is a separate observation, not permission to merge an open PR.
-7. Provide authenticated durable status and narrowly supported reconciliation.
-   No elapsed-time lease release, fake exit/usage, implicit waiver or task-wide
-   budget reset. Implement audited report inventory/hold release separately.
+The controller calls the real private `revalidateAdoptedSource` workflow, not
+ordinary revalidate/pull/graft. It requires an already-invalidated result, exact
+source ownership and explicit dependency preparation, claims ONE invocation,
+executes full fresh checks/review and uses normal retry/execution admission.
+Setup must actually pass for an overall pass to be accepted. There is no coding
+worker, replacement/wakeup fallback, old review/pass reuse, control-plane publication,
+publication-linked advisory QA, dependent dispatch, approval or merge. Repository
+setup/check commands still execute code under the existing container credentials
+and network policy; checks-only is NOT an OS-level read-only sandbox. Do not admit
+setup scripts that themselves publish, merge or destroy work.
 
-Tests exercise the library protocol and real temporary Git/filesystem fixtures;
-they are not live Azure/Docker execution, actual pod source adoption, fresh
-validation, full dependency closure or end-to-end report-preservation evidence.
+Ownership is rechecked after successful AND rejected awaits. Clean exact
+host/container branch/head/tree AND requested remote head are verified around
+checks and before canonical result publication. Unexpected tracked/lockfile
+mutation fails closed. Returned results are retained as **unaccepted observations**
+before certification; current proof is never relabelled from historical results.
+
+## Deliberate limits and remaining recovery work
+
+- Errors/crashes/lost transport retain phase, immutable evidence and originals;
+  source/command/checks invocations do not automatically replay. A narrowly
+  authenticated phase-aware reconciliation/recheck action is NOT yet exposed.
+  Inspect status; do not edit the production DB or reuse ordinary worker recovery.
+- Symlinks are archived as links, not their external targets. Reports outside
+  `/workspace`, global caches, provider snapshot copies and complete dependency
+  closure are NOT certified. Original resources can continue billing indefinitely.
+- Verified report inventory and separately audited supported hold release remain
+  unfinished. Checks success is not archive completeness or delivery permission.
+- Existing no-merge and original PR-target constraints remain. External delivery
+  is a separate provider observation, not permission to merge an open PR or mark
+  an unrelated failed pod complete.
+- Local tests use real SQLite/Git/filesystem and observed local process exits with
+  a fake data plane/validation engine. They test orchestration, not live Azure,
+  actual hosted-pod validation, full dependency closure or recovered old reports.
+- Do not roll back to a retention-unaware binary after source custody exists.
+  Prefer a retention-aware roll-forward. Force rollout still requires normal
+  release gates and a fresh concrete interruption scope review.

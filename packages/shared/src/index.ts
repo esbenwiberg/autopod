@@ -10,6 +10,12 @@ export type {
   TerminationReconciliationReceipt,
   TerminationReconciliationState,
 } from './types/termination-reconciliation.js';
+export type {
+  SourceAdoptionRequest,
+  SourceAdoptionStage,
+  SourceAdoptionState,
+  SourceAdoptionList,
+} from './types/source-adoption.js';
 export { deploymentRequestSchema } from './schemas/deployment.schema.js';
 export type { DeploymentRequest } from './schemas/deployment.schema.js';
 export type {

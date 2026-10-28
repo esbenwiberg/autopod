@@ -56,7 +56,8 @@ export class SandboxTerminalReaper {
     const containerId = pod.containerId;
     if (
       this.deps.podRepo.externalDeliveries?.retains(containerId) ||
-      this.deps.podRepo.sandboxWakeups?.retains(containerId)
+      this.deps.podRepo.sandboxWakeups?.retains(containerId) ||
+      this.deps.podRepo.sourceAdoptions?.retains(containerId)
     )
       return;
     const generation = pod.lifecycleGeneration;
@@ -78,7 +79,8 @@ export class SandboxTerminalReaper {
       beforeDelete.executionTarget !== 'sandbox' ||
       beforeDelete.status !== status ||
       beforeDelete.pendingEscalation ||
-      this.deps.podRepo.externalDeliveries?.retains(containerId)
+      this.deps.podRepo.externalDeliveries?.retains(containerId) ||
+      this.deps.podRepo.sourceAdoptions?.retains(containerId)
     ) {
       return;
     }

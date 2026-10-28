@@ -29,6 +29,7 @@ export function createOperatorKill(
     eventBus,
   } = captured;
   async function killSession(podId: string): Promise<void> {
+    podRepo.sourceAdoptions?.assertDeletable(podId);
     podRepo.deletionOwnership?.assertTaskAvailable(podId);
     const pod = podRepo.getOrThrow(podId);
     podRepo.sandboxWakeups?.assertPodReleasable(podId);
@@ -76,6 +77,7 @@ export function createOperatorKill(
           'Failed to persist rotated credentials during kill — proceeding',
         );
         if (!ownsKillLifecycle()) return;
+        podRepo.sourceAdoptions?.assertReleasable(pod.containerId);
         podRepo.sandboxWakeups?.assertReleasable(pod.containerId);
         try {
           await cm.kill(pod.containerId);
@@ -104,6 +106,7 @@ export function createOperatorKill(
       // Cleanup worktree — always clear the DB path even if cleanup throws,
       // so a subsequent rework doesn't attempt recovery on a stale directory.
       if (pod.worktreePath) {
+        podRepo.sourceAdoptions?.assertDeletable(podId);
         podRepo.sandboxWakeups?.assertPodReleasable(podId);
         if (pod.containerId) podRepo.sandboxWakeups?.assertReleasable(pod.containerId);
         try {

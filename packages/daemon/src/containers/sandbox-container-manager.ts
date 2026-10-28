@@ -38,6 +38,7 @@ import {
   SANDBOX_OUTPUT_INVENTORY,
   extractManagedSandboxOutput,
 } from '../managed/output-extraction.js';
+import { assertSourceResourceReleasable } from '../pods/source-custody-guards.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
 import {
   CGROUP_EXECUTION_METADATA_PROBE,
@@ -168,6 +169,9 @@ export class SandboxContainerManager implements ContainerManager {
         registryCredentials: config.registryCredentials,
         resolveImageDigest: config.resolveImageDigest,
         wakeupJournal: options.wakeupJournal,
+        assertReleaseAllowed: (id) => {
+          if (options.managedDatabase) assertSourceResourceReleasable(options.managedDatabase, id);
+        },
       },
       logger,
     );
@@ -366,6 +370,7 @@ for root in sys.argv[1:]:
   }
 
   async kill(containerId: string): Promise<void> {
+    if (this.managedDatabase) assertSourceResourceReleasable(this.managedDatabase, containerId);
     try {
       await this.client.destroy(containerId);
     } catch (error) {
@@ -394,6 +399,7 @@ for root in sys.argv[1:]:
   }
 
   async stop(containerId: string): Promise<void> {
+    if (this.managedDatabase) assertSourceResourceReleasable(this.managedDatabase, containerId);
     await this.client.suspend(containerId, 'memory');
   }
 

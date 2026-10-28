@@ -62,6 +62,7 @@ import {
   type SourceAdoptionRepository,
   createSourceAdoptionRepository,
 } from './source-adoption-repository.js';
+import { assertSourceAvailable, assertSourceDeliveryAllowed } from './source-custody-guards.js';
 import {
   type SourcePublicationLedger,
   createSourcePublicationLedger,
@@ -296,6 +297,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   /** Read one live or archived pod without admitting further execution. */
   getForHistory?(id: string): Pod;
   update(id: string, changes: PodUpdates): void;
+  transaction<T>(operation: () => T): T;
   incrementLifecycleGeneration(id: string): number;
   delete(id: string): void;
   list(filters?: PodFilters): Pod[];
@@ -402,7 +404,7 @@ function readPodFromRow(row: Record<string, unknown>): PodOptions {
 }
 
 /** Map a SQLite row (snake_case) to a Pod (camelCase). */
-function rowToSession(row: Record<string, unknown>): Pod {
+function decodeSessionRow(row: Record<string, unknown>): Pod {
   // Parse profile_snapshot once so we can derive hasWebUi without a second JSON.parse.
   const profileSnapshotData: Profile | null = row.profile_snapshot
     ? (() => {
@@ -579,7 +581,7 @@ function rowToSession(row: Record<string, unknown>): Pod {
 }
 
 /** A display projection is never used for state transitions or approval decisions. */
-function rowToDisplaySession(source: Record<string, unknown>): Pod {
+function decodeDisplaySessionRow(source: Record<string, unknown>): Pod {
   const row = { ...source };
   const diagnostics: NonNullable<Pod['recordDiagnostics']> = [];
   const arrayFields = new Set([
@@ -683,14 +685,14 @@ function rowToDisplaySession(source: Record<string, unknown>): Pod {
       row.phase_token_usage = null;
     }
   }
-  return { ...rowToSession(row), recordDiagnostics: diagnostics };
+  return { ...decodeSessionRow(row), recordDiagnostics: diagnostics };
 }
 
 function rowToCostSource(row: Record<string, unknown>): PodCostSource {
   // Display decoding diagnoses corrupt siblings; reconciliation needs raw values
   // to preserve healthy costs and report unavailable phases independently.
   const rawPhases = row.phase_token_usage;
-  const pod = rowToDisplaySession(row);
+  const pod = decodeDisplaySessionRow(row);
   let phaseTokenUsage: unknown = null;
   try {
     phaseTokenUsage = rawPhases ? JSON.parse(String(rawPhases)) : null;
@@ -707,6 +709,21 @@ export function createPodRepository(db: Database.Database): PodRepository {
   const externalDeliveries = createExternalDeliveryRepository(db);
   const sandboxWakeups = createSandboxWakeupJournal(db);
   const sourceAdoptions = createSourceAdoptionRepository(db);
+  const custodyProjection = (pod: Pod): Pod =>
+    pod.readinessReview && sourceAdoptions.hasCustody(pod.id)
+      ? {
+          ...pod,
+          readinessReview: withLifecycleReadiness(
+            pod.readinessReview,
+            pod.status,
+            pod.lastValidationResult,
+            true,
+          ),
+        }
+      : pod;
+  const rowToSession = (row: Record<string, unknown>) => custodyProjection(decodeSessionRow(row));
+  const rowToDisplaySession = (row: Record<string, unknown>) =>
+    custodyProjection(decodeDisplaySessionRow(row));
   const dispatchPreflight = createDispatchPreflightLedger(db);
   const taskExecutions = createTaskExecutionLedger(db);
   const deletionOwnership = createDeletionOwnership(db);
@@ -888,6 +905,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
         disableAskHuman: pod.disableAskHuman ? 1 : 0,
       });
       taskExecutions.register(pod.id);
+      assertSourceAvailable(db, pod.id, '');
+      assertSourceDeliveryAllowed(db, pod.id);
       dispatchPreflight.registerRequest(pod.id, pod.dispatchRepository);
       if (pod.intentionalRerun)
         dispatchPreflight.registerRerun(
@@ -925,6 +944,44 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     update(id: string, changes: PodUpdates): void {
+      if (
+        [
+          'containerId',
+          'executionTarget',
+          'worktreePath',
+          'task',
+          'runtime',
+          'model',
+          'branch',
+          'baseBranch',
+          'profileSnapshot',
+          'options',
+          'contract',
+          'startCommitSha',
+          'launchConfigDigest',
+          'providerIdSnapshot',
+          'providerAccountIdSnapshot',
+        ].some((field) => Object.hasOwn(changes, field))
+      )
+        assertSourceAvailable(db, id, '');
+      if (
+        [
+          'status',
+          'lastValidationResult',
+          'preSubmitReview',
+          'failureReason',
+          'worktreeCompromised',
+          'lastValidatedCommitSha',
+          'validationAttempts',
+          'maxValidationAttempts',
+          'skipValidation',
+          'validationWaiver',
+          'readinessReview',
+          'sidecarContainerIds',
+          'testRunBranches',
+        ].some((field) => Object.hasOwn(changes, field))
+      )
+        assertSourceAvailable(db, id);
       if (
         [
           'status',
@@ -1348,7 +1405,16 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (result.changes === 0) throw new PodNotFoundError(id);
     },
 
+    transaction<T>(operation: () => T): T {
+      return db.transaction(() => {
+        const value = operation();
+        if (value && typeof value === 'object' && 'then' in value)
+          throw new Error('Repository transaction must be synchronous');
+        return value;
+      })();
+    },
     incrementLifecycleGeneration(id: string): number {
+      assertSourceAvailable(db, id);
       deletionOwnership.assertTaskAvailable(id);
       const result = db
         .prepare(
@@ -1447,7 +1513,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
                json_extract(binding, '$.resource.containerId') != ''
              ELSE 0 END
            UNION SELECT sandbox_id AS container_id FROM sandbox_wakeup_intents
-           WHERE ended_at IS NULL`,
+           WHERE ended_at IS NULL
+           UNION SELECT json_extract(binding,'$.containerId') AS container_id FROM source_adoptions`,
         )
         .all() as { container_id: string }[];
       return rows.map((r) => r.container_id);
@@ -1470,6 +1537,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     delete: db.transaction((id: string): void => {
+      sourceAdoptions.assertDeletable(id);
       taskExecutions.assertCanDelete(id);
       externalDeliveries.assertDeletable(id);
       sandboxWakeups.assertPodReleasable(id);

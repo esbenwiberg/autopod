@@ -15,7 +15,7 @@ import { createOperatorFixture } from './operator-helpers.js';
 const exec = promisify(execFile);
 
 /** Local fake data plane with real Git/process exits; never Docker/Azure or a model worker. */
-export async function createSourceContainerFixture(options: { ignoredCollision?: boolean } = {}) {
+export async function createSourceWorkspaceFixture(options: { ignoredCollision?: boolean } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'source-container-'));
   const host = path.join(root, 'host');
   const guest = path.join(root, 'guest');
@@ -70,7 +70,9 @@ export async function createSourceContainerFixture(options: { ignoredCollision?:
   await writeFile(path.join(guest, 'ignored-report.bin'), Buffer.from([0, 1, 255]));
   const f = createOperatorFixture();
   const podId = f.pod().id;
-  f.podRepo.update(podId, { worktreePath: host, branch: 'repair', lastValidationResult: null });
+  f.podRepo.update(podId, { worktreePath: host, lastValidationResult: null });
+  // Fixture construction only: branch is immutable and deliberately not a PodUpdates field.
+  f.db.prepare("UPDATE pods SET branch='repair' WHERE id=?").run(podId);
   f.events.transition(f.pod(), 'failed');
   const cm = {
     ...createMockContainerManager(),
@@ -78,10 +80,11 @@ export async function createSourceContainerFixture(options: { ignoredCollision?:
     supportsStreamingExec: true,
     getResourceKey: vi.fn(async () => 'local:test-source'),
   };
-  const transfer = path.join(root, 'guest-transfer');
   const map = (value: string) =>
     value
-      .replaceAll('/tmp/.autopod-source-source-adapter', transfer)
+      .replace(/\/tmp\/\.autopod-source-([a-zA-Z0-9-]+)/g, (_match, id: string) =>
+        path.join(root, `guest-transfer-${id}`),
+      )
       .replaceAll('/workspace', guest);
   let sequence = 0;
   vi.mocked(cm.execStreaming).mockImplementation(async (containerId, argv, options) => {
@@ -124,6 +127,11 @@ export async function createSourceContainerFixture(options: { ignoredCollision?:
       await cp(guest, destination, { recursive: true, dereference: false, verbatimSymlinks: true });
     },
   );
+  return { root, host, guest, git, old, target, tree, f, cm, bundle, podId };
+}
+export async function createSourceContainerFixture(options: { ignoredCollision?: boolean } = {}) {
+  const { root, host, guest, git, old, target, tree, f, cm, bundle, podId } =
+    await createSourceWorkspaceFixture(options);
   const journal = f.podRepo.sourceAdoptions;
   if (!journal) throw new Error('No source journal');
   const pod = f.pod();
@@ -164,7 +172,9 @@ export async function createSourceContainerFixture(options: { ignoredCollision?:
       tree,
     },
   });
-  const generation = f.podRepo.incrementLifecycleGeneration(podId);
+  const generation = journal.owned('source-adapter', () =>
+    f.podRepo.incrementLifecycleGeneration(podId),
+  );
   journal.advance('source-adapter', 'preserved', 'applying', { generation });
   const record = journal.get('source-adapter');
   if (!record) throw new Error('No source record');

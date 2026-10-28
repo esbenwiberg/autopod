@@ -214,6 +214,11 @@ export interface PrepareSourceAdoption {
 }
 
 export interface WorktreeManager {
+  /** Strict clean identity, refusing hidden indexes, executable filters and submodules before status. */
+  inspectSourceAdoption?(
+    worktreePath: string,
+    branch: string,
+  ): Promise<{ branch: string; commitSha: string; treeSha: string; worktreeClean: boolean }>;
   prepareSourceAdoption?(
     config: PrepareSourceAdoption,
   ): Promise<{ bundle: string; bundleHash: string; tree: string }>;

@@ -42,7 +42,11 @@ import {
   truncateDiffAtFileBoundary,
 } from './diff-utils.js';
 import { assertMergeRepository } from './merge-source-identity.js';
-import { applyPinnedAdoption, preparePinnedAdoption } from './source-adoption-git.js';
+import {
+  applyPinnedAdoption,
+  inspectAdoptionGit,
+  preparePinnedAdoption,
+} from './source-adoption-git.js';
 
 const execFileAsync = promisify(execFile);
 const AUTOPOD_SYNC_STAGING_PREFIXES = ['.autopod-sync-', '.autopod-extract-'] as const;
@@ -112,6 +116,14 @@ const GIT_ENV: Record<string, string> = {
  * so tests and tools that introspect git argv don't have to special-case the
  * prefix. Git applies these as ad-hoc config for the single invocation.
  */
+const SOURCE_GIT_ENV: Record<string, string> = {
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_NO_REPLACE_OBJECTS: '1',
+  GIT_GRAFT_FILE: '/dev/null',
+  GIT_OPTIONAL_LOCKS: '0',
+};
+
 const GIT_NO_AMBIENT_CREDS_ENV: Record<string, string> = {
   GIT_CONFIG_COUNT: '3',
   GIT_CONFIG_KEY_0: 'credential.helper',
@@ -414,7 +426,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     try {
       return await preparePinnedAdoption(
         config,
-        (args) => git(args, { cwd: config.worktreePath, timeout: 60_000 }),
+        (args) => git(args, { cwd: config.worktreePath, timeout: 60_000, env: SOURCE_GIT_ENV }),
         async (ref) => {
           config.assertCurrent();
           await git(['fetch', '--no-tags', remote.url, `+refs/heads/${config.branch}:${ref}`], {
@@ -422,6 +434,7 @@ export class LocalWorktreeManager implements WorktreeManager {
             timeout: 60_000,
             credential: remote.credential,
             credentialUrl: remote.url,
+            env: SOURCE_GIT_ENV,
           });
         },
       );
@@ -433,8 +446,16 @@ export class LocalWorktreeManager implements WorktreeManager {
 
   async applySourceAdoption(config: PrepareSourceAdoption): Promise<void> {
     await applyPinnedAdoption(config, (args) =>
-      git(args, { cwd: config.worktreePath, timeout: 60_000 }),
+      git(args, { cwd: config.worktreePath, timeout: 60_000, env: SOURCE_GIT_ENV }),
     );
+  }
+
+  async inspectSourceAdoption(worktreePath: string, branch: string) {
+    const source = await inspectAdoptionGit(
+      (args) => git(args, { cwd: worktreePath, timeout: 30_000, env: SOURCE_GIT_ENV }),
+      branch,
+    );
+    return { branch, commitSha: source.head, treeSha: source.tree, worktreeClean: true };
   }
 
   async observeSourceBranch(

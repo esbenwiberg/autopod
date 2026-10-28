@@ -11,6 +11,38 @@ import { SandboxContainerManager } from './sandbox-container-manager.js';
 const logger = pino({ level: 'silent' });
 let wakeupFixture: ReturnType<typeof createSandboxWakeupFixture> | undefined;
 
+describe('source resource release custody', () => {
+  it.each(['destroy', 'suspend'] as const)(
+    'rechecks custody after delayed auth before %s dispatch',
+    async (action) => {
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let held = false;
+      const { client, requests } = makeClient(
+        action === 'suspend' ? [{ status: 200, body: { id: 'original', state: 'Running' } }] : [],
+        {
+          credential: {
+            async getToken() {
+              await gate;
+              return { token: 'fixture-token', expiresOnTimestamp: Date.now() + 60_000 };
+            },
+          },
+          assertReleaseAllowed() {
+            if (held) throw new Error('SOURCE_CUSTODY_HELD');
+          },
+        },
+      );
+      const pending = client[action]('original');
+      held = true;
+      release();
+      await expect(pending).rejects.toThrow('SOURCE_CUSTODY_HELD');
+      expect(requests.filter((request) => request.init?.method !== 'GET')).toHaveLength(0);
+    },
+  );
+});
+
 describe('sandbox resource namespaces', () => {
   it('binds endpoint/region/subscription/group/resource without waking or executing', () => {
     const original = makeClient([]);

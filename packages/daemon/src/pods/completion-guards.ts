@@ -6,6 +6,7 @@ export function createCompletionGuards(captured: CompletionGuardsCaptured) {
   const { podRepo, nudgeRepo } = captured;
 
   function assertExecutionTerminationVerified(podId: string): void {
+    podRepo.sourceAdoptions?.assertAvailable(podId);
     podRepo.deletionOwnership?.assertTaskAvailable(podId);
     assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
   }

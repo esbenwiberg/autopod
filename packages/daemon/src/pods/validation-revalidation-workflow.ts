@@ -84,14 +84,14 @@ export function createValidationRevalidationWorkflow(
       adoptedSource?: AdoptedSourceValidationRequest;
     },
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
-    assertExecutionTerminationVerified(podId);
-    assertGuidanceCollected(podId);
     const pod = podRepo.getOrThrow(podId);
     if (!options?.adoptedSource && podRepo.sourceAdoptions?.hasCustody(podId))
       sourceAdoptionError(
         'Use source-bound checks; ordinary revalidation may pull or rewrite preserved source.',
         'SOURCE_CHECKS_REQUIRED',
       );
+    assertExecutionTerminationVerified(podId);
+    assertGuidanceCollected(podId);
     if (
       options?.adoptedSource &&
       (_deps.launchConfiguration?.read(podId)?.intent === 'goal' ||

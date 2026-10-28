@@ -106,6 +106,7 @@ export interface AzureSandboxApiClientConfig {
   resumeTimeoutMs?: number;
   /** Required to submit resume: durable per-resource claims survive daemon replacement. */
   wakeupJournal?: SandboxWakeupJournal;
+  assertReleaseAllowed?: (sandboxId: string) => void;
   /**
    * Retry/backoff for the Azure Sandboxes data-plane rate limiter (HTTP 429,
    * 600 req/min). The platform returns `retryAfterSeconds`; we honor it (clamped
@@ -211,6 +212,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private readonly pollIntervalMs: number;
   private readonly resumeTimeoutMs: number;
   private readonly wakeupJournal?: SandboxWakeupJournal;
+  private readonly assertReleaseAllowed?: (sandboxId: string) => void;
   private readonly retryMaxAttempts: number;
   private readonly retryMaxDelayMs: number;
   private readonly retryBaseDelayMs: number;
@@ -237,6 +239,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     this.pollIntervalMs = config.pollIntervalMs ?? 3000;
     this.resumeTimeoutMs = config.resumeTimeoutMs ?? 145_000;
     this.wakeupJournal = config.wakeupJournal;
+    this.assertReleaseAllowed = config.assertReleaseAllowed;
     this.retryMaxAttempts = config.retry?.maxAttempts ?? 6;
     this.retryMaxDelayMs = config.retry?.maxDelayMs ?? 30_000;
     this.retryBaseDelayMs = config.retry?.baseDelayMs ?? 1000;
@@ -344,6 +347,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     this.wakeupJournal?.assertReleasable(sandboxId);
     await this.requestData('DELETE', `${this.sandboxPath(sandboxId)}`, {
       okStatuses: [200, 202, 204, 404],
+      beforeSend: () => {
+        this.assertReleaseAllowed?.(sandboxId);
+        this.wakeupJournal?.assertReleasable(sandboxId);
+      },
     });
     await this.pollDeleted(() => this.getSandbox(sandboxId), `sandbox ${sandboxId}`);
   }
@@ -1082,6 +1089,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     this.wakeupJournal?.assertReleasable(sandboxId);
     await this.requestData('POST', `${this.sandboxPath(sandboxId)}/stop`, {
       okStatuses: [200, 202, 204],
+      beforeSend: () => {
+        this.assertReleaseAllowed?.(sandboxId);
+        this.wakeupJournal?.assertReleasable(sandboxId);
+      },
     });
     await this.pollState(
       () => this.getSandbox(sandboxId),
