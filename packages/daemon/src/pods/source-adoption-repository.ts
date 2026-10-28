@@ -1,13 +1,9 @@
-import { createHash } from 'node:crypto';
-import { AutopodError, type OperatorActor, type Pod, type ValidationResult } from '@autopod/shared';
+import type { OperatorActor, Pod, ValidationResult } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { sourceAdoptionError, sourceHash } from './source-adoption-identity.js';
 import type { SourceAdoptionStage, SourceAdoptionState } from './source-adoption-types.js';
-
-export const sourceHash = (value: unknown) =>
-  createHash('sha256').update(JSON.stringify(value)).digest('hex');
-export function sourceAdoptionError(message: string, code = 'SOURCE_ADOPTION_BLOCKED'): never {
-  throw new AutopodError(message, code, 409);
-}
+import { type SourceCommandJournal, createSourceCommandJournal } from './source-command-journal.js';
+export { sourceAdoptionError, sourceHash } from './source-adoption-identity.js';
 export function sourcePodFingerprint(pod: Pod): string {
   return sourceHash([
     pod.containerId,
@@ -82,6 +78,7 @@ export function sourceAdoptionState(row: SourceAdoptionRecord): SourceAdoptionSt
   };
 }
 export interface SourceAdoptionRepository {
+  readonly commands: SourceCommandJournal;
   get(id: string): SourceAdoptionRecord | null;
   list(podId: string): SourceAdoptionRecord[];
   assertAvailable(podId: string, owner?: string): void;
@@ -115,6 +112,7 @@ export interface SourceAdoptionRepository {
   assertDeliveryAllowed(podId: string): void;
 }
 export function createSourceAdoptionRepository(db: Database.Database): SourceAdoptionRepository {
+  const commands = createSourceCommandJournal(db);
   const get = (id: string): SourceAdoptionRecord | null => {
     const row = db.prepare('SELECT * FROM source_adoptions WHERE id=?').get(id) as
       | {
@@ -173,6 +171,7 @@ export function createSourceAdoptionRepository(db: Database.Database): SourceAdo
       );
   };
   return {
+    commands,
     get,
     list(podId: string) {
       return (
@@ -266,6 +265,7 @@ export function createSourceAdoptionRepository(db: Database.Database): SourceAdo
       ) => {
         const current = get(id);
         if (!current || current.stage !== expected) sourceAdoptionError('Adoption phase changed');
+        if (next === 'checked') commands.assertSettled(id);
         db.prepare(`UPDATE source_adoptions SET stage=?,preservation=COALESCE(?,preservation),
         adopted_generation=COALESCE(?,adopted_generation),validation_hash=COALESCE(?,validation_hash),
         validation_result=COALESCE(?,validation_result),error=NULL,completed_at=? WHERE id=?`).run(

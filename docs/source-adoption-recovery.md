@@ -79,6 +79,28 @@ source drift cannot silently destroy execution evidence or become a current pass
 A provider404 never clears the original resource pointer in this path. No
 controller is yet exposed that can supply this capability on a real pod.
 
+## Native auxiliary command custody (coordinator wiring still pending)
+
+`source-command-journal.ts`/`source-command-runner.ts` record each fixed source
+operation step before requesting native streaming exec. Migration221 makes each
+step's admission/observations immutable and unique. Adapters must support
+recoverable exec identities; buffered exec fallback codes are not exit evidence.
+An identity is durably admitted by the adapter's before-start callback, with exact
+backend/container checks. Another pending command blocks the next step.
+
+Timeout revokes only known-unsent work; late callbacks cannot start through that
+revocation. Already-admitted work remains held, even if kill/transport fails.
+Only an observed streaming exit or deliberate exact-identity backend termination
+can settle it. A late exit is recorded against its original command, never a new
+lifecycle. Nonzero exits stay nonzero. Reconciliation does not repeat Git. Source
+custody cannot be marked checked with an unsettled auxiliary command. Output is
+bounded; truncated inspection output fails closed. These are infrastructure
+process observations, not coding-worker/token-usage receipts or retry grants.
+
+This is not yet a container transfer/adoption controller or a public action.
+Original provider namespace, quiescence and ownership must be bound by the
+coordinator before using these capabilities on real resources.
+
 ## Required before exposing it
 
 1. Bind actual lifecycle/generation/resource namespace, physical worktree,
