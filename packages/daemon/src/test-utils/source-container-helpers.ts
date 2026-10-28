@@ -21,17 +21,29 @@ export async function createSourceWorkspaceFixture(options: { ignoredCollision?:
   const guest = path.join(root, 'guest');
   await mkdir(host);
   const git = (directory: string, ...args: string[]) =>
-    exec('/usr/bin/git', [
-      '-c',
-      'user.name=Fixture',
-      '-c',
-      'user.email=fixture@example.invalid',
-      '-c',
-      'commit.gpgsign=false',
-      '-C',
-      directory,
-      ...args,
-    ]);
+    exec(
+      '/usr/bin/git',
+      [
+        '-c',
+        'user.name=Fixture',
+        '-c',
+        'user.email=fixture@example.invalid',
+        '-c',
+        'commit.gpgsign=false',
+        '-C',
+        directory,
+        ...args,
+      ],
+      {
+        env: {
+          ...process.env,
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_NO_REPLACE_OBJECTS: '1',
+          GIT_GRAFT_FILE: '/dev/null',
+        },
+      },
+    );
   await git(host, 'init', '-b', 'repair');
   await writeFile(path.join(host, '.gitignore'), 'ignored-report.bin\n');
   await writeFile(path.join(host, 'code.txt'), 'original');
