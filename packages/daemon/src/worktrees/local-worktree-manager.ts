@@ -18,6 +18,7 @@ import type {
   EnsureRemoteBranchConfig,
   EnsureRemoteBranchResult,
   MergeBranchConfig,
+  PrepareSourceAdoption,
   PushArtifactBranchConfig,
   RebaseOntoBaseConfig,
   RebaseOntoBaseResult,
@@ -40,6 +41,8 @@ import {
   stripModeOnlyChanges,
   truncateDiffAtFileBoundary,
 } from './diff-utils.js';
+import { assertMergeRepository } from './merge-source-identity.js';
+import { applyPinnedAdoption, preparePinnedAdoption } from './source-adoption-git.js';
 
 const execFileAsync = promisify(execFile);
 const AUTOPOD_SYNC_STAGING_PREFIXES = ['.autopod-sync-', '.autopod-extract-'] as const;
@@ -401,6 +404,74 @@ export interface LocalWorktreeManagerConfig {
  * Each pod gets its own worktree checked out from the bare repo.
  */
 export class LocalWorktreeManager implements WorktreeManager {
+  async prepareSourceAdoption(config: PrepareSourceAdoption) {
+    const remote = await this.getAuthenticatedRemote(config.worktreePath);
+    assertMergeRepository(
+      { repository: config.repository, branch: config.branch, baseBranch: config.branch },
+      remote.url,
+    );
+    config.assertCurrent();
+    try {
+      return await preparePinnedAdoption(
+        config,
+        (args) => git(args, { cwd: config.worktreePath, timeout: 60_000 }),
+        async (ref) => {
+          config.assertCurrent();
+          await git(['fetch', '--no-tags', remote.url, `+refs/heads/${config.branch}:${ref}`], {
+            cwd: config.worktreePath,
+            timeout: 60_000,
+            credential: remote.credential,
+            credentialUrl: remote.url,
+          });
+        },
+      );
+    } catch (error) {
+      if (error instanceof AutopodError) throw error;
+      throw sanitizeGitError(error);
+    }
+  }
+
+  async applySourceAdoption(config: PrepareSourceAdoption): Promise<void> {
+    await applyPinnedAdoption(config, (args) =>
+      git(args, { cwd: config.worktreePath, timeout: 60_000 }),
+    );
+  }
+
+  async observeSourceBranch(
+    worktreePath: string,
+    repository: string,
+    branch: string,
+  ): Promise<string> {
+    const remote = await this.getAuthenticatedRemote(worktreePath);
+    assertMergeRepository({ repository, branch, baseBranch: branch }, remote.url);
+    await git(['check-ref-format', `refs/heads/${branch}`], { cwd: worktreePath });
+    try {
+      const result = await git(['ls-remote', '--exit-code', remote.url, `refs/heads/${branch}`], {
+        cwd: worktreePath,
+        timeout: 30_000,
+        credential: remote.credential,
+        credentialUrl: remote.url,
+      });
+      const lines = result.stdout.trim().split('\n');
+      const [head, ref] = (lines[0] ?? '').split(/\s+/);
+      if (
+        lines.length !== 1 ||
+        ref !== `refs/heads/${branch}` ||
+        !head ||
+        !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(head)
+      )
+        throw new AutopodError(
+          'Remote source observation unavailable',
+          'SOURCE_REMOTE_UNAVAILABLE',
+          409,
+        );
+      return head;
+    } catch (error) {
+      if (error instanceof AutopodError) throw error;
+      throw sanitizeGitError(error);
+    }
+  }
+
   async inspectSource(worktreePath: string, expectedBranch: string) {
     const branch = (
       await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath })

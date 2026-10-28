@@ -7,7 +7,7 @@ import { writeArtifactSnapshotReceipt } from './artifact-snapshot-receipt.js';
 
 /** Publish only a completed copy. A failed/expired copy never replaces a prior snapshot. */
 export async function collectArtifactSnapshot(options: {
-  containerManager: ContainerManager;
+  containerManager: Pick<ContainerManager, 'extractDirectoryFromContainer'>;
   containerId: string | null;
   artifactRoot: string;
   generation: number;
