@@ -298,6 +298,9 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     getSession(podId: string): Pod {
       return admissionQueries.getSession(podId);
     },
+    getExternalDelivery(podId: string) {
+      return admissionQueries.getExternalDelivery(podId);
+    },
 
     refreshReadinessAfterQualityScore(podId: string): boolean {
       return approvalControls.refreshReadinessAfterQualityScore(podId);

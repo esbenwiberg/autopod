@@ -3775,11 +3775,36 @@ human_review: []
     expect(execInContainer).toHaveBeenCalledTimes(3);
     expect(execInContainer.mock.calls[1]?.[0]).toBe('container-test');
     expect(execInContainer.mock.calls[1]?.[1].join(' ')).toContain('/run/autopod/agent-shim.sh');
+    expect(execInContainer.mock.calls[1]?.[1].join(' ')).toContain('--json-schema');
+    expect(runContainerReviewer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outputContract: expect.objectContaining({ name: 'task-review-v1' }),
+      }),
+    );
     expect(execInContainer.mock.calls[1]?.[2]).toMatchObject({
       cwd: '/workspace',
       env: reviewerExecEnv,
     });
     expect(execInContainer.mock.calls[1]?.[2]).not.toHaveProperty('timeout');
+  });
+
+  it('retains a bounded head and tail for malformed Tier 1 output without accepting a verdict', async () => {
+    const raw = `{"status":"fail","reasoning":"Actual critic issue"${'x'.repeat(4000)}tail: repair the financial export`;
+    vi.mocked(runContainerReviewer).mockResolvedValueOnce({ stdout: raw });
+    const engine = createLocalValidationEngine(stubContainerManager());
+    const result = await engine.validate(
+      baseConfig({
+        reviewerProvider: 'max',
+        reviewerModel: 'claude-sonnet-4-6',
+        diff: 'diff --git a/src/a.ts b/src/a.ts\n+changed\n',
+      }),
+    );
+    expect(result.taskReview).toBeNull();
+    expect(result.overall).toBe('fail');
+    expect(result.reviewSkipReason).toContain('No verdict was accepted');
+    expect(result.reviewSkipReason).toContain('Actual critic issue');
+    expect(result.reviewSkipReason).toContain('tail: repair the financial export');
+    expect(result.reviewSkipReason?.length).toBeLessThan(2500);
   });
 
   it('fails Max Review clearly when no live container is available', async () => {

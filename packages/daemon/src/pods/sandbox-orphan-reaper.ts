@@ -112,7 +112,10 @@ export class SandboxOrphanReaper {
       // between the two reads then appears claimed and is left alone; had we
       // read the DB first, that write would be invisible and we would delete a
       // sandbox a pod had just taken ownership of.
-      const claimed = new Set(this.deps.podRepo.listReferencedContainerIds());
+      const claimed = new Set([
+        ...this.deps.podRepo.listReferencedContainerIds(),
+        ...(this.deps.podRepo.externalDeliveries?.retainedSandboxIds() ?? []),
+      ]);
       const result = { ...empty, listed: sandboxes.length };
       const candidates: SandboxDescriptor[] = [];
 
@@ -146,6 +149,10 @@ export class SandboxOrphanReaper {
       result.deferred = candidates.length - batch.length;
 
       for (const sandbox of batch) {
+        if (this.deps.podRepo.externalDeliveries?.retains(sandbox.id)) {
+          result.deferred++;
+          continue;
+        }
         if (await this.deleteOrphan(sandbox)) result.deleted++;
         else result.failed++;
       }

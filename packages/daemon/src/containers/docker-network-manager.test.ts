@@ -186,6 +186,20 @@ describe('DockerNetworkManager', () => {
       expect(result).toContain('*.yarnpkg.com');
     });
 
+    it('allows Go proxy ZIP redirects only under package-manager consent', () => {
+      const optedIn = manager.computeAllowlist(
+        makePolicy({ allowPackageManagers: true }),
+        [],
+        GATEWAY,
+      );
+      expect(optedIn).toContain('proxy.golang.org');
+      expect(optedIn).toContain('storage.googleapis.com');
+      expect(optedIn).not.toContain('*.googleapis.com');
+      expect(manager.computeAllowlist(makePolicy(), [], GATEWAY)).not.toContain(
+        'storage.googleapis.com',
+      );
+    });
+
     it('keeps families with user-hosted subdomains exact', () => {
       const result = manager.computeAllowlist(
         makePolicy({ allowPackageManagers: true }),

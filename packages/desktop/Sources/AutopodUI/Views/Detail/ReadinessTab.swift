@@ -437,6 +437,23 @@ struct ReadinessTab: View {
 
     private var approvalSection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if pod.status == .complete {
+                Label("Delivery complete", systemImage: "checkmark.seal")
+                    .foregroundStyle(.green)
+                Text("Delivery is recorded. Any retained reports or resource-recovery follow-ups are listed in the review.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if !isApprovalState {
+                Text("Normal approval is unavailable")
+                    .font(.callout.weight(.semibold))
+                Text(approvalBlockReason)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if pod.status == .reviewRequired || pod.status == .failed {
+                    Button("Open validation recovery") { onOpenTab(.validation) }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                        .accessibilityIdentifier("readiness.openValidationRecovery")
+                }
+            } else {
             if requiresReason {
                 Text("Approval reason required")
                     .font(.callout.weight(.semibold))
@@ -465,13 +482,24 @@ struct ReadinessTab: View {
             .tint(decisionStatus == .ready ? .green : .orange)
             .disabled(!canApprove || actions.approvalPending(pod.id))
             .help(approvalHelp)
+            }
         }
         .readinessPanel()
     }
 
+    private var approvalBlockReason: String {
+        if pod.status == .reviewRequired || pod.status == .failed {
+            if pod.validationChecks?.allPassed == false {
+                return "Validation has not passed. Repair or retry its checks in Validation. A readiness reason does not waive failed checks; an intentional waiver uses the separate Override validation action."
+            }
+            return "This pod is not in the validated approval state. Inspect its validation and recovery blockers before approval. A readiness reason does not bypass lifecycle or execution-evidence requirements."
+        }
+        return "Approval becomes available after validation has finished and passed."
+    }
+
     private var approvalHelp: String {
         if !isApprovalState {
-            return "Approval is only available after validation."
+            return approvalBlockReason
         }
         guard let decisionStatus else { return "Readiness is not available yet." }
         if decisionStatus.requiresApprovalReason {

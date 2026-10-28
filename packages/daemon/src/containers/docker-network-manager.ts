@@ -135,6 +135,9 @@ export function computeNetworkPolicyAllowlist(
       '*.nuget.org',
       'proxy.golang.org',
       'sum.golang.org',
+      // The Go proxy redirects module/toolchain ZIPs to this shared CDN. Exact
+      // host only (not *.googleapis.com), and only under package-manager consent.
+      'storage.googleapis.com',
       'rubygems.org',
       '*.rubygems.org',
     ];

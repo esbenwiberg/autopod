@@ -34,6 +34,8 @@ export function createOperatorKill(
     await stopSandboxPreviewProxy(podId);
     stopMergePolling(podId);
     const pod = podRepo.getOrThrow(podId);
+    podRepo.externalDeliveries?.assertDeletable(podId);
+    if (pod.containerId) podRepo.externalDeliveries?.assertReleasable(pod.containerId);
     if (!canKill(pod.status)) {
       throw new AutopodError(
         `Cannot kill pod ${podId} in status ${pod.status}`,

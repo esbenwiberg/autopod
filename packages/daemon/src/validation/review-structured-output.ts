@@ -31,6 +31,63 @@ export interface ReviewerOutputContract {
   jsonSchema: string;
 }
 
+// Tier 1 uses the same provider-native shape guard as council reviews. A prompt
+// asking for JSON alone is not a transport contract; local parsing still gates it.
+export const taskReviewOutputContract: ReviewerOutputContract = {
+  name: 'task-review-v1',
+  jsonSchema: JSON.stringify({
+    type: 'object',
+    additionalProperties: false,
+    required: ['status', 'reasoning', 'issues', 'requirementsCheck', 'deviationsAssessment'],
+    properties: {
+      status: { type: 'string', enum: ['pass', 'fail', 'uncertain'] },
+      reasoning: { type: 'string' },
+      issues: { type: 'array', maxItems: 1000, items: { type: 'string' } },
+      requirementsCheck: {
+        type: 'array',
+        maxItems: 1000,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['criterion', 'met', 'note'],
+          properties: {
+            criterion: { type: 'string' },
+            met: { type: 'boolean' },
+            note: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          },
+        },
+      },
+      deviationsAssessment: {
+        anyOf: [
+          { type: 'null' },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['disclosedDeviations', 'undisclosedDeviations'],
+            properties: {
+              disclosedDeviations: {
+                type: 'array',
+                maxItems: 1000,
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['step', 'reasoning', 'verdict'],
+                  properties: {
+                    step: { type: 'string' },
+                    reasoning: { type: 'string' },
+                    verdict: { type: 'string', enum: ['justified', 'questionable', 'unjustified'] },
+                  },
+                },
+              },
+              undisclosedDeviations: { type: 'array', maxItems: 1000, items: { type: 'string' } },
+            },
+          },
+        ],
+      },
+    },
+  }),
+};
+
 const nullableJsonSchema = (schema: Record<string, unknown>) => ({
   anyOf: [schema, { type: 'null' }],
 });

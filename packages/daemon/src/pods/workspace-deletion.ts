@@ -25,7 +25,9 @@ export function createWorkspaceDeletion(captured: WorkspaceDeletionCaptured) {
 
   async function deleteSession(podId: string): Promise<void> {
     podRepo.taskExecutions?.assertCanDelete(podId);
+    podRepo.externalDeliveries?.assertDeletable(podId);
     const pod = podRepo.getOrThrow(podId);
+    if (pod.containerId) podRepo.externalDeliveries?.assertReleasable(pod.containerId);
     const deletable =
       isTerminalState(pod.status) ||
       pod.status === 'failed' ||
@@ -57,6 +59,8 @@ export function createWorkspaceDeletion(captured: WorkspaceDeletionCaptured) {
         );
       }
       podRepo.taskExecutions?.assertCanDelete(podId);
+      podRepo.externalDeliveries?.assertDeletable(podId);
+      if (current.containerId) podRepo.externalDeliveries?.assertReleasable(current.containerId);
     };
     const claim = podRepo.deletionOwnership?.acquire(
       podId,
