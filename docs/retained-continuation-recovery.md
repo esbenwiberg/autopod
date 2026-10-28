@@ -33,11 +33,31 @@ A credential-write failure, lost resume response or daemon restart must not turn
 a recorded human answer into an implicitly consumed answer. Detached MCP
 fallbacks retain the same text and are queued once, not twice.
 
+## Current readiness and automatic retention
+
+An explicitly cleared current validation result is unknown; a historical pass
+must not silently replace it. Cached ready snapshots are projected against the
+current lifecycle and proof on detail/list reads without rewriting historical
+approval. Code delivery, current-source validation, runtime recovery and report
+preservation remain separate.
+
+Automatic terminal reaping no longer wakes, checkpoints or deletes failed
+sandboxes. Git checkpoints do not establish preservation of ignored reports.
+Completed/killed resources also remain held while task runs or validation exits
+are unsettled. Orphan detection includes unresolved dispatch-bound resources
+even after the current pod's container pointer is cleared, retains possible
+sources labelled for failed/review-required owners, and rechecks claims before
+each deletion. A label only justifies retention, never source adoption or proof
+of backend termination. Existing exact-source external-delivery holds still
+apply. This can retain billable storage indefinitely; it is not a report archive
+or an automatic cleanup permission.
+
 ## Scope and remaining work
 
 The sequencing/custody fix does not itself establish that an outcome-unknown
 provider resume was accepted, terminate an old execution, adopt a newer remote
 source revision, or recover inaccessible reports. It does not authorize a retry,
 reset task-wide accounting, waive validation, or complete a pod whose delivery is
-unresolved. Durable wakeup observation and cleanup/report-retention rules are
-separate recovery concerns; do not claim those are solved by this ordering fix.
+unresolved. Durable wakeup observation and verified capture/release of report-retention
+holds remain separate recovery concerns. No provider timeout is treated as
+termination or as permission to blindly repeat its mutation.

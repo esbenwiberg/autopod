@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveLaunch } from '../configuration/launch-resolver.js';
 import { createProfileStore } from '../profiles/index.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
-import { createTestContext } from '../test-utils/mock-helpers.js';
+import { createPassingValidationResult, createTestContext } from '../test-utils/mock-helpers.js';
 import { createContinuationContext } from './continuation-context.js';
 import type { ContinuationLiveDependencies } from './continuation-ports.js';
 import { createGoalRepository } from './goal-repository.js';
@@ -198,6 +198,33 @@ describe('continuation context', () => {
     expect(f.captured.getResumeEnv).not.toHaveBeenCalled();
     expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
   });
+  it.each([false, true])(
+    'never bypasses an unverified validation exit (fresh=%s)',
+    async (fresh) => {
+      const f = fixture();
+      f.ctx.podRepo.update('context', {
+        lastValidationResult: {
+          ...createPassingValidationResult('context'),
+          overall: 'fail',
+          infrastructureFailure: {
+            phase: 'build',
+            code: 'EXEC_EXIT_UNVERIFIED',
+            message: 'Original validation command exit is unverified',
+            retryable: false,
+          },
+        },
+      });
+      await expect(
+        f.c.taskFeedbackEvents('context', 'Apply feedback', fresh),
+      ).rejects.toMatchObject({
+        code: 'VALIDATION_EXECUTION_UNVERIFIED',
+      });
+      expect(f.ctx.containerManager.getStatus).not.toHaveBeenCalled();
+      expect(f.captured.getResumeEnv).not.toHaveBeenCalled();
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    },
+  );
   it('retains queued human guidance and tells feedback workers to collect its receipt', async () => {
     const f = fixture();
     f.ctx.nudgeRepo.queue('context', 'Preserved human direction');

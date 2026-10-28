@@ -124,7 +124,7 @@ export class SandboxOrphanReaper {
           result.foreign++;
           continue;
         }
-        if (claimed.has(sandbox.id)) continue;
+        if (claimed.has(sandbox.id) || this.hasRecoveryOwner(sandbox)) continue;
 
         const ageMs = this.ageMs(sandbox);
         if (ageMs === undefined) {
@@ -149,7 +149,11 @@ export class SandboxOrphanReaper {
       result.deferred = candidates.length - batch.length;
 
       for (const sandbox of batch) {
-        if (this.deps.podRepo.externalDeliveries?.retains(sandbox.id)) {
+        if (
+          this.deps.podRepo.externalDeliveries?.retains(sandbox.id) ||
+          this.deps.podRepo.listReferencedContainerIds().includes(sandbox.id) ||
+          this.hasRecoveryOwner(sandbox)
+        ) {
           result.deferred++;
           continue;
         }
@@ -166,6 +170,18 @@ export class SandboxOrphanReaper {
     } finally {
       this.running = false;
     }
+  }
+
+  /** A label is a reason to retain possible evidence, never permission to reuse it. */
+  private hasRecoveryOwner(sandbox: SandboxDescriptor): boolean {
+    const podId = sandbox.labels.podId;
+    const owner = podId ? this.deps.podRepo.get(podId) : undefined;
+    return Boolean(
+      owner &&
+        (owner.status === 'failed' ||
+          owner.status === 'review_required' ||
+          this.deps.podRepo.taskExecutions?.hasActiveRun(owner.id)),
+    );
   }
 
   private ageMs(sandbox: SandboxDescriptor): number | undefined {

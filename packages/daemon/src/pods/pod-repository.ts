@@ -53,6 +53,7 @@ import {
 } from './execution-provenance-ledger.js';
 import { displayRepository, repositoryDisplayColumns } from './pod-display-repository.js';
 import { type ProviderUsageProjection, readProviderUsage } from './provider-usage-projection.js';
+import { withLifecycleReadiness } from './readiness-projection.js';
 import {
   type SourcePublicationLedger,
   createSourcePublicationLedger,
@@ -306,9 +307,9 @@ export interface PodRepository extends Partial<UnitOfWork> {
   getPodsBySeries(seriesId: string): Pod[];
   listNonTerminalPodIds(): string[];
   /**
-   * Every container/sandbox ID referenced by any pod row, in any status. This is
-   * the authoritative "claimed" set for platform-side orphan detection: an
-   * infrastructure object not in here is referenced by nothing the daemon knows.
+   * Current allocations and recorded, unsettled execution resources, including
+   * historical resources whose current pod pointer was cleared. Absence is not
+   * termination proof; orphan deletion must also honor retention/owner fences.
    */
   listReferencedContainerIds(): string[];
   /**
@@ -498,7 +499,13 @@ function rowToSession(row: Record<string, unknown>): Pod {
       ? (JSON.parse(row.validation_waiver as string) as ValidationWaiver)
       : null,
     readinessReview: row.readiness_review
-      ? (JSON.parse(row.readiness_review as string) as ReadinessReview)
+      ? withLifecycleReadiness(
+          JSON.parse(row.readiness_review as string) as ReadinessReview,
+          row.status as PodStatus,
+          row.last_validation_result
+            ? (JSON.parse(row.last_validation_result as string) as ValidationResult)
+            : null,
+        )
       : null,
     pimGroups: row.pim_groups ? (JSON.parse(row.pim_groups as string) as PimGroupConfig[]) : null,
     profileSnapshot: profileSnapshotData,
@@ -1417,7 +1424,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
           `SELECT container_id FROM pods WHERE container_id IS NOT NULL AND container_id != ''
            UNION
            SELECT sandbox_id AS container_id FROM managed_sandbox_allocations
-           WHERE sandbox_id IS NOT NULL AND sandbox_id != ''`,
+           WHERE sandbox_id IS NOT NULL AND sandbox_id != ''
+           UNION
+           SELECT json_extract(binding, '$.resource.containerId') AS container_id
+           FROM task_agent_runs WHERE ended_at IS NULL AND
+             CASE WHEN json_valid(binding) THEN
+               json_type(binding, '$.resource.containerId') = 'text' AND
+               json_extract(binding, '$.resource.containerId') != ''
+             ELSE 0 END`,
         )
         .all() as { container_id: string }[];
       return rows.map((r) => r.container_id);

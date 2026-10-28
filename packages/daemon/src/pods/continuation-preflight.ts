@@ -5,6 +5,7 @@ import { inspectExecutionPreflight } from './execution-preflight.js';
 import type { ExecutionProvenanceLedger } from './execution-provenance-ledger.js';
 import type { PodRepository } from './pod-repository.js';
 import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
+import { assertValidationExecutionSettled } from './validation-recovery-policy.js';
 
 /** Callers must not fail or release the lifecycle that superseded this continuation. */
 export class AgentContinuationSupersededError extends AutopodError {
@@ -40,6 +41,7 @@ export function assertAgentContinuationCurrent(
     throw new AgentContinuationSupersededError(
       'An unanswered human decision blocks agent continuation; it remains actionable.',
     );
+  assertValidationExecutionSettled(current);
   return current;
 }
 

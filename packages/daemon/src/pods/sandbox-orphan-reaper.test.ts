@@ -1,3 +1,4 @@
+import type { Pod } from '@autopod/shared';
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 import type { SandboxDescriptor } from '../containers/sandbox-api-client.js';
@@ -23,7 +24,10 @@ function build(
   referenced: string[] = [],
   options: { minAgeMs?: number; maxDeletesPerSweep?: number } = {},
 ) {
+  const taskExecutions = { hasActiveRun: vi.fn(() => false) };
   const podRepo = {
+    taskExecutions,
+    get: vi.fn<(id: string) => Pod | undefined>(() => undefined),
     listReferencedContainerIds: vi.fn(() => referenced),
   } as unknown as PodRepository;
   const sandboxContainerManager = {
@@ -31,6 +35,7 @@ function build(
     kill: vi.fn(async () => {}),
   } as unknown as SandboxContainerManager;
   return {
+    taskExecutions,
     podRepo,
     sandboxContainerManager,
     reaper: new SandboxOrphanReaper({
@@ -52,6 +57,36 @@ describe('SandboxOrphanReaper', () => {
     expect(deps.sandboxContainerManager.kill).toHaveBeenCalledWith('orphan-2');
   });
 
+  it.each(['failed', 'review_required'] as const)(
+    'retains possible source for a %s owner after container_id was cleared',
+    async (status) => {
+      const deps = build([
+        sandbox({ id: 'old-original', labels: { managedBy: 'autopod', podId: 'owner' } }),
+      ]);
+      vi.mocked(deps.podRepo.get).mockReturnValue({ id: 'owner', status } as Pod);
+      await deps.reaper.runSweep();
+      expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
+    },
+  );
+  it('rechecks claims after an earlier asynchronous deletion', async () => {
+    const claimed: string[] = [];
+    const deps = build([sandbox({ id: 'first' }), sandbox({ id: 'later-claimed' })], claimed);
+    vi.mocked(deps.sandboxContainerManager.kill).mockImplementationOnce(async () => {
+      claimed.push('later-claimed');
+    });
+    const result = await deps.reaper.runSweep();
+    expect(deps.sandboxContainerManager.kill).toHaveBeenCalledExactlyOnceWith('first');
+    expect(result.deferred).toBe(1);
+  });
+  it('retains a labelled owner with an unsettled original execution', async () => {
+    const deps = build([
+      sandbox({ id: 'old-original', labels: { managedBy: 'autopod', podId: 'owner' } }),
+    ]);
+    vi.mocked(deps.podRepo.get).mockReturnValue({ id: 'owner', status: 'running' } as Pod);
+    deps.taskExecutions.hasActiveRun.mockReturnValue(true);
+    await deps.reaper.runSweep();
+    expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
+  });
   it('never touches sandboxes that are not labelled managedBy autopod', async () => {
     // The sandbox group is shared infrastructure — the dataverse-harness
     // sandboxes that drove the September cost spike lived in the same group.

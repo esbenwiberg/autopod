@@ -48,7 +48,6 @@ describe('durable report-retention fences after externally verified delivery', (
     await new SandboxTerminalReaper({
       podRepo: f.podRepo,
       sandboxContainerManager: f.cm as unknown as SandboxContainerManager,
-      preserveWorkspace: vi.fn(),
       logger: f.deps.logger,
     }).runSweep();
     expect(f.cm.kill).not.toHaveBeenCalled();

@@ -33,6 +33,7 @@ import { ClaudeRuntime } from '../runtimes/claude-runtime.js';
 import { CodexRuntime } from '../runtimes/codex-runtime.js';
 import { CopilotRuntime } from '../runtimes/copilot-runtime.js';
 import {
+  collectAndAcknowledgeGuidance,
   mockBranchPublication,
   mockCommittedPublication,
   mockPrMerge,
@@ -13763,6 +13764,8 @@ describe('PodManager', () => {
             },
           });
           const continuation = async function* (): AsyncIterable<AgentEvent> {
+            const reply = collectAndAcknowledgeGuidance(ctx.deps.nudgeRepo, pod.id);
+            expect(reply?.messages.join('\n')).toContain('Repair finding A only');
             yield {
               type: 'complete',
               timestamp: new Date().toISOString(),
@@ -13783,6 +13786,7 @@ describe('PodManager', () => {
           expect(ctx.db.prepare('SELECT response FROM completion_decisions').get()).toEqual({
             response: 'Repair finding A only',
           });
+          expect(ctx.deps.nudgeRepo.hasPending(pod.id)).toBe(true);
           vi.mocked(ctx.runtime.resume).mockClear();
           ctx.podRepo.update(pod.id, {
             status: 'queued',
@@ -13798,6 +13802,7 @@ describe('PodManager', () => {
           expect(delivered).toContain(question.id);
           expect(delivered).toContain('Which finding?');
           expect(restarted.getSession(pod.id).status).toBe('validated');
+          expect(ctx.deps.nudgeRepo.hasPending(pod.id)).toBe(false);
           const continuationCount =
             vi.mocked(ctx.runtime.resume).mock.calls.length +
             vi.mocked(ctx.runtime.spawn).mock.calls.length;
@@ -15196,7 +15201,7 @@ describe('PodManager', () => {
           worktreePath: '/tmp/wt',
         });
         const replacement = makeValidationResult({ podId: pod.id, attempt: 1 });
-        const replacementReadiness = makeReadinessReview('ready', 'Replacement readiness');
+        const replacementReadiness = makeReadinessReview('needs_review', 'Replacement readiness');
         const advisoryResult = {
           status: 'pass' as const,
           reasoning: 'Old execution finished',
@@ -19491,7 +19496,13 @@ describe('PodManager', () => {
           ]),
         }),
       );
-      expect(piRuntime.resume).toHaveBeenCalledWith(pod.id, 'continue please', 'ctr-1', undefined);
+      expect(piRuntime.resume).toHaveBeenCalledWith(
+        pod.id,
+        expect.stringContaining('continue please'),
+        'ctr-1',
+        undefined,
+      );
+      expect(vi.mocked(piRuntime.resume).mock.calls[0]?.[1]).toContain('acknowledge_messages');
     });
   });
 
@@ -20705,6 +20716,8 @@ describe('PodManager', () => {
             vi.mocked(ctx.runtime.resume).mockImplementation(async function* () {
               resumed.resolve();
               await releaseWorker.promise;
+              const reply = collectAndAcknowledgeGuidance(ctx.deps.nudgeRepo, pod.id);
+              expect(reply?.messages.join('\n')).toContain('Revise the report');
               yield { type: 'complete', timestamp: new Date().toISOString(), result: 'New report' };
             });
             const manager = createPodManager(ctx.deps);

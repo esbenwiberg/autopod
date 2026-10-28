@@ -32,6 +32,7 @@ import {
 import { createProfileStore } from '../../profiles/index.js';
 import { CodexStreamParser } from '../../runtimes/codex-stream-parser.js';
 import { createSafetyEventsRepository } from '../../safety/safety-events-repository.js';
+import { createPassingValidationResult } from '../../test-utils/mock-helpers.js';
 import { podRoutes } from './pods.js';
 
 // ── DB setup (mirrors routes-extended.test.ts pattern) ────────────────────────
@@ -1422,6 +1423,10 @@ describe('GET /pods/analytics/reliability', () => {
   it('readiness exposes null and object snapshots in pod API responses', async () => {
     const oldPodId = insertPod(db, { id: 'readiness-old' });
     const readyPodId = insertPod(db, { id: 'readiness-ready', readinessReview });
+    db.prepare('UPDATE pods SET last_validation_result=? WHERE id=?').run(
+      JSON.stringify(createPassingValidationResult(readyPodId)),
+      readyPodId,
+    );
 
     const listRes = await app.inject({
       method: 'GET',
@@ -1442,6 +1447,25 @@ describe('GET /pods/analytics/reliability', () => {
     });
     expect(detailRes.statusCode).toBe(200);
     expect(detailRes.json().readinessReview).toEqual(readinessReview);
+  });
+
+  it('projects stale readiness without rewriting history', async () => {
+    const id = insertPod(db, { id: 'readiness-stale', status: 'failed', readinessReview });
+    type Response = { id: string; readinessReview: ReadinessReview | null };
+    for (const url of ['/pods', `/pods/${id}`]) {
+      const res = await app.inject({ method: 'GET', url, headers: authHeaders });
+      expect(res.statusCode).toBe(200);
+      const body = res.json<Response | Response[]>();
+      const result = Array.isArray(body) ? body.find((pod) => pod.id === id) : body;
+      expect(result?.readinessReview?.status).toBe('risky');
+      expect(result?.readinessReview?.findings).toContainEqual(
+        expect.objectContaining({ id: 'lifecycle-readiness-unresolved' }),
+      );
+    }
+    const stored = db.prepare('SELECT readiness_review FROM pods WHERE id=?').get(id) as {
+      readiness_review: string;
+    };
+    expect(JSON.parse(stored.readiness_review)).toEqual(readinessReview);
   });
 
   it('redacts profile credentials from profile API responses', async () => {

@@ -1199,7 +1199,6 @@ const sandboxTerminalReaper = sandboxContainerManager
   ? new SandboxTerminalReaper({
       podRepo,
       sandboxContainerManager,
-      preserveWorkspace: (id) => podManager.preserveWorkspace(id, 'terminal sandbox reaping'),
       logger: logger.child({ component: 'sandbox-terminal-reaper' }),
     })
   : null;
