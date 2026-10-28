@@ -262,7 +262,11 @@ async function runClaudeContainerReview(
         config.containerId,
         logPath,
       );
-      if (!stagedDiagnostic) throw err;
+      if (!stagedDiagnostic)
+        throw new ContainerReviewerUnavailableError(
+          `${err.message} (claude CLI wrote no stderr before the deadline)`,
+          { cause: err, kind: 'timeout', stderr: err.stderr },
+        );
       throw new ContainerReviewerUnavailableError(
         `Container reviewer timed out after ${config.timeout}ms: ${stagedDiagnostic}`,
         {
