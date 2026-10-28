@@ -1,5 +1,5 @@
 import { PendingRequests } from '@autopod/escalation-mcp';
-import type { EscalationRequest, PodGoal } from '@autopod/shared';
+import type { EscalationRequest, ExecutionTarget, PodGoal } from '@autopod/shared';
 import { afterEach, vi } from 'vitest';
 import { createAgentRunRegistry } from '../pods/agent-run-registry.js';
 import { persistEscalation } from '../pods/escalation-coordinator.js';
@@ -28,8 +28,14 @@ const waiters: PendingRequests[] = [];
 afterEach(() => {
   for (const pending of waiters.splice(0)) pending.cancelAll();
 });
-export function createOperatorFixture(disk = false) {
+export function createOperatorFixture(disk = false, target: ExecutionTarget = 'local') {
   const f = createFixCycleFixture(disk);
+  if (target !== 'local') {
+    const containerId = f.pod().containerId;
+    f.podRepo.update('prepare', { containerId: null });
+    f.podRepo.update('prepare', { executionTarget: target });
+    f.podRepo.update('prepare', { containerId });
+  }
   f.podRepo.update('prepare', { status: 'running', prUrl: null });
   const state = createOperatorPauseState();
   const registry = createAgentRunRegistry();

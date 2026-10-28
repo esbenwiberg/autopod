@@ -31,15 +31,23 @@ describe('complete operator message lifetime', () => {
     expect(f.db.pragma('integrity_check', { simple: true })).toBe('ok');
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
   });
-  it('queues detached fallback and resumes with the same text after resolving the old tool promise', async () => {
+  it('queues detached fallback once and resumes with its answer and receipt instructions', async () => {
     const f = createOperatorFixture();
     f.awaiting();
     const waiter = f.waiter(true);
     await f.messages().sendMessage.call(f.calls, 'prepare', 'Detached answer');
     await expect(waiter.wait).resolves.toBe('Detached answer');
-    const queued = f.deps.nudgeRepo.listPending('prepare')[0]?.message;
+    const pending = f.deps.nudgeRepo.listPending('prepare');
+    expect(pending).toHaveLength(1);
+    const queued = pending[0]?.message;
     expect(queued).toContain('Fallback response for the previous ask_human MCP call');
-    expect(f.ctx.runtime.resume).toHaveBeenCalledWith('prepare', queued, 'container-123', {});
+    expect(f.ctx.runtime.resume).toHaveBeenCalledWith(
+      'prepare',
+      expect.stringContaining(queued as string),
+      'container-123',
+      {},
+    );
+    expect(vi.mocked(f.ctx.runtime.resume).mock.calls[0]?.[1]).toContain('acknowledge_messages');
     expect(f.calls.handleCompletion).toHaveBeenCalledWith('prepare');
   });
   it('retains a durable unresolved run and queues the reply without another runtime conversation', async () => {
@@ -162,6 +170,94 @@ describe('complete operator message lifetime', () => {
     expect(f.calls.triggerValidation).toHaveBeenCalledWith('prepare');
     expect(f.messagesCaptured.taskFeedbackEvents).not.toHaveBeenCalled();
     expect(f.pod().pendingEscalation).toBeNull();
+  });
+  it.each([null, 'restart'] as const)(
+    'wakes a retained sandbox before credential preparation with recovery trigger %s',
+    async (lastRecoveryTrigger) => {
+      const f = createOperatorFixture(false, 'sandbox');
+      f.awaiting();
+      f.podRepo.update('prepare', { lastRecoveryTrigger });
+      let running = false;
+      const order: string[] = [];
+      vi.mocked(f.cm.getStatus).mockImplementation(async () => (running ? 'running' : 'stopped'));
+      vi.mocked(f.cm.start).mockImplementation(async () => {
+        order.push('wake');
+        running = true;
+      });
+      f.messagesCaptured.getResumeEnv.mockImplementation(async () => {
+        order.push('credentials');
+        expect(running).toBe(true);
+        return {};
+      });
+      await f.messages().sendMessage.call(f.calls, 'prepare', 'Continue preserved work');
+      expect(order).toEqual(['wake', 'credentials']);
+      expect(f.cm.start).toHaveBeenCalledExactlyOnceWith('container-123');
+      expect(f.ctx.runtime.resume).toHaveBeenCalledOnce();
+      expect(f.pod().lastRecoveryTrigger).toBeNull();
+    },
+  );
+  it('does not submit a wakeup for an already running retained sandbox', async () => {
+    const f = createOperatorFixture(false, 'sandbox');
+    f.awaiting();
+    await f.messages().sendMessage.call(f.calls, 'prepare', 'Continue preserved work');
+    expect(f.cm.start).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).toHaveBeenCalledOnce();
+  });
+  it('retains the original sandbox and durable reply when wakeup fails before credentials', async () => {
+    const f = createOperatorFixture(true, 'sandbox');
+    const question = f.awaiting();
+    vi.mocked(f.cm.getStatus).mockResolvedValue('stopped');
+    vi.mocked(f.cm.start).mockRejectedValue(new Error('Wakeup not observed'));
+    await expect(
+      f.messages().sendMessage.call(f.calls, 'prepare', 'Retain this human answer'),
+    ).rejects.toThrow('Wakeup not observed');
+    expect(f.messagesCaptured.getResumeEnv).not.toHaveBeenCalled();
+    expect(f.messagesCaptured.recordContinuationProvenance).not.toHaveBeenCalled();
+    expect(f.messagesCaptured.primeRuntimeForResume).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    expect(f.cm.kill).not.toHaveBeenCalled();
+    expect(f.messagesCaptured.enqueueSession).not.toHaveBeenCalled();
+    expect(f.pod()).toMatchObject({ status: 'failed', containerId: 'container-123' });
+    expect(f.deps.escalationRepo.getOrThrow(question.id).response?.response).toBe(
+      'Retain this human answer',
+    );
+    expect(f.deps.nudgeRepo.listPending('prepare')[0]?.message).toBe('Retain this human answer');
+    const reopened = f.reopen();
+    expect(reopened.pods.getOrThrow('prepare')).toMatchObject({
+      status: 'failed',
+      containerId: 'container-123',
+    });
+    expect(createNudgeRepository(f.db).listPending('prepare')).toHaveLength(1);
+    expect(createEscalationRepository(f.db).getOrThrow(question.id).response?.response).toBe(
+      'Retain this human answer',
+    );
+  });
+  it('does not prepare credentials or fail a replacement lifecycle after a delayed wakeup', async () => {
+    const f = createOperatorFixture(false, 'sandbox');
+    f.awaiting();
+    vi.mocked(f.cm.getStatus).mockResolvedValue('stopped');
+    vi.mocked(f.cm.start).mockImplementation(async () => {
+      f.podRepo.incrementLifecycleGeneration('prepare');
+      f.podRepo.update('prepare', { containerId: 'replacement' });
+    });
+    await expect(
+      f.messages().sendMessage.call(f.calls, 'prepare', 'Continue'),
+    ).rejects.toMatchObject({ code: 'STALE_AGENT_CONTINUATION' });
+    expect(f.messagesCaptured.getResumeEnv).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    expect(f.pod()).toMatchObject({ status: 'running', containerId: 'replacement' });
+  });
+  it('refuses an unknown retained sandbox state without a wakeup or credential write', async () => {
+    const f = createOperatorFixture(false, 'sandbox');
+    f.awaiting();
+    vi.mocked(f.cm.getStatus).mockResolvedValue('unknown');
+    await expect(
+      f.messages().sendMessage.call(f.calls, 'prepare', 'Continue'),
+    ).rejects.toMatchObject({ code: 'CONTINUATION_RESOURCE_UNAVAILABLE' });
+    expect(f.cm.start).not.toHaveBeenCalled();
+    expect(f.messagesCaptured.getResumeEnv).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    expect(f.pod()).toMatchObject({ status: 'failed', containerId: 'container-123' });
   });
   it('reads the live Goal projection and refuses ordinary conversation restart', async () => {
     const f = createOperatorFixture();
