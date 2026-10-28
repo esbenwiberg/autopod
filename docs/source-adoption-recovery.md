@@ -2,9 +2,9 @@
 
 **Not yet an operator workflow. No HTTP/CLI operation is exposed, no current-source
 validation is certified by these helpers, and no rollout/retry is authorized.**
-The controller, actual checks-only validation integration, admission/cleanup
-fences, authenticated API/CLI and supported ambiguity reconciliation remain work
-in progress. Do not deploy this checkpoint as a pod-recovery solution.
+The private checks-only path now uses the real revalidation workflow, but its
+source-coordinator/real-backend binding, admission/cleanup fences, authenticated
+API/CLI and supported ambiguity reconciliation remain work in progress. Do not deploy this checkpoint as a pod-recovery solution.
 
 This is a bounded follow-up to retained-continuation/wakeup recovery. An advanced
 remote branch cannot be approved using an old pass, force-pushed backwards, or
@@ -49,6 +49,35 @@ silently fast-forwarded while continuing to display historical validation.
   `--no-overwrite-ignore`: it refuses ignored-report collisions rather than
   overwriting them. There is no hard reset, clean, auto-commit, rebase, push,
   branch retarget or provider PR merge.
+
+## Private checks integration (not an exposed recovery operation)
+
+`validation-revalidation-workflow.ts:revalidateAdoptedSource` accepts only a
+checking-stage durable admission with original task/resource/source bindings and
+an already-invalidated current result. It refuses native Goals, phase skips and
+waivers, requires source-bound dependency preparation, and claims one invocation
+before external awaits. Migration220 records that claim immutably: **not a
+worker start, backend dispatch, termination or usage receipt**. A second caller
+or daemon restart cannot replay it. Normal revalidation refuses existing source
+custody rather than pulling/reconciling a branch behind the source protocol.
+
+The private path does not pull, graft/reset/auto-commit, wake a stopped resource,
+replace a missing one, reset attempt history, consult old review batches or
+pre-submit passes, waive failures, publish source/screenshots, trigger dependent
+work or approve/merge. It calls the existing validation execution/retry machinery;
+no permission/grant or task-wide budget reset is manufactured. Setup execution
+must actually pass before an overall pass is accepted. The admitted setup command
+is immutable source-operation input (or the frozen configured command), not a
+claim that arbitrary dependencies were cryptographically certified.
+
+Ownership is rechecked after successful AND rejected awaits. The coordinator's
+real-source verifier runs before preparation/checks and after execution, and the
+actual validation invocation is rechecked again after that last asynchronous
+verification. Only then may canonical result publication happen. Returned results
+are retained as explicitly **unaccepted** observations before certification, so
+source drift cannot silently destroy execution evidence or become a current pass.
+A provider404 never clears the original resource pointer in this path. No
+controller is yet exposed that can supply this capability on a real pod.
 
 ## Required before exposing it
 

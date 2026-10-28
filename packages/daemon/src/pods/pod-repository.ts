@@ -59,6 +59,10 @@ import { displayRepository, repositoryDisplayColumns } from './pod-display-repos
 import { type ProviderUsageProjection, readProviderUsage } from './provider-usage-projection.js';
 import { withLifecycleReadiness } from './readiness-projection.js';
 import {
+  type SourceAdoptionRepository,
+  createSourceAdoptionRepository,
+} from './source-adoption-repository.js';
+import {
   type SourcePublicationLedger,
   createSourcePublicationLedger,
 } from './source-publication-ledger.js';
@@ -280,6 +284,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   sourcePublications?: SourcePublicationLedger;
   externalDeliveries?: ExternalDeliveryRepository;
   sandboxWakeups?: SandboxWakeupJournal;
+  sourceAdoptions?: SourceAdoptionRepository;
   mergeJournal?: MergeJournal;
   taskExecutions?: TaskExecutionLedger;
   deletionOwnership?: DeletionOwnership;
@@ -701,6 +706,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
   const completionJournal = createCompletionJournal(db);
   const externalDeliveries = createExternalDeliveryRepository(db);
   const sandboxWakeups = createSandboxWakeupJournal(db);
+  const sourceAdoptions = createSourceAdoptionRepository(db);
   const dispatchPreflight = createDispatchPreflightLedger(db);
   const taskExecutions = createTaskExecutionLedger(db);
   const deletionOwnership = createDeletionOwnership(db);
@@ -787,6 +793,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     sourcePublications: createSourcePublicationLedger(db),
     externalDeliveries,
     sandboxWakeups,
+    sourceAdoptions,
     mergeJournal: createMergeJournal(db),
     taskExecutions,
     deletionOwnership,

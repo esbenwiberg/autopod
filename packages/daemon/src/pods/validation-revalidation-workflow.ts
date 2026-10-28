@@ -3,7 +3,12 @@ import { isExpectedDockerError } from '../containers/docker-helpers.js';
 import { parseDiffFilePaths } from '../validation/review-context-builder.js';
 
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
+import {
+  type AdoptedSourceValidationRequest,
+  openAdoptedSourceValidation,
+} from './adopted-source-validation.js';
 import { resolveReviewerModel, resolveReviewerProvider } from './runtime-resolver.js';
+import { sourceAdoptionError } from './source-adoption-repository.js';
 import { isTerminalState } from './state-machine.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import {
@@ -12,6 +17,7 @@ import {
   reviewInfrastructureFailureLabel,
 } from './validation-infrastructure.js';
 import { ValidationSupersededError } from './validation-ownership.js';
+import { assertValidationExecutionSettled } from './validation-recovery-policy.js';
 import {
   assertProtectedOperationalPathsInScope,
   getPodValidationSkipPhases,
@@ -69,16 +75,50 @@ export function createValidationRevalidationWorkflow(
     completeRevalidationPass,
   } = captured;
 
-  async function revalidateSession(
+  async function executeRevalidation(
     this: Pick<ValidationWorkflowCalls, 'approveSession'>,
     podId: string,
-    options?: { force?: boolean; checksOnly?: boolean },
+    options?: {
+      force?: boolean;
+      checksOnly?: boolean;
+      adoptedSource?: AdoptedSourceValidationRequest;
+    },
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
     assertExecutionTerminationVerified(podId);
     assertGuidanceCollected(podId);
     const pod = podRepo.getOrThrow(podId);
+    if (!options?.adoptedSource && podRepo.sourceAdoptions?.hasCustody(podId))
+      sourceAdoptionError(
+        'Use source-bound checks; ordinary revalidation may pull or rewrite preserved source.',
+        'SOURCE_CHECKS_REQUIRED',
+      );
+    if (
+      options?.adoptedSource &&
+      (_deps.launchConfiguration?.read(podId)?.intent === 'goal' ||
+        _deps.launchConfiguration?.goals?.get(podId))
+    )
+      sourceAdoptionError(
+        'Native Goal source adoption requires its own reviewed revision flow',
+        'SOURCE_GOAL_UNSUPPORTED',
+      );
+    if (options?.adoptedSource) assertValidationExecutionSettled(pod);
+    const adopted = options?.adoptedSource
+      ? openAdoptedSourceValidation(
+          podRepo,
+          podId,
+          options.adoptedSource,
+          executionForPod,
+          assertGuidanceCollected,
+        )
+      : undefined;
+    const owned = <T>(operation: () => Promise<T>) =>
+      adopted ? adopted.owned(operation) : operation();
     const force = options?.force ?? false;
-    if (pod.status !== 'failed' && pod.status !== 'review_required') {
+    if (
+      pod.status !== 'failed' &&
+      pod.status !== 'review_required' &&
+      !(adopted && pod.status === 'validated')
+    ) {
       throw new AutopodError(
         `Cannot revalidate pod ${podId} in status ${pod.status} — only failed or review_required pods can be revalidated`,
         'INVALID_STATE',
@@ -120,17 +160,33 @@ export function createValidationRevalidationWorkflow(
     // Pull latest from remote branch (human may have pushed fixes). Failures are
     // tolerated when force=true so a resume with no remote access (e.g. revoked
     // PAT) still reaches the validation engine on the existing worktree.
-    emitActivityStatus(podId, 'Pulling latest changes from remote branch…');
-    try {
-      const pullResult = await worktreeManager.pullBranch(
-        pod.worktreePath,
-        await resolveGitCredential(profile),
-      );
-      newCommits = pullResult.newCommits;
-    } catch (err) {
-      if (!force) throw err;
-      logger.warn({ err, podId }, 'pullBranch failed — proceeding (force=true)');
-      emitActivityStatus(podId, 'Could not pull from remote — revalidating local worktree');
+    if (adopted) {
+      if (
+        getPodValidationSuite(pod) !== 'full' ||
+        pod.options.validate === false ||
+        pod.skipValidation ||
+        getPodValidationSkipPhases(profile, pod).length > 0
+      )
+        sourceAdoptionError(
+          'Adopted-source checks require full validation without phase skips or waivers',
+          'SOURCE_CHECKS_BYPASSED',
+        );
+      adopted.claimInvocation();
+      await adopted.verify();
+      newCommits = true;
+    } else {
+      emitActivityStatus(podId, 'Pulling latest changes from remote branch…');
+      try {
+        const pullResult = await worktreeManager.pullBranch(
+          pod.worktreePath,
+          await resolveGitCredential(profile),
+        );
+        newCommits = pullResult.newCommits;
+      } catch (err) {
+        if (!force) throw err;
+        logger.warn({ err, podId }, 'pullBranch failed — proceeding (force=true)');
+        emitActivityStatus(podId, 'Could not pull from remote — revalidating local worktree');
+      }
     }
 
     // Without `force`, no-new-commits is a fast-fail: the only legitimate caller is
@@ -156,10 +212,10 @@ export function createValidationRevalidationWorkflow(
     }
 
     // Reset validation attempts for the fresh human-driven validation
-    podRepo.update(podId, { validationAttempts: 0 });
+    if (!adopted) podRepo.update(podId, { validationAttempts: 0 });
 
     // Pre-push security scan: human-pushed fixes also need to clear the gate.
-    await runPushCheckpointScan(pod, profile);
+    await owned(() => runPushCheckpointScan(pod, profile));
 
     // Transition to validating
     if (!pod.containerId && force) {
@@ -170,7 +226,7 @@ export function createValidationRevalidationWorkflow(
     transition(pod, 'validating', { failureReason: null });
 
     // Re-run validation (force=true restarts container, but we don't want agent retry on failure)
-    const attempt = 1;
+    const attempt = adopted ? pod.validationAttempts + 1 : 1;
     podRepo.update(podId, { validationAttempts: attempt });
 
     // Reset the desktop Validation tab chips for this fresh attempt — without this,
@@ -195,8 +251,16 @@ export function createValidationRevalidationWorkflow(
       // Restart the container with updated worktree
       const cm = containerManagerFactory.get(pod.executionTarget);
       try {
-        await cm.start(pod.containerId);
+        if (adopted) {
+          const status = await owned(() => cm.getStatus(pod.containerId as string));
+          if (status !== 'running')
+            sourceAdoptionError(
+              'The exact adopted resource must already be Running; no replacement or second wakeup is permitted.',
+              'VALIDATION_RESOURCE_UNAVAILABLE',
+            );
+        } else await cm.start(pod.containerId);
       } catch (err) {
+        if (adopted) throw err;
         if (isExpectedDockerError(err, [404])) {
           podRepo.update(podId, { containerId: null });
           if (force) {
@@ -218,7 +282,8 @@ export function createValidationRevalidationWorkflow(
       // worktree must reflect the live /workspace before reading diffs or facts.
       emitActivityStatus(podId, 'Syncing workspace…');
       let validationSyncOk = true;
-      if (pod.containerId && pod.worktreePath) {
+      if (adopted) await adopted.verify();
+      if (!adopted && pod.containerId && pod.worktreePath) {
         try {
           await prepareWorkspaceForValidation(
             pod.containerId,
@@ -260,7 +325,7 @@ export function createValidationRevalidationWorkflow(
 
       const revalDefaultBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
       const revalidationExecEnv = {
-        ...((await validationEnvironmentForPod(pod, profile)) ?? {}),
+        ...((await owned(() => validationEnvironmentForPod(pod, profile))) ?? {}),
         ...buildValidationContextEnv({
           podId,
           headBranch: pod.branch,
@@ -269,35 +334,42 @@ export function createValidationRevalidationWorkflow(
         }),
       };
       const [diff, commitLog] = pod.worktreePath
-        ? await Promise.all([
-            worktreeManager.getDiff(
-              pod.worktreePath,
-              revalDefaultBranch,
-              undefined,
-              pod.startCommitSha ?? undefined,
-            ),
-            worktreeManager.getCommitLog(
-              pod.worktreePath,
-              revalDefaultBranch,
-              undefined,
-              pod.startCommitSha ?? undefined,
-            ),
-          ])
+        ? await owned(() =>
+            Promise.all([
+              worktreeManager.getDiff(
+                pod.worktreePath,
+                revalDefaultBranch,
+                undefined,
+                pod.startCommitSha ?? undefined,
+              ),
+              worktreeManager.getCommitLog(
+                pod.worktreePath,
+                revalDefaultBranch,
+                undefined,
+                pod.startCommitSha ?? undefined,
+              ),
+            ]),
+          )
         : ['', ''];
       const changedPathsAgainstBase =
         pod.worktreePath && worktreeManager.getChangedPathsAgainstBase
-          ? await worktreeManager.getChangedPathsAgainstBase(pod.worktreePath, revalDefaultBranch)
+          ? await owned(() =>
+              worktreeManager.getChangedPathsAgainstBase!(
+                pod.worktreePath as string,
+                revalDefaultBranch,
+              ),
+            )
           : parseDiffFilePaths(diff);
       assertProtectedOperationalPathsInScope(pod, changedPathsAgainstBase);
 
       const codeReviewSkill = pod.worktreePath
-        ? await loadCodeReviewSkill(pod.worktreePath, logger)
+        ? await owned(() => loadCodeReviewSkill(pod.worktreePath as string, logger))
         : undefined;
 
       const { profile: reviewerProfile, credentials: reviewerProviderCredentials } =
         getEffectiveReviewerConfig(pod);
-      const reviewerExecEnv = await buildReviewerExecEnv(pod);
-      const priorReviewBatch = validationRepo?.getLatestReviewBatch(podId);
+      const reviewerExecEnv = await owned(() => buildReviewerExecEnv(pod));
+      const priorReviewBatch = adopted ? undefined : validationRepo?.getLatestReviewBatch(podId);
       const validationConfig = {
         podId,
         containerId: pod.containerId,
@@ -306,7 +378,8 @@ export function createValidationRevalidationWorkflow(
         containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
         webProbeMode:
           pod.executionTarget === 'sandbox' ? ('container' as const) : ('host' as const),
-        validationSetupCommand: profile.validationSetupCommand ?? undefined,
+        validationSetupCommand:
+          adopted?.setupCommand ?? profile.validationSetupCommand ?? undefined,
         buildCommand: profile.buildCommand ?? '',
         startCommand: profile.startCommand ?? '',
         buildWorkDir: profile.buildWorkDir ?? undefined,
@@ -339,7 +412,7 @@ export function createValidationRevalidationWorkflow(
         startCommitSha: pod.startCommitSha ?? undefined,
         hasWebUi: profile.hasWebUi ?? true,
         advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
-        preSubmitReview: pod.preSubmitReview ?? undefined,
+        preSubmitReview: adopted ? undefined : (pod.preSubmitReview ?? undefined),
         skipPhases: getPodValidationSkipPhases(profile, pod),
         priorReviewBatch,
         extraExecEnv: revalidationExecEnv,
@@ -347,7 +420,24 @@ export function createValidationRevalidationWorkflow(
 
       let result: Awaited<ReturnType<typeof validationEngine.validate>>;
       const revalidateController = new AbortController();
-      const ownership = claimValidation(pod, revalidateController);
+      if (adopted) await adopted.verify();
+      const baseOwnership = claimValidation(pod, revalidateController);
+      const ownership = adopted
+        ? {
+            assertCurrent() {
+              adopted.assertCurrent();
+              return baseOwnership.assertCurrent();
+            },
+            isCurrent() {
+              try {
+                this.assertCurrent();
+                return true;
+              } catch {
+                return false;
+              }
+            },
+          }
+        : baseOwnership;
       try {
         result = await validateWithInfrastructureRetries(
           validationConfig,
@@ -356,7 +446,18 @@ export function createValidationRevalidationWorkflow(
           'Revalidation engine threw unexpectedly',
           ownership,
         );
+        if (options?.adoptedSource)
+          podRepo.sourceAdoptions?.observeChecksResult(options.adoptedSource.operationId, result);
         ownership.assertCurrent();
+        if (adopted) {
+          await adopted.verify();
+          ownership.assertCurrent();
+          if (result.overall === 'pass' && result.setup?.status !== 'pass')
+            sourceAdoptionError(
+              'Dependency setup did not produce passing execution evidence',
+              'SOURCE_DEPENDENCY_SETUP_UNVERIFIED',
+            );
+        }
       } finally {
         if (validationAbortControllers.get(podId) === revalidateController)
           validationAbortControllers.delete(podId);
@@ -400,18 +501,20 @@ export function createValidationRevalidationWorkflow(
       }
 
       if (result.overall === 'pass') {
-        return await completeRevalidationPass.call(this, {
-          podId,
-          pod,
-          profile,
-          s2,
-          result,
-          revalDefaultBranch,
-          newCommits,
-          validationConfig,
-          validationRecord,
-          checksOnly: options?.checksOnly,
-        });
+        return await owned(() =>
+          completeRevalidationPass.call(this, {
+            podId,
+            pod,
+            profile,
+            s2,
+            result,
+            revalDefaultBranch,
+            newCommits,
+            validationConfig,
+            validationRecord,
+            checksOnly: options?.checksOnly,
+          }),
+        );
       }
 
       if (isReviewInfrastructureOnlyFailure(result)) {
@@ -461,6 +564,21 @@ export function createValidationRevalidationWorkflow(
 
       return { newCommits, result: 'fail' };
     } catch (err) {
+      if (adopted) {
+        if (err instanceof ValidationSupersededError) throw err;
+        adopted.assertCurrent();
+        const current = podRepo.getOrThrow(podId);
+        if (err instanceof TaskRetryBlockedError)
+          await owned(() => parkOnRetryAdmission(current, err));
+        else if (current.status === 'validating')
+          transition(current, 'review_required', {
+            failureReason: sanitizeFailureReason(
+              err,
+              'Source-bound validation could not be certified; original custody remains held',
+            ),
+          });
+        throw err;
+      }
       if (err instanceof ValidationSupersededError) return { newCommits, result: 'fail' };
       logger.error({ err, podId }, 'Revalidation error');
       const s2 = podRepo.getOrThrow(podId);
@@ -480,5 +598,26 @@ export function createValidationRevalidationWorkflow(
     }
   }
 
-  return { revalidateSession };
+  function revalidateSession(
+    this: Pick<ValidationWorkflowCalls, 'approveSession'>,
+    podId: string,
+    options?: { force?: boolean; checksOnly?: boolean },
+  ) {
+    return executeRevalidation.call(this, podId, options);
+  }
+  function revalidateAdoptedSource(podId: string, request: AdoptedSourceValidationRequest) {
+    return executeRevalidation.call(
+      {
+        approveSession: async () => {
+          sourceAdoptionError(
+            'Source adoption never authorizes approval or merge',
+            'SOURCE_ADOPTION_DELIVERY_HELD',
+          );
+        },
+      },
+      podId,
+      { force: true, checksOnly: true, adoptedSource: request },
+    );
+  }
+  return { revalidateSession, revalidateAdoptedSource };
 }

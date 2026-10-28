@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { AutopodError, type OperatorActor, type Pod } from '@autopod/shared';
+import { AutopodError, type OperatorActor, type Pod, type ValidationResult } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { SourceAdoptionStage, SourceAdoptionState } from './source-adoption-types.js';
 
@@ -42,6 +42,8 @@ export interface SourceAdoptionBinding {
   worktreePath: string;
   oldHead: string;
   targetHead: string;
+  /** Human-admitted, source-bound dependency preparation; executed by normal validation admission. */
+  dependencySetupCommand?: string;
 }
 export interface SourcePreservation {
   host: string;
@@ -83,6 +85,7 @@ export interface SourceAdoptionRepository {
   get(id: string): SourceAdoptionRecord | null;
   list(podId: string): SourceAdoptionRecord[];
   assertAvailable(podId: string, owner?: string): void;
+  hasCustody(podId: string): boolean;
   claim(
     id: string,
     podId: string,
@@ -103,6 +106,8 @@ export interface SourceAdoptionRepository {
     },
   ): void;
   fail(id: string, code: string): void;
+  observeChecksResult(id: string, result: ValidationResult): void;
+  claimChecksInvocation(id: string, assertCurrent: () => void): void;
   retains(containerId: string): boolean;
   retainedContainerIds(): string[];
   assertDeletable(podId: string): void;
@@ -157,9 +162,10 @@ export function createSourceAdoptionRepository(db: Database.Database): SourceAdo
   const assertAvailable = (podId: string, owner?: string) => {
     const blocked = db
       .prepare(`SELECT id FROM source_adoptions WHERE completed_at IS NULL AND
-      (task_id=? OR json_extract(binding,'$.containerId')=(SELECT container_id FROM pods WHERE id=?)
+      (task_id=(SELECT task_id FROM task_executions WHERE pod_id=?) OR pod_id=?
+      OR json_extract(binding,'$.containerId')=(SELECT container_id FROM pods WHERE id=?)
       OR json_extract(binding,'$.worktreePath')=(SELECT worktree_path FROM pods WHERE id=?))`)
-      .all(task(podId), podId, podId) as { id: string }[];
+      .all(podId, podId, podId, podId) as { id: string }[];
     if (blocked.some((row) => row.id !== owner))
       sourceAdoptionError(
         'Source adoption owns this task/resource. Observe its durable operation; do not retry another worker, validation or delivery.',
@@ -178,6 +184,16 @@ export function createSourceAdoptionRepository(db: Database.Database): SourceAdo
         .filter((row): row is SourceAdoptionRecord => row !== null);
     },
     assertAvailable,
+    hasCustody(podId: string) {
+      return Boolean(
+        db
+          .prepare(`SELECT 1 FROM source_adoptions WHERE pod_id=? OR
+        task_id=(SELECT task_id FROM task_executions WHERE pod_id=?) OR
+        json_extract(binding,'$.containerId')=(SELECT container_id FROM pods WHERE id=?) OR
+        json_extract(binding,'$.worktreePath')=(SELECT worktree_path FROM pods WHERE id=?) LIMIT 1`)
+          .get(podId, podId, podId, podId),
+      );
+    },
     claim: db.transaction(
       (
         id: string,
@@ -271,6 +287,25 @@ export function createSourceAdoptionRepository(db: Database.Database): SourceAdo
       if (result.changes !== 1) sourceAdoptionError('No unsettled source adoption exists');
       event(id, { error: code.slice(0, 500) });
     }),
+    claimChecksInvocation: db.transaction((id: string, assertCurrent: () => void) => {
+      const row = get(id);
+      if (!row || row.stage !== 'checking' || row.error || !row.adoptedGeneration)
+        sourceAdoptionError('No active source checks admission exists');
+      assertCurrent();
+      if (db.prepare('SELECT 1 FROM source_check_invocations WHERE adoption_id=?').get(id))
+        sourceAdoptionError(
+          'This source checks invocation is already claimed. Observe/reconcile it; do not replay.',
+          'SOURCE_CHECKS_ALREADY_CLAIMED',
+        );
+      db.prepare(
+        'INSERT INTO source_check_invocations(adoption_id,pod_id,generation,claimed_at) VALUES(?,?,?,?)',
+      ).run(id, row.podId, row.adoptedGeneration, new Date().toISOString());
+      event(id, { observation: 'checks-invocation-claimed', generation: row.adoptedGeneration });
+    }),
+    observeChecksResult(id: string, result: ValidationResult) {
+      if (!get(id)) sourceAdoptionError('Source checks observation has no original admission');
+      event(id, { observation: 'unaccepted-validation-result', result });
+    },
     retains(containerId: string) {
       return Boolean(
         db
