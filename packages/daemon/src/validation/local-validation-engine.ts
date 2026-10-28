@@ -61,7 +61,10 @@ import {
   parseClosureVerification,
   reconcileReviewLedger,
 } from './review-ledger.js';
-import { reviewClosureOutputContract } from './review-structured-output.js';
+import {
+  reviewClosureOutputContract,
+  taskReviewOutputContract,
+} from './review-structured-output.js';
 import { ToolReviewError, runToolUseReview } from './review-tool-runner.js';
 import { ReviewerApiDeadlineError, reviewerApiBudget } from './reviewer-api-budget.js';
 import { runWithValidationEvidence } from './run-with-evidence.js';
@@ -3886,6 +3889,7 @@ async function runTaskReview(
             ...(config.reviewerExecEnv ? { env: config.reviewerExecEnv } : {}),
             timeout: reviewTimeout,
             logger: log,
+            outputContract: taskReviewOutputContract,
           });
           stdout = containerReview.stdout;
           tier1TokenUsage = containerReview.tokenUsage;
@@ -3928,10 +3932,17 @@ async function runTaskReview(
           }
         }
         if (!tier1Parsed) {
-          log?.warn({ rawOutput: stdout.slice(0, 500) }, 'failed to parse task review response');
+          const diagnostic =
+            stdout.length <= 2000
+              ? stdout
+              : `${stdout.slice(0, 500)}\n… reviewer output omitted …\n${stdout.slice(-1500)}`;
+          log?.warn(
+            { rawOutput: diagnostic, outputCharacters: stdout.length },
+            'failed to parse task review response',
+          );
           return {
             result: null,
-            skipReason: 'Failed to parse Tier 1 review response',
+            skipReason: `Failed to parse Tier 1 review response. No verdict was accepted. Bounded reviewer diagnostic (not a validation verdict):\n${diagnostic}`,
             tokenUsage: tier1TokenUsage,
           };
         }
