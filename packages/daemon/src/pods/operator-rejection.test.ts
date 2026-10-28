@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createPassingValidationResult } from '../test-utils/mock-helpers.js';
 import { createOperatorFixture } from '../test-utils/operator-helpers.js';
 import { AgentContinuationSupersededError } from './continuation-preflight.js';
 describe('operator rejection lifetime', () => {
@@ -9,6 +10,54 @@ describe('operator rejection lifetime', () => {
     ).rejects.toMatchObject({ code: 'INVALID_STATE' });
     expect(f.rejectionCaptured.beginGoalTaskRework).not.toHaveBeenCalled();
     expect(f.cm.start).not.toHaveBeenCalled();
+  });
+  it('cannot erase an unverified validation exit before its continuation guard runs', async () => {
+    const f = createOperatorFixture();
+    f.mainCaptured.transition(f.pod(), 'failed');
+    f.podRepo.update('prepare', {
+      lastValidationResult: {
+        ...createPassingValidationResult('prepare'),
+        overall: 'fail',
+        infrastructureFailure: {
+          phase: 'build',
+          code: 'EXEC_EXIT_UNVERIFIED',
+          message: 'Original exit unverified',
+          retryable: false,
+        },
+      },
+    });
+    const before = f.pod();
+    await expect(
+      f.rejection().rejectSession.call(f.calls, 'prepare', 'Continue'),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_EXECUTION_UNVERIFIED',
+    });
+    expect(f.pod()).toEqual(before);
+    expect(f.rejectionCaptured.beginGoalTaskRework).not.toHaveBeenCalled();
+    expect(f.cm.start).not.toHaveBeenCalled();
+    expect(f.rejectionCaptured.taskFeedbackEvents).not.toHaveBeenCalled();
+  });
+  it('blocks an unverified original worker before attempting physical wakeup', async () => {
+    const f = createOperatorFixture();
+    const pod = f.pod();
+    const ledger = f.podRepo.taskExecutions;
+    if (!ledger) throw new Error('Missing ledger');
+    const run = ledger.beginRun('prepare', pod.lifecycleGeneration, pod.finalization?.cycle ?? 0, {
+      runtime: pod.runtime,
+      model: pod.model,
+      providerAccountId: 'account',
+    });
+    ledger.retainUnverifiedRun(run);
+    f.mainCaptured.transition(f.pod(), 'failed');
+    const before = f.pod();
+    await expect(
+      f.rejection().rejectSession.call(f.calls, 'prepare', 'Continue'),
+    ).rejects.toMatchObject({
+      code: 'TASK_EXECUTION_TERMINATION_UNVERIFIED',
+    });
+    expect(f.pod()).toEqual(before);
+    expect(f.cm.start).not.toHaveBeenCalled();
+    expect(f.rejectionCaptured.beginGoalTaskRework).not.toHaveBeenCalled();
   });
   it('retains reset/actor feedback and the dynamic network receiver through actual SQLite reopen', async () => {
     const f = createOperatorFixture(true);

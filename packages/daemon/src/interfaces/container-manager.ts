@@ -1,6 +1,11 @@
 import type { Readable, Writable } from 'node:stream';
 import type { ArtifactOutput, NativeGoalProcessIdentity } from '@autopod/shared';
 
+/** Fence retained-resource wakeup across asynchronous provider/auth observations. */
+export interface ContainerStartOptions {
+  assertCurrent?: () => void;
+}
+
 /** Guard publication of a collected directory after asynchronous extraction. */
 export interface DirectoryExtractionOptions {
   /** Called after verified wakeup, before export; permits separate wake/copy budgets. */
@@ -166,7 +171,7 @@ export interface ContainerManager {
   /** Stop a container without removing it. Idempotent — swallows "already stopped". */
   stop(containerId: string): Promise<void>;
   /** Start a previously stopped container. Idempotent — swallows "already running". */
-  start(containerId: string): Promise<void>;
+  start(containerId: string, options?: ContainerStartOptions): Promise<void>;
   writeFile(
     containerId: string,
     path: string,

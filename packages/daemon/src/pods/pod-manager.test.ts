@@ -24878,7 +24878,7 @@ describe('worker startup diagnostics', () => {
     expect(failed.failureReason).not.toContain('ghp_1234567890');
   });
 
-  it('destroys a failed sandbox only after its workspace checkpoint succeeds', async () => {
+  it('keeps report sources after a successful failed-worker checkpoint', async () => {
     const runtime = createMockRuntime();
     vi.mocked(runtime.spawn).mockImplementation(async function* () {
       yield {
@@ -24902,8 +24902,11 @@ describe('worker startup diagnostics', () => {
     await manager.processPod(pod.id);
 
     expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalled();
-    expect(ctx.containerManager.kill).toHaveBeenCalledWith('container-123');
-    expect(manager.getSession(pod.id).containerId).toBeNull();
+    expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+    expect(manager.getSession(pod.id)).toMatchObject({
+      status: 'failed',
+      containerId: 'container-123',
+    });
   });
 
   it('retains a failed sandbox when its workspace checkpoint fails', async () => {

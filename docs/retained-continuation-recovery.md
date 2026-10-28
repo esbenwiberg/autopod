@@ -52,12 +52,29 @@ of backend termination. Existing exact-source external-delivery holds still
 apply. This can retain billable storage indefinitely; it is not a report archive
 or an automatic cleanup permission.
 
+## Durable wakeup custody
+
+The Azure adapter uses the SQLite journal described in
+[`sandbox-wakeup-recovery.md`](sandbox-wakeup-recovery.md). Potentially dispatched
+resumes survive restart and cannot be blindly reposted. Revoking an unsent
+claim cannot revoke an admitted transport. Caller ownership checks propagate
+through provider/auth awaits. Legacy stopped resources without a Running
+baseline fail closed; this deliberately does not turn old uncertain restores
+into retry permission.
+
+Inline failed-worker checkpointing no longer deletes the original sandbox.
+Stopped, active/unsettled or unverified-validation resources are not restored
+for that background collection. Pending wakeup claims also fence explicit
+cleanup/Kill/Delete and backend deletion; current-pointer loss does not release
+the resource, and a recorded owner label retains its host source too.
+
 ## Scope and remaining work
 
 The sequencing/custody fix does not itself establish that an outcome-unknown
 provider resume was accepted, terminate an old execution, adopt a newer remote
 source revision, or recover inaccessible reports. It does not authorize a retry,
 reset task-wide accounting, waive validation, or complete a pod whose delivery is
-unresolved. Durable wakeup observation and verified capture/release of report-retention
-holds remain separate recovery concerns. No provider timeout is treated as
-termination or as permission to blindly repeat its mutation.
+unresolved. Provider diagnosis for pre-journal uncertain restores, reviewed legacy recovery
+controls and verified capture/release of report-retention holds remain separate
+recovery concerns. No provider timeout is treated as termination or as permission
+to blindly repeat its mutation.

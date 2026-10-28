@@ -602,7 +602,7 @@ if (SANDBOX_SUBSCRIPTION_ID && SANDBOX_RESOURCE_GROUP) {
       tier: SANDBOX_TIER,
     },
     logger,
-    { managedDatabase: db },
+    { managedDatabase: db, wakeupJournal: podRepo.sandboxWakeups },
   );
   logger.info(
     {

@@ -1182,6 +1182,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
   const operatorRejection = createOperatorRejection({
     podRepo,
+    resolveEffectiveBoundProfile,
     beginGoalTaskRework,
     emitActivityStatus,
     transition,

@@ -26,8 +26,12 @@ export function createWorkspaceDeletion(captured: WorkspaceDeletionCaptured) {
   async function deleteSession(podId: string): Promise<void> {
     podRepo.taskExecutions?.assertCanDelete(podId);
     podRepo.externalDeliveries?.assertDeletable(podId);
+    podRepo.sandboxWakeups?.assertPodReleasable(podId);
     const pod = podRepo.getOrThrow(podId);
-    if (pod.containerId) podRepo.externalDeliveries?.assertReleasable(pod.containerId);
+    if (pod.containerId) {
+      podRepo.sandboxWakeups?.assertReleasable(pod.containerId);
+      podRepo.externalDeliveries?.assertReleasable(pod.containerId);
+    }
     const deletable =
       isTerminalState(pod.status) ||
       pod.status === 'failed' ||
@@ -60,7 +64,11 @@ export function createWorkspaceDeletion(captured: WorkspaceDeletionCaptured) {
       }
       podRepo.taskExecutions?.assertCanDelete(podId);
       podRepo.externalDeliveries?.assertDeletable(podId);
-      if (current.containerId) podRepo.externalDeliveries?.assertReleasable(current.containerId);
+      podRepo.sandboxWakeups?.assertPodReleasable(podId);
+      if (current.containerId) {
+        podRepo.sandboxWakeups?.assertReleasable(current.containerId);
+        podRepo.externalDeliveries?.assertReleasable(current.containerId);
+      }
     };
     const claim = podRepo.deletionOwnership?.acquire(
       podId,

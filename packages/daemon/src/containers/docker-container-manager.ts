@@ -22,6 +22,7 @@ import type {
   ContainerExecutionMetadata,
   ContainerManager,
   ContainerSpawnConfig,
+  ContainerStartOptions,
   DirectoryExtractionOptions,
   ExecOptions,
   ExecResult,
@@ -550,9 +551,12 @@ export class DockerContainerManager implements ContainerManager {
     }
   }
 
-  async start(containerId: string): Promise<void> {
+  async start(containerId: string, options: ContainerStartOptions = {}): Promise<void> {
     try {
-      if (await this.isContainerListedAsRunning(containerId)) {
+      options.assertCurrent?.();
+      const running = await this.isContainerListedAsRunning(containerId);
+      options.assertCurrent?.();
+      if (running) {
         this.logger.debug({ containerId }, 'Container already running');
         return;
       }

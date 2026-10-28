@@ -30,10 +30,12 @@ export function createOperatorKill(
   } = captured;
   async function killSession(podId: string): Promise<void> {
     podRepo.deletionOwnership?.assertTaskAvailable(podId);
+    const pod = podRepo.getOrThrow(podId);
+    podRepo.sandboxWakeups?.assertPodReleasable(podId);
+    if (pod.containerId) podRepo.sandboxWakeups?.assertReleasable(pod.containerId);
     clearPreviewTimer(podId);
     await stopSandboxPreviewProxy(podId);
     stopMergePolling(podId);
-    const pod = podRepo.getOrThrow(podId);
     podRepo.externalDeliveries?.assertDeletable(podId);
     if (pod.containerId) podRepo.externalDeliveries?.assertReleasable(pod.containerId);
     if (!canKill(pod.status)) {
@@ -74,6 +76,7 @@ export function createOperatorKill(
           'Failed to persist rotated credentials during kill — proceeding',
         );
         if (!ownsKillLifecycle()) return;
+        podRepo.sandboxWakeups?.assertReleasable(pod.containerId);
         try {
           await cm.kill(pod.containerId);
           if (ownsLifecycle(podId, pod.lifecycleGeneration, pod.containerId)) {
@@ -101,6 +104,8 @@ export function createOperatorKill(
       // Cleanup worktree — always clear the DB path even if cleanup throws,
       // so a subsequent rework doesn't attempt recovery on a stale directory.
       if (pod.worktreePath) {
+        podRepo.sandboxWakeups?.assertPodReleasable(podId);
+        if (pod.containerId) podRepo.sandboxWakeups?.assertReleasable(pod.containerId);
         try {
           await worktreeManager.cleanup(pod.worktreePath);
         } catch (err) {

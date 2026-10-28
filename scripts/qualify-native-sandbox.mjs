@@ -4,7 +4,15 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -64,6 +72,8 @@ export async function buildAdapter(directory) {
       contents: [
         "export { AzureSandboxApiClient } from './packages/daemon/src/containers/azure-sandbox-api-client.ts';",
         "export { SandboxContainerManager } from './packages/daemon/src/containers/sandbox-container-manager.ts';",
+        "export { createSandboxWakeupJournal } from './packages/daemon/src/containers/sandbox-wakeup-journal.ts';",
+        "export { default as wakeupSchema } from './packages/daemon/src/db/migrations/218_sandbox_wakeup_intents.sql';",
       ].join('\n'),
       resolveDir: root,
     },
@@ -72,7 +82,8 @@ export async function buildAdapter(directory) {
     bundle: true,
     platform: 'node',
     format: 'cjs',
-    external: ['@azure/identity', 'tar-stream'],
+    external: ['@azure/identity', 'tar-stream', 'better-sqlite3'],
+    loader: { '.sql': 'text' },
     alias: { '@autopod/shared': join(root, 'packages/shared/src/index.ts') },
     metafile: true,
     logLevel: 'silent',
@@ -85,6 +96,24 @@ export async function buildAdapter(directory) {
         .filter((path) => path !== '<stdin>')
         .map((path) => [path, sha256(readFileSync(resolve(root, path)))]),
     ),
+  };
+}
+
+export function openWakeupJournal(bundle, filename) {
+  const { createSandboxWakeupJournal, wakeupSchema } = daemonRequire(bundle);
+  const Database = daemonRequire('better-sqlite3');
+  const db = new Database(filename);
+  chmodSync(filename, 0o600);
+  db.pragma('foreign_keys = ON');
+  const initialized = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sandbox_wakeup_baselines'")
+    .get();
+  if (!initialized) db.transaction(() => db.exec(wakeupSchema))();
+  return {
+    journal: createSandboxWakeupJournal(db),
+    close: () => {
+      if (db.open) db.close();
+    },
   };
 }
 
@@ -103,11 +132,14 @@ async function connection(receipt, receiptPath, bundle, cleanup) {
     },
   };
   const save = () => saveJson(receiptPath, receipt);
+  // Keep this beside the durable receipt, not inside the disposable source bundle.
+  const wakeup = openWakeupJournal(bundle, `${receiptPath}.wakeups.sqlite`);
   const guard = createGuard({ target, receipt, save, cleanup });
   const client = new AzureSandboxApiClient(
     {
       ...target,
       credential,
+      wakeupJournal: wakeup.journal,
       assumeGroupExists: true,
       fetch: guard.fetch,
       webSocket: guard.webSocket,
@@ -123,12 +155,16 @@ async function connection(receipt, receiptPath, bundle, cleanup) {
       headers: { Authorization: `Bearer ${token.token}` },
     });
     assert([200, 404].includes(response.status), 'unexpected-get-status');
-    return {
-      status: response.status,
-      body: response.status === 200 ? await response.json() : null,
-    };
+    const body = response.status === 200 ? await response.json() : null;
+    if (
+      body?.state === 'Running' &&
+      typeof body.id === 'string' &&
+      path === `/sandboxes/${body.id}`
+    )
+      wakeup.journal.observeRunning(`${base}${path}`.toLowerCase(), body.id);
+    return { status: response.status, body };
   };
-  return { client, manager, guard, get, save };
+  return { client, manager, guard, get, save, close: wakeup.close };
 }
 
 async function preflight(receipt, get, save) {
@@ -338,6 +374,7 @@ async function child(mode, receiptPath, bundle) {
   } finally {
     ctx.guard.close();
     ctx.save();
+    ctx.close();
   }
 }
 

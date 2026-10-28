@@ -33,6 +33,10 @@ import {
   readinessReviewSchema,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import {
+  type SandboxWakeupJournal,
+  createSandboxWakeupJournal,
+} from '../containers/sandbox-wakeup-journal.js';
 import { type UnitOfWork, createUnitOfWork } from '../db/unit-of-work.js';
 import { extractFindings } from '../validation/finding-fingerprint.js';
 import {
@@ -275,6 +279,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   deliveryLedger?: DeliveryLedger;
   sourcePublications?: SourcePublicationLedger;
   externalDeliveries?: ExternalDeliveryRepository;
+  sandboxWakeups?: SandboxWakeupJournal;
   mergeJournal?: MergeJournal;
   taskExecutions?: TaskExecutionLedger;
   deletionOwnership?: DeletionOwnership;
@@ -695,6 +700,7 @@ function rowToCostSource(row: Record<string, unknown>): PodCostSource {
 export function createPodRepository(db: Database.Database): PodRepository {
   const completionJournal = createCompletionJournal(db);
   const externalDeliveries = createExternalDeliveryRepository(db);
+  const sandboxWakeups = createSandboxWakeupJournal(db);
   const dispatchPreflight = createDispatchPreflightLedger(db);
   const taskExecutions = createTaskExecutionLedger(db);
   const deletionOwnership = createDeletionOwnership(db);
@@ -780,6 +786,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     deliveryLedger: createDeliveryLedger(db),
     sourcePublications: createSourcePublicationLedger(db),
     externalDeliveries,
+    sandboxWakeups,
     mergeJournal: createMergeJournal(db),
     taskExecutions,
     deletionOwnership,
@@ -1431,7 +1438,9 @@ export function createPodRepository(db: Database.Database): PodRepository {
              CASE WHEN json_valid(binding) THEN
                json_type(binding, '$.resource.containerId') = 'text' AND
                json_extract(binding, '$.resource.containerId') != ''
-             ELSE 0 END`,
+             ELSE 0 END
+           UNION SELECT sandbox_id AS container_id FROM sandbox_wakeup_intents
+           WHERE ended_at IS NULL`,
         )
         .all() as { container_id: string }[];
       return rows.map((r) => r.container_id);
@@ -1456,6 +1465,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     delete: db.transaction((id: string): void => {
       taskExecutions.assertCanDelete(id);
       externalDeliveries.assertDeletable(id);
+      sandboxWakeups.assertPodReleasable(id);
       archiveTaskHistory(id);
       // Null out self-referential FKs from other pods before deleting.
       // These were added without ON DELETE SET NULL (SQLite can't ALTER COLUMN),

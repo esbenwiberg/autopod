@@ -1,13 +1,15 @@
 import { createHash } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import pino from 'pino';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createSandboxWakeupFixture } from '../test-utils/sandbox-wakeup-helpers.js';
 import { createLocalValidationEngine } from '../validation/local-validation-engine.js';
 import { AzureSandboxApiClient, type WebSocketLike } from './azure-sandbox-api-client.js';
 import { type SandboxExecChunk, SandboxInfrastructureError } from './sandbox-api-client.js';
 import { SandboxContainerManager } from './sandbox-container-manager.js';
 
 const logger = pino({ level: 'silent' });
+let wakeupFixture: ReturnType<typeof createSandboxWakeupFixture> | undefined;
 
 describe('recoverable native sandbox Goal processes', () => {
   it('delivers RPC stdin through ordered private packets instead of the EOF-only stream', async () => {
@@ -340,6 +342,7 @@ function makeClient(
         sandboxGroup: 'autopod-spike',
         credential,
         fetch,
+        wakeupJournal: wakeupFixture?.journal,
         pollIntervalMs: 0,
         ...config,
       },
@@ -1930,6 +1933,12 @@ describe('listSandboxes', () => {
 });
 
 describe('bounded retained sandbox resume', () => {
+  beforeEach(() => {
+    wakeupFixture = createSandboxWakeupFixture(true);
+  });
+  afterEach(() => {
+    wakeupFixture = undefined;
+  });
   it.each([
     { states: ['Stopped', 'Running'], locked: true, posts: 1 },
     { states: ['Stopped', 'Stopped', 'Running'], locked: true, posts: 2 },

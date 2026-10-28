@@ -54,7 +54,11 @@ export class SandboxTerminalReaper {
       return;
     }
     const containerId = pod.containerId;
-    if (this.deps.podRepo.externalDeliveries?.retains(containerId)) return;
+    if (
+      this.deps.podRepo.externalDeliveries?.retains(containerId) ||
+      this.deps.podRepo.sandboxWakeups?.retains(containerId)
+    )
+      return;
     const generation = pod.lifecycleGeneration;
     const status = pod.status;
     if (this.deps.podRepo.taskExecutions?.hasActiveRun(pod.id)) return;

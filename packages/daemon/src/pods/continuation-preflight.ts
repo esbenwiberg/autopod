@@ -18,14 +18,14 @@ export class AgentContinuationSupersededError extends AutopodError {
 
 export function assertAgentContinuationCurrent(
   pod: Pod,
-  containerId: string,
-  deps: { readCurrent(): Pod; hasPendingDecision(): boolean },
+  containerId: string | null,
+  deps: { readCurrent(): Pod; hasPendingDecision(): boolean; expectedStatus?: Pod['status'] },
 ): Pod {
   const current = deps.readCurrent();
   if (
     current.lifecycleGeneration !== pod.lifecycleGeneration ||
     current.containerId !== containerId ||
-    current.status !== 'running' ||
+    current.status !== (deps.expectedStatus ?? 'running') ||
     current.runtime !== pod.runtime ||
     current.model !== pod.model ||
     current.providerIdSnapshot !== pod.providerIdSnapshot ||
@@ -65,9 +65,19 @@ export async function prepareRetainedAgentContinuation(
     assertTaskExecutionTerminationVerified(deps.podRepo.taskExecutions, pod.id);
     deps.resolveProfile(current);
   };
+  async function awaitCurrent<T>(operation: () => Promise<T>): Promise<T> {
+    let result: T;
+    try {
+      result = await operation();
+    } catch (error) {
+      assertCurrent();
+      throw error;
+    }
+    assertCurrent();
+    return result;
+  }
   assertCurrent();
-  const status = await deps.containerManager.getStatus(containerId);
-  assertCurrent();
+  const status = await awaitCurrent(() => deps.containerManager.getStatus(containerId));
   if (status === 'running') return;
   if (status !== 'stopped')
     throw new AutopodError(
@@ -75,10 +85,8 @@ export async function prepareRetainedAgentContinuation(
       'CONTINUATION_RESOURCE_UNAVAILABLE',
       409,
     );
-  await deps.containerManager.start(containerId);
-  assertCurrent();
-  const resumed = await deps.containerManager.getStatus(containerId);
-  assertCurrent();
+  await awaitCurrent(() => deps.containerManager.start(containerId, { assertCurrent }));
+  const resumed = await awaitCurrent(() => deps.containerManager.getStatus(containerId));
   if (resumed !== 'running')
     throw new AutopodError(
       'Retained continuation resource was not observed Running; no credentials or worker were dispatched.',

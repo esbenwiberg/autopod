@@ -157,7 +157,9 @@ describe('continuation context', () => {
       });
       await f.c.taskFeedbackEvents('context', 'Apply feedback', fresh);
       expect(f.order.indexOf('wake')).toBeLessThan(f.order.indexOf('env'));
-      expect(f.ctx.containerManager.start).toHaveBeenCalledExactlyOnceWith('container');
+      expect(f.ctx.containerManager.start).toHaveBeenCalledExactlyOnceWith('container', {
+        assertCurrent: expect.any(Function),
+      });
     },
   );
   it.each(['unknown', 'deleted'] as const)(
@@ -225,6 +227,26 @@ describe('continuation context', () => {
       expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
     },
   );
+  it.each(['observe', 'wake'] as const)('late %s failure keeps new work', async (phase) => {
+    const f = fixture();
+    const failLate = async () => {
+      f.ctx.podRepo.incrementLifecycleGeneration('context');
+      f.ctx.podRepo.update('context', { status: 'queued', containerId: 'replacement' });
+      throw new Error('Old provider operation failed');
+    };
+    if (phase === 'observe')
+      vi.mocked(f.ctx.containerManager.getStatus).mockImplementationOnce(failLate);
+    else {
+      vi.mocked(f.ctx.containerManager.getStatus).mockResolvedValue('stopped');
+      vi.mocked(f.ctx.containerManager.start).mockImplementationOnce(failLate);
+    }
+    await expect(f.c.taskFeedbackEvents('context', 'Apply feedback', false)).rejects.toMatchObject({
+      code: 'STALE_AGENT_CONTINUATION',
+    });
+    expect(f.pod()).toMatchObject({ status: 'queued', containerId: 'replacement' });
+    expect(f.captured.getResumeEnv).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+  });
   it('retains queued human guidance and tells feedback workers to collect its receipt', async () => {
     const f = fixture();
     f.ctx.nudgeRepo.queue('context', 'Preserved human direction');

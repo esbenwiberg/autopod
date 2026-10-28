@@ -191,7 +191,9 @@ describe('complete operator message lifetime', () => {
       });
       await f.messages().sendMessage.call(f.calls, 'prepare', 'Continue preserved work');
       expect(order).toEqual(['wake', 'credentials']);
-      expect(f.cm.start).toHaveBeenCalledExactlyOnceWith('container-123');
+      expect(f.cm.start).toHaveBeenCalledExactlyOnceWith('container-123', {
+        assertCurrent: expect.any(Function),
+      });
       expect(f.ctx.runtime.resume).toHaveBeenCalledOnce();
       expect(f.pod().lastRecoveryTrigger).toBeNull();
     },

@@ -7,6 +7,7 @@ import {
 } from '@autopod/shared';
 import { DefaultAzureCredential } from '@azure/identity';
 import type { Logger } from 'pino';
+import type { ContainerStartOptions } from '../interfaces/container-manager.js';
 import { isObservedExitCode } from './exec-exit-evidence.js';
 import { SandboxInfrastructureError } from './sandbox-api-client.js';
 import type {
@@ -37,6 +38,7 @@ import {
   sandboxGoalRoot,
   sandboxGoalSupervisor,
 } from './sandbox-goal-process.js';
+import type { SandboxWakeupJournal } from './sandbox-wakeup-journal.js';
 
 const API_VERSION = '2026-02-01-preview';
 const ARM_SCOPE = 'https://management.azure.com/.default';
@@ -102,6 +104,8 @@ export interface AzureSandboxApiClientConfig {
   /** Test seam. Defaults to 3s to match the Python SDK poller. */
   pollIntervalMs?: number;
   resumeTimeoutMs?: number;
+  /** Required to submit resume: durable per-resource claims survive daemon replacement. */
+  wakeupJournal?: SandboxWakeupJournal;
   /**
    * Retry/backoff for the Azure Sandboxes data-plane rate limiter (HTTP 429,
    * 600 req/min). The platform returns `retryAfterSeconds`; we honor it (clamped
@@ -206,6 +210,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private readonly resolveImageDigest?: ImageDigestResolver;
   private readonly pollIntervalMs: number;
   private readonly resumeTimeoutMs: number;
+  private readonly wakeupJournal?: SandboxWakeupJournal;
   private readonly retryMaxAttempts: number;
   private readonly retryMaxDelayMs: number;
   private readonly retryBaseDelayMs: number;
@@ -231,6 +236,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     this.resolveImageDigest = config.resolveImageDigest;
     this.pollIntervalMs = config.pollIntervalMs ?? 3000;
     this.resumeTimeoutMs = config.resumeTimeoutMs ?? 145_000;
+    this.wakeupJournal = config.wakeupJournal;
     this.retryMaxAttempts = config.retry?.maxAttempts ?? 6;
     this.retryMaxDelayMs = config.retry?.maxDelayMs ?? 30_000;
     this.retryBaseDelayMs = config.retry?.baseDelayMs ?? 1000;
@@ -335,6 +341,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   }
 
   async destroy(sandboxId: string): Promise<void> {
+    this.wakeupJournal?.assertReleasable(sandboxId);
     await this.requestData('DELETE', `${this.sandboxPath(sandboxId)}`, {
       okStatuses: [200, 202, 204, 404],
     });
@@ -1070,6 +1077,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   async suspend(sandboxId: string, _mode: 'memory' | 'disk' = 'memory'): Promise<void> {
     const current = await this.getSandbox(sandboxId).catch(() => null);
     if (current && stoppedStates.has(current.state ?? '')) return;
+    this.wakeupJournal?.assertReleasable(sandboxId);
     await this.requestData('POST', `${this.sandboxPath(sandboxId)}/stop`, {
       okStatuses: [200, 202, 204],
     });
@@ -1082,10 +1090,13 @@ export class AzureSandboxApiClient implements SandboxApiClient {
 
   private readonly resumes = new Map<string, Promise<void>>();
 
-  async resume(sandboxId: string): Promise<void> {
+  async resume(sandboxId: string, options: ContainerStartOptions = {}): Promise<void> {
+    // Ownership-specific callers must not inherit a different lifecycle's cancellation.
+    // The durable claim, not this optimization, coalesces their actual mutations.
+    if (options.assertCurrent) return this.reconcileResume(sandboxId, options);
     const existing = this.resumes.get(sandboxId);
     if (existing) return existing;
-    const operation = this.reconcileResume(sandboxId);
+    const operation = this.reconcileResume(sandboxId, options);
     this.resumes.set(sandboxId, operation);
     try {
       await operation;
@@ -1094,37 +1105,43 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     }
   }
 
-  private async reconcileResume(sandboxId: string): Promise<void> {
+  private async reconcileResume(sandboxId: string, options: ContainerStartOptions): Promise<void> {
     const controller = new AbortController();
     const timeoutMs = this.resumeTimeoutMs;
+    const expiresAt = Date.now() + timeoutMs;
+    const timeoutError = () =>
+      new AutopodError(
+        'Retained sandbox was not observed Running in time. A dispatched resume may be outcome-unknown; retained intents permit observation, not blind replay.',
+        'SANDBOX_WAKEUP_TIMEOUT',
+        504,
+      );
+    let ownedIntent: string | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
         controller.abort();
-        reject(
-          new AutopodError(
-            'Retained sandbox wakeup timed out while waiting for Running (possibly locked or transitioning).',
-            'SANDBOX_WAKEUP_TIMEOUT',
-            504,
-          ),
-        );
+        reject(timeoutError());
       }, timeoutMs);
     });
-    const check = () => controller.signal.throwIfAborted();
+    const check = () => {
+      options.assertCurrent?.();
+      // Synchronous SQLite/token work can delay timer delivery beyond the deadline.
+      if (Date.now() >= expiresAt) {
+        controller.abort();
+        throw timeoutError();
+      }
+      controller.signal.throwIfAborted();
+    };
     const requestOptions = {
       signal: controller.signal,
       singleAttempt: true,
+      beforeObserve: check,
       timeoutMs: Math.min(timeoutMs, 15_000),
     };
     const reconcile = async () => {
-      let submitted = false;
       while (true) {
         check();
-        const current = await this.requestData<SandboxResponse>(
-          'GET',
-          this.sandboxPath(sandboxId),
-          requestOptions,
-        );
+        const current = await this.getSandbox(sandboxId, requestOptions);
         check();
         if (current.state === 'Running') return;
         if (['Failed', 'Deleted', 'Deleting', 'Terminated'].includes(current.state ?? '')) {
@@ -1134,31 +1151,65 @@ export class AzureSandboxApiClient implements SandboxApiClient {
             502,
           );
         }
-        if (stoppedStates.has(current.state ?? '') && !submitted) {
-          // Only ResourceLocked proves this POST was rejected before execution.
-          const response = await this.request(
-            'data',
-            'POST',
-            `${this.dataEndpoint}${this.sandboxPath(sandboxId)}/resume`,
-            {
-              ...requestOptions,
-              params: { 'api-version': API_VERSION },
-              okStatuses: [200, 202, 204, 409],
-            },
+        if (stoppedStates.has(current.state ?? '')) {
+          const journal = this.wakeupJournal;
+          if (!journal)
+            throw new AutopodError(
+              'Durable wakeup journal unavailable; no resume was submitted.',
+              'SANDBOX_WAKEUP_JOURNAL_UNAVAILABLE',
+              503,
+            );
+          // Labels justify retaining a possible owner's source, never source adoption.
+          const owner = current.labels?.podId ?? current.properties?.labels?.podId;
+          const intent = journal.claim(
+            this.wakeupKey(sandboxId),
+            sandboxId,
+            typeof owner === 'string' && owner.length <= 256 ? owner : undefined,
           );
-          check();
-          if (response.status === 409) {
-            const body = (await readJsonOrEmpty(response)) as { title?: string };
-            check();
-            if (body.title !== 'ResourceLocked') {
-              throw new AutopodError(
-                'Sandbox resume returned an unrelated conflict.',
-                'SANDBOX_WAKEUP_CONFLICT',
-                409,
+          if (intent.acquired) {
+            ownedIntent = intent.id;
+            try {
+              const response = await this.request(
+                'data',
+                'POST',
+                `${this.dataEndpoint}${this.sandboxPath(sandboxId)}/resume`,
+                {
+                  ...requestOptions,
+                  beforeSend: () => {
+                    check();
+                    journal.beginDispatch(intent.id);
+                  },
+                  headers: { 'x-ms-client-request-id': intent.id },
+                  params: { 'api-version': API_VERSION },
+                  okStatuses: [200, 202, 204, 409],
+                },
+              );
+              check();
+              if (response.status === 409) {
+                const body = (await readJsonOrEmpty(response)) as { title?: string };
+                check();
+                if (body.title !== 'ResourceLocked')
+                  throw new AutopodError(
+                    'Sandbox resume returned an unrelated conflict; its intent remains retained.',
+                    'SANDBOX_WAKEUP_CONFLICT',
+                    409,
+                  );
+                // Only this exact response proves rejection before execution.
+                journal.rejectLocked(intent.id);
+              }
+            } catch (error) {
+              check();
+              if (
+                error instanceof AutopodError &&
+                error.statusCode < 500 &&
+                error.code !== 'SANDBOX_WAKEUP_SUPERSEDED'
+              )
+                throw error;
+              this.logger.warn(
+                { sandboxId, intentId: intent.id },
+                'Resume response unavailable; observing provider state without another POST',
               );
             }
-          } else {
-            submitted = true;
           }
         }
         // Transitional/unknown states are observed, never resumed blindly.
@@ -1170,6 +1221,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     } finally {
       if (timer) clearTimeout(timer);
       controller.abort();
+      // A revoked unsent claim cannot later dispatch: beforeSend uses an atomic CAS.
+      // Once transport was admitted, never release the claim merely on timeout.
+      if (ownedIntent) this.wakeupJournal?.revokeUnsent(ownedIntent);
     }
   }
 
@@ -1185,7 +1239,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     // not wait or park a sandbox that Azure has definitively removed.
     if (response.status === 404) return 'deleted';
     const sandbox = (await readJsonOrEmpty(response)) as SandboxResponse;
-    if (sandbox.state === 'Running') return 'running';
+    if (sandbox.state === 'Running') {
+      this.wakeupJournal?.observeRunning(this.wakeupKey(sandboxId), sandboxId);
+      return 'running';
+    }
     if (stoppedStates.has(sandbox.state ?? '')) return 'stopped';
     return 'unknown';
   }
@@ -1479,8 +1536,24 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     );
   }
 
-  private async getSandbox(sandboxId: string): Promise<SandboxResponse> {
-    return this.requestData<SandboxResponse>('GET', this.sandboxPath(sandboxId));
+  private async getSandbox(
+    sandboxId: string,
+    options: RequestOptions = {},
+  ): Promise<SandboxResponse> {
+    const sandbox = await this.requestData<SandboxResponse>(
+      'GET',
+      this.sandboxPath(sandboxId),
+      options,
+    );
+    options.signal?.throwIfAborted();
+    options.beforeObserve?.();
+    if (sandbox.state === 'Running')
+      this.wakeupJournal?.observeRunning(this.wakeupKey(sandboxId), sandboxId);
+    return sandbox;
+  }
+
+  private wakeupKey(sandboxId: string): string {
+    return `${this.dataEndpoint}${this.sandboxPath(sandboxId)}`.toLowerCase();
   }
 
   private async getDiskImage(diskImageId: string): Promise<DiskImageResponse> {
@@ -1600,6 +1673,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       const timeout = controller ? setTimeout(() => controller.abort(), options.timeoutMs) : null;
       let response: Response;
       try {
+        options.beforeSend?.();
         response = await this.fetchFn(url, {
           method,
           headers,
@@ -1798,6 +1872,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
 
 interface RequestOptions {
   signal?: AbortSignal;
+  /** Synchronous admission recheck after token acquisition, immediately before transport. */
+  beforeSend?: () => void;
+  beforeObserve?: () => void;
   singleAttempt?: boolean;
   params?: Record<string, string | undefined>;
   headers?: Record<string, string>;

@@ -1,4 +1,5 @@
 import type { NativeGoalProcessIdentity } from '@autopod/shared';
+import type { ContainerStartOptions } from '../interfaces/container-manager.js';
 
 /**
  * Seam over the Azure Container Apps **Sandboxes** preview data-plane.
@@ -275,7 +276,7 @@ export interface SandboxApiClient {
   /** Snapshot-suspend the sandbox (maps to ContainerManager.stop). */
   suspend(sandboxId: string, mode?: 'memory' | 'disk'): Promise<void>;
   /** Resume a suspended sandbox (maps to ContainerManager.start). */
-  resume(sandboxId: string): Promise<void>;
+  resume(sandboxId: string, options?: ContainerStartOptions): Promise<void>;
   getStatus(sandboxId: string): Promise<SandboxStatus>;
 }
 

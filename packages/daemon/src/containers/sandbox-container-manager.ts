@@ -23,6 +23,7 @@ import type {
   ContainerExecutionMetadata,
   ContainerManager,
   ContainerSpawnConfig,
+  ContainerStartOptions,
   DirectoryExtractionOptions,
   ExecOptions,
   ExecResult,
@@ -55,11 +56,14 @@ import {
   egressPolicyForMode,
   pickSandboxTier,
 } from './sandbox-api-client.js';
+import type { SandboxWakeupJournal } from './sandbox-wakeup-journal.js';
 import { exportSandboxWorkspace, isExcludedPath } from './sandbox-workspace-export.js';
 
 export interface SandboxContainerManagerOptions {
   /** Explicit managed-mode ledger; native spawn remains unchanged. */
   managedDatabase?: Database.Database;
+  /** Required for Azure resume mutations; independent of managed/native execution accounting. */
+  wakeupJournal?: SandboxWakeupJournal;
   /** Tier used when a spawn carries no `memoryBytes` hint (default: 'L'). */
   defaultTier?: SandboxResourceTier;
   /** Test seam for exercising multi-part archive uploads. */
@@ -163,6 +167,7 @@ export class SandboxContainerManager implements ContainerManager {
         imagePullIdentityResourceId: config.imagePullIdentityResourceId,
         registryCredentials: config.registryCredentials,
         resolveImageDigest: config.resolveImageDigest,
+        wakeupJournal: options.wakeupJournal,
       },
       logger,
     );
@@ -382,8 +387,10 @@ for root in sys.argv[1:]:
     await this.client.suspend(containerId, 'memory');
   }
 
-  async start(containerId: string): Promise<void> {
-    await this.client.resume(containerId);
+  async start(containerId: string, options: ContainerStartOptions = {}): Promise<void> {
+    options.assertCurrent?.();
+    await this.client.resume(containerId, options);
+    options.assertCurrent?.();
   }
 
   async writeFile(
@@ -499,7 +506,9 @@ for root in sys.argv[1:]:
     assertDirectoryExtractionCurrent(options);
     // Azure may suspend a retained workspace while its settled worker is idle.
     // Resume the same sandbox; do not provision or restart an agent to copy files.
-    await this.client.resume(containerId);
+    await this.client.resume(containerId, {
+      assertCurrent: () => assertDirectoryExtractionCurrent(options),
+    });
     assertDirectoryExtractionCurrent(options);
     options?.onExportStarted?.();
     mkdirSync(hostPath, { recursive: true });

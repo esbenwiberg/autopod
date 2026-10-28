@@ -1,5 +1,6 @@
 import type { Pod } from '@autopod/shared';
 import { describeSyncFailure } from './completion-diagnostics.js';
+import { assertValidationExecutionSettled } from './validation-recovery-policy.js';
 import type { WorkspacePreservationRecoveryCaptured } from './workspace-contracts.js';
 
 export function createWorkspacePreservationRecovery(
@@ -8,7 +9,6 @@ export function createWorkspacePreservationRecovery(
   const {
     podRepo,
     preservePodWorkspace,
-    cleanupContainer,
     emitActivityStatus,
     logger,
     containerManagerFactory,
@@ -18,9 +18,30 @@ export function createWorkspacePreservationRecovery(
   async function preserveSandboxAfterAgentFailure(podId: string, reason: string): Promise<void> {
     const pod = podRepo.getOrThrow(podId);
     if (pod.executionTarget !== 'sandbox' || !pod.containerId || !pod.worktreePath) return;
+    // Never wake a failed/unsettled execution just to collect a checkpoint.
+    if (podRepo.taskExecutions?.hasActiveRun(podId)) return;
     try {
-      await preservePodWorkspace(pod, reason);
-      await cleanupContainer(pod, 'agent-failure-preserved');
+      assertValidationExecutionSettled(pod);
+      const status = await containerManagerFactory
+        .get(pod.executionTarget)
+        .getStatus(pod.containerId);
+      const current = podRepo.getOrThrow(podId);
+      if (
+        status !== 'running' ||
+        current.lifecycleGeneration !== pod.lifecycleGeneration ||
+        current.containerId !== pod.containerId ||
+        current.status !== pod.status ||
+        podRepo.taskExecutions?.hasActiveRun(podId)
+      )
+        return;
+      assertValidationExecutionSettled(current);
+      await preservePodWorkspace(current, reason);
+      // A tracked-source checkpoint does not prove ignored report preservation.
+      // Leave the original source intact until a dedicated capture/release workflow.
+      logger.info(
+        { podId, containerId: pod.containerId },
+        'Source checkpoint retained; original sandbox retained for report recovery',
+      );
     } catch (preserveErr) {
       emitActivityStatus(
         podId,
