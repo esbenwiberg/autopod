@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -24,6 +24,13 @@ async function fixture() {
   const git = (args: string[]) =>
     exec('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', ...args], {
       cwd: local,
+      env: {
+        ...process.env,
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_NO_REPLACE_OBJECTS: '1',
+        GIT_GRAFT_FILE: '/dev/null',
+      },
     });
   await git(['checkout', '-b', 'repair']);
   await writeFile(path.join(local, '.gitignore'), 'ignored-report.txt\n');
@@ -55,6 +62,17 @@ async function fixture() {
   return { root, local, git, old, target, config, prepare };
 }
 describe('real Git exact-source adoption', () => {
+  it('refuses repository-local executable filters before status can invoke them', async () => {
+    const f = await fixture();
+    await writeFile(path.join(f.local, '.gitattributes'), 'code.txt filter=source-policy\n');
+    await f.git(['add', '.gitattributes']);
+    await f.git(['commit', '-m', 'fixture attributes']);
+    const sentinel = path.join(f.root, 'filter-must-not-execute');
+    await f.git(['config', 'filter.source-policy.clean', `touch ${sentinel}`]);
+    await writeFile(path.join(f.local, 'code.txt'), 'changed source requiring status refresh');
+    await expect(inspectAdoptionGit(f.git, 'repair')).rejects.toThrow('Executable filters');
+    await expect(access(sentinel)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
   it('pins remote source without changing workspace, then fast-forwards without deleting ignored reports', async () => {
     const f = await fixture();
     const saved = await f.prepare();
