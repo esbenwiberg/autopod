@@ -97,6 +97,8 @@ export interface SandboxFileInfo {
 
 export interface SandboxFileWriteOptions {
   timeoutMs?: number;
+  singleAttempt?: boolean;
+  beforeSend?: () => void;
 }
 
 export interface SandboxDirListing {
@@ -278,6 +280,8 @@ export interface SandboxApiClient {
   /** Resume a suspended sandbox (maps to ContainerManager.start). */
   resume(sandboxId: string, options?: ContainerStartOptions): Promise<void>;
   getStatus(sandboxId: string): Promise<SandboxStatus>;
+  /** Configured provider namespace including endpoint, subscription, group and exact resource ID. */
+  getResourceKey?(sandboxId: string): string;
 }
 
 // ---------------------------------------------------------------------------

@@ -97,9 +97,20 @@ custody cannot be marked checked with an unsettled auxiliary command. Output is
 bounded; truncated inspection output fails closed. These are infrastructure
 process observations, not coding-worker/token-usage receipts or retry grants.
 
-This is not yet a container transfer/adoption controller or a public action.
-Original provider namespace, quiescence and ownership must be bound by the
-coordinator before using these capabilities on real resources.
+`source-container-adoption.ts` now provides the real retained-container adapter:
+exact backend/engine/provider namespace plus fresh Running observation, fixed
+isolated Python/system-Git inspection, bounded private bundle transfer with two
+SHA256 verifications, local bundle import and FF-only application with
+`--no-overwrite-ignore`. It never resumes/replaces a resource or uses buffered
+exec. Unique command steps prevent replay after a lost result. A lost chunk
+write stops before assembly; it is not retried. Local real-Git adapter tests
+preserve binary ignored reports, reject ignored collisions and namespace changes,
+and retain old workspace receipts. These are not live Docker/Azure tests.
+
+This is still not a source-adoption controller or a public action. Original
+execution/provider ownership, quiescence, atomic lifecycle invalidation, all
+competing-operation/cleanup fences, host hardening and supported reconciliation
+must be composed by that coordinator before using the adapter on real pods.
 
 ## Required before exposing it
 

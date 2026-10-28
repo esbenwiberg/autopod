@@ -11,6 +11,22 @@ import { SandboxContainerManager } from './sandbox-container-manager.js';
 const logger = pino({ level: 'silent' });
 let wakeupFixture: ReturnType<typeof createSandboxWakeupFixture> | undefined;
 
+describe('sandbox resource namespaces', () => {
+  it('binds endpoint/region/subscription/group/resource without waking or executing', () => {
+    const original = makeClient([]);
+    const key = original.client.getResourceKey('original');
+    for (const change of [
+      { location: 'northeurope' },
+      { subscriptionId: 'other' },
+      { resourceGroup: 'other' },
+      { sandboxGroup: 'other' },
+    ])
+      expect(makeClient([], change).client.getResourceKey('original')).not.toBe(key);
+    expect(original.client.getResourceKey('replacement')).not.toBe(key);
+    expect(original.requests).toHaveLength(0);
+  });
+});
+
 describe('recoverable native sandbox Goal processes', () => {
   it('delivers RPC stdin through ordered private packets instead of the EOF-only stream', async () => {
     const socket = new MockWebSocket();
@@ -1203,6 +1219,46 @@ describe('AzureSandboxApiClient', () => {
     expect(sockets[0]?.closed).toBe(true);
   });
 
+  it('fences a file write after delayed auth and does not send stale bytes', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let current = true;
+    let reached = false;
+    const { client, requests } = makeClient([{ status: 204 }], {
+      credential: {
+        async getToken() {
+          reached = true;
+          await gate;
+          return { token: 'fixture-token', expiresOnTimestamp: Date.now() + 60_000 };
+        },
+      },
+    });
+    const write = client.writeFile('original', '/tmp/source/chunk', Buffer.from('bundle'), {
+      singleAttempt: true,
+      beforeSend() {
+        if (!current) throw new Error('STALE_SOURCE');
+      },
+    });
+    await vi.waitFor(() => expect(reached).toBe(true));
+    current = false;
+    release();
+    await expect(write).rejects.toThrow('STALE_SOURCE');
+    expect(requests).toHaveLength(0);
+  });
+  it('does not replay an explicitly single-attempt file write after rate limiting', async () => {
+    const { client, requests } = makeClient([
+      { status: 429, body: { error: { code: 'Throttled' } } },
+      { status: 204 },
+    ]);
+    await expect(
+      client.writeFile('original', '/tmp/source/chunk', Buffer.from('bundle'), {
+        singleAttempt: true,
+      }),
+    ).rejects.toThrow();
+    expect(requests).toHaveLength(1);
+  });
   it('writes, reads, lists, stats files, and updates egress policy through the data plane', async () => {
     const { client, requests } = makeClient([
       { status: 204 },

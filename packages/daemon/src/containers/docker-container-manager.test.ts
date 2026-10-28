@@ -65,11 +65,12 @@ function createMockExec(exitCode = 0) {
   };
 }
 
-function createMockDocker(container = createMockContainer()) {
+function createMockDocker(container = createMockContainer(), engineId = 'fixture-engine-1') {
   const image = {
     inspect: vi.fn().mockResolvedValue({ Id: 'image-123' }),
   };
   return {
+    info: vi.fn().mockResolvedValue({ ID: engineId }),
     createContainer: vi.fn().mockResolvedValue(container),
     getContainer: vi.fn().mockReturnValue(container),
     getImage: vi.fn().mockReturnValue(image),
@@ -112,6 +113,24 @@ describe('DockerContainerManager', () => {
     manager = new DockerContainerManager({ docker, logger });
   });
 
+  it('binds exact full container IDs to their actual Docker engine, not pod labels', async () => {
+    const id = 'a'.repeat(64);
+    container.inspect.mockResolvedValue({ Id: id, Config: { Labels: { podId: 'owner' } } });
+    const first = await manager.getResourceKey(id);
+    const other = new DockerContainerManager({
+      docker: createMockDocker(container, 'fixture-engine-2'),
+      logger,
+    });
+    expect(first).not.toBe(await other.getResourceKey(id));
+    expect(JSON.parse(first)).toEqual(['docker', 'fixture-engine-1', id]);
+    await expect(manager.getResourceKey('a'.repeat(12))).rejects.toMatchObject({
+      code: 'CONTAINER_RESOURCE_IDENTITY_UNAVAILABLE',
+    });
+    container.inspect.mockResolvedValue({ Id: 'b'.repeat(64) });
+    await expect(manager.getResourceKey(id)).rejects.toMatchObject({
+      code: 'CONTAINER_RESOURCE_IDENTITY_UNAVAILABLE',
+    });
+  });
   it('captures immutable image and configured resources, retaining unknown values as null', async () => {
     container.inspect.mockResolvedValue({
       Image: `sha256:${'a'.repeat(64)}`,
@@ -744,6 +763,32 @@ describe('DockerContainerManager', () => {
   // ─── writeFile() ────────────────────────────────────────
 
   describe('writeFile()', () => {
+    it('preserves private existing parents instead of widening their archive modes', async () => {
+      await manager.writeFile('abc123', '/tmp/private-transfer/chunk-0', 'bundle', {
+        mode: 0o600,
+        preserveParentModes: true,
+      });
+      const [buffer] = container.putArchive.mock.calls[0] ?? [];
+      const headers = await readTarHeaders(buffer as Buffer);
+      expect(headers).toHaveLength(1);
+      expect(headers[0]).toMatchObject({
+        name: 'tmp/private-transfer/chunk-0',
+        uid: 1000,
+        gid: 1000,
+        mode: 0o600,
+      });
+    });
+    it('rechecks ownership after building the archive and before dispatch', async () => {
+      let calls = 0;
+      await expect(
+        manager.writeFile('abc123', '/tmp/private-transfer/chunk-0', 'bundle', {
+          assertCurrent() {
+            if (++calls > 1) throw new Error('STALE_SOURCE');
+          },
+        }),
+      ).rejects.toThrow('STALE_SOURCE');
+      expect(container.putArchive).not.toHaveBeenCalled();
+    });
     it('refuses a nonbinary tar chunk before calling Docker', async () => {
       const original = tar.pack;
       const spy = vi.spyOn(tar, 'pack').mockImplementationOnce(() => {

@@ -14,7 +14,7 @@ import {
 import { basename, dirname, join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import type { ArtifactOutput, NativeGoalProcessIdentity } from '@autopod/shared';
+import { type ArtifactOutput, AutopodError, type NativeGoalProcessIdentity } from '@autopod/shared';
 import Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 import tar from 'tar-stream';
@@ -648,6 +648,7 @@ export class DockerContainerManager implements ContainerManager {
     content: string | Buffer,
     options?: FileWriteOptions,
   ): Promise<void> {
+    options?.assertCurrent?.();
     const container = this.docker.getContainer(containerId);
 
     // Build a tar archive with the single file, including parent directory entries.
@@ -664,7 +665,7 @@ export class DockerContainerManager implements ContainerManager {
     const normalizedPath = filePath.startsWith('/') ? filePath.slice(1) : filePath;
     const parts = normalizedPath.split('/');
     // Add each intermediate directory as an explicit entry so they're owned by autopod
-    for (let i = 1; i < parts.length; i++) {
+    for (let i = 1; !options?.preserveParentModes && i < parts.length; i++) {
       // Top-level system dir — leave it alone (see comment above).
       const firstPart = parts[0];
       if (i === 1 && firstPart !== undefined && SYSTEM_TOP_LEVEL_DIRS.has(firstPart)) continue;
@@ -693,12 +694,19 @@ export class DockerContainerManager implements ContainerManager {
     });
     const tarBuffer = Buffer.concat(chunks);
 
-    await boundedDockerCall(container.putArchive(tarBuffer, { path: '/' }), {
-      label: 'container.putArchive',
-      timeoutMs: DOCKER_CALL_TIMEOUTS.putArchive,
-      logger: this.logger,
-      containerId,
-    });
+    options?.assertCurrent?.();
+    try {
+      await boundedDockerCall(container.putArchive(tarBuffer, { path: '/' }), {
+        label: 'container.putArchive',
+        timeoutMs: options?.timeoutMs ?? DOCKER_CALL_TIMEOUTS.putArchive,
+        logger: this.logger,
+        containerId,
+      });
+      options?.assertCurrent?.();
+    } catch (error) {
+      options?.assertCurrent?.();
+      throw error;
+    }
     this.logger.debug({ containerId, filePath }, 'File written to container');
   }
 
@@ -880,6 +888,30 @@ export class DockerContainerManager implements ContainerManager {
     } finally {
       rmSync(stagingPath, { recursive: true, force: true });
     }
+  }
+
+  async getResourceKey(containerId: string): Promise<string> {
+    const [engine, container] = await Promise.all([
+      boundedDockerCall(this.docker.info(), {
+        label: 'docker.info (source namespace)',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+        logger: this.logger,
+        containerId,
+      }),
+      boundedDockerCall(this.docker.getContainer(containerId).inspect(), {
+        label: 'container.inspect (source namespace)',
+        timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+        logger: this.logger,
+        containerId,
+      }),
+    ]);
+    if (!engine.ID || !/^[a-f0-9]{64}$/.test(containerId) || container.Id !== containerId)
+      throw new AutopodError(
+        'Exact Docker engine/resource identity unavailable',
+        'CONTAINER_RESOURCE_IDENTITY_UNAVAILABLE',
+        409,
+      );
+    return JSON.stringify(['docker', engine.ID, container.Id]);
   }
 
   async getExecutionMetadata(containerId: string): Promise<ContainerExecutionMetadata> {

@@ -90,7 +90,7 @@ export interface SourceAdoptionRepository {
     actor: OperatorActor,
     reason: string,
     assertCurrent: () => void,
-  ): SourceAdoptionRecord;
+  ): SourceAdoptionRecord & { acquired: boolean };
   advance(
     id: string,
     expected: SourceAdoptionStage,
@@ -233,7 +233,7 @@ export function createSourceAdoptionRepository(db: Database.Database): SourceAdo
               'Request ID already belongs to another adoption',
               'SOURCE_ADOPTION_CONFLICT',
             );
-          return old;
+          return { ...old, acquired: false };
         }
         assertCurrent();
         assertAvailable(podId);
@@ -248,7 +248,8 @@ export function createSourceAdoptionRepository(db: Database.Database): SourceAdo
           new Date().toISOString(),
         );
         event(id, { stage: 'claimed' });
-        return get(id) ?? sourceAdoptionError('Adoption claim unavailable');
+        const claimed = get(id) ?? sourceAdoptionError('Adoption claim unavailable');
+        return { ...claimed, acquired: true };
       },
     ),
     advance: db.transaction(

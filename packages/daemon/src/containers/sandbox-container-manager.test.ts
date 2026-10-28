@@ -82,6 +82,7 @@ type ExecHandler = (
 ) => SandboxExecResult | Promise<SandboxExecResult>;
 
 class FakeSandboxApiClient implements SandboxApiClient {
+  getResourceKey?: (id: string) => string;
   readonly created: CreateSandboxOptions[] = [];
   readonly execCalls: Array<{ id: string; command: string[]; options?: SandboxExecOptions }> = [];
   readonly egressUpdates: Array<{ id: string; policy: SandboxEgressPolicy }> = [];
@@ -415,6 +416,19 @@ const baseConfig: ContainerSpawnConfig = {
 };
 
 describe('SandboxContainerManager', () => {
+  it('requires provider namespace evidence instead of adopting an owner label or bare UUID', async () => {
+    const client = new FakeSandboxApiClient();
+    const manager = new SandboxContainerManager(client, logger);
+    await expect(manager.getResourceKey('original')).rejects.toMatchObject({
+      code: 'CONTAINER_RESOURCE_IDENTITY_UNAVAILABLE',
+    });
+    client.getResourceKey = (id) => `https://region/sub/group/sandboxes/${id}`;
+    await expect(manager.getResourceKey('original')).resolves.toBe(
+      'https://region/sub/group/sandboxes/original',
+    );
+    expect(client.created).toHaveLength(0);
+    expect(client.execCalls).toHaveLength(0);
+  });
   describe('spawn', () => {
     it('creates a sandbox and returns its id', async () => {
       const client = new FakeSandboxApiClient();

@@ -144,8 +144,7 @@ export function createSourceCommandJournal(db: Database.Database): SourceCommand
         !state.identity ||
         state.revoked ||
         state.exitCode !== null ||
-        !Number.isSafeInteger(exitCode) ||
-        exitCode < 0
+        !Number.isSafeInteger(exitCode)
       )
         sourceAdoptionError('No observed original source exec exit can be recorded');
       append(id, { observation: 'source-command-exited', step, exitCode, output });

@@ -968,6 +968,8 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       params: { path, createDirs: 'true' },
       okStatuses: [200, 201, 204],
       timeoutMs: options?.timeoutMs,
+      singleAttempt: options?.singleAttempt,
+      beforeSend: options?.beforeSend,
     });
   }
 
@@ -1550,6 +1552,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     if (sandbox.state === 'Running')
       this.wakeupJournal?.observeRunning(this.wakeupKey(sandboxId), sandboxId);
     return sandbox;
+  }
+
+  getResourceKey(sandboxId: string): string {
+    return this.wakeupKey(sandboxId);
   }
 
   private wakeupKey(sandboxId: string): string {

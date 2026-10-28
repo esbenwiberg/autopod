@@ -86,6 +86,13 @@ describe('source command physical custody', () => {
     expect(() => s.options.journal.assertSettled('source-checks')).not.toThrow();
     expect(() => s.options.journal.exited('source-checks', 'apply', 0)).toThrow();
   });
+  it('retains a provider-observed negative signal exit without converting it to success', async () => {
+    const s = createSourceCommandFixture();
+    s.handle.exitCode = Promise.resolve(-15);
+    await expect(s.run()).rejects.toMatchObject({ code: 'SOURCE_COMMAND_FAILED' });
+    expect(s.options.journal.get('source-checks', 'apply')?.exitCode).toBe(-15);
+    expect(() => s.options.journal.assertSettled('source-checks')).not.toThrow();
+  });
   it('keeps an original admitted exec across reopen and reconciles that identity without rerunning Git', async () => {
     const s = createSourceCommandFixture(true);
     s.options.timeoutMs = 20;

@@ -29,8 +29,8 @@ function fixture() {
 describe('durable source adoption custody', () => {
   it('coalesces only the exact same request and fences another operation across reopen', () => {
     const f = fixture();
-    expect(f.claim().stage).toBe('claimed');
-    expect(f.claim().id).toBe('one');
+    expect(f.claim()).toMatchObject({ stage: 'claimed', acquired: true });
+    expect(f.claim()).toMatchObject({ id: 'one', acquired: false });
     expect(() =>
       f.repo.claim(
         'one',
@@ -46,6 +46,11 @@ describe('durable source adoption custody', () => {
     expect(f.f.db).not.toBe(previousDb);
     const next = createSourceAdoptionRepository(f.f.db);
     expect(next.get('one')?.binding).toEqual(f.binding);
+    expect(
+      next.claim('one', f.pod.id, f.binding, f.actor, 'Validate repaired source', () => {
+        throw new Error('Duplicate must not readmit external work');
+      }),
+    ).toMatchObject({ id: 'one', acquired: false });
     expect(() => next.assertAvailable(f.pod.id)).toThrow();
     expect(() => next.assertAvailable(f.pod.id, 'one')).not.toThrow();
     expect(() =>

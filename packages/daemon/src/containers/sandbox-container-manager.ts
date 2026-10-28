@@ -177,6 +177,16 @@ export class SandboxContainerManager implements ContainerManager {
     });
   }
 
+  async getResourceKey(containerId: string): Promise<string> {
+    if (!this.client.getResourceKey)
+      throw new AutopodError(
+        'Sandbox provider namespace unavailable',
+        'CONTAINER_RESOURCE_IDENTITY_UNAVAILABLE',
+        409,
+      );
+    return this.client.getResourceKey(containerId);
+  }
+
   async getExecutionMetadata(containerId: string): Promise<ContainerExecutionMetadata> {
     const [kernel, allocation, image] = await Promise.allSettled([
       this.execInContainer(containerId, ['node', '-e', CGROUP_EXECUTION_METADATA_PROBE], {
@@ -399,13 +409,21 @@ for root in sys.argv[1:]:
     content: string | Buffer,
     options?: FileWriteOptions,
   ): Promise<void> {
+    options?.assertCurrent?.();
     const buf = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
     await this.client.writeFile(
       containerId,
       path,
       buf,
-      options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : undefined,
+      options
+        ? {
+            timeoutMs: options.timeoutMs,
+            singleAttempt: options.singleAttempt,
+            beforeSend: options.assertCurrent,
+          }
+        : undefined,
     );
+    options?.assertCurrent?.();
     if (options?.mode === undefined) return;
     // The files endpoint writes as root; hand the file to the container user before narrowing it.
     const mode = options.mode.toString(8).padStart(4, '0');
