@@ -1,4 +1,5 @@
 // Types
+export type { ExternalDeliveryReceipt } from './types/external-delivery.js';
 export type {
   ValidationRecoveryAction,
   ValidationRecoveryAvailability,

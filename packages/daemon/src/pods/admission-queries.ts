@@ -21,6 +21,11 @@ export function createAdmissionQueries(
     return podRepo.getOrThrow(podId);
   }
 
+  function getExternalDelivery(podId: string) {
+    podRepo.getOrThrow(podId);
+    return podRepo.externalDeliveries?.get(podId) ?? null;
+  }
+
   async function getDeploymentConfiguration(podId: string) {
     const pod = podRepo.getOrThrow(podId);
     const launch = deps.launchConfiguration?.read(podId);
@@ -78,6 +83,7 @@ export function createAdmissionQueries(
   return {
     getLaunchConfiguration,
     getSession,
+    getExternalDelivery,
     getDeploymentConfiguration,
     getInjectedMcpServer,
     getInjectedMcpServers,

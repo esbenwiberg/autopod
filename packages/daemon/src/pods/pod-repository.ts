@@ -257,6 +257,10 @@ import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-exec
 import { createTaskHistoryArchive } from './task-history-archive.js';
 
 import { COST_POD_COLUMNS, type PodCostSource } from './cost-pod-projection.js';
+import {
+  type ExternalDeliveryRepository,
+  createExternalDeliveryRepository,
+} from './external-delivery-repository.js';
 
 export interface PodRepository extends Partial<UnitOfWork> {
   taskRetries?: TaskRetryLedger;
@@ -269,6 +273,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   afterInsertCommitted?(id: string, effect: () => void): void;
   deliveryLedger?: DeliveryLedger;
   sourcePublications?: SourcePublicationLedger;
+  externalDeliveries?: ExternalDeliveryRepository;
   mergeJournal?: MergeJournal;
   taskExecutions?: TaskExecutionLedger;
   deletionOwnership?: DeletionOwnership;
@@ -682,6 +687,7 @@ function rowToCostSource(row: Record<string, unknown>): PodCostSource {
 
 export function createPodRepository(db: Database.Database): PodRepository {
   const completionJournal = createCompletionJournal(db);
+  const externalDeliveries = createExternalDeliveryRepository(db);
   const dispatchPreflight = createDispatchPreflightLedger(db);
   const taskExecutions = createTaskExecutionLedger(db);
   const deletionOwnership = createDeletionOwnership(db);
@@ -766,6 +772,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     hasUnansweredDecision: (podId) => hasUnansweredDecision(db, podId),
     deliveryLedger: createDeliveryLedger(db),
     sourcePublications: createSourcePublicationLedger(db),
+    externalDeliveries,
     mergeJournal: createMergeJournal(db),
     taskExecutions,
     deletionOwnership,
@@ -1434,6 +1441,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
 
     delete: db.transaction((id: string): void => {
       taskExecutions.assertCanDelete(id);
+      externalDeliveries.assertDeletable(id);
       archiveTaskHistory(id);
       // Null out self-referential FKs from other pods before deleting.
       // These were added without ON DELETE SET NULL (SQLite can't ALTER COLUMN),

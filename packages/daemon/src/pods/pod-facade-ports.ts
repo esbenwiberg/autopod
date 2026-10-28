@@ -46,6 +46,7 @@ export interface PodFacadeOwners {
     ReturnType<typeof createAdmissionQueries>,
     | 'getLaunchConfiguration'
     | 'getSession'
+    | 'getExternalDelivery'
     | 'getDeploymentConfiguration'
     | 'getInjectedMcpServer'
     | 'getInjectedMcpServers'

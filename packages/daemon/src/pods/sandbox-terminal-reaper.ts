@@ -54,6 +54,7 @@ export class SandboxTerminalReaper {
       return;
     }
     const containerId = pod.containerId;
+    if (this.deps.podRepo.externalDeliveries?.retains(containerId)) return;
     const generation = pod.lifecycleGeneration;
     const status = pod.status;
     // A repository checkpoint is not a published artifact snapshot. The artifact
@@ -78,7 +79,8 @@ export class SandboxTerminalReaper {
       beforeDelete.containerId !== containerId ||
       beforeDelete.executionTarget !== 'sandbox' ||
       beforeDelete.status !== status ||
-      beforeDelete.pendingEscalation
+      beforeDelete.pendingEscalation ||
+      this.deps.podRepo.externalDeliveries?.retains(containerId)
     ) {
       return;
     }

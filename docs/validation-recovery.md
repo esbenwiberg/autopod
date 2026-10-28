@@ -22,7 +22,7 @@ failures have controls; selecting a historical validation attempt does not.
 ## Authenticated recovery API
 
 `GET /pods/:podId/validation-recovery` returns eligibility for both actions,
-`lifecycleGeneration`, `validationTimestamp`, `activeAction`, and `lastError`.
+`generation`, `validationTimestamp`, `activeAction`, and `lastError`.
 Eligibility is calculated by the daemon, not inferred from an attempt label.
 
 `POST /pods/:podId/validation-recovery` requires a human identity and a body like:
@@ -66,7 +66,10 @@ available through the existing log expansion.
 - Durable recovery supervision/backoff and automatic bounded repair across the
   distinct trigger, Resume, and validation-only paths. Explicit checks-only retry
   intentionally does not become an automatic coding loop.
-- Preserving reports before sandbox suspension and exact-source reconciliation
-  of externally merged PRs when the original sandbox cannot be restored.
+- Preserving reports before sandbox suspension and recovering their contents
+  when the sandbox cannot be restored. Exact-source external delivery observation
+  is now covered by [external-delivery-recovery.md](external-delivery-recovery.md),
+  with report recovery explicitly pending and original resources retained.
 
-This change does not deploy a daemon or mutate/recover any live pod.
+Installation does not itself request a worker retry or waive validation. Recovery
+operations remain explicit operator actions.

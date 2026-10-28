@@ -15,6 +15,7 @@ import type { ActionAuditRepository } from '../actions/audit-repository.js';
 import type { ScanRepository, StoredScan } from '../security/scan-repository.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventRepository } from './event-repository.js';
+import { withExternalDeliveryReadiness } from './external-delivery-readiness.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
@@ -156,29 +157,32 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
           (hasPiAttempt && hasNonPiAttempt ? 'mixed_pi_runtime' : null);
       }
     }
-    return deriveReadinessReview({
-      pod,
-      latestValidation,
-      latestSecurityScan: deps.scanRepo?.getLatestForPod(podId, 'push') ?? null,
-      actionAudit: audit
-        ? {
-            valid: audit.valid,
-            rowCount: audit.rowCount,
-            reason: audit.reason,
-            quarantineCount: actionSafety?.quarantineCount ?? 0,
-            piiCount: actionSafety?.piiCount ?? 0,
-            piiCategories: actionSafety?.piiCategories ?? [],
-            maxQuarantineScore: actionSafety?.maxQuarantineScore ?? 0,
-          }
-        : undefined,
-      deniedEgressCount: deniedEgress.total,
-      nonBlockingDeniedEgressCount: deniedEgress.nonBlocking,
-      preflightOverlapCount: deps.eventRepo?.countForSession(podId, 'pod.preflight_overlap') ?? 0,
-      qualityScore,
-      qualityScoreStage,
-      qualityUnavailableReason,
-      advisoryQaInFlight: options.advisoryQaInFlight,
-    });
+    return withExternalDeliveryReadiness(
+      deriveReadinessReview({
+        pod,
+        latestValidation,
+        latestSecurityScan: deps.scanRepo?.getLatestForPod(podId, 'push') ?? null,
+        actionAudit: audit
+          ? {
+              valid: audit.valid,
+              rowCount: audit.rowCount,
+              reason: audit.reason,
+              quarantineCount: actionSafety?.quarantineCount ?? 0,
+              piiCount: actionSafety?.piiCount ?? 0,
+              piiCategories: actionSafety?.piiCategories ?? [],
+              maxQuarantineScore: actionSafety?.maxQuarantineScore ?? 0,
+            }
+          : undefined,
+        deniedEgressCount: deniedEgress.total,
+        nonBlockingDeniedEgressCount: deniedEgress.nonBlocking,
+        preflightOverlapCount: deps.eventRepo?.countForSession(podId, 'pod.preflight_overlap') ?? 0,
+        qualityScore,
+        qualityScoreStage,
+        qualityUnavailableReason,
+        advisoryQaInFlight: options.advisoryQaInFlight,
+      }),
+      deps.podRepo.externalDeliveries?.get(podId) ?? null,
+    );
   };
 
   return {

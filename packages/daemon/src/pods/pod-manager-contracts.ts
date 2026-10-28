@@ -327,6 +327,7 @@ export interface PodManager {
     previewUrl: string | null;
   }>;
   getSession(podId: string): Pod;
+  getExternalDelivery(podId: string): import('@autopod/shared').ExternalDeliveryReceipt | null;
   /** Refresh terminal readiness after dependent quality telemetry is persisted. */
   refreshReadinessAfterQualityScore(podId: string): boolean;
   listSessions(filters?: {

@@ -761,6 +761,11 @@ export function podRoutes(
     return wire;
   });
 
+  app.get('/pods/:podId/external-delivery', async (request) => {
+    const { podId } = z.object({ podId: z.string().min(1).max(128) }).parse(request.params);
+    return { receipt: podManager.getExternalDelivery(podId) };
+  });
+
   // Task projection deliberately avoids deserializing the pod's contract/validation JSON.
   app.get('/pods/:podId/task-execution', async (request) => {
     const { podId } = request.params as { podId: string };

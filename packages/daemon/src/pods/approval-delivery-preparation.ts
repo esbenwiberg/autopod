@@ -10,6 +10,7 @@ import {
 import { publishCommittedSource, publishSource } from '../worktrees/durable-source-publication.js';
 import { mergeReconciliation } from '../worktrees/merge-source-identity.js';
 import type { ApprovalDeliveryPreparationCaptured } from './approval-contracts.js';
+import { reconcileExternalApproval } from './approval-external-delivery.js';
 import { APPROVAL_SNAPSHOT_EXCLUDES } from './approval-policy.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import type {
@@ -88,6 +89,20 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
         throw new AutopodError(reason, 'DELIVERY_RECONCILIATION_REQUIRED', 409);
       }
     }
+
+    // A factual, exact-source external merge is observed before any sandbox
+    // wakeup. Its durable receipt pins unpreserved reports against all cleanup.
+    if (
+      await reconcileExternalApproval(captured, {
+        podId,
+        options,
+        pod,
+        readiness,
+        actor,
+        approvalReason,
+      })
+    )
+      return { kind: 'halted' };
 
     // Git checkpoints omit ignored reports. Preserve the complete sandbox
     // workspace before publication or either approval cleanup path removes it.
