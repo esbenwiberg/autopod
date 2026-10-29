@@ -1,12 +1,41 @@
 import { execFile, spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, it } from 'vitest';
-import { terminatePidFileScript } from './azure-sandbox-api-client.js';
+import { processGroupProbeScript, terminatePidFileScript } from './azure-sandbox-api-client.js';
 
 const exec = promisify(execFile);
+
+it.each(['gone', 'unreadable', 'member', 'zombie'] as const)(
+  'process-group proof distinguishes vanished entries from unknown/live members: %s',
+  async (mode) => {
+    const root = await mkdtemp(join(tmpdir(), 'validation-proc-fixture-'));
+    const directory = join(root, '222');
+    await mkdir(directory);
+    const statFile = join(directory, 'stat');
+    await writeFile(statFile, `222 (fixture process) ${mode === 'zombie' ? 'Z' : 'S'} 1 111 1 0\n`);
+    try {
+      const probe = processGroupProbeScript().replaceAll('/proc/', `${root}/`);
+      const cat =
+        mode === 'gone'
+          ? `cat() { rm -f '${statFile}'; rmdir '${directory}'; /bin/cat "$@"; }`
+          : mode === 'unreadable'
+            ? 'cat() { return 1; }'
+            : 'cat() { /bin/cat "$@"; }';
+      const result = await exec('sh', [
+        '-c',
+        `pid=111; ${cat}; ${probe}; if group_alive; then echo held; else echo absent; fi`,
+      ]);
+      expect(result.stdout.trim()).toBe(
+        mode === 'member' || mode === 'unreadable' ? 'held' : 'absent',
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 it.skipIf(process.platform !== 'linux').each(['graceful', 'forced', 'stale'] as const)(
   'verifies owned process group cleanup: %s',
@@ -19,8 +48,9 @@ it.skipIf(process.platform !== 'linux').each(['graceful', 'forced', 'stale'] as 
         '-c',
         [
           'stat=$(cat /proc/$$/stat); rest=${stat##*) }; set -- $rest',
-          `printf '%s %s\\n' "$$" "\${20}" > '${receipt}'`,
           mode === 'forced' ? "trap '' TERM" : "trap 'exit 0' TERM",
+          // Publish readiness only once the requested signal disposition exists.
+          `printf '%s %s\\n' "$$" "\${20}" > '${receipt}'`,
           'while :; do sleep 0.1; done',
         ].join('; '),
       ],

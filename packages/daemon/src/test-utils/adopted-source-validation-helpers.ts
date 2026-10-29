@@ -1,5 +1,7 @@
 import type { Profile } from '@autopod/shared';
 import { vi } from 'vitest';
+import { resolvePrBaseBranch } from '../pods/delivery-policy.js';
+import { createRevalidationPassDelivery } from '../pods/revalidation-pass-delivery.js';
 import { sourcePodFingerprint } from '../pods/source-adoption-repository.js';
 import { captureValidationOwnership } from '../pods/validation-ownership.js';
 import { createValidationProgress } from '../pods/validation-progress.js';
@@ -150,14 +152,38 @@ export function createSourceRevalidationHarness(
       }),
     ),
     maybeTriggerDependents: vi.fn(),
-    completeRevalidationPass: vi.fn<ValidationRevalidationCaptured['completeRevalidationPass']>(
-      async (context) => {
-        if (!context.checksOnly) throw new Error('Source checks attempted delivery');
-        f.events.transition(f.pod(), 'validated');
-        return { newCommits: true, result: 'pass' };
-      },
-    ),
+    completeRevalidationPass: vi.fn<ValidationRevalidationCaptured['completeRevalidationPass']>(),
   } satisfies ValidationRevalidationCaptured;
+  const finalizer = createRevalidationPassDelivery({
+    ...f.mainCaptured,
+    ...captured,
+    resolvePrBaseBranch,
+    warnIfSinglePrSeriesMissingSeriesMeta: vi.fn(),
+    prManagerFactory: vi.fn(() => {
+      throw new Error('Source checks attempted PR delivery');
+    }),
+    refreshReadiness: vi.fn(() => true),
+    getLatestPushFindings: vi.fn(() => []),
+    advisoryPublicationOwnership: vi.fn(() => {
+      throw new Error('Source checks attempted advisory publication');
+    }),
+    runAdvisoryAfterValidation: vi.fn(async () => {
+      throw new Error('Source checks attempted advisory execution');
+    }),
+    handleDeletionGuardError: vi.fn(() => false),
+    ensurePrBaseBranchOnOrigin: vi.fn(async () => {}),
+  });
+  captured.completeRevalidationPass.mockImplementation((context) => {
+    if (!context.checksOnly) throw new Error('Source checks attempted delivery');
+    return finalizer.completeRevalidationPass.call(
+      {
+        approveSession: async () => {
+          throw new Error('Source checks attempted approval');
+        },
+      },
+      context,
+    );
+  });
   const verifySource = vi.fn(async () => {});
   const live: ValidationWorkflowLiveDependencies = {};
   const workflow = () => createValidationRevalidationWorkflow(live, captured);

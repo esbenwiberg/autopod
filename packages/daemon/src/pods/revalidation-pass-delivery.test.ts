@@ -29,6 +29,9 @@ describe('separate human revalidation delivery lifetime', () => {
         expect(f.passCaptured.maybeTriggerDependents).not.toHaveBeenCalled();
         expect(f.passCaptured.runAdvisoryAfterValidation).not.toHaveBeenCalled();
         expect(f.passCaptured.refreshReadiness).toHaveBeenCalled();
+        expect(
+          f.passCaptured.containerManagerFactory.get(f.pod().executionTarget).stop,
+        ).toHaveBeenCalledOnce();
       } finally {
         vi.useRealTimers();
       }

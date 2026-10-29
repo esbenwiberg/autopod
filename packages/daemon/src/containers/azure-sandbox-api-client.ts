@@ -2009,6 +2009,13 @@ function sandboxRuntimeUserScript(scriptBody: string, prelude: string[] = []): s
   ].join('\n');
 }
 
+export function processGroupProbeScript(): string {
+  // A process can disappear after glob expansion/readability observation. Only
+  // an absent proc directory settles that entry; unreadable existing entries
+  // remain unknown. Unrelated process churn must not masquerade as owned work.
+  return 'group_alive() { for stat_file in /proc/[0-9]*/stat; do [ -r "$stat_file" ] || { [ -d "${stat_file%/stat}" ] && return 0; continue; }; stat=$(cat "$stat_file" 2>/dev/null) || { [ -d "${stat_file%/stat}" ] && return 0; continue; }; rest=${stat##*) }; set -- $rest; [ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0; done; return 1; }';
+}
+
 export function terminatePidFileScript(pidPath: string): string {
   return [
     `pid_file=${shellQuote(pidPath)}`,
@@ -2018,7 +2025,7 @@ export function terminatePidFileScript(pidPath: string): string {
     'case "$pid" in *[!0-9]*|"") exit 1;; esac',
     '[ "$pid" -gt 1 ] || exit 1',
     '[ -d /proc/1 ] || exit 1',
-    'group_alive() { for stat_file in /proc/[0-9]*/stat; do [ -r "$stat_file" ] || continue; stat=$(cat "$stat_file") || return 0; rest=${stat##*) }; set -- $rest; [ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0; done; return 1; }',
+    processGroupProbeScript(),
     // A stale PID receipt must never signal an unrelated reused process group.
     'stat=$(cat /proc/"$pid"/stat) || exit 1',
     'rest=${stat##*) }; set -- $rest',

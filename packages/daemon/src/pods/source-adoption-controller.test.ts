@@ -16,6 +16,12 @@ async function fixture(options: { ignoredCollision?: boolean } = {}) {
 describe('durable source adoption coordinator (real Git/filesystem, mocked validator/data plane)', () => {
   it('preserves BOTH old workspaces, applies exact source and invokes real source-bound revalidation without delivery or reset', async () => {
     const s = await fixture();
+    let running = true;
+    vi.mocked(s.cm.getStatus).mockImplementation(async () => (running ? 'running' : 'stopped'));
+    vi.mocked(s.cm.stop).mockImplementation(async () => {
+      running = false;
+    });
+    vi.mocked(s.harness.captured.containerManagerFactory.get).mockReturnValue(s.cm);
     const before = s.f.db.prepare('SELECT * FROM task_executions WHERE pod_id=?').get(s.podId);
     const first = await s.submit();
     expect(first.stage).toBe('claimed');
@@ -53,6 +59,8 @@ describe('durable source adoption coordinator (real Git/filesystem, mocked valid
     );
     expect(s.harness.captured.worktreeManager.pullBranch).not.toHaveBeenCalled();
     expect(s.f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(s.cm.stop).not.toHaveBeenCalled();
+    expect(running).toBe(true);
     expect(s.harness.captured.maybeTriggerDependents).not.toHaveBeenCalled();
     expect(s.harness.oldReview).not.toHaveBeenCalled();
     expect(s.f.ctx.validationEngine.validate).toHaveBeenCalledWith(

@@ -187,7 +187,13 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
     if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
       return { newCommits, result: 'pass' };
     }
-    if (postAdvisoryPod.containerId) {
+    // The source coordinator still needs the original Running resource for its
+    // final exact-source verification. A pass does not release source/report
+    // custody or authorize a stop that would make that verification impossible.
+    if (
+      postAdvisoryPod.containerId &&
+      !podRepo.sourceAdoptions?.retains(postAdvisoryPod.containerId)
+    ) {
       try {
         emitActivityStatus(podId, 'Stopping post-validation container…');
         const cm2 = containerManagerFactory.get(postAdvisoryPod.executionTarget);
