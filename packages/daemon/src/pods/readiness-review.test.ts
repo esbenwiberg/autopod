@@ -224,6 +224,14 @@ describe('deriveReadinessReview', () => {
       expect.arrayContaining([expect.objectContaining({ id: 'validation-unknown' })]),
     );
   });
+  it('does not present a failed lifecycle as release-ready even when prior checks passed', () => {
+    const result = review({ pod: pod({ status: 'failed' }) });
+    expect(result.status).toBe('needs_review');
+    expect(result.summary).toContain('failed');
+    expect(result.findings).toContainEqual(
+      expect.objectContaining({ id: 'lifecycle-readiness-unresolved' }),
+    );
+  });
   it('marks a clean pod ready', () => {
     const result = review();
 
@@ -546,6 +554,20 @@ describe('deriveSeriesReadiness', () => {
 });
 
 describe('createReadinessService', () => {
+  it('does not resurrect historical passing validation after current proof is cleared', () => {
+    const currentPod = pod({ status: 'failed', lastValidationResult: null });
+    const podRepo = {
+      getOrThrow: () => currentPod,
+    } as unknown as PodRepository;
+    const validationRepo = {
+      getForSession: () => [{ id: 'old-pass', result: validation(), createdAt: NOW }],
+    } as unknown as ValidationRepository;
+    const result = createReadinessService({ podRepo, validationRepo }).computePodReadiness(
+      currentPod.id,
+    );
+    expect(result.status).toBe('risky');
+    expect(result.findings).toContainEqual(expect.objectContaining({ id: 'validation-unknown' }));
+  });
   it('uses canonical reset-cycle validation instead of an older higher attempt', () => {
     const canonicalPass = validation({ attempt: 1, overall: 'pass' });
     const currentPod = pod({ lastValidationResult: canonicalPass });

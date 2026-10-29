@@ -9,6 +9,7 @@ import {
 } from '../validation/container-reviewer-runner.js';
 import { getAzureToken } from './azure-token.js';
 import {
+  type ProfileLlmClient,
   type ProfileLlmClientUnavailableReason,
   createProfileAnthropicClient,
 } from './llm-client.js';
@@ -25,6 +26,22 @@ export interface MemoryReviewer {
     userMessage: string;
     maxTokens: number;
   }): Promise<string>;
+}
+
+export function createAnthropicMemoryReviewer(anthropic: ProfileLlmClient): MemoryReviewer {
+  return {
+    model: anthropic.model,
+    async generateText({ systemPrompt, userMessage, maxTokens }) {
+      const response = await anthropic.client.messages.create({
+        model: anthropic.model,
+        max_tokens: maxTokens,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userMessage }],
+      });
+      const textBlock = response.content.find((block) => block.type === 'text');
+      return textBlock?.text ?? '';
+    },
+  };
 }
 
 export type MemoryReviewerUnavailableReason =
@@ -121,7 +138,7 @@ function foundryOpenAiReviewer(input: {
 }): MemoryReviewer {
   const endpoint = trimTrailingSlash(input.endpoint);
   const apiVersion = input.apiVersion ?? DEFAULT_FOUNDRY_OPENAI_API_VERSION;
-  const headers =
+  const headers: Record<string, string> =
     input.authMode === 'api-key'
       ? { 'api-key': input.secret }
       : { authorization: `Bearer ${input.secret}` };
@@ -326,21 +343,7 @@ async function createDaemonMemoryReviewer(
   return {
     ok: true,
     model: anthropic.model,
-    reviewer: {
-      model: anthropic.model,
-      async generateText({ systemPrompt, userMessage, maxTokens }) {
-        const response = await anthropic.client.messages.create({
-          model: anthropic.model,
-          max_tokens: maxTokens,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userMessage }],
-        });
-        const textBlock = response.content.find(
-          (block): block is { type: 'text'; text: string } => block.type === 'text',
-        );
-        return textBlock?.text ?? '';
-      },
-    },
+    reviewer: createAnthropicMemoryReviewer(anthropic),
   };
 }
 

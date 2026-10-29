@@ -68,6 +68,18 @@ export function terminalRoutes(
         return;
       }
 
+      const sourceHeld = () => {
+        try {
+          return Boolean(podManager.getSourceAdoptions?.(podId).length);
+        } catch {
+          return true;
+        }
+      };
+      if (sourceHeld()) {
+        socket.close(4009, 'Source custody held');
+        return;
+      }
+
       if (!pod.containerId) {
         socket.close(4004, 'No container for pod');
         return;
@@ -128,7 +140,8 @@ export function terminalRoutes(
         try {
           const session = await cm.attachTerminal(containerId, { cols, rows });
           closeBackend = () => session.close();
-          if (cleanedUp) {
+          if (cleanedUp || sourceHeld()) {
+            if (sourceHeld()) socket.close(4009, 'Source custody held');
             session.close();
             return;
           }
@@ -145,6 +158,11 @@ export function terminalRoutes(
           });
 
           socket.on('message', (rawData: Buffer, isBinary: boolean) => {
+            if (sourceHeld()) {
+              socket.close(4009, 'Source custody held');
+              cleanupTerminal();
+              return;
+            }
             if (!isBinary) {
               const text = rawData.toString('utf8');
               try {
@@ -201,6 +219,11 @@ export function terminalRoutes(
             WorkingDir: '/workspace',
           });
 
+          if (sourceHeld()) {
+            socket.close(4009, 'Source custody held');
+            cleanupTerminal();
+            return;
+          }
           const startedStream = (await exec.start({
             hijack: true,
             stdin: true,
@@ -244,6 +267,11 @@ export function terminalRoutes(
           // stdin bytes). We must NOT use `typeof data === 'string'` — it's always
           // false with `ws`.
           socket.on('message', (rawData: Buffer, isBinary: boolean) => {
+            if (sourceHeld()) {
+              socket.close(4009, 'Source custody held');
+              cleanupTerminal();
+              return;
+            }
             if (!isBinary) {
               // Text frame — might be a JSON control message
               const text = rawData.toString('utf8');

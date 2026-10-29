@@ -120,6 +120,7 @@ export interface OperatorMessagesCaptured {
 
 export interface OperatorRejectionCaptured {
   podRepo: PodRepository;
+  resolveEffectiveBoundProfile: OperatorMessagesCaptured['resolveEffectiveBoundProfile'];
   beginGoalTaskRework: (pod: Pod, task: string) => Promise<boolean>;
   emitActivityStatus: ReturnType<typeof createCompletionEvents>['emitActivityStatus'];
   transition: ReturnType<typeof createCompletionEvents>['transition'];

@@ -186,6 +186,12 @@ export interface PodManagerDependencies {
 }
 
 export interface PodManager {
+  adoptSource?(
+    podId: string,
+    input: import('./source-adoption-controller.js').SourceAdoptionRequest,
+    actor: OperatorActor,
+  ): Promise<import('./source-adoption-types.js').SourceAdoptionState>;
+  getSourceAdoptions?(podId: string): import('./source-adoption-types.js').SourceAdoptionState[];
   getLaunchConfiguration?(podId: string): EffectiveLaunchConfig | null;
   createResolvedSession?(
     config: EffectiveLaunchConfig,

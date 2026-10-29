@@ -21,7 +21,8 @@ import type { ProviderAttemptRepository } from './provider-attempt-repository.js
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import { computeScore, isQualityScoreEligible } from './quality-score.js';
 import { computeQualitySignals } from './quality-signals.js';
-import type { StoredValidation, ValidationRepository } from './validation-repository.js';
+import { withLifecycleReadiness } from './readiness-projection.js';
+import type { ValidationRepository } from './validation-repository.js';
 
 const READINESS_STATUSES: ReadinessStatus[] = ['ready', 'needs_review', 'waived', 'risky'];
 const AREA_TITLES: Record<ReadinessArea, string> = {
@@ -123,8 +124,8 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
     options: { advisoryQaInFlight?: boolean } = {},
   ): ReadinessReview => {
     const pod = deps.podRepo.getOrThrow(podId);
-    const validations = deps.validationRepo?.getForSession(podId) ?? [];
-    const latestValidation = selectLatestValidation(pod, validations);
+    // Null is an explicit invalidation, not permission to resurrect a prior cycle's pass.
+    const latestValidation = pod.lastValidationResult;
     const audit = deps.actionAuditRepo?.verifyAuditChain(podId);
     const actionSafety = deps.actionAuditRepo?.getSafetySummary(podId);
     const deniedEgress = summarizeDeniedEgressEvents(
@@ -200,13 +201,6 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
   };
 }
 
-function selectLatestValidation(
-  pod: Pod,
-  validations: StoredValidation[],
-): ValidationResult | null {
-  return pod.lastValidationResult ?? validations[validations.length - 1]?.result ?? null;
-}
-
 export function deriveReadinessReview(inputs: ReadinessInputs): ReadinessReview {
   const computedAt = inputs.computedAt ?? new Date().toISOString();
   const areas = [
@@ -225,15 +219,19 @@ export function deriveReadinessReview(inputs: ReadinessInputs): ReadinessReview 
     findings,
   );
 
-  return {
-    status,
-    summary: summarizePodReadiness(status, findings),
-    computedAt,
-    scope: 'pod',
-    areas: areas.map(({ area }) => area),
-    findings,
-    approval: inputs.pod.readinessReview?.approval ?? null,
-  };
+  return withLifecycleReadiness(
+    {
+      status,
+      summary: summarizePodReadiness(status, findings),
+      computedAt,
+      scope: 'pod',
+      areas: areas.map(({ area }) => area),
+      findings,
+      approval: inputs.pod.readinessReview?.approval ?? null,
+    },
+    inputs.pod.status,
+    inputs.latestValidation,
+  );
 }
 
 export function deriveSeriesReadiness(

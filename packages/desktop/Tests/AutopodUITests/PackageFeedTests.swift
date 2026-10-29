@@ -30,6 +30,10 @@ import Testing
     #expect(fixture.writes[0]["origins"] == .array([.string("https://packages.example.com")]))
     #expect(fixture.payload["credential"] == .object(["secretId": .string("registry")]))
     #expect(!ConfigurationJSON.object(fixture.payload).formatted().contains("test-only-private-pat"))
+    // The backend receipt precedes reloadCredentials/defer and SwiftUI rendering.
+    // Wait for the actual secure field to clear, not merely the fixture write.
+    try await host.wait { packageFeedPATIsCleared(host) && host.has("feed-store-pat") && !host.enabled("feed-store-pat") }
+    #expect(packageFeedPATIsCleared(host), "Native secure field cleared after storing")
     #expect(!host.enabled("feed-store-pat"), "PAT cleared after storing")
     try host.capture("package-feed-pat-stored")
   }
@@ -41,10 +45,12 @@ import Testing
     defer { host.close() }
     try await host.wait { host.has("feed-test") }
     try host.press("feed-test")
-    try await host.wait { fixture.probes == [1] }
+    // Recording a request is not completion of its async reply or rendered UI.
+    try await host.wait { fixture.probes == [1] && host.containsText("Fixture authenticated read") }
     #expect(host.containsText("Fixture authenticated read"))
     try host.editField(placeholder: "HTTPS registry URL", text: "https://changed.example.com/")
     host.window.makeFirstResponder(nil)
+    try await host.wait { host.has("feed-test") && !host.enabled("feed-test") }
     #expect(!host.enabled("feed-test"))
   }
   @Test func repositorySelectionKeepsLegacyRegistryAndUnknownSelections() async throws {
@@ -58,6 +64,15 @@ import Testing
     #expect(fixture.payload["packageFeedIds"] == .array([.string("missing"), .string("feed")]))
     #expect(fixture.payload["privateRegistries"]?.array?.first?["credential"]?["secretId"] == .string("old"))
   }
+}
+
+@MainActor private func packageFeedPATIsCleared(_ host: LaunchComposerHost) -> Bool {
+  func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+  host.window.layoutIfNeeded()
+  host.hosting.layoutSubtreeIfNeeded()
+  let field = descendants(host.hosting).compactMap { $0 as? NSSecureTextField }
+    .first { $0.placeholderString == "Replacement PAT" }
+  return field?.stringValue.isEmpty == true
 }
 
 @MainActor @Observable private final class FeedFixture {

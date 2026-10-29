@@ -3,6 +3,7 @@ import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { CreatePrConfig, CreatePrResult } from '../interfaces/pr-manager.js';
 import { hasUnansweredDecision } from './decision-admission.js';
+import { assertSourceDeliveryAllowed } from './source-custody-guards.js';
 
 export interface DeliveryIntent {
   id: string;
@@ -48,6 +49,7 @@ export function createDeliveryLedger(db: Database.Database): DeliveryLedger {
   };
   return {
     reserve: db.transaction((config: CreatePrConfig) => {
+      assertSourceDeliveryAllowed(db, config.podId);
       const repository = repositoryIdentity(config);
       const identity = createHash('sha256')
         .update(JSON.stringify([repository, config.branch, config.baseBranch]))
@@ -92,6 +94,7 @@ export function createDeliveryLedger(db: Database.Database): DeliveryLedger {
             .prepare('SELECT pod_id AS podId FROM delivery_intents WHERE id = ?')
             .get(intent.id) as { podId: string } | undefined;
           if (!owner || hasUnansweredDecision(db, owner.podId)) return false;
+          assertSourceDeliveryAllowed(db, owner.podId);
           return (
             db
               .prepare(

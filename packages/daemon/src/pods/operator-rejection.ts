@@ -3,13 +3,19 @@ import { AutopodError } from '@autopod/shared';
 import { deriveAgentAttempt } from './agent-execution-policy.js';
 import { actorLabel } from './approval-policy.js';
 import { REWORK_IN_PROGRESS_PREFIX } from './continuation-policy.js';
-import { AgentContinuationSupersededError } from './continuation-preflight.js';
+import {
+  AgentContinuationSupersededError,
+  assertAgentContinuationCurrent,
+  prepareRetainedAgentContinuation,
+} from './continuation-preflight.js';
 import { formatFeedback } from './feedback-formatter.js';
 import type { OperatorRejectionCalls, OperatorRejectionCaptured } from './operator-contracts.js';
 import { isTerminalState } from './state-machine.js';
+import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
 export function createOperatorRejection(captured: OperatorRejectionCaptured) {
   const {
     podRepo,
+    resolveEffectiveBoundProfile,
     beginGoalTaskRework,
     emitActivityStatus,
     transition,
@@ -35,10 +41,27 @@ export function createOperatorRejection(captured: OperatorRejectionCaptured) {
       );
     }
 
+    const assertRejectionCurrent = () => {
+      podRepo.sourceAdoptions?.assertAvailable(podId);
+      podRepo.deletionOwnership?.assertTaskAvailable(podId);
+      assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
+      assertAgentContinuationCurrent(pod, pod.containerId, {
+        readCurrent: () => podRepo.getOrThrow(podId),
+        expectedStatus: pod.status,
+        hasPendingDecision: () =>
+          podRepo.hasUnansweredDecision?.(podId) ??
+          Boolean(podRepo.getOrThrow(podId).pendingEscalation),
+      });
+      if (podRepo.taskExecutions?.hasActiveRun(podId))
+        throw new AutopodError('Original worker is still settling', 'TASK_AGENT_RUN_ACTIVE', 409);
+    };
+    // Validate the original result BEFORE clearing it for a new feedback cycle.
+    assertRejectionCurrent();
     const goalRework = await beginGoalTaskRework(
       pod,
       `Address human feedback after Goal achievement: ${reason ?? 'Changes rejected. Please try again.'}`,
     );
+    assertRejectionCurrent();
     const previousStatus = pod.status as 'validated' | 'failed' | 'review_required';
 
     emitActivityStatus(
@@ -76,10 +99,14 @@ export function createOperatorRejection(captured: OperatorRejectionCaptured) {
 
       // Container is stopped post-validation — restart it before resuming the agent
       const cm = containerManagerFactory.get(pod.executionTarget);
-      await cm.start(pod.containerId);
+      await prepareRetainedAgentContinuation(podRepo.getOrThrow(podId), pod.containerId, {
+        containerManager: cm,
+        podRepo,
+        resolveProfile: resolveEffectiveBoundProfile,
+      });
       logger.info(
         { podId, containerId: pod.containerId },
-        'Container restarted for rejection retry',
+        'Retained resource verified running for feedback continuation',
       );
       if (pod.executionTarget === 'local') {
         await this.refreshNetworkPolicy(pod.profileName);

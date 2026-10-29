@@ -2,8 +2,10 @@ import { z } from 'zod';
 import { createPodRequestSchema } from './pod.schema.js';
 
 /** Task-specific inputs survive composition; presets cannot silently replace the work contract. */
-export const launchWorkSchema = createPodRequestSchema
-  .innerType()
+// This projection intentionally selects field schemas, not whole-pod cross-field rules
+// (the previous Zod 3 innerType() projection did the same); final pod admission checks those.
+export const launchWorkSchema = z
+  .object(createPodRequestSchema.shape)
   .pick({
     intentionalRerun: true,
     branch: true,

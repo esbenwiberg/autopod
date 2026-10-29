@@ -2,6 +2,7 @@ import { savedLaunchSelectionSchema, scheduledScanPolicyInputSchema } from '@aut
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { ScheduledJobManager } from '../../scheduled-jobs/scheduled-job-manager.js';
+import type {} from '../types.js';
 
 const templateFieldSchema = z.object({
   key: z.string().min(1),
@@ -10,7 +11,7 @@ const templateFieldSchema = z.object({
   defaultValue: z.string().optional(),
 });
 
-const fieldValuesSchema = z.record(z.string());
+const fieldValuesSchema = z.record(z.string(), z.string());
 
 const createSchema = z
   .object({

@@ -50,7 +50,7 @@ interface CredentialPersistenceOptions {
 }
 
 function isMaxRefreshCredentials(
-  credentials: MaxCredentials | null | undefined,
+  credentials: ProviderCredentials | null | undefined,
 ): credentials is MaxRefreshCredentials {
   return (
     credentials?.provider === 'max' &&
@@ -323,6 +323,7 @@ async function persistProviderAccountMaxReadback(
   if (!oauth?.accessToken || !oauth.refreshToken || !oauth.expiresAt) {
     throw new Error('MAX credential readback was incomplete');
   }
+  const { accessToken, refreshToken, expiresAt } = oauth;
   await withOwnerLock(credentialOwnerKey(owner), async () => {
     const current = store.get(owner.id).credentials;
     if (
@@ -334,9 +335,9 @@ async function persistProviderAccountMaxReadback(
     }
     store.updateCredentials(owner.id, {
       ...current,
-      accessToken: oauth.accessToken,
-      refreshToken: oauth.refreshToken,
-      expiresAt: new Date(oauth.expiresAt).toISOString(),
+      accessToken,
+      refreshToken,
+      expiresAt: new Date(expiresAt).toISOString(),
     });
     logger.info(ownerLogFields(owner), 'Persisted system sandbox MAX credential rotation');
   });
@@ -464,6 +465,7 @@ export async function persistRefreshedCredentials(
     logger.warn({ profileName }, 'Credentials file missing required OAuth fields');
     return;
   }
+  const { accessToken, refreshToken, expiresAt } = oauth;
 
   // Resolve which profile actually owns these credentials. For derived
   // profiles that inherit from a parent, rotations go to the parent's row
@@ -473,7 +475,7 @@ export async function persistRefreshedCredentials(
     const rawCurrentCreds = getOwnerCredentials(profileStore, options.providerAccountStore, owner);
     const currentCreds = isMaxRefreshCredentials(rawCurrentCreds) ? rawCurrentCreds : null;
 
-    if (currentCreds && currentCreds.refreshToken === oauth.refreshToken) {
+    if (currentCreds && currentCreds.refreshToken === refreshToken) {
       logger.debug(
         { profileName, ...ownerLogFields(owner) },
         'Owner refresh token matches container — skipping persist',
@@ -513,9 +515,9 @@ export async function persistRefreshedCredentials(
 
     const updated: MaxRefreshCredentials = {
       provider: 'max',
-      accessToken: oauth.accessToken,
-      refreshToken: oauth.refreshToken,
-      expiresAt: new Date(oauth.expiresAt).toISOString(),
+      accessToken,
+      refreshToken,
+      expiresAt: new Date(expiresAt).toISOString(),
       clientId: currentCreds?.clientId,
       scopes: currentCreds?.scopes,
       subscriptionType: currentCreds?.subscriptionType,

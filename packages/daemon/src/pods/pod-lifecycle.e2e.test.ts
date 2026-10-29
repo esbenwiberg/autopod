@@ -28,6 +28,7 @@ import { createActionAuditRepository } from '../actions/audit-repository.js';
 import type { PrManager } from '../interfaces/index.js';
 import {
   type TestContext,
+  collectAndAcknowledgeGuidance,
   completeEvent,
   createFailingValidationResult,
   createMockRuntime,
@@ -321,10 +322,14 @@ describe('Pod Lifecycle E2E', () => {
       ctx.db.close();
     });
 
-    it('human response via sendMessage resumes agent and completes', async () => {
+    it.each([true, false])('human reply requires inbox receipt=%s', async (collectReply) => {
       // Test the sendMessage path directly, starting from an awaiting_input pod
       const runtime = createMockRuntime({
         resume: vi.fn(async function* () {
+          if (collectReply) {
+            const reply = collectAndAcknowledgeGuidance(ctx.nudgeRepo, pod.id);
+            expect(reply?.messages.join('\n')).toContain('Use PostgreSQL');
+          }
           yield statusEvent('Got it, using PostgreSQL');
           yield completeEvent('Done — added PostgreSQL support');
         } as () => AsyncIterable<AgentEvent>),
@@ -349,13 +354,14 @@ describe('Pod Lifecycle E2E', () => {
       await manager.sendMessage(pod.id, 'Use PostgreSQL');
 
       const result = manager.getSession(pod.id);
-      expect(result.status).toBe('validated'); // skipValidation=true
+      expect(result.status).toBe(collectReply ? 'validated' : 'failed'); // skipValidation=true
       expect(result.pendingEscalation).toBeNull();
+      expect(ctx.nudgeRepo.hasPending(pod.id)).toBe(!collectReply);
 
       // Agent was resumed with the human's message
       expect(runtime.resume).toHaveBeenCalledWith(
         pod.id,
-        'Use PostgreSQL',
+        expect.stringContaining('Use PostgreSQL'),
         'ctr-1',
         undefined, // no provider env for default anthropic provider
       );

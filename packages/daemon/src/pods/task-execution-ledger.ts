@@ -14,6 +14,7 @@ import { hasUnansweredDecision } from './decision-admission.js';
 import { createDeletionOwnership } from './deletion-ownership.js';
 import { ensureMergeIdentityProjection } from './merge-identity-projection.js';
 import { readProviderUsage } from './provider-usage-projection.js';
+import { assertSourceAvailable, assertSourceDeliveryAllowed } from './source-custody-guards.js';
 import { createTerminationReconciliationRepository } from './termination-reconciliation-repository.js';
 
 export interface ExecutionBinding {
@@ -559,6 +560,8 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           .get(podId),
       ),
     beginRun: db.transaction((podId, generation, cycle, binding) => {
+      assertSourceAvailable(db, podId, '');
+      assertSourceDeliveryAllowed(db, podId);
       createDeletionOwnership(db).assertTaskAvailable(podId);
       const encoded = JSON.stringify({
         runtime: binding.runtime,
@@ -578,7 +581,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         .get(podId) as
         | { generation: number; containerId: string | null; executionTarget: string }
         | undefined;
-      if (current?.generation !== generation)
+      if (!current || current.generation !== generation)
         throw new Error('Stale lifecycle cannot start a task run');
       if (
         binding.resource &&

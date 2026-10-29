@@ -11,6 +11,7 @@ import {
   injectedSkillSchema,
 } from './injection.schema.js';
 import { withCanonicalModelIdPolicy } from './model.schema.js';
+import { partialWithoutDefaults } from './partial-without-defaults.js';
 import {
   providerAccountIdSchema,
   providerFailoverPolicySchema,
@@ -88,7 +89,7 @@ const piOAuthCredentialsSchema = z.object({
   provider: z.literal('pi'),
   providerId: z.enum(['anthropic', 'openai-codex', 'github-copilot']),
   credential: z
-    .record(z.unknown())
+    .record(z.string(), z.unknown())
     .refine(
       (credential) =>
         ['access', 'accessToken', 'token'].some(
@@ -280,7 +281,9 @@ const mergeableFieldSchema = z.enum([
 
 const mergeModeSchema = z.enum(['merge', 'replace']);
 
-export const mergeStrategySchema = z.record(mergeableFieldSchema, mergeModeSchema).default({});
+export const mergeStrategySchema = z
+  .partialRecord(mergeableFieldSchema, mergeModeSchema)
+  .default({});
 
 export const escalationConfigSchema = z.object({
   askHuman: z.boolean().default(true),
@@ -291,12 +294,12 @@ export const escalationConfigSchema = z.object({
       model: canonicalModelIdSchema.default(CLAUDE_REVIEWER_MODEL),
       maxCalls: z.number().int().min(0).max(50).default(5),
     })
-    .default({}),
+    .prefault({}),
   advisor: z
     .object({
       enabled: z.boolean().default(false),
     })
-    .default({}),
+    .prefault({}),
   autoPauseAfter: z.number().int().min(1).max(20).default(3),
   humanResponseTimeout: z.number().int().min(60).max(86_400).default(3600),
 });
@@ -356,7 +359,7 @@ const createProfileBaseSchema = z.object({
   executionTarget: z.enum(['local', 'sandbox']).nullable().default('local'),
   customInstructions: z.string().max(50_000).nullable().default(null),
   agentDonePrompt: z.string().max(50_000).nullable().default(null),
-  escalation: escalationConfigSchema.nullable().default({}),
+  escalation: escalationConfigSchema.nullable().prefault({}),
   extends: z.string().nullable().default(null),
   workerProfile: z.string().nullable().default(null),
   mcpServers: z.array(injectedMcpServerSchema).nullable().default([]),
@@ -377,7 +380,7 @@ const createProfileBaseSchema = z.object({
    * Common use: `{ NODE_OPTIONS: "--max-old-space-size=4096" }` to raise V8
    * heap for memory-heavy production bundles. Does not affect agent runtime env.
    */
-  buildEnv: z.record(z.string()).nullable().default(null),
+  buildEnv: z.record(z.string(), z.string()).nullable().default(null),
   buildTimeout: z.number().int().min(30).max(1800).nullable().default(300),
   testTimeout: z.number().int().min(30).max(3600).nullable().default(600),
   /** Optional lint command run before build. */
@@ -392,6 +395,7 @@ const createProfileBaseSchema = z.object({
    * cycle is fast and trusted can lower this for snappier turnarounds.
    */
   mergePollIntervalSec: z.number().int().min(5).max(3600).nullable().optional().default(null),
+  preflightConflictPolicy: z.enum(['warn', 'block']).nullable().optional(),
   prProvider: z.enum(['github', 'ado']).nullable().default('github'),
   githubPat: z.string().min(1).nullable().default(null),
   githubPatExpiresAt: dateOnlySchema.nullable().default(null),
@@ -457,7 +461,7 @@ const createProfileBaseSchema = z.object({
   deployment: z
     .object({
       enabled: z.boolean(),
-      env: z.record(z.string()),
+      env: z.record(z.string(), z.string()),
       allowedScripts: z.array(z.string().min(1)).optional(),
     })
     .nullable()
@@ -512,4 +516,6 @@ export const createProfileSchema = z
     }
   });
 
-export const updateProfileSchema = createProfileBaseSchema.partial().omit({ name: true });
+export const updateProfileSchema = partialWithoutDefaults(createProfileBaseSchema).omit({
+  name: true,
+});

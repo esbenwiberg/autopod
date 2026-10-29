@@ -35,6 +35,8 @@ export function createResourceCleanup(
         deps.launchConfiguration?.pim?.release(pod.id);
       return;
     }
+    podRepo.sourceAdoptions?.assertReleasable(targetContainerId);
+    podRepo.sandboxWakeups?.assertReleasable(targetContainerId);
     if (mode === 'kill') podRepo.externalDeliveries?.assertReleasable(targetContainerId);
     logger.info(
       { podId: pod.id, containerId: targetContainerId, generation: pod.lifecycleGeneration },
@@ -72,6 +74,8 @@ export function createResourceCleanup(
     assertReleaseAllowed?.();
     const cm = containerManagerFactory.get(pod.executionTarget);
     if (mode === 'kill') podRepo.externalDeliveries?.assertReleasable(targetContainerId);
+    podRepo.sandboxWakeups?.assertReleasable(targetContainerId);
+    podRepo.sourceAdoptions?.assertReleasable(targetContainerId);
     const op = mode === 'kill' ? cm.kill(targetContainerId) : cm.stop(targetContainerId);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deleted = await Promise.race([

@@ -159,14 +159,28 @@ struct ProfileAuthenticatorTests {
     try FileManager.default.createDirectory(at: agentDir, withIntermediateDirectories: true)
     try Data("secret".utf8).write(to: agentDir.appendingPathComponent("auth.json"))
 
-    DispatchQueue.global().async {
-      while !FileManager.default.fileExists(atPath: cancellationPath.path) {
+    // Model an already-running Terminal watcher, rather than racing the global
+    // dispatch queue's availability against the production cancellation deadline.
+    let watching = DispatchSemaphore(value: 0)
+    let finished = DispatchSemaphore(value: 0)
+    Thread.detachNewThread {
+      watching.signal()
+      let deadline = Date().addingTimeInterval(10)
+      while !FileManager.default.fileExists(atPath: cancellationPath.path), Date() < deadline {
         Thread.sleep(forTimeInterval: 0.01)
       }
-      FileManager.default.createFile(
-        atPath: agentDir.appendingPathComponent(".auth-status").path,
-        contents: Data("130".utf8)
-      )
+      if FileManager.default.fileExists(atPath: cancellationPath.path) {
+        FileManager.default.createFile(
+          atPath: agentDir.appendingPathComponent(".auth-status").path,
+          contents: Data("130".utf8)
+        )
+      }
+      finished.signal()
+    }
+    try #require(watching.wait(timeout: .now() + 2) == .success)
+    defer {
+      try? FileManager.default.removeItem(at: agentDir)
+      try? FileManager.default.removeItem(at: cancellationPath)
     }
 
     ProfileAuthenticator.cancelPiLogin(
@@ -174,8 +188,11 @@ struct ProfileAuthenticatorTests {
       cancellationPath: cancellationPath
     )
 
-    #expect(!FileManager.default.fileExists(atPath: agentDir.path))
-    #expect(!FileManager.default.fileExists(atPath: cancellationPath.path))
+    try #require(finished.wait(timeout: .now() + 2) == .success)
+    let agentDirectoryRemains = FileManager.default.fileExists(atPath: agentDir.path)
+    let cancellationMarkerRemains = FileManager.default.fileExists(atPath: cancellationPath.path)
+    #expect(!agentDirectoryRemains)
+    #expect(!cancellationMarkerRemains)
   }
 
   @Test func cancellationMarkerSurvivesDelayedTerminalLaunch() throws {

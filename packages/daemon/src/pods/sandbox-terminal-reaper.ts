@@ -1,12 +1,11 @@
 import type { Logger } from 'pino';
 import type { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
 import type { PodRepository } from './pod-repository.js';
+import { assertValidationExecutionSettled } from './validation-recovery-policy.js';
 
 export interface SandboxTerminalReaperDependencies {
   podRepo: PodRepository;
   sandboxContainerManager: SandboxContainerManager;
-  /** Must throw unless the failed sandbox's workspace is safely on the host. */
-  preserveWorkspace: (podId: string) => Promise<void>;
   logger: Logger;
   deletionTimeoutMs?: number;
 }
@@ -14,8 +13,9 @@ export interface SandboxTerminalReaperDependencies {
 /**
  * Converges terminal DB-referenced Azure Sandboxes: the backstop for an inline
  * `cleanupContainer` kill that failed or timed out. Walking from the pod row is
- * what gives us recovery context — notably the chance to preserve a `failed`
- * pod's workspace before its sandbox is destroyed.
+ * what gives us current lifecycle ownership. Failed pods are not automatic
+ * deletion candidates: a Git checkpoint does not preserve ignored reports.
+ * Retained resources can keep billing until explicit supported recovery/cleanup.
  *
  * By construction it cannot see a sandbox the DB no longer references (deleted
  * pod row, cleared `container_id`, id never persisted). That blind spot belongs
@@ -33,7 +33,7 @@ export class SandboxTerminalReaper {
     }
     this.running = true;
     try {
-      const pods = (['complete', 'killed', 'failed'] as const).flatMap((status) =>
+      const pods = (['complete', 'killed'] as const).flatMap((status) =>
         this.deps.podRepo
           .list({ status })
           .filter((pod) => pod.executionTarget === 'sandbox' && pod.containerId),
@@ -49,29 +49,28 @@ export class SandboxTerminalReaper {
     if (
       pod.executionTarget !== 'sandbox' ||
       !pod.containerId ||
-      !(['complete', 'killed', 'failed'] as const).includes(pod.status)
+      (pod.status !== 'complete' && pod.status !== 'killed')
     ) {
       return;
     }
     const containerId = pod.containerId;
-    if (this.deps.podRepo.externalDeliveries?.retains(containerId)) return;
+    if (
+      this.deps.podRepo.externalDeliveries?.retains(containerId) ||
+      this.deps.podRepo.sandboxWakeups?.retains(containerId) ||
+      this.deps.podRepo.sourceAdoptions?.retains(containerId)
+    )
+      return;
     const generation = pod.lifecycleGeneration;
     const status = pod.status;
-    // A repository checkpoint is not a published artifact snapshot. The artifact
-    // completion path owns collection and cleanup; preserve its retry source.
-    if (pod.status === 'failed' && (pod.options?.output === 'artifact' || pod.pendingEscalation)) {
+    if (this.deps.podRepo.taskExecutions?.hasActiveRun(pod.id)) return;
+    try {
+      assertValidationExecutionSettled(pod);
+    } catch (err) {
+      this.deps.logger.warn(
+        { err, podId: pod.id, containerId },
+        'Retaining sandbox because validation execution termination is unverified',
+      );
       return;
-    }
-    if (pod.status === 'failed') {
-      try {
-        await this.deps.preserveWorkspace(pod.id);
-      } catch (err) {
-        this.deps.logger.error(
-          { err, podId: pod.id, containerId },
-          'Retaining failed sandbox because workspace preservation did not succeed',
-        );
-        return;
-      }
     }
     const beforeDelete = this.deps.podRepo.getOrThrow(pod.id);
     if (
@@ -80,7 +79,8 @@ export class SandboxTerminalReaper {
       beforeDelete.executionTarget !== 'sandbox' ||
       beforeDelete.status !== status ||
       beforeDelete.pendingEscalation ||
-      this.deps.podRepo.externalDeliveries?.retains(containerId)
+      this.deps.podRepo.externalDeliveries?.retains(containerId) ||
+      this.deps.podRepo.sourceAdoptions?.retains(containerId)
     ) {
       return;
     }
@@ -101,12 +101,7 @@ export class SandboxTerminalReaper {
         current.executionTarget === 'sandbox' &&
         current.status === status
       ) {
-        this.deps.podRepo.update(
-          pod.id,
-          current.status === 'failed'
-            ? { containerId: null, worktreeCompromised: false, preSubmitReview: null }
-            : { containerId: null },
-        );
+        this.deps.podRepo.update(pod.id, { containerId: null });
       }
       this.deps.logger.info({ podId: pod.id, containerId }, 'Terminal sandbox deletion confirmed');
     } catch (err) {

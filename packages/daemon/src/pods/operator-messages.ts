@@ -8,7 +8,10 @@ import { ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import type { AgentRunOutcome } from './agent-execution-contracts.js';
 import { legacyRespondedBy, parseValidationOverrideResponse } from './approval-policy.js';
-import { AgentContinuationSupersededError } from './continuation-preflight.js';
+import {
+  AgentContinuationSupersededError,
+  prepareRetainedAgentContinuation,
+} from './continuation-preflight.js';
 import { resolvePrBaseBranch } from './delivery-policy.js';
 import { persistCompletionReply } from './escalation-coordinator.js';
 import type {
@@ -443,7 +446,9 @@ export function createOperatorMessages(
         : message;
     persistCompletionReply(podRepo, pod, message, actor, () => {
       transition(pod, 'running', { pendingEscalation: null });
-      if (queueForRetainedRun) nudgeRepo.queue(podId, queuedReply);
+      // Persist delivery custody before wakeup, credentials or dispatch. A
+      // saved response or an attempted resume is not a worker acknowledgement.
+      nudgeRepo.queue(podId, queuedReply);
     });
     emitActivityStatus(podId, 'Human reply recorded.');
 
@@ -457,7 +462,6 @@ export function createOperatorMessages(
       if (resolveResult.resolved) {
         if (resolveResult.detached) {
           resumeMessage = buildDetachedMcpFallbackMessage(pod.pendingEscalation.type, message);
-          if (!queueForRetainedRun) nudgeRepo.queue(podId, resumeMessage);
           emitActivityStatus(
             podId,
             'MCP response stream was closed — queued human reply for check_messages',
@@ -478,23 +482,32 @@ export function createOperatorMessages(
       return;
     }
 
+    const continuationMessage = [
+      resumeMessage,
+      '',
+      'This human reply is retained in check_messages. Read the queued messages and acknowledge each deliveryId with acknowledge_messages before finalizing. Do not apply an already received answer twice.',
+    ].join('\n');
     emitActivityStatus(podId, 'Resuming agent with message…');
     try {
-      const resumeEnv = await getResumeEnv(pod);
-      const runtime = runtimeRegistry.get(pod.runtime);
       if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
       const resumingPreservedSandbox =
         pod.lastRecoveryTrigger === 'restart' && pod.executionTarget === 'sandbox';
+      await prepareRetainedAgentContinuation(pod, pod.containerId, {
+        containerManager: containerManagerFactory.get(pod.executionTarget),
+        podRepo,
+        resolveProfile: resolveEffectiveBoundProfile,
+      });
       if (resumingPreservedSandbox) {
-        await containerManagerFactory.get('sandbox').start(pod.containerId);
         podRepo.update(podId, { lastRecoveryTrigger: null });
         emitActivityStatus(podId, 'Resuming preserved sandbox after daemon restart…');
       }
+      const resumeEnv = await getResumeEnv(pod);
+      const runtime = runtimeRegistry.get(pod.runtime);
       await recordContinuationProvenance(pod, pod.containerId);
       const mcpServers = await primeRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
       let outcome: AgentRunOutcome;
       try {
-        const events = runtime.resume(podId, resumeMessage, pod.containerId, resumeEnv);
+        const events = runtime.resume(podId, continuationMessage, pod.containerId, resumeEnv);
         outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
       } catch (err) {
         if (!(resumingPreservedSandbox && err instanceof ResumeSessionNotFoundError)) throw err;
@@ -516,7 +529,7 @@ export function createOperatorMessages(
           ),
           workDir: '/workspace',
           containerId: pod.containerId,
-          env: resumeEnv,
+          env: resumeEnv ?? {},
           mcpServers,
           executionTarget: pod.executionTarget,
         });

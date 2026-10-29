@@ -199,8 +199,9 @@ export function createScheduledJobManager(deps: ScheduledJobManagerDeps): Schedu
         if (req.scan !== undefined)
           validateLaunch(
             {
-              launch: req.launch ?? (req.profileName ? null : job.launch),
-              profileName: req.profileName ?? (req.launch ? null : job.profileName),
+              launch: req.launch ?? (req.profileName ? undefined : (job.launch ?? undefined)),
+              profileName:
+                req.profileName ?? (req.launch ? undefined : (job.profileName ?? undefined)),
               scan: req.scan,
             },
             job.ownerUserId ?? ownerUserId,

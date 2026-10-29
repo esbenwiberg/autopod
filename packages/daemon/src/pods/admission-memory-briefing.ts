@@ -1,7 +1,11 @@
 import type { MemoryEntry, Pod } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
-import type { ProfileLlmClientResult } from '../providers/index.js';
+import { type ProfileLlmClientResult, createProfileAnthropicClient } from '../providers/index.js';
+import {
+  type MemoryReviewer,
+  createAnthropicMemoryReviewer,
+} from '../providers/memory-reviewer.js';
 import type { MemoryRepository } from './memory-repository.js';
 import { prefilterMemories, selectRelevantMemories } from './memory-selector.js';
 import type { MemoryUsageRepository } from './memory-usage-repository.js';
@@ -45,11 +49,13 @@ export async function selectMemoryBriefingForPod(opts: {
   const reviewerModelId =
     profile.reviewerModel || profile.defaultModel || pod.model || 'claude-haiku-4-5';
   const createReviewerClient = opts.createReviewerClient ?? createProfileAnthropicClient;
-  let reviewerClient: ProfileLlmClientResult | null = null;
+  let reviewer: MemoryReviewer | undefined;
   let reviewerUnavailableReason: string | undefined;
   try {
-    reviewerClient = await createReviewerClient(profile, reviewerModelId, logger);
-    if (!reviewerClient.ok) {
+    const reviewerClient = await createReviewerClient(profile, reviewerModelId, logger);
+    if (reviewerClient.ok) {
+      reviewer = createAnthropicMemoryReviewer(reviewerClient);
+    } else {
       reviewerUnavailableReason = reviewerClient.reason;
     }
   } catch (err) {
@@ -63,8 +69,8 @@ export async function selectMemoryBriefingForPod(opts: {
     deps: {
       memoryRepo,
       usageRepo,
-      anthropicClient: reviewerClient?.ok ? reviewerClient.client : undefined,
-      reviewerModel: reviewerClient?.ok ? reviewerClient.model : undefined,
+      reviewer,
+      reviewerModel: reviewer?.model,
       reviewerUnavailableReason,
       logger,
     },

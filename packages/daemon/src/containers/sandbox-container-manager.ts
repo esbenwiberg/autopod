@@ -23,6 +23,7 @@ import type {
   ContainerExecutionMetadata,
   ContainerManager,
   ContainerSpawnConfig,
+  ContainerStartOptions,
   DirectoryExtractionOptions,
   ExecOptions,
   ExecResult,
@@ -37,6 +38,7 @@ import {
   SANDBOX_OUTPUT_INVENTORY,
   extractManagedSandboxOutput,
 } from '../managed/output-extraction.js';
+import { assertSourceResourceReleasable } from '../pods/source-custody-guards.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
 import {
   CGROUP_EXECUTION_METADATA_PROBE,
@@ -55,11 +57,14 @@ import {
   egressPolicyForMode,
   pickSandboxTier,
 } from './sandbox-api-client.js';
+import type { SandboxWakeupJournal } from './sandbox-wakeup-journal.js';
 import { exportSandboxWorkspace, isExcludedPath } from './sandbox-workspace-export.js';
 
 export interface SandboxContainerManagerOptions {
   /** Explicit managed-mode ledger; native spawn remains unchanged. */
   managedDatabase?: Database.Database;
+  /** Required for Azure resume mutations; independent of managed/native execution accounting. */
+  wakeupJournal?: SandboxWakeupJournal;
   /** Tier used when a spawn carries no `memoryBytes` hint (default: 'L'). */
   defaultTier?: SandboxResourceTier;
   /** Test seam for exercising multi-part archive uploads. */
@@ -163,6 +168,10 @@ export class SandboxContainerManager implements ContainerManager {
         imagePullIdentityResourceId: config.imagePullIdentityResourceId,
         registryCredentials: config.registryCredentials,
         resolveImageDigest: config.resolveImageDigest,
+        wakeupJournal: options.wakeupJournal,
+        assertReleaseAllowed: (id) => {
+          if (options.managedDatabase) assertSourceResourceReleasable(options.managedDatabase, id);
+        },
       },
       logger,
     );
@@ -170,6 +179,16 @@ export class SandboxContainerManager implements ContainerManager {
       ...options,
       defaultTier: config.tier ?? 'L',
     });
+  }
+
+  async getResourceKey(containerId: string): Promise<string> {
+    if (!this.client.getResourceKey)
+      throw new AutopodError(
+        'Sandbox provider namespace unavailable',
+        'CONTAINER_RESOURCE_IDENTITY_UNAVAILABLE',
+        409,
+      );
+    return this.client.getResourceKey(containerId);
   }
 
   async getExecutionMetadata(containerId: string): Promise<ContainerExecutionMetadata> {
@@ -351,6 +370,7 @@ for root in sys.argv[1:]:
   }
 
   async kill(containerId: string): Promise<void> {
+    if (this.managedDatabase) assertSourceResourceReleasable(this.managedDatabase, containerId);
     try {
       await this.client.destroy(containerId);
     } catch (error) {
@@ -379,11 +399,14 @@ for root in sys.argv[1:]:
   }
 
   async stop(containerId: string): Promise<void> {
+    if (this.managedDatabase) assertSourceResourceReleasable(this.managedDatabase, containerId);
     await this.client.suspend(containerId, 'memory');
   }
 
-  async start(containerId: string): Promise<void> {
-    await this.client.resume(containerId);
+  async start(containerId: string, options: ContainerStartOptions = {}): Promise<void> {
+    options.assertCurrent?.();
+    await this.client.resume(containerId, options);
+    options.assertCurrent?.();
   }
 
   async writeFile(
@@ -392,13 +415,21 @@ for root in sys.argv[1:]:
     content: string | Buffer,
     options?: FileWriteOptions,
   ): Promise<void> {
+    options?.assertCurrent?.();
     const buf = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
     await this.client.writeFile(
       containerId,
       path,
       buf,
-      options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : undefined,
+      options
+        ? {
+            timeoutMs: options.timeoutMs,
+            singleAttempt: options.singleAttempt,
+            beforeSend: options.assertCurrent,
+          }
+        : undefined,
     );
+    options?.assertCurrent?.();
     if (options?.mode === undefined) return;
     // The files endpoint writes as root; hand the file to the container user before narrowing it.
     const mode = options.mode.toString(8).padStart(4, '0');
@@ -499,7 +530,9 @@ for root in sys.argv[1:]:
     assertDirectoryExtractionCurrent(options);
     // Azure may suspend a retained workspace while its settled worker is idle.
     // Resume the same sandbox; do not provision or restart an agent to copy files.
-    await this.client.resume(containerId);
+    await this.client.resume(containerId, {
+      assertCurrent: () => assertDirectoryExtractionCurrent(options),
+    });
     assertDirectoryExtractionCurrent(options);
     options?.onExportStarted?.();
     mkdirSync(hostPath, { recursive: true });

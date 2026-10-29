@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import * as providers from '../providers/index.js';
+import { createMemoryBriefingSdkFixture } from '../test-utils/admission-memory-briefing-helpers.js';
 import { createAdmissionFixture } from '../test-utils/admission-queries-helpers.js';
 import {
   approvedMemoriesForPod,
@@ -7,6 +9,33 @@ import {
 } from './admission-memory-briefing.js';
 import { createMemoryUsageRepository } from './memory-usage-repository.js';
 describe('complete original memory briefing', () => {
+  it('uses the actual default factory binding and forwards a usable reviewer to memory ranking', async () => {
+    const s = createMemoryBriefingSdkFixture();
+    vi.stubEnv('ANTHROPIC_API_KEY', 'fixture-key-not-real');
+    vi.stubGlobal('fetch', s.fetch);
+    const factory = vi
+      .spyOn(providers, 'createProfileAnthropicClient')
+      .mockResolvedValue({ ok: true, client: s.client, model: 'claude-haiku-4-5' });
+    try {
+      const profile = s.f.profiles.get('test-profile');
+      const result = await selectMemoryBriefingForPod({
+        pod: { ...s.f.pod(), task: 'Authentication token refresh' },
+        profile,
+        memoryRepo: s.f.memoryRepo,
+        logger: s.f.deps.logger,
+      });
+      expect(factory).toHaveBeenCalledOnce();
+      expect(s.fetch).toHaveBeenCalledOnce();
+      expect(result.unavailableReason).toBeNull();
+      expect(result.selected.map((entry) => entry.memory.id)).toEqual([s.memory.id]);
+      expect(result.selected[0]?.relevanceReason).toContain('Fixture reviewer selected');
+    } finally {
+      factory.mockRestore();
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+      s.f.db.close();
+    }
+  });
   it('deduplicates parent scopes and excludes shared profile memory for native pods', () => {
     const f = createAdmissionFixture();
     const list = vi.spyOn(f.memoryRepo, 'list');

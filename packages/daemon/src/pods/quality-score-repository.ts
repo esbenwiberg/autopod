@@ -428,7 +428,8 @@ export function createQualityScoreRepository(db: Database.Database): QualityScor
         b.count++;
         dayBuckets.set(day, b);
 
-        distCounts[Math.min(Math.floor(score / 10), 9)]++;
+        const bucket = Math.min(Math.floor(score / 10), 9);
+        distCounts[bucket] = (distCounts[bucket] ?? 0) + 1;
 
         if ((s.readEditRatio ?? 0) < 1 && s.editCount > 0) reasons.lowReadEditRatio++;
         if ((s.editsWithoutPriorRead ?? 0) > 0) reasons.editsWithoutPriorRead++;

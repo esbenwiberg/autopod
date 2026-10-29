@@ -12,7 +12,7 @@ const MAX_FILE_ENTRIES = 100_000;
 const MAX_DIRECTORY_ENTRIES = 100_000;
 const MAX_BYTES = 1_073_741_824;
 
-async function fingerprint(
+export async function fingerprintArtifactSnapshot(
   root: string,
 ): Promise<{ sha256: string; entries: number; bytes: number }> {
   const digest = createHash('sha256');
@@ -77,7 +77,7 @@ export async function writeArtifactSnapshotReceipt(
   generation: number,
   cycle: number,
 ): Promise<void> {
-  const identity = await fingerprint(staging);
+  const identity = await fingerprintArtifactSnapshot(staging);
   await writeFile(
     `${snapshot}.receipt.json`,
     JSON.stringify({
@@ -127,7 +127,7 @@ export async function verifyArtifactSnapshot(
       receipt.snapshot !== path.basename(snapshot)
     )
       throw new Error('Artifact receipt does not match this lifecycle');
-    const actual = await fingerprint(snapshot);
+    const actual = await fingerprintArtifactSnapshot(snapshot);
     if (
       receipt.sha256 !== actual.sha256 ||
       receipt.entries !== actual.entries ||

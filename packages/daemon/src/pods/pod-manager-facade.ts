@@ -20,6 +20,8 @@ import type { ArtifactResumeObservation } from './artifact-resume-observation.js
 import { createValidationTriggerCalls } from './pod-facade-calls.js';
 import type { PodFacadeOwners } from './pod-facade-ports.js';
 import type { PodStats } from './pod-repository.js';
+import type { SourceAdoptionRequest } from './source-adoption-controller.js';
+import { sourceAdoptionError } from './source-adoption-identity.js';
 import type { PodCreator } from './workspace-contracts.js';
 export function createPodManagerFacade(captured: PodFacadeOwners) {
   const {
@@ -69,6 +71,19 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     terminationReconciliation,
   } = captured;
   return {
+    adoptSource(podId: string, input: SourceAdoptionRequest, actor: OperatorActor) {
+      return (captured.sourceAdoption ?? sourceAdoptionError('Source adoption unavailable')).submit(
+        podId,
+        input,
+        actor,
+      );
+    },
+    getSourceAdoptions(podId: string) {
+      podRepo.getOrThrow(podId);
+      return (captured.sourceAdoption ?? sourceAdoptionError('Source adoption unavailable')).list(
+        podId,
+      );
+    },
     getLaunchConfiguration(podId: string): EffectiveLaunchConfig | null {
       return admissionQueries.getLaunchConfiguration(podId);
     },

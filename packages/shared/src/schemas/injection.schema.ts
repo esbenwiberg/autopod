@@ -34,7 +34,7 @@ export const injectedSkillSchema = z.object({
 export const injectedMcpServerSchema = z.object({
   name: z.string().min(1).max(64),
   url: z.string().url(),
-  headers: z.record(z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
   description: z.string().max(500).optional(),
   toolHints: z.array(z.string().max(200)).max(20).optional(),
 });
@@ -47,7 +47,7 @@ export const injectedClaudeMdSectionSchema = z.object({
     .object({
       url: z.string().url(),
       authorization: z.string().optional(),
-      body: z.record(z.unknown()).optional(),
+      body: z.record(z.string(), z.unknown()).optional(),
       timeoutMs: z.number().int().min(1000).max(30_000).default(10_000),
     })
     .optional(),

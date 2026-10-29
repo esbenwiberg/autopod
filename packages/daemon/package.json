@@ -32,7 +32,7 @@
     "@autopod/shared": "workspace:*",
     "@autopod/validator": "workspace:*",
     "@azure/container-registry": "^1.1.0",
-    "@azure/identity": "^4.13.1",
+    "@azure/identity": "^4.14.0",
     "@fastify/cors": "^11.3.0",
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/static": "^10.1.2",
@@ -46,12 +46,12 @@
     "cron-parser": "^4.9.0",
     "dockerode": "^5.0.1",
     "dotenv": "^17.4.2",
-    "fastify": "^5.12.5",
+    "fastify": "^5.12.7",
     "jose": "^6.2.3",
     "pino": "^10.3.1",
     "slugify": "^1.6.9",
     "tar-stream": "^3.2.0",
-    "zod": "^3.24.1"
+    "zod": "^4.6.7"
   },
   "optionalDependencies": {
     "playwright": "^1.61.1"
@@ -65,6 +65,6 @@
     "pino-pretty": "^13.0.0",
     "tsup": "^8.3.5",
     "typescript": "^5.7.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.12"
   }
 }

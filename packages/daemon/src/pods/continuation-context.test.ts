@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveLaunch } from '../configuration/launch-resolver.js';
 import { createProfileStore } from '../profiles/index.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
-import { createTestContext } from '../test-utils/mock-helpers.js';
+import { createPassingValidationResult, createTestContext } from '../test-utils/mock-helpers.js';
 import { createContinuationContext } from './continuation-context.js';
 import type { ContinuationLiveDependencies } from './continuation-ports.js';
 import { createGoalRepository } from './goal-repository.js';
@@ -113,7 +113,7 @@ describe('continuation context', () => {
       const resume = vi.spyOn(f.ctx.runtime, 'resume');
       const events = await f.c.taskFeedbackEvents('context', 'Reviewed changes', fresh);
       expect(events[Symbol.asyncIterator]).toBeTypeOf('function');
-      expect(f.order).toEqual(['env', 'binding', 'binding', 'prime']);
+      expect(f.order).toEqual(['binding', 'binding', 'env', 'binding', 'binding', 'prime']);
       expect(f.ctx.podRepo.executionProvenance?.latest('context')?.status).toBe('checked');
       if (fresh) {
         expect(resume).not.toHaveBeenCalled();
@@ -138,6 +138,127 @@ describe('continuation context', () => {
       }
     },
   );
+  it.each([false, true])(
+    'wakes stopped feedback resources before credentials with fresh=%s',
+    async (fresh) => {
+      const f = fixture();
+      let running = false;
+      vi.mocked(f.ctx.containerManager.getStatus).mockImplementation(async () =>
+        running ? 'running' : 'stopped',
+      );
+      vi.mocked(f.ctx.containerManager.start).mockImplementation(async () => {
+        f.order.push('wake');
+        running = true;
+      });
+      f.captured.getResumeEnv.mockImplementation(async () => {
+        expect(running).toBe(true);
+        f.order.push('env');
+        return f.env;
+      });
+      await f.c.taskFeedbackEvents('context', 'Apply feedback', fresh);
+      expect(f.order.indexOf('wake')).toBeLessThan(f.order.indexOf('env'));
+      expect(f.ctx.containerManager.start).toHaveBeenCalledExactlyOnceWith('container', {
+        assertCurrent: expect.any(Function),
+      });
+    },
+  );
+  it.each(['unknown', 'deleted'] as const)(
+    'retains a feedback resource in state %s without waking, configuring or dispatching it',
+    async (status) => {
+      const f = fixture();
+      vi.mocked(f.ctx.containerManager.getStatus).mockResolvedValue(status);
+      await expect(
+        f.c.taskFeedbackEvents('context', 'Apply feedback', false),
+      ).rejects.toMatchObject({
+        code: 'CONTINUATION_RESOURCE_UNAVAILABLE',
+      });
+      expect(f.ctx.containerManager.start).not.toHaveBeenCalled();
+      expect(f.captured.getResumeEnv).not.toHaveBeenCalled();
+      expect(f.captured.primeRuntimeForResume).not.toHaveBeenCalled();
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(f.pod().containerId).toBe('container');
+    },
+  );
+  it('blocks an unverified original execution before observing or waking feedback resources', async () => {
+    const f = fixture();
+    const ledger = f.ctx.podRepo.taskExecutions;
+    if (!ledger) throw new Error('Missing task ledger');
+    const pod = f.pod();
+    const run = ledger.beginRun('context', pod.lifecycleGeneration, 0, {
+      runtime: pod.runtime,
+      model: pod.model,
+      providerAccountId: null,
+      resource: { containerId: pod.containerId, executionTarget: pod.executionTarget },
+    });
+    ledger.retainUnverifiedRun(run);
+    await expect(f.c.taskFeedbackEvents('context', 'Apply feedback', false)).rejects.toMatchObject({
+      code: 'TASK_EXECUTION_TERMINATION_UNVERIFIED',
+    });
+    expect(f.ctx.containerManager.getStatus).not.toHaveBeenCalled();
+    expect(f.ctx.containerManager.start).not.toHaveBeenCalled();
+    expect(f.captured.getResumeEnv).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+  });
+  it.each([false, true])(
+    'never bypasses an unverified validation exit (fresh=%s)',
+    async (fresh) => {
+      const f = fixture();
+      f.ctx.podRepo.update('context', {
+        lastValidationResult: {
+          ...createPassingValidationResult('context'),
+          overall: 'fail',
+          infrastructureFailure: {
+            phase: 'build',
+            code: 'EXEC_EXIT_UNVERIFIED',
+            message: 'Original validation command exit is unverified',
+            retryable: false,
+          },
+        },
+      });
+      await expect(
+        f.c.taskFeedbackEvents('context', 'Apply feedback', fresh),
+      ).rejects.toMatchObject({
+        code: 'VALIDATION_EXECUTION_UNVERIFIED',
+      });
+      expect(f.ctx.containerManager.getStatus).not.toHaveBeenCalled();
+      expect(f.captured.getResumeEnv).not.toHaveBeenCalled();
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['observe', 'wake'] as const)('late %s failure keeps new work', async (phase) => {
+    const f = fixture();
+    const failLate = async () => {
+      f.ctx.podRepo.incrementLifecycleGeneration('context');
+      f.ctx.podRepo.update('context', { status: 'queued', containerId: 'replacement' });
+      throw new Error('Old provider operation failed');
+    };
+    if (phase === 'observe')
+      vi.mocked(f.ctx.containerManager.getStatus).mockImplementationOnce(failLate);
+    else {
+      vi.mocked(f.ctx.containerManager.getStatus).mockResolvedValue('stopped');
+      vi.mocked(f.ctx.containerManager.start).mockImplementationOnce(failLate);
+    }
+    await expect(f.c.taskFeedbackEvents('context', 'Apply feedback', false)).rejects.toMatchObject({
+      code: 'STALE_AGENT_CONTINUATION',
+    });
+    expect(f.pod()).toMatchObject({ status: 'queued', containerId: 'replacement' });
+    expect(f.captured.getResumeEnv).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+  });
+  it('retains queued human guidance and tells feedback workers to collect its receipt', async () => {
+    const f = fixture();
+    f.ctx.nudgeRepo.queue('context', 'Preserved human direction');
+    await f.c.taskFeedbackEvents('context', 'Apply feedback', false);
+    expect(f.ctx.runtime.resume).toHaveBeenCalledWith(
+      'context',
+      expect.stringContaining('acknowledge_messages'),
+      'container',
+      f.env,
+    );
+    expect(f.ctx.nudgeRepo.hasPending('context')).toBe(true);
+  });
   it('retains an unanswered human decision and never primes or resumes through it', async () => {
     const f = fixture();
     vi.spyOn(f.ctx.podRepo, 'hasUnansweredDecision').mockReturnValue(true);

@@ -77,7 +77,7 @@ const piOAuthCredentialsSchema = z.object({
   provider: z.literal('pi'),
   providerId: z.enum(['anthropic', 'openai-codex', 'github-copilot']),
   credential: z
-    .record(z.unknown())
+    .record(z.string(), z.unknown())
     .refine(
       (credential) =>
         ['access', 'accessToken', 'token'].some(

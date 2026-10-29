@@ -2,6 +2,7 @@ import type { Pod } from '@autopod/shared';
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 import type { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
+import { createPassingValidationResult } from '../test-utils/mock-helpers.js';
 import type { PodRepository } from './pod-repository.js';
 import { SandboxTerminalReaper } from './sandbox-terminal-reaper.js';
 
@@ -17,7 +18,9 @@ function pod(status: Pod['status'], id = 'pod-1'): Pod {
 }
 
 function build(pods: Pod[]) {
+  const taskExecutions = { hasActiveRun: vi.fn(() => false) };
   const podRepo = {
+    taskExecutions,
     list: vi.fn(({ status }: { status: Pod['status'] }) =>
       pods.filter((pod) => pod.status === status),
     ),
@@ -30,16 +33,15 @@ function build(pods: Pod[]) {
   } as unknown as PodRepository;
   const sandboxContainerManager = {
     kill: vi.fn(async () => {}),
+    start: vi.fn(async () => {}),
   } as unknown as SandboxContainerManager;
-  const preserveWorkspace = vi.fn(async () => {});
   return {
+    taskExecutions,
     podRepo,
     sandboxContainerManager,
-    preserveWorkspace,
     reaper: new SandboxTerminalReaper({
       podRepo,
       sandboxContainerManager,
-      preserveWorkspace,
       logger,
     }),
   };
@@ -51,22 +53,21 @@ describe('SandboxTerminalReaper', () => {
     failed.options = { agentMode: 'auto', output: 'artifact', validate: false };
     const deps = build([failed]);
     await deps.reaper.runSweep();
-    expect(deps.preserveWorkspace).not.toHaveBeenCalled();
+    expect(deps.sandboxContainerManager.start).not.toHaveBeenCalled();
     expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
     expect(failed.containerId).toBe('sandbox-pod-1');
   });
 
-  it('does not delete a lifecycle resumed while failed-work preservation was pending', async () => {
+  it('does not wake or restore failed sandboxes as a side effect of automatic cleanup', async () => {
     const failed = pod('failed');
     failed.lifecycleGeneration = 3;
     const deps = build([failed]);
-    deps.preserveWorkspace.mockImplementationOnce(async () => {
-      failed.status = 'running';
-      failed.lifecycleGeneration = 4;
-    });
     await deps.reaper.runSweep();
+    expect(deps.sandboxContainerManager.start).not.toHaveBeenCalled();
     expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
     expect(failed.containerId).toBe('sandbox-pod-1');
+    expect(failed.status).toBe('failed');
+    expect(failed.lifecycleGeneration).toBe(3);
   });
 
   it('deletes complete and killed sandboxes then clears their container IDs', async () => {
@@ -79,21 +80,54 @@ describe('SandboxTerminalReaper', () => {
     expect(killed.containerId).toBeNull();
   });
 
-  it('preserves failed work before deletion and retains it when preservation fails', async () => {
+  it('never treats repository preservation as proof that failed-pod reports are safe', async () => {
     const failed = pod('failed');
     failed.worktreeCompromised = true;
     failed.preSubmitReview = { status: 'pass' } as Pod['preSubmitReview'];
     const deps = build([failed]);
-    deps.preserveWorkspace.mockRejectedValueOnce(new Error('host worktree unavailable'));
     await deps.reaper.runSweep();
     expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
     expect(failed.containerId).toBe('sandbox-pod-1');
     await deps.reaper.runSweep();
-    expect(deps.preserveWorkspace).toHaveBeenCalledTimes(2);
-    expect(deps.sandboxContainerManager.kill).toHaveBeenCalledWith('sandbox-pod-1');
-    expect(failed.containerId).toBeNull();
-    expect(failed.worktreeCompromised).toBe(false);
-    expect(failed.preSubmitReview).toBeNull();
+    expect(deps.sandboxContainerManager.start).not.toHaveBeenCalled();
+    expect(deps.podRepo.update).not.toHaveBeenCalled();
+    expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
+    expect(failed.containerId).toBe('sandbox-pod-1');
+    expect(failed.worktreeCompromised).toBe(true);
+    expect(failed.preSubmitReview).toEqual({ status: 'pass' });
+  });
+
+  it.each(['complete', 'killed'] as const)(
+    'retains %s resources until original task execution settles',
+    async (status) => {
+      const terminal = pod(status);
+      const deps = build([terminal]);
+      deps.taskExecutions.hasActiveRun.mockReturnValue(true);
+      await deps.reaper.runSweep();
+      expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
+      expect(terminal.containerId).toBe('sandbox-pod-1');
+      deps.taskExecutions.hasActiveRun.mockReturnValue(false);
+      await deps.reaper.runSweep();
+      expect(deps.sandboxContainerManager.kill).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('retains terminal resources with an unverified validation exit', async () => {
+    const terminal = pod('complete');
+    terminal.lastValidationResult = {
+      ...createPassingValidationResult(terminal.id),
+      overall: 'fail',
+      infrastructureFailure: {
+        phase: 'build',
+        code: 'EXEC_EXIT_UNVERIFIED',
+        message: 'Original command exit is unverified',
+        retryable: false,
+      },
+    };
+    const deps = build([terminal]);
+    await deps.reaper.runSweep();
+    expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
+    expect(terminal.containerId).toBe('sandbox-pod-1');
   });
 
   it('retains container IDs on deletion errors and retries later', async () => {
@@ -122,7 +156,6 @@ describe('SandboxTerminalReaper', () => {
       const reaper = new SandboxTerminalReaper({
         podRepo: deps.podRepo,
         sandboxContainerManager: deps.sandboxContainerManager,
-        preserveWorkspace: deps.preserveWorkspace,
         logger,
         deletionTimeoutMs: 1_000,
       });

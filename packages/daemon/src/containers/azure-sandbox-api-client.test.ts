@@ -1,13 +1,63 @@
 import { createHash } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import pino from 'pino';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createSandboxWakeupFixture } from '../test-utils/sandbox-wakeup-helpers.js';
 import { createLocalValidationEngine } from '../validation/local-validation-engine.js';
 import { AzureSandboxApiClient, type WebSocketLike } from './azure-sandbox-api-client.js';
 import { type SandboxExecChunk, SandboxInfrastructureError } from './sandbox-api-client.js';
 import { SandboxContainerManager } from './sandbox-container-manager.js';
 
 const logger = pino({ level: 'silent' });
+let wakeupFixture: ReturnType<typeof createSandboxWakeupFixture> | undefined;
+
+describe('source resource release custody', () => {
+  it.each(['destroy', 'suspend'] as const)(
+    'rechecks custody after delayed auth before %s dispatch',
+    async (action) => {
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let held = false;
+      const { client, requests } = makeClient(
+        action === 'suspend' ? [{ status: 200, body: { id: 'original', state: 'Running' } }] : [],
+        {
+          credential: {
+            async getToken() {
+              await gate;
+              return { token: 'fixture-token', expiresOnTimestamp: Date.now() + 60_000 };
+            },
+          },
+          assertReleaseAllowed() {
+            if (held) throw new Error('SOURCE_CUSTODY_HELD');
+          },
+        },
+      );
+      const pending = client[action]('original');
+      held = true;
+      release();
+      await expect(pending).rejects.toThrow('SOURCE_CUSTODY_HELD');
+      expect(requests.filter((request) => request.init?.method !== 'GET')).toHaveLength(0);
+    },
+  );
+});
+
+describe('sandbox resource namespaces', () => {
+  it('binds endpoint/region/subscription/group/resource without waking or executing', () => {
+    const original = makeClient([]);
+    const key = original.client.getResourceKey('original');
+    for (const change of [
+      { location: 'northeurope' },
+      { subscriptionId: 'other' },
+      { resourceGroup: 'other' },
+      { sandboxGroup: 'other' },
+    ])
+      expect(makeClient([], change).client.getResourceKey('original')).not.toBe(key);
+    expect(original.client.getResourceKey('replacement')).not.toBe(key);
+    expect(original.requests).toHaveLength(0);
+  });
+});
 
 describe('recoverable native sandbox Goal processes', () => {
   it('delivers RPC stdin through ordered private packets instead of the EOF-only stream', async () => {
@@ -340,6 +390,7 @@ function makeClient(
         sandboxGroup: 'autopod-spike',
         credential,
         fetch,
+        wakeupJournal: wakeupFixture?.journal,
         pollIntervalMs: 0,
         ...config,
       },
@@ -1200,6 +1251,46 @@ describe('AzureSandboxApiClient', () => {
     expect(sockets[0]?.closed).toBe(true);
   });
 
+  it('fences a file write after delayed auth and does not send stale bytes', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let current = true;
+    let reached = false;
+    const { client, requests } = makeClient([{ status: 204 }], {
+      credential: {
+        async getToken() {
+          reached = true;
+          await gate;
+          return { token: 'fixture-token', expiresOnTimestamp: Date.now() + 60_000 };
+        },
+      },
+    });
+    const write = client.writeFile('original', '/tmp/source/chunk', Buffer.from('bundle'), {
+      singleAttempt: true,
+      beforeSend() {
+        if (!current) throw new Error('STALE_SOURCE');
+      },
+    });
+    await vi.waitFor(() => expect(reached).toBe(true));
+    current = false;
+    release();
+    await expect(write).rejects.toThrow('STALE_SOURCE');
+    expect(requests).toHaveLength(0);
+  });
+  it('does not replay an explicitly single-attempt file write after rate limiting', async () => {
+    const { client, requests } = makeClient([
+      { status: 429, body: { error: { code: 'Throttled' } } },
+      { status: 204 },
+    ]);
+    await expect(
+      client.writeFile('original', '/tmp/source/chunk', Buffer.from('bundle'), {
+        singleAttempt: true,
+      }),
+    ).rejects.toThrow();
+    expect(requests).toHaveLength(1);
+  });
   it('writes, reads, lists, stats files, and updates egress policy through the data plane', async () => {
     const { client, requests } = makeClient([
       { status: 204 },
@@ -1930,6 +2021,12 @@ describe('listSandboxes', () => {
 });
 
 describe('bounded retained sandbox resume', () => {
+  beforeEach(() => {
+    wakeupFixture = createSandboxWakeupFixture(true);
+  });
+  afterEach(() => {
+    wakeupFixture = undefined;
+  });
   it.each([
     { states: ['Stopped', 'Running'], locked: true, posts: 1 },
     { states: ['Stopped', 'Stopped', 'Running'], locked: true, posts: 2 },

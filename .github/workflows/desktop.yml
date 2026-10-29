@@ -42,15 +42,18 @@ jobs:
       - name: Test Swift package
         run: ./scripts/test-desktop.sh
 
+      # Read packageManager from package.json; never let npx fetch a newer major.
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
 
       - name: Test village renderer contract
         run: |
-          npx pnpm install --frozen-lockfile --filter autopod
+          "$PNPM_HOME/pnpm" install --frozen-lockfile --filter autopod
           node --test packages/desktop/Tests/VillageHost/*.test.mjs scripts/update-village-renderer.test.mjs
-          npx pnpm village:check
+          "$PNPM_HOME/pnpm" village:check
 
       - name: Build macOS app
         run: >-

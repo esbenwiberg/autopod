@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { launchWorkSchema } from './launch-work.schema.js';
+import { partialWithoutDefaults } from './partial-without-defaults.js';
 import { reasoningEffortSchema, updateProfileSchema } from './profile.schema.js';
 import { serviceAccessSchema } from './service-access.schema.js';
 
@@ -26,7 +27,7 @@ export const configurationValueSchema = z.union([
   z.object({ value: z.string() }).strict(),
   secretRef,
 ]);
-const values = z.record(configurationValueSchema);
+const values = z.record(z.string(), configurationValueSchema);
 const command = z.string().min(1).max(50_000).nullable();
 const timeout = z.number().int().positive().max(86_400);
 export const configurationUrlSchema = z
@@ -134,7 +135,7 @@ export const repositorySetupSchema = z
           .default(null),
       })
       .strict()
-      .default({}),
+      .prefault({}),
   })
   .strict();
 
@@ -163,7 +164,8 @@ export const repositoryConfigSchema = z
 
 export const environmentPresetSchema = z
   .object({
-    template: updateProfileSchema.shape.template.unwrap().removeDefault().unwrap(),
+    // Select the explicit-value arm, not PATCH absence or profile creation defaults.
+    template: updateProfileSchema.shape.template.unwrap().options[1].removeDefault().unwrap(),
     baseImage: z.string().min(1).nullable().default(null),
     tools: z.array(z.object({ name, version: z.string().min(1) }).strict()).default([]),
     prepareCommands: z.array(z.string().min(1)).default([]),
@@ -417,8 +419,8 @@ export const allocationSchema = z
 export const executionSettingsSchema = z
   .object({
     target: z.enum(['local', 'sandbox']).default('local'),
-    main: allocationSchema.default({}),
-    sidecars: z.record(allocationSchema).default({}),
+    main: allocationSchema.prefault({}),
+    sidecars: z.record(z.string(), allocationSchema).default({}),
     networkPolicy: updateProfileSchema.shape.networkPolicy.default(null),
   })
   .strict();
@@ -430,7 +432,7 @@ export const launchProfileSchema = z
     githubAccessId: id.nullable().default(null),
     toolPackIds: uniqueIds.default([]),
     requiredSidecarIds: uniqueIds.default([]),
-    execution: executionSettingsSchema.default({}),
+    execution: executionSettingsSchema.prefault({}),
     pim: z.array(pimSelectionSchema).default([]),
     workerProfileId: id.nullable().default(null),
   })
@@ -468,25 +470,22 @@ export const configurationRevisionSchema = z
   })
   .strict();
 
-export const launchOverridesSchema = z
-  .object({
-    repositorySetup: repositorySetupSchema
-      .omit({ id: true, name: true, integrations: true })
-      .partial()
-      .strict(),
-    environment: environmentPresetSchema.partial().strict(),
-    ai: aiPresetSchema.partial().strict(),
-    workflow: workflowPresetSchema.partial().strict(),
-    githubAccess: githubAccessPresetSchema.partial().strict(),
-    execution: executionSettingsSchema
-      .partial()
-      .extend({ main: allocationSchema.partial().optional() })
+export const launchOverridesSchema = partialWithoutDefaults(
+  z.object({
+    repositorySetup: partialWithoutDefaults(
+      repositorySetupSchema.omit({ id: true, name: true, integrations: true }),
+    ).strict(),
+    environment: partialWithoutDefaults(environmentPresetSchema).strict(),
+    ai: partialWithoutDefaults(aiPresetSchema).strict(),
+    workflow: partialWithoutDefaults(workflowPresetSchema).strict(),
+    githubAccess: partialWithoutDefaults(githubAccessPresetSchema).strict(),
+    execution: partialWithoutDefaults(executionSettingsSchema)
+      .extend({ main: partialWithoutDefaults(allocationSchema).optional() })
       .strict(),
     pim: z.array(pimSelectionSchema),
     toolPacks: z.array(toolPackSchema),
-  })
-  .partial()
-  .strict();
+  }),
+).strict();
 const launchOptions = z
   .object({
     profileId: id.optional(),

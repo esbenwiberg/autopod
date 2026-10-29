@@ -364,7 +364,7 @@ run_and_tail /tmp/autopod-fetch-$TARGET_SHA.log 1 sudo -u ewi git -C \"\$TMP\" f
 sudo -u ewi git -C \"\$TMP\" checkout -q $TARGET_SHA_FULL
 echo \"checked out: \$(sudo -u ewi git -C \"\$TMP\" rev-parse HEAD)\"
 echo '=== install + build (all packages) ==='
-run_and_tail /tmp/autopod-build-$TARGET_SHA.log 24 sudo -u ewi -H bash -lc \"cd \$TMP && npx --yes pnpm install --frozen-lockfile && npx --yes pnpm build\"
+run_and_tail /tmp/autopod-build-$TARGET_SHA.log 24 sudo -u ewi -H bash -lc \"cd \$TMP && npx --yes pnpm@9.15.4 install --frozen-lockfile && npx --yes pnpm@9.15.4 build\"
 echo '=== stage as new release ==='
 rm -rf \"\$NEW\"
 mv \"\$TMP\" \"\$NEW\"
@@ -421,7 +421,7 @@ rm -rf \"\$NEW/.git\"
 mv \"\$TMP/.git\" \"\$NEW/.git\"
 chown -R ewi:ewi \"\$NEW\"
 echo '=== rebuild (turbo rebuilds only changed packages) ==='
-run_and_tail /tmp/autopod-build-$TARGET_SHA.log 24 sudo -u ewi -H bash -lc \"cd \$NEW && npx --yes pnpm build\"
+run_and_tail /tmp/autopod-build-$TARGET_SHA.log 24 sudo -u ewi -H bash -lc \"cd \$NEW && npx --yes pnpm@9.15.4 build\"
 sudo -u ewi rm -rf \"\$TMP\"
 ls -la \"\$NEW/packages/daemon/dist/index.js\"
 echo '=== BUILD DONE (symlink NOT swapped) ==='
