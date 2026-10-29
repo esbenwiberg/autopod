@@ -426,6 +426,8 @@ it('passes an explicit time window and rejects a wider two-branch window before 
         'main',
         '--head',
         'main',
+        '--scope',
+        'delta',
       ]),
     ).rejects.toThrow('delta is always empty');
     expect(updateScheduledJob).toHaveBeenCalledTimes(1);

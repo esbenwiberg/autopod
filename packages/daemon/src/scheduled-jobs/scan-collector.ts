@@ -12,6 +12,7 @@ import type {
 } from '@autopod/shared';
 import type { Detector } from '../security/detectors/detector.js';
 import { createSecretlintDetector } from '../security/detectors/secretlint-detector.js';
+import { scanFindingSchema } from './scan-record-reader.js';
 
 const exec = promisify(execFile);
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -57,7 +58,7 @@ async function secretVersion(): Promise<string> {
   return versions.join(';');
 }
 
-/** Reads exact Git objects. No fallback refs, always-scan expansion, checkout scripts or agent. */
+/** Reads immutable Git objects only; never executes repository scripts. */
 export async function collectScheduledScan(
   workdir: string,
   repository: string,
@@ -65,7 +66,9 @@ export async function collectScheduledScan(
   deps: ScheduledCollectorDeps = {},
   asOf = new Date().toISOString(),
 ): Promise<ScheduledScanCollection> {
+  const currentTree = policy.scope !== 'delta';
   const result: ScheduledScanCollection = {
+    scope: currentTree ? 'current_tree' : 'delta',
     version: 1,
     repository,
     baseSha: null,
@@ -78,11 +81,54 @@ export async function collectScheduledScan(
   };
   const git = async (...args: string[]) =>
     (await exec('git', args, { cwd: workdir, timeout: 15000, maxBuffer: 2 * 1024 * 1024 })).stdout;
+  const collectionLimit = 2 * 1024 * 1024;
+  const contentLimit = 32 * 1024 * 1024;
+  // Account JSON escaping and UTF-8 bytes, not just item counts. Reserve space
+  // for final scanner receipts/diagnostics, and for findings after scope capture.
+  const receiptReserve = 32 * 1024;
+  const findingLimit = 65536;
+  let retainedBytes = 0;
+  let scopeIncomplete = false;
+  let receiptFull = false;
+  const retain = <T>(items: T[], item: T, limit = collectionLimit - receiptReserve) => {
+    const bytes = Buffer.byteLength(JSON.stringify(item)) + (items.length ? 1 : 0);
+    if (retainedBytes + bytes > limit) return false;
+    retainedBytes += bytes;
+    items.push(item);
+    return true;
+  };
+  const retainFinding = (finding: ScheduledScanFinding) => {
+    if (
+      result.findings.length >= 1000 ||
+      !scanFindingSchema.safeParse(finding).success ||
+      Buffer.byteLength(JSON.stringify(finding)) > findingLimit ||
+      !retain(result.findings, finding)
+    ) {
+      receiptFull = true;
+      throw new Error('Finding receipt budget exceeded');
+    }
+  };
+  let totalBytes = 0;
   const blob = async (sha: string, path: string) => {
+    // Charge before reading: maxBuffer failures must consume the same aggregate
+    // budget as successful reads. Immutable object size bounds the allocation.
+    let size: number;
+    try {
+      size = Number((await git('cat-file', '-s', `${sha}:${path}`)).trim());
+      if (!Number.isSafeInteger(size) || size < 0) throw new Error('Invalid object size');
+    } catch {
+      totalBytes = Math.min(contentLimit, totalBytes + collectionLimit);
+      throw new Error('Object size unavailable');
+    }
+    if (size > contentLimit - totalBytes) {
+      totalBytes = contentLimit;
+      throw new Error('Total content budget exceeded');
+    }
+    totalBytes += size;
+    if (size > collectionLimit) throw new Error('File exceeds supported text scope');
     const content = await git('cat-file', 'blob', `${sha}:${path}`);
-    if (Buffer.byteLength(content) > 2 * 1024 * 1024 || content.includes('\0'))
-      throw new Error('File exceeds supported text scope');
-    return { path, content, sizeBytes: Buffer.byteLength(content) };
+    if (content.includes('\0')) throw new Error('File exceeds supported text scope');
+    return { path, content, sizeBytes: size };
   };
   try {
     result.baseSha = (
@@ -167,24 +213,47 @@ export async function collectScheduledScan(
     if (raw.at(-1) === '') raw.pop();
     if (raw.length % 2 || raw.length > 400)
       throw new Error('Delta is malformed or exceeds 200 paths');
+    retainedBytes = Buffer.byteLength(JSON.stringify(result));
     for (let index = 0; index < raw.length; index += 2) {
       const change = raw[index];
       const path = raw[index + 1];
       if (!path || !change || !['A', 'M', 'D', 'T'].includes(change))
         throw new Error('Unsupported delta record');
-      result.files.push({
-        path,
-        change: change === 'A' ? 'added' : change === 'D' ? 'deleted' : 'modified',
-      });
+      if (
+        path.length > 4096 ||
+        !retain(result.files, {
+          path,
+          change: change === 'A' ? 'added' : change === 'D' ? 'deleted' : 'modified',
+        })
+      )
+        throw new Error('Delta receipt budget exceeded');
     }
-    // Stack detection uses names as context only; it never adds paths to the scan.
+    // Preserve delta context independently of the explicit current-tree scan scope.
     const names = (await git('ls-tree', '-r', '--name-only', '-z', result.headSha)).split('\0');
+    if (currentTree) {
+      result.scannedPaths = [];
+      retainedBytes = Buffer.byteLength(JSON.stringify(result));
+      for (const path of names) {
+        if (!path) continue;
+        if (
+          result.scannedPaths.length >= 10000 ||
+          path.length > 4096 ||
+          !retain(result.scannedPaths, path, collectionLimit - receiptReserve - findingLimit)
+        ) {
+          scopeIncomplete = true;
+          result.diagnostics.push(
+            'Tree path or serialized scope budget exceeded; only the retained paths were scanned, and total findings are unknown.',
+          );
+          break;
+        }
+      }
+    }
     result.stacks = [
       ...new Set(
         names.flatMap((name) =>
           /(^|\/)package\.json$/.test(name)
             ? ['node']
-            : /\.(csproj|fsproj)$/.test(name)
+            : /\.(csproj|fsproj|vbproj|vcxproj)$/.test(name)
               ? ['dotnet']
               : /(^|\/)(pyproject\.toml|requirements\.txt)$/.test(name)
                 ? ['python']
@@ -194,11 +263,11 @@ export async function collectScheduledScan(
     ].sort();
   } catch {
     result.diagnostics.push(
-      'Exact delta enumeration unavailable; no fallback or wider scope was scanned.',
+      'Exact scan scope enumeration unavailable or exceeded resource limits; no clean result is available.',
     );
     return result;
   }
-  if (!result.files.length) {
+  if (!currentTree && !result.files.length) {
     result.scanners = policy.scanners.map((scanner) => ({
       scanner,
       version: null,
@@ -207,7 +276,27 @@ export async function collectScheduledScan(
     }));
     return result;
   }
+  retainedBytes = Buffer.byteLength(JSON.stringify(result));
   const deadline = Date.now() + 60000;
+  const scanFiles = currentTree
+    ? (result.scannedPaths ?? []).map((path) => ({ path, change: 'added' as const }))
+    : result.files;
+  const bounded = async <T>(operation: Promise<T>): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        operation,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error('Collection time budget exceeded')),
+            Math.max(1, deadline - Date.now()),
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   for (const scanner of policy.scanners) {
     const observation: ScheduledScannerResult = {
       scanner,
@@ -220,53 +309,64 @@ export async function collectScheduledScan(
     try {
       if (scanner === 'secrets') {
         const detector = deps.secrets ?? createSecretlintDetector();
-        observation.version = await (deps.secretVersion ?? secretVersion)();
+        observation.version = await bounded((deps.secretVersion ?? secretVersion)());
         if (!detector.scanWithBaselineIdentity)
           throw new Error('Detector cannot report incomplete execution');
-        await detector.warmup();
-        for (const file of result.files) {
+        await bounded(detector.warmup());
+        let incomplete = false;
+        for (const file of scanFiles) {
           if (Date.now() >= deadline) throw new Error('Collection time budget exceeded');
           if (file.change === 'deleted') continue;
-          const current = await detector.scanWithBaselineIdentity(
-            await blob(result.headSha, file.path),
-          );
-          if (!current) throw new Error('Secret scanner execution incomplete');
-          const baseline =
-            file.change === 'added'
-              ? []
-              : await detector.scanWithBaselineIdentity(await blob(result.baseSha, file.path));
-          if (!baseline) throw new Error('Secret baseline unavailable');
-          const previous = new Map<string, number>();
-          for (const finding of baseline)
-            previous.set(finding.identity, (previous.get(finding.identity) ?? 0) + 1);
-          for (const { identity, finding } of current) {
-            const count = previous.get(identity) ?? 0;
-            if (count > 0) {
-              previous.set(identity, count - 1);
-              continue;
+          try {
+            const current = await bounded(
+              detector.scanWithBaselineIdentity(await blob(result.headSha, file.path)),
+            );
+            if (!current) throw new Error('Secret scanner execution incomplete');
+            const baseline =
+              file.change === 'added'
+                ? []
+                : await bounded(
+                    detector.scanWithBaselineIdentity(await blob(result.baseSha, file.path)),
+                  );
+            if (!baseline) throw new Error('Secret baseline unavailable');
+            const previous = new Map<string, number>();
+            for (const finding of baseline)
+              previous.set(finding.identity, (previous.get(finding.identity) ?? 0) + 1);
+            for (const { identity, finding } of current) {
+              const count = previous.get(identity) ?? 0;
+              if (count > 0) {
+                previous.set(identity, count - 1);
+                continue;
+              }
+              retainFinding({
+                id: hash(
+                  JSON.stringify([repository, scanner, file.path, finding.ruleId, identity]),
+                ),
+                scanner,
+                file: file.path,
+                line: finding.line,
+                ruleId: finding.ruleId ?? 'secret',
+                severity: finding.severity === 'medium' ? 'moderate' : finding.severity,
+                summary: 'Secret finding [REDACTED]',
+              });
             }
-            result.findings.push({
-              id: hash(JSON.stringify([repository, scanner, file.path, finding.ruleId, identity])),
-              scanner,
-              file: file.path,
-              line: finding.line,
-              ruleId: finding.ruleId ?? 'secret',
-              severity: finding.severity === 'medium' ? 'moderate' : finding.severity,
-              summary: 'New secret finding [REDACTED]',
-            });
+          } catch {
+            incomplete = true;
+            if (totalBytes >= contentLimit || receiptFull) break;
           }
         }
+        if (incomplete) throw new Error('Secret coverage incomplete');
       } else {
-        const files = result.files.filter(
+        const files = scanFiles.filter(
           (file) =>
             file.change !== 'deleted' &&
-            /(^|\/)(package(?:-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|packages\.lock\.json|requirements\.txt|poetry\.lock)$/.test(
+            /(^|\/)(package(?:-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|packages\.lock\.json|requirements\.txt|poetry\.lock|pyproject\.toml|Pipfile(?:\.lock)?|Cargo\.(?:toml|lock)|go\.(?:mod|sum)|Gemfile(?:\.lock)?|composer\.(?:json|lock)|pom\.xml|(?:build|settings)\.gradle(?:\.kts)?|gradle\.libs\.versions\.toml|libs\.versions\.toml|packages\.config|Directory\.Packages\.props|build\.sbt|mix\.(?:exs|lock)|pubspec\.(?:yaml|lock)|Package\.(?:swift|resolved)|setup\.(?:py|cfg)|[^/]+\.(?:csproj|fsproj|vbproj|vcxproj))$/.test(
               file.path,
             ),
         );
         if (!files.length) {
           observation.status = 'not_applicable';
-          observation.diagnostic = 'No dependency manifests or lockfiles in the exact delta.';
+          observation.diagnostic = 'No dependency manifests or lockfiles in the selected scope.';
           continue;
         }
         if (!deps.auditLockfile) {
@@ -275,42 +375,68 @@ export async function collectScheduledScan(
         }
         const versions = new Set<string>();
         const evidence: string[] = [];
+        let incomplete = false;
         for (const file of files) {
           if (Date.now() >= deadline) throw new Error('Collection time budget exceeded');
           if (!/(^|\/)(package-lock\.json|npm-shrinkwrap\.json)$/.test(file.path)) {
             const lock = file.path.replace(/package\.json$/, 'package-lock.json');
             if (
               file.path.endsWith('package.json') &&
-              files.some((candidate) => candidate.path === lock)
+              files.some(
+                (candidate) =>
+                  candidate.path === lock ||
+                  candidate.path === file.path.replace(/package\.json$/, 'npm-shrinkwrap.json'),
+              )
             )
               continue;
-            throw new Error('Dependency scope has no supported changed lockfile');
+            incomplete = true;
+            continue;
           }
-          const scanned = await deps.auditLockfile(
-            file.path,
-            (await blob(result.headSha, file.path)).content,
-          );
-          versions.add(scanned.version);
-          evidence.push(scanned.evidenceHash);
-          for (const finding of scanned.findings)
-            result.findings.push({
-              id: hash(JSON.stringify([repository, scanner, file.path, finding.identity])),
-              scanner,
-              file: file.path,
-              ruleId: finding.ruleId,
-              severity: finding.severity,
-              summary: finding.summary,
-            });
+          try {
+            const scanned = await bounded(
+              deps.auditLockfile(file.path, (await blob(result.headSha, file.path)).content),
+            );
+            versions.add(scanned.version);
+            evidence.push(scanned.evidenceHash);
+            for (const finding of scanned.findings) {
+              retainFinding({
+                id: hash(JSON.stringify([repository, scanner, file.path, finding.identity])),
+                scanner,
+                file: file.path,
+                ruleId: finding.ruleId,
+                severity: finding.severity,
+                summary: finding.summary,
+              });
+            }
+          } catch {
+            incomplete = true;
+            if (totalBytes >= contentLimit || receiptFull) break;
+          }
         }
-        observation.version = [...versions].sort().join(';');
-        observation.evidenceHash = hash(JSON.stringify(evidence));
+        observation.version = versions.size ? [...versions].sort().join(';') : null;
+        if (evidence.length) observation.evidenceHash = hash(JSON.stringify(evidence));
+        if (incomplete) throw new Error('Dependency coverage incomplete');
       }
       observation.findingCount = result.findings.length - beforeCount;
     } catch {
       observation.status = observation.status === 'unavailable' ? 'unavailable' : 'failed';
       observation.findingCount = null;
       observation.diagnostic =
-        'Requested scanner did not complete within its supported exact scope; total findings are unknown.';
+        totalBytes >= contentLimit || receiptFull
+          ? 'Collection content or serialized receipt budget exceeded; retained partial findings remain available, and total findings are unknown.'
+          : 'Requested scanner did not complete within its supported exact scope; total findings are unknown.';
+    }
+  }
+  if (receiptFull)
+    result.diagnostics.push(
+      'Finding receipt budget exceeded; earlier findings are retained, and total findings are unknown.',
+    );
+  if (scopeIncomplete) {
+    for (const observation of result.scanners) {
+      if (observation.status !== 'unavailable') observation.status = 'failed';
+      observation.findingCount = null;
+      observation.diagnostic =
+        'Selected tree coverage exceeds receipt limits; total findings are unknown.';
     }
   }
   result.findings = [

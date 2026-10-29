@@ -121,3 +121,11 @@ private final class ScanFixtureProtocol: URLProtocol, @unchecked Sendable {
   let pod = try JSONDecoder().decode(ScheduledRunResponse.self, from: Data(#"{"id":"abc12345","status":"queued"}"#.utf8))
   #expect(pod.summary == "Pod abc12345 started.")
 }
+
+@Test func currentTreePolicyAndCompletedEmptyDeltaDecode() throws {
+  let policy = try JSONDecoder().decode(ScheduledScanPolicy.self, from: Data(#"{"version":1,"baseRef":"main","headRef":"main","scanners":["secrets"],"judgment":"none","scope":"current_tree"}"#.utf8))
+  #expect(policy.scope == "current_tree")
+  let complete = try JSONDecoder().decode(ScheduledRunResponse.self, from: Data(#"{"kind":"scan_report","id":"current","status":"complete"}"#.utf8))
+  #expect(complete.summary == "Scan report ready.")
+  #expect(!complete.summary.contains("nothing was checked"))
+}

@@ -29,6 +29,8 @@ export const scheduledScanPolicySchema = z
       .min(1)
       .max(2)
       .refine((values) => new Set(values).size === values.length),
+    /** Omitted policies run current-tree security checks; delta is explicit opt-in. */
+    scope: z.enum(['current_tree', 'delta']).optional(),
     judgment: z.enum(['none', 'bounded']).default('none'),
     windowHours: z.number().int().min(1).max(720).optional(),
   })
@@ -37,13 +39,12 @@ export const scheduledScanPolicySchema = z
     (policy) => policy.windowHours === undefined || policy.baseRef === policy.headRef,
     'A time window uses one branch; baseRef and headRef must match',
   );
-/**
- * Boundary schema for creating or replacing a policy. Without a window the scan is the
- * net `baseRef..headRef` delta, so identical refs can only ever yield an empty report.
- * Stored policies are read with the lenient schema above so existing rows stay readable.
- */
+/** Current-tree checks permit equal refs. Explicit delta-only inputs need a useful range. */
 export const scheduledScanPolicyInputSchema = scheduledScanPolicySchema.refine(
-  (policy) => policy.windowHours !== undefined || policy.baseRef !== policy.headRef,
+  (policy) =>
+    policy.scope !== 'delta' ||
+    policy.windowHours !== undefined ||
+    policy.baseRef !== policy.headRef,
   'baseRef and headRef are the same branch, so the delta is always empty; set windowHours to scan recent commits on it',
 );
 export type ScheduledScanPolicy = z.infer<typeof scheduledScanPolicySchema>;
@@ -77,6 +78,9 @@ export interface ScheduledScanCollection {
     semantics: 'first_parent_committer_time_net_delta';
     selectedCommits: string[];
   };
+  /** Explicit execution scope; absent on historical delta-only reports. */
+  scope?: 'current_tree' | 'delta';
+  scannedPaths?: string[];
   files: Array<{ path: string; change: 'added' | 'modified' | 'deleted' }>;
   stacks: string[];
   scanners: ScheduledScannerResult[];

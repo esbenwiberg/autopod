@@ -18,6 +18,7 @@ vi.mock('../providers/llm-client.js', () => ({ createProviderAnthropicClient: vi
 
 const policy: ScheduledScanPolicy = {
   version: 1,
+  scope: 'delta',
   baseRef: 'main',
   headRef: 'work',
   scanners: ['secrets', 'dependencies'],
@@ -57,6 +58,224 @@ function fixture() {
   };
   return { dir, git, commit };
 }
+
+describe('current-tree scheduled security checks', () => {
+  it('checks existing secrets and unchanged dependencies for manual and scheduled runs', async () => {
+    const f = fixture();
+    const db = createTestDb();
+    const reports = createScanReportRepository(db);
+    const currentPolicy = { ...policy, scope: undefined };
+    const audit = vi.fn(async () => ({
+      version: 'audit-fixture',
+      evidenceHash: 'immutable-advisory-response',
+      findings: [
+        {
+          identity: 'old-advisory',
+          ruleId: 'CVE-fixture',
+          severity: 'high' as const,
+          summary: 'Current vulnerability',
+        },
+      ],
+    }));
+    const coordinator = createScanCoordinator({
+      reports,
+      collector: {
+        auditLockfile: audit,
+        secretVersion: async () => 'fixture',
+        secrets: {
+          name: 'secrets',
+          warmup: async () => {},
+          scan: async () => [],
+          scanWithBaselineIdentity: async (file) =>
+            file.content.includes('AKIA')
+              ? [
+                  {
+                    identity: 'existing-secret',
+                    finding: {
+                      detector: 'secrets',
+                      file: file.path,
+                      line: 1,
+                      ruleId: 'fixture-secret',
+                      severity: 'high',
+                      snippet: '[REDACTED]',
+                    },
+                  },
+                ]
+              : [],
+        },
+      },
+      prepare: async () => ({ workdir: f.dir, repository: 'fixture', cleanup: async () => {} }),
+      logger: pino({ level: 'silent' }),
+    });
+    try {
+      writeFileSync(join(f.dir, 'source.ts'), `const key = "${'AKIA'}${'A'.repeat(16)}";`);
+      writeFileSync(join(f.dir, 'package.json'), '{}');
+      writeFileSync(join(f.dir, 'package-lock.json'), '{"lockfileVersion":3}');
+      f.commit();
+      f.git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+      const job = { id: 'current-job', scan: currentPolicy } as ScheduledJob;
+      for (const key of ['manual:current', 'scheduled:current:time']) {
+        const report = await coordinator.collect(job, key);
+        expect(report.status).toBe('complete');
+        expect(report.collection?.files).toEqual([]);
+        expect(report.collection?.scanners.map((scanner) => scanner.status)).toEqual([
+          'completed',
+          'completed',
+        ]);
+        expect(report.collection?.findings.map((finding) => finding.scanner).sort()).toEqual([
+          'dependencies',
+          'secrets',
+        ]);
+        expect(JSON.stringify(report.collection)).not.toContain('A'.repeat(16));
+        expect(reports.get(report.id).collection?.scope).toBe('current_tree');
+      }
+      writeFileSync(join(f.dir, 'outside.ts'), 'Unrelated change');
+      f.commit();
+      const report = await coordinator.collect(job, 'manual:unrelated');
+      expect(report.status).toBe('complete');
+      expect(report.collection?.files).toEqual([{ path: 'outside.ts', change: 'modified' }]);
+      expect(report.collection?.findings).toHaveLength(2);
+      expect(reports.unresolved(report.id)).toHaveLength(2);
+      expect(audit).toHaveBeenCalledTimes(3);
+      expect(db.prepare('SELECT count(*) AS n FROM pods').get()).toEqual({ n: 0 });
+    } finally {
+      db.close();
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('distinguishes successful zero findings, missing capability, failures and unsupported manifests', async () => {
+    const f = fixture();
+    const db = createTestDb();
+    const reports = createScanReportRepository(db);
+    const currentPolicy = { ...policy, scope: undefined };
+    const detector: Detector = {
+      name: 'secrets',
+      warmup: async () => {},
+      scan: async () => [],
+      scanWithBaselineIdentity: async () => [],
+    };
+    const audit = vi.fn(async () => ({
+      version: 'fixture',
+      evidenceHash: 'evidence',
+      findings: [],
+    }));
+    const deps = { secrets: detector, secretVersion: async () => 'fixture', auditLockfile: audit };
+    const collect = () => collectScheduledScan(f.dir, 'fixture', currentPolicy, deps);
+    const finish = async () => {
+      const report = reports.begin('job', Math.random().toString(), currentPolicy);
+      return reports.finish(report.id, await collect());
+    };
+    try {
+      writeFileSync(join(f.dir, 'package-lock.json'), '{}');
+      f.commit();
+      f.git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+      expect(await finish()).toMatchObject({ status: 'complete', collection: { findings: [] } });
+      const missing = await collectScheduledScan(f.dir, 'fixture', currentPolicy, {
+        secrets: detector,
+        secretVersion: deps.secretVersion,
+      });
+      expect(missing.scanners[1]).toMatchObject({ status: 'unavailable', findingCount: null });
+      audit.mockRejectedValueOnce(new Error('Registry down'));
+      expect((await finish()).status).toBe('incomplete');
+      detector.scanWithBaselineIdentity = async () => null;
+      expect((await finish()).status).toBe('incomplete');
+      detector.scanWithBaselineIdentity = async () => [];
+      writeFileSync(join(f.dir, 'pyproject.toml'), '[project]');
+      f.commit();
+      expect((await finish()).status).toBe('incomplete');
+    } finally {
+      db.close();
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('retains useful findings while unsupported content makes coverage incomplete', async () => {
+    const f = fixture();
+    try {
+      writeFileSync(join(f.dir, 'a-binary'), Buffer.from([0, 1, 2]));
+      writeFileSync(join(f.dir, 'source.ts'), `const key = "${'AKIA'}${'A'.repeat(16)}";`);
+      writeFileSync(join(f.dir, 'Cargo.toml'), '[package]');
+      writeFileSync(join(f.dir, 'package-lock.json'), '{}');
+      f.commit();
+      f.git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+      const result = await collectScheduledScan(
+        f.dir,
+        'fixture',
+        { ...policy, scope: undefined },
+        {
+          auditLockfile: async () => ({
+            version: 'fixture',
+            evidenceHash: 'evidence',
+            findings: [
+              {
+                identity: 'advisory',
+                ruleId: 'CVE-fixture',
+                severity: 'high',
+                summary: 'Current vulnerability',
+              },
+            ],
+          }),
+        },
+      );
+      expect(result.scanners.map((scanner) => scanner.status)).toEqual(['failed', 'failed']);
+      expect(result.findings.map((finding) => finding.scanner).sort()).toEqual([
+        'dependencies',
+        'secrets',
+      ]);
+      expect(result.scanners.every((scanner) => scanner.findingCount === null)).toBe(true);
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports oversized tracked content and finding limits as incomplete', async () => {
+    const f = fixture();
+    const detector: Detector = {
+      name: 'secrets',
+      warmup: async () => {},
+      scan: async () => [],
+      scanWithBaselineIdentity: async () => [],
+    };
+    const currentPolicy = {
+      ...policy,
+      scope: undefined,
+      scanners: ['secrets'] as ScheduledScanPolicy['scanners'],
+    };
+    try {
+      writeFileSync(join(f.dir, 'large.txt'), 'x'.repeat(2 * 1024 * 1024 + 1));
+      f.commit();
+      f.git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+      const result = await collectScheduledScan(f.dir, 'fixture', currentPolicy, {
+        secrets: detector,
+        secretVersion: async () => 'fixture',
+      });
+      expect(result.scanners[0]).toMatchObject({ status: 'failed', findingCount: null });
+      rmSync(join(f.dir, 'large.txt'));
+      f.commit();
+      detector.scanWithBaselineIdentity = async () =>
+        Array.from({ length: 1001 }, (_, i) => ({
+          identity: String(i),
+          finding: {
+            detector: 'secrets',
+            file: 'outside.ts',
+            line: i + 1,
+            ruleId: 'fixture',
+            severity: 'high',
+            snippet: '[REDACTED]',
+          },
+        }));
+      const limited = await collectScheduledScan(f.dir, 'fixture', currentPolicy, {
+        secrets: detector,
+        secretVersion: async () => 'fixture',
+      });
+      expect(limited.scanners[0]).toMatchObject({ status: 'failed', findingCount: null });
+      expect(limited.findings).toHaveLength(1000);
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('exact deterministic scheduled delta collector', () => {
   it('freezes a strict time window, keeps an old branch empty, and rejects timestamps that would widen its delta', async () => {

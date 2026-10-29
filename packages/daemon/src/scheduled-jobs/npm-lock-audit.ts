@@ -57,7 +57,7 @@ export function normalizeNpmAudit(stdout: string, version: string): DependencySc
         identity: JSON.stringify([name, advisory]),
         ruleId: `npm:${advisory}`,
         severity: row.severity as ScheduledScanFinding['severity'],
-        summary: `Known ${row.severity} vulnerability in dependency ${name} within this changed lockfile.`,
+        summary: `Known ${row.severity} vulnerability in dependency ${name} within this scanned lockfile.`,
       });
   }
   return { version, findings, evidenceHash: createHash('sha256').update(stdout).digest('hex') };

@@ -225,6 +225,14 @@ export function ScanReport() {
             </p>
             <details>
               <summary>Exact source and files</summary>
+              {detail.report.collection && (
+                <p>
+                  Scan scope: {detail.report.collection.scope ?? 'delta'} ·{' '}
+                  {detail.report.collection.scannedPaths?.length ??
+                    detail.report.collection.files.length}{' '}
+                  paths
+                </p>
+              )}
               <p>{detail.report.collection?.repository ?? 'Repository unavailable'}</p>
               {detail.report.collection?.window && (
                 <p>

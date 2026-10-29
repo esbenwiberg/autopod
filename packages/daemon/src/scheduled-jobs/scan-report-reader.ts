@@ -30,6 +30,8 @@ const collectionSchema = z
       })
       .strict()
       .optional(),
+    scope: z.enum(['current_tree', 'delta']).optional(),
+    scannedPaths: z.array(text.min(1)).max(10000).optional(),
     files: z
       .array(
         z.object({ path: text.min(1), change: z.enum(['added', 'modified', 'deleted']) }).strict(),

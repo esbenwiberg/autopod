@@ -364,10 +364,14 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
           'SCAN_SCOPE_TOO_LARGE',
           409,
         );
-      const exactFiles = new Set(collection.files.map((file) => file.path));
+      const exactFiles = new Set(
+        collection.scope === 'current_tree'
+          ? (collection.scannedPaths ?? [])
+          : collection.files.map((file) => file.path),
+      );
       if (collection.findings.some((finding) => !exactFiles.has(finding.file)))
         throw new AutopodError(
-          'Finding lies outside the exact requested delta',
+          'Finding lies outside the recorded scan scope',
           'SCAN_SCOPE_MISMATCH',
           409,
         );
@@ -380,14 +384,14 @@ export function createScanReportRepository(db: Database.Database): ScanReportRep
             !collection.scanners.some(
               (result) =>
                 result.scanner === scanner &&
-                (collection.files.length === 0
+                (collection.scope !== 'current_tree' && collection.files.length === 0
                   ? result.status === 'skipped_empty'
                   : ['completed', 'not_applicable'].includes(result.status)),
             ),
         );
       const status = incomplete
         ? 'incomplete'
-        : collection.files.length === 0
+        : collection.scope !== 'current_tree' && collection.files.length === 0
           ? 'empty_delta'
           : 'complete';
       const now = new Date().toISOString();

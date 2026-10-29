@@ -6,8 +6,10 @@ public struct ScheduledScanPolicy: Codable, Sendable, Hashable {
   public let headRef: String
   public let scanners: [String]
   public let judgment: String
+  public let scope: String?
   public let windowHours: Int?
-  public init(baseRef: String, headRef: String, scanners: [String], judgment: String = "none", windowHours: Int? = nil) {
+  public init(baseRef: String, headRef: String, scanners: [String], judgment: String = "none", windowHours: Int? = nil, scope: String? = nil) {
+    self.scope = scope
     self.version = 1; self.baseRef = baseRef; self.headRef = headRef
     self.scanners = scanners; self.judgment = judgment; self.windowHours = windowHours
   }
@@ -49,6 +51,8 @@ public struct ScheduledScannerResult: Codable, Sendable {
 public struct ScheduledScanCollection: Codable, Sendable {
   public struct Window: Codable, Sendable { public let start: String; public let end: String; public let semantics: String; public let selectedCommits: [String] }
   public let window: Window?
+  public let scope: String?
+  public let scannedPaths: [String]?
   public let baseKind: String?
   public struct FileDelta: Codable, Sendable { public let path: String; public let change: String }
   public let repository: String

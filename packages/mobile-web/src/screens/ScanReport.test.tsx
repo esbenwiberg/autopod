@@ -35,6 +35,8 @@ it('retains a human selection through lost response and reload, and requires a s
       createdAt: '2026-09-07T10:00:00Z',
       policy: { baseRef: 'main', headRef: 'work' },
       collection: {
+        scope: 'current_tree',
+        scannedPaths: ['package-lock.json'],
         repository: 'fixture',
         files: [],
         diagnostics: ['One scanner failed'],
@@ -98,6 +100,7 @@ it('retains a human selection through lost response and reload, and requires a s
     });
   try {
     await render();
+    expect(container.textContent).toContain('Scan scope: current_tree · 1 paths');
     expect(container.textContent).toContain('Unknown findings');
     expect(container.textContent).toContain('One scanner failed');
     await click('Record repair selection');
