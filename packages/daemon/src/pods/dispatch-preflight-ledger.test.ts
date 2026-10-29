@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
+import { DISPATCH_CANDIDATES_SQL } from './dispatch-preflight-ledger.js';
 import { type NewPod, createPodRepository } from './pod-repository.js';
 
 const base = 'a'.repeat(40);
@@ -45,7 +46,127 @@ function addRepair(f: ReturnType<typeof fixture>, parent: string, child: string,
   f.repo.update(parent, { fixPodId: child });
 }
 
+function recordLegacyRepair(f: ReturnType<typeof fixture>, child: string) {
+  const work = createHash('sha256')
+    .update(JSON.stringify({ contract: null, task: repairPlaceholder }))
+    .digest('hex');
+  f.db
+    .prepare(`INSERT INTO execution_dispatch_preflights
+    (id,execution_id,task_id,pod_id,generation,version,repository,base_branch,base_commit_sha,work_hash,status,conflicts,rerun_intent,checked_at)
+    SELECT ?,e.execution_id,e.task_id,p.id,p.lifecycle_generation,1,
+    'github.com/org/repo','main',?,?,'admitted','[]',NULL,?
+    FROM pods p JOIN task_executions e ON e.pod_id=p.id WHERE p.id=?`)
+    .run(`legacy-${child}`, base, work, new Date().toISOString(), child);
+}
+
 describe('dispatch admission against immutable execution evidence', () => {
+  it('uses the same single-PR series owner as fix admission, not a PR-less triggering sibling', () => {
+    const f = fixture();
+    try {
+      const prUrl = 'https://github.com/org/repo/pull/11';
+      f.repo.insert(
+        request('owner', {
+          task: 'Series PR owner',
+          seriesId: 'series',
+          prMode: 'single',
+          branch: 'owner-tip',
+          prUrl,
+          status: 'merge_pending',
+        }),
+      );
+      f.repo.insert(
+        request('sibling', {
+          task: 'Another brief in series',
+          seriesId: 'series',
+          prMode: 'single',
+          branch: 'sibling-tip',
+          baseBranch: 'sibling-base',
+          status: 'merge_pending',
+        }),
+      );
+      f.repo.insert(
+        request('fix', {
+          task: repairPlaceholder,
+          linkedPodId: 'sibling',
+          branch: 'owner-tip',
+          baseBranch: 'main',
+          prUrl,
+        }),
+      );
+      f.repo.update('sibling', { fixPodId: 'fix' });
+      expect(f.ledger.inspect('fix', 1, repository, 'main', base).status).toBe('admitted');
+    } finally {
+      f.db.close();
+    }
+  });
+  it('honors the exact audited conflict set when intentionally rerunning a scoped blocked repair', () => {
+    const f = fixture();
+    try {
+      addRepair(f, 'prior-parent', 'prior-fix', 11);
+      recordLegacyRepair(f, 'prior-fix');
+      addRepair(f, 'blocked-parent', 'blocked-fix', 11);
+      expect(f.ledger.inspect('blocked-fix', 1, repository, 'main', base).status).toBe(
+        'review_required',
+      );
+      f.repo.insert(
+        request('rerun', {
+          task: repairPlaceholder,
+          rerunRequestHash: 'b'.repeat(64),
+          intentionalRerun: {
+            ofPodId: 'blocked-fix',
+            requestKey: 'audited-scoped-rerun',
+            reason:
+              'Distinct rerun after review of this exact blocked repair and its recorded conflict.',
+          },
+        }),
+      );
+      expect(f.ledger.inspect('rerun', 1, repository, 'main', base)).toMatchObject({
+        status: 'admitted',
+        rerun: { ofPodId: 'blocked-fix' },
+      });
+      addRepair(f, 'new-parent', 'new-fix', 11);
+      recordLegacyRepair(f, 'new-fix');
+      expect(f.ledger.inspect('rerun', 1, repository, 'main', base).status).toBe('review_required');
+      f.repo.update('blocked-fix', { prUrl: 'https://github.com/org/repo/pull/12' });
+      expect(() => f.ledger.inspect('rerun', 1, repository, 'main', base)).toThrow('repair scope');
+    } finally {
+      f.db.close();
+    }
+  });
+  it('uses immutable execution parent lineage after normal parent-first deletion clears the child pointer', () => {
+    const f = fixture();
+    try {
+      addRepair(f, 'old-parent', 'old-fix', 11);
+      recordLegacyRepair(f, 'old-fix');
+      f.repo.delete('old-parent');
+      expect(f.repo.getOrThrow('old-fix').linkedPodId).toBeNull();
+      f.repo.delete('old-fix');
+      addRepair(f, 'new-parent', 'new-fix', 12);
+      expect(f.ledger.inspect('new-fix', 1, repository, 'main', base).status).toBe('admitted');
+    } finally {
+      f.db.close();
+    }
+  });
+  it('bounds receipt candidates before reading retained history without UNION-view materialization', () => {
+    const f = fixture();
+    try {
+      const plan = f.db
+        .prepare(`EXPLAIN QUERY PLAN ${DISPATCH_CANDIDATES_SQL}`)
+        .all(
+          'github.com/org/repo',
+          'main',
+          'a'.repeat(64),
+          'b'.repeat(64),
+          'task',
+          new Date().toISOString(),
+        ) as Array<{ detail: string }>;
+      const detail = plan.map((p) => p.detail).join('\n');
+      expect(detail).toContain('execution_preflight_identity');
+      expect(detail).not.toMatch(/MATERIALIZE|SCAN task_history/);
+    } finally {
+      f.db.close();
+    }
+  });
   it('distinguishes canonical queued repairs of different PRs, including deleted old repairs', () => {
     const f = fixture();
     try {

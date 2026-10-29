@@ -8,6 +8,7 @@ import {
 import type Database from 'better-sqlite3';
 import { canonicalMergePrIdentity } from '../worktrees/merge-pr-identity.js';
 import { assertMergeRepository } from '../worktrees/merge-source-identity.js';
+import { selectSinglePrOwner } from './workspace-branch-source.js';
 
 export interface DispatchPreflightLedger {
   registerRequest(podId: string, repository?: string | null): void;
@@ -68,6 +69,9 @@ interface RequestRow {
   executionId: string;
   generation: number;
   linkedPodId: string | null;
+  parentPodId: string | null;
+  seriesId: string | null;
+  prMode: string | null;
   fixPodId: string | null;
   branch: string;
   prUrl: string | null;
@@ -138,8 +142,17 @@ const requestRepository = (row: RequestRow): string => {
 };
 const selectRequest = `SELECT p.id, p.rowid AS rowNumber, substr(p.task,1,50001) AS task, substr(p.contract,1,1048577) AS contract, p.status, p.linked_pod_id AS linkedPodId, p.fix_pod_id AS fixPodId, p.branch, p.pr_url AS prUrl,
   p.lifecycle_generation AS generation, e.task_id AS taskId, e.execution_id AS executionId,
+  e.parent_pod_id AS parentPodId,p.series_id AS seriesId,p.pr_mode AS prMode,
   COALESCE(b.base_branch, p.base_branch, json_extract(CASE WHEN json_valid(p.profile_snapshot) THEN p.profile_snapshot ELSE NULL END, '$.defaultBranch')) AS baseBranch, f.repo_url AS repository, b.repository AS frozenRepository, substr(p.profile_snapshot,1,1048577) AS profileSnapshot, p.scheduled_job_id AS scheduledJobId
   FROM pods p JOIN task_executions e ON e.pod_id = p.id LEFT JOIN profiles f ON f.name = p.profile_name LEFT JOIN execution_dispatch_bindings b ON b.execution_id = e.execution_id`;
+export const DISPATCH_CANDIDATES_SQL = `SELECT d.pod_id AS podId,d.execution_id AS executionId,p.status,d.checked_at AS checkedAt,
+          d.work_hash AS workHash,d.task_id AS taskId
+        FROM execution_dispatch_preflights d
+        LEFT JOIN task_executions e ON e.pod_id=d.pod_id AND e.execution_id=d.execution_id
+        LEFT JOIN pods p ON p.id=e.pod_id
+        WHERE d.repository = ? AND d.base_branch = ? AND d.work_hash IN (?,?) AND d.task_id <> ? AND d.status = 'admitted'
+        AND (d.checked_at >= ? OR p.status NOT IN ('complete','failed','killed','rejected')) GROUP BY d.execution_id ORDER BY MAX(d.checked_at) DESC LIMIT 101`;
+
 export function createDispatchPreflightLedger(db: Database.Database): DispatchPreflightLedger {
   const get = (id: string): RequestRow => {
     const row = db.prepare(`${selectRequest} WHERE p.id = ?`).get(id) as RequestRow | undefined;
@@ -151,6 +164,69 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
       );
     return row;
   };
+  type RepairRow = Pick<
+    RequestRow,
+    | 'id'
+    | 'executionId'
+    | 'taskId'
+    | 'linkedPodId'
+    | 'parentPodId'
+    | 'prUrl'
+    | 'branch'
+    | 'seriesId'
+    | 'prMode'
+    | 'scheduledJobId'
+  >;
+  const repairProjection = `p.id,e.execution_id AS executionId,e.task_id AS taskId,
+    p.linked_pod_id AS linkedPodId,e.parent_pod_id AS parentPodId,p.pr_url AS prUrl,
+    p.branch,p.series_id AS seriesId,p.pr_mode AS prMode,p.scheduled_job_id AS scheduledJobId`;
+  // Point lookups use live/archive pod-id indexes, never materialized UNION views.
+  const retainedRepair = (id: string): RepairRow | undefined => {
+    return (
+      (db
+        .prepare(`SELECT ${repairProjection} FROM pods p JOIN task_executions e
+      ON e.pod_id=p.id WHERE p.id=?`)
+        .get(id) as RepairRow | undefined) ??
+      (db
+        .prepare(`SELECT ${repairProjection} FROM task_history_pods p
+        JOIN task_history_task_executions e ON e.pod_id=p.id WHERE p.id=?
+        AND NOT EXISTS(SELECT 1 FROM pods live WHERE live.id=p.id)`)
+        .get(id) as RepairRow | undefined)
+    );
+  };
+  const parentIdentity = (row: RepairRow): string | null => {
+    if (row.linkedPodId && row.linkedPodId !== row.parentPodId) return null;
+    return row.parentPodId;
+  };
+  const liveOwner = (parent: RequestRow): RequestRow => {
+    if (parent.prMode !== 'single') return parent;
+    if (!parent.seriesId) throw new Error('Series identity missing');
+    const owners = db
+      .prepare(`${selectRequest} WHERE p.series_id=? AND p.pr_url IS NOT NULL
+      AND p.pr_url<>'' ORDER BY p.created_at ASC LIMIT 101`)
+      .all(parent.seriesId) as RequestRow[];
+    if (owners.length > 100) throw new Error('Series owner scope exceeds bound');
+    const owner = selectSinglePrOwner(parent, owners);
+    if (!owner) throw new Error('Series PR owner missing');
+    return owner;
+  };
+  const retainedOwner = (parent: RepairRow): RepairRow | undefined => {
+    // A retained PR-owning parent is its own historical witness. Otherwise use
+    // the same live-series owner domain as fix admission. An archive-only sibling
+    // owner remains held, rather than scanning all unrelated archived history.
+    if (parent.prMode !== 'single' || parent.prUrl) return parent;
+    if (!parent.seriesId) return undefined;
+    const owners = db
+      .prepare(`SELECT ${repairProjection} FROM pods p JOIN task_executions e ON e.pod_id=p.id
+      WHERE p.series_id=? AND p.pr_url IS NOT NULL AND p.pr_url<>''
+      ORDER BY p.created_at ASC LIMIT 101`)
+      .all(parent.seriesId) as RepairRow[];
+    return owners.length > 100 ? undefined : selectSinglePrOwner(parent, owners);
+  };
+  const scopedRepairHash = (work: string, pr: string): string =>
+    createHash('sha256')
+      .update(canonical({ kind: 'pr-repair-v1', pr, work }))
+      .digest('hex');
   const decode = (row: Record<string, unknown>): DispatchPreflightEvidence => ({
     id: row.id as string,
     version: 1,
@@ -277,6 +353,20 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             409,
           );
         const legacyWorkHash = hash(pod);
+        const intent = db
+          .prepare('SELECT * FROM execution_rerun_intents WHERE execution_id = ?')
+          .get(pod.executionId) as Record<string, unknown> | undefined;
+        if (
+          intent &&
+          (intent.work_hash !== legacyWorkHash ||
+            intent.source_repository !== repository ||
+            intent.source_base_branch !== baseBranch)
+        )
+          throw new AutopodError(
+            'Intentional rerun request binding changed; reconcile before dispatch',
+            'INVALID_RERUN',
+            409,
+          );
         let repairPr: string | null = null;
         const repairIdentity = (raw: string) => {
           const identity = canonicalMergePrIdentity(raw);
@@ -287,22 +377,29 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
           );
           return identity;
         };
-        if (pod.linkedPodId && pod.task === '[PR FIX] Awaiting queued feedback.') {
+        if (
+          (pod.linkedPodId || pod.parentPodId) &&
+          pod.task === '[PR FIX] Awaiting queued feedback.'
+        ) {
           try {
-            const parent = get(pod.linkedPodId);
+            const parentId = parentIdentity(pod);
+            if (!parentId) throw new Error('Unverified parent lineage');
+            const parent = get(parentId);
+            const owner = liveOwner(parent);
             if (
               parent.fixPodId !== pod.id ||
               parent.taskId !== pod.taskId ||
-              parent.branch !== pod.branch ||
-              parent.baseBranch !== baseBranch ||
+              owner.branch !== pod.branch ||
+              owner.baseBranch !== baseBranch ||
               requestRepository(parent) !== repository ||
-              !parent.prUrl ||
+              requestRepository(owner) !== repository ||
+              !owner.prUrl ||
               !pod.prUrl ||
               ['complete', 'killed', 'rejected'].includes(parent.status)
             )
               throw new Error('Invalid repair owner');
             repairPr = repairIdentity(pod.prUrl);
-            if (repairIdentity(parent.prUrl) !== repairPr) throw new Error('Different parent PR');
+            if (repairIdentity(owner.prUrl) !== repairPr) throw new Error('Different owner PR');
           } catch {
             throw new AutopodError(
               'Canonical PR repair identity is unavailable or changed; reconcile its parent before dispatch.',
@@ -311,29 +408,57 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             );
           }
         }
-        // The stub is not business work. Scope a canonical repair to the actual
-        // PR, while retaining its original contract and all parent/task fences.
-        const workHash = repairPr
-          ? createHash('sha256')
-              .update(canonical({ kind: 'pr-repair-v1', pr: repairPr, work: legacyWorkHash }))
-              .digest('hex')
-          : legacyWorkHash;
-        const unrelatedRepair = (
-          prior: Pick<RequestRow, 'linkedPodId' | 'prUrl' | 'taskId'> & { branch: string | null },
-        ) => {
-          if (!repairPr || !prior.linkedPodId || !prior.prUrl) return false;
+        // An audited unlinked rerun preserves the reviewed source scope, not just
+        // its generic stub. Reconstruct only an exactly matching immutable hash.
+        if (intent && !repairPr && pod.task === '[PR FIX] Awaiting queued feedback.') {
+          const sourceEvidence = db
+            .prepare(`SELECT work_hash AS workHash FROM execution_dispatch_preflights
+            WHERE execution_id=? AND repository=? AND base_branch=? ORDER BY rowid DESC LIMIT 1`)
+            .get(intent.source_execution_id, repository, baseBranch) as
+            | { workHash: string }
+            | undefined;
+          if (sourceEvidence && sourceEvidence.workHash !== legacyWorkHash) {
+            try {
+              const source = get(intent.source_pod_id as string);
+              if (
+                source.executionId !== intent.source_execution_id ||
+                !parentIdentity(source) ||
+                !source.prUrl ||
+                hash(source) !== legacyWorkHash ||
+                requestRepository(source) !== repository ||
+                source.baseBranch !== baseBranch
+              )
+                throw new Error('Source request changed');
+              const identity = repairIdentity(source.prUrl);
+              if (scopedRepairHash(legacyWorkHash, identity) !== sourceEvidence.workHash)
+                throw new Error('Source scope changed');
+              repairPr = identity;
+            } catch {
+              throw new AutopodError(
+                'Reviewed repair scope is unavailable or changed; reconcile the rerun',
+                'INVALID_RERUN',
+                409,
+              );
+            }
+          }
+        }
+        // The stub is not business work. Retain its contract and actual PR identity.
+        const workHash = repairPr ? scopedRepairHash(legacyWorkHash, repairPr) : legacyWorkHash;
+        const unrelatedRepair = (prior: RepairRow) => {
+          const parentId = parentIdentity(prior);
+          if (!repairPr || !parentId || !prior.prUrl) return false;
           try {
-            const parent = db
-              .prepare(`SELECT p.pr_url AS prUrl,p.branch,e.task_id AS taskId
-              FROM retained_pods p JOIN retained_task_executions e ON e.pod_id=p.id
-              WHERE p.id=?`)
-              .get(prior.linkedPodId) as
-              | { prUrl: string | null; branch: string; taskId: string }
-              | undefined;
-            if (!parent?.prUrl || parent.taskId !== prior.taskId || parent.branch !== prior.branch)
+            const parent = retainedRepair(parentId);
+            const owner = parent ? retainedOwner(parent) : undefined;
+            if (
+              !parent ||
+              !owner?.prUrl ||
+              parent.taskId !== prior.taskId ||
+              owner.branch !== prior.branch
+            )
               return false;
             const identity = repairIdentity(prior.prUrl);
-            return repairIdentity(parent.prUrl) === identity && identity !== repairPr;
+            return repairIdentity(owner.prUrl) === identity && identity !== repairPr;
           } catch {
             return false;
           } // Missing/unreadable historical identity remains blocking.
@@ -341,14 +466,7 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
         const cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
         const conflicts = new Map<string, DispatchPreflightEvidence['conflicts'][number]>();
         const previous = db
-          .prepare(`SELECT d.pod_id AS podId,d.execution_id AS executionId,p.status,d.checked_at AS checkedAt,
-          d.work_hash AS workHash,d.task_id AS taskId,rp.scheduled_job_id AS scheduledJobId,
-          rp.linked_pod_id AS linkedPodId,rp.pr_url AS prUrl,rp.branch
-        FROM execution_dispatch_preflights d LEFT JOIN task_executions e ON e.execution_id = d.execution_id LEFT JOIN pods p ON p.id = e.pod_id
-        LEFT JOIN retained_task_executions re ON re.execution_id = d.execution_id
-        LEFT JOIN retained_pods rp ON rp.id = re.pod_id
-        WHERE d.repository = ? AND d.base_branch = ? AND d.work_hash IN (?,?) AND d.task_id <> ? AND d.status = 'admitted'
-        AND (d.checked_at >= ? OR p.status NOT IN ('complete','failed','killed','rejected')) GROUP BY d.execution_id ORDER BY MAX(d.checked_at) DESC LIMIT 101`)
+          .prepare(DISPATCH_CANDIDATES_SQL)
           .all(repository, baseBranch, workHash, legacyWorkHash, pod.taskId, cutoff) as Array<{
           podId: string;
           executionId: string;
@@ -356,10 +474,6 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
           checkedAt: string;
           workHash: string;
           taskId: string;
-          branch: string | null;
-          linkedPodId: string | null;
-          prUrl: string | null;
-          scheduledJobId: string | null;
         }>;
         if (previous.length > 100)
           throw new AutopodError(
@@ -368,8 +482,20 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             409,
           );
         for (const prior of previous) {
-          if (finishedRunOfSameSchedule(pod.scheduledJobId, prior)) continue;
-          if (prior.workHash === legacyWorkHash && unrelatedRepair(prior)) continue;
+          const identity = retainedRepair(prior.podId);
+          const verified =
+            identity?.executionId === prior.executionId && identity.taskId === prior.taskId
+              ? identity
+              : undefined;
+          if (
+            verified &&
+            finishedRunOfSameSchedule(pod.scheduledJobId, {
+              scheduledJobId: verified.scheduledJobId,
+              status: prior.status,
+            })
+          )
+            continue;
+          if (verified && prior.workHash === legacyWorkHash && unrelatedRepair(verified)) continue;
           conflicts.set(prior.executionId, {
             podId: prior.podId,
             executionId: prior.executionId,
@@ -415,18 +541,6 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
               evidence: 'legacy_request',
             });
         }
-        const intent = db
-          .prepare('SELECT * FROM execution_rerun_intents WHERE execution_id = ?')
-          .get(pod.executionId) as Record<string, unknown> | undefined;
-        if (
-          intent &&
-          (intent.source_repository !== repository || intent.source_base_branch !== baseBranch)
-        )
-          throw new AutopodError(
-            'Intentional rerun targets a different repository or base; reconcile the request',
-            'INVALID_RERUN',
-            409,
-          );
         const rerun: DispatchPreflightEvidence['rerun'] = intent
           ? {
               ofPodId: intent.source_pod_id as string,
@@ -458,7 +572,7 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
           return [...conflicts.keys()].every((executionId) => reviewed.has(executionId));
         };
         const authorized =
-          intent?.work_hash === workHash &&
+          intent?.work_hash === legacyWorkHash &&
           (conflicts.has(intent.source_execution_id as string) || reviewedByBlockedSource());
         const status = conflicts.size === 0 || authorized ? 'admitted' : 'review_required';
         const id = randomUUID();
