@@ -85,23 +85,37 @@ export async function runSourceCommand(options: {
   });
   const work = Promise.resolve().then(async () => {
     check();
+    let markAdmitted = () => {};
+    const admitted = new Promise<void>((resolve) => {
+      markAdmitted = resolve;
+    });
     handle = await cm.execStreaming(options.containerId, options.command, {
       cwd: '/workspace',
       timeout,
       onProcessCreated(identity) {
         journal.admit(adoptionId, step, identity, check);
+        markAdmitted();
       },
       onProcessStarted(identity) {
         journal.started(adoptionId, step, identity);
       },
     });
-    if (!journal.get(adoptionId, step)?.identity) {
-      void handle.kill().catch(() => {});
-      sourceAdoptionError(
-        'Adapter started no recoverable source exec identity',
-        'SOURCE_EXEC_IDENTITY_MISSING',
-      );
-    }
+    // Sandbox streams expose their handle before asynchronous supervisor setup
+    // admits an identity. Wait for that actual journal admission, not the handle.
+    // An exited/failed stream or the outer deadline still refuses missing proof;
+    // a late callback must pass the same revocation/ownership gate before start.
+    await Promise.race([
+      admitted,
+      handle.exitCode.then(() => {
+        if (!journal.get(adoptionId, step)?.identity) {
+          void handle?.kill().catch(() => {});
+          sourceAdoptionError(
+            'Adapter started no recoverable source exec identity',
+            'SOURCE_EXEC_IDENTITY_MISSING',
+          );
+        }
+      }),
+    ]);
     if (expired) void handle.kill().catch(() => {});
     const [stdout, stderr, exitCode] = await Promise.all([
       collect(handle.stdout),

@@ -16,6 +16,69 @@ describe('source command physical custody', () => {
     await expect(s.run()).rejects.toMatchObject({ code: 'SOURCE_COMMAND_ALREADY_CLAIMED' });
     expect(s.cm.execStreaming).toHaveBeenCalledTimes(1);
   });
+  it('awaits deferred native admission after an early stream handle without replay', async () => {
+    const s = createSourceCommandFixture();
+    let admit = () => {};
+    let exit = (_code: number) => {};
+    s.handle.exitCode = new Promise<number>((resolve) => {
+      exit = resolve;
+    });
+    vi.mocked(s.cm.execStreaming).mockImplementationOnce(async (_id, _command, options) => {
+      admit = () => {
+        options?.onProcessCreated?.(s.identity);
+        options?.onProcessStarted?.(s.identity);
+      };
+      return s.handle;
+    });
+    const outcome = s.run().then(
+      (value) => ({ value, error: null }),
+      (error: unknown) => ({ value: null, error }),
+    );
+    await vi.waitFor(() => expect(s.cm.execStreaming).toHaveBeenCalledTimes(1));
+    expect(s.options.journal.get('source-checks', 'apply')?.identity).toBeNull();
+    expect(() => admit()).not.toThrow();
+    exit(0);
+    expect(await outcome).toMatchObject({
+      error: null,
+      value: { exitCode: 0, stdout: 'source output' },
+    });
+    expect(s.options.journal.get('source-checks', 'apply')).toMatchObject({
+      identity: s.identity,
+      exitCode: 0,
+    });
+  });
+  it('refuses an exited stream without admission rather than accepting its exit as source proof', async () => {
+    const s = createSourceCommandFixture();
+    vi.mocked(s.cm.execStreaming).mockResolvedValueOnce(s.handle);
+    await expect(s.run()).rejects.toMatchObject({ code: 'SOURCE_EXEC_IDENTITY_MISSING' });
+    expect(s.options.journal.get('source-checks', 'apply')).toMatchObject({
+      identity: null,
+      exitCode: null,
+      revoked: true,
+    });
+    expect(s.handle.kill).toHaveBeenCalledTimes(1);
+  });
+  it('revokes an early handle still awaiting identity on deadline and rejects late admission', async () => {
+    const s = createSourceCommandFixture();
+    s.options.timeoutMs = 20;
+    s.handle.exitCode = new Promise(() => {});
+    let admit = () => {};
+    vi.mocked(s.cm.execStreaming).mockImplementationOnce(async (_id, _command, options) => {
+      admit = () => {
+        options?.onProcessCreated?.(s.identity);
+      };
+      return s.handle;
+    });
+    await expect(s.run()).rejects.toMatchObject({ code: 'SOURCE_COMMAND_TIMEOUT' });
+    expect(s.options.journal.get('source-checks', 'apply')).toMatchObject({
+      identity: null,
+      exitCode: null,
+      revoked: true,
+    });
+    expect(() => admit()).toThrow();
+    await expect(s.run()).rejects.toMatchObject({ code: 'SOURCE_COMMAND_ALREADY_CLAIMED' });
+    expect(s.cm.execStreaming).toHaveBeenCalledTimes(1);
+  });
   it('never falls back to buffered exec or executes on another resource', async () => {
     const s = createSourceCommandFixture();
     s.options.containerManager = { ...s.cm, supportsExecRecovery: false };

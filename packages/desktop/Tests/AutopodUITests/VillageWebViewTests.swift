@@ -13,6 +13,17 @@ struct VillageWebViewTests {
         return try JSONDecoder().decode(VillageSnapshot.self, from: Data(contentsOf: file))
     }
 
+    private func mount(_ webView: WKWebView) -> NSWindow {
+        // Match the app's mounted WebKit lifecycle after earlier AppKit suites
+        // close their windows; keep the host visible without taking focus.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = webView
+        window.orderBack(nil)
+        return window
+    }
+
     @Test func bundledRendererLoadsUpdatesAndSelectsThroughRealWebKit() async throws {
         _ = NSApplication.shared
         var selection: VillageActor?
@@ -20,8 +31,14 @@ struct VillageWebViewTests {
         let coordinator = VillageWebView.Coordinator(onSelect: { selection = $0 }, onFailure: { failure = $0 })
         let snapshot = try fixture()
         let webView = VillageWebView.makeWebView(snapshot: snapshot, coordinator: coordinator)
-        webView.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
-        defer { VillageWebView.dismantleNSView(webView, coordinator: coordinator) }
+        let window = mount(webView)
+        defer {
+            VillageWebView.dismantleNSView(webView, coordinator: coordinator)
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        #expect(webView.window === window)
+        #expect(window.isVisible)
         var count = 0
         for _ in 0..<100 {
             // Do not evaluate in the initial blank document while the bundled
@@ -75,7 +92,7 @@ struct VillageWebViewTests {
         }
         #expect(selection?.source == .managed)
         #expect(selection?.podId == "pod-a")
-        // Offscreen WebKit throttles RAF. Drive the requested frames deterministically
+        // Background WebKit can throttle RAF. Drive requested frames deterministically
         // while exercising the real bundled drawing code and its cancellation behavior.
         _ = try await webView.evaluateJavaScript("{ window.villagePaints=0; window.requestAnimationFrame=cb=>{window.villageFrame=cb;return 1;}; window.cancelAnimationFrame=()=>{window.villageFrame=null;}; const c=document.querySelector('canvas').getContext('2d'), draw=c.drawImage; c.drawImage=function(...args){window.villagePaints++; return draw.apply(this,args);}; }; true")
         coordinator.update(VillageSnapshot(connected: true, activityStreamConnected: true,
@@ -111,7 +128,14 @@ struct VillageWebViewTests {
         let coordinator = VillageWebView.Coordinator(onSelect: { selection = $0 }, onFailure: { failure = $0 })
         let initial = try fixture()
         let webView = VillageWebView.makeWebView(snapshot: initial, coordinator: coordinator)
-        defer { VillageWebView.dismantleNSView(webView, coordinator: coordinator) }
+        let window = mount(webView)
+        defer {
+            VillageWebView.dismantleNSView(webView, coordinator: coordinator)
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        #expect(webView.window === window)
+        #expect(window.isVisible)
         let title = "<script>window.villageInjected = true</script> ` ${danger}"
         let actor = VillageActor(id: "managed:only", podId: "only", source: .managed,
             detailLevel: .lifecycle, title: title, profile: "test", model: "codex",
