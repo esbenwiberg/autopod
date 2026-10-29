@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -33,7 +34,134 @@ function fixture() {
   return { db, repo, ledger };
 }
 
+const repairPlaceholder = '[PR FIX] Awaiting queued feedback.';
+function addRepair(f: ReturnType<typeof fixture>, parent: string, child: string, number: number) {
+  const prUrl = `https://github.com/org/repo/pull/${number}`;
+  const branch = `repair/${number}`;
+  f.repo.insert(
+    request(parent, { task: `Original task ${parent}`, branch, prUrl, status: 'merge_pending' }),
+  );
+  f.repo.insert(request(child, { task: repairPlaceholder, branch, prUrl, linkedPodId: parent }));
+  f.repo.update(parent, { fixPodId: child });
+}
+
 describe('dispatch admission against immutable execution evidence', () => {
+  it('distinguishes canonical queued repairs of different PRs, including deleted old repairs', () => {
+    const f = fixture();
+    try {
+      addRepair(f, 'old-parent', 'old-fix', 11);
+      const prior = f.ledger.inspect('old-fix', 1, repository, 'main', base);
+      expect(prior.status).toBe('admitted');
+      // As in production, the running repair replaces its placeholder with feedback.
+      f.repo.update('old-fix', { task: '[PR FIX] Expanded feedback for PR11' });
+      f.repo.delete('old-fix');
+      addRepair(f, 'new-parent', 'new-fix', 12);
+      expect(f.ledger.inspect('new-fix', 1, repository, 'main', base)).toMatchObject({
+        status: 'admitted',
+        conflicts: [],
+      });
+      expect(
+        f.db
+          .prepare('SELECT work_hash FROM execution_dispatch_preflights WHERE id=?')
+          .get(prior.id),
+      ).toEqual({ work_hash: prior.workHash });
+    } finally {
+      f.db.close();
+    }
+  });
+  it('does not confuse two still-queued canonical repair placeholders for different PRs', () => {
+    const f = fixture();
+    try {
+      addRepair(f, 'parent-a', 'fix-a', 11);
+      addRepair(f, 'parent-b', 'fix-b', 12);
+      expect(f.ledger.inspect('fix-b', 1, repository, 'main', base)).toMatchObject({
+        status: 'admitted',
+        conflicts: [],
+      });
+    } finally {
+      f.db.close();
+    }
+  });
+  it.each(['different-pr', 'same-pr', 'missing-pr', 'foreign-pr', 'parent-mismatch'] as const)(
+    'classifies immutable pre-fix placeholder receipts without guessing missing history: %s',
+    (kind) => {
+      const f = fixture();
+      try {
+        addRepair(f, 'old-parent', 'old-fix', 11);
+        const legacyHash = createHash('sha256')
+          .update(JSON.stringify({ contract: null, task: repairPlaceholder }))
+          .digest('hex');
+        // Historical fixture constructed as the old binary recorded it. No receipt is updated.
+        f.db
+          .prepare(`INSERT INTO execution_dispatch_preflights
+          (id,execution_id,task_id,pod_id,generation,version,repository,base_branch,base_commit_sha,work_hash,status,conflicts,rerun_intent,checked_at)
+          SELECT 'legacy-fix',e.execution_id,e.task_id,p.id,p.lifecycle_generation,1,
+          'github.com/org/repo','main',?,?,'admitted','[]',NULL,?
+          FROM pods p JOIN task_executions e ON e.pod_id=p.id WHERE p.id='old-fix'`)
+          .run(base, legacyHash, new Date().toISOString());
+        f.repo.update('old-fix', {
+          task: '[PR FIX] Expanded feedback',
+          ...(kind === 'missing-pr' ? { prUrl: null } : {}),
+          ...(kind === 'foreign-pr' ? { prUrl: 'https://github.com/elsewhere/repo/pull/12' } : {}),
+        });
+        if (kind === 'parent-mismatch') {
+          f.repo.update('old-parent', { prUrl: 'https://github.com/org/repo/pull/99' });
+        }
+        f.repo.delete('old-fix');
+        addRepair(f, 'new-parent', 'new-fix', kind === 'same-pr' ? 11 : 12);
+        expect(f.ledger.inspect('new-fix', 1, repository, 'main', base).status).toBe(
+          kind === 'different-pr' ? 'admitted' : 'review_required',
+        );
+        expect(
+          f.db
+            .prepare("SELECT work_hash FROM execution_dispatch_preflights WHERE id='legacy-fix'")
+            .get(),
+        ).toEqual({ work_hash: legacyHash });
+      } finally {
+        f.db.close();
+      }
+    },
+  );
+  it('keeps same-PR repair and ordinary-placeholder duplicate protections', () => {
+    const f = fixture();
+    try {
+      addRepair(f, 'parent-a', 'fix-a', 11);
+      f.ledger.inspect('fix-a', 1, repository, 'main', base);
+      addRepair(f, 'parent-b', 'fix-b', 11);
+      f.repo.update('parent-b', { prUrl: 'https://github.com/Org/Repo/pull/11/' });
+      f.repo.update('fix-b', { prUrl: 'https://github.com/Org/Repo/pull/11/' });
+      expect(f.ledger.inspect('fix-b', 1, repository, 'main', base).status).toBe('review_required');
+      f.repo.insert(request('literal-a', { task: repairPlaceholder }));
+      f.ledger.inspect('literal-a', 1, repository, 'main', base);
+      f.repo.insert(request('literal-b', { task: repairPlaceholder }));
+      expect(f.ledger.inspect('literal-b', 1, repository, 'main', base).status).toBe(
+        'review_required',
+      );
+    } finally {
+      f.db.close();
+    }
+  });
+  it('refuses stale canonical ownership or a mismatched PR/branch instead of exempting linked work', () => {
+    const f = fixture();
+    try {
+      addRepair(f, 'parent', 'fix', 11);
+      f.repo.update('parent', { fixPodId: null });
+      expect(() => f.ledger.inspect('fix', 1, repository, 'main', base)).toThrow('repair identity');
+      f.repo.update('parent', { fixPodId: 'fix' });
+      f.repo.update('fix', { prUrl: 'https://github.com/org/repo/pull/12' });
+      expect(() => f.ledger.inspect('fix', 1, repository, 'main', base)).toThrow('repair identity');
+      f.repo.update('parent', { prUrl: 'https://github.com/elsewhere/repo/pull/12' });
+      f.repo.update('fix', { prUrl: 'https://github.com/elsewhere/repo/pull/12' });
+      expect(() => f.ledger.inspect('fix', 1, repository, 'main', base)).toThrow('repair identity');
+      f.repo.update('parent', { prUrl: 'https://github.com/org/repo/pull/11' });
+      f.repo.update('fix', { prUrl: 'https://github.com/org/repo/pull/11' });
+      // Corrupt local fixture construction only; branch is not an operator-editable field.
+      f.db.prepare("UPDATE pods SET branch='wrong-branch' WHERE id='fix'").run();
+      expect(() => f.ledger.inspect('fix', 1, repository, 'main', base)).toThrow('repair identity');
+    } finally {
+      f.db.close();
+    }
+  });
   it('serializes equivalent queued work, exempts linked rework, and requires an audited distinct rerun', () => {
     const { db, repo, ledger } = fixture();
     try {

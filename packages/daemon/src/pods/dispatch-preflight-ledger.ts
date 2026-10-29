@@ -6,6 +6,8 @@ import {
   type IntentionalRerun,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { canonicalMergePrIdentity } from '../worktrees/merge-pr-identity.js';
+import { assertMergeRepository } from '../worktrees/merge-source-identity.js';
 
 export interface DispatchPreflightLedger {
   registerRequest(podId: string, repository?: string | null): void;
@@ -66,6 +68,9 @@ interface RequestRow {
   executionId: string;
   generation: number;
   linkedPodId: string | null;
+  fixPodId: string | null;
+  branch: string;
+  prUrl: string | null;
   status: string;
   baseBranch: string;
   repository: string;
@@ -131,7 +136,7 @@ const requestRepository = (row: RequestRow): string => {
     );
   }
 };
-const selectRequest = `SELECT p.id, p.rowid AS rowNumber, substr(p.task,1,50001) AS task, substr(p.contract,1,1048577) AS contract, p.status, p.linked_pod_id AS linkedPodId,
+const selectRequest = `SELECT p.id, p.rowid AS rowNumber, substr(p.task,1,50001) AS task, substr(p.contract,1,1048577) AS contract, p.status, p.linked_pod_id AS linkedPodId, p.fix_pod_id AS fixPodId, p.branch, p.pr_url AS prUrl,
   p.lifecycle_generation AS generation, e.task_id AS taskId, e.execution_id AS executionId,
   COALESCE(b.base_branch, p.base_branch, json_extract(CASE WHEN json_valid(p.profile_snapshot) THEN p.profile_snapshot ELSE NULL END, '$.defaultBranch')) AS baseBranch, f.repo_url AS repository, b.repository AS frozenRepository, substr(p.profile_snapshot,1,1048577) AS profileSnapshot, p.scheduled_job_id AS scheduledJobId
   FROM pods p JOIN task_executions e ON e.pod_id = p.id LEFT JOIN profiles f ON f.name = p.profile_name LEFT JOIN execution_dispatch_bindings b ON b.execution_id = e.execution_id`;
@@ -271,21 +276,89 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             'DISPATCH_BINDING_CHANGED',
             409,
           );
-        const workHash = hash(pod);
+        const legacyWorkHash = hash(pod);
+        let repairPr: string | null = null;
+        const repairIdentity = (raw: string) => {
+          const identity = canonicalMergePrIdentity(raw);
+          const prRepository = identity.replace(/\/(?:pull|pullrequest)\/[1-9][0-9]*$/, '');
+          assertMergeRepository(
+            { repository: `https://${repository}`, branch: pod.branch, baseBranch },
+            prRepository,
+          );
+          return identity;
+        };
+        if (pod.linkedPodId && pod.task === '[PR FIX] Awaiting queued feedback.') {
+          try {
+            const parent = get(pod.linkedPodId);
+            if (
+              parent.fixPodId !== pod.id ||
+              parent.taskId !== pod.taskId ||
+              parent.branch !== pod.branch ||
+              parent.baseBranch !== baseBranch ||
+              requestRepository(parent) !== repository ||
+              !parent.prUrl ||
+              !pod.prUrl ||
+              ['complete', 'killed', 'rejected'].includes(parent.status)
+            )
+              throw new Error('Invalid repair owner');
+            repairPr = repairIdentity(pod.prUrl);
+            if (repairIdentity(parent.prUrl) !== repairPr) throw new Error('Different parent PR');
+          } catch {
+            throw new AutopodError(
+              'Canonical PR repair identity is unavailable or changed; reconcile its parent before dispatch.',
+              'DISPATCH_REPAIR_IDENTITY_UNAVAILABLE',
+              409,
+            );
+          }
+        }
+        // The stub is not business work. Scope a canonical repair to the actual
+        // PR, while retaining its original contract and all parent/task fences.
+        const workHash = repairPr
+          ? createHash('sha256')
+              .update(canonical({ kind: 'pr-repair-v1', pr: repairPr, work: legacyWorkHash }))
+              .digest('hex')
+          : legacyWorkHash;
+        const unrelatedRepair = (
+          prior: Pick<RequestRow, 'linkedPodId' | 'prUrl' | 'taskId'> & { branch: string | null },
+        ) => {
+          if (!repairPr || !prior.linkedPodId || !prior.prUrl) return false;
+          try {
+            const parent = db
+              .prepare(`SELECT p.pr_url AS prUrl,p.branch,e.task_id AS taskId
+              FROM retained_pods p JOIN retained_task_executions e ON e.pod_id=p.id
+              WHERE p.id=?`)
+              .get(prior.linkedPodId) as
+              | { prUrl: string | null; branch: string; taskId: string }
+              | undefined;
+            if (!parent?.prUrl || parent.taskId !== prior.taskId || parent.branch !== prior.branch)
+              return false;
+            const identity = repairIdentity(prior.prUrl);
+            return repairIdentity(parent.prUrl) === identity && identity !== repairPr;
+          } catch {
+            return false;
+          } // Missing/unreadable historical identity remains blocking.
+        };
         const cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
         const conflicts = new Map<string, DispatchPreflightEvidence['conflicts'][number]>();
         const previous = db
           .prepare(`SELECT d.pod_id AS podId,d.execution_id AS executionId,p.status,d.checked_at AS checkedAt,
-          (SELECT rp.scheduled_job_id FROM retained_task_executions re JOIN retained_pods rp ON rp.id = re.pod_id
-            WHERE re.execution_id = d.execution_id LIMIT 1) AS scheduledJobId
+          d.work_hash AS workHash,d.task_id AS taskId,rp.scheduled_job_id AS scheduledJobId,
+          rp.linked_pod_id AS linkedPodId,rp.pr_url AS prUrl,rp.branch
         FROM execution_dispatch_preflights d LEFT JOIN task_executions e ON e.execution_id = d.execution_id LEFT JOIN pods p ON p.id = e.pod_id
-        WHERE d.repository = ? AND d.base_branch = ? AND d.work_hash = ? AND d.task_id <> ? AND d.status = 'admitted'
+        LEFT JOIN retained_task_executions re ON re.execution_id = d.execution_id
+        LEFT JOIN retained_pods rp ON rp.id = re.pod_id
+        WHERE d.repository = ? AND d.base_branch = ? AND d.work_hash IN (?,?) AND d.task_id <> ? AND d.status = 'admitted'
         AND (d.checked_at >= ? OR p.status NOT IN ('complete','failed','killed','rejected')) GROUP BY d.execution_id ORDER BY MAX(d.checked_at) DESC LIMIT 101`)
-          .all(repository, baseBranch, workHash, pod.taskId, cutoff) as Array<{
+          .all(repository, baseBranch, workHash, legacyWorkHash, pod.taskId, cutoff) as Array<{
           podId: string;
           executionId: string;
           status: string | null;
           checkedAt: string;
+          workHash: string;
+          taskId: string;
+          branch: string | null;
+          linkedPodId: string | null;
+          prUrl: string | null;
           scheduledJobId: string | null;
         }>;
         if (previous.length > 100)
@@ -296,6 +369,7 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
           );
         for (const prior of previous) {
           if (finishedRunOfSameSchedule(pod.scheduledJobId, prior)) continue;
+          if (prior.workHash === legacyWorkHash && unrelatedRepair(prior)) continue;
           conflicts.set(prior.executionId, {
             podId: prior.podId,
             executionId: prior.executionId,
@@ -322,7 +396,7 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
           if (
             conflicts.has(prior.executionId) ||
             finishedRunOfSameSchedule(pod.scheduledJobId, prior) ||
-            hash(prior) !== workHash
+            hash(prior) !== legacyWorkHash
           )
             continue;
           if (!prior.baseBranch)
@@ -333,7 +407,7 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             );
           if (prior.baseBranch !== baseBranch) continue;
           const priorRepository = requestRepository(prior);
-          if (priorRepository === repository)
+          if (priorRepository === repository && !unrelatedRepair(prior))
             conflicts.set(prior.executionId, {
               podId: prior.id,
               executionId: prior.executionId,
