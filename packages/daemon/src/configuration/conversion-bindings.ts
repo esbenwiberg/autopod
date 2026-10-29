@@ -14,15 +14,18 @@ import type { LegacyMigrationBindings } from './legacy-profile-migration.js';
 /** Mapping files contain references and policy choices, never credential values. */
 export const conversionBindingsSchema = z
   .object({
-    accountByProfile: z.record(configurationIdSchema).optional(),
-    accountFailover: z.record(providerFailoverPolicySchema.nullable()).optional(),
-    registryCredentialByProfile: z.record(configurationIdSchema).optional(),
-    secretReferencesByProfile: z.record(z.record(configurationIdSchema)).optional(),
-    githubAccessByProfile: z.record(githubAccessPresetSchema).optional(),
-    remoteByProfile: z.record(configurationUrlSchema).optional(),
-    serviceAccessByProfile: z.record(serviceAccessSchema).optional(),
+    accountByProfile: z.record(z.string(), configurationIdSchema).optional(),
+    accountFailover: z.record(z.string(), providerFailoverPolicySchema.nullable()).optional(),
+    registryCredentialByProfile: z.record(z.string(), configurationIdSchema).optional(),
+    secretReferencesByProfile: z
+      .record(z.string(), z.record(z.string(), configurationIdSchema))
+      .optional(),
+    githubAccessByProfile: z.record(z.string(), githubAccessPresetSchema).optional(),
+    remoteByProfile: z.record(z.string(), configurationUrlSchema).optional(),
+    serviceAccessByProfile: z.record(z.string(), serviceAccessSchema).optional(),
     deploymentByProfile: z
       .record(
+        z.string(),
         z
           .object({
             source: z.literal('published-default'),
@@ -32,8 +35,8 @@ export const conversionBindingsSchema = z
           .strict(),
       )
       .optional(),
-    profileReplacementByProfile: z.record(z.string().min(1)).optional(),
-    resolvedToolPackByProfile: z.record(toolPackSchema).optional(),
+    profileReplacementByProfile: z.record(z.string(), z.string().min(1)).optional(),
+    resolvedToolPackByProfile: z.record(z.string(), toolPackSchema).optional(),
     codeIntelligenceVersions: z
       .object({
         serena: z
@@ -47,9 +50,9 @@ export const conversionBindingsSchema = z
       })
       .strict()
       .optional(),
-    pimByProfile: z.record(z.array(pimSelectionSchema)).optional(),
-    usualProfileByRemote: z.record(z.string().min(1)).optional(),
-    trustedByProfile: z.record(z.boolean()).optional(),
-    watcherEnabledByProfile: z.record(z.boolean()).optional(),
+    pimByProfile: z.record(z.string(), z.array(pimSelectionSchema)).optional(),
+    usualProfileByRemote: z.record(z.string(), z.string().min(1)).optional(),
+    trustedByProfile: z.record(z.string(), z.boolean()).optional(),
+    watcherEnabledByProfile: z.record(z.string(), z.boolean()).optional(),
   })
-  .strict() satisfies z.ZodType<LegacyMigrationBindings, z.ZodTypeDef, unknown>;
+  .strict() satisfies z.ZodType<LegacyMigrationBindings, unknown>;

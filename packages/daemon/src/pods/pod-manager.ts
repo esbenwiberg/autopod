@@ -326,14 +326,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
   const { activeAgentRuns, activeAgentRunResolvers } = createAgentRunRegistry();
   const {
-    providerForAttempt,
     ensureProviderAttempt,
     rotateProviderAttemptForFreshSegment,
     closeProviderAttempt,
-    isCompatibleTarget,
     selectProviderFailoverTarget,
-    escapeProviderTargetDiagnosticValue,
-    describeProviderFailoverTarget,
     providerFailoverUnavailableActivity,
     profileForProviderTarget,
     resolveEffectiveBoundProfile,
@@ -642,12 +638,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     operatorErrorMessage,
     transition,
   });
-  const {
-    visibleProviderHandoffActivity,
-    prepareProviderContinuationHandoff,
-    queueProviderContinuation,
-    handleProviderLimit,
-  } = providerContinuation;
+  const { handleProviderLimit } = providerContinuation;
 
   const continuationControls = createContinuationControls(deps, {
     podRepo,

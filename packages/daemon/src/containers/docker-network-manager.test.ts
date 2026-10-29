@@ -116,6 +116,23 @@ describe('DockerNetworkManager', () => {
       expect(result).toContain('custom.example.com');
     });
 
+    it('does not grant egress for URL-like stdio commands or arguments', () => {
+      const result = manager.computeAllowlist(
+        makePolicy(),
+        [
+          {
+            type: 'stdio',
+            name: 'local-fixture',
+            command: 'https://unapproved.example',
+            args: ['https://other-unapproved.example'],
+          },
+        ],
+        GATEWAY,
+      );
+      expect(result).not.toContain('unapproved.example');
+      expect(result).not.toContain('other-unapproved.example');
+    });
+
     it('extracts hostnames from MCP server URLs', () => {
       const servers = [makeMcpServer('https://mcp.example.com:8080/v1')];
       const result = manager.computeAllowlist(makePolicy(), servers, GATEWAY);

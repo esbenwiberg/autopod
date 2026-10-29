@@ -158,6 +158,63 @@ describe('IssueWatcherService', () => {
     return { service, eventBus, issueWatcherRepo, client, safetyEventsRepo };
   }
 
+  it('ignores lifecycle events without an original pod identity before issue lookup or mutation', () => {
+    const { service, eventBus, issueWatcherRepo, client } = createService();
+    const lookup = vi.spyOn(issueWatcherRepo, 'findBySessionId');
+    service.start();
+    try {
+      eventBus.emit({
+        type: 'pod.status_changed',
+        timestamp: new Date().toISOString(),
+        podId: null,
+        previousStatus: 'running',
+        newStatus: 'complete',
+      });
+      expect(lookup).not.toHaveBeenCalled();
+      expect(client.addComment).not.toHaveBeenCalled();
+      expect(mockSessionManager.createSession).not.toHaveBeenCalled();
+    } finally {
+      service.stop();
+    }
+  });
+
+  it('uses the same documented default prefix for nullable sources at pickup and completion', async () => {
+    mockProfileStore.setProfile('test-profile', {
+      ...mockProfileStore.get('test-profile'),
+      issueWatcherLabelPrefix: null,
+    });
+    const { service, eventBus, issueWatcherRepo, client } = createService([
+      {
+        id: '42',
+        title: 'Fix login',
+        body: 'Repair login',
+        url: 'https://github.com/org/repo/issues/42',
+        labels: ['autopod'],
+        triggerLabel: 'autopod',
+        requirements: ['Login works'],
+      },
+    ]);
+    service.start();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(client.addLabel).toHaveBeenCalledWith('42', 'autopod:in-progress');
+      const tracked = issueWatcherRepo.list()[0];
+      if (!tracked?.podId) throw new Error('Fixture pod missing');
+      issueWatcherRepo.updatePod(tracked.id, tracked.podId, 'working');
+      eventBus.emit({
+        type: 'pod.status_changed',
+        timestamp: new Date().toISOString(),
+        podId: tracked.podId,
+        previousStatus: 'running',
+        newStatus: 'complete',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(client.addLabel).toHaveBeenCalledWith('42', 'autopod:done');
+    } finally {
+      service.stop();
+    }
+  });
+
   function writePlannerSpec(worktreePath: string, issueId: string) {
     const specDir = path.join(worktreePath, 'specs', `issue-${issueId}`);
     fs.mkdirSync(specDir, { recursive: true });

@@ -1071,10 +1071,10 @@ export class LocalWorktreeManager implements WorktreeManager {
   }
 
   async getBranchDiff(config: BranchDiffConfig): Promise<string> {
-    const { repoUrl, branch, baseBranch, pat, maxLength = 200_000 } = config;
+    const { repoUrl, branch, baseBranch, maxLength = 200_000 } = config;
     const cacheKey = this.sanitizeRepoUrl(repoUrl);
     const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
-    const remote = await this.getAuthenticatedRemoteForRepo(repoUrl, bareRepoPath, pat);
+    const remote = await this.getAuthenticatedRemoteForRepo(repoUrl);
     await fs.mkdir(this.cacheDir, { recursive: true });
 
     try {
@@ -1940,7 +1940,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     relPath: string;
     pat?: string;
   }): Promise<BranchFolderContents> {
-    const { repoUrl, branch, pat } = params;
+    const { repoUrl, branch } = params;
     // Normalize relPath: strip leading/trailing slashes, reject escape attempts.
     const relPath = params.relPath.replace(/^\/+|\/+$/g, '');
     if (!relPath || relPath.includes('..')) {
@@ -1949,7 +1949,7 @@ export class LocalWorktreeManager implements WorktreeManager {
 
     const cacheKey = this.sanitizeRepoUrl(repoUrl);
     const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
-    const remote = await this.getAuthenticatedRemoteForRepo(repoUrl, bareRepoPath, pat);
+    const remote = await this.getAuthenticatedRemoteForRepo(repoUrl);
     await fs.mkdir(this.cacheDir, { recursive: true });
 
     // Serialize per-repo to avoid fetch races with other callers.
@@ -2213,7 +2213,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     purpose: string;
     branchPurpose?: 'base' | 'start';
   }): Promise<string> {
-    const { remote, bareRepoPath, branch, purpose, branchPurpose = 'base' } = params;
+    const { remote, bareRepoPath, branch, branchPurpose = 'base' } = params;
     try {
       await git(['fetch', remote.url, `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
         cwd: bareRepoPath,
@@ -2364,15 +2364,6 @@ export class LocalWorktreeManager implements WorktreeManager {
       .replace(/^https?:\/\//, '')
       .replace(/\.git$/, '')
       .replace(/[/:]/g, '_');
-  }
-
-  private async pathExists(p: string): Promise<boolean> {
-    try {
-      await fs.access(p);
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   private parseDiffStats(output: string): DiffStats {

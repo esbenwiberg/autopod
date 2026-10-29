@@ -7,7 +7,7 @@ import type {
 import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 import { DOCKER_CALL_TIMEOUTS, boundedDockerCall } from './docker-bounds.js';
-import { HAPROXY_LISTEN_PORT, HAPROXY_LOG_PORT, generateHaproxyConfig } from './haproxy-config.js';
+import { HAPROXY_LISTEN_PORT, generateHaproxyConfig } from './haproxy-config.js';
 
 // Defense-in-depth: only allow hostnames/IPs that are safe to interpolate into shell scripts.
 // Blocks shell metacharacters even if an unsafe value somehow bypassed schema validation.
@@ -98,6 +98,7 @@ export function computeNetworkPolicyAllowlist(
 
   // Extract hostnames from MCP server URLs
   for (const server of mcpServers) {
+    if (server.type === 'stdio') continue;
     try {
       const url = new URL(server.url);
       hosts.add(url.hostname);
@@ -579,7 +580,7 @@ export class DockerNetworkManager {
     lines.push('  haproxy -f /etc/haproxy/haproxy.cfg -D -p /var/run/haproxy/haproxy.pid');
     lines.push('');
 
-    // HAProxy logs to UDP ${HAPROXY_LOG_PORT} on loopback. A long-running
+    // HAProxy logs to its configured UDP loopback port. A long-running
     // `socat -u UDP-RECV` exec spawned by `DockerContainerManager.streamHaproxyDenials`
     // owns that socket and feeds parsed lines to the daemon's event bus —
     // we do NOT start it from this script because shell backgrounding under

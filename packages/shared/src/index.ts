@@ -207,6 +207,7 @@ export type {
   FoundryApiSurface,
   CopilotCredentials,
   OpenRouterCredentials,
+  PiOAuthCredentials,
 } from './types/model-provider.js';
 
 export {

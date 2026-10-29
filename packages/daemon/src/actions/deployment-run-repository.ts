@@ -37,7 +37,7 @@ export const deploymentPlanSchema = z
     image: z.string().regex(/^.+@sha256:[a-f0-9]{64}$/),
     runnerDigest: digest,
     environmentDigest: digest,
-    credentialRevisions: z.record(z.number().int().positive()),
+    credentialRevisions: z.record(z.string(), z.number().int().positive()),
     expiresAt: z.string().datetime(),
   })
   .strict();

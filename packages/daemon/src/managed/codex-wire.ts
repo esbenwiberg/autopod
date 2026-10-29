@@ -45,7 +45,7 @@ const requestSchema = z
       .optional(),
     include: z.array(z.literal('reasoning.encrypted_content')).optional(),
     prompt_cache_key: z.string().optional(),
-    client_metadata: z.record(z.string()).optional(),
+    client_metadata: z.record(z.string(), z.string()).optional(),
   })
   .strict();
 /** Single report turn only. No tools, files, remote URLs, continuations or worker-selected route. */

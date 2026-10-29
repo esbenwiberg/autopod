@@ -553,7 +553,7 @@ ${input.body}${requirementsSection}
     });
 
     // Swap labels: remove trigger, add in-progress
-    const prefix = profile.issueWatcherLabelPrefix;
+    const prefix = profile.issueWatcherLabelPrefix ?? 'autopod';
     try {
       await client.removeLabel(candidate.id, candidate.triggerLabel);
       await client.addLabel(candidate.id, `${prefix}:in-progress`);
@@ -679,6 +679,7 @@ ${input.body}${requirementsSection}
     if (event.type !== 'pod.status_changed') return;
 
     const { podId, newStatus } = event;
+    if (!podId) return;
     if (newStatus !== 'complete' && newStatus !== 'failed' && newStatus !== 'killed') {
       return;
     }
@@ -694,7 +695,7 @@ ${input.body}${requirementsSection}
             ? deps.launches.readSource(podId)
             : profileStore.get(tracked.profileName);
         const client = await issueClientFactory(profile, deps.githubAuth, deps.azureDevOpsAuth);
-        const prefix = profile.issueWatcherLabelPrefix;
+        const prefix = profile.issueWatcherLabelPrefix ?? 'autopod';
 
         if (newStatus === 'complete' && tracked.phase === 'planning') {
           let plannerPod: Pod;

@@ -83,7 +83,7 @@ export function truncateDiffAtFileBoundary(diff: string, maxLength: number): str
     } else {
       // Extract the file path from the header for the omitted list
       const match = chunk.match(/^diff --git a\/.+ b\/(.+)$/m);
-      omitted.push(match ? match[1] : '(unknown file)');
+      omitted.push(match?.[1] ?? '(unknown file)');
     }
   }
 

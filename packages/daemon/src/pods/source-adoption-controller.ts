@@ -197,7 +197,6 @@ export function createSourceAdoptionController(deps: SourceAdoptionControllerDep
       repo.advance(id, 'preserved', 'applying', { generation });
       podRepo.update(old.id, {
         lastValidationResult: null,
-        lastValidatedCommitSha: null,
         preSubmitReview: null,
         validationWaiver: null,
       });

@@ -30,14 +30,15 @@ const text = (max: number) =>
     .string()
     .transform((v) => v.trim())
     .pipe(z.string().min(1).max(max));
-const list = (item: z.ZodTypeAny, required = false) => z.array(item).min(required ? 1 : 0);
-const scenarioFields: Record<string, z.ZodTypeAny> = {
+const list = <Item extends z.ZodType>(item: Item, required = false) =>
+  z.array(item).min(required ? 1 : 0);
+const scenarioFields = {
   id: text(128),
   given: list(text(10000), true),
   when: list(text(10000), true),
-};
-// biome-ignore lint/suspicious/noThenProperty: contract scenarios intentionally use Given/When/Then.
-scenarioFields.then = list(text(10000), true);
+  // biome-ignore lint/suspicious/noThenProperty: contract scenarios intentionally use Given/When/Then.
+  then: list(text(10000), true),
+} satisfies z.ZodRawShape;
 const scenarioSchema = z.object(scenarioFields).passthrough();
 const factSchema = z
   .object({
@@ -144,11 +145,17 @@ export function inspectSpecContract(input: unknown, source = 'contract'): Contra
         code = 'CONTRACT_PROVES_ENTRY_TOO_LONG';
         hint = 'Use a declared scenario id containing at most 128 characters.';
       }
-      diagnostics.push(issue(path, code, zodIssue.message, hint, source));
+      let message = zodIssue.message;
+      if (zodIssue.code === 'too_big' && zodIssue.origin === 'string')
+        message = `must contain at most ${zodIssue.maximum} character(s)`;
+      if (zodIssue.code === 'invalid_value' && path.endsWith('.kind'))
+        message =
+          'kind must be one of unit-test, integration-test, contract-test, browser-test, typecheck, lint-rule, smoke-script, custom-command';
+      diagnostics.push(issue(path, code, message, hint, source));
     }
   }
   const raw = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
-  const contract = result.success ? (result.data as SpecContract) : undefined;
+  const contract = result.success ? result.data : undefined;
   // Semantic checks also inspect usable raw arrays, allowing independent errors alongside shape errors.
   const scenarios = Array.isArray(raw.scenarios) ? raw.scenarios : (contract?.scenarios ?? []);
   const facts = Array.isArray(raw.requiredFacts)
@@ -350,11 +357,6 @@ export function parseSpecContract(yamlText: string): SpecContract {
             .replace(/^dependsOn/, 'depends_on')
             .replace(/\.(\d+)\./g, '[$1].');
           let message = d.message;
-          if (/String must contain at most (\d+) character/.test(message))
-            message = message.replace('String must contain', 'must contain');
-          if (path.endsWith('.kind') && message.startsWith('Invalid enum'))
-            message =
-              'kind must be one of unit-test, integration-test, contract-test, browser-test, typecheck, lint-rule, smoke-script, custom-command';
           if (d.code === 'CONTRACT_MCP_COMMAND')
             message =
               'uses validate_in_browser MCP tool syntax. Use an executable browser-test command instead.';

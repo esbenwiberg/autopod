@@ -581,7 +581,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         .get(podId) as
         | { generation: number; containerId: string | null; executionTarget: string }
         | undefined;
-      if (current?.generation !== generation)
+      if (!current || current.generation !== generation)
         throw new Error('Stale lifecycle cannot start a task run');
       if (
         binding.resource &&

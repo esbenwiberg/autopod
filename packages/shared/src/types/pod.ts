@@ -363,6 +363,8 @@ export interface Pod {
   prFixAttempts: number;
   maxPrFixAttempts: number;
   fixPodId: string | null;
+  /** Existing retained timestamp for the last fix-pod dispatch, when recorded. */
+  lastFixPodSpawnedAt?: string | null;
   /**
    * Iteration counter for fix pods running under `profile.reuseFixPod = true`.
    * 0 for non-fix pods or the first iteration; increments each time the same

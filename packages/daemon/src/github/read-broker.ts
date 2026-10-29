@@ -153,7 +153,7 @@ export function createGitHubReadBroker(deps: {
         if (request.resource === 'issues.list') {
           // GitHub lists PRs through /issues. Do not silently grant prs.read through this endpoint.
           data = z
-            .array(z.record(z.unknown()))
+            .array(z.record(z.string(), z.unknown()))
             .parse(data)
             .filter((item) => !item.pull_request);
         }

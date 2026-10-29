@@ -124,7 +124,7 @@ export const podsitterDecisionSchema = z
     contractVersion: z.literal(1),
     attentionSignature: z.string().min(1).max(256),
     action: z.enum(PODSITTER_ACTIONS),
-    arguments: z.record(z.unknown()),
+    arguments: z.record(z.string(), z.unknown()),
     reason: boundedTextSchema.min(1),
     evidenceRefs: z.array(z.string().min(1).max(256)).max(100),
     confidence: z.enum(['low', 'medium', 'high']),

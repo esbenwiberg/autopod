@@ -109,7 +109,7 @@ export class WorkspaceCheckpointController {
     this.lastFingerprint.set(podId, fingerprint);
     const elapsed = this.now() - (this.lastAttemptAt.get(podId) ?? 0);
     if (!changed || elapsed < this.intervalMs) return this.degradedDecision(podId, fingerprint);
-    return this.request(podId, 'interval', fingerprint);
+    return this.run(podId, 'interval', fingerprint);
   }
 
   async request(
@@ -218,14 +218,14 @@ export class WorkspaceCheckpointController {
     let result: WorkspaceCheckpointResult;
     let shouldRetry = true;
     try {
-      while (shouldRetry) {
+      do {
         attempts++;
         result = await this.deps.checkpoint(podId, reason, await this.nextSequence(podId));
         shouldRetry = !!result.error?.retryable && attempts <= this.retryDelaysMs.length;
         if (!shouldRetry) break;
         const base = this.retryDelaysMs[attempts - 1] ?? 0;
         await this.sleep(Math.floor(base * (0.5 + this.random())));
-      }
+      } while (shouldRetry);
       const verified = result.lineageVerified && result.promoted && result.materialized;
       await this.deps.records.save({
         podId,

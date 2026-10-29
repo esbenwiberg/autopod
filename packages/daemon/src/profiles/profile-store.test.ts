@@ -74,6 +74,18 @@ describe('ProfileStore', () => {
     store = createProfileStore(db);
   });
 
+  it('round-trips existing preflight policy and leaves it untouched by an unrelated patch', () => {
+    const created = store.create({ ...validInput, preflightConflictPolicy: 'block' });
+    expect(store.get(created.name).preflightConflictPolicy).toBe('block');
+    store.update(created.name, { buildTimeout: 47 });
+    expect(store.get(created.name).preflightConflictPolicy).toBe('block');
+    store.update(created.name, { preflightConflictPolicy: 'warn' });
+    expect(store.get(created.name).preflightConflictPolicy).toBe('warn');
+    store.update(created.name, { preflightConflictPolicy: null });
+    expect(store.get(created.name).preflightConflictPolicy).toBeNull();
+    expect(() => store.update(created.name, { preflightConflictPolicy: 'bypass' })).toThrow();
+  });
+
   describe('create', () => {
     it('should create a profile and read it back', () => {
       const profile = store.create(validInput);

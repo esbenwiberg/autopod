@@ -1,5 +1,6 @@
 import {
   type EffectiveLaunchConfig,
+  type ParsedBrief,
   type Pod,
   type SeriesLaunchRequest,
   inspectSeriesBriefGraph,
@@ -193,11 +194,11 @@ export function createSeriesLaunches(options: {
 
 function seriesWork(
   request: SeriesLaunchRequest,
-  brief: SeriesLaunchRequest['briefs'][number],
+  brief: ParsedBrief,
   seriesId: string,
   root: boolean,
 ): EffectiveLaunchConfig['work'] {
-  return {
+  return launchWorkSchema.parse({
     startBranch: root ? request.startBranch : undefined,
     baseBranch: request.baseBranch,
     specFiles: root ? request.specFiles : undefined,
@@ -212,5 +213,5 @@ function seriesWork(
     touches: brief.touches,
     doesNotTouch: brief.doesNotTouch,
     waitForMerge: request.prMode === 'stacked' && !root,
-  };
+  });
 }

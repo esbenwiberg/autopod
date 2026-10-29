@@ -235,6 +235,7 @@ export interface PodUpdates {
   options?: PodOptions;
   dependencyStartedAt?: string | null;
   baseBranch?: string | null;
+  waitForMerge?: boolean;
   sidecarContainerIds?: Record<string, string> | null;
   testRunBranches?: string[] | null;
   worktreeCompromised?: boolean;
@@ -971,7 +972,6 @@ export function createPodRepository(db: Database.Database): PodRepository {
           'preSubmitReview',
           'failureReason',
           'worktreeCompromised',
-          'lastValidatedCommitSha',
           'validationAttempts',
           'maxValidationAttempts',
           'skipValidation',
@@ -1450,7 +1450,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
         .get(id) as Record<string, unknown> | undefined;
       if (!row) return { kind: 'unavailable' };
       const pod = rowToDisplaySession(row);
-      return displayRepository(row, pod.profileSnapshot?.repoUrl);
+      return displayRepository(row, pod.profileSnapshot?.repoUrl ?? undefined);
     },
 
     listCompactForDisplay(filters?: PodFilters): CompactPodSource[] {
@@ -1464,7 +1464,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           }
           return {
             ...pod,
-            repositoryDisplay: displayRepository(row, pod.profileSnapshot?.repoUrl),
+            repositoryDisplay: displayRepository(row, pod.profileSnapshot?.repoUrl ?? undefined),
             finalization:
               completionJournal.getForDisplay?.(pod.id, pod.lifecycleGeneration) ?? null,
           };
