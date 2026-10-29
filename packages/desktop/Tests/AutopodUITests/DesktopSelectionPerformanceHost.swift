@@ -56,13 +56,17 @@ import Testing
     }
     var nodes: [NSObject] { descendants(hosting) }
     func label(_ node: NSObject) -> String { value(node, "accessibilityLabel") as? String ?? "" }
-    func find(id: String) -> NSObject? {
-        nodes.first { value($0, "accessibilityIdentifier") as? String == id }
+    func find(id: String) -> NSObject? { find(id: id, in: nodes) }
+    func find(id: String, in candidates: [NSObject]) -> NSObject? {
+        candidates.first { value($0, "accessibilityIdentifier") as? String == id
+            && $0.responds(to: NSSelectorFromString("accessibilityPerformPress")) }
     }
     func find(label prefix: String) -> NSObject? {
         nodes.first { label($0).hasPrefix(prefix) && $0.responds(to: NSSelectorFromString("accessibilityPerformPress")) }
     }
-    func press(_ node: NSObject) { _ = value(node, "accessibilityPerformPress") }
+    @discardableResult func press(_ node: NSObject) -> Bool {
+        value(node, "accessibilityPerformPress") as? Bool == true
+    }
     func contains(_ text: String) -> Bool {
         nodes.contains { label($0).contains(text)
             || (value($0, "accessibilityValue") as? String ?? "").contains(text) }
@@ -88,12 +92,13 @@ import Testing
     func selectTab(_ tab: String) async throws {
         layout()
         if destination(tab) { return }
-        press(try #require(find(id: "detail-tab-\(tab)")))
+        try #require(press(try #require(find(id: "detail-tab-\(tab)"))),
+            "Native tab control must acknowledge its press: \(tab)")
         try await wait { self.destination(tab) }
     }
     func destination(_ tab: String) -> Bool {
         let current = nodes
-        guard let node = current.first(where: { value($0, "accessibilityIdentifier") as? String == "detail-tab-\(tab)" }),
+        guard let node = find(id: "detail-tab-\(tab)", in: current),
               value(node, "accessibilitySelected") as? Bool == true,
               let id = inputs.selectedID, current.contains(where: { label($0) == id }) else { return false }
         let marker: String
@@ -117,7 +122,7 @@ import Testing
         else { node = try #require(find(label: "Fixture pod \(podID)")) }
         let clock = ContinuousClock()
         let start = clock.now
-        press(node)
+        try #require(press(node), "Native selection control must acknowledge its press")
         try await wait { self.inputs.selectedID == podID && self.destination(tab ?? "overview") }
         let duration = start.duration(to: clock.now).components
         return Double(duration.attoseconds) / 1e15 + Double(duration.seconds) * 1_000

@@ -4,6 +4,14 @@ import SwiftUI
 import Testing
 @testable import AutopodUI
 
+@MainActor private class NavigationLabelAXFixture: NSObject {
+    @objc var accessibilityIdentifier: String { "duplicate-tab" }
+}
+@MainActor private final class NavigationActionAXFixture: NavigationLabelAXFixture {
+    private(set) var presses = 0
+    @objc func accessibilityPerformPress() -> Bool { presses += 1; return true }
+}
+
 @MainActor @Observable private final class DetailNavigationInputs {
     var pod = DesktopPerformanceFixtures.pods[0]
     let navigation = DesktopDetailNavigation()
@@ -22,16 +30,38 @@ import Testing
 }
 
 @Suite(.serialized) @MainActor struct DesktopDetailNavigationTests {
+    @Test func duplicateIdentifierSelectsTheActionNotItsNoninteractiveLabel() throws {
+        let host = try DesktopSelectionPerformanceHost()
+        defer { host.close() }
+        let label = NavigationLabelAXFixture()
+        let action = NavigationActionAXFixture()
+        let node = try #require(host.find(id: "duplicate-tab", in: [label, action]))
+        #expect(node === action)
+        #expect(host.press(node))
+        #expect(action.presses == 1)
+        #expect(!host.press(label))
+    }
+
     @Test func diffRemainsAvailableAfterRepeatedEvidenceNavigation() async throws {
         let host = try DesktopSelectionPerformanceHost()
         defer { host.close() }
         try await host.scope("repository")
-        for _ in 0..<120 {
-            try await host.selectTab("overview")
-            try await host.selectTab("evidence")
+        for iteration in 0..<120 {
+            for tab in ["overview", "evidence"] {
+                do { try await host.selectTab(tab) }
+                catch {
+                    print("Repeated evidence navigation failed at iteration \(iteration), destination \(tab), pod \(host.inputs.selectedID ?? "none")")
+                    throw error
+                }
+            }
         }
-        try await host.selectTab("overview")
-        _ = try await host.transition(tab: "diff", podID: "perf-0000")
+        do {
+            try await host.selectTab("overview")
+            _ = try await host.transition(tab: "diff", podID: "perf-0000")
+        } catch {
+            print("Repeated evidence navigation failed at final overview/diff transition")
+            throw error
+        }
     }
 
     @Test func historyOpensArchivedPodAndClearsFleetFiltersWithTabRetained() async throws {
