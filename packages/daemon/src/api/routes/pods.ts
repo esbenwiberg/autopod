@@ -51,6 +51,8 @@ import type { SafetyEventsRepository } from '../../safety/safety-events-reposito
 import { CONTROL_PLANE_RATE_LIMIT_MAX, rateLimitIdentity } from '../plugins/rate-limit.js';
 import { resolvePublicPreviewOrigin, rewritePreviewUrlForBrowser } from '../preview-url.js';
 import { serializePodForWire, serializeValidationResult } from '../wire-serializers.js';
+import { sourceAdoptionRoutes } from './source-adoption.js';
+import { validationRecoveryRoutes } from './validation-recovery.js';
 
 function humanActor(request: FastifyRequest): OperatorActor {
   return {
@@ -492,6 +494,8 @@ export function podRoutes(
   // Rework can include a full sandbox filesystem sync. Keep it detached from the
   // desktop request and coalesce repeats after a client-side timeout.
   const reworkRuns = new Map<string, Promise<void>>();
+  sourceAdoptionRoutes(app, podManager);
+  const validationRecovery = validationRecoveryRoutes(app, podManager, (id) => reworkRuns.has(id));
   const hostedDeployDrainSchema = z.object({
     ttlSeconds: z.number().int().min(60).max(3_600).default(1_800),
   });
@@ -759,6 +763,11 @@ export function podRoutes(
     return wire;
   });
 
+  app.get('/pods/:podId/external-delivery', async (request) => {
+    const { podId } = z.object({ podId: z.string().min(1).max(128) }).parse(request.params);
+    return { receipt: podManager.getExternalDelivery(podId) };
+  });
+
   // Task projection deliberately avoids deserializing the pod's contract/validation JSON.
   app.get('/pods/:podId/task-execution', async (request) => {
     const { podId } = request.params as { podId: string };
@@ -841,6 +850,31 @@ export function podRoutes(
       throw new AutopodError('Task retry accounting unavailable', 'TASK_IDENTITY_UNAVAILABLE', 503);
     return ledger.state((request.params as { podId: string }).podId);
   });
+  app.get('/pods/:podId/termination-reconciliations', async (request) => {
+    const { podId } = request.params as { podId: string };
+    podManager.getSession(podId);
+    if (!podRepo?.taskExecutions)
+      throw new AutopodError('Task execution ledger unavailable', 'TASK_IDENTITY_UNAVAILABLE', 503);
+    return podRepo.taskExecutions.terminationReconciliations(podId);
+  });
+  app.post('/pods/:podId/termination-reconciliations', async (request) => {
+    if (!request.user?.oid)
+      throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
+    const input = z
+      .object({
+        runId: z.string().uuid(),
+        reason: z.string().trim().min(10).max(4000),
+      })
+      .strict()
+      .parse(request.body);
+    return podManager.reconcileTermination(
+      (request.params as { podId: string }).podId,
+      input.runId,
+      input.reason,
+      humanActor(request),
+    );
+  });
+
   // Default authenticated user route: never trust an actor supplied in the body.
   app.post('/pods/:podId/retry-authorizations', async (request, reply) => {
     if (!request.user?.oid)
@@ -1233,6 +1267,12 @@ export function podRoutes(
       await podManager.triggerValidation(podId, { force: true });
       return { ok: true };
     }
+    if (validationRecovery.isActive(podId))
+      throw new AutopodError(
+        'Validation recovery is already running.',
+        'RECOVERY_IN_PROGRESS',
+        409,
+      );
     podManager.assertCanRework(podId);
     if (!reworkRuns.has(podId)) {
       const run = podManager

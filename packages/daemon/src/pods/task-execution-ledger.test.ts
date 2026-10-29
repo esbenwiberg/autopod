@@ -40,6 +40,19 @@ function fixture() {
 const binding = { runtime: 'codex', model: 'model', providerAccountId: 'account' };
 
 describe('task-wide execution accounting', () => {
+  it('refuses a missing original lifecycle before recording any task run', () => {
+    const { db, repo } = fixture();
+    try {
+      const ledger = repo.taskExecutions;
+      if (!ledger) throw new Error('Missing task ledger');
+      expect(() => ledger.beginRun('missing-original', 1, 1, binding)).toThrow('Stale lifecycle');
+      expect(
+        db.prepare('SELECT id FROM task_agent_runs WHERE pod_id=?').all('missing-original'),
+      ).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
   it('raises or removes the shared limit without rewriting launch evidence or erasing usage', () => {
     const { db, repo } = fixture();
     try {

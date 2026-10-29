@@ -320,11 +320,12 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
       // PR creation failed during validation — retry it now
       emitActivityStatus(podId, 'No PR found — creating PR before merging…');
       let retryPrUrl: string | null = null;
+      const retryWorktreePath = pod.worktreePath;
       try {
         const retryProfile = executionForPod(pod);
         const publishedSource = await deliveryOperation(async () =>
           commitAndPublishApprovalBranch(mergingAnchor, {
-            worktreePath: pod.worktreePath,
+            worktreePath: retryWorktreePath,
             // Push the feature branch up so the PR can be opened against the resolved base.
             targetBranch: pod.branch,
             // Pass the PAT explicitly — approval retry runs post-container, so the
@@ -394,7 +395,7 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
         podRepo.update(podId, { prUrl: newPrUrl });
         emitActivityStatus(podId, `PR created: ${newPrUrl}`);
         const reviewStatus = await deliveryOperation(async () =>
-          prManager.getPrStatus({ prUrl: newPrUrl, worktreePath: pod.worktreePath }),
+          prManager.getPrStatus({ prUrl: newPrUrl, worktreePath: retryWorktreePath }),
         );
         if (reviewStatus.merged || !reviewStatus.open)
           mergeReconciliation(
@@ -426,7 +427,7 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
               branch: publishedSource.branch,
               baseBranch,
             },
-            worktreePath: pod.worktreePath,
+            worktreePath: retryWorktreePath,
             prUrl: newPrUrl,
             squash: mergeSquash,
           }),
@@ -437,7 +438,7 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
           const retryStatus = await deliveryOperation(async () =>
             prManager.getPrStatus({
               prUrl: newPrUrl,
-              worktreePath: pod.worktreePath,
+              worktreePath: retryWorktreePath,
             }),
           );
           const blockReason = retryStatus.blockReason ?? 'Waiting for merge conditions';
@@ -460,13 +461,14 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
         failDelivery('PR creation did not complete.');
       }
     } else if (pod.worktreePath) {
+      const fallbackWorktreePath = pod.worktreePath;
       // Fallback: no PR manager configured — push branch directly
       emitActivityStatus(podId, 'Pushing branch…');
       try {
         const profile = executionForPod(pod);
         await deliveryOperation(async () =>
           commitAndPublishApprovalBranch(mergingAnchor, {
-            worktreePath: pod.worktreePath,
+            worktreePath: fallbackWorktreePath,
             // Push the feature branch up to origin — no PR manager configured, so this is the
             // last step. Pushing onto profile.defaultBranch would force-push the feature work
             // straight onto main, which is never what we want.

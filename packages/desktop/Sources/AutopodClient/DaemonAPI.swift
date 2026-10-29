@@ -266,7 +266,7 @@ public actor DaemonAPI {
       nil
     }
     // Approval runs delivery inline: it may wait for advisory QA, resume a suspended
-    // sandbox to preserve reports (bounded at 120s), then push/create the PR.
+    // sandbox (150s wake budget), preserve reports (120s export budget), then publish.
     do {
       let _: OkResponse = try await request(
         "POST", "/pods/\(id)/approve", body: body, timeout: Self.approvalTimeout
@@ -441,6 +441,14 @@ public actor DaemonAPI {
   }
   public func authorizeRetry(_ id: String, request input: TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization {
     try await request("POST", "/pods/\(id)/retry-authorizations", body: encode(input))
+  }
+
+  public func getValidationRecovery(_ id: String) async throws -> ValidationRecoveryState {
+    try await request("GET", "/pods/\(id)/validation-recovery")
+  }
+
+  public func requestValidationRecovery(_ id: String, input: ValidationRecoveryRequest) async throws {
+    let _: OkResponse = try await request("POST", "/pods/\(id)/validation-recovery", body: encode(input))
   }
 
   public func resumePod(_ id: String) async throws -> ResumeResponse {

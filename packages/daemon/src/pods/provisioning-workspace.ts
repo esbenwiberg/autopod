@@ -446,7 +446,7 @@ export function createProvisioningWorkspace(
           );
           if (dispatchEvidence?.status === 'review_required')
             throw new AutopodError(
-              `Equivalent active or recent work requires review: ${dispatchEvidence.conflicts.map((entry) => entry.podId).join(', ')}. Reconcile the existing execution or create an intentional rerun with a recorded reason.`,
+              `Equivalent active work requires review: ${dispatchEvidence.conflicts.map((entry) => entry.podId).join(', ')}. Review the existing execution or create an intentional rerun with a recorded reason.`,
               'EQUIVALENT_WORK_REVIEW_REQUIRED',
               409,
             );

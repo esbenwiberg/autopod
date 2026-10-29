@@ -7,6 +7,8 @@ import {
 } from '@autopod/shared';
 import { DefaultAzureCredential } from '@azure/identity';
 import type { Logger } from 'pino';
+import type { ContainerStartOptions } from '../interfaces/container-manager.js';
+import { isObservedExitCode } from './exec-exit-evidence.js';
 import { SandboxInfrastructureError } from './sandbox-api-client.js';
 import type {
   CreateSandboxOptions,
@@ -36,6 +38,7 @@ import {
   sandboxGoalRoot,
   sandboxGoalSupervisor,
 } from './sandbox-goal-process.js';
+import type { SandboxWakeupJournal } from './sandbox-wakeup-journal.js';
 
 const API_VERSION = '2026-02-01-preview';
 const ARM_SCOPE = 'https://management.azure.com/.default';
@@ -100,6 +103,10 @@ export interface AzureSandboxApiClientConfig {
   resolveImageDigest?: ImageDigestResolver;
   /** Test seam. Defaults to 3s to match the Python SDK poller. */
   pollIntervalMs?: number;
+  resumeTimeoutMs?: number;
+  /** Required to submit resume: durable per-resource claims survive daemon replacement. */
+  wakeupJournal?: SandboxWakeupJournal;
+  assertReleaseAllowed?: (sandboxId: string) => void;
   /**
    * Retry/backoff for the Azure Sandboxes data-plane rate limiter (HTTP 429,
    * 600 req/min). The platform returns `retryAfterSeconds`; we honor it (clamped
@@ -203,6 +210,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private readonly webSocketFactory: WebSocketFactory;
   private readonly resolveImageDigest?: ImageDigestResolver;
   private readonly pollIntervalMs: number;
+  private readonly resumeTimeoutMs: number;
+  private readonly wakeupJournal?: SandboxWakeupJournal;
+  private readonly assertReleaseAllowed?: (sandboxId: string) => void;
   private readonly retryMaxAttempts: number;
   private readonly retryMaxDelayMs: number;
   private readonly retryBaseDelayMs: number;
@@ -227,6 +237,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     this.webSocketFactory = config.webSocket ?? defaultWebSocketFactory;
     this.resolveImageDigest = config.resolveImageDigest;
     this.pollIntervalMs = config.pollIntervalMs ?? 3000;
+    this.resumeTimeoutMs = config.resumeTimeoutMs ?? 145_000;
+    this.wakeupJournal = config.wakeupJournal;
+    this.assertReleaseAllowed = config.assertReleaseAllowed;
     this.retryMaxAttempts = config.retry?.maxAttempts ?? 6;
     this.retryMaxDelayMs = config.retry?.maxDelayMs ?? 30_000;
     this.retryBaseDelayMs = config.retry?.baseDelayMs ?? 1000;
@@ -331,8 +344,13 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   }
 
   async destroy(sandboxId: string): Promise<void> {
+    this.wakeupJournal?.assertReleasable(sandboxId);
     await this.requestData('DELETE', `${this.sandboxPath(sandboxId)}`, {
       okStatuses: [200, 202, 204, 404],
+      beforeSend: () => {
+        this.assertReleaseAllowed?.(sandboxId);
+        this.wakeupJournal?.assertReleasable(sandboxId);
+      },
     });
     await this.pollDeleted(() => this.getSandbox(sandboxId), `sandbox ${sandboxId}`);
   }
@@ -439,7 +457,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       response = await this.requestData<ExecResponse>(
         'POST',
         `${this.sandboxPath(sandboxId)}/executeShellCommand`,
-        { json: body, timeoutMs: options?.timeoutMs },
+        { json: body, timeoutMs: options?.timeoutMs, singleAttempt: options?.singleAttempt },
       );
     } catch (err) {
       // A lost response cannot establish whether this command ran remotely.
@@ -549,11 +567,11 @@ export class AzureSandboxApiClient implements SandboxApiClient {
             wake();
             return;
           }
-          const termination = await this.exec(sandboxId, [
-            'sh',
-            '-c',
-            terminatePidFileScript(pidPath),
-          ]);
+          const termination = await this.exec(
+            sandboxId,
+            ['sh', '-c', terminatePidFileScript(pidPath)],
+            { timeoutMs: 5_000, singleAttempt: true },
+          );
           if (termination.exitCode !== 0) {
             throw new AutopodError(
               `Remote sandbox exec termination was not verified (exit ${termination.exitCode})`,
@@ -587,18 +605,19 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     let inputBytes = 0;
     let inputWrites = Promise.resolve();
 
+    let timeoutFailure: AutopodError | null = null;
+    let timedOutExitCode: number | undefined;
     const timeoutTimer = options?.timeoutMs
       ? setTimeout(() => {
-          fail(
-            new AutopodError(
-              `Sandbox streaming exec on ${sandboxId} timed out after ${options.timeoutMs}ms`,
-              'AZURE_SANDBOX_TIMEOUT',
-              504,
-            ),
+          if (failure || exitReceived || closed) return;
+          timeoutFailure = new AutopodError(
+            `Sandbox streaming exec on ${sandboxId} timed out after ${options.timeoutMs}ms`,
+            'AZURE_SANDBOX_TIMEOUT',
+            504,
           );
-          void cancelRemote().catch((err) => {
-            this.logger.warn({ err, sandboxId }, 'Failed to terminate timed-out sandbox exec');
-          });
+          // Wake the consumer first, but settle bounded cleanup in its catch
+          // before reporting the timeout. Never equate socket close with exit.
+          fail(timeoutFailure);
         }, options.timeoutMs)
       : null;
 
@@ -661,8 +680,12 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           const text = Buffer.from(frame.data ?? '', 'base64').toString('utf-8');
           queue.push(frame.type === 'stdout' ? { stdout: text } : { stderr: text });
         } else if (frame.type === 'exit_code') {
+          if (!isObservedExitCode(frame.exitCode)) {
+            fail(new Error('Sandbox exec received an invalid exit code'));
+            return;
+          }
           exitReceived = true;
-          queue.push({ exitCode: Number(frame.exitCode ?? 0) });
+          queue.push({ exitCode: frame.exitCode });
           socket.close();
         } else if (frame.type === 'error') {
           fail(
@@ -705,6 +728,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       while (true) {
         const chunk = queue.shift();
         if (chunk) {
+          if (timeoutFailure && chunk.exitCode !== undefined) {
+            timedOutExitCode = chunk.exitCode;
+            throw timeoutFailure;
+          }
           if (identity && chunk.exitCode !== undefined) {
             const code = sandboxGoalExit(
               identity,
@@ -715,7 +742,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
             return;
           }
           yield chunk;
-          if (chunk.exitCode !== undefined) return;
+          if (chunk.exitCode !== undefined) {
+            if (timeoutFailure) throw timeoutFailure;
+            return;
+          }
           continue;
         }
         if (failure) throw failure;
@@ -725,6 +755,31 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         });
       }
     } catch (error) {
+      if (timeoutFailure) {
+        let cleanup: 'confirmed' | 'failed' = 'failed';
+        try {
+          await cancelRemote();
+          cleanup = 'confirmed';
+        } catch (err) {
+          this.logger.warn({ err, sandboxId }, 'Failed to terminate timed-out sandbox exec');
+        }
+        // Keep bytes received during the termination grace period as well.
+        // An actual exit frame is evidence; cleanup's own exit code is not.
+        let observedExitCode = timedOutExitCode;
+        for (const chunk of queue.splice(0)) {
+          if (isObservedExitCode(chunk.exitCode)) observedExitCode = chunk.exitCode;
+          if (chunk.stdout || chunk.stderr) yield { stdout: chunk.stdout, stderr: chunk.stderr };
+        }
+        Object.assign(timeoutFailure, {
+          execution: {
+            cause: 'timeout',
+            timeoutMs: options?.timeoutMs,
+            cleanup,
+            ...(observedExitCode !== undefined ? { observedExitCode } : {}),
+          },
+        });
+        throw timeoutFailure;
+      }
       if (!identity || !failure || exitReceived) throw error;
       // Losing the RPC transport must stop this owned process. Only its private
       // supervisor receipt can turn transport uncertainty into an observed exit.
@@ -920,6 +975,8 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       params: { path, createDirs: 'true' },
       okStatuses: [200, 201, 204],
       timeoutMs: options?.timeoutMs,
+      singleAttempt: options?.singleAttempt,
+      beforeSend: options?.beforeSend,
     });
   }
 
@@ -1029,8 +1086,13 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   async suspend(sandboxId: string, _mode: 'memory' | 'disk' = 'memory'): Promise<void> {
     const current = await this.getSandbox(sandboxId).catch(() => null);
     if (current && stoppedStates.has(current.state ?? '')) return;
+    this.wakeupJournal?.assertReleasable(sandboxId);
     await this.requestData('POST', `${this.sandboxPath(sandboxId)}/stop`, {
       okStatuses: [200, 202, 204],
+      beforeSend: () => {
+        this.assertReleaseAllowed?.(sandboxId);
+        this.wakeupJournal?.assertReleasable(sandboxId);
+      },
     });
     await this.pollState(
       () => this.getSandbox(sandboxId),
@@ -1039,17 +1101,143 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     );
   }
 
-  async resume(sandboxId: string): Promise<void> {
-    const current = await this.getSandbox(sandboxId).catch(() => null);
-    if (current?.state === 'Running') return;
-    await this.requestData('POST', `${this.sandboxPath(sandboxId)}/resume`, {
-      okStatuses: [200, 202, 204],
+  private readonly resumes = new Map<string, Promise<void>>();
+
+  async resume(sandboxId: string, options: ContainerStartOptions = {}): Promise<void> {
+    // Ownership-specific callers must not inherit a different lifecycle's cancellation.
+    // The durable claim, not this optimization, coalesces their actual mutations.
+    if (options.assertCurrent) return this.reconcileResume(sandboxId, options);
+    const existing = this.resumes.get(sandboxId);
+    if (existing) return existing;
+    const operation = this.reconcileResume(sandboxId, options);
+    this.resumes.set(sandboxId, operation);
+    try {
+      await operation;
+    } finally {
+      if (this.resumes.get(sandboxId) === operation) this.resumes.delete(sandboxId);
+    }
+  }
+
+  private async reconcileResume(sandboxId: string, options: ContainerStartOptions): Promise<void> {
+    const controller = new AbortController();
+    const timeoutMs = this.resumeTimeoutMs;
+    const expiresAt = Date.now() + timeoutMs;
+    const timeoutError = () =>
+      new AutopodError(
+        'Retained sandbox was not observed Running in time. A dispatched resume may be outcome-unknown; retained intents permit observation, not blind replay.',
+        'SANDBOX_WAKEUP_TIMEOUT',
+        504,
+      );
+    let ownedIntent: string | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(timeoutError());
+      }, timeoutMs);
     });
-    await this.pollState(
-      () => this.getSandbox(sandboxId),
-      (sandbox) => sandbox.state === 'Running',
-      `sandbox ${sandboxId} resume`,
-    );
+    const check = () => {
+      options.assertCurrent?.();
+      // Synchronous SQLite/token work can delay timer delivery beyond the deadline.
+      if (Date.now() >= expiresAt) {
+        controller.abort();
+        throw timeoutError();
+      }
+      controller.signal.throwIfAborted();
+    };
+    const requestOptions = {
+      signal: controller.signal,
+      singleAttempt: true,
+      beforeObserve: check,
+      timeoutMs: Math.min(timeoutMs, 15_000),
+    };
+    const reconcile = async () => {
+      while (true) {
+        check();
+        const current = await this.getSandbox(sandboxId, requestOptions);
+        check();
+        if (current.state === 'Running') return;
+        if (['Failed', 'Deleted', 'Deleting', 'Terminated'].includes(current.state ?? '')) {
+          throw new AutopodError(
+            'Retained sandbox cannot be woken from its terminal state.',
+            'SANDBOX_WAKEUP_FAILED',
+            502,
+          );
+        }
+        if (stoppedStates.has(current.state ?? '')) {
+          const journal = this.wakeupJournal;
+          if (!journal)
+            throw new AutopodError(
+              'Durable wakeup journal unavailable; no resume was submitted.',
+              'SANDBOX_WAKEUP_JOURNAL_UNAVAILABLE',
+              503,
+            );
+          // Labels justify retaining a possible owner's source, never source adoption.
+          const owner = current.labels?.podId ?? current.properties?.labels?.podId;
+          const intent = journal.claim(
+            this.wakeupKey(sandboxId),
+            sandboxId,
+            typeof owner === 'string' && owner.length <= 256 ? owner : undefined,
+          );
+          if (intent.acquired) {
+            ownedIntent = intent.id;
+            try {
+              const response = await this.request(
+                'data',
+                'POST',
+                `${this.dataEndpoint}${this.sandboxPath(sandboxId)}/resume`,
+                {
+                  ...requestOptions,
+                  beforeSend: () => {
+                    check();
+                    journal.beginDispatch(intent.id);
+                  },
+                  headers: { 'x-ms-client-request-id': intent.id },
+                  params: { 'api-version': API_VERSION },
+                  okStatuses: [200, 202, 204, 409],
+                },
+              );
+              check();
+              if (response.status === 409) {
+                const body = (await readJsonOrEmpty(response)) as { title?: string };
+                check();
+                if (body.title !== 'ResourceLocked')
+                  throw new AutopodError(
+                    'Sandbox resume returned an unrelated conflict; its intent remains retained.',
+                    'SANDBOX_WAKEUP_CONFLICT',
+                    409,
+                  );
+                // Only this exact response proves rejection before execution.
+                journal.rejectLocked(intent.id);
+              }
+            } catch (error) {
+              check();
+              if (
+                error instanceof AutopodError &&
+                error.statusCode < 500 &&
+                error.code !== 'SANDBOX_WAKEUP_SUPERSEDED'
+              )
+                throw error;
+              this.logger.warn(
+                { sandboxId, intentId: intent.id },
+                'Resume response unavailable; observing provider state without another POST',
+              );
+            }
+          }
+        }
+        // Transitional/unknown states are observed, never resumed blindly.
+        await sleep(this.pollIntervalMs);
+      }
+    };
+    try {
+      await Promise.race([reconcile(), deadline]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      controller.abort();
+      // A revoked unsent claim cannot later dispatch: beforeSend uses an atomic CAS.
+      // Once transport was admitted, never release the claim merely on timeout.
+      if (ownedIntent) this.wakeupJournal?.revokeUnsent(ownedIntent);
+    }
   }
 
   async getStatus(sandboxId: string): Promise<SandboxStatus> {
@@ -1064,7 +1252,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     // not wait or park a sandbox that Azure has definitively removed.
     if (response.status === 404) return 'deleted';
     const sandbox = (await readJsonOrEmpty(response)) as SandboxResponse;
-    if (sandbox.state === 'Running') return 'running';
+    if (sandbox.state === 'Running') {
+      this.wakeupJournal?.observeRunning(this.wakeupKey(sandboxId), sandboxId);
+      return 'running';
+    }
     if (stoppedStates.has(sandbox.state ?? '')) return 'stopped';
     return 'unknown';
   }
@@ -1358,8 +1549,28 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     );
   }
 
-  private async getSandbox(sandboxId: string): Promise<SandboxResponse> {
-    return this.requestData<SandboxResponse>('GET', this.sandboxPath(sandboxId));
+  private async getSandbox(
+    sandboxId: string,
+    options: RequestOptions = {},
+  ): Promise<SandboxResponse> {
+    const sandbox = await this.requestData<SandboxResponse>(
+      'GET',
+      this.sandboxPath(sandboxId),
+      options,
+    );
+    options.signal?.throwIfAborted();
+    options.beforeObserve?.();
+    if (sandbox.state === 'Running')
+      this.wakeupJournal?.observeRunning(this.wakeupKey(sandboxId), sandboxId);
+    return sandbox;
+  }
+
+  getResourceKey(sandboxId: string): string {
+    return this.wakeupKey(sandboxId);
+  }
+
+  private wakeupKey(sandboxId: string): string {
+    return `${this.dataEndpoint}${this.sandboxPath(sandboxId)}`.toLowerCase();
   }
 
   private async getDiskImage(diskImageId: string): Promise<DiskImageResponse> {
@@ -1454,6 +1665,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       'AZURE_AUTH',
     );
 
+    options.signal?.throwIfAborted();
     const url = withQuery(baseUrl, options.params);
     const okStatuses = options.okStatuses ?? [200, 201, 202, 204];
 
@@ -1478,11 +1690,15 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       const timeout = controller ? setTimeout(() => controller.abort(), options.timeoutMs) : null;
       let response: Response;
       try {
+        options.beforeSend?.();
         response = await this.fetchFn(url, {
           method,
           headers,
           body: options.json !== undefined ? JSON.stringify(options.json) : options.body,
-          signal: controller?.signal,
+          signal:
+            options.signal && controller
+              ? AbortSignal.any([options.signal, controller.signal])
+              : (options.signal ?? controller?.signal),
         });
       } catch (err) {
         if (controller && isAbortError(err)) {
@@ -1672,6 +1888,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
 }
 
 interface RequestOptions {
+  signal?: AbortSignal;
+  /** Synchronous admission recheck after token acquisition, immediately before transport. */
+  beforeSend?: () => void;
+  beforeObserve?: () => void;
   singleAttempt?: boolean;
   params?: Record<string, string | undefined>;
   headers?: Record<string, string>;
@@ -1762,7 +1982,10 @@ function streamExecScript(command: string[], cwd?: string): string {
     '  exec env AUTOPOD_STREAM_SESSION=1 setsid -w "$0"',
     'fi',
     'umask 077',
-    'echo $$ > "$0.pid"',
+    'stat=$(cat /proc/$$/stat) || exit 1',
+    'rest=${stat##*) }; set -- $rest',
+    'start=$(printf \'%s\' "${20}")',
+    'printf \'%s %s\\n\' "$$" "$start" > "$0.pid"',
   ]);
 }
 
@@ -1786,18 +2009,31 @@ function sandboxRuntimeUserScript(scriptBody: string, prelude: string[] = []): s
   ].join('\n');
 }
 
-function terminatePidFileScript(pidPath: string): string {
+export function processGroupProbeScript(): string {
+  // A process can disappear after glob expansion/readability observation. Only
+  // an absent proc directory settles that entry; unreadable existing entries
+  // remain unknown. Unrelated process churn must not masquerade as owned work.
+  return 'group_alive() { for stat_file in /proc/[0-9]*/stat; do [ -r "$stat_file" ] || { [ -d "${stat_file%/stat}" ] && return 0; continue; }; stat=$(cat "$stat_file" 2>/dev/null) || { [ -d "${stat_file%/stat}" ] && return 0; continue; }; rest=${stat##*) }; set -- $rest; [ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0; done; return 1; }';
+}
+
+export function terminatePidFileScript(pidPath: string): string {
   return [
     `pid_file=${shellQuote(pidPath)}`,
     '[ -s "$pid_file" ] || exit 1',
-    'pid=$(cat "$pid_file")',
+    'read -r pid start < "$pid_file" || exit 1',
+    'case "$start" in *[!0-9]*|"") exit 1;; esac',
     'case "$pid" in *[!0-9]*|"") exit 1;; esac',
+    '[ "$pid" -gt 1 ] || exit 1',
     '[ -d /proc/1 ] || exit 1',
-    'group_alive() { for stat_file in /proc/[0-9]*/stat; do [ -r "$stat_file" ] || continue; stat=$(cat "$stat_file") || return 0; rest=${stat##*) }; set -- $rest; [ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0; done; return 1; }',
+    processGroupProbeScript(),
+    // A stale PID receipt must never signal an unrelated reused process group.
+    'stat=$(cat /proc/"$pid"/stat) || exit 1',
+    'rest=${stat##*) }; set -- $rest',
+    '[ "$3" = "$pid" ] && [ "${20}" = "$start" ] || exit 1',
     'kill -TERM -"$pid" 2>/dev/null || true',
     'i=0',
     'while group_alive && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
-    'kill -KILL -"$pid" 2>/dev/null || true',
+    'if group_alive; then kill -KILL -"$pid" 2>/dev/null || true; fi',
     'i=0',
     'while group_alive && [ "$i" -lt 20 ]; do sleep 0.1; i=$((i + 1)); done',
     'group_alive && exit 1',

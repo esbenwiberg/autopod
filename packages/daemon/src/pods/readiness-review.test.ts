@@ -224,6 +224,14 @@ describe('deriveReadinessReview', () => {
       expect.arrayContaining([expect.objectContaining({ id: 'validation-unknown' })]),
     );
   });
+  it('does not present a failed lifecycle as release-ready even when prior checks passed', () => {
+    const result = review({ pod: pod({ status: 'failed' }) });
+    expect(result.status).toBe('needs_review');
+    expect(result.summary).toContain('failed');
+    expect(result.findings).toContainEqual(
+      expect.objectContaining({ id: 'lifecycle-readiness-unresolved' }),
+    );
+  });
   it('marks a clean pod ready', () => {
     const result = review();
 
@@ -546,6 +554,20 @@ describe('deriveSeriesReadiness', () => {
 });
 
 describe('createReadinessService', () => {
+  it('does not resurrect historical passing validation after current proof is cleared', () => {
+    const currentPod = pod({ status: 'failed', lastValidationResult: null });
+    const podRepo = {
+      getOrThrow: () => currentPod,
+    } as unknown as PodRepository;
+    const validationRepo = {
+      getForSession: () => [{ id: 'old-pass', result: validation(), createdAt: NOW }],
+    } as unknown as ValidationRepository;
+    const result = createReadinessService({ podRepo, validationRepo }).computePodReadiness(
+      currentPod.id,
+    );
+    expect(result.status).toBe('risky');
+    expect(result.findings).toContainEqual(expect.objectContaining({ id: 'validation-unknown' }));
+  });
   it('uses canonical reset-cycle validation instead of an older higher attempt', () => {
     const canonicalPass = validation({ attempt: 1, overall: 'pass' });
     const currentPod = pod({ lastValidationResult: canonicalPass });
@@ -700,6 +722,81 @@ describe('createReadinessService', () => {
       ]),
     );
     expect(insert).not.toHaveBeenCalled();
+  });
+
+  it('explains why provisional process health is unavailable', () => {
+    const currentPod = pod({ lastValidationResult: validation() });
+    const podRepo = {
+      getOrThrow: () => currentPod,
+      update: () => undefined,
+      getPodsBySeries: () => [],
+    } as unknown as PodRepository;
+    const ambiguousRead: AgentToolUseEvent = {
+      type: 'tool_use',
+      timestamp: NOW,
+      tool: 'Bash',
+      input: { command: 'grep -rn needle src | head -20' },
+    };
+    const eventRepo = {
+      countForSession: () => 0,
+      getForSession: (_podId: string, options?: { type?: string }) =>
+        options?.type
+          ? []
+          : [
+              {
+                id: 1,
+                podId: currentPod.id,
+                type: 'pod.agent_activity',
+                payload: {
+                  type: 'pod.agent_activity',
+                  timestamp: NOW,
+                  podId: currentPod.id,
+                  event: ambiguousRead,
+                },
+                createdAt: NOW,
+              },
+            ],
+    } as unknown as EventRepository;
+    const escalationRepo = {
+      countBySessionAndTypes: () => 0,
+    } as unknown as EscalationRepository;
+
+    const result = createReadinessService({
+      podRepo,
+      eventRepo,
+      escalationRepo,
+      qualityScoreRepo: { get: () => null } as unknown as QualityScoreRepository,
+    }).computePodReadiness(currentPod.id);
+
+    expect(result.areas).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          area: 'quality',
+          status: 'not_available',
+          summary: 'Process health unavailable: inspection commands could not be verified safely.',
+        }),
+      ]),
+    );
+  });
+
+  it('explains a persisted unavailable process-health row', () => {
+    const review = deriveReadinessReview({
+      pod: pod({ lastValidationResult: validation() }),
+      latestValidation: validation(),
+      qualityScore: null,
+      qualityScoreStage: 'terminal',
+      qualityUnavailableReason: 'no_activity',
+    });
+    expect(review.areas).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          area: 'quality',
+          status: 'not_available',
+          summary:
+            'Process health unavailable: no quality-relevant activity was retained for this session.',
+        }),
+      ]),
+    );
   });
 
   it('classifies known denied-egress hosts from stored firewall events as non-blocking', () => {

@@ -14,6 +14,8 @@ import { hasUnansweredDecision } from './decision-admission.js';
 import { createDeletionOwnership } from './deletion-ownership.js';
 import { ensureMergeIdentityProjection } from './merge-identity-projection.js';
 import { readProviderUsage } from './provider-usage-projection.js';
+import { assertSourceAvailable, assertSourceDeliveryAllowed } from './source-custody-guards.js';
+import { createTerminationReconciliationRepository } from './termination-reconciliation-repository.js';
 
 export interface ExecutionBinding {
   runtime: string;
@@ -34,7 +36,8 @@ function isContainerReference(value: unknown): value is string {
   );
 }
 
-export interface TaskExecutionLedger {
+export interface TaskExecutionLedger
+  extends ReturnType<typeof createTerminationReconciliationRepository> {
   register(podId: string): void;
   raiseBudget(
     podId: string,
@@ -66,7 +69,7 @@ export function assertTaskExecutionTerminationVerified(
 ): void {
   if (ledger?.hasUnverifiedTermination(podId))
     throw new AutopodError(
-      'A worker in this logical task has unverified process termination. Retain its source and resources; reconcile termination before Resume, Rework, validation or delivery.',
+      'A worker in this logical task has unverified process termination. Retain its source and resources; use ap reconcile-termination <pod-id> to inspect recorded ownership before Resume, Rework, validation or delivery.',
       'TASK_EXECUTION_TERMINATION_UNVERIFIED',
       409,
     );
@@ -546,6 +549,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           409,
         );
     },
+    ...createTerminationReconciliationRepository(db),
     hasUnverifiedTermination: (podId) =>
       Boolean(
         db
@@ -556,6 +560,8 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           .get(podId),
       ),
     beginRun: db.transaction((podId, generation, cycle, binding) => {
+      assertSourceAvailable(db, podId, '');
+      assertSourceDeliveryAllowed(db, podId);
       createDeletionOwnership(db).assertTaskAvailable(podId);
       const encoded = JSON.stringify({
         runtime: binding.runtime,
@@ -575,7 +581,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         .get(podId) as
         | { generation: number; containerId: string | null; executionTarget: string }
         | undefined;
-      if (current?.generation !== generation)
+      if (!current || current.generation !== generation)
         throw new Error('Stale lifecycle cannot start a task run');
       if (
         binding.resource &&

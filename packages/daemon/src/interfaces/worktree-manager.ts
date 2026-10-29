@@ -202,7 +202,28 @@ export interface PushArtifactBranchConfig {
   pat?: string;
 }
 
+export interface PrepareSourceAdoption {
+  worktreePath: string;
+  repository: string;
+  branch: string;
+  oldHead: string;
+  targetHead: string;
+  id: string;
+  bundle: string;
+  assertCurrent(): void;
+}
+
 export interface WorktreeManager {
+  /** Strict clean identity, refusing hidden indexes, executable filters and submodules before status. */
+  inspectSourceAdoption?(
+    worktreePath: string,
+    branch: string,
+  ): Promise<{ branch: string; commitSha: string; treeSha: string; worktreeClean: boolean }>;
+  prepareSourceAdoption?(
+    config: PrepareSourceAdoption,
+  ): Promise<{ bundle: string; bundleHash: string; tree: string }>;
+  applySourceAdoption?(config: PrepareSourceAdoption): Promise<void>;
+  observeSourceBranch?(worktreePath: string, repository: string, branch: string): Promise<string>;
   /** Daemon-authenticated source-only tarball at an exact commit; no Git metadata or credentials. */
   readSnapshotArchive?(params: { repoUrl: string; revision: string }): Promise<Buffer>;
   /** Read-only local source identity for recovery; unavailable adapters cannot authorize cleanup. */

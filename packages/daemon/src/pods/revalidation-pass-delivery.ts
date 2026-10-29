@@ -38,12 +38,18 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
       newCommits,
       validationConfig,
       validationRecord,
+      checksOnly = false,
     }: RevalidationPassContext,
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
-    emitActivityStatus(podId, 'Revalidation passed — human fix worked!');
+    emitActivityStatus(
+      podId,
+      checksOnly
+        ? 'Validation checks passed — delivery was not requested.'
+        : 'Revalidation passed — human fix worked!',
+    );
     let prUrl: string | null = s2.prUrl ?? null;
-    const prManager = prManagerFactory ? prManagerFactory(profile) : null;
-    if (prManager && s2.worktreePath && s2.options.output === 'pr') {
+    const prManager = !checksOnly && prManagerFactory ? prManagerFactory(profile) : null;
+    if (!checksOnly && prManager && s2.worktreePath && s2.options.output === 'pr') {
       // Same artifact ref as the validation-pass path — never the reviewed
       // branch. This path builds no PR body, so the ref is simply where a
       // reviewer can find the screenshots.
@@ -162,22 +168,32 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
     const revalidatedPod = transition(s2, 'validated', { prUrl });
     refreshReadiness(podId, {
       advisoryQaInFlight:
-        validationConfig.advisoryBrowserQaEnabled && !!validationEngine.runAdvisoryBrowserQa,
+        !checksOnly &&
+        validationConfig.advisoryBrowserQaEnabled &&
+        !!validationEngine.runAdvisoryBrowserQa,
     });
-    maybeTriggerDependents(revalidatedPod);
-    await runAdvisoryAfterValidation(
-      podId,
-      validationConfig,
-      result,
-      validationRecord?.id,
-      revalidatedPod,
-    );
-    advisoryPublicationOwnership(revalidatedPod, result, validationRecord?.id).assertCurrent();
+    if (!checksOnly) maybeTriggerDependents(revalidatedPod);
+    if (!checksOnly) {
+      await runAdvisoryAfterValidation(
+        podId,
+        validationConfig,
+        result,
+        validationRecord?.id,
+        revalidatedPod,
+      );
+      advisoryPublicationOwnership(revalidatedPod, result, validationRecord?.id).assertCurrent();
+    }
     const postAdvisoryPod = podRepo.getOrThrow(podId);
     if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
       return { newCommits, result: 'pass' };
     }
-    if (postAdvisoryPod.containerId) {
+    // The source coordinator still needs the original Running resource for its
+    // final exact-source verification. A pass does not release source/report
+    // custody or authorize a stop that would make that verification impossible.
+    if (
+      postAdvisoryPod.containerId &&
+      !podRepo.sourceAdoptions?.retains(postAdvisoryPod.containerId)
+    ) {
       try {
         emitActivityStatus(podId, 'Stopping post-validation container…');
         const cm2 = containerManagerFactory.get(postAdvisoryPod.executionTarget);
@@ -186,7 +202,7 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
         logger.warn({ err, podId }, 'Failed to stop container post-revalidation');
       }
     }
-    if (postAdvisoryPod.autoApprove) {
+    if (!checksOnly && postAdvisoryPod.autoApprove) {
       emitActivityStatus(podId, 'Auto-approving…');
       logger.info({ podId }, 'Auto-approving pod after revalidation');
       setImmediate(() => {

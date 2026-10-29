@@ -18,6 +18,7 @@ import type {
   EnsureRemoteBranchConfig,
   EnsureRemoteBranchResult,
   MergeBranchConfig,
+  PrepareSourceAdoption,
   PushArtifactBranchConfig,
   RebaseOntoBaseConfig,
   RebaseOntoBaseResult,
@@ -40,6 +41,12 @@ import {
   stripModeOnlyChanges,
   truncateDiffAtFileBoundary,
 } from './diff-utils.js';
+import { assertMergeRepository } from './merge-source-identity.js';
+import {
+  applyPinnedAdoption,
+  inspectAdoptionGit,
+  preparePinnedAdoption,
+} from './source-adoption-git.js';
 
 const execFileAsync = promisify(execFile);
 const AUTOPOD_SYNC_STAGING_PREFIXES = ['.autopod-sync-', '.autopod-extract-'] as const;
@@ -109,6 +116,14 @@ const GIT_ENV: Record<string, string> = {
  * so tests and tools that introspect git argv don't have to special-case the
  * prefix. Git applies these as ad-hoc config for the single invocation.
  */
+const SOURCE_GIT_ENV: Record<string, string> = {
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_NO_REPLACE_OBJECTS: '1',
+  GIT_GRAFT_FILE: '/dev/null',
+  GIT_OPTIONAL_LOCKS: '0',
+};
+
 const GIT_NO_AMBIENT_CREDS_ENV: Record<string, string> = {
   GIT_CONFIG_COUNT: '3',
   GIT_CONFIG_KEY_0: 'credential.helper',
@@ -401,6 +416,83 @@ export interface LocalWorktreeManagerConfig {
  * Each pod gets its own worktree checked out from the bare repo.
  */
 export class LocalWorktreeManager implements WorktreeManager {
+  async prepareSourceAdoption(config: PrepareSourceAdoption) {
+    const remote = await this.getAuthenticatedRemote(config.worktreePath);
+    assertMergeRepository(
+      { repository: config.repository, branch: config.branch, baseBranch: config.branch },
+      remote.url,
+    );
+    config.assertCurrent();
+    try {
+      return await preparePinnedAdoption(
+        config,
+        (args) => git(args, { cwd: config.worktreePath, timeout: 60_000, env: SOURCE_GIT_ENV }),
+        async (ref) => {
+          config.assertCurrent();
+          await git(['fetch', '--no-tags', remote.url, `+refs/heads/${config.branch}:${ref}`], {
+            cwd: config.worktreePath,
+            timeout: 60_000,
+            credential: remote.credential,
+            credentialUrl: remote.url,
+            env: SOURCE_GIT_ENV,
+          });
+        },
+      );
+    } catch (error) {
+      if (error instanceof AutopodError) throw error;
+      throw sanitizeGitError(error);
+    }
+  }
+
+  async applySourceAdoption(config: PrepareSourceAdoption): Promise<void> {
+    await applyPinnedAdoption(config, (args) =>
+      git(args, { cwd: config.worktreePath, timeout: 60_000, env: SOURCE_GIT_ENV }),
+    );
+  }
+
+  async inspectSourceAdoption(worktreePath: string, branch: string) {
+    const source = await inspectAdoptionGit(
+      (args) => git(args, { cwd: worktreePath, timeout: 30_000, env: SOURCE_GIT_ENV }),
+      branch,
+    );
+    return { branch, commitSha: source.head, treeSha: source.tree, worktreeClean: true };
+  }
+
+  async observeSourceBranch(
+    worktreePath: string,
+    repository: string,
+    branch: string,
+  ): Promise<string> {
+    const remote = await this.getAuthenticatedRemote(worktreePath);
+    assertMergeRepository({ repository, branch, baseBranch: branch }, remote.url);
+    await git(['check-ref-format', `refs/heads/${branch}`], { cwd: worktreePath });
+    try {
+      const result = await git(['ls-remote', '--exit-code', remote.url, `refs/heads/${branch}`], {
+        cwd: worktreePath,
+        timeout: 30_000,
+        credential: remote.credential,
+        credentialUrl: remote.url,
+      });
+      const lines = result.stdout.trim().split('\n');
+      const [head, ref] = (lines[0] ?? '').split(/\s+/);
+      if (
+        lines.length !== 1 ||
+        ref !== `refs/heads/${branch}` ||
+        !head ||
+        !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(head)
+      )
+        throw new AutopodError(
+          'Remote source observation unavailable',
+          'SOURCE_REMOTE_UNAVAILABLE',
+          409,
+        );
+      return head;
+    } catch (error) {
+      if (error instanceof AutopodError) throw error;
+      throw sanitizeGitError(error);
+    }
+  }
+
   async inspectSource(worktreePath: string, expectedBranch: string) {
     const branch = (
       await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath })
@@ -979,10 +1071,10 @@ export class LocalWorktreeManager implements WorktreeManager {
   }
 
   async getBranchDiff(config: BranchDiffConfig): Promise<string> {
-    const { repoUrl, branch, baseBranch, pat, maxLength = 200_000 } = config;
+    const { repoUrl, branch, baseBranch, maxLength = 200_000 } = config;
     const cacheKey = this.sanitizeRepoUrl(repoUrl);
     const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
-    const remote = await this.getAuthenticatedRemoteForRepo(repoUrl, bareRepoPath, pat);
+    const remote = await this.getAuthenticatedRemoteForRepo(repoUrl);
     await fs.mkdir(this.cacheDir, { recursive: true });
 
     try {
@@ -1848,7 +1940,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     relPath: string;
     pat?: string;
   }): Promise<BranchFolderContents> {
-    const { repoUrl, branch, pat } = params;
+    const { repoUrl, branch } = params;
     // Normalize relPath: strip leading/trailing slashes, reject escape attempts.
     const relPath = params.relPath.replace(/^\/+|\/+$/g, '');
     if (!relPath || relPath.includes('..')) {
@@ -1857,7 +1949,7 @@ export class LocalWorktreeManager implements WorktreeManager {
 
     const cacheKey = this.sanitizeRepoUrl(repoUrl);
     const bareRepoPath = path.join(this.cacheDir, `${cacheKey}.git`);
-    const remote = await this.getAuthenticatedRemoteForRepo(repoUrl, bareRepoPath, pat);
+    const remote = await this.getAuthenticatedRemoteForRepo(repoUrl);
     await fs.mkdir(this.cacheDir, { recursive: true });
 
     // Serialize per-repo to avoid fetch races with other callers.
@@ -2121,7 +2213,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     purpose: string;
     branchPurpose?: 'base' | 'start';
   }): Promise<string> {
-    const { remote, bareRepoPath, branch, purpose, branchPurpose = 'base' } = params;
+    const { remote, bareRepoPath, branch, branchPurpose = 'base' } = params;
     try {
       await git(['fetch', remote.url, `+refs/heads/${branch}:refs/remotes/origin/${branch}`], {
         cwd: bareRepoPath,
@@ -2272,15 +2364,6 @@ export class LocalWorktreeManager implements WorktreeManager {
       .replace(/^https?:\/\//, '')
       .replace(/\.git$/, '')
       .replace(/[/:]/g, '_');
-  }
-
-  private async pathExists(p: string): Promise<boolean> {
-    try {
-      await fs.access(p);
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   private parseDiffStats(output: string): DiffStats {

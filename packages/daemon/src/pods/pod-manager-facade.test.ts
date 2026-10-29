@@ -30,7 +30,10 @@ function instance(disk = false) {
 describe('composed pod manager facade boundary', () => {
   it('adds no extra infrastructure construction effects and preserves actual shorthand function identities', () => {
     const f = instance();
-    expect(Object.keys(f.manager)).toHaveLength(73);
+    expect(Object.keys(f.manager)).toHaveLength(78);
+    expect(f.manager.adoptSource).toBeTypeOf('function');
+    expect(f.manager.getSourceAdoptions).toBeTypeOf('function');
+    expect(f.manager.reconcileTermination).toBeTypeOf('function');
     expect(f.manager.touchHeartbeat).toBe(f.owners.touchHeartbeat);
     expect(f.manager.getReviewerExecutor).toBe(f.owners.getReviewerExecutor);
     expect(f.cm.spawn).not.toHaveBeenCalled();

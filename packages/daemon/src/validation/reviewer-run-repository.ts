@@ -32,6 +32,10 @@ export interface ReviewerRunRecord {
   requiresReconciliation: boolean;
 }
 
+type ReviewerRunSqlRecord = Omit<ReviewerRunRecord, 'requiresReconciliation'> & {
+  requiresReconciliation: number;
+};
+
 /** A run blocks new reviewers until it is finished, cleaned and its usage is known or accepted. */
 export const UNRECONCILED_REVIEWER_RUN = `(state IN ('preparing','running')
   OR (state='uncertain' AND reconciled_at IS NULL) OR cleanup!='clean')`;
@@ -198,14 +202,14 @@ export class ReviewerRunRepository {
         .prepare(
           `SELECT ${RECORD_COLUMNS} FROM isolated_reviewer_runs WHERE pod_id=? ORDER BY created_at DESC, id`,
         )
-        .all(podId) as Array<ReviewerRunRecord & { requiresReconciliation: number }>
+        .all(podId) as ReviewerRunSqlRecord[]
     ).map((row) => ({ ...row, requiresReconciliation: !!row.requiresReconciliation }));
   }
 
   get(podId: string, runId: string): ReviewerRunRecord | null {
     const row = this.db
       .prepare(`SELECT ${RECORD_COLUMNS} FROM isolated_reviewer_runs WHERE pod_id=? AND id=?`)
-      .get(podId, runId) as (ReviewerRunRecord & { requiresReconciliation: number }) | undefined;
+      .get(podId, runId) as ReviewerRunSqlRecord | undefined;
     return row ? { ...row, requiresReconciliation: !!row.requiresReconciliation } : null;
   }
 

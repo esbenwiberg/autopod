@@ -1,6 +1,7 @@
 import type {
   FirewallDeniedEvent,
   Pod,
+  QualityInspectionUnavailableReason,
   ReadinessArea,
   ReadinessAreaReview,
   ReadinessAreaStatus,
@@ -14,12 +15,14 @@ import type { ActionAuditRepository } from '../actions/audit-repository.js';
 import type { ScanRepository, StoredScan } from '../security/scan-repository.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventRepository } from './event-repository.js';
+import { withExternalDeliveryReadiness } from './external-delivery-readiness.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import { computeScore, isQualityScoreEligible } from './quality-score.js';
 import { computeQualitySignals } from './quality-signals.js';
-import type { StoredValidation, ValidationRepository } from './validation-repository.js';
+import { withLifecycleReadiness } from './readiness-projection.js';
+import type { ValidationRepository } from './validation-repository.js';
 
 const READINESS_STATUSES: ReadinessStatus[] = ['ready', 'needs_review', 'waived', 'risky'];
 const AREA_TITLES: Record<ReadinessArea, string> = {
@@ -77,6 +80,8 @@ export interface ReadinessInputs {
   preflightOverlapCount?: number;
   qualityScore?: number | null;
   qualityScoreStage?: 'provisional' | 'terminal';
+  /** Why process health could not be scored, when known. */
+  qualityUnavailableReason?: QualityInspectionUnavailableReason | null;
   advisoryQaInFlight?: boolean;
   computedAt?: string;
 }
@@ -119,8 +124,8 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
     options: { advisoryQaInFlight?: boolean } = {},
   ): ReadinessReview => {
     const pod = deps.podRepo.getOrThrow(podId);
-    const validations = deps.validationRepo?.getForSession(podId) ?? [];
-    const latestValidation = selectLatestValidation(pod, validations);
+    // Null is an explicit invalidation, not permission to resurrect a prior cycle's pass.
+    const latestValidation = pod.lastValidationResult;
     const audit = deps.actionAuditRepo?.verifyAuditChain(podId);
     const actionSafety = deps.actionAuditRepo?.getSafetySummary(podId);
     const deniedEgress = summarizeDeniedEgressEvents(
@@ -130,6 +135,7 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
     let qualityScore = persistedQuality?.score ?? null;
     let qualityScoreStage: ReadinessInputs['qualityScoreStage'] =
       persistedQuality === null ? undefined : 'terminal';
+    let qualityUnavailableReason = persistedQuality?.inspectionUnavailableReason ?? null;
     if (persistedQuality === null && deps.eventRepo && deps.escalationRepo) {
       const signals = computeQualitySignals(podId, {
         podRepo: deps.podRepo,
@@ -146,30 +152,38 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
       if (isQualityScoreEligible({ signals, hasPiAttempt, hasNonPiAttempt })) {
         qualityScore = computeScore({ signals, stage: { kind: 'provisional' } });
         qualityScoreStage = 'provisional';
+      } else {
+        qualityUnavailableReason =
+          signals.inspectionUnavailableReason ??
+          (hasPiAttempt && hasNonPiAttempt ? 'mixed_pi_runtime' : null);
       }
     }
-    return deriveReadinessReview({
-      pod,
-      latestValidation,
-      latestSecurityScan: deps.scanRepo?.getLatestForPod(podId, 'push') ?? null,
-      actionAudit: audit
-        ? {
-            valid: audit.valid,
-            rowCount: audit.rowCount,
-            reason: audit.reason,
-            quarantineCount: actionSafety?.quarantineCount ?? 0,
-            piiCount: actionSafety?.piiCount ?? 0,
-            piiCategories: actionSafety?.piiCategories ?? [],
-            maxQuarantineScore: actionSafety?.maxQuarantineScore ?? 0,
-          }
-        : undefined,
-      deniedEgressCount: deniedEgress.total,
-      nonBlockingDeniedEgressCount: deniedEgress.nonBlocking,
-      preflightOverlapCount: deps.eventRepo?.countForSession(podId, 'pod.preflight_overlap') ?? 0,
-      qualityScore,
-      qualityScoreStage,
-      advisoryQaInFlight: options.advisoryQaInFlight,
-    });
+    return withExternalDeliveryReadiness(
+      deriveReadinessReview({
+        pod,
+        latestValidation,
+        latestSecurityScan: deps.scanRepo?.getLatestForPod(podId, 'push') ?? null,
+        actionAudit: audit
+          ? {
+              valid: audit.valid,
+              rowCount: audit.rowCount,
+              reason: audit.reason,
+              quarantineCount: actionSafety?.quarantineCount ?? 0,
+              piiCount: actionSafety?.piiCount ?? 0,
+              piiCategories: actionSafety?.piiCategories ?? [],
+              maxQuarantineScore: actionSafety?.maxQuarantineScore ?? 0,
+            }
+          : undefined,
+        deniedEgressCount: deniedEgress.total,
+        nonBlockingDeniedEgressCount: deniedEgress.nonBlocking,
+        preflightOverlapCount: deps.eventRepo?.countForSession(podId, 'pod.preflight_overlap') ?? 0,
+        qualityScore,
+        qualityScoreStage,
+        qualityUnavailableReason,
+        advisoryQaInFlight: options.advisoryQaInFlight,
+      }),
+      deps.podRepo.externalDeliveries?.get(podId) ?? null,
+    );
   };
 
   return {
@@ -185,13 +199,6 @@ export function createReadinessService(deps: ReadinessServiceDeps): ReadinessSer
       return deriveSeriesReadiness(seriesId, deps.podRepo.getPodsBySeries(seriesId));
     },
   };
-}
-
-function selectLatestValidation(
-  pod: Pod,
-  validations: StoredValidation[],
-): ValidationResult | null {
-  return pod.lastValidationResult ?? validations[validations.length - 1]?.result ?? null;
 }
 
 export function deriveReadinessReview(inputs: ReadinessInputs): ReadinessReview {
@@ -212,15 +219,19 @@ export function deriveReadinessReview(inputs: ReadinessInputs): ReadinessReview 
     findings,
   );
 
-  return {
-    status,
-    summary: summarizePodReadiness(status, findings),
-    computedAt,
-    scope: 'pod',
-    areas: areas.map(({ area }) => area),
-    findings,
-    approval: inputs.pod.readinessReview?.approval ?? null,
-  };
+  return withLifecycleReadiness(
+    {
+      status,
+      summary: summarizePodReadiness(status, findings),
+      computedAt,
+      scope: 'pod',
+      areas: areas.map(({ area }) => area),
+      findings,
+      approval: inputs.pod.readinessReview?.approval ?? null,
+    },
+    inputs.pod.status,
+    inputs.latestValidation,
+  );
 }
 
 export function deriveSeriesReadiness(
@@ -553,10 +564,13 @@ function qualityArea(inputs: ReadinessInputs): {
 } {
   const score = inputs.qualityScore;
   if (score === null || score === undefined) {
+    const reason = inputs.qualityUnavailableReason;
     return area(
       'quality',
       'not_available',
-      'No eligible process-health score is available yet.',
+      reason
+        ? `Process health unavailable: ${QUALITY_UNAVAILABLE_REASONS[reason]}`
+        : 'No eligible process-health score is available yet.',
       [],
     );
   }
@@ -576,6 +590,15 @@ function qualityArea(inputs: ReadinessInputs): {
   }
   return area('quality', 'ready', `${label} is ${score}.`, []);
 }
+
+// Keep in sync with SessionQualityCard.unavailableReasonDescription on desktop.
+const QUALITY_UNAVAILABLE_REASONS: Record<QualityInspectionUnavailableReason, string> = {
+  no_activity: 'no quality-relevant activity was retained for this session.',
+  ambiguous_inspection: 'inspection commands could not be verified safely.',
+  unresolved_write: 'native write activity could not be resolved safely.',
+  mixed_pi_runtime: 'mixed Pi and non-Pi runtime evidence cannot be scored.',
+  historical_pi: 'historical Pi activity does not retain compatible evidence.',
+};
 
 function advisoryQaArea(inputs: ReadinessInputs): {
   area: ReadinessAreaReview;

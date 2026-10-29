@@ -124,6 +124,53 @@ describe('LocalWorktreeManager', () => {
   const cacheDir = '/tmp/test-cache';
   const worktreeDir = '/tmp/test-worktrees';
 
+  describe('exact-source adoption adapter', () => {
+    const config = {
+      worktreePath: '/tmp/test-worktrees/pod',
+      repository: 'https://github.com/org/repo',
+      branch: 'repair',
+      oldHead: 'a'.repeat(40),
+      targetHead: 'b'.repeat(40),
+      id: 'source-owner',
+      bundle: '/tmp/private/old-source.bundle',
+      assertCurrent() {},
+    };
+    it('keeps a remote movement refusal machine-readable, without touching source', async () => {
+      setupExecFileMock({
+        '--git-common-dir': { stdout: '/tmp/test-cache/repo.git' },
+        'remote get-url origin': { stdout: config.repository },
+        'symbolic-ref --short HEAD': { stdout: config.branch },
+        'rev-parse HEAD^{tree}': { stdout: 'd'.repeat(40) },
+        'rev-parse HEAD': { stdout: config.oldHead },
+        'rev-parse refs/autopod/source-adoption/source-owner/target': { stdout: 'c'.repeat(40) },
+      });
+      await expect(manager.prepareSourceAdoption(config)).rejects.toMatchObject({
+        code: 'SOURCE_REMOTE_CHANGED',
+      });
+      expect(
+        execFileMock.mock.calls.some((call) => ['merge', 'reset', 'push'].includes(call[1][0])),
+      ).toBe(false);
+    });
+    it('refuses a different repository before any fetch', async () => {
+      setupExecFileMock({
+        '--git-common-dir': { stdout: '/tmp/test-cache/repo.git' },
+        'remote get-url origin': { stdout: 'https://github.com/other/repo' },
+      });
+      await expect(manager.prepareSourceAdoption(config)).rejects.toThrow();
+      expect(execFileMock.mock.calls.some((call) => call[1][0] === 'fetch')).toBe(false);
+    });
+    it('does not turn an invalid remote observation into a generic success/error', async () => {
+      setupExecFileMock({
+        '--git-common-dir': { stdout: '/tmp/test-cache/repo.git' },
+        'remote get-url origin': { stdout: config.repository },
+        'ls-remote --exit-code': { stdout: 'not-a-source-receipt' },
+      });
+      await expect(
+        manager.observeSourceBranch(config.worktreePath, config.repository, config.branch),
+      ).rejects.toMatchObject({ code: 'SOURCE_REMOTE_UNAVAILABLE' });
+    });
+  });
+
   it('fetches an exact source commit with daemon-only authentication and removes temporary Git metadata', async () => {
     const revision = 'a'.repeat(40);
     setupExecFileMock({

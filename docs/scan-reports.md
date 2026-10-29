@@ -39,10 +39,17 @@ there are findings; unavailable or failed checks finish `incomplete` with unknow
 
 Dependency audits currently support npm lockfile v2/v3 (`package-lock.json` or
 `npm-shrinkwrap.json`) and send dependency metadata to the public npm advisory service.
-Other recognized ecosystems, or a manifest without a supported lockfile, report
-incomplete coverage. Auditing uses an isolated temporary directory, ignores scripts,
-and never installs repository code or applies fixes. Advisory checks run even when
+Other recognized ecosystems (including Maven/Gradle, .NET, Python, Ruby, Go,
+Rust, PHP, Swift, Dart, Elixir and sbt), or a manifest without a supported lockfile,
+report incomplete coverage with unknown counts. Mixed supported/unsupported
+projects retain supported findings while the overall coverage remains incomplete.
+Auditing uses an isolated temporary directory, ignores scripts, and never installs
+repository code or applies fixes. Advisory checks run even when
 manifests did not change.
+
+Deploy the daemon before clients that send explicit `scope` policies. Older strict
+daemons reject the new field; clients do not universally negotiate this capability.
+Keep explicit-scope clients on a compatible daemon during a mixed-version rollout.
 
 Collection is bounded: 10,000 current-tree paths, 200 delta paths, 2 MiB per Git
 command/blob, 32 MiB aggregate blob reads, 1,000 findings, and a 60-second scanner
@@ -51,3 +58,11 @@ exceeded limits, detector failures and unavailable advisory services cannot esta
 a clean result. Partial findings remain redacted and durable; inspect diagnostics
 and arrange a narrower or supported scan when coverage is incomplete. Reports and
 triage remain immutable evidence; repair launches still require human selection.
+
+The collector budgets serialized UTF-8 JSON (including escaping) during collection,
+within the existing 2 MiB receipt limit. Scope capture reserves 64 KiB for an
+initial finding, plus 32 KiB for completion diagnostics and scanner metadata. A bounded partial scope records incomplete coverage and unknown counts;
+earlier accepted findings and commit identities remain readable. Individual finding
+records also fit the existing reader bounds. Immutable blob sizes are checked and
+charged before content reads, including oversized objects that are never buffered.
+Repeated unsupported reads therefore exhaust the same 32 MiB aggregate budget.

@@ -186,6 +186,12 @@ export interface PodManagerDependencies {
 }
 
 export interface PodManager {
+  adoptSource?(
+    podId: string,
+    input: import('./source-adoption-controller.js').SourceAdoptionRequest,
+    actor: OperatorActor,
+  ): Promise<import('./source-adoption-types.js').SourceAdoptionState>;
+  getSourceAdoptions?(podId: string): import('./source-adoption-types.js').SourceAdoptionState[];
   getLaunchConfiguration?(podId: string): EffectiveLaunchConfig | null;
   createResolvedSession?(
     config: EffectiveLaunchConfig,
@@ -288,6 +294,7 @@ export interface PodManager {
   ): Promise<void>;
   /** Check worker retry permission before Rework can tear down or enqueue resources. */
   assertCanRework(podId: string): void;
+  assertCanRetryValidation(podId: string): void;
   triggerValidation(
     podId: string,
     options?: { force?: boolean; validationOnly?: boolean },
@@ -299,7 +306,7 @@ export interface PodManager {
    *  findings. */
   revalidateSession(
     podId: string,
-    options?: { force?: boolean },
+    options?: { force?: boolean; checksOnly?: boolean },
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }>;
   /** Create a linked workspace pod on the same branch as a failed worker pod for human fixes. */
   fixManually(
@@ -326,6 +333,7 @@ export interface PodManager {
     previewUrl: string | null;
   }>;
   getSession(podId: string): Pod;
+  getExternalDelivery(podId: string): import('@autopod/shared').ExternalDeliveryReceipt | null;
   /** Refresh terminal readiness after dependent quality telemetry is persisted. */
   refreshReadinessAfterQualityScore(podId: string): boolean;
   listSessions(filters?: {
@@ -397,6 +405,12 @@ export interface PodManager {
    * Updates prUrl on success. Throws if the pod is not complete or already has a PR.
    */
   retryCreatePr(podId: string): Promise<void>;
+  reconcileTermination(
+    podId: string,
+    runId: string,
+    reason: string,
+    actor: OperatorActor,
+  ): Promise<import('@autopod/shared').TerminationReconciliationReceipt>;
   /**
    * Operator escape hatch for `failed` pods: advance the pod from where it died
    * without re-running the agent. Picks the cheapest action that fits the pod's

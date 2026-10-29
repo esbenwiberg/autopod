@@ -33,6 +33,7 @@ import { ClaudeRuntime } from '../runtimes/claude-runtime.js';
 import { CodexRuntime } from '../runtimes/codex-runtime.js';
 import { CopilotRuntime } from '../runtimes/copilot-runtime.js';
 import {
+  collectAndAcknowledgeGuidance,
   mockBranchPublication,
   mockCommittedPublication,
   mockPrMerge,
@@ -8820,6 +8821,56 @@ describe('PodManager', () => {
         },
       );
 
+      it('coordinates manager callers per pod and releases failed approval for explicit retry', async () => {
+        const { ctx, manager, pod } = setup();
+        const other = manager.createSession(
+          { profileName: 'test-profile', task: 'Independent approval', options: pod.options },
+          'user-1',
+        );
+        ctx.podRepo.update(
+          other.id,
+          validatedPodUpdates(other.id, {
+            containerId: 'other-approval-source',
+            worktreePath: '/tmp/other-wt',
+            filesChanged: 1,
+          }),
+        );
+        let fail!: (error: Error) => void;
+        const held = new Promise<void>((_, reject) => {
+          fail = reject;
+        });
+        let started!: () => void;
+        const collecting = new Promise<void>((resolve) => {
+          started = resolve;
+        });
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer)
+          .mockImplementationOnce(async () => {
+            started();
+            await held;
+          })
+          .mockResolvedValue(undefined);
+        const first = manager.approveSession(pod.id);
+        const failure = expect(first).rejects.toMatchObject({
+          code: 'ARTIFACT_PRESERVATION_FAILED',
+        });
+        await collecting;
+        await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
+          code: 'APPROVAL_IN_PROGRESS',
+        });
+        await manager.approveSession(other.id);
+        expect(manager.getSession(other.id).status).toBe('complete');
+        expect(manager.getSession(pod.id).status).toBe('validated');
+        expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(2);
+        fail(new Error('Synthetic export failure'));
+        await failure;
+        expect(manager.getSession(pod.id).containerId).toBe('approval-source');
+        await manager.approveSession(pod.id);
+        expect(manager.getSession(pod.id).status).toBe('complete');
+        expect(ctx.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(3);
+        expect(ctx.worktreeManager.mergeBranch).toHaveBeenCalledTimes(2);
+        expect(ctx.containerManager.kill).toHaveBeenCalledTimes(2);
+      });
+
       it('retains validated resources and does not publish if report copying fails', async () => {
         const { ctx, manager, pod } = setup();
         vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(
@@ -13713,6 +13764,8 @@ describe('PodManager', () => {
             },
           });
           const continuation = async function* (): AsyncIterable<AgentEvent> {
+            const reply = collectAndAcknowledgeGuidance(ctx.deps.nudgeRepo, pod.id);
+            expect(reply?.messages.join('\n')).toContain('Repair finding A only');
             yield {
               type: 'complete',
               timestamp: new Date().toISOString(),
@@ -13733,6 +13786,7 @@ describe('PodManager', () => {
           expect(ctx.db.prepare('SELECT response FROM completion_decisions').get()).toEqual({
             response: 'Repair finding A only',
           });
+          expect(ctx.deps.nudgeRepo.hasPending(pod.id)).toBe(true);
           vi.mocked(ctx.runtime.resume).mockClear();
           ctx.podRepo.update(pod.id, {
             status: 'queued',
@@ -13748,6 +13802,7 @@ describe('PodManager', () => {
           expect(delivered).toContain(question.id);
           expect(delivered).toContain('Which finding?');
           expect(restarted.getSession(pod.id).status).toBe('validated');
+          expect(ctx.deps.nudgeRepo.hasPending(pod.id)).toBe(false);
           const continuationCount =
             vi.mocked(ctx.runtime.resume).mock.calls.length +
             vi.mocked(ctx.runtime.spawn).mock.calls.length;
@@ -15146,7 +15201,7 @@ describe('PodManager', () => {
           worktreePath: '/tmp/wt',
         });
         const replacement = makeValidationResult({ podId: pod.id, attempt: 1 });
-        const replacementReadiness = makeReadinessReview('ready', 'Replacement readiness');
+        const replacementReadiness = makeReadinessReview('needs_review', 'Replacement readiness');
         const advisoryResult = {
           status: 'pass' as const,
           reasoning: 'Old execution finished',
@@ -19441,7 +19496,13 @@ describe('PodManager', () => {
           ]),
         }),
       );
-      expect(piRuntime.resume).toHaveBeenCalledWith(pod.id, 'continue please', 'ctr-1', undefined);
+      expect(piRuntime.resume).toHaveBeenCalledWith(
+        pod.id,
+        expect.stringContaining('continue please'),
+        'ctr-1',
+        undefined,
+      );
+      expect(vi.mocked(piRuntime.resume).mock.calls[0]?.[1]).toContain('acknowledge_messages');
     });
   });
 
@@ -20655,6 +20716,8 @@ describe('PodManager', () => {
             vi.mocked(ctx.runtime.resume).mockImplementation(async function* () {
               resumed.resolve();
               await releaseWorker.promise;
+              const reply = collectAndAcknowledgeGuidance(ctx.deps.nudgeRepo, pod.id);
+              expect(reply?.messages.join('\n')).toContain('Revise the report');
               yield { type: 'complete', timestamp: new Date().toISOString(), result: 'New report' };
             });
             const manager = createPodManager(ctx.deps);
@@ -24815,7 +24878,7 @@ describe('worker startup diagnostics', () => {
     expect(failed.failureReason).not.toContain('ghp_1234567890');
   });
 
-  it('destroys a failed sandbox only after its workspace checkpoint succeeds', async () => {
+  it('keeps report sources after a successful failed-worker checkpoint', async () => {
     const runtime = createMockRuntime();
     vi.mocked(runtime.spawn).mockImplementation(async function* () {
       yield {
@@ -24839,8 +24902,11 @@ describe('worker startup diagnostics', () => {
     await manager.processPod(pod.id);
 
     expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalled();
-    expect(ctx.containerManager.kill).toHaveBeenCalledWith('container-123');
-    expect(manager.getSession(pod.id).containerId).toBeNull();
+    expect(ctx.containerManager.kill).not.toHaveBeenCalled();
+    expect(manager.getSession(pod.id)).toMatchObject({
+      status: 'failed',
+      containerId: 'container-123',
+    });
   });
 
   it('retains a failed sandbox when its workspace checkpoint fails', async () => {

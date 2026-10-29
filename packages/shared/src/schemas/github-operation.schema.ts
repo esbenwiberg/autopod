@@ -41,7 +41,7 @@ export const githubMutationSchema = z
           .refine(
             (s) => !s.startsWith('refs/') && !s.includes('*') && !s.includes('..') && !/\s/.test(s),
           ),
-        inputs: z.record(z.string().max(60_000)).default({}),
+        inputs: z.record(z.string(), z.string().max(60_000)).default({}),
       })
       .strict(),
     base.extend({ operation: z.literal('runs.rerun'), runId: number }).strict(),

@@ -14,7 +14,12 @@ import {
   validateTarget,
   verifyCache,
 } from './lib/native-sandbox-qualification.mjs';
-import { buildAdapter, cleanupOwned, runSupervised } from './qualify-native-sandbox.mjs';
+import {
+  buildAdapter,
+  cleanupOwned,
+  openWakeupJournal,
+  runSupervised,
+} from './qualify-native-sandbox.mjs';
 
 const target = {
   subscriptionId: '00000000-0000-0000-0000-000000000000',
@@ -408,10 +413,12 @@ test('fresh production source bundle exercises guarded adapter paths including s
   const dir = mkdtempSync(
     new URL('../packages/daemon/.turbo-r01c-test-', import.meta.url).pathname,
   );
+  let wakeup;
   try {
     const built = await buildAdapter(dir);
     const require = createRequire(import.meta.url);
     const { AzureSandboxApiClient, SandboxContainerManager } = require(built.outfile);
+    wakeup = openWakeupJournal(built.outfile, join(dir, 'wakeups.sqlite'));
     let deleted = false;
     let createCalls = 0;
     let resumeCalls = 0;
@@ -532,6 +539,7 @@ test('fresh production source bundle exercises guarded adapter paths including s
         },
         fetch: guard.fetch,
         webSocket: guard.webSocket,
+        wakeupJournal: wakeup.journal,
         retry: { maxAttempts: 1 },
         pollIntervalMs: 1,
       },
@@ -593,6 +601,7 @@ test('fresh production source bundle exercises guarded adapter paths including s
       'node_modules',
     ]);
     assert.equal(resumeCalls, 1);
+    assert.equal(wakeup.journal.retains(object.id), false);
     assert.equal(readFileSync(join(outputDir, 'input.txt'), 'utf8'), 'from-host\n');
     assert.equal(readFileSync(join(outputDir, 'output.txt'), 'utf8'), 'from-sandbox\n');
     await manager.refreshFirewall(
@@ -604,7 +613,11 @@ test('fresh production source bundle exercises guarded adapter paths including s
     await manager.kill(object.id);
     assert.equal(deleted, true);
     assert.equal(receipt.guardFailures, undefined);
+    wakeup.close();
+    wakeup = openWakeupJournal(built.outfile, join(dir, 'wakeups.sqlite'));
+    assert.equal(wakeup.journal.retains(object.id), false);
   } finally {
+    wakeup?.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

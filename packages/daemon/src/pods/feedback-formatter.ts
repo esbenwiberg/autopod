@@ -1,4 +1,5 @@
 import type { EscalationResponse, ValidationResult } from '@autopod/shared';
+import { boundedDiagnosticOutput } from './diagnostic-output.js';
 
 export interface FeedbackOptions {
   task: string;
@@ -50,7 +51,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
     lines.push('### Setup Errors');
     if (result.setup.output) {
       lines.push('```');
-      lines.push(result.setup.output.slice(0, 10_000));
+      lines.push(boundedDiagnosticOutput(result.setup.output));
       lines.push('```');
     }
     lines.push('');
@@ -60,7 +61,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
   if (result.smoke.build.status === 'fail') {
     lines.push('### Build Errors');
     lines.push('```');
-    lines.push(result.smoke.build.output);
+    lines.push(boundedDiagnosticOutput(result.smoke.build.output));
     lines.push('```');
     lines.push('');
   }
@@ -101,7 +102,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
     const testOutput = [result.test.stdout, result.test.stderr].filter(Boolean).join('\n').trim();
     if (testOutput) {
       lines.push('```');
-      lines.push(testOutput.slice(0, 10_000));
+      lines.push(boundedDiagnosticOutput(testOutput));
       lines.push('```');
     }
     lines.push('');
@@ -112,7 +113,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
     lines.push('### Lint Failures');
     if (result.lint.output) {
       lines.push('```');
-      lines.push(result.lint.output.slice(0, 10_000));
+      lines.push(boundedDiagnosticOutput(result.lint.output));
       lines.push('```');
     }
     lines.push('');
@@ -123,7 +124,7 @@ function formatValidationFailure(input: ValidationFeedback): string {
     lines.push('### Security Scan Failures');
     if (result.sast.output) {
       lines.push('```');
-      lines.push(result.sast.output.slice(0, 10_000));
+      lines.push(boundedDiagnosticOutput(result.sast.output));
       lines.push('```');
     }
     lines.push('');

@@ -6,6 +6,7 @@ import { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import { AutopodError, parseSpecContract } from '@autopod/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ExecInterruptedError } from '../containers/exec-exit-evidence.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type {
   ValidationEngineConfig,
@@ -3024,6 +3025,45 @@ human_review: []
     expect(cm.execStreaming).toHaveBeenCalledTimes(1);
   });
 
+  it.each([undefined, 7])(
+    'retains failed test output and timeout evidence with observed exit %s',
+    async (observedExitCode) => {
+      const cm = stubContainerManager();
+      const exitCode = Promise.reject(
+        new ExecInterruptedError({
+          cause: 'timeout',
+          timeoutMs: 600_000,
+          cleanup: 'failed',
+          ...(observedExitCode !== undefined ? { observedExitCode } : {}),
+        }),
+      );
+      void exitCode.catch(() => {});
+      vi.mocked(cm.execStreaming).mockResolvedValue({
+        stdout: Readable.from(['FAIL real test assertion\n']),
+        stderr: Readable.from(['assertion expected true, received false\n']),
+        exitCode,
+        kill: vi.fn(),
+      });
+      const result = await createLocalValidationEngine(cm).validate(
+        baseConfig({
+          executionTarget: 'sandbox',
+          testCommand: 'test',
+          startCommand: '',
+          smokePages: [],
+        }),
+      );
+      expect(result.overall).toBe('fail');
+      expect(result.infrastructureFailure).toMatchObject({
+        retryable: false,
+        execution: { cause: 'timeout', timeoutMs: 600_000, cleanup: 'failed' },
+      });
+      expect(result.test?.stdout).toContain('FAIL real test assertion');
+      expect(result.test?.stdout).toContain('assertion expected true, received false');
+      expect(result.test?.duration).toBeGreaterThanOrEqual(0);
+      expect(cm.execStreaming).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it.each(['EXEC_EXIT_UNVERIFIED', 'AZURE_SANDBOX_EXEC_INVALID_RESPONSE'])(
     'blocks an unknown sandbox test outcome without replay: %s',
     async (code) => {
@@ -3735,11 +3775,36 @@ human_review: []
     expect(execInContainer).toHaveBeenCalledTimes(3);
     expect(execInContainer.mock.calls[1]?.[0]).toBe('container-test');
     expect(execInContainer.mock.calls[1]?.[1].join(' ')).toContain('/run/autopod/agent-shim.sh');
+    expect(execInContainer.mock.calls[1]?.[1].join(' ')).toContain('--json-schema');
+    expect(runContainerReviewer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outputContract: expect.objectContaining({ name: 'task-review-v1' }),
+      }),
+    );
     expect(execInContainer.mock.calls[1]?.[2]).toMatchObject({
       cwd: '/workspace',
       env: reviewerExecEnv,
     });
     expect(execInContainer.mock.calls[1]?.[2]).not.toHaveProperty('timeout');
+  });
+
+  it('retains a bounded head and tail for malformed Tier 1 output without accepting a verdict', async () => {
+    const raw = `{"status":"fail","reasoning":"Actual critic issue"${'x'.repeat(4000)}tail: repair the financial export`;
+    vi.mocked(runContainerReviewer).mockResolvedValueOnce({ stdout: raw });
+    const engine = createLocalValidationEngine(stubContainerManager());
+    const result = await engine.validate(
+      baseConfig({
+        reviewerProvider: 'max',
+        reviewerModel: 'claude-sonnet-4-6',
+        diff: 'diff --git a/src/a.ts b/src/a.ts\n+changed\n',
+      }),
+    );
+    expect(result.taskReview).toBeNull();
+    expect(result.overall).toBe('fail');
+    expect(result.reviewSkipReason).toContain('No verdict was accepted');
+    expect(result.reviewSkipReason).toContain('Actual critic issue');
+    expect(result.reviewSkipReason).toContain('tail: repair the financial export');
+    expect(result.reviewSkipReason?.length).toBeLessThan(2500);
   });
 
   it('fails Max Review clearly when no live container is available', async () => {

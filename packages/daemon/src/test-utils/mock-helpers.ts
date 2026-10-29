@@ -49,6 +49,13 @@ import type { ProfileStore } from '../profiles/index.js';
 import { createScheduledJobRepository } from '../scheduled-jobs/scheduled-job-repository.js';
 import { createScheduledJobTemplateRepository } from '../scheduled-jobs/scheduled-job-template-repository.js';
 
+/** Worker double: exercise the real inbox read/ack protocol, never controller auto-ack. */
+export function collectAndAcknowledgeGuidance(repo: NudgeRepository, podId: string) {
+  const delivery = repo.readPending(podId);
+  if (delivery) repo.acknowledgeDelivery(podId, delivery.deliveryId);
+  return delivery;
+}
+
 /** Synthetic transport evidence for lifecycle tests; real Git coverage is separate. */
 /** Synthetic provider evidence for local lifecycle fixtures, never live provider proof. */
 export async function mockPrMerge(

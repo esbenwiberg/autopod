@@ -20,6 +20,8 @@ import type { ArtifactResumeObservation } from './artifact-resume-observation.js
 import { createValidationTriggerCalls } from './pod-facade-calls.js';
 import type { PodFacadeOwners } from './pod-facade-ports.js';
 import type { PodStats } from './pod-repository.js';
+import type { SourceAdoptionRequest } from './source-adoption-controller.js';
+import { sourceAdoptionError } from './source-adoption-identity.js';
 import type { PodCreator } from './workspace-contracts.js';
 export function createPodManagerFacade(captured: PodFacadeOwners) {
   const {
@@ -66,8 +68,22 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     providerContinuation,
     workspaceEscapeControls,
     workspaceWatchdog,
+    terminationReconciliation,
   } = captured;
   return {
+    adoptSource(podId: string, input: SourceAdoptionRequest, actor: OperatorActor) {
+      return (captured.sourceAdoption ?? sourceAdoptionError('Source adoption unavailable')).submit(
+        podId,
+        input,
+        actor,
+      );
+    },
+    getSourceAdoptions(podId: string) {
+      podRepo.getOrThrow(podId);
+      return (captured.sourceAdoption ?? sourceAdoptionError('Source adoption unavailable')).list(
+        podId,
+      );
+    },
     getLaunchConfiguration(podId: string): EffectiveLaunchConfig | null {
       return admissionQueries.getLaunchConfiguration(podId);
     },
@@ -208,6 +224,9 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     cleanupPodResourcesForRecovery(podId: string): Promise<void> {
       return workspaceRecoveryCommands.cleanupPodResourcesForRecovery(podId);
     },
+    assertCanRetryValidation(podId: string): void {
+      continuationControls.assertCanRetryValidation(podId);
+    },
     assertCanRework(
       podId: string,
     ): ReturnType<PodFacadeOwners['continuationControls']['assertCanRework']> {
@@ -225,7 +244,7 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     },
     revalidateSession(
       podId: string,
-      options?: { force?: boolean },
+      options?: { force?: boolean; checksOnly?: boolean },
     ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
       return validationRevalidationWorkflow.revalidateSession.call(
         { approveSession: (...args) => this.approveSession(...args) },
@@ -293,6 +312,9 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
 
     getSession(podId: string): Pod {
       return admissionQueries.getSession(podId);
+    },
+    getExternalDelivery(podId: string) {
+      return admissionQueries.getExternalDelivery(podId);
     },
 
     refreshReadinessAfterQualityScore(podId: string): boolean {
@@ -439,6 +461,9 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
 
     getArtifactResumeObservation(podId: string): ArtifactResumeObservation {
       return workspaceArtifactObservation.getArtifactResumeObservation(podId);
+    },
+    reconcileTermination(podId: string, runId: string, reason: string, actor: OperatorActor) {
+      return terminationReconciliation.reconcileTermination(podId, runId, reason, actor);
     },
     resumePod(podId: string): Promise<{
       action:

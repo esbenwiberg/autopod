@@ -72,7 +72,7 @@ export const hostConfigurationSettingsSchema = z
           .default({ memoryGb: 2, cpus: 1 }),
       })
       .strict()
-      .default({}),
+      .prefault({}),
   })
   .strict();
 

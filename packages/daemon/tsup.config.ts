@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { defineConfig } from 'tsup';
 import { collectImplementationIdentity } from './src/runtimes/build-input-identity.js';
 
@@ -46,9 +47,48 @@ export default defineConfig({
     'src/db/reconcile-native-checkpoint-cli.ts',
     'src/configuration/conversion-cli.ts',
     'src/configuration/cutover-cli.ts',
+    // Executable entry declarations can erase private implementation imports.
+    // Keep critical recovery/configuration/auth modules checked by normal CI too.
+    ...(process.env.AUTOPOD_TYPECHECK === '1'
+      ? [
+          'src/actions/deployment-run-repository.ts',
+          'src/api/routes/scheduled-jobs.ts',
+          'src/api/types.ts',
+          'src/configuration/conversion-bindings.ts',
+          'src/configuration/host-components.ts',
+          'src/configuration/series-launches.ts',
+          'src/containers/docker-network-manager.ts',
+          'src/github/read-broker.ts',
+          'src/issue-watcher/issue-watcher-service.ts',
+          'src/managed/codex-wire.ts',
+          'src/pods/admission-memory-briefing.ts',
+          'src/pods/approval-delivery-execution.ts',
+          'src/pods/completion-guards.ts',
+          'src/pods/completion-ports.ts',
+          'src/pods/pod-manager.ts',
+          'src/pods/pod-repository.ts',
+          'src/pods/quality-score-repository.ts',
+          'src/pods/source-adoption-controller.ts',
+          'src/pods/task-execution-ledger.ts',
+          'src/pods/workspace-checkpoint-controller.ts',
+          'src/providers/credential-persistence.ts',
+          'src/providers/env-builder.ts',
+          'src/providers/memory-reviewer.ts',
+          'src/scheduled-jobs/scheduled-job-manager.ts',
+          'src/validation/reviewer-run-repository.ts',
+          'src/worktrees/diff-utils.ts',
+          'src/worktrees/local-worktree-manager.ts',
+        ]
+      : []),
   ],
   format: ['esm'],
-  dts: true,
+  dts:
+    process.env.AUTOPOD_TYPECHECK === '1'
+      ? {
+          only: true,
+          compilerOptions: { types: ['node', resolve('src/api/type-context')] },
+        }
+      : true,
   clean: true,
   sourcemap: true,
   external: ['better-sqlite3', 'pino-pretty'],

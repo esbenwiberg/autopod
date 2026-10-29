@@ -10,6 +10,8 @@ import AutopodUI
 public final class ActionHandler {
 
   public private(set) var pendingAction: String?
+  public private(set) var pendingApprovals: Set<String> = []
+  private var bulkApprovalPending = false
   public private(set) var lastError: String?
   /// Error from the most recent preview call, or nil on success. Separate
   /// from lastError so the series sheet doesn't pick up unrelated failures.
@@ -154,6 +156,15 @@ public final class ActionHandler {
         self.podStore.upsertSession(PodMapper.map(response))
         return response.id
       },
+      loadValidationRecovery: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.getValidationRecovery(id) }
+      },
+      requestValidationRecovery: { [weak self] id, input in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        try await self.perform { try await self.api.requestValidationRecovery(id, input: input) }
+        try await self.perform { await self.podStore.refreshSession(id) }
+      },
       loadRetryState: { [weak self] id, stage in
         guard let self else { throw URLError(.notConnectedToInternet) }
         return try await self.perform { try await self.api.getRetryState(id, stage: stage) }
@@ -217,6 +228,7 @@ public final class ActionHandler {
         $0.linkedSessionId == id || $0.id == source.fixPodId || (source.seriesId != nil && $0.seriesId == source.seriesId)
       })
     })
+    result.approvalPending = { [weak self] id in self?.pendingApprovals.contains(id) == true }
     return result
   }
 
@@ -249,14 +261,19 @@ public final class ActionHandler {
   // MARK: - Actions
 
   public func approve(_ podId: String, reason: String? = nil) async {
-    pendingAction = "approve-\(podId)"
+    guard pendingApprovals.insert(podId).inserted else { return }
+    let marker = "approve-\(podId)"
+    pendingAction = marker
+    defer {
+      pendingApprovals.remove(podId)
+      if pendingAction == marker { pendingAction = nil }
+    }
     do {
       try await perform { try await api.approvePod(podId, reason: reason) }
       // Status is updated by the daemon event after readiness gates accept the approval.
     } catch {
       lastError = error.localizedDescription
     }
-    pendingAction = nil
   }
 
   public func reject(_ podId: String, feedback: String?) async {
@@ -583,14 +600,25 @@ public final class ActionHandler {
   }
 
   public func approveAllValidated() async {
+    guard !bulkApprovalPending else { return }
+    bulkApprovalPending = true
+    // Own only new markers so bulk completion cannot clear an individual request.
+    let owned = Set(podStore.pods.filter {
+      $0.status == .validated && !pendingApprovals.contains($0.id)
+    }.map(\.id))
+    pendingApprovals.formUnion(owned)
     pendingAction = "approve-all"
+    defer {
+      bulkApprovalPending = false
+      pendingApprovals.subtract(owned)
+      if pendingAction == "approve-all" { pendingAction = nil }
+    }
     do {
       _ = try await perform { try await api.approveAllValidated() }
       try await perform { await podStore.loadSessions() }
     } catch {
       lastError = error.localizedDescription
     }
-    pendingAction = nil
   }
 
   public func killAllFailed() async {

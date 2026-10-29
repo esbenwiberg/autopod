@@ -1,7 +1,10 @@
 import type { AgentEvent, Pod } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import type { ContinuationCaptured, ContinuationLiveDependencies } from './continuation-ports.js';
-import { preflightAgentContinuation } from './continuation-preflight.js';
+import {
+  preflightAgentContinuation,
+  prepareRetainedAgentContinuation,
+} from './continuation-preflight.js';
 import { resolvedReasoningEffort } from './provider-attempt-policy.js';
 import {
   buildContinuationPrompt as buildContinuationPromptFromWorktree,
@@ -63,6 +66,7 @@ export function createContinuationContext(deps: ContinuationLiveDependencies, ca
   async function recordContinuationProvenance(pod: Pod, containerId: string): Promise<void> {
     await preflightAgentContinuation(pod, containerId, {
       containerManager: containerManagerFactory.get(pod.executionTarget),
+      assertAvailable: () => podRepo.sourceAdoptions?.assertAvailable(pod.id),
       readCurrent: () => podRepo.getOrThrow(pod.id),
       hasPendingDecision: () =>
         podRepo.hasUnansweredDecision?.(pod.id) ??
@@ -105,15 +109,21 @@ export function createContinuationContext(deps: ContinuationLiveDependencies, ca
   ): Promise<AsyncIterable<AgentEvent>> {
     const pod = podRepo.getOrThrow(podId);
     if (!pod.containerId) throw new Error(`Pod ${podId} has no container`);
+    await prepareRetainedAgentContinuation(pod, pod.containerId, {
+      containerManager: containerManagerFactory.get(pod.executionTarget),
+      podRepo,
+      resolveProfile: resolveEffectiveBoundProfile,
+    });
     const env = await getResumeEnv(pod);
     const runtime = runtimeRegistry.get(pod.runtime);
     await recordContinuationProvenance(pod, pod.containerId);
     const mcpServers = await primeRuntimeForResume(pod, runtime, pod.containerId, env);
-    if (!fresh) return runtime.resume(podId, message, pod.containerId, env);
+    const continuationMessage = appendDecisionContext(pod, message);
+    if (!fresh) return runtime.resume(podId, continuationMessage, pod.containerId, env);
     const profile = executionForPod(pod);
     return runtime.spawn({
       podId,
-      task: message,
+      task: continuationMessage,
       model: pod.model,
       reasoningEffort: resolvedReasoningEffort(profile),
       workDir: '/workspace',

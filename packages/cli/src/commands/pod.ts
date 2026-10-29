@@ -22,6 +22,7 @@ import { registerBudgetCommand } from './budget.js';
 import { registerGoalCommands } from './goal.js';
 import { registerLaunchCommand } from './launch.js';
 import { registerReviewerRunsCommand } from './reviewer-runs.js';
+import { registerSourceRecoveryCommand } from './source-recovery.js';
 
 const podColumns: ColumnDef<Pod>[] = [
   { header: 'ID', formatter: (s) => s.id.slice(0, 8), width: 10 },
@@ -139,6 +140,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   registerGoalCommands(program, getClient);
   registerBudgetCommand(program, getClient);
   registerReviewerRunsCommand(program, getClient);
+  registerSourceRecoveryCommand(program, getClient);
   program
     .command('execution-provenance <id>')
     .description('Inspect recorded runtime, image, build, resource and command preflight evidence')
@@ -340,6 +342,47 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       withJsonOutput(opts, { ok: true, requested: 'rework' }, () =>
         console.log('Rework requested. Inspect status and retry-state for execution outcome.'),
       );
+    });
+  program
+    .command('reconcile-termination <id>')
+    .description(
+      'Inspect unsettled worker ownership; --run and --reason reconcile confirmed deletion',
+    )
+    .option('--run <id>', 'Exact recorded run ID; required with --reason')
+    .option('--reason <text>', 'Human reason for reconciliation (10–4000 characters)')
+    .option('--json', 'Output JSON')
+    .action(async (id: string, opts: { run?: string; reason?: string; json?: boolean }) => {
+      if (Boolean(opts.run) !== Boolean(opts.reason))
+        throw new Error('Apply requires both --run and --reason; omit both to inspect.');
+      const client = getClient();
+      const podId = await resolvePodId(client, id);
+      if (opts.run && opts.reason) {
+        const receipt = await client.reconcileTermination(podId, opts.run, opts.reason);
+        withJsonOutput(opts, receipt, (value) => {
+          console.log(`Reconciled run ${value.runId}: recorded sandbox confirmed deleted.`);
+          console.log('Exit code remains unknown. No worker started or retry permission granted.');
+          console.log(
+            `Inspect ap retry-state ${podId} --stage worker before requesting ap rework ${podId}.`,
+          );
+        });
+      } else {
+        const state = await client.getTerminationReconciliations(podId);
+        withJsonOutput(opts, state, (value) => {
+          for (const run of value.pending)
+            console.log(
+              `${run.runId}: owner ${run.podId}, generation ${run.generation}, sandbox ${run.resource?.containerId ?? 'ownership unavailable'}`,
+            );
+          if (!value.pending.length) console.log('No unresolved termination claims.');
+          for (const receipt of value.receipts)
+            console.log(
+              `Reconciled ${receipt.runId} for ${receipt.podId} at ${receipt.reconciledAt}: ${receipt.reason}`,
+            );
+          if (value.pending.length)
+            console.log(
+              'To reconcile, use the owner pod ID with --run <run-id> --reason <human-reason>. Only backend-confirmed deletion is accepted.',
+            );
+        });
+      }
     });
   program
     .command('resume <id>')

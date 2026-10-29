@@ -164,7 +164,7 @@ export async function buildProviderEnv(
 
     default:
       // Exhaustiveness check
-      throw new Error(`Unknown model provider: ${provider as string}`);
+      throw new Error(`Unknown model provider: ${String(provider)}`);
   }
 }
 

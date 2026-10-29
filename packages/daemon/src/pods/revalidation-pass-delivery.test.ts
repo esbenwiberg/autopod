@@ -3,6 +3,40 @@ import { createDeliveryFixture } from '../test-utils/delivery-helpers.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { createRevalidationPassDelivery } from './revalidation-pass-delivery.js';
 describe('separate human revalidation delivery lifetime', () => {
+  it.each([null, 'https://github.com/org/repo/pull/27'])(
+    'checks-only success never publishes, creates or approves a PR (%s)',
+    async (prUrl) => {
+      vi.useFakeTimers();
+      try {
+        const f = createDeliveryFixture();
+        f.validating();
+        f.podRepo.update('prepare', { prUrl, autoApprove: true });
+        await expect(
+          f.repass().completeRevalidationPass.call(f.calls, {
+            ...f.passContext(),
+            revalDefaultBranch: 'main',
+            newCommits: false,
+            checksOnly: true,
+          }),
+        ).resolves.toEqual({ newCommits: false, result: 'pass' });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(f.pod()).toMatchObject({ status: 'validated', prUrl });
+        expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+        expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
+        expect(f.passCaptured.prManagerFactory).not.toHaveBeenCalled();
+        expect(f.provider.createPr).not.toHaveBeenCalled();
+        expect(f.calls.approveSession).not.toHaveBeenCalled();
+        expect(f.passCaptured.maybeTriggerDependents).not.toHaveBeenCalled();
+        expect(f.passCaptured.runAdvisoryAfterValidation).not.toHaveBeenCalled();
+        expect(f.passCaptured.refreshReadiness).toHaveBeenCalled();
+        expect(
+          f.passCaptured.containerManagerFactory.get(f.pod().executionTarget).stop,
+        ).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
   it('retains synchronous no-PR publication before advisory and the original return shape', async () => {
     const f = createDeliveryFixture();
     f.validating();

@@ -18,6 +18,8 @@ import {
 import { ensureMergeIdentityProjection } from './merge-identity-projection.js';
 import { createSourcePublicationLedger } from './source-publication-ledger.js';
 
+import { assertSourceDeliveryAllowed } from './source-custody-guards.js';
+
 export interface BoundMergeConfig {
   prUrl: string;
   expectedHeadSha: string;
@@ -143,6 +145,7 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
     publicationId: string,
     config: MergePrConfig,
   ): IntentRow {
+    assertSourceDeliveryAllowed(db, pod.id);
     if (
       !['merging', 'merge_pending'].includes(pod.status) ||
       !pod.prUrl ||

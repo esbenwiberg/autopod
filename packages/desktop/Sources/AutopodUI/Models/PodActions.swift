@@ -34,6 +34,7 @@ public enum PendingPodControl: Sendable, Equatable {
 /// Views call these; the app layer provides real implementations.
 /// All closures default to no-ops so previews work without wiring.
 public struct PodActions: Sendable {
+  public var approvalPending: @MainActor @Sendable (String) -> Bool = { _ in false }
   public var repair: PodRepairActions = .unavailable
   public var approve: @MainActor @Sendable (String, String?) async -> Void
   public var reject: @MainActor @Sendable (String, String?) async -> Void
@@ -89,6 +90,8 @@ public struct PodActions: Sendable {
   public var loadDispatchPreflight: @MainActor @Sendable (String) async throws -> DispatchPreflightResponse
   public var loadRerunTemplate: @MainActor @Sendable (String) async throws -> IntentionalRerunDraft
   public var createIntentionalRerun: @MainActor @Sendable (IntentionalRerunDraft) async throws -> String
+  public var loadValidationRecovery: @MainActor @Sendable (String) async throws -> ValidationRecoveryState
+  public var requestValidationRecovery: @MainActor @Sendable (String, ValidationRecoveryRequest) async throws -> Void
   public var loadRetryState: @MainActor @Sendable (String, String) async throws -> TaskRetryState
   public var authorizeRetry: @MainActor @Sendable (String, TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization
   public var reworkRetry: @MainActor @Sendable (String) async throws -> Void
@@ -176,6 +179,8 @@ public struct PodActions: Sendable {
     loadDispatchPreflight: @escaping @MainActor @Sendable (String) async throws -> DispatchPreflightResponse = { _ in throw URLError(.unsupportedURL) },
     loadRerunTemplate: @escaping @MainActor @Sendable (String) async throws -> IntentionalRerunDraft = { _ in throw URLError(.unsupportedURL) },
     createIntentionalRerun: @escaping @MainActor @Sendable (IntentionalRerunDraft) async throws -> String = { _ in throw URLError(.unsupportedURL) },
+    loadValidationRecovery: @escaping @MainActor @Sendable (String) async throws -> ValidationRecoveryState = { _ in throw URLError(.unsupportedURL) },
+    requestValidationRecovery: @escaping @MainActor @Sendable (String, ValidationRecoveryRequest) async throws -> Void = { _, _ in throw URLError(.unsupportedURL) },
     loadRetryState: @escaping @MainActor @Sendable (String, String) async throws -> TaskRetryState = { _, _ in throw URLError(.unsupportedURL) },
     authorizeRetry: @escaping @MainActor @Sendable (String, TaskRetryAuthorizationRequest) async throws -> TaskRetryAuthorization = { _, _ in throw URLError(.unsupportedURL) },
     reworkRetry: @escaping @MainActor @Sendable (String) async throws -> Void = { _ in throw URLError(.unsupportedURL) },
@@ -233,6 +238,8 @@ public struct PodActions: Sendable {
     self.loadDispatchPreflight = loadDispatchPreflight
     self.loadRerunTemplate = loadRerunTemplate
     self.createIntentionalRerun = createIntentionalRerun
+    self.loadValidationRecovery = loadValidationRecovery
+    self.requestValidationRecovery = requestValidationRecovery
     self.loadRetryState = loadRetryState
     self.authorizeRetry = authorizeRetry
     self.reworkRetry = reworkRetry

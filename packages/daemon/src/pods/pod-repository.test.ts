@@ -136,6 +136,21 @@ describe('PodRepository', () => {
     repo = createPodRepository(db);
   });
 
+  it('preserves recorded fix-dispatch metadata while updating the existing merge-wait flag', () => {
+    repo.insert(validSession);
+    const recordedAt = '2026-10-28T12:00:00.000Z';
+    repo.update('sess-001', { lastFixPodSpawnedAt: recordedAt, waitForMerge: true });
+    expect(repo.getOrThrow('sess-001')).toMatchObject({
+      lastFixPodSpawnedAt: recordedAt,
+      waitForMerge: true,
+    });
+    repo.update('sess-001', { waitForMerge: false });
+    expect(repo.getOrThrow('sess-001')).toMatchObject({
+      lastFixPodSpawnedAt: recordedAt,
+      waitForMerge: false,
+    });
+  });
+
   describe('insert', () => {
     it('should insert a pod and read it back', () => {
       repo.insert(validSession);

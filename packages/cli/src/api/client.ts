@@ -10,6 +10,9 @@ import type {
   LaunchRequest,
   PimDiscovery,
   PodGoal,
+  SourceAdoptionList,
+  SourceAdoptionRequest,
+  SourceAdoptionState,
 } from '@autopod/shared';
 import type {
   ScanDecisionPage,
@@ -445,6 +448,27 @@ export class AutopodClient {
       ...(stage === 'validation' ? {} : { stage }),
     });
   }
+  async getSourceAdoptions(id: string): Promise<SourceAdoptionList> {
+    return this.request<SourceAdoptionList>('GET', `/pods/${id}/source-adoptions`);
+  }
+  async adoptSource(id: string, input: SourceAdoptionRequest): Promise<SourceAdoptionState> {
+    return this.request<SourceAdoptionState>('POST', `/pods/${id}/source-adoptions`, input);
+  }
+
+  async getTerminationReconciliations(
+    id: string,
+  ): Promise<import('@autopod/shared').TerminationReconciliationState> {
+    return this.request('GET', `/pods/${id}/termination-reconciliations`);
+  }
+
+  async reconcileTermination(
+    id: string,
+    runId: string,
+    reason: string,
+  ): Promise<import('@autopod/shared').TerminationReconciliationReceipt> {
+    return this.request('POST', `/pods/${id}/termination-reconciliations`, { runId, reason });
+  }
+
   async resumePod(id: string): Promise<{ ok: boolean; action: string }> {
     return this.request('POST', `/pods/${id}/resume`);
   }

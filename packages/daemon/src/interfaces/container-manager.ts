@@ -1,8 +1,15 @@
 import type { Readable, Writable } from 'node:stream';
 import type { ArtifactOutput, NativeGoalProcessIdentity } from '@autopod/shared';
 
+/** Fence retained-resource wakeup across asynchronous provider/auth observations. */
+export interface ContainerStartOptions {
+  assertCurrent?: () => void;
+}
+
 /** Guard publication of a collected directory after asynchronous extraction. */
 export interface DirectoryExtractionOptions {
+  /** Called after verified wakeup, before export; permits separate wake/copy budgets. */
+  onExportStarted?: () => void;
   signal?: AbortSignal;
   /** Synchronous ownership check immediately before collection and publication; throws if stale. */
   assertCurrent?: () => void;
@@ -65,6 +72,12 @@ export interface ExecResult {
 }
 
 export interface FileWriteOptions {
+  /** Ownership fence rechecked by the backend immediately before dispatch. */
+  assertCurrent?: () => void;
+  /** Never retry this mutation; lost responses remain owned by the caller's durable operation. */
+  singleAttempt?: boolean;
+  /** Parent directories already exist; do not rewrite their ownership/permissions. */
+  preserveParentModes?: boolean;
   /** Bound remote file publication so control-plane refreshers can recover. */
   timeoutMs?: number;
   /**
@@ -141,6 +154,8 @@ export interface ContainerExecutionMetadata {
 export interface ContainerManager {
   /** Available only when an exec can be recorded before start and inspected after daemon restart. */
   readonly supportsExecRecovery?: boolean;
+  /** Exact backend/engine/region/group/resource namespace, never an owner label. */
+  getResourceKey?(containerId: string): Promise<string>;
   /** Verifies backend identity and observed exit; never treats a lost transport or PID file as exit. */
   terminateRecordedExec?(identity: NativeGoalProcessIdentity): Promise<number>;
   /** Read actual backend identity; unsupported metadata remains unavailable. */
@@ -164,7 +179,7 @@ export interface ContainerManager {
   /** Stop a container without removing it. Idempotent — swallows "already stopped". */
   stop(containerId: string): Promise<void>;
   /** Start a previously stopped container. Idempotent — swallows "already running". */
-  start(containerId: string): Promise<void>;
+  start(containerId: string, options?: ContainerStartOptions): Promise<void>;
   writeFile(
     containerId: string,
     path: string,

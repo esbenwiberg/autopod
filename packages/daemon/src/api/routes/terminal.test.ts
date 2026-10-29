@@ -130,6 +130,48 @@ function registerHandler(
 }
 
 describe('terminalRoutes', () => {
+  it('refuses a legacy running projection when source custody exists before any terminal attach', async () => {
+    const factory = { get: vi.fn() } as unknown as ContainerManagerFactory;
+    const manager = {
+      getSession: () => makePod(),
+      getSourceAdoptions: () => [{ id: 'source-held' }],
+    } as unknown as PodManager;
+    const docker = { getContainer: vi.fn() } as unknown as Dockerode;
+    const handler = registerHandler(
+      manager,
+      factory,
+      { validateToken: async () => testUser } as unknown as AuthModule,
+      docker,
+    );
+    const { socket } = makeSocket();
+    await handler(socket, makeRequest());
+    expect(socket.close).toHaveBeenCalledWith(4009, 'Source custody held');
+    expect(factory.get).not.toHaveBeenCalled();
+    expect(docker.getContainer).not.toHaveBeenCalled();
+  });
+  it('stops forwarding existing terminal input after source custody is acquired', async () => {
+    let held = false;
+    const fake = makeFakeSession();
+    const factory = {
+      get: () => ({ attachTerminal: async () => fake.session }),
+    } as unknown as ContainerManagerFactory;
+    const manager = {
+      getSession: () => makePod(),
+      getSourceAdoptions: () => (held ? [{ id: 'source-held' }] : []),
+    } as unknown as PodManager;
+    const handler = registerHandler(
+      manager,
+      factory,
+      { validateToken: async () => testUser } as unknown as AuthModule,
+      { getContainer: vi.fn() } as unknown as Dockerode,
+    );
+    const { socket, emit } = makeSocket();
+    await handler(socket, makeRequest());
+    held = true;
+    emit('message', Buffer.from('git reset --hard\n'), true);
+    expect(fake.writes).toEqual([]);
+    expect(socket.close).toHaveBeenCalledWith(4009, 'Source custody held');
+  });
   it('wires sandbox terminal sessions through the container manager (no Docker)', async () => {
     const fake = makeFakeSession();
     const attachTerminal = vi.fn(async () => fake.session);

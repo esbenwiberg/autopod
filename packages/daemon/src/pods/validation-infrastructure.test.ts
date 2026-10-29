@@ -89,6 +89,20 @@ describe('infrastructure classifiers and labels', () => {
       expect(isValidationInfrastructureOnlyFailure(r)).toBe(false);
     },
   );
+  it('labels explicit timeout and cleanup without claiming tests never ran', () => {
+    const r = result();
+    r.infrastructureFailure = {
+      phase: 'test',
+      code: 'EXEC_EXIT_UNVERIFIED',
+      message: 'unknown command outcome',
+      retryable: false,
+      execution: { cause: 'timeout', timeoutMs: 600_000, cleanup: 'failed' },
+    };
+    expect(validationInfrastructureFailureLabel(r)).toBe(
+      'Validation timed out after 600s during test; cleanup failed; automatic retry blocked',
+    );
+  });
+
   it('requires typed metadata and keeps the generic fallback label', () => {
     const r = result();
     expect(isValidationInfrastructureOnlyFailure(r)).toBe(false);

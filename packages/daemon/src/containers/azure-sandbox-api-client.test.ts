@@ -1,13 +1,63 @@
 import { createHash } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import pino from 'pino';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createSandboxWakeupFixture } from '../test-utils/sandbox-wakeup-helpers.js';
 import { createLocalValidationEngine } from '../validation/local-validation-engine.js';
 import { AzureSandboxApiClient, type WebSocketLike } from './azure-sandbox-api-client.js';
 import { type SandboxExecChunk, SandboxInfrastructureError } from './sandbox-api-client.js';
 import { SandboxContainerManager } from './sandbox-container-manager.js';
 
 const logger = pino({ level: 'silent' });
+let wakeupFixture: ReturnType<typeof createSandboxWakeupFixture> | undefined;
+
+describe('source resource release custody', () => {
+  it.each(['destroy', 'suspend'] as const)(
+    'rechecks custody after delayed auth before %s dispatch',
+    async (action) => {
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let held = false;
+      const { client, requests } = makeClient(
+        action === 'suspend' ? [{ status: 200, body: { id: 'original', state: 'Running' } }] : [],
+        {
+          credential: {
+            async getToken() {
+              await gate;
+              return { token: 'fixture-token', expiresOnTimestamp: Date.now() + 60_000 };
+            },
+          },
+          assertReleaseAllowed() {
+            if (held) throw new Error('SOURCE_CUSTODY_HELD');
+          },
+        },
+      );
+      const pending = client[action]('original');
+      held = true;
+      release();
+      await expect(pending).rejects.toThrow('SOURCE_CUSTODY_HELD');
+      expect(requests.filter((request) => request.init?.method !== 'GET')).toHaveLength(0);
+    },
+  );
+});
+
+describe('sandbox resource namespaces', () => {
+  it('binds endpoint/region/subscription/group/resource without waking or executing', () => {
+    const original = makeClient([]);
+    const key = original.client.getResourceKey('original');
+    for (const change of [
+      { location: 'northeurope' },
+      { subscriptionId: 'other' },
+      { resourceGroup: 'other' },
+      { sandboxGroup: 'other' },
+    ])
+      expect(makeClient([], change).client.getResourceKey('original')).not.toBe(key);
+    expect(original.client.getResourceKey('replacement')).not.toBe(key);
+    expect(original.requests).toHaveLength(0);
+  });
+});
 
 describe('recoverable native sandbox Goal processes', () => {
   it('delivers RPC stdin through ordered private packets instead of the EOF-only stream', async () => {
@@ -340,6 +390,7 @@ function makeClient(
         sandboxGroup: 'autopod-spike',
         credential,
         fetch,
+        wakeupJournal: wakeupFixture?.journal,
         pollIntervalMs: 0,
         ...config,
       },
@@ -833,7 +884,10 @@ describe('AzureSandboxApiClient', () => {
         '  exec env AUTOPOD_STREAM_SESSION=1 setsid -w "$0"',
         'fi',
         'umask 077',
-        'echo $$ > "$0.pid"',
+        'stat=$(cat /proc/$$/stat) || exit 1',
+        'rest=${stat##*) }; set -- $rest',
+        'start=$(printf \'%s\' "${20}")',
+        'printf \'%s %s\\n\' "$$" "$start" > "$0.pid"',
         'if [ "$(id -u)" = "0" ]; then',
         "  exec env HOME=/home/autopod USER=autopod LOGNAME=autopod su -m -s /bin/sh autopod -c 'cd /workspace || exit 1\nexec echo hello'",
         'fi',
@@ -972,12 +1026,105 @@ describe('AzureSandboxApiClient', () => {
           // No output is expected before timeout.
         }
       })(),
-    ).rejects.toThrow(/timed out/);
+    ).rejects.toMatchObject({
+      code: 'AZURE_SANDBOX_TIMEOUT',
+      execution: { cause: 'timeout', timeoutMs: 1, cleanup: 'confirmed' },
+    });
 
     expect(sockets[0]?.closed).toBe(true);
     const killBody = JSON.stringify(jsonBody(requests[2] ?? failRequest()));
     expect(killBody).toContain('kill -TERM');
     expect(killBody).toContain('kill -KILL');
+  });
+
+  it.each([409, 429])(
+    'reports timeout cleanup refusal %s without retry or observed exit',
+    async (status) => {
+      const { client, requests } = makeStreamingClient(
+        (socket) => socket.onopen?.({}),
+        [...STREAM_SETUP_RESPONSES, { status, body: { message: 'Concurrent exec unsupported' } }],
+      );
+      const chunks: SandboxExecChunk[] = [];
+      await expect(
+        (async () => {
+          for await (const chunk of client.execStream('sbx-1', ['test'], { timeoutMs: 1 }))
+            chunks.push(chunk);
+        })(),
+      ).rejects.toMatchObject({
+        code: 'AZURE_SANDBOX_TIMEOUT',
+        execution: { cause: 'timeout', cleanup: 'failed' },
+      });
+      expect(chunks.some((chunk) => chunk.exitCode !== undefined)).toBe(false);
+      expect(requests).toHaveLength(3);
+    },
+  );
+
+  it.each([undefined, 0, 143, 137])(
+    'waits for cleanup and preserves output/observed exit %s',
+    async (observedExitCode) => {
+      const { client, sockets } = makeStreamingClient((socket) => socket.onopen?.({}));
+      const originalExec = client.exec.bind(client);
+      let releaseCleanup: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        releaseCleanup = resolve;
+      });
+      let cleanupStarted: (() => void) | undefined;
+      const started = new Promise<void>((resolve) => {
+        cleanupStarted = resolve;
+      });
+      vi.spyOn(client, 'exec').mockImplementation(async (id, command, options) => {
+        if (command[2]?.includes('pid_file=')) {
+          cleanupStarted?.();
+          await gate;
+          sockets[0]?.emit({
+            type: 'stdout',
+            data: Buffer.from('FAIL during cleanup\n').toString('base64'),
+          });
+          if (observedExitCode !== undefined)
+            sockets[0]?.emit({ type: 'exit_code', exitCode: observedExitCode });
+          return { stdout: '', stderr: '', exitCode: 0 };
+        }
+        return originalExec(id, command, options);
+      });
+      let settled = false;
+      const chunks: SandboxExecChunk[] = [];
+      const pending = (async () => {
+        try {
+          for await (const _chunk of client.execStream('sbx-1', ['test'], { timeoutMs: 1 })) {
+            chunks.push(_chunk);
+          }
+        } finally {
+          settled = true;
+        }
+      })();
+      const rejection = expect(pending).rejects.toMatchObject({
+        execution: {
+          cause: 'timeout',
+          cleanup: 'confirmed',
+          ...(observedExitCode !== undefined ? { observedExitCode } : {}),
+        },
+      });
+      await started;
+      expect(settled).toBe(false);
+      releaseCleanup?.();
+      await rejection;
+      expect(chunks.map((chunk) => chunk.stdout ?? '').join('')).toContain('FAIL during cleanup');
+      expect(chunks.some((chunk) => chunk.exitCode !== undefined)).toBe(false);
+    },
+  );
+
+  it('does not accept an exit frame with a missing exit code as success', async () => {
+    const { client } = makeStreamingClient((socket) => {
+      socket.onopen?.({});
+      socket.onmessage?.({ data: JSON.stringify({ type: 'exit_code' }) });
+    }, STREAM_SETUP_RESPONSES);
+    await expect(
+      (async () => {
+        for await (const _chunk of client.execStream('sbx-1', ['test'])) {
+          /* drain */
+        }
+      })(),
+    ).rejects.toThrow('invalid exit code');
   });
 
   it('fails the exec stream when the socket closes before an exit code', async () => {
@@ -1104,6 +1251,46 @@ describe('AzureSandboxApiClient', () => {
     expect(sockets[0]?.closed).toBe(true);
   });
 
+  it('fences a file write after delayed auth and does not send stale bytes', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let current = true;
+    let reached = false;
+    const { client, requests } = makeClient([{ status: 204 }], {
+      credential: {
+        async getToken() {
+          reached = true;
+          await gate;
+          return { token: 'fixture-token', expiresOnTimestamp: Date.now() + 60_000 };
+        },
+      },
+    });
+    const write = client.writeFile('original', '/tmp/source/chunk', Buffer.from('bundle'), {
+      singleAttempt: true,
+      beforeSend() {
+        if (!current) throw new Error('STALE_SOURCE');
+      },
+    });
+    await vi.waitFor(() => expect(reached).toBe(true));
+    current = false;
+    release();
+    await expect(write).rejects.toThrow('STALE_SOURCE');
+    expect(requests).toHaveLength(0);
+  });
+  it('does not replay an explicitly single-attempt file write after rate limiting', async () => {
+    const { client, requests } = makeClient([
+      { status: 429, body: { error: { code: 'Throttled' } } },
+      { status: 204 },
+    ]);
+    await expect(
+      client.writeFile('original', '/tmp/source/chunk', Buffer.from('bundle'), {
+        singleAttempt: true,
+      }),
+    ).rejects.toThrow();
+    expect(requests).toHaveLength(1);
+  });
   it('writes, reads, lists, stats files, and updates egress policy through the data plane', async () => {
     const { client, requests } = makeClient([
       { status: 204 },
@@ -1830,5 +2017,177 @@ describe('listSandboxes', () => {
   it('returns an empty list for a missing group rather than throwing', async () => {
     const { client } = makeClient([{ status: 404 }]);
     expect(await client.listSandboxes()).toEqual([]);
+  });
+});
+
+describe('bounded retained sandbox resume', () => {
+  beforeEach(() => {
+    wakeupFixture = createSandboxWakeupFixture(true);
+  });
+  afterEach(() => {
+    wakeupFixture = undefined;
+  });
+  it.each([
+    { states: ['Stopped', 'Running'], locked: true, posts: 1 },
+    { states: ['Stopped', 'Stopped', 'Running'], locked: true, posts: 2 },
+    { states: ['Stopped', 'Stopped', 'Running'], locked: false, posts: 1 },
+    { states: ['Resuming', 'Running'], locked: false, posts: 0 },
+    { states: ['Running'], locked: false, posts: 0 },
+  ])(
+    'observes Running without duplicate accepted operations: $states',
+    async ({ states, locked, posts }) => {
+      vi.useFakeTimers();
+      try {
+        const responses: MockHttpResponse[] = [];
+        let submitted = false;
+        for (const state of states) {
+          responses.push({ status: 200, body: { state } });
+          if (state === 'Stopped' && !submitted) {
+            responses.push(
+              locked ? { status: 409, body: { title: 'ResourceLocked' } } : { status: 202 },
+            );
+            if (!locked) submitted = true;
+          }
+        }
+        const { client, requests } = makeClient(responses, { pollIntervalMs: 10 });
+        const attempts = Promise.all([
+          client.resume('synthetic-worker'),
+          client.resume('synthetic-worker'),
+        ]);
+        await vi.runAllTimersAsync();
+        await attempts;
+        expect(requests.filter((r) => r.init?.method === 'POST')).toHaveLength(posts);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([
+    { status: 409, body: { title: 'OtherConflict' } },
+    { status: 403, body: { title: 'Forbidden' } },
+    { status: 404, body: { title: 'NotFound' } },
+  ])('does not blindly retry resume rejection $status', async (rejection) => {
+    const { client, requests } = makeClient([
+      { status: 200, body: { state: 'Stopped' } },
+      rejection,
+    ]);
+    await expect(client.resume('synthetic-worker')).rejects.toThrow();
+    expect(requests).toHaveLength(2);
+  });
+
+  it.each(['Failed', 'Deleted', 'Deleting', 'Terminated'])(
+    'rejects terminal %s without a POST',
+    async (state) => {
+      const { client, requests } = makeClient([{ status: 200, body: { state } }]);
+      await expect(client.resume('synthetic-worker')).rejects.toMatchObject({
+        code: 'SANDBOX_WAKEUP_FAILED',
+      });
+      expect(requests).toHaveLength(1);
+    },
+  );
+
+  it('retries a rejected lock only after observing stopped, then observes an accepted resume', async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, requests } = makeClient(
+        [
+          { status: 200, body: { state: 'Stopped' } },
+          { status: 409, body: { title: 'ResourceLocked' } },
+          { status: 200, body: { state: 'Stopping' } },
+          { status: 200, body: { state: 'Stopped' } },
+          { status: 202 },
+          { status: 200, body: { state: 'Stopped' } },
+          { status: 200, body: { state: 'Running' } },
+        ],
+        { pollIntervalMs: 10 },
+      );
+      const resume = client.resume('synthetic-worker');
+      await vi.runAllTimersAsync();
+      await resume;
+      expect(requests.map((r) => r.init?.method)).toEqual([
+        'GET',
+        'POST',
+        'GET',
+        'GET',
+        'POST',
+        'GET',
+        'GET',
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not POST after a timed-out observation settles late', async () => {
+    vi.useFakeTimers();
+    try {
+      let observe!: (response: Response) => void;
+      const fetch = vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            observe = resolve;
+          }),
+      );
+      const { client } = makeClient([], { fetch, resumeTimeoutMs: 50 });
+      const result = expect(client.resume('synthetic-worker')).rejects.toMatchObject({
+        code: 'SANDBOX_WAKEUP_TIMEOUT',
+      });
+      await vi.advanceTimersByTimeAsync(50);
+      await result;
+      observe(new Response(JSON.stringify({ state: 'Stopped' })));
+      await vi.runAllTimersAsync();
+      expect(fetch).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds a hung HTTP call and releases the resume guard', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi
+        .fn()
+        .mockImplementationOnce(() => new Promise<Response>(() => {}))
+        .mockResolvedValue(new Response(JSON.stringify({ state: 'Running' })));
+      const { client } = makeClient([], { fetch, resumeTimeoutMs: 50 });
+      const result = expect(client.resume('synthetic-worker')).rejects.toMatchObject({
+        code: 'SANDBOX_WAKEUP_TIMEOUT',
+      });
+      await vi.advanceTimersByTimeAsync(50);
+      await result;
+      await client.resume('synthetic-worker');
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([true, false])('bounds persistent locks/transitions (locked=$0)', async (locked) => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn(
+        async (_url: string | URL, init?: RequestInit) =>
+          new Response(
+            JSON.stringify(
+              init?.method === 'POST'
+                ? { title: 'ResourceLocked' }
+                : { state: locked ? 'Stopped' : 'Resuming' },
+            ),
+            { status: init?.method === 'POST' ? 409 : 200 },
+          ),
+      );
+      const { client } = makeClient([], { fetch, resumeTimeoutMs: 50, pollIntervalMs: 10 });
+      const result = expect(client.resume('synthetic-worker')).rejects.toMatchObject({
+        code: 'SANDBOX_WAKEUP_TIMEOUT',
+      });
+      await vi.advanceTimersByTimeAsync(50);
+      await result;
+      const calls = fetch.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(100);
+      expect(fetch).toHaveBeenCalledTimes(calls);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -30,6 +30,8 @@ import type { PodRepository } from './pod-repository.js';
 import type { createResourceNetwork } from './resource-network.js';
 import type { createResourcePreviewControls } from './resource-preview-controls.js';
 import type { createReviewerContext } from './reviewer-context.js';
+import type { createSourceAdoptionController } from './source-adoption-controller.js';
+import type { createTerminationReconciliation } from './termination-reconciliation.js';
 import type { createValidationEnvironment } from './validation-environment.js';
 import type { createWorkspaceArtifactObservation } from './workspace-artifact-observation.js';
 import type { createWorkspaceBranchSync } from './workspace-branch-sync.js';
@@ -41,10 +43,12 @@ import type { createWorkspacePromotion } from './workspace-promotion.js';
 import type { createWorkspaceRecoveryCommands } from './workspace-recovery-commands.js';
 import type { createWorkspaceWatchdog } from './workspace-watchdog.js';
 export interface PodFacadeOwners {
+  sourceAdoption?: ReturnType<typeof createSourceAdoptionController>;
   admissionQueries: Pick<
     ReturnType<typeof createAdmissionQueries>,
     | 'getLaunchConfiguration'
     | 'getSession'
+    | 'getExternalDelivery'
     | 'getDeploymentConfiguration'
     | 'getInjectedMcpServer'
     | 'getInjectedMcpServers'
@@ -61,7 +65,7 @@ export interface PodFacadeOwners {
   >;
   continuationControls: Pick<
     ReturnType<typeof createContinuationControls>,
-    'resumeNativeGoal' | 'assertCanRework' | 'resumePod'
+    'resumeNativeGoal' | 'assertCanRework' | 'assertCanRetryValidation' | 'resumePod'
   >;
   processWorkflow: Pick<ReturnType<typeof createAgentProcessWorkflow>, 'processPod'>;
   agentEventConsumption: Pick<ReturnType<typeof createAgentEventConsumption>, 'consumeAgentEvents'>;
@@ -153,6 +157,7 @@ export interface PodFacadeOwners {
     'getArtifactResumeObservation'
   >;
   providerContinuation: Pick<ReturnType<typeof createProviderContinuation>, 'continueProvider'>;
+  terminationReconciliation: ReturnType<typeof createTerminationReconciliation>;
   workspaceEscapeControls: Pick<
     ReturnType<typeof createWorkspaceEscapeControls>,
     'forceComplete' | 'kickPod'

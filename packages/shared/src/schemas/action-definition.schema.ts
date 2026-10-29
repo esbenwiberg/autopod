@@ -72,9 +72,9 @@ const endpointSchema = z.object({
 });
 
 const requestMappingSchema = z.object({
-  bodyMapping: z.record(z.string()).optional(),
-  queryMapping: z.record(z.string()).optional(),
-  pathMapping: z.record(z.string()).optional(),
+  bodyMapping: z.record(z.string(), z.string()).optional(),
+  queryMapping: z.record(z.string(), z.string()).optional(),
+  pathMapping: z.record(z.string(), z.string()).optional(),
 });
 
 // ─── Response ───────────────────────────────────────────────────
@@ -95,7 +95,7 @@ export const actionDefinitionSchema = z
     description: z.string().min(1).max(1000),
     group: actionGroupSchema,
     handler: actionHandlerSchema,
-    params: z.record(paramDefSchema),
+    params: z.record(z.string(), paramDefSchema),
     endpoint: endpointSchema.optional(),
     request: requestMappingSchema.optional(),
     response: responseSchema,
@@ -151,7 +151,7 @@ export const actionPolicySchema = z
     enabledActions: z.array(z.string().min(1).max(64)).default([]).optional(),
     actionOverrides: z.array(actionOverrideSchema).optional(),
     customActions: z.array(actionDefinitionSchema).max(50).optional(),
-    sanitization: dataSanitizationConfigSchema.default({}),
+    sanitization: dataSanitizationConfigSchema.prefault({}),
     quarantine: quarantineConfigSchema.optional(),
   })
   .refine((d) => d.enabledGroups.length > 0 || (d.enabledActions?.length ?? 0) > 0, {

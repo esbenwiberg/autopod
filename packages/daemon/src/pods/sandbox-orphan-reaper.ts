@@ -112,7 +112,10 @@ export class SandboxOrphanReaper {
       // between the two reads then appears claimed and is left alone; had we
       // read the DB first, that write would be invisible and we would delete a
       // sandbox a pod had just taken ownership of.
-      const claimed = new Set(this.deps.podRepo.listReferencedContainerIds());
+      const claimed = new Set([
+        ...this.deps.podRepo.listReferencedContainerIds(),
+        ...(this.deps.podRepo.externalDeliveries?.retainedSandboxIds() ?? []),
+      ]);
       const result = { ...empty, listed: sandboxes.length };
       const candidates: SandboxDescriptor[] = [];
 
@@ -121,7 +124,7 @@ export class SandboxOrphanReaper {
           result.foreign++;
           continue;
         }
-        if (claimed.has(sandbox.id)) continue;
+        if (claimed.has(sandbox.id) || this.hasRecoveryOwner(sandbox)) continue;
 
         const ageMs = this.ageMs(sandbox);
         if (ageMs === undefined) {
@@ -146,6 +149,15 @@ export class SandboxOrphanReaper {
       result.deferred = candidates.length - batch.length;
 
       for (const sandbox of batch) {
+        if (
+          this.deps.podRepo.sourceAdoptions?.retains(sandbox.id) ||
+          this.deps.podRepo.externalDeliveries?.retains(sandbox.id) ||
+          this.deps.podRepo.listReferencedContainerIds().includes(sandbox.id) ||
+          this.hasRecoveryOwner(sandbox)
+        ) {
+          result.deferred++;
+          continue;
+        }
         if (await this.deleteOrphan(sandbox)) result.deleted++;
         else result.failed++;
       }
@@ -159,6 +171,18 @@ export class SandboxOrphanReaper {
     } finally {
       this.running = false;
     }
+  }
+
+  /** A label is a reason to retain possible evidence, never permission to reuse it. */
+  private hasRecoveryOwner(sandbox: SandboxDescriptor): boolean {
+    const podId = sandbox.labels.podId;
+    const owner = podId ? this.deps.podRepo.get(podId) : undefined;
+    return Boolean(
+      owner &&
+        (owner.status === 'failed' ||
+          owner.status === 'review_required' ||
+          this.deps.podRepo.taskExecutions?.hasActiveRun(owner.id)),
+    );
   }
 
   private ageMs(sandbox: SandboxDescriptor): number | undefined {

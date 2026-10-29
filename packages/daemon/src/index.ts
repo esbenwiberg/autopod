@@ -602,7 +602,7 @@ if (SANDBOX_SUBSCRIPTION_ID && SANDBOX_RESOURCE_GROUP) {
       tier: SANDBOX_TIER,
     },
     logger,
-    { managedDatabase: db },
+    { managedDatabase: db, wakeupJournal: podRepo.sandboxWakeups },
   );
   logger.info(
     {
@@ -1199,7 +1199,6 @@ const sandboxTerminalReaper = sandboxContainerManager
   ? new SandboxTerminalReaper({
       podRepo,
       sandboxContainerManager,
-      preserveWorkspace: (id) => podManager.preserveWorkspace(id, 'terminal sandbox reaping'),
       logger: logger.child({ component: 'sandbox-terminal-reaper' }),
     })
   : null;

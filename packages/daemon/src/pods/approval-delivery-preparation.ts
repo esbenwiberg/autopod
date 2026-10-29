@@ -10,6 +10,7 @@ import {
 import { publishCommittedSource, publishSource } from '../worktrees/durable-source-publication.js';
 import { mergeReconciliation } from '../worktrees/merge-source-identity.js';
 import type { ApprovalDeliveryPreparationCaptured } from './approval-contracts.js';
+import { reconcileExternalApproval } from './approval-external-delivery.js';
 import { APPROVAL_SNAPSHOT_EXCLUDES } from './approval-policy.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import type {
@@ -89,6 +90,20 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
       }
     }
 
+    // A factual, exact-source external merge is observed before any sandbox
+    // wakeup. Its durable receipt pins unpreserved reports against all cleanup.
+    if (
+      await reconcileExternalApproval(captured, {
+        podId,
+        options,
+        pod,
+        readiness,
+        actor,
+        approvalReason,
+      })
+    )
+      return { kind: 'halted' };
+
     // Git checkpoints omit ignored reports. Preserve the complete sandbox
     // workspace before publication or either approval cleanup path removes it.
     if (
@@ -114,6 +129,14 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
           cycle: pod.finalization?.cycle ?? 0,
           isCurrent,
           excludes: APPROVAL_SNAPSHOT_EXCLUDES,
+          wakeupTimeoutMs: 150_000,
+          onStage: (stage) =>
+            emitActivityStatus(
+              podId,
+              stage === 'wakeup'
+                ? 'Waking retained sandbox for approval…'
+                : 'Preserving workspace reports…',
+            ),
         });
         assertApprovalCurrent(pod);
         podRepo.update(podId, { artifactsPath });
@@ -123,8 +146,7 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
           'Approval workspace preservation failed; resources retained',
         );
         assertApprovalCurrent(pod);
-        const reason =
-          'Approval delivery failed. Workspace reports could not be preserved. Original resources retained; repair preservation and retry approval.';
+        const reason = `Approval delivery failed. ${error instanceof AutopodError && error.code === 'ARTIFACT_PRESERVATION_FAILED' ? error.message : 'Workspace preservation failed. Original resources retained; retry approval.'}`;
         podRepo.update(podId, { failureReason: reason });
         emitActivityError(podId, reason, false);
         throw error;

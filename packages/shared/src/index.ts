@@ -1,4 +1,21 @@
 // Types
+export type { ExternalDeliveryReceipt } from './types/external-delivery.js';
+export type {
+  ValidationRecoveryAction,
+  ValidationRecoveryAvailability,
+  ValidationRecoveryState,
+} from './types/validation-recovery.js';
+export type {
+  UnverifiedTaskRun,
+  TerminationReconciliationReceipt,
+  TerminationReconciliationState,
+} from './types/termination-reconciliation.js';
+export type {
+  SourceAdoptionRequest,
+  SourceAdoptionStage,
+  SourceAdoptionState,
+  SourceAdoptionList,
+} from './types/source-adoption.js';
 export { deploymentRequestSchema } from './schemas/deployment.schema.js';
 export type { DeploymentRequest } from './schemas/deployment.schema.js';
 export type {
@@ -190,6 +207,7 @@ export type {
   FoundryApiSurface,
   CopilotCredentials,
   OpenRouterCredentials,
+  PiOAuthCredentials,
 } from './types/model-provider.js';
 
 export {

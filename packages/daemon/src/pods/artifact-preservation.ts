@@ -7,16 +7,20 @@ import { writeArtifactSnapshotReceipt } from './artifact-snapshot-receipt.js';
 
 /** Publish only a completed copy. A failed/expired copy never replaces a prior snapshot. */
 export async function collectArtifactSnapshot(options: {
-  containerManager: ContainerManager;
+  containerManager: Pick<ContainerManager, 'extractDirectoryFromContainer'>;
   containerId: string | null;
   artifactRoot: string;
   generation: number;
   cycle?: number;
   isCurrent: () => boolean;
   timeoutMs?: number;
+  /** Sandbox wakeup has its own budget; export retains the normal copy budget. */
+  wakeupTimeoutMs?: number;
+  onStage?: (stage: 'wakeup' | 'export') => void;
   /** ContainerManager exclude contract; omit to preserve the complete workspace. */
   excludes?: string[];
 }): Promise<string> {
+  let stage: 'wakeup' | 'export' = options.wakeupTimeoutMs === undefined ? 'export' : 'wakeup';
   const failure = (cause?: unknown) => {
     const error = new AutopodError(
       'Artifact preservation failed. The original container is retained; retry collection before completing.',
@@ -24,6 +28,27 @@ export async function collectArtifactSnapshot(options: {
       502,
     );
     error.cause = cause;
+    if (
+      options.wakeupTimeoutMs !== undefined &&
+      cause &&
+      !(cause instanceof AutopodError && cause.code === 'ARTIFACT_PRESERVATION_FAILED')
+    ) {
+      const timedOut =
+        cause instanceof Error &&
+        (cause.message.startsWith('Retained sandbox wakeup timed out') ||
+          cause.message.startsWith('Workspace report export timed out') ||
+          (cause instanceof AutopodError &&
+            ['SANDBOX_WAKEUP_TIMEOUT', 'AZURE_SANDBOX_TIMEOUT'].includes(cause.code)));
+      const detail =
+        stage === 'wakeup'
+          ? timedOut
+            ? 'Retained sandbox wakeup timed out while waiting for Running; check for a lock or transition.'
+            : 'Retained sandbox wakeup failed; check sandbox availability.'
+          : timedOut
+            ? 'Workspace report export timed out.'
+            : 'Workspace report export failed.';
+      error.message = `${detail} Original resources retained; retry approval after resolving preservation.`;
+    }
     return error;
   };
   const containerId = options.containerId;
@@ -33,14 +58,61 @@ export async function collectArtifactSnapshot(options: {
   let expired = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let snapshot: string | undefined;
-  const copy = Promise.resolve().then(() =>
-    options.containerManager.extractDirectoryFromContainer(
+  const controller = new AbortController();
+  let rejectDeadline: (error: Error) => void;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    rejectDeadline = reject;
+  });
+  const armDeadline = () => {
+    if (timer) clearTimeout(timer);
+    const ms =
+      stage === 'wakeup' ? (options.wakeupTimeoutMs ?? 150_000) : (options.timeoutMs ?? 120_000);
+    if (!options.isCurrent()) throw failure();
+    options.onStage?.(stage);
+    timer = setTimeout(() => {
+      expired = true;
+      controller.abort();
+      rejectDeadline(
+        new Error(
+          stage === 'wakeup'
+            ? 'Retained sandbox wakeup timed out; it may still be locked or transitioning.'
+            : options.wakeupTimeoutMs === undefined
+              ? `Artifact copy timed out after ${options.timeoutMs ?? 120_000}ms`
+              : 'Workspace report export timed out.',
+        ),
+      );
+    }, ms);
+  };
+  const copy = Promise.resolve().then(() => {
+    armDeadline();
+    if (options.wakeupTimeoutMs === undefined) {
+      return options.containerManager.extractDirectoryFromContainer(
+        containerId,
+        '/workspace',
+        staging,
+        options.excludes,
+      );
+    }
+    return options.containerManager.extractDirectoryFromContainer(
       containerId,
       '/workspace',
       staging,
       options.excludes,
-    ),
-  );
+      {
+        signal: controller.signal,
+        assertCurrent: () => {
+          if (expired || !options.isCurrent()) throw failure();
+        },
+        onExportStarted: () => {
+          if (expired || !options.isCurrent()) throw failure();
+          if (stage === 'wakeup') {
+            stage = 'export';
+            armDeadline();
+          }
+        },
+      },
+    );
+  });
   // A timeout cannot cancel the adapter's copy. Remove its staging directory only
   // after it actually settles, and never publish it or delete the source container.
   void copy
@@ -50,15 +122,7 @@ export async function collectArtifactSnapshot(options: {
     )
     .catch(() => {});
   try {
-    await Promise.race([
-      copy,
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => {
-          expired = true;
-          reject(new Error(`Artifact copy timed out after ${options.timeoutMs ?? 120_000}ms`));
-        }, options.timeoutMs ?? 120_000);
-      }),
-    ]);
+    await Promise.race([copy, deadline]);
     if (timer) clearTimeout(timer);
     if (!options.isCurrent()) throw failure();
     snapshot = path.join(options.artifactRoot, `generation-${options.generation}-${randomUUID()}`);

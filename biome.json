@@ -43,6 +43,7 @@
       "**/pnpm-lock.yaml",
       "**/.autopod-data/**",
       "**/.agentry/**",
+      "**/.claude/worktrees/**",
       ".clawpatch/project.json",
       ".clawpatch/features/**",
       ".clawpatch/findings/**",

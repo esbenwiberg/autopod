@@ -3,6 +3,7 @@ import { AutopodError, type Pod } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { BranchPublicationReceipt } from '../interfaces/worktree-manager.js';
 import { hasUnansweredDecision } from './decision-admission.js';
+import { assertSourceDeliveryAllowed } from './source-custody-guards.js';
 
 export type PublicationSource = Omit<
   BranchPublicationReceipt,
@@ -76,6 +77,7 @@ function sourceIdentity(source: PublicationSource): string {
 }
 export function createSourcePublicationLedger(db: Database.Database): SourcePublicationLedger {
   function assertCurrent(pod: Pod, allowCompletedFix = false) {
+    assertSourceDeliveryAllowed(db, pod.id);
     const row = db
       .prepare(
         'SELECT lifecycle_generation AS generation, status, profile_name AS profile, branch, base_branch AS baseBranch, worktree_path AS worktree, container_id AS container, agent_mode AS agentMode, output_target AS output, execution_target AS executionTarget, pr_url AS prUrl FROM pods WHERE id = ?',

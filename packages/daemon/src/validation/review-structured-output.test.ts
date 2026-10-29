@@ -5,6 +5,7 @@ import {
   parseAxisResponse,
   reviewAxisOutputContract,
   reviewSynthesisOutputContract,
+  taskReviewOutputContract,
 } from './review-structured-output.js';
 
 const finding = {
@@ -48,6 +49,7 @@ function expectProviderCompatibleSchema(value: unknown): void {
 
 describe('parseAxisResponse', () => {
   it('emits provider-compatible schema contracts', () => {
+    expectProviderCompatibleSchema(JSON.parse(taskReviewOutputContract.jsonSchema));
     expectProviderCompatibleSchema(JSON.parse(reviewAxisOutputContract.jsonSchema));
     expectProviderCompatibleSchema(JSON.parse(reviewSynthesisOutputContract.jsonSchema));
   });
