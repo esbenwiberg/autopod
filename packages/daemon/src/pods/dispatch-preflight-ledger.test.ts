@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -5,6 +6,7 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
+import { DISPATCH_CANDIDATES_SQL } from './dispatch-preflight-ledger.js';
 import { type NewPod, createPodRepository } from './pod-repository.js';
 
 const base = 'a'.repeat(40);
@@ -33,8 +35,425 @@ function fixture() {
   return { db, repo, ledger };
 }
 
+const repairPlaceholder = '[PR FIX] Awaiting queued feedback.';
+function addRepair(f: ReturnType<typeof fixture>, parent: string, child: string, number: number) {
+  const prUrl = `https://github.com/org/repo/pull/${number}`;
+  const branch = `repair/${number}`;
+  f.repo.insert(
+    request(parent, { task: `Original task ${parent}`, branch, prUrl, status: 'merge_pending' }),
+  );
+  f.repo.insert(request(child, { task: repairPlaceholder, branch, prUrl, linkedPodId: parent }));
+  f.repo.update(parent, { fixPodId: child });
+}
+
+function recordLegacyRepair(f: ReturnType<typeof fixture>, child: string) {
+  const work = createHash('sha256')
+    .update(JSON.stringify({ contract: null, task: repairPlaceholder }))
+    .digest('hex');
+  f.db
+    .prepare(`INSERT INTO execution_dispatch_preflights
+    (id,execution_id,task_id,pod_id,generation,version,repository,base_branch,base_commit_sha,work_hash,status,conflicts,rerun_intent,checked_at)
+    SELECT ?,e.execution_id,e.task_id,p.id,p.lifecycle_generation,1,
+    'github.com/org/repo','main',?,?,'admitted','[]',NULL,?
+    FROM pods p JOIN task_executions e ON e.pod_id=p.id WHERE p.id=?`)
+    .run(`legacy-${child}`, base, work, new Date().toISOString(), child);
+}
+
 describe('dispatch admission against immutable execution evidence', () => {
-  it('serializes equivalent queued work, exempts linked rework, and requires an audited distinct rerun', () => {
+  const activeStates = [
+    'queued',
+    'provisioning',
+    'running',
+    'awaiting_input',
+    'paused',
+    'validating',
+    'validated',
+    'review_required',
+    'approved',
+    'merging',
+    'merge_pending',
+    'killing',
+  ] as const;
+  const finishedStates = ['complete', 'failed', 'killed', 'rejected'] as const;
+  it.each(
+    finishedStates.flatMap((status) => [false, true].map((receipt) => ({ status, receipt }))),
+  )(
+    'does not block on finished $status work, with receipt=$receipt, and preserves its evidence',
+    ({ status, receipt }) => {
+      const f = fixture();
+      try {
+        f.repo.insert(request('prior'));
+        const evidence = receipt ? f.ledger.inspect('prior', 1, repository, 'main', base) : null;
+        f.db.prepare("UPDATE pods SET status=? WHERE id='prior'").run(status);
+        f.repo.insert(request('next'));
+        expect(f.ledger.inspect('next', 1, repository, 'main', base)).toMatchObject({
+          status: 'admitted',
+          conflicts: [],
+        });
+        if (evidence)
+          expect(
+            f.db
+              .prepare('SELECT work_hash FROM execution_dispatch_preflights WHERE id=?')
+              .get(evidence.id),
+          ).toEqual({ work_hash: evidence.workHash });
+      } finally {
+        f.db.close();
+      }
+    },
+  );
+  it.each(activeStates.flatMap((status) => [false, true].map((receipt) => ({ status, receipt }))))(
+    'still blocks active $status work, with receipt=$receipt',
+    ({ status, receipt }) => {
+      const f = fixture();
+      try {
+        f.repo.insert(request('prior'));
+        if (receipt) f.ledger.inspect('prior', 1, repository, 'main', base);
+        f.db.prepare("UPDATE pods SET status=? WHERE id='prior'").run(status);
+        f.repo.insert(request('next'));
+        expect(f.ledger.inspect('next', 1, repository, 'main', base)).toMatchObject({
+          status: 'review_required',
+          conflicts: [{ podId: 'prior' }],
+        });
+      } finally {
+        f.db.close();
+      }
+    },
+  );
+  it('does not let a large deleted history consume the active conflict bound', () => {
+    const f = fixture();
+    try {
+      for (let i = 0; i < 102; i++) {
+        const id = `old-${i}`;
+        f.repo.insert(request(id));
+        f.ledger.inspect(id, 1, repository, 'main', base);
+        f.repo.delete(id);
+      }
+      f.repo.insert(request('next'));
+      expect(f.ledger.inspect('next', 1, repository, 'main', base)).toMatchObject({
+        status: 'admitted',
+        conflicts: [],
+      });
+      expect(
+        f.db.prepare('SELECT COUNT(*) AS count FROM execution_dispatch_preflights').get(),
+      ).toEqual({ count: 103 });
+    } finally {
+      f.db.close();
+    }
+  });
+  it('uses the same single-PR series owner as fix admission, not a PR-less triggering sibling', () => {
+    const f = fixture();
+    try {
+      const prUrl = 'https://github.com/org/repo/pull/11';
+      f.repo.insert(
+        request('owner', {
+          task: 'Series PR owner',
+          seriesId: 'series',
+          prMode: 'single',
+          branch: 'owner-tip',
+          prUrl,
+          status: 'merge_pending',
+        }),
+      );
+      f.repo.insert(
+        request('sibling', {
+          task: 'Another brief in series',
+          seriesId: 'series',
+          prMode: 'single',
+          branch: 'sibling-tip',
+          baseBranch: 'sibling-base',
+          status: 'merge_pending',
+        }),
+      );
+      f.repo.insert(
+        request('fix', {
+          task: repairPlaceholder,
+          linkedPodId: 'sibling',
+          branch: 'owner-tip',
+          baseBranch: 'main',
+          prUrl,
+        }),
+      );
+      f.repo.update('sibling', { fixPodId: 'fix' });
+      expect(f.ledger.inspect('fix', 1, repository, 'main', base).status).toBe('admitted');
+    } finally {
+      f.db.close();
+    }
+  });
+  it('holds a distinct repair rerun without an executable feedback handoff, without creating an orphan task', () => {
+    const f = fixture();
+    try {
+      addRepair(f, 'prior-parent', 'prior-fix', 11);
+      recordLegacyRepair(f, 'prior-fix');
+      addRepair(f, 'blocked-parent', 'blocked-fix', 11);
+      expect(f.ledger.inspect('blocked-fix', 1, repository, 'main', base).status).toBe(
+        'review_required',
+      );
+      // Hash equivalence is NOT executable work: an unlinked rerun cannot drain
+      // the canonical parent's feedback. Continue the existing repair instead.
+      expect(() =>
+        f.repo.insert(
+          request('rerun', {
+            task: repairPlaceholder,
+            rerunRequestHash: 'b'.repeat(64),
+            intentionalRerun: {
+              ofPodId: 'blocked-fix',
+              requestKey: 'scoped-rerun-without-feedback',
+              reason:
+                'Reviewed the conflicts but have not materialized an executable feedback handoff.',
+            },
+          }),
+        ),
+      ).toThrow('executable feedback');
+      expect(f.db.prepare("SELECT id FROM pods WHERE id='rerun'").get()).toBeUndefined();
+      expect(f.repo.getOrThrow('blocked-parent').fixPodId).toBe('blocked-fix');
+    } finally {
+      f.db.close();
+    }
+  });
+  it('holds already-recorded legacy placeholder rerun intents without rewriting their audit rows', () => {
+    const f = fixture();
+    try {
+      addRepair(f, 'parent', 'source-fix', 11);
+      f.repo.insert(request('old-rerun', { task: repairPlaceholder }));
+      const work = createHash('sha256')
+        .update(JSON.stringify({ contract: null, task: repairPlaceholder }))
+        .digest('hex');
+      f.db
+        .prepare(`INSERT INTO execution_rerun_intents
+        (execution_id,pod_id,source_pod_id,source_execution_id,source_repository,source_base_branch,work_hash,reason,user_id,request_key,request_hash,actor,recorded_at)
+        SELECT current.execution_id,current.pod_id,source.pod_id,source.execution_id,
+        'github.com/org/repo','main',?,'Historical reviewed rerun','operator','old-rerun-key',?, ?,?
+        FROM task_executions current JOIN task_executions source ON source.pod_id='source-fix'
+        WHERE current.pod_id='old-rerun'`)
+        .run(
+          work,
+          'a'.repeat(64),
+          JSON.stringify({ type: 'human', userId: 'operator' }),
+          new Date().toISOString(),
+        );
+      expect(() => f.ledger.inspect('old-rerun', 1, repository, 'main', base)).toThrow(
+        'executable feedback',
+      );
+      expect(
+        f.db
+          .prepare("SELECT request_key FROM execution_rerun_intents WHERE pod_id='old-rerun'")
+          .get(),
+      ).toEqual({ request_key: 'old-rerun-key' });
+    } finally {
+      f.db.close();
+    }
+  });
+  it('authorizes only the named direct conflict, never a second unreviewed admitted rerun', () => {
+    const f = fixture();
+    try {
+      f.repo.insert(request('source'));
+      f.ledger.inspect('source', 1, repository, 'main', base);
+      for (const id of ['rerun-one', 'rerun-two']) {
+        f.repo.insert(
+          request(id, {
+            rerunRequestHash: (id === 'rerun-one' ? 'c' : 'd').repeat(64),
+            intentionalRerun: {
+              ofPodId: 'source',
+              requestKey: id,
+              reason: 'Reviewed only the named original execution.',
+            },
+          }),
+        );
+        expect(f.ledger.inspect(id, 1, repository, 'main', base).status).toBe(
+          id === 'rerun-one' ? 'admitted' : 'review_required',
+        );
+      }
+    } finally {
+      f.db.close();
+    }
+  });
+  it('uses immutable execution parent lineage after normal parent-first deletion clears the child pointer', () => {
+    const f = fixture();
+    try {
+      addRepair(f, 'old-parent', 'old-fix', 11);
+      recordLegacyRepair(f, 'old-fix');
+      f.repo.delete('old-parent');
+      expect(f.repo.getOrThrow('old-fix').linkedPodId).toBeNull();
+      f.repo.delete('old-fix');
+      addRepair(f, 'new-parent', 'new-fix', 12);
+      expect(f.ledger.inspect('new-fix', 1, repository, 'main', base).status).toBe('admitted');
+    } finally {
+      f.db.close();
+    }
+  });
+  it('bounds receipt candidates before reading retained history without UNION-view materialization', () => {
+    const f = fixture();
+    try {
+      const plan = f.db
+        .prepare(`EXPLAIN QUERY PLAN ${DISPATCH_CANDIDATES_SQL}`)
+        .all('github.com/org/repo', 'main', 'a'.repeat(64), 'b'.repeat(64), 'task') as Array<{
+        detail: string;
+      }>;
+      const detail = plan.map((p) => p.detail).join('\n');
+      expect(detail).toContain('execution_preflight_identity');
+      expect(detail).not.toMatch(/MATERIALIZE|SCAN task_history/);
+    } finally {
+      f.db.close();
+    }
+  });
+  it('distinguishes canonical queued repairs of different PRs, including deleted old repairs', () => {
+    const f = fixture();
+    try {
+      addRepair(f, 'old-parent', 'old-fix', 11);
+      const prior = f.ledger.inspect('old-fix', 1, repository, 'main', base);
+      expect(prior.status).toBe('admitted');
+      // As in production, the running repair replaces its placeholder with feedback.
+      f.repo.update('old-fix', { task: '[PR FIX] Expanded feedback for PR11' });
+      f.repo.delete('old-fix');
+      addRepair(f, 'new-parent', 'new-fix', 12);
+      expect(f.ledger.inspect('new-fix', 1, repository, 'main', base)).toMatchObject({
+        status: 'admitted',
+        conflicts: [],
+      });
+      expect(
+        f.db
+          .prepare('SELECT work_hash FROM execution_dispatch_preflights WHERE id=?')
+          .get(prior.id),
+      ).toEqual({ work_hash: prior.workHash });
+    } finally {
+      f.db.close();
+    }
+  });
+  it('does not confuse two still-queued canonical repair placeholders for different PRs', () => {
+    const f = fixture();
+    try {
+      addRepair(f, 'parent-a', 'fix-a', 11);
+      addRepair(f, 'parent-b', 'fix-b', 12);
+      expect(f.ledger.inspect('fix-b', 1, repository, 'main', base)).toMatchObject({
+        status: 'admitted',
+        conflicts: [],
+      });
+    } finally {
+      f.db.close();
+    }
+  });
+  it.each(
+    (['different-pr', 'same-pr', 'missing-pr', 'foreign-pr', 'parent-mismatch'] as const).flatMap(
+      (kind) => [false, true].map((deleted) => ({ kind, deleted })),
+    ),
+  )(
+    'classifies active legacy PR receipts, ignoring deleted history: $kind / deleted=$deleted',
+    ({ kind, deleted }) => {
+      const f = fixture();
+      try {
+        addRepair(f, 'old-parent', 'old-fix', 11);
+        const legacyHash = createHash('sha256')
+          .update(JSON.stringify({ contract: null, task: repairPlaceholder }))
+          .digest('hex');
+        // Historical fixture constructed as the old binary recorded it. No receipt is updated.
+        f.db
+          .prepare(`INSERT INTO execution_dispatch_preflights
+          (id,execution_id,task_id,pod_id,generation,version,repository,base_branch,base_commit_sha,work_hash,status,conflicts,rerun_intent,checked_at)
+          SELECT 'legacy-fix',e.execution_id,e.task_id,p.id,p.lifecycle_generation,1,
+          'github.com/org/repo','main',?,?,'admitted','[]',NULL,?
+          FROM pods p JOIN task_executions e ON e.pod_id=p.id WHERE p.id='old-fix'`)
+          .run(base, legacyHash, new Date().toISOString());
+        f.repo.update('old-fix', {
+          task: '[PR FIX] Expanded feedback',
+          ...(kind === 'missing-pr' ? { prUrl: null } : {}),
+          ...(kind === 'foreign-pr' ? { prUrl: 'https://github.com/elsewhere/repo/pull/12' } : {}),
+        });
+        if (kind === 'parent-mismatch') {
+          f.repo.update('old-parent', { prUrl: 'https://github.com/org/repo/pull/99' });
+        }
+        if (deleted) f.repo.delete('old-fix');
+        addRepair(f, 'new-parent', 'new-fix', kind === 'same-pr' ? 11 : 12);
+        expect(f.ledger.inspect('new-fix', 1, repository, 'main', base).status).toBe(
+          deleted || kind === 'different-pr' ? 'admitted' : 'review_required',
+        );
+        expect(
+          f.db
+            .prepare("SELECT work_hash FROM execution_dispatch_preflights WHERE id='legacy-fix'")
+            .get(),
+        ).toEqual({ work_hash: legacyHash });
+      } finally {
+        f.db.close();
+      }
+    },
+  );
+  it('keeps same-PR repair and ordinary-placeholder duplicate protections', () => {
+    const f = fixture();
+    try {
+      addRepair(f, 'parent-a', 'fix-a', 11);
+      f.ledger.inspect('fix-a', 1, repository, 'main', base);
+      addRepair(f, 'parent-b', 'fix-b', 11);
+      f.repo.update('parent-b', { prUrl: 'https://github.com/Org/Repo/pull/11/' });
+      f.repo.update('fix-b', { prUrl: 'https://github.com/Org/Repo/pull/11/' });
+      expect(f.ledger.inspect('fix-b', 1, repository, 'main', base).status).toBe('review_required');
+      f.repo.insert(request('literal-a', { task: repairPlaceholder }));
+      f.ledger.inspect('literal-a', 1, repository, 'main', base);
+      f.repo.insert(request('literal-b', { task: repairPlaceholder }));
+      expect(f.ledger.inspect('literal-b', 1, repository, 'main', base).status).toBe(
+        'review_required',
+      );
+    } finally {
+      f.db.close();
+    }
+  });
+  it('refuses stale canonical ownership or a mismatched PR/branch instead of exempting linked work', () => {
+    const f = fixture();
+    try {
+      addRepair(f, 'parent', 'fix', 11);
+      f.repo.update('parent', { fixPodId: null });
+      expect(() => f.ledger.inspect('fix', 1, repository, 'main', base)).toThrow('repair identity');
+      f.repo.update('parent', { fixPodId: 'fix' });
+      f.repo.update('fix', { prUrl: 'https://github.com/org/repo/pull/12' });
+      expect(() => f.ledger.inspect('fix', 1, repository, 'main', base)).toThrow('repair identity');
+      f.repo.update('parent', { prUrl: 'https://github.com/elsewhere/repo/pull/12' });
+      f.repo.update('fix', { prUrl: 'https://github.com/elsewhere/repo/pull/12' });
+      expect(() => f.ledger.inspect('fix', 1, repository, 'main', base)).toThrow('repair identity');
+      f.repo.update('parent', { prUrl: 'https://github.com/org/repo/pull/11' });
+      f.repo.update('fix', { prUrl: 'https://github.com/org/repo/pull/11' });
+      // Corrupt local fixture construction only; branch is not an operator-editable field.
+      f.db.prepare("UPDATE pods SET branch='wrong-branch' WHERE id='fix'").run();
+      expect(() => f.ledger.inspect('fix', 1, repository, 'main', base)).toThrow('repair identity');
+    } finally {
+      f.db.close();
+    }
+  });
+  it('keeps linked rework in its task but requires explicit review before a distinct rerun supersedes both executions', () => {
+    const f = fixture();
+    try {
+      f.repo.insert(request('source'));
+      f.ledger.inspect('source', 1, repository, 'main', base);
+      f.repo.insert(request('fix', { linkedPodId: 'source' }));
+      expect(f.ledger.inspect('fix', 1, repository, 'main', base).status).toBe('admitted');
+      f.repo.insert(
+        request('blocked-rerun', {
+          rerunRequestHash: 'e'.repeat(64),
+          intentionalRerun: {
+            ofPodId: 'source',
+            requestKey: 'source-only',
+            reason: 'Reviewed the source, not its additional repair execution.',
+          },
+        }),
+      );
+      expect(f.ledger.inspect('blocked-rerun', 1, repository, 'main', base).status).toBe(
+        'review_required',
+      );
+      f.repo.insert(
+        request('reviewed-rerun', {
+          rerunRequestHash: 'f'.repeat(64),
+          intentionalRerun: {
+            ofPodId: 'blocked-rerun',
+            requestKey: 'reviewed-source-and-fix',
+            reason: 'Reviewed both exact executions recorded in the blocked request.',
+          },
+        }),
+      );
+      expect(f.ledger.inspect('reviewed-rerun', 1, repository, 'main', base).status).toBe(
+        'admitted',
+      );
+    } finally {
+      f.db.close();
+    }
+  });
+  it('serializes equivalent queued work and requires an audited distinct rerun', () => {
     const { db, repo, ledger } = fixture();
     try {
       repo.insert(request('first'));
@@ -45,8 +464,6 @@ describe('dispatch admission against immutable execution evidence', () => {
       });
       const first = ledger.inspect('first', 1, repository, 'main', base);
       expect(first.status).toBe('admitted');
-      repo.insert(request('fix', { linkedPodId: 'first' }));
-      expect(ledger.inspect('fix', 1, repository, 'main', base).status).toBe('admitted');
       repo.insert(
         request('rerun', {
           rerunRequestHash: 'a'.repeat(64),
@@ -88,11 +505,12 @@ describe('dispatch admission against immutable execution evidence', () => {
       const ledger = createPodRepository(db).dispatchPreflight;
       expect(ledger?.latest('first')).toBeNull();
       expect(ledger?.inspect('second', 1, repository, 'main', base)).toMatchObject({
-        status: 'review_required',
-        conflicts: [
-          { executionId: first.executionId, status: 'deleted', evidence: 'dispatch_receipt' },
-        ],
+        status: 'admitted',
+        conflicts: [],
       });
+      expect(
+        db.prepare('SELECT work_hash FROM execution_dispatch_preflights WHERE id=?').get(first.id),
+      ).toEqual({ work_hash: first.workHash });
       expect(db.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
       expect(db.pragma('foreign_key_check')).toEqual([]);
     } finally {
@@ -156,6 +574,11 @@ describe('dispatch admission against immutable execution evidence', () => {
         'contract is unreadable',
       );
       expect(ledger.latest('second')).toBeNull();
+      db.prepare("UPDATE pods SET status='failed' WHERE id='first'").run();
+      expect(ledger.inspect('second', 1, repository, 'main', base).status).toBe('admitted');
+      expect(db.prepare("SELECT contract FROM pods WHERE id='first'").get()).toEqual({
+        contract: 'bad-json',
+      });
     } finally {
       db.close();
     }
@@ -209,18 +632,23 @@ describe('dispatch admission against immutable execution evidence', () => {
       repo.delete('tuesday');
       run('wednesday');
       expect(inspect('wednesday').status).toBe('admitted');
-      // Identical work from outside the schedule is still a duplicate of the schedule's runs.
+      // Finished runs do not block manual work either; active scheduled work still does.
       db.prepare("UPDATE pods SET status = 'complete' WHERE id = 'wednesday'").run();
       repo.insert(request('manual'));
-      expect(inspect('manual')).toMatchObject({
+      expect(inspect('manual').status).toBe('admitted');
+      db.prepare("UPDATE pods SET status = 'complete' WHERE id = 'manual'").run();
+      run('thursday');
+      expect(inspect('thursday').status).toBe('admitted');
+      repo.insert(request('another-manual'));
+      expect(inspect('another-manual')).toMatchObject({
         status: 'review_required',
-        conflicts: expect.arrayContaining([expect.objectContaining({ podId: 'wednesday' })]),
+        conflicts: [{ podId: 'thursday' }],
       });
     } finally {
       db.close();
     }
   });
-  it('ignores terminal work outside the seven-day window but retains older active work', () => {
+  it('ignores terminal work regardless of age but retains older active work', () => {
     const { db, repo, ledger } = fixture();
     try {
       repo.insert(request('first', { status: 'complete' }));
