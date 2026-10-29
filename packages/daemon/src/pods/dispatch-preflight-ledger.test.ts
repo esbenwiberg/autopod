@@ -88,11 +88,12 @@ describe('dispatch admission against immutable execution evidence', () => {
       const ledger = createPodRepository(db).dispatchPreflight;
       expect(ledger?.latest('first')).toBeNull();
       expect(ledger?.inspect('second', 1, repository, 'main', base)).toMatchObject({
-        status: 'review_required',
-        conflicts: [
-          { executionId: first.executionId, status: 'deleted', evidence: 'dispatch_receipt' },
-        ],
+        status: 'admitted',
+        conflicts: [],
       });
+      expect(
+        db.prepare('SELECT work_hash FROM execution_dispatch_preflights WHERE id=?').get(first.id),
+      ).toEqual({ work_hash: first.workHash });
       expect(db.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
       expect(db.pragma('foreign_key_check')).toEqual([]);
     } finally {
@@ -156,6 +157,11 @@ describe('dispatch admission against immutable execution evidence', () => {
         'contract is unreadable',
       );
       expect(ledger.latest('second')).toBeNull();
+      db.prepare("UPDATE pods SET status='failed' WHERE id='first'").run();
+      expect(ledger.inspect('second', 1, repository, 'main', base).status).toBe('admitted');
+      expect(db.prepare("SELECT contract FROM pods WHERE id='first'").get()).toEqual({
+        contract: 'bad-json',
+      });
     } finally {
       db.close();
     }
@@ -209,18 +215,23 @@ describe('dispatch admission against immutable execution evidence', () => {
       repo.delete('tuesday');
       run('wednesday');
       expect(inspect('wednesday').status).toBe('admitted');
-      // Identical work from outside the schedule is still a duplicate of the schedule's runs.
+      // Finished schedule runs do not block manual work either.
       db.prepare("UPDATE pods SET status = 'complete' WHERE id = 'wednesday'").run();
       repo.insert(request('manual'));
-      expect(inspect('manual')).toMatchObject({
+      expect(inspect('manual').status).toBe('admitted');
+      db.prepare("UPDATE pods SET status = 'complete' WHERE id = 'manual'").run();
+      run('thursday');
+      expect(inspect('thursday').status).toBe('admitted');
+      repo.insert(request('another-manual'));
+      expect(inspect('another-manual')).toMatchObject({
         status: 'review_required',
-        conflicts: expect.arrayContaining([expect.objectContaining({ podId: 'wednesday' })]),
+        conflicts: [{ podId: 'thursday' }],
       });
     } finally {
       db.close();
     }
   });
-  it('ignores terminal work outside the seven-day window but retains older active work', () => {
+  it('ignores terminal work regardless of age but retains older active work', () => {
     const { db, repo, ledger } = fixture();
     try {
       repo.insert(request('first', { status: 'complete' }));
