@@ -118,6 +118,14 @@ const hash = (row: Pick<RequestRow, 'task' | 'contract'>): string => {
     );
   }
 };
+const requireExecutableRerun = (task: string): void => {
+  if (task === '[PR FIX] Awaiting queued feedback.')
+    throw new AutopodError(
+      'PR repair placeholder has no executable feedback handoff; resume the existing canonical repair instead.',
+      'RERUN_REPAIR_FEEDBACK_REQUIRED',
+      409,
+    );
+};
 const requestRepository = (row: RequestRow): string => {
   if (row.frozenRepository) return row.frozenRepository;
   if ((row.profileSnapshot?.length ?? 0) > 1048576)
@@ -305,6 +313,7 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
         );
       const pod = get(podId);
       const source = get(request.ofPodId);
+      requireExecutableRerun(pod.task);
       if (pod.linkedPodId || pod.taskId === source.taskId || hash(pod) !== hash(source))
         throw new AutopodError(
           'Intentional rerun must preserve the referenced request and have a distinct logical execution',
@@ -367,6 +376,7 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             'INVALID_RERUN',
             409,
           );
+        if (intent) requireExecutableRerun(pod.task);
         let repairPr: string | null = null;
         const repairIdentity = (raw: string) => {
           const identity = canonicalMergePrIdentity(raw);
@@ -406,40 +416,6 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
               'DISPATCH_REPAIR_IDENTITY_UNAVAILABLE',
               409,
             );
-          }
-        }
-        // An audited unlinked rerun preserves the reviewed source scope, not just
-        // its generic stub. Reconstruct only an exactly matching immutable hash.
-        if (intent && !repairPr && pod.task === '[PR FIX] Awaiting queued feedback.') {
-          const sourceEvidence = db
-            .prepare(`SELECT work_hash AS workHash FROM execution_dispatch_preflights
-            WHERE execution_id=? AND repository=? AND base_branch=? ORDER BY rowid DESC LIMIT 1`)
-            .get(intent.source_execution_id, repository, baseBranch) as
-            | { workHash: string }
-            | undefined;
-          if (sourceEvidence && sourceEvidence.workHash !== legacyWorkHash) {
-            try {
-              const source = get(intent.source_pod_id as string);
-              if (
-                source.executionId !== intent.source_execution_id ||
-                !parentIdentity(source) ||
-                !source.prUrl ||
-                hash(source) !== legacyWorkHash ||
-                requestRepository(source) !== repository ||
-                source.baseBranch !== baseBranch
-              )
-                throw new Error('Source request changed');
-              const identity = repairIdentity(source.prUrl);
-              if (scopedRepairHash(legacyWorkHash, identity) !== sourceEvidence.workHash)
-                throw new Error('Source scope changed');
-              repairPr = identity;
-            } catch {
-              throw new AutopodError(
-                'Reviewed repair scope is unavailable or changed; reconcile the rerun',
-                'INVALID_RERUN',
-                409,
-              );
-            }
           }
         }
         // The stub is not business work. Retain its contract and actual PR identity.
@@ -573,7 +549,8 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
         };
         const authorized =
           intent?.work_hash === legacyWorkHash &&
-          (conflicts.has(intent.source_execution_id as string) || reviewedByBlockedSource());
+          ([...conflicts.keys()].every((id) => id === intent.source_execution_id) ||
+            reviewedByBlockedSource());
         const status = conflicts.size === 0 || authorized ? 'admitted' : 'review_required';
         const id = randomUUID();
         db.prepare(`INSERT INTO execution_dispatch_preflights(id,execution_id,task_id,pod_id,generation,version,repository,base_branch,base_commit_sha,work_hash,status,conflicts,rerun_intent,checked_at)

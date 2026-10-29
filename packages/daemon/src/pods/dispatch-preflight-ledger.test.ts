@@ -99,7 +99,7 @@ describe('dispatch admission against immutable execution evidence', () => {
       f.db.close();
     }
   });
-  it('honors the exact audited conflict set when intentionally rerunning a scoped blocked repair', () => {
+  it('holds a distinct repair rerun without an executable feedback handoff, without creating an orphan task', () => {
     const f = fixture();
     try {
       addRepair(f, 'prior-parent', 'prior-fix', 11);
@@ -108,27 +108,81 @@ describe('dispatch admission against immutable execution evidence', () => {
       expect(f.ledger.inspect('blocked-fix', 1, repository, 'main', base).status).toBe(
         'review_required',
       );
-      f.repo.insert(
-        request('rerun', {
-          task: repairPlaceholder,
-          rerunRequestHash: 'b'.repeat(64),
-          intentionalRerun: {
-            ofPodId: 'blocked-fix',
-            requestKey: 'audited-scoped-rerun',
-            reason:
-              'Distinct rerun after review of this exact blocked repair and its recorded conflict.',
-          },
-        }),
+      // Hash equivalence is NOT executable work: an unlinked rerun cannot drain
+      // the canonical parent's feedback. Continue the existing repair instead.
+      expect(() =>
+        f.repo.insert(
+          request('rerun', {
+            task: repairPlaceholder,
+            rerunRequestHash: 'b'.repeat(64),
+            intentionalRerun: {
+              ofPodId: 'blocked-fix',
+              requestKey: 'scoped-rerun-without-feedback',
+              reason:
+                'Reviewed the conflicts but have not materialized an executable feedback handoff.',
+            },
+          }),
+        ),
+      ).toThrow('executable feedback');
+      expect(f.db.prepare("SELECT id FROM pods WHERE id='rerun'").get()).toBeUndefined();
+      expect(f.repo.getOrThrow('blocked-parent').fixPodId).toBe('blocked-fix');
+    } finally {
+      f.db.close();
+    }
+  });
+  it('holds already-recorded legacy placeholder rerun intents without rewriting their audit rows', () => {
+    const f = fixture();
+    try {
+      addRepair(f, 'parent', 'source-fix', 11);
+      f.repo.insert(request('old-rerun', { task: repairPlaceholder }));
+      const work = createHash('sha256')
+        .update(JSON.stringify({ contract: null, task: repairPlaceholder }))
+        .digest('hex');
+      f.db
+        .prepare(`INSERT INTO execution_rerun_intents
+        (execution_id,pod_id,source_pod_id,source_execution_id,source_repository,source_base_branch,work_hash,reason,user_id,request_key,request_hash,actor,recorded_at)
+        SELECT current.execution_id,current.pod_id,source.pod_id,source.execution_id,
+        'github.com/org/repo','main',?,'Historical reviewed rerun','operator','old-rerun-key',?, ?,?
+        FROM task_executions current JOIN task_executions source ON source.pod_id='source-fix'
+        WHERE current.pod_id='old-rerun'`)
+        .run(
+          work,
+          'a'.repeat(64),
+          JSON.stringify({ type: 'human', userId: 'operator' }),
+          new Date().toISOString(),
+        );
+      expect(() => f.ledger.inspect('old-rerun', 1, repository, 'main', base)).toThrow(
+        'executable feedback',
       );
-      expect(f.ledger.inspect('rerun', 1, repository, 'main', base)).toMatchObject({
-        status: 'admitted',
-        rerun: { ofPodId: 'blocked-fix' },
-      });
-      addRepair(f, 'new-parent', 'new-fix', 11);
-      recordLegacyRepair(f, 'new-fix');
-      expect(f.ledger.inspect('rerun', 1, repository, 'main', base).status).toBe('review_required');
-      f.repo.update('blocked-fix', { prUrl: 'https://github.com/org/repo/pull/12' });
-      expect(() => f.ledger.inspect('rerun', 1, repository, 'main', base)).toThrow('repair scope');
+      expect(
+        f.db
+          .prepare("SELECT request_key FROM execution_rerun_intents WHERE pod_id='old-rerun'")
+          .get(),
+      ).toEqual({ request_key: 'old-rerun-key' });
+    } finally {
+      f.db.close();
+    }
+  });
+  it('authorizes only the named direct conflict, never a second unreviewed admitted rerun', () => {
+    const f = fixture();
+    try {
+      f.repo.insert(request('source'));
+      f.ledger.inspect('source', 1, repository, 'main', base);
+      for (const id of ['rerun-one', 'rerun-two']) {
+        f.repo.insert(
+          request(id, {
+            rerunRequestHash: (id === 'rerun-one' ? 'c' : 'd').repeat(64),
+            intentionalRerun: {
+              ofPodId: 'source',
+              requestKey: id,
+              reason: 'Reviewed only the named original execution.',
+            },
+          }),
+        );
+        expect(f.ledger.inspect(id, 1, repository, 'main', base).status).toBe(
+          id === 'rerun-one' ? 'admitted' : 'review_required',
+        );
+      }
     } finally {
       f.db.close();
     }
@@ -283,7 +337,44 @@ describe('dispatch admission against immutable execution evidence', () => {
       f.db.close();
     }
   });
-  it('serializes equivalent queued work, exempts linked rework, and requires an audited distinct rerun', () => {
+  it('keeps linked rework in its task but requires explicit review before a distinct rerun supersedes both executions', () => {
+    const f = fixture();
+    try {
+      f.repo.insert(request('source'));
+      f.ledger.inspect('source', 1, repository, 'main', base);
+      f.repo.insert(request('fix', { linkedPodId: 'source' }));
+      expect(f.ledger.inspect('fix', 1, repository, 'main', base).status).toBe('admitted');
+      f.repo.insert(
+        request('blocked-rerun', {
+          rerunRequestHash: 'e'.repeat(64),
+          intentionalRerun: {
+            ofPodId: 'source',
+            requestKey: 'source-only',
+            reason: 'Reviewed the source, not its additional repair execution.',
+          },
+        }),
+      );
+      expect(f.ledger.inspect('blocked-rerun', 1, repository, 'main', base).status).toBe(
+        'review_required',
+      );
+      f.repo.insert(
+        request('reviewed-rerun', {
+          rerunRequestHash: 'f'.repeat(64),
+          intentionalRerun: {
+            ofPodId: 'blocked-rerun',
+            requestKey: 'reviewed-source-and-fix',
+            reason: 'Reviewed both exact executions recorded in the blocked request.',
+          },
+        }),
+      );
+      expect(f.ledger.inspect('reviewed-rerun', 1, repository, 'main', base).status).toBe(
+        'admitted',
+      );
+    } finally {
+      f.db.close();
+    }
+  });
+  it('serializes equivalent queued work and requires an audited distinct rerun', () => {
     const { db, repo, ledger } = fixture();
     try {
       repo.insert(request('first'));
@@ -294,8 +385,6 @@ describe('dispatch admission against immutable execution evidence', () => {
       });
       const first = ledger.inspect('first', 1, repository, 'main', base);
       expect(first.status).toBe('admitted');
-      repo.insert(request('fix', { linkedPodId: 'first' }));
-      expect(ledger.inspect('fix', 1, repository, 'main', base).status).toBe('admitted');
       repo.insert(
         request('rerun', {
           rerunRequestHash: 'a'.repeat(64),
