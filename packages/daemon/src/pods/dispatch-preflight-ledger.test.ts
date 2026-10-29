@@ -60,6 +60,86 @@ function recordLegacyRepair(f: ReturnType<typeof fixture>, child: string) {
 }
 
 describe('dispatch admission against immutable execution evidence', () => {
+  const activeStates = [
+    'queued',
+    'provisioning',
+    'running',
+    'awaiting_input',
+    'paused',
+    'validating',
+    'validated',
+    'review_required',
+    'approved',
+    'merging',
+    'merge_pending',
+    'killing',
+  ] as const;
+  const finishedStates = ['complete', 'failed', 'killed', 'rejected'] as const;
+  it.each(
+    finishedStates.flatMap((status) => [false, true].map((receipt) => ({ status, receipt }))),
+  )(
+    'does not block on finished $status work, with receipt=$receipt, and preserves its evidence',
+    ({ status, receipt }) => {
+      const f = fixture();
+      try {
+        f.repo.insert(request('prior'));
+        const evidence = receipt ? f.ledger.inspect('prior', 1, repository, 'main', base) : null;
+        f.db.prepare("UPDATE pods SET status=? WHERE id='prior'").run(status);
+        f.repo.insert(request('next'));
+        expect(f.ledger.inspect('next', 1, repository, 'main', base)).toMatchObject({
+          status: 'admitted',
+          conflicts: [],
+        });
+        if (evidence)
+          expect(
+            f.db
+              .prepare('SELECT work_hash FROM execution_dispatch_preflights WHERE id=?')
+              .get(evidence.id),
+          ).toEqual({ work_hash: evidence.workHash });
+      } finally {
+        f.db.close();
+      }
+    },
+  );
+  it.each(activeStates.flatMap((status) => [false, true].map((receipt) => ({ status, receipt }))))(
+    'still blocks active $status work, with receipt=$receipt',
+    ({ status, receipt }) => {
+      const f = fixture();
+      try {
+        f.repo.insert(request('prior'));
+        if (receipt) f.ledger.inspect('prior', 1, repository, 'main', base);
+        f.db.prepare("UPDATE pods SET status=? WHERE id='prior'").run(status);
+        f.repo.insert(request('next'));
+        expect(f.ledger.inspect('next', 1, repository, 'main', base)).toMatchObject({
+          status: 'review_required',
+          conflicts: [{ podId: 'prior' }],
+        });
+      } finally {
+        f.db.close();
+      }
+    },
+  );
+  it('does not let a large deleted history consume the active conflict bound', () => {
+    const f = fixture();
+    try {
+      for (let i = 0; i < 102; i++) {
+        const id = `old-${i}`;
+        f.repo.insert(request(id));
+        f.ledger.inspect(id, 1, repository, 'main', base);
+        f.repo.delete(id);
+      }
+      f.repo.insert(request('next'));
+      expect(f.ledger.inspect('next', 1, repository, 'main', base)).toMatchObject({
+        status: 'admitted',
+        conflicts: [],
+      });
+      expect(
+        f.db.prepare('SELECT COUNT(*) AS count FROM execution_dispatch_preflights').get(),
+      ).toEqual({ count: 103 });
+    } finally {
+      f.db.close();
+    }
+  });
   it('uses the same single-PR series owner as fix admission, not a PR-less triggering sibling', () => {
     const f = fixture();
     try {
@@ -206,14 +286,9 @@ describe('dispatch admission against immutable execution evidence', () => {
     try {
       const plan = f.db
         .prepare(`EXPLAIN QUERY PLAN ${DISPATCH_CANDIDATES_SQL}`)
-        .all(
-          'github.com/org/repo',
-          'main',
-          'a'.repeat(64),
-          'b'.repeat(64),
-          'task',
-          new Date().toISOString(),
-        ) as Array<{ detail: string }>;
+        .all('github.com/org/repo', 'main', 'a'.repeat(64), 'b'.repeat(64), 'task') as Array<{
+        detail: string;
+      }>;
       const detail = plan.map((p) => p.detail).join('\n');
       expect(detail).toContain('execution_preflight_identity');
       expect(detail).not.toMatch(/MATERIALIZE|SCAN task_history/);
@@ -257,9 +332,13 @@ describe('dispatch admission against immutable execution evidence', () => {
       f.db.close();
     }
   });
-  it.each(['different-pr', 'same-pr', 'missing-pr', 'foreign-pr', 'parent-mismatch'] as const)(
-    'classifies immutable pre-fix placeholder receipts without guessing missing history: %s',
-    (kind) => {
+  it.each(
+    (['different-pr', 'same-pr', 'missing-pr', 'foreign-pr', 'parent-mismatch'] as const).flatMap(
+      (kind) => [false, true].map((deleted) => ({ kind, deleted })),
+    ),
+  )(
+    'classifies active legacy PR receipts, ignoring deleted history: $kind / deleted=$deleted',
+    ({ kind, deleted }) => {
       const f = fixture();
       try {
         addRepair(f, 'old-parent', 'old-fix', 11);
@@ -282,10 +361,10 @@ describe('dispatch admission against immutable execution evidence', () => {
         if (kind === 'parent-mismatch') {
           f.repo.update('old-parent', { prUrl: 'https://github.com/org/repo/pull/99' });
         }
-        f.repo.delete('old-fix');
+        if (deleted) f.repo.delete('old-fix');
         addRepair(f, 'new-parent', 'new-fix', kind === 'same-pr' ? 11 : 12);
         expect(f.ledger.inspect('new-fix', 1, repository, 'main', base).status).toBe(
-          kind === 'different-pr' ? 'admitted' : 'review_required',
+          deleted || kind === 'different-pr' ? 'admitted' : 'review_required',
         );
         expect(
           f.db
@@ -426,11 +505,12 @@ describe('dispatch admission against immutable execution evidence', () => {
       const ledger = createPodRepository(db).dispatchPreflight;
       expect(ledger?.latest('first')).toBeNull();
       expect(ledger?.inspect('second', 1, repository, 'main', base)).toMatchObject({
-        status: 'review_required',
-        conflicts: [
-          { executionId: first.executionId, status: 'deleted', evidence: 'dispatch_receipt' },
-        ],
+        status: 'admitted',
+        conflicts: [],
       });
+      expect(
+        db.prepare('SELECT work_hash FROM execution_dispatch_preflights WHERE id=?').get(first.id),
+      ).toEqual({ work_hash: first.workHash });
       expect(db.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
       expect(db.pragma('foreign_key_check')).toEqual([]);
     } finally {
@@ -494,6 +574,11 @@ describe('dispatch admission against immutable execution evidence', () => {
         'contract is unreadable',
       );
       expect(ledger.latest('second')).toBeNull();
+      db.prepare("UPDATE pods SET status='failed' WHERE id='first'").run();
+      expect(ledger.inspect('second', 1, repository, 'main', base).status).toBe('admitted');
+      expect(db.prepare("SELECT contract FROM pods WHERE id='first'").get()).toEqual({
+        contract: 'bad-json',
+      });
     } finally {
       db.close();
     }
@@ -547,18 +632,23 @@ describe('dispatch admission against immutable execution evidence', () => {
       repo.delete('tuesday');
       run('wednesday');
       expect(inspect('wednesday').status).toBe('admitted');
-      // Identical work from outside the schedule is still a duplicate of the schedule's runs.
+      // Finished runs do not block manual work either; active scheduled work still does.
       db.prepare("UPDATE pods SET status = 'complete' WHERE id = 'wednesday'").run();
       repo.insert(request('manual'));
-      expect(inspect('manual')).toMatchObject({
+      expect(inspect('manual').status).toBe('admitted');
+      db.prepare("UPDATE pods SET status = 'complete' WHERE id = 'manual'").run();
+      run('thursday');
+      expect(inspect('thursday').status).toBe('admitted');
+      repo.insert(request('another-manual'));
+      expect(inspect('another-manual')).toMatchObject({
         status: 'review_required',
-        conflicts: expect.arrayContaining([expect.objectContaining({ podId: 'wednesday' })]),
+        conflicts: [{ podId: 'thursday' }],
       });
     } finally {
       db.close();
     }
   });
-  it('ignores terminal work outside the seven-day window but retains older active work', () => {
+  it('ignores terminal work regardless of age but retains older active work', () => {
     const { db, repo, ledger } = fixture();
     try {
       repo.insert(request('first', { status: 'complete' }));

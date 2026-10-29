@@ -82,18 +82,6 @@ interface RequestRow {
   frozenRepository: string | null;
   scheduledJobId: string | null;
 }
-const FINISHED = new Set(['complete', 'failed', 'killed', 'rejected']);
-/**
- * A recurring schedule repeats identical work by design: its finished (or deleted) runs are not
- * duplicates of the next one. Its still-active runs are, so overlapping runs keep blocking.
- */
-const finishedRunOfSameSchedule = (
-  current: string | null,
-  prior: { scheduledJobId: string | null; status: string | null },
-): boolean =>
-  current !== null &&
-  prior.scheduledJobId === current &&
-  (prior.status === null || FINISHED.has(prior.status));
 const hash = (row: Pick<RequestRow, 'task' | 'contract'>): string => {
   if (row.task.length > 50000 || (row.contract?.length ?? 0) > 1048576)
     throw new AutopodError(
@@ -156,10 +144,10 @@ const selectRequest = `SELECT p.id, p.rowid AS rowNumber, substr(p.task,1,50001)
 export const DISPATCH_CANDIDATES_SQL = `SELECT d.pod_id AS podId,d.execution_id AS executionId,p.status,d.checked_at AS checkedAt,
           d.work_hash AS workHash,d.task_id AS taskId
         FROM execution_dispatch_preflights d
-        LEFT JOIN task_executions e ON e.pod_id=d.pod_id AND e.execution_id=d.execution_id
-        LEFT JOIN pods p ON p.id=e.pod_id
+        JOIN task_executions e ON e.pod_id=d.pod_id AND e.execution_id=d.execution_id
+        JOIN pods p ON p.id=e.pod_id
         WHERE d.repository = ? AND d.base_branch = ? AND d.work_hash IN (?,?) AND d.task_id <> ? AND d.status = 'admitted'
-        AND (d.checked_at >= ? OR p.status NOT IN ('complete','failed','killed','rejected')) GROUP BY d.execution_id ORDER BY MAX(d.checked_at) DESC LIMIT 101`;
+        AND p.status NOT IN ('complete','failed','killed','rejected') GROUP BY d.execution_id ORDER BY MAX(d.checked_at) DESC LIMIT 101`;
 
 export function createDispatchPreflightLedger(db: Database.Database): DispatchPreflightLedger {
   const get = (id: string): RequestRow => {
@@ -439,11 +427,10 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             return false;
           } // Missing/unreadable historical identity remains blocking.
         };
-        const cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
         const conflicts = new Map<string, DispatchPreflightEvidence['conflicts'][number]>();
         const previous = db
           .prepare(DISPATCH_CANDIDATES_SQL)
-          .all(repository, baseBranch, workHash, legacyWorkHash, pod.taskId, cutoff) as Array<{
+          .all(repository, baseBranch, workHash, legacyWorkHash, pod.taskId) as Array<{
           podId: string;
           executionId: string;
           status: string | null;
@@ -463,14 +450,6 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             identity?.executionId === prior.executionId && identity.taskId === prior.taskId
               ? identity
               : undefined;
-          if (
-            verified &&
-            finishedRunOfSameSchedule(pod.scheduledJobId, {
-              scheduledJobId: verified.scheduledJobId,
-              status: prior.status,
-            })
-          )
-            continue;
           if (verified && prior.workHash === legacyWorkHash && unrelatedRepair(verified)) continue;
           conflicts.set(prior.executionId, {
             podId: prior.podId,
@@ -479,15 +458,16 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             evidence: 'dispatch_receipt',
           });
         }
-        // Older queued/historical requests may predate this ledger. Match exact task
-        // text, then canonical contract, using bounded projections; no semantic guess.
+        // Active queued requests may predate this ledger. Finished/deleted history
+        // remains evidence, not a duplicate-work veto. Other execution/budget fences
+        // are independent and are not waived by this status-based policy.
         const legacy = db
           .prepare(`${selectRequest} WHERE p.rowid < ? AND e.task_id <> ? AND p.task = ?
         AND NOT EXISTS (SELECT 1 FROM execution_dispatch_preflights d WHERE d.execution_id = e.execution_id)
         AND NOT EXISTS (SELECT 1 FROM pod_launch_snapshots s WHERE s.pod_id = p.id
           AND json_type(CASE WHEN json_valid(s.payload) THEN s.payload ELSE NULL END, '$.repository') = 'null')
-        AND (p.created_at >= ? OR p.status NOT IN ('complete','failed','killed','rejected')) ORDER BY p.rowid DESC LIMIT 101`)
-          .all(pod.rowNumber, pod.taskId, pod.task, cutoff) as RequestRow[];
+        AND p.status NOT IN ('complete','failed','killed','rejected') ORDER BY p.rowid DESC LIMIT 101`)
+          .all(pod.rowNumber, pod.taskId, pod.task) as RequestRow[];
         if (legacy.length > 100)
           throw new AutopodError(
             'Equivalent work scope exceeds 100 legacy requests; reconcile prior executions',
@@ -495,12 +475,7 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             409,
           );
         for (const prior of legacy) {
-          if (
-            conflicts.has(prior.executionId) ||
-            finishedRunOfSameSchedule(pod.scheduledJobId, prior) ||
-            hash(prior) !== legacyWorkHash
-          )
-            continue;
+          if (conflicts.has(prior.executionId) || hash(prior) !== legacyWorkHash) continue;
           if (!prior.baseBranch)
             throw new AutopodError(
               'Historical base binding unavailable; reconcile before dispatch',
