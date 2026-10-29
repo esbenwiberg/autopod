@@ -1,4 +1,11 @@
-import type { AgentRoute, EffectiveLaunchConfig, ScheduledJob } from '@autopod/shared';
+import {
+  type AgentRoute,
+  DEFAULT_MAX_PR_FIX_ATTEMPTS,
+  type EffectiveLaunchConfig,
+  type Pod,
+  PodNotFoundError,
+  type ScheduledJob,
+} from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { Logger } from 'pino';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
@@ -305,29 +312,125 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     },
     async admitDerived(input, createPod) {
       const owner = options.pods.getOrThrow(input.source.podId);
+      const isFix = input.source.kind === 'fix';
+      const ordinal = input.fixAttempt === undefined ? 1 : input.fixAttempt;
+      if (
+        (input.fixAttempt !== undefined && !isFix) ||
+        !Number.isSafeInteger(ordinal) ||
+        ordinal < 1 ||
+        (isFix && ordinal > (owner.maxPrFixAttempts ?? DEFAULT_MAX_PR_FIX_ATTEMPTS))
+      )
+        configurationError('Invalid PR fix admission ordinal', 'CONFIG_DERIVATION_INVALID');
+      if (
+        isFix &&
+        (owner.linkedPodId ||
+          ['failed', 'complete', 'killed'].includes(owner.status) ||
+          input.work?.linkedPodId !== owner.id)
+      )
+        configurationError('PR fix must belong to its root parent', 'CONFIG_SOURCE_CHANGED', 409);
       const parent = snapshots.get(input.source.podId);
       if (!parent)
         configurationError('Derived launch source is unavailable', 'CONFIG_SOURCE_MISSING', 409);
       const config = deriveLaunch(parent, input);
       await assertCurrent(config);
-      const currentOwner = options.pods.getOrThrow(input.source.podId);
-      if (
-        owner.lifecycleGeneration !== currentOwner.lifecycleGeneration ||
-        owner.status !== currentOwner.status ||
-        currentOwner.launchConfigDigest !== parent.digest
-      )
-        configurationError(
-          'Derived launch parent changed during preflight',
-          'CONFIG_SOURCE_CHANGED',
-          409,
-        );
-      const requestId = `derived-${configurationDigest(input)}`;
-      return snapshots.admit({
-        config,
-        requestId,
-        requestDigest: configurationDigest({ source: input.source, config: config.digest }),
-        createPod: () => createPod(config),
-      }).podId;
+      // Preserve the original request key for attempt one, including legacy receipts.
+      const { fixAttempt: _, ...legacyInput } = input;
+      const requestId = `derived-${configurationDigest(ordinal === 1 ? legacyInput : input)}`;
+      const requestDigest = configurationDigest({ source: input.source, config: config.digest });
+      return atomicPodChange(options.pods, () => {
+        const current = options.pods.getOrThrow(owner.id);
+        if (
+          owner.lifecycleGeneration !== current.lifecycleGeneration ||
+          owner.status !== current.status ||
+          current.launchConfigDigest !== parent.digest ||
+          (isFix &&
+            (owner.maxPrFixAttempts !== current.maxPrFixAttempts ||
+              current.linkedPodId ||
+              owner.branch !== current.branch ||
+              owner.baseBranch !== current.baseBranch ||
+              owner.prUrl !== current.prUrl ||
+              owner.userId !== current.userId ||
+              owner.model !== current.model ||
+              owner.runtime !== current.runtime ||
+              owner.executionTarget !== current.executionTarget ||
+              owner.providerAccountIdSnapshot !== current.providerAccountIdSnapshot ||
+              owner.providerIdSnapshot !== current.providerIdSnapshot))
+        )
+          configurationError(
+            'Derived launch parent changed during preflight',
+            'CONFIG_SOURCE_CHANGED',
+            409,
+          );
+        const previous = snapshots.findRequest(requestId, requestDigest);
+        if (previous) {
+          let child: Pod;
+          try {
+            child = options.pods.getOrThrow(previous);
+          } catch (error) {
+            if (!(error instanceof PodNotFoundError)) throw error;
+            configurationError(
+              'The previously admitted child was deleted; its admission is retained in history',
+              'CONFIG_ADMISSION_POD_DELETED',
+              409,
+            );
+          }
+          if (
+            child.launchConfigDigest !== config.digest ||
+            (isFix &&
+              (current.fixPodId !== previous ||
+                current.prFixAttempts !== ordinal ||
+                child.linkedPodId !== current.id))
+          )
+            configurationError('Admitted child ownership changed', 'CONFIG_SOURCE_CHANGED', 409);
+          return previous;
+        }
+        if (isFix) {
+          if (
+            owner.prFixAttempts !== current.prFixAttempts ||
+            owner.fixPodId !== current.fixPodId ||
+            ordinal !== (current.prFixAttempts ?? 0) + 1
+          )
+            configurationError(
+              'PR fix attempt changed during preflight',
+              'CONFIG_SOURCE_CHANGED',
+              409,
+            );
+          if (
+            db
+              .prepare(`SELECT 1 FROM pods p JOIN pod_launch_snapshots s ON s.pod_id=p.id
+                WHERE p.linked_pod_id=? AND json_extract(s.payload,'$.derivation.kind')='fix'
+                LIMIT 1`)
+              .get(current.id)
+          )
+            configurationError(
+              'An admitted PR fix child still exists for this parent',
+              'CONFIG_SOURCE_CHANGED',
+              409,
+            );
+          if (current.fixPodId) {
+            try {
+              options.pods.getOrThrow(current.fixPodId);
+              configurationError(
+                'A canonical PR fix child already exists',
+                'CONFIG_SOURCE_CHANGED',
+                409,
+              );
+            } catch (error) {
+              if (!(error instanceof PodNotFoundError)) throw error;
+            }
+          }
+        }
+        return snapshots.admit({
+          config,
+          requestId,
+          requestDigest,
+          createPod: () => {
+            const id = createPod(config);
+            if (isFix) options.pods.update(owner.id, { fixPodId: id, prFixAttempts: ordinal });
+            return id;
+          },
+        }).podId;
+      });
     },
     async prepareEnvironment(config) {
       await assertCurrent(config);

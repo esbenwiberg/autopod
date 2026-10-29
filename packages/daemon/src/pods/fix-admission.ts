@@ -1,5 +1,10 @@
 import type { EffectiveLaunchConfig, Pod } from '@autopod/shared';
-import { AutopodError, DEFAULT_MAX_PR_FIX_ATTEMPTS, generatePodId } from '@autopod/shared';
+import {
+  AutopodError,
+  DEFAULT_MAX_PR_FIX_ATTEMPTS,
+  PodNotFoundError,
+  generatePodId,
+} from '@autopod/shared';
 import { launchPodOptions } from '../configuration/launch-pod-options.js';
 import type { PrMergeStatus } from '../interfaces/index.js';
 import type { FixAdmissionCaptured, FixAdmissionLiveDependencies } from './fix-contracts.js';
@@ -57,6 +62,12 @@ export function createFixAdmission(
     if (parent.fixPodId) {
       try {
         const fix = podRepo.getOrThrow(parent.fixPodId);
+        if (fix.linkedPodId !== parent.id)
+          throw new AutopodError(
+            'Canonical PR fix child belongs to a different parent',
+            'CONFIG_SOURCE_CHANGED',
+            409,
+          );
         if (
           fix.status === 'awaiting_input' &&
           fix.mergeBlockReason?.startsWith(FIX_DELIVERY_FAILED_PREFIX)
@@ -79,7 +90,8 @@ export function createFixAdmission(
           return;
         }
         recycleCandidate = fix;
-      } catch {
+      } catch (error) {
+        if (!(error instanceof PodNotFoundError)) throw error;
         // Fix pod row gone — treat as no live fix pod, fall through to spawn.
       }
     }
@@ -151,7 +163,6 @@ export function createFixAdmission(
         // the new run record its own.
         taskSummary: null,
         fixIteration: newIteration,
-        branch: branchSource.branch,
         baseBranch: branchSource.baseBranch ?? null,
         prUrl: branchSource.prUrl ?? null,
       });
@@ -178,6 +189,7 @@ export function createFixAdmission(
     // when the pod starts.
     const placeholderTask = '[PR FIX] Awaiting queued feedback.';
     const inheritedProviderBinding = providerBindingForFixPod(parent);
+    let insertedFix = false;
     const insertFix = (config?: EffectiveLaunchConfig): string => {
       for (let attempt = 0; attempt < 10; attempt++) {
         const fixId = generatePodId();
@@ -206,6 +218,7 @@ export function createFixAdmission(
             pimGroups: parent.pimGroups ?? null,
             prUrl: branchSource.prUrl ?? null,
           });
+          insertedFix = true;
           return fixId;
         } catch (err: unknown) {
           if (
@@ -231,6 +244,7 @@ export function createFixAdmission(
       fixId = await deps.launchConfiguration.admitDerived(
         {
           source: { podId: parent.id, digest: parent.launchConfigDigest, kind: 'fix' },
+          fixAttempt: newAttempt,
           task: placeholderTask,
           work: {
             branch: branchSource.branch,
@@ -243,6 +257,8 @@ export function createFixAdmission(
       );
     } else fixId = insertFix();
 
+    // A concurrent caller can replay this admission; only its creator publishes it.
+    if (!insertedFix) return;
     enqueueSession(fixId);
     eventBus.emit({
       type: 'pod.created',
