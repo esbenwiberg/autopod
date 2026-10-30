@@ -2156,6 +2156,9 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.factValidation?.status).toBe('skip');
     expect(result.taskReview).toBeNull();
     expect(result.reviewSkipReason).toBe('Skipped — validation setup failed');
+    expect(result.reviewSkipKind).toBeUndefined();
+    expect(result.smoke.build.status).toBe('skip');
+    expect(result.smoke.status).toBe('fail');
   });
 
   it('skips Health and Pages when hasWebUi is false', async () => {

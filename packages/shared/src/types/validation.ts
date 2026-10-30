@@ -93,7 +93,8 @@ export interface SmokeResult {
 }
 
 export interface BuildResult {
-  status: 'pass' | 'fail';
+  /** A skipped build did not execute and is not passing build evidence. */
+  status: 'pass' | 'fail' | 'skip';
   output: string;
   duration: number;
   /**

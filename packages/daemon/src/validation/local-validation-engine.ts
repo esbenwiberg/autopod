@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import type { Dirent } from 'node:fs';
 import { access, mkdir, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -10,7 +11,6 @@ import type {
   FactValidationResult,
   HealthResult,
   PageResult,
-  ReviewFindingCandidate,
   ReviewProgressAxis,
   ReviewProgressSnapshot,
   TaskReviewResult,
@@ -1441,7 +1441,7 @@ function makeSetupFailedResult(
     reviewSkipReason: infrastructureFailure
       ? 'Skipped — validation infrastructure failed'
       : 'Skipped — validation setup failed',
-    reviewSkipKind: infrastructureFailure ? 'upstream-failed' : null,
+    reviewSkipKind: infrastructureFailure ? 'upstream-failed' : undefined,
     ...(infrastructureFailure && { infrastructureFailure }),
     overall: 'fail',
     duration: Date.now() - startTime,
@@ -2743,7 +2743,7 @@ async function collectHostFactAttachments(
   const attachments: NonNullable<FactCheckResult['attachments']> = [];
 
   async function walk(dir: string): Promise<void> {
-    let entries: Awaited<ReturnType<typeof readdir>>;
+    let entries: Dirent[];
     try {
       entries = await readdir(dir, { withFileTypes: true });
     } catch {
@@ -4516,8 +4516,9 @@ export function parseReviewJson(raw: string): {
     if (typeof parsed.reasoning !== 'string') return null;
     if (!Array.isArray(parsed.issues)) return null;
 
-    const requirementsCheck = Array.isArray(parsed.requirementsCheck)
-      ? parsed.requirementsCheck
+    const rawRequirementsCheck: unknown = parsed.requirementsCheck;
+    const requirementsCheck = Array.isArray(rawRequirementsCheck)
+      ? rawRequirementsCheck
           .filter(
             (item: unknown): item is Record<string, unknown> =>
               typeof item === 'object' &&
