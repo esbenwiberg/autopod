@@ -258,6 +258,21 @@ describe('research findings contract', () => {
     ).rejects.toMatchObject({ statusCode: 409 });
     expect(f.pod().researchFindings?.acceptance?.actor).toEqual(human);
   });
+  it.each(['kill', 'rework'] as const)(
+    'rejects acceptance when %s supersedes asynchronous evidence verification',
+    async (operation) => {
+      await finalizer().finalizeArtifactPod(f.pod());
+      const service = acceptance();
+      // accept() checks authority synchronously, then yields to snapshot I/O.
+      const pending = service.accept('prepare', request(), human);
+      if (operation === 'kill') f.events.transition(f.pod(), 'killing');
+      else f.podRepo.incrementLifecycleGeneration('prepare');
+      await expect(pending).rejects.toMatchObject({ statusCode: 409 });
+      expect(service.completed).not.toHaveBeenCalled();
+      expect(service.dependents).not.toHaveBeenCalled();
+      expect(f.pod().completedAt).toBeNull();
+    },
+  );
   it('retains immutable ready and accepted receipts across a new lifecycle', async () => {
     await finalizer().finalizeArtifactPod(f.pod());
     const service = acceptance();
