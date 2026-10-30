@@ -6,6 +6,7 @@ import { ActionBar } from '../components/ActionBar.js';
 import { ActivityList } from '../components/ActivityList.js';
 import { DispatchPreflightPanel } from '../components/DispatchPreflightPanel.js';
 import { EscalationCard } from '../components/EscalationCard.js';
+import { ResearchReports } from '../components/ResearchReports.js';
 import { SkipValidationToggle } from '../components/SkipValidationToggle.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { TaskExecutionPanel } from '../components/TaskExecutionPanel.js';
@@ -196,7 +197,9 @@ export function PodDetail(): JSX.Element {
               at {data.researchFindings.acceptance.acceptedAt}
             </p>
           ) : null}
-          <ResearchReports podId={data.id} />
+          {data.researchFindings ? (
+            <ResearchReports podId={data.id} findings={data.researchFindings} />
+          ) : null}
         </section>
       ) : (
         <ValidationSummary result={data.lastValidationResult} history={validationHistory} />
@@ -267,43 +270,5 @@ function BackLink(): JSX.Element {
     <Link to="/" className="back-link">
       ← Back
     </Link>
-  );
-}
-
-function ResearchReports({ podId }: { podId: string }): JSX.Element {
-  const [files, setFiles] = useState<Array<{ path: string }>>([]);
-  const [content, setContent] = useState('');
-  useEffect(() => {
-    let cancelled = false;
-    apiFetch<{ files: Array<{ path: string }> }>(
-      `/pods/${podId}/files?ext=md,txt,html,json,csv,log,pdf`,
-    )
-      .then((value) => {
-        if (!cancelled) setFiles(value.files);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [podId]);
-  return (
-    <div>
-      {files.map((file) => (
-        <button
-          type="button"
-          key={file.path}
-          onClick={() => {
-            apiFetch<{ content: string }>(
-              `/pods/${podId}/files/content?path=${encodeURIComponent(file.path)}`,
-            )
-              .then((value) => setContent(value.content))
-              .catch((error: Error) => setContent(error.message));
-          }}
-        >
-          Open report: {file.path}
-        </button>
-      ))}
-      {content ? <pre>{content}</pre> : null}
-    </div>
   );
 }
