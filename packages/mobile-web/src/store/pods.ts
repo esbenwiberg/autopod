@@ -93,6 +93,15 @@ export const usePodsStore = create<PodsState>((set, get) => ({
         return;
       }
       case 'pod.status_changed':
+        if (
+          event.newStatus === 'research_ready' ||
+          (event.newStatus === 'complete' &&
+            get().pods.find((p) => p.id === event.podId)?.completionPolicy === 'accept-findings')
+        ) {
+          apiFetch<Pod>(`/pods/${event.podId}`)
+            .then((p) => get().upsertPod(p))
+            .catch(() => {});
+        }
         set({ pods: patchPod(get().pods, event.podId, { status: event.newStatus }) });
         return;
       case 'pod.completed':

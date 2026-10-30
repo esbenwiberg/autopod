@@ -171,7 +171,8 @@ export function availableActions(
   if (
     status === 'failed' &&
     (pod?.options.output === 'artifact' || pod?.completionPolicy === 'accept-findings') &&
-    pod.finalization?.phase === 'preserving' &&
+    (pod?.finalization?.phase === 'preserving' ||
+      (pod?.completionPolicy === 'accept-findings' && pod.finalization?.phase === 'ready')) &&
     pod.finalization.agentSettledAt &&
     !pod.pendingEscalation
   )

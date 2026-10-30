@@ -2,10 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { AutopodError, type OperatorActor, type Pod } from '@autopod/shared';
 import { atomicPodChange } from '../db/unit-of-work.js';
-import {
-  fingerprintArtifactSnapshot,
-  verifyArtifactSnapshot,
-} from './artifact-snapshot-receipt.js';
+import { verifiedArtifactSnapshotHash } from './artifact-snapshot-receipt.js';
 import type { PodRepository, PodUpdates } from './pod-repository.js';
 
 export interface AcceptFindingsRequest {
@@ -21,7 +18,7 @@ function conflict(message: string): never {
 export async function retainFindings(pod: Pod): Promise<NonNullable<Pod['researchFindings']>> {
   if (
     !pod.launchConfigDigest ||
-    !pod.taskSummary ||
+    !pod.taskSummary?.actualSummary.trim() ||
     !pod.finalization?.agentSettledAt ||
     pod.finalization.generation !== pod.lifecycleGeneration ||
     !pod.artifactsPath
@@ -32,13 +29,12 @@ export async function retainFindings(pod: Pod): Promise<NonNullable<Pod['researc
     'artifacts',
     pod.id,
   );
-  await verifyArtifactSnapshot(
+  const snapshotHash = await verifiedArtifactSnapshotHash(
     pod.artifactsPath,
     root,
     pod.lifecycleGeneration,
     pod.finalization.cycle,
   );
-  const snapshot = await fingerprintArtifactSnapshot(pod.artifactsPath);
   const identity = {
     generation: pod.lifecycleGeneration,
     cycle: pod.finalization.cycle,
@@ -46,7 +42,7 @@ export async function retainFindings(pod: Pod): Promise<NonNullable<Pod['researc
     summary: pod.taskSummary,
     result: pod.finalization.result,
     artifactsPath: pod.artifactsPath,
-    snapshotHash: snapshot.sha256,
+    snapshotHash,
   };
   return {
     ...identity,
@@ -62,7 +58,7 @@ export function createFindingsAcceptance(deps: {
   assertGuidanceCollected(id: string): void;
   transition(pod: Pod, to: 'complete', updates?: Partial<PodUpdates>): Pod;
   emitPodCompletedEvent(pod: Pod): void;
-  maybeTriggerDependents(id: string): void;
+  maybeTriggerDependents(pod: Pod): void;
 }) {
   return async function acceptFindings(
     id: string,
@@ -99,7 +95,9 @@ export function createFindingsAcceptance(deps: {
         );
       return current;
     };
-    assertCurrent();
+    const initial = assertCurrent();
+    if (initial.status === 'complete' && initial.researchFindings?.acceptance)
+      return initial.researchFindings;
     const verified = await retainFindings(pod);
     if (verified.evidenceHash !== receipt?.evidenceHash)
       conflict('Retained evidence differs from the reviewed findings');
@@ -116,7 +114,7 @@ export function createFindingsAcceptance(deps: {
       });
       const publish = () => {
         deps.emitPodCompletedEvent(completed);
-        deps.maybeTriggerDependents(id);
+        deps.maybeTriggerDependents(completed);
       };
       if (deps.podRepo.afterCommit) deps.podRepo.afterCommit(publish);
       else publish();

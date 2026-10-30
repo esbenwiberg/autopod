@@ -175,6 +175,12 @@ export function createDeliveryPr(captured: DeliveryPrCaptured) {
 
   async function retryCreatePr(podId: string): Promise<void> {
     const pod = podRepo.getOrThrow(podId);
+    if (pod.completionPolicy === 'accept-findings')
+      throw new AutopodError(
+        'Findings acceptance grants no source publication authority',
+        'FINDINGS_PUBLICATION_FORBIDDEN',
+        409,
+      );
     if (pod.status !== 'complete' && pod.status !== 'validated') {
       throw new AutopodError(
         `Cannot retry PR creation for ${podId} in status ${pod.status} — only validated or complete pods`,

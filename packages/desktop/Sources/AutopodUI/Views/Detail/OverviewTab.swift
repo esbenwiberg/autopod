@@ -52,7 +52,7 @@ struct OverviewTab: View {
                         Text(pod.researchFindings?.summary.actualSummary ?? pod.taskSummary?.actualSummary ?? "Summary is not yet available.")
                             .textSelection(.enabled)
                         if let accepted = pod.researchFindings?.acceptance {
-                            Text("Accepted \(accepted.acceptedAt)").font(.caption)
+                            Text("Accepted by \(accepted.actor["displayName"]?.string ?? accepted.actor["userId"]?.string ?? "human") at \(accepted.acceptedAt)").font(.caption)
                         }
                     }
                 }

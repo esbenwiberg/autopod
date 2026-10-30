@@ -105,10 +105,20 @@ export function createCompletionWorkflow(
     }
     if (pod.completionPolicy === 'accept-findings') {
       const config = deps.launchConfiguration?.read(podId);
-      if (config?.digest !== pod.launchConfigDigest || config.workflow.completion !== 'accept-findings' ||
-          config.intent !== 'task' || config.workflow.agentMode !== 'auto' ||
-          !['artifact', 'none'].includes(config.workflow.output) || config.workflow.validationPhases.length > 0)
-        throw new AutopodError('Frozen findings contract is unavailable or incompatible', 'FINDINGS_CONTRACT_INVALID', 409);
+      if (
+        !config ||
+        config.digest !== pod.launchConfigDigest ||
+        config.workflow.completion !== 'accept-findings' ||
+        config.intent !== 'task' ||
+        config.workflow.agentMode !== 'auto' ||
+        !['artifact', 'none'].includes(config.workflow.output) ||
+        config.workflow.validationPhases.length > 0
+      )
+        throw new AutopodError(
+          'Frozen findings contract is unavailable or incompatible',
+          'FINDINGS_CONTRACT_INVALID',
+          409,
+        );
     }
     // Bail out if pod is already past the running stage (could happen when
     // processPod's spawn unblocks after sendMessage already drove completion)

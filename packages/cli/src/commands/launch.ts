@@ -200,6 +200,16 @@ export function registerLaunchCommand(
         };
       }
       if (
+        mode.name === 'research' &&
+        ((request.overrides?.workflow?.output !== undefined &&
+          request.overrides.workflow.output !== 'artifact') ||
+          (request.overrides?.workflow?.completion !== undefined &&
+            request.overrides.workflow.completion !== 'accept-findings'))
+      )
+        throw new Error(
+          'Research requires artifact output and accept-findings completion. Use ap run to replay a different explicit workflow.',
+        );
+      if (
         mode.output &&
         request.source &&
         request.source.configuration !== 'current' &&

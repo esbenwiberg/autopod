@@ -197,8 +197,21 @@ export function createArtifactFinalizer(deps: ArtifactFinalizerDependencies): {
     }
     if (!ownsArtifactFinalization(pod, true)) return;
     deps.assertExecutionTerminationVerified(podId);
+    if (
+      findings &&
+      (JSON.stringify(podRepo.getOrThrow(podId).taskSummary) !== JSON.stringify(findings.summary) ||
+        podRepo.getOrThrow(podId).finalization?.result !== findings.result)
+    )
+      throw new AutopodError(
+        'Native findings changed during cleanup; review finalization before retrying',
+        'FINDINGS_CONFLICT',
+        409,
+      );
     atomicPodChange(podRepo, () => {
-      if (findings) podRepo.update(podId, { researchFindings: findings });
+      if (findings)
+        podRepo.update(podId, {
+          researchFindings: { ...findings, readyAt: new Date().toISOString() },
+        });
       transition(podRepo.getOrThrow(podId), findingsOnly ? 'research_ready' : 'complete');
     });
   }

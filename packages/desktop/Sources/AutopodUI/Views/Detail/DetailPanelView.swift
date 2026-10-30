@@ -962,7 +962,7 @@ public struct DetailPanelView: View {
                 }
 
             case .researchReady:
-                Button("Open report") { selectedTab = .evidence }
+                Button("Open report / summary") { requestedEvidenceSection = .artifacts; selectedTab = .evidence }
                 if let findings = pod.researchFindings {
                     Button(findingsPending ? "Accepting…" : "Accept findings") {
                         findingsPending = true

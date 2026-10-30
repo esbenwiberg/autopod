@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3';
 import { createScanReportRepository } from '../scheduled-jobs/scan-report-repository.js';
 import { type ConfigurationStore, configurationError } from './configuration-store.js';
 import { deriveLaunch } from './derive-launch.js';
-import { configurationDigest } from './launch-resolver.js';
+import { assertFindingsWorkflow, configurationDigest } from './launch-resolver.js';
 import { deriveScanRepair, readScanConfiguration } from './scan-repair-config.js';
 
 export interface LaunchSnapshotRepository {
@@ -270,6 +270,7 @@ export function createLaunchSnapshotRepository(
           const previous = findRequest(input.requestId, input.requestDigest);
           if (previous) return { podId: previous, created: false };
         }
+        assertFindingsWorkflow(input.config.workflow, input.config.intent);
         const { digest, ...body } = input.config;
         if (digest !== configurationDigest(body))
           configurationError(

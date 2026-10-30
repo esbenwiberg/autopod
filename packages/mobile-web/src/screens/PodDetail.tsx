@@ -187,7 +187,14 @@ export function PodDetail(): JSX.Element {
           <p>Not required for this research task: native validation.</p>
           <p>{data.researchFindings?.summary.actualSummary ?? data.taskSummary?.actualSummary}</p>
           {data.researchFindings?.acceptance ? (
-            <p>Accepted {data.researchFindings.acceptance.acceptedAt}</p>
+            <p>
+              Accepted by{' '}
+              {data.researchFindings.acceptance.actor.type === 'human'
+                ? (data.researchFindings.acceptance.actor.displayName ??
+                  data.researchFindings.acceptance.actor.userId)
+                : data.researchFindings.acceptance.actor.type}{' '}
+              at {data.researchFindings.acceptance.acceptedAt}
+            </p>
           ) : null}
           <ResearchReports podId={data.id} />
         </section>
@@ -268,7 +275,9 @@ function ResearchReports({ podId }: { podId: string }): JSX.Element {
   const [content, setContent] = useState('');
   useEffect(() => {
     let cancelled = false;
-    apiFetch<{ files: Array<{ path: string }> }>(`/pods/${podId}/files`)
+    apiFetch<{ files: Array<{ path: string }> }>(
+      `/pods/${podId}/files?ext=md,txt,html,json,csv,log,pdf`,
+    )
       .then((value) => {
         if (!cancelled) setFiles(value.files);
       })

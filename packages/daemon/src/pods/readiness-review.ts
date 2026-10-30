@@ -231,6 +231,8 @@ export function deriveReadinessReview(inputs: ReadinessInputs): ReadinessReview 
     },
     inputs.pod.status,
     inputs.latestValidation,
+    false,
+    inputs.pod.completionPolicy === 'accept-findings',
   );
 }
 

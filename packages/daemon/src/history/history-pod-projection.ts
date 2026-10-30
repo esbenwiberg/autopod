@@ -6,6 +6,7 @@ export const HISTORY_JSON_FIELDS = [
   'research_findings',
 ] as const;
 export const HISTORY_POD_COLUMNS = [
+  'completion_policy',
   'id',
   'profile_name',
   'status',

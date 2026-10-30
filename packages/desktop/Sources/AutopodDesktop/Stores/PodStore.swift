@@ -211,6 +211,7 @@ public final class PodStore {
       merged.fleetDisplay = incoming.fleetDisplay
       merged.phase = incoming.phase
     }
+    merged.completionPolicy = incoming.completionPolicy
     merged.pod = incoming.pod
     merged.hasWorktree = incoming.hasWorktree
     merged.branch = incoming.branch

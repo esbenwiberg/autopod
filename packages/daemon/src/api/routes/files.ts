@@ -2,6 +2,10 @@ import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { ContainerManager } from '../../interfaces/container-manager.js';
+import {
+  readArtifactSnapshotFile,
+  verifyArtifactSnapshot,
+} from '../../pods/artifact-snapshot-receipt.js';
 import type { ContainerManagerFactory, PodManager } from '../../pods/pod-manager.js';
 
 interface FileEntry {
@@ -69,7 +73,9 @@ export function filesRoutes(
 
     const extensions = parseExtensions(query.ext);
 
-    const preservedSnapshot = pod.status === 'complete' ? pod.artifactsPath : null;
+    const findings = pod.researchFindings;
+    const preservedSnapshot =
+      findings?.artifactsPath ?? (pod.status === 'complete' ? pod.artifactsPath : null);
     if (containerManagerFactory && pod.containerId && !preservedSnapshot) {
       const cm = containerManagerFactory.get(pod.executionTarget);
       const fromContainer = await tryListFromContainer(cm, pod.containerId, extensions);
@@ -86,6 +92,17 @@ export function filesRoutes(
     }
 
     const root = path.resolve(rootPath);
+    if (findings)
+      await verifyArtifactSnapshot(
+        root,
+        path.join(
+          process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data'),
+          'artifacts',
+          pod.id,
+        ),
+        findings.generation,
+        findings.cycle,
+      );
     const files = await walk(root, extensions);
     files.sort((a, b) => a.path.localeCompare(b.path));
 
@@ -112,7 +129,9 @@ export function filesRoutes(
 
     const isBinary = isBinaryPath(relPath);
 
-    const preservedSnapshot = pod.status === 'complete' ? pod.artifactsPath : null;
+    const findings = pod.researchFindings;
+    const preservedSnapshot =
+      findings?.artifactsPath ?? (pod.status === 'complete' ? pod.artifactsPath : null);
     if (containerManagerFactory && pod.containerId && !preservedSnapshot) {
       const cm = containerManagerFactory.get(pod.executionTarget);
       const fromContainer = await tryReadFromContainer(cm, pod.containerId, relPath, isBinary);
@@ -132,6 +151,25 @@ export function filesRoutes(
     }
 
     const root = path.resolve(rootPath);
+    if (findings) {
+      const bytes = await readArtifactSnapshotFile(
+        root,
+        path.join(
+          process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data'),
+          'artifacts',
+          pod.id,
+        ),
+        findings.generation,
+        findings.cycle,
+        relPath,
+      );
+      return {
+        path: relPath,
+        content: bytes.toString(isBinary ? 'base64' : 'utf8'),
+        size: bytes.length,
+        ...(isBinary ? { encoding: 'base64' } : {}),
+      };
+    }
     const resolved = path.resolve(root, relPath);
     // Path-traversal guard — resolved must stay under the root.
     if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {

@@ -532,6 +532,8 @@ function decodeSessionRow(row: Record<string, unknown>): Pod {
           row.last_validation_result
             ? (JSON.parse(row.last_validation_result as string) as ValidationResult)
             : null,
+          false,
+          row.completion_policy === 'accept-findings',
         )
       : null,
     pimGroups: row.pim_groups ? (JSON.parse(row.pim_groups as string) as PimGroupConfig[]) : null,
@@ -631,6 +633,7 @@ function decodeDisplaySessionRow(source: Record<string, unknown>): Pod {
     'spec_context_files',
     'spec_files',
     'task_summary',
+    'research_findings',
     'test_run_branches',
     'touches',
     'validation_overrides',
@@ -966,7 +969,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
             'SELECT receipt FROM research_findings_receipts WHERE pod_id=? ORDER BY generation,cycle,accepted',
           )
           .all(id) as Array<{ receipt: string }>
-      ).map((row) => JSON.parse(row.receipt));
+      ).map((row) => JSON.parse(row.receipt) as NonNullable<Pod['researchFindings']>);
     },
     update(id: string, changes: PodUpdates): void {
       // Any mutation during validation preservation could invalidate its evidence.
@@ -1459,7 +1462,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
       deletionOwnership.assertTaskAvailable(id);
       const result = db
         .prepare(
-          'UPDATE pods SET lifecycle_generation = lifecycle_generation + 1, updated_at = ? WHERE id = ?',
+          'UPDATE pods SET lifecycle_generation = lifecycle_generation + 1, research_findings = NULL, updated_at = ? WHERE id = ?',
         )
         .run(new Date().toISOString(), id);
       if (result.changes === 0) throw new PodNotFoundError(id);

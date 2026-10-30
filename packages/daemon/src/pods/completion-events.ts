@@ -64,7 +64,12 @@ export function createCompletionEvents(captured: CompletionEventsCaptured) {
     };
     if (podRepo.afterCommit) podRepo.afterCommit(publish);
     else publish();
-    if (to === 'validated' || to === 'review_required' || to === 'failed') {
+    if (
+      to === 'research_ready' ||
+      to === 'validated' ||
+      to === 'review_required' ||
+      to === 'failed'
+    ) {
       refreshReadiness(pod.id);
     }
     return podRepo.getOrThrow(pod.id);

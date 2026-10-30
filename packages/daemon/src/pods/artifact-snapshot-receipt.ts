@@ -108,6 +108,16 @@ export async function verifyArtifactSnapshot(
   await checkArtifactSnapshot(snapshot, artifactRoot, generation, cycle);
 }
 
+/** Hash from the same inventory verified against the original receipt. */
+export async function verifiedArtifactSnapshotHash(
+  snapshot: string,
+  artifactRoot: string,
+  generation: number,
+  cycle: number,
+): Promise<string> {
+  return (await checkArtifactSnapshot(snapshot, artifactRoot, generation, cycle)).sha256;
+}
+
 /** Returned bytes participated in the very inventory hash checked against the receipt. */
 export async function readArtifactSnapshotFile(
   snapshot: string,
@@ -123,8 +133,8 @@ export async function readArtifactSnapshotFile(
     cycle,
     relativePath,
   );
-  if (!captured) throw new Error('Evidence is missing or is not a regular file');
-  return captured;
+  if (!captured.captured) throw new Error('Evidence is missing or is not a regular file');
+  return captured.captured;
 }
 
 async function checkArtifactSnapshot(
@@ -133,7 +143,7 @@ async function checkArtifactSnapshot(
   generation: number,
   cycle: number,
   captureFile?: string,
-): Promise<Buffer | undefined> {
+): Promise<{ sha256: string; captured?: Buffer }> {
   try {
     if (
       path.dirname(path.resolve(snapshot)) !== path.resolve(artifactRoot) ||
@@ -170,7 +180,7 @@ async function checkArtifactSnapshot(
       receipt.bytes !== actual.bytes
     )
       throw new Error('Artifact snapshot differs from its preservation receipt');
-    return actual.captured;
+    return { sha256: actual.sha256, captured: actual.captured };
   } catch {
     throw new AutopodError(
       'Saved artifact snapshot could not be verified. Restore its snapshot and receipt before finalizing; the settled worker was not restarted.',

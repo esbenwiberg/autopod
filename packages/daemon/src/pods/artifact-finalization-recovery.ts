@@ -1,12 +1,13 @@
 import type { Pod } from '@autopod/shared';
 
-/** This phase records an entered collection, not merely an older worker completion. */
+/** Ordinary artifacts require entered collection; explicit findings also recover settled ready cycles. */
 export function hasInterruptedArtifactCollection(pod: Pod): boolean {
   return (
     (pod.options?.output === 'artifact' || pod.completionPolicy === 'accept-findings') &&
     ['running', 'paused', 'failed'].includes(pod.status) &&
     pod.finalization?.generation === pod.lifecycleGeneration &&
-    pod.finalization?.phase === 'preserving' &&
+    (pod.finalization?.phase === 'preserving' ||
+      (pod.completionPolicy === 'accept-findings' && pod.finalization?.phase === 'ready')) &&
     Boolean(pod.finalization.agentSettledAt) &&
     !pod.finalization.pendingDecisionId &&
     !pod.pendingEscalation

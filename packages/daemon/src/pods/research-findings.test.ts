@@ -2,11 +2,14 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Pod } from '@autopod/shared';
+import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { filesRoutes } from '../api/routes/files.js';
 import { createCompletionFixture } from '../test-utils/completion-helpers.js';
 import { createMockContainerManager } from '../test-utils/mock-helpers.js';
 import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
 import { createArtifactFinalizer } from './artifact-finalizer.js';
+import { type PodManager, createPodManager } from './pod-manager.js';
 import { createPodRepository } from './pod-repository.js';
 import { createFindingsAcceptance } from './research-findings.js';
 import {
@@ -111,13 +114,13 @@ function request() {
     expectedEvidenceHash: evidence.evidenceHash,
   };
 }
-const human = { type: 'human' as const, id: 'reviewer' };
+const human = { type: 'human' as const, userId: 'reviewer' };
 
 describe('research findings contract', () => {
   it.each(['none', 'artifact'] as const)(
     'retains %s findings and releases worker without delivery or fabricated validation',
     async (output) => {
-      f.podRepo.update('prepare', { options: { ...f.pod().options, output } });
+      f.podRepo.update('prepare', { options: { ...f.pod().options, output }, autoApprove: true });
       const service = finalizer();
       await service.finalizeArtifactPod(f.pod());
       const pod = createPodRepository(f.db).getOrThrow('prepare');
@@ -141,6 +144,59 @@ describe('research findings contract', () => {
       expect(f.podRepo.getStats().byStatus.research_ready).toBe(1);
     },
   );
+  it('reads exact retained files instead of a leftover worktree and refuses changed bytes', async () => {
+    await finalizer().finalizeArtifactPod(f.pod());
+    f.podRepo.update('prepare', { worktreePath: '/unrelated-worktree' });
+    const app = Fastify();
+    filesRoutes(app, { getSession: () => f.pod() } as unknown as PodManager);
+    try {
+      const read = await app.inject({
+        method: 'GET',
+        url: '/pods/prepare/files/content?path=arbitrary-report.md',
+      });
+      expect(read.statusCode).toBe(200);
+      expect(read.json().content).toContain('unresolved');
+      const listing = await app.inject({ method: 'GET', url: '/pods/prepare/files' });
+      expect(listing.json().files[0].path).toBe('arbitrary-report.md');
+      await writeFile(
+        path.join(f.pod().artifactsPath ?? '', 'arbitrary-report.md'),
+        'changed bytes',
+      );
+      expect(
+        (
+          await app.inject({
+            method: 'GET',
+            url: '/pods/prepare/files/content?path=arbitrary-report.md',
+          })
+        ).statusCode,
+      ).toBe(409);
+    } finally {
+      await app.close();
+    }
+  });
+  it('retries interrupted cleanup from the saved receipt without collecting or spawning again', async () => {
+    const service = finalizer();
+    service.cleanup.mockImplementationOnce(async (pod, _label, _mode, assertCurrent) => {
+      assertCurrent();
+      f.podRepo.update(pod.id, { containerId: null });
+      throw new Error('cleanup interrupted');
+    });
+    await expect(service.finalizeArtifactPod(f.pod())).rejects.toThrow('cleanup interrupted');
+    expect(hasInterruptedArtifactCollection(f.pod())).toBe(true);
+    await service.finalizeArtifactPod(f.pod());
+    expect(f.pod().status).toBe('research_ready');
+    expect(service.cm.extractDirectoryFromContainer).toHaveBeenCalledTimes(1);
+  });
+  it('refuses a superseded cycle during preservation without releasing resources', async () => {
+    const service = finalizer();
+    vi.mocked(service.cm.extractDirectoryFromContainer).mockImplementation(async () => {
+      f.podRepo.completionJournal?.begin(f.pod());
+    });
+    await service.finalizeArtifactPod(f.pod());
+    expect(f.pod().status).toBe('running');
+    expect(service.cleanup).not.toHaveBeenCalled();
+    expect(f.pod().researchFindings).toBeNull();
+  });
   it('supports summary-only research and exact concurrent idempotent acceptance', async () => {
     await finalizer(false).finalizeArtifactPod(f.pod());
     const service = acceptance();
@@ -155,10 +211,31 @@ describe('research findings contract', () => {
     });
     expect(service.completed).toHaveBeenCalledTimes(1);
     expect(service.dependents).toHaveBeenCalledTimes(1);
+    expect(service.dependents).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'prepare', status: 'complete' }),
+    );
     await expect(
       service.accept('prepare', { ...request(), expectedEvidenceHash: 'b'.repeat(64) }, human),
     ).rejects.toMatchObject({ statusCode: 409 });
     expect(f.pod().researchFindings?.acceptance?.actor).toEqual(human);
+  });
+  it('retains immutable ready and accepted receipts across a new lifecycle', async () => {
+    await finalizer().finalizeArtifactPod(f.pod());
+    const service = acceptance();
+    const reviewed = request();
+    const accepted = await service.accept('prepare', reviewed, human);
+    await writeFile(
+      path.join(f.pod().artifactsPath ?? '', 'arbitrary-report.md'),
+      'later corruption',
+    );
+    expect(await service.accept('prepare', reviewed, human)).toEqual(accepted);
+    expect(f.podRepo.getFindingsReceipts?.('prepare')).toHaveLength(2);
+    f.podRepo.incrementLifecycleGeneration('prepare');
+    expect(f.pod().researchFindings).toBeNull();
+    expect(f.podRepo.getFindingsReceipts?.('prepare')[1]).toEqual(accepted);
+    await expect(service.accept('prepare', reviewed, human)).rejects.toMatchObject({
+      statusCode: 409,
+    });
   });
   it('rejects non-human, stale cycle, killed and changed evidence without completing', async () => {
     await finalizer().finalizeArtifactPod(f.pod());
@@ -206,6 +283,28 @@ describe('research findings contract', () => {
     await expect(service.finalizeArtifactPod(f.pod())).rejects.toThrow('unsettled');
     expect(service.cm.extractDirectoryFromContainer).not.toHaveBeenCalled();
     expect(service.cleanup).not.toHaveBeenCalled();
+  });
+  it('blocks approval, waivers, publication retries and native checks for findings', async () => {
+    await finalizer().finalizeArtifactPod(f.pod());
+    const manager = createPodManager(f.deps);
+    await expect(manager.approveSession('prepare', { actor: human })).rejects.toMatchObject({
+      code: 'FINDINGS_ACCEPTANCE_REQUIRED',
+    });
+    await expect(manager.forceApprove('prepare', 'bypass', human)).rejects.toMatchObject({
+      code: 'FINDINGS_ACCEPTANCE_REQUIRED',
+    });
+    await expect(manager.retryCreatePr('prepare')).rejects.toMatchObject({
+      code: 'FINDINGS_PUBLICATION_FORBIDDEN',
+    });
+    await expect(manager.triggerValidation('prepare')).rejects.toMatchObject({
+      code: 'FINDINGS_VALIDATION_NOT_APPLICABLE',
+    });
+    await expect(manager.revalidateSession('prepare')).rejects.toMatchObject({
+      code: 'FINDINGS_VALIDATION_NOT_APPLICABLE',
+    });
+    expect(() => manager.setSkipValidation('prepare', true, human)).toThrow();
+    expect(f.pod().status).toBe('research_ready');
+    expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
   });
   it('keeps research ready a human decision, never merge approval or an active worker', () => {
     expect(() => validateTransition('prepare', 'running', 'research_ready')).not.toThrow();

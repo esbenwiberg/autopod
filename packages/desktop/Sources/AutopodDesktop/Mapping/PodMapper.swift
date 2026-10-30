@@ -94,8 +94,8 @@ public enum PodMapper {
       status: PodStatus(rawValue: response.status) ?? .queued,
       pod: config,
       hasWorktree: response.worktreePath != nil,
-      artifactCollectionPending: response.status == "failed" && response.options.output == "artifact"
-        && response.finalization?.phase == "preserving" && response.finalization?.agentSettledAt != nil
+      artifactCollectionPending: response.status == "failed" && (response.options.output == "artifact" || response.completionPolicy == "accept-findings")
+        && (response.finalization?.phase == "preserving" || (response.completionPolicy == "accept-findings" && response.finalization?.phase == "ready")) && response.finalization?.agentSettledAt != nil
         && response.finalization?.pendingDecisionId == nil,
       branch: response.branch,
       profileName: response.profileName,
@@ -488,7 +488,7 @@ public enum PodMapper {
       pod: pod,
       hasWorktree: response.worktreePath != nil,
       artifactCollectionPending: response.status == "failed" && (pod.output == .artifact || response.completionPolicy == "accept-findings")
-        && response.finalization?.phase == "preserving" && response.finalization?.agentSettledAt != nil
+        && (response.finalization?.phase == "preserving" || (response.completionPolicy == "accept-findings" && response.finalization?.phase == "ready")) && response.finalization?.agentSettledAt != nil
         && response.finalization?.pendingDecisionId == nil,
       branch: response.branch,
       profileName: response.profileName,
