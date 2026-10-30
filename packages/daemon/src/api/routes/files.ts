@@ -102,6 +102,7 @@ export function filesRoutes(
         ),
         findings.generation,
         findings.cycle,
+        findings.snapshotHash,
       );
     const files = await walk(root, extensions);
     files.sort((a, b) => a.path.localeCompare(b.path));
@@ -162,6 +163,7 @@ export function filesRoutes(
         findings.generation,
         findings.cycle,
         relPath,
+        findings.snapshotHash,
       );
       return {
         path: relPath,

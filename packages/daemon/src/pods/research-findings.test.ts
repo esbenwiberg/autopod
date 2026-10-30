@@ -5,10 +5,12 @@ import type { Pod } from '@autopod/shared';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { filesRoutes } from '../api/routes/files.js';
+import { podRoutes } from '../api/routes/pods.js';
 import { createCompletionFixture } from '../test-utils/completion-helpers.js';
 import { createMockContainerManager } from '../test-utils/mock-helpers.js';
 import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
 import { createArtifactFinalizer } from './artifact-finalizer.js';
+import { fingerprintArtifactSnapshot } from './artifact-snapshot-receipt.js';
 import { type PodManager, createPodManager } from './pod-manager.js';
 import { createPodRepository } from './pod-repository.js';
 import { createFindingsAcceptance } from './research-findings.js';
@@ -172,6 +174,41 @@ describe('research findings contract', () => {
           })
         ).statusCode,
       ).toBe(409);
+    } finally {
+      await app.close();
+    }
+  });
+  it('reads exact accepted evidence after pod archival and rejects rewritten snapshot receipts', async () => {
+    await finalizer().finalizeArtifactPod(f.pod());
+    const reviewed = request();
+    const accepted = await acceptance().accept('prepare', reviewed, human);
+    f.podRepo.delete('prepare');
+    expect(() => f.pod()).toThrow();
+    const app = Fastify();
+    podRoutes(app, {} as PodManager, undefined, undefined, f.podRepo);
+    const url = `/pods/prepare/findings-receipts/${reviewed.expectedGeneration}/${reviewed.expectedCycle}/content?evidenceHash=${reviewed.expectedEvidenceHash}&path=arbitrary-report.md`;
+    try {
+      const response = await app.inject({ method: 'GET', url });
+      expect(response.statusCode).toBe(200);
+      expect(Buffer.from(response.json().content, 'base64').toString()).toContain('unresolved');
+      expect(
+        (
+          await app.inject({
+            method: 'GET',
+            url: url.replace(reviewed.expectedEvidenceHash, 'b'.repeat(64)),
+          })
+        ).statusCode,
+      ).toBe(404);
+      await writeFile(path.join(accepted.artifactsPath, 'arbitrary-report.md'), 'rewritten');
+      const forged = {
+        version: 1,
+        generation: accepted.generation,
+        cycle: accepted.cycle,
+        snapshot: path.basename(accepted.artifactsPath),
+        ...(await fingerprintArtifactSnapshot(accepted.artifactsPath)),
+      };
+      await writeFile(`${accepted.artifactsPath}.receipt.json`, JSON.stringify(forged));
+      expect((await app.inject({ method: 'GET', url })).statusCode).toBe(409);
     } finally {
       await app.close();
     }

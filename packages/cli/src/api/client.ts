@@ -378,6 +378,22 @@ export class AutopodClient {
     return this.request('GET', `/pods/stats${qs ? `?${qs}` : ''}`);
   }
 
+  async getFindingsReceipts(id: string): Promise<NonNullable<Pod['researchFindings']>[]> {
+    return this.request('GET', `/pods/${encodeURIComponent(id)}/findings-receipts`);
+  }
+  async getFindingsFile(
+    id: string,
+    generation: number,
+    cycle: number,
+    evidenceHash: string,
+    filePath: string,
+  ): Promise<{ content: string; encoding: 'base64' }> {
+    const query = new URLSearchParams({ evidenceHash, path: filePath });
+    return this.request(
+      'GET',
+      `/pods/${encodeURIComponent(id)}/findings-receipts/${generation}/${cycle}/content?${query}`,
+    );
+  }
   async acceptFindings(
     id: string,
     evidence: { expectedGeneration: number; expectedCycle: number; expectedEvidenceHash: string },

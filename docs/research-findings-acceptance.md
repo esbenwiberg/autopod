@@ -27,6 +27,9 @@ Open the summary and reports in desktop/phone details, or use:
 ap status <full-pod-id> --json
 ap files <full-pod-id>
 ap files <full-pod-id> --path <report-path>
+# Immutable receipt/history access, including deleted pods:
+ap findings <full-pod-id>
+ap findings <full-pod-id> --generation <generation> --cycle <cycle> --evidence-hash <hash> --path <report-path>
 ap accept-findings <full-pod-id> --generation <generation> --cycle <cycle> --evidence-hash <researchFindings.evidenceHash>
 ```
 
@@ -43,7 +46,11 @@ Dependencies retain existing policy and are released only after acceptance to co
 The authenticated API is `POST /pods/:id/accept-findings` with strict body
 `{expectedGeneration, expectedCycle, expectedEvidenceHash}`. The actor is never supplied
 by the caller. `GET /pods/:id/findings-receipts` exposes immutable ready/accepted
-receipts across pod reuse/deletion. Current evidence stays in pod detail/history.
+receipts across pod reuse/deletion. `GET /pods/:id/findings-receipts/:generation/:cycle/content?evidenceHash=...&path=...`
+reads at most 5 MiB from the exact retained receipt, independently of current pod/worktree
+pointers. Reads verify the inventory hash pinned in the immutable database receipt as
+well as the snapshot sidecar; changing both snapshot and sidecar cannot rewrite accepted
+history. The CLI `ap findings` exposes these archived receipts and reports. Current evidence stays in pod detail/history.
 Artifact reads verify the retained receipt and never fall back to a live worktree.
 
 Interrupted collection/cleanup uses the existing artifact finalization recovery:

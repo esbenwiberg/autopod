@@ -104,8 +104,10 @@ export async function verifyArtifactSnapshot(
   artifactRoot: string,
   generation: number,
   cycle = 0,
+  expectedHash?: string,
 ): Promise<void> {
-  await checkArtifactSnapshot(snapshot, artifactRoot, generation, cycle);
+  const verified = await checkArtifactSnapshot(snapshot, artifactRoot, generation, cycle);
+  assertPinnedHash(verified.sha256, expectedHash);
 }
 
 /** Hash from the same inventory verified against the original receipt. */
@@ -125,6 +127,7 @@ export async function readArtifactSnapshotFile(
   generation: number,
   cycle: number,
   relativePath: string,
+  expectedHash?: string,
 ): Promise<Buffer> {
   const captured = await checkArtifactSnapshot(
     snapshot,
@@ -133,8 +136,18 @@ export async function readArtifactSnapshotFile(
     cycle,
     relativePath,
   );
+  assertPinnedHash(captured.sha256, expectedHash);
   if (!captured.captured) throw new Error('Evidence is missing or is not a regular file');
   return captured.captured;
+}
+
+function assertPinnedHash(actual: string, expected?: string): void {
+  if (expected && actual !== expected)
+    throw new AutopodError(
+      'Saved artifact differs from the immutable findings receipt',
+      'ARTIFACT_SNAPSHOT_UNVERIFIED',
+      409,
+    );
 }
 
 async function checkArtifactSnapshot(

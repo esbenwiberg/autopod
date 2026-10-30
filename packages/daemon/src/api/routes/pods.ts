@@ -1,3 +1,4 @@
+import path from 'node:path';
 import {
   AutopodError,
   type CompactPod,
@@ -17,6 +18,7 @@ import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ActionAuditRepository } from '../../actions/audit-repository.js';
+import { readArtifactSnapshotFile } from '../../pods/artifact-snapshot-receipt.js';
 import type { CompactPodSource } from '../../pods/compact-pod-projection.js';
 import { aggregateCost, parseDays } from '../../pods/cost-aggregation.js';
 import { dispatchRerunRequest } from '../../pods/dispatch-rerun-request.js';
@@ -1478,6 +1480,66 @@ export function podRoutes(
   app.get('/pods/:podId/findings-receipts', async (request) => {
     const { podId } = request.params as { podId: string };
     return podRepo?.getFindingsReceipts?.(podId) ?? [];
+  });
+
+  app.get('/pods/:podId/findings-receipts/:generation/:cycle/content', async (request) => {
+    const params = z
+      .object({
+        podId: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+        generation: z.coerce.number().int().nonnegative(),
+        cycle: z.coerce.number().int().positive(),
+      })
+      .parse(request.params);
+    const query = z
+      .object({
+        evidenceHash: z.string().regex(/^[a-f0-9]{64}$/),
+        path: z
+          .string()
+          .min(1)
+          .max(512)
+          .refine(
+            (value) =>
+              !value.startsWith('/') &&
+              !value.includes('\\') &&
+              !value.includes('\0') &&
+              !value.split('/').some((part) => part === '..' || part === '.'),
+          ),
+      })
+      .strict()
+      .parse(request.query);
+    const receipt = podRepo
+      ?.getFindingsReceipts?.(params.podId)
+      .find(
+        (value) =>
+          value.generation === params.generation &&
+          value.cycle === params.cycle &&
+          value.evidenceHash === query.evidenceHash,
+      );
+    if (!receipt)
+      throw new AutopodError(
+        'Exact retained findings receipt is unavailable',
+        'FINDINGS_NOT_FOUND',
+        404,
+      );
+    const bytes = await readArtifactSnapshotFile(
+      receipt.artifactsPath,
+      path.join(
+        process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data'),
+        'artifacts',
+        params.podId,
+      ),
+      receipt.generation,
+      receipt.cycle,
+      query.path,
+      receipt.snapshotHash,
+    );
+    return {
+      path: query.path,
+      evidenceHash: receipt.evidenceHash,
+      encoding: 'base64',
+      content: bytes.toString('base64'),
+      size: bytes.length,
+    };
   });
 
   app.post('/pods/:podId/accept-findings', async (request) => {
