@@ -12,6 +12,8 @@ export interface DerivedLaunchInput {
   work?: LaunchRequest['work'];
   /** Explicit user-selected handoff output; all other workflow authority remains frozen. */
   output?: EffectiveLaunchConfig['workflow']['output'];
+  /** Daemon-owned PR fix admission ordinal; never changes the frozen launch authority. */
+  fixAttempt?: number;
 }
 /** Daemon-owned continuation of admitted authority, independent of later preset edits/archive. */
 export function deriveLaunch(
