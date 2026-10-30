@@ -2040,7 +2040,9 @@ describe('PodManager', () => {
         release.resolve();
         await pending;
 
-        expect(ctx.containerManager.start).toHaveBeenCalledWith(pod.containerId);
+        expect(ctx.containerManager.start).toHaveBeenCalledWith(pod.containerId, {
+          assertCurrent: expect.any(Function),
+        });
         expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalledWith({
           containerManager: ctx.containerManager,
           containerId: pod.containerId,
@@ -2302,7 +2304,7 @@ describe('PodManager', () => {
         expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
           pod.containerId,
           ['sh', '-c', expect.stringContaining('STAGING="/mnt/worktree/.autopod-sync-')],
-          { timeout: 120_000 },
+          { timeout: 120_000, assertCurrent: expect.any(Function) },
         );
         expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
         expect(info).toHaveBeenCalledWith(
@@ -2445,7 +2447,7 @@ describe('PodManager', () => {
           expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
             pod.containerId,
             ['sh', '-c', expect.stringContaining('staging_count=')],
-            { timeout: 120_000 },
+            { timeout: 120_000, assertCurrent: expect.any(Function) },
           );
           expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
           expect(manager.getSession(pod.id)).toMatchObject({
@@ -3053,12 +3055,12 @@ describe('PodManager', () => {
               expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
                 pod.containerId,
                 ['git', '-C', '/workspace', 'reset', '--hard', host],
-                { timeout: 30_000 },
+                { timeout: 30_000, assertCurrent: expect.any(Function) },
               );
               expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
                 pod.containerId,
                 ['git', '-C', '/workspace', 'clean', '-fd'],
-                { timeout: 30_000 },
+                { timeout: 30_000, assertCurrent: expect.any(Function) },
               );
             } else {
               expect(trace).toContain('sync');
@@ -3250,7 +3252,9 @@ describe('PodManager', () => {
       });
 
       await expect(manager.recoverWorktree(pod.id)).resolves.toMatchObject({ recovered: true });
-      expect(ctx.containerManager.start).toHaveBeenCalledWith('ctr-1');
+      expect(ctx.containerManager.start).toHaveBeenCalledWith('ctr-1', {
+        assertCurrent: expect.any(Function),
+      });
     });
 
     it('does not recursively extract sandbox source when checkpoint proof is unavailable', async () => {
@@ -15944,12 +15948,12 @@ describe('PodManager', () => {
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'ctr-1',
         ['git', '-C', '/workspace', 'reset', '--hard', hostHead],
-        { timeout: 30_000 },
+        { timeout: 30_000, assertCurrent: expect.any(Function) },
       );
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'ctr-1',
         ['git', '-C', '/workspace', 'clean', '-fd'],
-        { timeout: 30_000 },
+        { timeout: 30_000, assertCurrent: expect.any(Function) },
       );
       const execCalls = vi.mocked(ctx.containerManager.execInContainer).mock.calls;
       const resetIndex = execCalls.findIndex(
