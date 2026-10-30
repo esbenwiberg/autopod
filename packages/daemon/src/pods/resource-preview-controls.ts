@@ -29,6 +29,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
       );
     }
 
+    const retainedContainerId = pod.containerId;
     if (!pod.previewUrl && pod.executionTarget !== 'sandbox') {
       throw new AutopodError(`Pod ${podId} has no preview URL`, 'INVALID_STATE', 409);
     }
@@ -55,7 +56,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
         const supervisorAlive = await (async () => {
           try {
             const pidResult = await cm.execInContainer(
-              pod.containerId,
+              retainedContainerId,
               ['sh', '-c', 'cat /tmp/autopod-supervisor.pid 2>/dev/null'],
               {},
             );
@@ -63,7 +64,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
             const pid = pidResult.stdout.trim();
             if (!pid) return false;
             const liveness = await cm.execInContainer(
-              pod.containerId,
+              retainedContainerId,
               ['sh', '-c', `kill -0 ${pid} 2>/dev/null && echo 1 || echo 0`],
               {},
             );

@@ -183,21 +183,21 @@ function fixture() {
 }
 
 describe('advisory validation ownership contract', () => {
-  it('retains the checked advisory method and receiver across a queued slot', async () => {
+  it('uses a replacement advisory method and its receiver after a queued slot', async () => {
     const f = fixture();
     const slot = deferred<void>();
     f.acquire.mockImplementation(() => slot.promise);
     const engine = f.deps.validationEngine;
-    const checked = vi.fn<Runner>(async function (this: typeof engine) {
+    const replacement = vi.fn<Runner>(async function (this: typeof engine) {
       expect(this).toBe(engine);
       return qa();
     });
-    engine.runAdvisoryBrowserQa = checked;
     const pending = f.run();
-    engine.runAdvisoryBrowserQa = undefined;
+    engine.runAdvisoryBrowserQa = replacement;
     slot.resolve();
     await expect(pending).resolves.toMatchObject({ advisoryBrowserQa: { status: 'pass' } });
-    expect(checked).toHaveBeenCalledOnce();
+    expect(replacement).toHaveBeenCalledOnce();
+    expect(f.runner).not.toHaveBeenCalled();
     expect(f.release).toHaveBeenCalledOnce();
   });
 

@@ -98,7 +98,6 @@ export function createAdvisoryValidation(deps: AdvisoryValidationDependencies): 
       return blockingResult;
     }
 
-    const runAdvisoryBrowserQa = validationEngine.runAdvisoryBrowserQa.bind(validationEngine);
     let registered = false;
     const ownership = advisoryPublicationOwnership(
       expectedPod,
@@ -140,7 +139,12 @@ export function createAdvisoryValidation(deps: AdvisoryValidationDependencies): 
         try {
           ownership.assertCurrent();
           const callbacks = buildPhaseEventCallbacks(podId);
-          advisoryResult = await runAdvisoryBrowserQa(
+          const runAdvisoryBrowserQa = validationEngine.runAdvisoryBrowserQa;
+          if (!runAdvisoryBrowserQa) {
+            throw new Error('Advisory browser QA is no longer available');
+          }
+          advisoryResult = await runAdvisoryBrowserQa.call(
+            validationEngine,
             validationConfig,
             blockingResult,
             (phase) => {
