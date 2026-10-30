@@ -3000,6 +3000,8 @@ describe('GET /pods/:podId/preview/status', () => {
     // Facade controls now verify actual task custody before calling the mocked probe.
     insertTestProfile(db);
     insertPod(db, { id: 'pod-abc', status: 'running' });
+    insertPod(db, { id: 'pod-stopped', status: 'failed' });
+    insertPod(db, { id: 'pod-crashed', status: 'failed' });
 
     const profileStore = createProfileStore(db);
     const podRepo = createPodRepository(db);
