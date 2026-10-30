@@ -2060,6 +2060,7 @@ export function processGroupProbeScript(): string {
     'group_alive() { for stat_file in /proc/[0-9]*/stat; do',
     '[ -r "$stat_file" ] || { [ -d "${stat_file%/stat}" ] && return 0; continue; }',
     'read_proc_stat "$stat_file" 2>/dev/null || { [ -d "${stat_file%/stat}" ] && return 0; continue; }',
+    'case "$stat" in *") "*) ;; *) [ -d "${stat_file%/stat}" ] && return 0; continue;; esac',
     'rest=${stat##*) }; set -- $rest',
     '[ "$#" -ge 20 ] || { [ -d "${stat_file%/stat}" ] && return 0; continue; }',
     '[ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0',

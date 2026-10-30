@@ -81,7 +81,9 @@ describe('resource preview caches and transport', () => {
       expect(f.cm.execInContainer).toHaveBeenCalledTimes(calls);
       expect(await f.preview.ensureSandboxPreviewProxy(f.pod())).toBe(url);
       expect((await fetch(url, { headers: { connection: 'close' } })).status).toBe(200);
-      f.podRepo.update('prepare', { lifecycleGeneration: f.pod().lifecycleGeneration + 1 });
+      const generation = f.pod().lifecycleGeneration;
+      f.podRepo.incrementLifecycleGeneration('prepare');
+      expect(f.pod().lifecycleGeneration).toBe(generation + 1);
       const renewedCalls = vi.mocked(f.cm.execInContainer).mock.calls.length;
       expect((await fetch(url, { headers: { connection: 'close' } })).status).toBe(502);
       expect(f.cm.execInContainer).toHaveBeenCalledTimes(renewedCalls);
