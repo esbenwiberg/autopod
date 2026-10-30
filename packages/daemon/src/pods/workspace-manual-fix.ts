@@ -1,6 +1,7 @@
 import type { OperatorActor, Pod } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import { actorLabel } from './approval-policy.js';
+import { captureValidationMutationGuard } from './validation-recovery-policy.js';
 import type {
   PodCreator,
   WorkspaceManualFixCalls,
@@ -22,6 +23,7 @@ export function createWorkspaceManualFix(
     instructions?: string,
   ): Promise<Pod> {
     const worker = podRepo.getOrThrow(podId);
+    const assertCurrent = captureValidationMutationGuard(podRepo, worker);
     const actor: OperatorActor =
       typeof actorOrUserId === 'string' ? { type: 'human', userId: actorOrUserId } : actorOrUserId;
     if (
@@ -73,7 +75,10 @@ export function createWorkspaceManualFix(
             specFiles: undefined,
           },
         },
-        (config) => create(config, userId, creator, actor).id,
+        (config) => {
+          assertCurrent();
+          return create(config, userId, creator, actor).id;
+        },
       );
       return podRepo.getOrThrow(id);
     }

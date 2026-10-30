@@ -32,7 +32,7 @@ import {
 import { createProfileStore } from '../../profiles/index.js';
 import { CodexStreamParser } from '../../runtimes/codex-stream-parser.js';
 import { createSafetyEventsRepository } from '../../safety/safety-events-repository.js';
-import { createPassingValidationResult } from '../../test-utils/mock-helpers.js';
+import { createPassingValidationResult, insertTestProfile } from '../../test-utils/mock-helpers.js';
 import { podRoutes } from './pods.js';
 
 // ── DB setup (mirrors routes-extended.test.ts pattern) ────────────────────────
@@ -2997,6 +2997,11 @@ describe('GET /pods/:podId/preview/status', () => {
   beforeEach(async () => {
     podSeq = 0;
     db = createTestDb();
+    // Facade controls now verify actual task custody before calling the mocked probe.
+    insertTestProfile(db);
+    insertPod(db, { id: 'pod-abc', status: 'running' });
+    insertPod(db, { id: 'pod-stopped', status: 'failed' });
+    insertPod(db, { id: 'pod-crashed', status: 'failed' });
 
     const profileStore = createProfileStore(db);
     const podRepo = createPodRepository(db);

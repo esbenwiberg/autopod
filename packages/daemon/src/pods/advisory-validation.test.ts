@@ -103,7 +103,8 @@ function fixture() {
   const db = createTestDb();
   cleanups.push(() => db.close());
   insertTestProfile(db);
-  const pod = insertPod(createPodRepository(db));
+  const repository = createPodRepository(db);
+  const pod = insertPod(repository);
   const state = { pod: structuredClone(pod), pending: false, latest: true, unanswered: false };
   const trace: string[] = [];
   const runs = new Map<string, Promise<ValidationResult>>();
@@ -156,6 +157,7 @@ function fixture() {
   const cfg = config();
   return {
     state,
+    repository,
     pod,
     blocking,
     cfg,
@@ -181,6 +183,62 @@ function fixture() {
 }
 
 describe('advisory validation ownership contract', () => {
+  it('uses a replacement advisory method and its receiver after a queued slot', async () => {
+    const f = fixture();
+    const slot = deferred<void>();
+    f.acquire.mockImplementation(() => slot.promise);
+    const engine = f.deps.validationEngine;
+    const replacement = vi.fn<Runner>(async function (this: typeof engine) {
+      expect(this).toBe(engine);
+      return qa();
+    });
+    const pending = f.run();
+    engine.runAdvisoryBrowserQa = replacement;
+    slot.resolve();
+    await expect(pending).resolves.toMatchObject({ advisoryBrowserQa: { status: 'pass' } });
+    expect(replacement).toHaveBeenCalledOnce();
+    expect(f.runner).not.toHaveBeenCalled();
+    expect(f.release).toHaveBeenCalledOnce();
+  });
+
+  it('refuses queued advisory execution if an immutable unpublished dispatch takes custody', async () => {
+    const f = fixture();
+    f.repository.update(f.pod.id, { containerId: null });
+    f.repository.update(f.pod.id, {
+      executionTarget: 'sandbox',
+      containerId: '11111111-1111-4111-8111-111111111111',
+    });
+    Object.assign(f.pod, f.repository.getOrThrow(f.pod.id));
+    Object.assign(f.state.pod, f.pod);
+    const queued = deferred<void>();
+    f.acquire.mockImplementation(() => queued.promise);
+    const pending = f.run();
+    const retries = f.repository.taskRetries;
+    const ledger = f.repository.validationExecutions;
+    if (!retries || !ledger) throw new Error('Missing durable validation ledger');
+    Object.assign(f.deps.podRepo, { validationExecutions: ledger });
+    const identity = {
+      source: 'a'.repeat(64),
+      contract: 'b'.repeat(64),
+      commands: 'c'.repeat(64),
+      environment: null,
+      implementation: null,
+    };
+    const admission = retries.admit(
+      f.pod.id,
+      f.pod.lifecycleGeneration,
+      identity,
+      'd'.repeat(64),
+      [],
+    );
+    retries.start(admission.id);
+    expect(ledger.dispatch(f.pod, admission.id, 1, 'test-scope')).not.toBeNull();
+    queued.resolve();
+    await expect(pending).rejects.toBeInstanceOf(ValidationSupersededError);
+    expect(f.runner).not.toHaveBeenCalled();
+    expect(f.history).not.toHaveBeenCalled();
+  });
+
   it('constructs inertly and returns the actual current pod when ownership is valid', () => {
     const f = fixture();
     expect(f.get).not.toHaveBeenCalled();

@@ -20,6 +20,12 @@ public final class ValidationRecoveryController {
 
   public var isPending: Bool { isSubmitting || state?.activeAction != nil }
 
+  public var reconciliationCommand: String? {
+    guard state?.fixValidation.code == "VALIDATION_EXECUTION_UNVERIFIED"
+      || state?.retryChecks.code == "VALIDATION_EXECUTION_UNVERIFIED" else { return nil }
+    return "ap reconcile-validation \(podId) --json"
+  }
+
   public func canRequest(_ action: String) -> Bool {
     guard !isPending, loadError == nil, let state, state.validationTimestamp != nil else { return false }
     return action == "fix-validation" ? state.fixValidation.allowed
@@ -117,6 +123,14 @@ struct ValidationRecoveryControls: View {
         }
         if let reason = state.retryChecks.reason, reason != state.fixValidation.reason {
           Text("Retry checks: \(reason)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        }
+        if let command = controller.reconciliationCommand {
+          Text("Termination proof is required before repair or checks. Inspect the exact validation evidence with the command below, and retain the original resource and reports. Inspection does not delete anything. Missing legacy ownership remains blocked.")
+            .font(.caption).foregroundStyle(.secondary)
+          Text(command)
+            .font(.caption.monospaced()).textSelection(.enabled)
+          Text("Destructive recovery is unavailable: the current provider cannot prove final source/report preservation while an execution remains unknown. No resume or deletion is performed. Budget selection and retry permission are separate; neither settles the execution.")
+            .font(.caption).foregroundStyle(.secondary)
         }
         if state.fixValidation.code?.hasPrefix("TASK_RETRY") == true
           || state.retryChecks.code?.hasPrefix("TASK_RETRY") == true

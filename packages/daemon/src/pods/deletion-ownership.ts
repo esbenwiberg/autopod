@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { assertTaskValidationSettled } from './validation-execution-evidence.js';
 
 export function deletionOwnershipError(): AutopodError {
   return new AutopodError(
@@ -20,6 +21,20 @@ export interface DeletionOwnership {
   acquire(podId: string, configuration: string): DeletionClaim;
   assertTaskAvailable(podId: string): void;
 }
+/** Pending validation preservation/deletion is exclusive across this logical task. */
+export function assertNoValidationRecovery(db: Database.Database, podId: string): void {
+  if (
+    db
+      .prepare(`SELECT 1 FROM validation_recovery_intents i JOIN task_executions e
+    ON e.task_id=i.task_id WHERE e.pod_id=? AND i.receipt IS NULL`)
+      .get(podId)
+  )
+    throw new AutopodError(
+      'Validation recovery owns this task. Inspect and reconcile its recorded operation before starting work or deleting resources.',
+      'VALIDATION_RECOVERY_IN_PROGRESS',
+      409,
+    );
+}
 /** Durable resource intent with non-expiring exclusive attempts and immutable step receipts. */
 export function createDeletionOwnership(db: Database.Database): DeletionOwnership {
   const resourceIdentity = (podId: string, configuration: string) => {
@@ -35,6 +50,7 @@ export function createDeletionOwnership(db: Database.Database): DeletionOwnershi
   };
   return {
     assertTaskAvailable(podId) {
+      assertNoValidationRecovery(db, podId);
       if (
         db
           .prepare(`SELECT 1 FROM deletion_cleanup_intents d JOIN task_executions e
@@ -44,6 +60,15 @@ export function createDeletionOwnership(db: Database.Database): DeletionOwnershi
         throw deletionOwnershipError();
     },
     acquire: db.transaction((podId: string, configuration: string): DeletionClaim => {
+      assertTaskValidationSettled(db, podId);
+      if (
+        db
+          .prepare(
+            'SELECT 1 FROM validation_recovery_intents i JOIN task_executions e ON e.task_id=i.task_id WHERE e.pod_id=? AND i.receipt IS NULL',
+          )
+          .get(podId)
+      )
+        throw deletionOwnershipError();
       const identity = resourceIdentity(podId, configuration);
       const task = db.prepare('SELECT task_id FROM task_executions WHERE pod_id=?').get(podId) as
         | { task_id: string }

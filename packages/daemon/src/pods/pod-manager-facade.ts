@@ -71,6 +71,7 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     terminationReconciliation,
   } = captured;
   return {
+    ...captured.validationExecutionRecovery,
     adoptSource(podId: string, input: SourceAdoptionRequest, actor: OperatorActor) {
       return (captured.sourceAdoption ?? sourceAdoptionError('Source adoption unavailable')).submit(
         podId,

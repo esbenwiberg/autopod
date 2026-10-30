@@ -4,6 +4,7 @@ import {
   result,
   unusedLocalPreviewUrl,
 } from '../test-utils/resource-helpers.js';
+import * as proxyModule from './sandbox-preview-proxy.js';
 afterEach(() => vi.unstubAllEnvs());
 describe('resource preview caches and transport', () => {
   it('persists native URL through SQLite reopen, reuses only matching container and unexposes once', async () => {
@@ -64,6 +65,63 @@ describe('resource preview caches and transport', () => {
     expect(await (await fetch(replacement)).text()).toBe('local preview');
     await f.preview.stopSandboxPreviewProxy('prepare');
   });
+  it('replaces a cached status guard after pause while still refusing stale requests', async () => {
+    vi.stubEnv('AUTOPOD_SANDBOX_NATIVE_PREVIEW_EMAILS', '');
+    const f = createResourceFixture();
+    f.sandbox();
+    f.podRepo.update('prepare', { previewUrl: await unusedLocalPreviewUrl() });
+    vi.mocked(f.cm.execInContainer).mockResolvedValue(
+      result(JSON.stringify({ statusCode: 200, headers: {}, bodyBase64: '' })),
+    );
+    const url = await f.preview.ensureSandboxPreviewProxy(f.pod());
+    try {
+      expect((await fetch(url, { headers: { connection: 'close' } })).status).toBe(200);
+      f.events.transition(f.pod(), 'paused');
+      const calls = vi.mocked(f.cm.execInContainer).mock.calls.length;
+      expect((await fetch(url, { headers: { connection: 'close' } })).status).toBe(502);
+      expect(f.cm.execInContainer).toHaveBeenCalledTimes(calls);
+      expect(await f.preview.ensureSandboxPreviewProxy(f.pod())).toBe(url);
+      expect((await fetch(url, { headers: { connection: 'close' } })).status).toBe(200);
+      const generation = f.pod().lifecycleGeneration;
+      f.podRepo.incrementLifecycleGeneration('prepare');
+      expect(f.pod().lifecycleGeneration).toBe(generation + 1);
+      const renewedCalls = vi.mocked(f.cm.execInContainer).mock.calls.length;
+      expect((await fetch(url, { headers: { connection: 'close' } })).status).toBe(502);
+      expect(f.cm.execInContainer).toHaveBeenCalledTimes(renewedCalls);
+    } finally {
+      await f.preview.stopSandboxPreviewProxy('prepare');
+    }
+  });
+
+  it('closes the actual new listener when ownership changes during construction', async () => {
+    vi.stubEnv('AUTOPOD_SANDBOX_NATIVE_PREVIEW_EMAILS', '');
+    const f = createResourceFixture();
+    f.sandbox();
+    f.podRepo.update('prepare', { previewUrl: await unusedLocalPreviewUrl() });
+    const start = proxyModule.startSandboxPreviewProxy;
+    let created: proxyModule.SandboxPreviewProxy | undefined;
+    const construct = vi
+      .spyOn(proxyModule, 'startSandboxPreviewProxy')
+      .mockImplementationOnce(async (options) => {
+        created = await start(options);
+        f.podRepo.incrementLifecycleGeneration('prepare');
+        return created;
+      });
+    try {
+      await expect(f.preview.ensureSandboxPreviewProxy(f.pod())).rejects.toMatchObject({
+        code: 'STALE_VALIDATION_EXECUTION',
+      });
+      expect(created).toBeDefined();
+      if (!created) throw new Error('Missing actual listener');
+      await expect(fetch(created.url)).rejects.toThrow();
+      await f.preview.stopSandboxPreviewProxy('prepare');
+      expect(f.cm.execInContainer).not.toHaveBeenCalled();
+    } finally {
+      construct.mockRestore();
+      await created?.close().catch(() => {});
+    }
+  });
+
   it('warns and falls back when native exposure fails or has no assigned URL', async () => {
     vi.stubEnv('AUTOPOD_SANDBOX_NATIVE_PREVIEW_EMAILS', 'reviewer@invalid.example');
     const f = createResourceFixture();

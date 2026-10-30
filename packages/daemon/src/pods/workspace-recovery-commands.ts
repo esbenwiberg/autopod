@@ -1,4 +1,8 @@
 import { AutopodError } from '@autopod/shared';
+import {
+  assertValidationMutationSettled,
+  captureValidationMutationGuard,
+} from './validation-recovery-policy.js';
 import type { WorkspaceRecoveryCommandsCaptured } from './workspace-contracts.js';
 
 export function createWorkspaceRecoveryCommands(captured: WorkspaceRecoveryCommandsCaptured) {
@@ -17,14 +21,18 @@ export function createWorkspaceRecoveryCommands(captured: WorkspaceRecoveryComma
   } = captured;
 
   async function preserveWorkspace(podId: string, reason = 'operator recovery'): Promise<void> {
+    assertValidationMutationSettled(podRepo, podId);
     await preservePodWorkspace(podRepo.getOrThrow(podId), reason);
   }
 
   async function quiesceSandboxAgent(podId: string): Promise<void> {
     const pod = podRepo.getOrThrow(podId);
+    const assertCurrent = captureValidationMutationGuard(podRepo, pod);
     if (pod.executionTarget !== 'sandbox' || !pod.containerId) return;
     const cm = containerManagerFactory.get('sandbox');
-    if ((await cm.getStatus(pod.containerId)) !== 'running') return;
+    const status = await cm.getStatus(pod.containerId);
+    assertCurrent();
+    if (status !== 'running') return;
     const result = await cm.execInContainer(
       pod.containerId,
       [
@@ -41,7 +49,7 @@ export function createWorkspaceRecoveryCommands(captured: WorkspaceRecoveryComma
           ': > "$pid_file"',
         ].join('; '),
       ],
-      { timeout: 5_000 },
+      { timeout: 5_000, assertCurrent },
     );
     if (result.exitCode !== 0) {
       throw new Error(`Sandbox worker quiesce failed (exit ${result.exitCode}): ${result.stderr}`);
@@ -51,13 +59,18 @@ export function createWorkspaceRecoveryCommands(captured: WorkspaceRecoveryComma
 
   async function suspendSandboxForRecovery(podId: string): Promise<void> {
     const pod = podRepo.getOrThrow(podId);
+    const assertCurrent = captureValidationMutationGuard(podRepo, pod);
     if (pod.executionTarget !== 'sandbox' || !pod.containerId) return;
     const cm = containerManagerFactory.get('sandbox');
-    if ((await cm.getStatus(pod.containerId)) === 'running') await cm.stop(pod.containerId);
+    const status = await cm.getStatus(pod.containerId);
+    assertCurrent();
+    if (status === 'running') await cm.stop(pod.containerId);
   }
 
   async function cleanupPodResourcesForRecovery(podId: string): Promise<void> {
+    const assertCurrent = captureValidationMutationGuard(podRepo, podRepo.getOrThrow(podId));
     await killSidecarsForPod(podId, true);
+    assertCurrent();
     await destroyPodNetwork(podId, true);
   }
 
@@ -65,8 +78,12 @@ export function createWorkspaceRecoveryCommands(captured: WorkspaceRecoveryComma
     recovered: boolean;
     message: string;
     blockers?: Array<{ status: string; path: string }>;
+    checkpoint?: Awaited<
+      ReturnType<WorkspaceRecoveryCommandsCaptured['checkpointSandboxWorkspaceForPod']>
+    >;
   }> {
     const pod = podRepo.getOrThrow(podId);
+    const assertCurrent = captureValidationMutationGuard(podRepo, pod);
     if (!pod.worktreeCompromised) {
       throw new AutopodError(
         `Pod ${podId} worktree is not compromised — nothing to recover`,
@@ -84,12 +101,17 @@ export function createWorkspaceRecoveryCommands(captured: WorkspaceRecoveryComma
     if (pod.executionTarget === 'sandbox') {
       if (pod.containerId) {
         const cm = containerManagerFactory.get('sandbox');
-        if ((await cm.getStatus(pod.containerId)) === 'stopped') {
-          await cm.start(pod.containerId);
+        const status = await cm.getStatus(pod.containerId);
+        assertCurrent();
+        if (status === 'stopped') {
+          await cm.start(pod.containerId, { assertCurrent });
+          assertCurrent();
           emitActivityStatus(podId, 'Resumed retained sandbox for checkpoint recovery.');
         }
       }
+      assertCurrent();
       const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
+      assertCurrent();
       const recovered =
         checkpoint.lineageVerified && checkpoint.promoted && checkpoint.materialized;
       if (!recovered) {
@@ -120,6 +142,7 @@ export function createWorkspaceRecoveryCommands(captured: WorkspaceRecoveryComma
         cm,
         pod.id,
       );
+      assertCurrent();
       if (recovered) {
         try {
           const profileForRecovery = executionForPod(pod);
@@ -130,6 +153,7 @@ export function createWorkspaceRecoveryCommands(captured: WorkspaceRecoveryComma
             pod.model,
             { maxDeletions: 100 },
           );
+          assertCurrent();
           podRepo.update(podId, { worktreeCompromised: false });
           emitActivityStatus(podId, 'Worktree recovered from container and committed successfully');
           return { recovered: true, message: 'Worktree recovered and committed' };
@@ -153,9 +177,11 @@ export function createWorkspaceRecoveryCommands(captured: WorkspaceRecoveryComma
     // are stale on disk. `restoreFromHead` is gated on recoverable tracked-file
     // damage so it can fix stale index/deletion/corruption states without
     // sweeping unrelated untracked work.
+    assertCurrent();
     const restored = await worktreeManager.restoreFromHead(pod.worktreePath, {
       allowTrackedModifications: true,
     });
+    assertCurrent();
     if (!restored.restored) {
       return {
         recovered: false,

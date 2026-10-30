@@ -1,3 +1,10 @@
+export type {
+  ValidationRecoveryBudgetReceipt,
+  ValidationExecutionBinding,
+  ValidationSettlementReceipt,
+  ValidationExecutionRecoveryState,
+  ValidationExecutionRecoveryRequest,
+} from './types/validation-execution-recovery.js';
 // Types
 export type { ExternalDeliveryReceipt } from './types/external-delivery.js';
 export type {
@@ -272,8 +279,11 @@ export type {
 export type {
   ValidationInfrastructureFailure,
   ValidationResult,
+  SetupResult,
   SmokeResult,
   BuildResult,
+  FactCheckResult,
+  FactValidationResult,
   LintResult,
   SastResult,
   HealthResult,
@@ -289,6 +299,7 @@ export type {
   ReviewFailureKind,
   ReviewBatchResult,
   ReviewProgressSnapshot,
+  ReviewProgressAxis,
   ReviewAdjudication,
   ReviewFindingLedgerEntry,
   ReviewRepairDelta,

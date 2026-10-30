@@ -1476,8 +1476,8 @@ function withReviewerExecEnv(
     stop(containerId) {
       return containerManager.stop(containerId);
     },
-    start(containerId) {
-      return containerManager.start(containerId);
+    start(containerId, options) {
+      return containerManager.start(containerId, options);
     },
     writeFile(containerId, path, content) {
       return containerManager.writeFile(containerId, path, content);

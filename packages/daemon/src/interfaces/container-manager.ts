@@ -89,6 +89,8 @@ export interface FileWriteOptions {
 }
 
 export interface ExecOptions {
+  /** Captured authority, rechecked immediately before each backend dispatch/start. */
+  assertCurrent?: () => void;
   cwd?: string;
   timeout?: number;
   /** Run the command as this user inside the container (e.g. 'root'). */
@@ -118,6 +120,8 @@ export interface StreamingExecResult {
 }
 
 export interface TerminalSessionOptions {
+  /** Captured task/resource authority; rechecked before wake and shell dispatch. */
+  assertCurrent?: () => void;
   /** Initial terminal width in columns. */
   cols: number;
   /** Initial terminal height in rows. */
@@ -152,6 +156,8 @@ export interface ContainerExecutionMetadata {
 }
 
 export interface ContainerManager {
+  /** Credential-free exact provider namespace; required for durable sandbox recovery. */
+  readonly executionResourceScope?: string;
   /** Available only when an exec can be recorded before start and inspected after daemon restart. */
   readonly supportsExecRecovery?: boolean;
   /** Exact backend/engine/region/group/resource namespace, never an owner label. */

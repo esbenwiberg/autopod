@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { AutopodError } from '@autopod/shared';
+import { captureValidationMutationGuard } from './validation-recovery-policy.js';
 import type { WorkspaceBranchSyncCaptured } from './workspace-contracts.js';
 const execFileAsync = promisify(execFile);
 export function createWorkspaceBranchSync(captured: WorkspaceBranchSyncCaptured) {
@@ -18,6 +19,13 @@ export function createWorkspaceBranchSync(captured: WorkspaceBranchSyncCaptured)
     podId: string,
   ): Promise<{ committed: boolean; pushed: boolean; error?: string }> {
     const pod = podRepo.getOrThrow(podId);
+    const assertCurrent = captureValidationMutationGuard(podRepo, pod);
+    const owned = async <T>(work: () => Promise<T>): Promise<T> => {
+      assertCurrent();
+      const value = await work();
+      assertCurrent();
+      return value;
+    };
 
     if (pod.options.agentMode !== 'interactive') {
       throw new AutopodError(
@@ -41,13 +49,18 @@ export function createWorkspaceBranchSync(captured: WorkspaceBranchSyncCaptured)
       );
     }
 
+    const worktreePath = pod.worktreePath;
+    const containerId = pod.containerId;
+
     // Pull container changes back to the host worktree so any uncommitted
     // briefs the user just wrote land on disk. Mirrors the first step of
     // completeSession but stops short of pushing + cleaning up.
-    if (pod.containerId) {
+    if (containerId) {
       try {
         const cm = containerManagerFactory.get(pod.executionTarget);
-        await syncWorkspaceBack(pod.containerId, pod.worktreePath, cm, podId, pod.executionTarget);
+        await owned(async () =>
+          syncWorkspaceBack(containerId, worktreePath, cm, podId, pod.executionTarget),
+        );
       } catch (err) {
         logger.warn({ err, podId }, 'syncWorkspaceBranch: sync-back failed');
         return {
@@ -63,28 +76,30 @@ export function createWorkspaceBranchSync(captured: WorkspaceBranchSyncCaptured)
     // outside this operation; commitFiles commits only these explicit paths.
     const profile = executionForPod(pod);
     const headBefore = await worktreeManager
-      .getCommitLog(pod.worktreePath, pod.branch, 1)
+      .getCommitLog(worktreePath, pod.branch, 1)
       .catch(() => '');
     try {
       // List each handoff document that differs from HEAD or is untracked. Using
       // `git ls-files` with the `--others`/`--modified` flags catches both
       // existing-but-edited briefs and brand-new ones in one pass.
-      const { stdout: mdListed } = await execFileAsync(
-        'git',
-        [
-          'ls-files',
-          '-z',
-          '--modified',
-          '--others',
-          '--exclude-standard',
-          '--',
-          '*.md',
-          'contract.yaml',
-          'contract.yml',
-          '**/contract.yaml',
-          '**/contract.yml',
-        ],
-        { cwd: pod.worktreePath, maxBuffer: 10 * 1024 * 1024 },
+      const { stdout: mdListed } = await owned(async () =>
+        execFileAsync(
+          'git',
+          [
+            'ls-files',
+            '-z',
+            '--modified',
+            '--others',
+            '--exclude-standard',
+            '--',
+            '*.md',
+            'contract.yaml',
+            'contract.yml',
+            '**/contract.yaml',
+            '**/contract.yml',
+          ],
+          { cwd: worktreePath, maxBuffer: 10 * 1024 * 1024 },
+        ),
       );
       const mdPaths = [...new Set(mdListed.split('\0').filter((p) => p.length > 0))];
 
@@ -93,24 +108,30 @@ export function createWorkspaceBranchSync(captured: WorkspaceBranchSyncCaptured)
           { podId, branch: pod.branch },
           'syncWorkspaceBranch: no handoff document changes to commit',
         );
-        await worktreeManager.pushBranch(pod.worktreePath, pod.branch, {
-          pat: await resolveGitCredential(profile),
-        });
+        await owned(async () =>
+          worktreeManager.pushBranch(worktreePath, pod.branch, {
+            pat: await owned(async () => resolveGitCredential(profile)),
+          }),
+        );
         return { committed: false, pushed: true };
       }
 
-      await worktreeManager.commitFiles(
-        pod.worktreePath,
-        mdPaths,
-        'chore: sync workspace for series handoff',
+      await owned(async () =>
+        worktreeManager.commitFiles(
+          worktreePath,
+          mdPaths,
+          'chore: sync workspace for series handoff',
+        ),
       );
 
-      await worktreeManager.pushBranch(pod.worktreePath, pod.branch, {
-        pat: await resolveGitCredential(profile),
-      });
+      await owned(async () =>
+        worktreeManager.pushBranch(worktreePath, pod.branch, {
+          pat: await owned(async () => resolveGitCredential(profile)),
+        }),
+      );
 
       const headAfter = await worktreeManager
-        .getCommitLog(pod.worktreePath, pod.branch, 1)
+        .getCommitLog(worktreePath, pod.branch, 1)
         .catch(() => '');
       const committed = headBefore !== headAfter;
       logger.info(

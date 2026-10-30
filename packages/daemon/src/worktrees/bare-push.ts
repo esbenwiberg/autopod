@@ -70,15 +70,23 @@ export async function pushCommitsToBareViaStagingRef(
   runGit: RunGit,
   bareRepoPath: string,
   podId: string,
+  assertCurrent: () => void = () => {},
 ): Promise<PushResult> {
+  const owned = async <T>(operation: () => Promise<T>): Promise<T> => {
+    assertCurrent();
+    const value = await operation();
+    assertCurrent();
+    return value;
+  };
+  assertCurrent();
   const stagingRef = autopodStagingRef(podId);
   const cleanupStaging = async () => {
-    await execFileAsync('git', ['--git-dir', bareRepoPath, 'update-ref', '-d', stagingRef]).catch(
-      () => {},
-    );
+    await owned(() =>
+      execFileAsync('git', ['--git-dir', bareRepoPath, 'update-ref', '-d', stagingRef]),
+    ).catch(() => {});
   };
 
-  const branchResolve = await runGit(['rev-parse', '--abbrev-ref', 'HEAD']);
+  const branchResolve = await owned(() => runGit(['rev-parse', '--abbrev-ref', 'HEAD']));
   if (branchResolve.exitCode !== 0 || !branchResolve.stdout.trim()) {
     return {
       pushed: false,
@@ -95,13 +103,15 @@ export async function pushCommitsToBareViaStagingRef(
 
   let expectedOld = EMPTY_OID;
   try {
-    const { stdout } = await execFileAsync('git', [
-      '--git-dir',
-      bareRepoPath,
-      'rev-parse',
-      '--verify',
-      `refs/heads/${branch}`,
-    ]);
+    const { stdout } = await owned(() =>
+      execFileAsync('git', [
+        '--git-dir',
+        bareRepoPath,
+        'rev-parse',
+        '--verify',
+        `refs/heads/${branch}`,
+      ]),
+    );
     expectedOld = stdout.trim();
   } catch {
     // Branch doesn't exist on the bare yet — first push creates it.
@@ -111,21 +121,23 @@ export async function pushCommitsToBareViaStagingRef(
   // push starts clean and we don't carry forward an aborted earlier attempt.
   await cleanupStaging();
 
-  const push = await runGit(['push', bareRepoPath, `HEAD:${stagingRef}`]);
+  const push = await owned(() => runGit(['push', bareRepoPath, `HEAD:${stagingRef}`]));
   if (push.exitCode !== 0) {
     return { pushed: false, reason: `push: ${push.stderr.trim() || 'non-zero exit'}` };
   }
 
   if (expectedOld !== EMPTY_OID) {
     try {
-      await execFileAsync('git', [
-        '--git-dir',
-        bareRepoPath,
-        'merge-base',
-        '--is-ancestor',
-        expectedOld,
-        stagingRef,
-      ]);
+      await owned(() =>
+        execFileAsync('git', [
+          '--git-dir',
+          bareRepoPath,
+          'merge-base',
+          '--is-ancestor',
+          expectedOld,
+          stagingRef,
+        ]),
+      );
     } catch {
       await cleanupStaging();
       return {
@@ -136,14 +148,16 @@ export async function pushCommitsToBareViaStagingRef(
   }
 
   try {
-    await execFileAsync('git', [
-      '--git-dir',
-      bareRepoPath,
-      'update-ref',
-      `refs/heads/${branch}`,
-      stagingRef,
-      expectedOld,
-    ]);
+    await owned(() =>
+      execFileAsync('git', [
+        '--git-dir',
+        bareRepoPath,
+        'update-ref',
+        `refs/heads/${branch}`,
+        stagingRef,
+        expectedOld,
+      ]),
+    );
   } catch (err) {
     await cleanupStaging();
     return { pushed: false, reason: `update-ref: ${(err as Error).message}` };

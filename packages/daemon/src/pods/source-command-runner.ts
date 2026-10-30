@@ -92,6 +92,7 @@ export async function runSourceCommand(options: {
     handle = await cm.execStreaming(options.containerId, options.command, {
       cwd: '/workspace',
       timeout,
+      assertCurrent: check,
       onProcessCreated(identity) {
         journal.admit(adoptionId, step, identity, check);
         markAdmitted();

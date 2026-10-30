@@ -32,8 +32,9 @@ describe('workspace recovery commands', () => {
     expect(f.cm.execInContainer).toHaveBeenCalledWith(
       'container-123',
       ['sh', '-c', expect.stringContaining('pid_file=/run/autopod/agent.pid')],
-      { timeout: 5000 },
+      { timeout: 5000, assertCurrent: expect.any(Function) },
     );
+    vi.mocked(f.cm.execInContainer).mock.calls[0]?.[2]?.assertCurrent?.();
     await f.recovery().suspendSandboxForRecovery('prepare');
     expect(f.cm.stop).toHaveBeenCalledWith('container-123');
   });

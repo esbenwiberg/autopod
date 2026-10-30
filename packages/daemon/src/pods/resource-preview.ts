@@ -8,15 +8,17 @@ import {
   parsePreviewPort,
 } from './resource-policy.js';
 import { type SandboxPreviewProxy, startSandboxPreviewProxy } from './sandbox-preview-proxy.js';
+import { captureValidationMutationGuard } from './validation-recovery-policy.js';
 
 export function createResourcePreview(captured: ResourcePreviewCaptured) {
   const { containerManagerFactory, logger, podRepo } = captured;
   const sandboxPreviewProxies = new Map<
     string,
-    { containerId: string; proxy: SandboxPreviewProxy }
+    { containerId: string; proxy: SandboxPreviewProxy; assertCurrent: () => unknown }
   >();
   const nativePreviewPorts = new Map<string, { containerId: string; port: number; url: string }>();
   async function tryNativeSandboxPreview(pod: Pod, containerId: string): Promise<string | null> {
+    const assertCurrent = captureValidationMutationGuard(podRepo, pod);
     const emails = nativePreviewEmails();
     if (emails.length === 0) return null;
     const cm = containerManagerFactory.get('sandbox');
@@ -28,6 +30,7 @@ export function createResourcePreview(captured: ResourcePreviewCaptured) {
 
     try {
       const exposed = await cm.exposePort(containerId, CONTAINER_APP_PORT, { entraEmails: emails });
+      assertCurrent();
       if (!exposed.url) {
         logger.warn(
           { podId: pod.id },
@@ -51,6 +54,7 @@ export function createResourcePreview(captured: ResourcePreviewCaptured) {
   }
 
   async function ensureSandboxPreviewProxy(pod: Pod): Promise<string> {
+    const assertCurrent = captureValidationMutationGuard(podRepo, pod);
     if (pod.executionTarget !== 'sandbox') {
       if (!pod.previewUrl) {
         throw new AutopodError(`Pod ${pod.id} has no preview URL`, 'INVALID_STATE', 409);
@@ -69,6 +73,7 @@ export function createResourcePreview(captured: ResourcePreviewCaptured) {
     // Prefer the platform's native public port when configured; fall back to the
     // daemon-side exec proxy otherwise (or on failure).
     const nativeUrl = await tryNativeSandboxPreview(pod, pod.containerId);
+    assertCurrent();
     if (nativeUrl) {
       // A native URL supersedes any previously-started exec proxy for this pod.
       if (sandboxPreviewProxies.has(pod.id)) await stopSandboxPreviewProxy(pod.id);
@@ -87,7 +92,15 @@ export function createResourcePreview(captured: ResourcePreviewCaptured) {
     }
 
     const existing = sandboxPreviewProxies.get(pod.id);
-    if (existing?.containerId === pod.containerId) return existing.proxy.url;
+    if (existing?.containerId === pod.containerId) {
+      try {
+        existing.assertCurrent();
+        return existing.proxy.url;
+      } catch {
+        // The new snapshot was checked above. Retire a proxy whose captured
+        // status/configuration/generation is stale; never reuse its old guard.
+      }
+    }
     if (existing) await stopSandboxPreviewProxy(pod.id);
 
     const hostPort = parsePreviewPort(previewUrl);
@@ -95,7 +108,9 @@ export function createResourcePreview(captured: ResourcePreviewCaptured) {
       throw new AutopodError(`Pod ${pod.id} has invalid preview URL`, 'INVALID_STATE', 409);
     }
 
+    assertCurrent();
     const proxy = await startSandboxPreviewProxy({
+      assertCurrent,
       podId: pod.id,
       containerId: pod.containerId,
       hostPort,
@@ -103,11 +118,20 @@ export function createResourcePreview(captured: ResourcePreviewCaptured) {
       containerManager: containerManagerFactory.get('sandbox'),
       logger,
     });
-    sandboxPreviewProxies.set(pod.id, { containerId: pod.containerId, proxy });
-    if (proxy.url !== previewUrl) {
-      podRepo.update(pod.id, { previewUrl: proxy.url });
+    try {
+      assertCurrent();
+      sandboxPreviewProxies.set(pod.id, { containerId: pod.containerId, proxy, assertCurrent });
+      if (proxy.url !== previewUrl) {
+        podRepo.update(pod.id, { previewUrl: proxy.url });
+      }
+      return proxy.url;
+    } catch (error) {
+      // Construction has already opened a listener. A stale owner must not leak
+      // it, or delete a replacement installed by a different invocation.
+      if (sandboxPreviewProxies.get(pod.id)?.proxy === proxy) sandboxPreviewProxies.delete(pod.id);
+      await proxy.close();
+      throw error;
     }
-    return proxy.url;
   }
 
   async function stopSandboxPreviewProxy(podId: string): Promise<void> {

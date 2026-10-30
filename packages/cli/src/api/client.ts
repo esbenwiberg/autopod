@@ -469,6 +469,25 @@ export class AutopodClient {
     return this.request('POST', `/pods/${id}/termination-reconciliations`, { runId, reason });
   }
 
+  async getValidationExecutionRecovery(
+    id: string,
+  ): Promise<import('@autopod/shared').ValidationExecutionRecoveryState> {
+    return this.request('GET', `/pods/${id}/validation-execution-recovery`);
+  }
+  async reconcileValidationExecution(
+    id: string,
+    input: import('@autopod/shared').ValidationExecutionRecoveryRequest,
+  ): Promise<import('@autopod/shared').ValidationExecutionRecoveryState> {
+    return this.request('POST', `/pods/${id}/validation-execution-recovery`, input);
+  }
+  async authorizeValidationRecoveryBudget(
+    id: string,
+    input: import('@autopod/shared').ValidationExecutionRecoveryRequest & {
+      testTimeoutSeconds: number;
+    },
+  ): Promise<unknown> {
+    return this.request('POST', `/pods/${id}/validation-recovery-budget`, input);
+  }
   async resumePod(id: string): Promise<{ ok: boolean; action: string }> {
     return this.request('POST', `/pods/${id}/resume`);
   }

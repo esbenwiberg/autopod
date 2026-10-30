@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { AuthModule } from '../../interfaces/index.js';
 import type { ContainerManagerFactory, PodManager } from '../../pods/pod-manager.js';
+import { captureValidationOwnership } from '../../pods/validation-ownership.js';
 import { extractWebSocketBearerToken } from '../websocket-auth.js';
 
 type TerminalStream = NodeJS.ReadWriteStream & { destroy?: () => void };
@@ -68,9 +69,20 @@ export function terminalRoutes(
         return;
       }
 
+      const ownership = captureValidationOwnership(pod, {
+        statuses: [pod.status],
+        readCurrent: () => podManager.getSession(podId),
+        isCurrentInvocation: () => true,
+        hasPendingDecision: () => false,
+      });
       const sourceHeld = () => {
         try {
-          return Boolean(podManager.getSourceAdoptions?.(podId).length);
+          ownership.assertCurrent();
+          const validation = podManager.getValidationExecutionRecovery?.(podId);
+          return (
+            Boolean(podManager.getSourceAdoptions?.(podId).length) ||
+            Boolean(validation?.required && !validation.settled)
+          );
         } catch {
           return true;
         }
@@ -138,7 +150,13 @@ export function terminalRoutes(
           return;
         }
         try {
-          const session = await cm.attachTerminal(containerId, { cols, rows });
+          const session = await cm.attachTerminal(containerId, {
+            cols,
+            rows,
+            assertCurrent: () => {
+              if (sourceHeld()) throw new Error('Source custody held');
+            },
+          });
           closeBackend = () => session.close();
           if (cleanedUp || sourceHeld()) {
             if (sourceHeld()) socket.close(4009, 'Source custody held');

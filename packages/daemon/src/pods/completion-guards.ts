@@ -9,6 +9,7 @@ export function createCompletionGuards(captured: CompletionGuardsCaptured) {
     podRepo.sourceAdoptions?.assertAvailable(podId);
     podRepo.deletionOwnership?.assertTaskAvailable(podId);
     assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
+    podRepo.validationExecutions?.assertTaskSettled(podId);
   }
 
   function assertGuidanceCollected(podId: string): void {

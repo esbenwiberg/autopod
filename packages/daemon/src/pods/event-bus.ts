@@ -6,6 +6,7 @@ import type { EventRepository } from './event-repository.js';
 export type EventSubscriber = (event: SystemEvent) => void;
 
 export interface EventBus {
+  emitAfterCommit(event: SystemEvent, afterCommit: (effect: () => void) => void): number;
   emit(event: SystemEvent): number; // returns event id
   subscribe(subscriber: EventSubscriber): () => void; // returns unsubscribe fn
   subscribeToSession(podId: string, subscriber: EventSubscriber): () => void;
@@ -30,44 +31,50 @@ export function createEventBus(
     return null;
   }
 
-  return {
-    emit(event: SystemEvent): number {
-      // Persist first (raw event — audit trail gets the unmodified version)
-      const id = eventRepo.insert(event);
+  function broadcast(event: SystemEvent, id: number): void {
+    // Sanitize event payload before broadcasting to subscribers
+    // This prevents PII/injection content from leaking via WebSocket broadcasts
+    const sanitizedEvent = options?.contentProcessing
+      ? (processContentDeep(event, options.contentProcessing).result as SystemEvent)
+      : event;
 
-      // Sanitize event payload before broadcasting to subscribers
-      // This prevents PII/injection content from leaking via WebSocket broadcasts
-      const sanitizedEvent = options?.contentProcessing
-        ? (processContentDeep(event, options.contentProcessing).result as SystemEvent)
-        : event;
+    // Tag with persisted event ID so WebSocket clients can track for replay
+    (sanitizedEvent as SystemEvent & { _eventId?: number })._eventId = id;
 
-      // Tag with persisted event ID so WebSocket clients can track for replay
-      (sanitizedEvent as SystemEvent & { _eventId?: number })._eventId = id;
-
-      // Broadcast to global subscribers
-      for (const sub of globalSubscribers) {
-        try {
-          sub(sanitizedEvent);
-        } catch (err) {
-          logger.error({ err }, 'Event subscriber error');
-        }
+    // Broadcast to global subscribers
+    for (const sub of globalSubscribers) {
+      try {
+        sub(sanitizedEvent);
+      } catch (err) {
+        logger.error({ err }, 'Event subscriber error');
       }
+    }
 
-      // Broadcast to pod-scoped subscribers
-      const podId = getSessionId(event);
-      if (podId) {
-        const subs = sessionSubscribers.get(podId);
-        if (subs) {
-          for (const sub of subs) {
-            try {
-              sub(sanitizedEvent);
-            } catch (err) {
-              logger.error({ err }, 'Pod subscriber error');
-            }
+    // Broadcast to pod-scoped subscribers
+    const podId = getSessionId(event);
+    if (podId) {
+      const subs = sessionSubscribers.get(podId);
+      if (subs) {
+        for (const sub of subs) {
+          try {
+            sub(sanitizedEvent);
+          } catch (err) {
+            logger.error({ err }, 'Pod subscriber error');
           }
         }
       }
+    }
+  }
 
+  return {
+    emit(event: SystemEvent): number {
+      const id = eventRepo.insert(event);
+      broadcast(event, id);
+      return id;
+    },
+    emitAfterCommit(event, afterCommit): number {
+      const id = eventRepo.insert(event);
+      afterCommit(() => broadcast(event, id));
       return id;
     },
 

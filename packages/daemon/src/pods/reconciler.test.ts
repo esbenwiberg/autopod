@@ -279,7 +279,13 @@ describe('reconcileSandboxSessions', () => {
 
     await reconcileSandboxSessions({ ...deps, logger });
 
-    expect(deps.sandboxContainerManager.start).toHaveBeenCalledWith('sandbox-1');
+    expect(deps.sandboxContainerManager.start).toHaveBeenCalledWith('sandbox-1', {
+      assertCurrent: expect.any(Function),
+    });
+    const options = vi.mocked(deps.sandboxContainerManager.start).mock.calls[0]?.[1];
+    expect(options?.assertCurrent).toBeTypeOf('function');
+    // Reconciliation parks the task after start, invalidating its captured status.
+    expect(() => options?.assertCurrent?.()).toThrow();
     expect(deps.quiesceSandboxAgent).toHaveBeenCalledWith('pod-1');
     expect(deps.preserveWorkspace).toHaveBeenCalledWith('pod-1');
     expect(deps.suspendSandbox).toHaveBeenCalledWith('pod-1');

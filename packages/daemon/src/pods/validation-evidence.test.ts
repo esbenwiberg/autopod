@@ -163,6 +163,32 @@ function fixture(target: Pod['executionTarget'] = 'local') {
 }
 
 describe('createValidationEvidence', () => {
+  it.each([
+    'EXEC_EXIT_UNVERIFIED',
+    'AZURE_SANDBOX_EXEC_INVALID_RESPONSE',
+    'VALIDATION_ENGINE_TERMINATION_UNVERIFIED',
+  ])('retains physical reports without checkpoint execution after %s', async (code) => {
+    const f = fixture('sandbox');
+    f.write('report.txt', 'original partial failed output');
+    f.result.overall = 'fail';
+    f.result.infrastructureFailure = {
+      phase: 'test',
+      code,
+      message: 'Termination unknown',
+      retryable: false,
+    };
+    vi.mocked(f.deps.checkpointSandboxWorkspaceForPod).mockImplementation(async () => {
+      f.write('report.txt', 'changed by new checkpoint commands');
+      throw new Error('Checkpoint ran beside an unknown execution');
+    });
+    expect(await f.run()).toBe(false);
+    expect(f.deps.checkpointSandboxWorkspaceForPod).not.toHaveBeenCalled();
+    expect(f.deps.syncWorkspaceBack).not.toHaveBeenCalled();
+    expect(f.deps.containerManagerFactory.get).not.toHaveBeenCalled();
+    expect(fs.readFileSync(path.join(f.worktree, 'report.txt'), 'utf8')).toBe(
+      'original partial failed output',
+    );
+  });
   it('constructs without I/O and keeps separate pod and activity identifiers', async () => {
     const f = fixture();
     f.result.smoke.pages = [page('page.png')];

@@ -64,6 +64,7 @@ export class SandboxTerminalReaper {
     const status = pod.status;
     if (this.deps.podRepo.taskExecutions?.hasActiveRun(pod.id)) return;
     try {
+      this.deps.podRepo.validationExecutions?.assertTaskSettled(pod.id);
       assertValidationExecutionSettled(pod);
     } catch (err) {
       this.deps.logger.warn(

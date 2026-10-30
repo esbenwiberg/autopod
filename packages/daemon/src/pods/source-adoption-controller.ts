@@ -15,7 +15,7 @@ import {
 } from './source-adoption-repository.js';
 import type { SourceAdoptionState } from './source-adoption-types.js';
 import { createSourceContainerAdoption } from './source-container-adoption.js';
-import { assertValidationExecutionSettled } from './validation-recovery-policy.js';
+import { assertValidationMutationSettled } from './validation-recovery-policy.js';
 import { getPodValidationSkipPhases, getPodValidationSuite } from './validation-workflow-policy.js';
 
 export type { SourceAdoptionRequest } from './source-adoption-types.js';
@@ -69,7 +69,7 @@ export function createSourceAdoptionController(deps: SourceAdoptionControllerDep
     podRepo.deletionOwnership?.assertTaskAvailable(pod.id);
     if (!podRepo.taskExecutions) sourceAdoptionError('Original execution ownership unavailable');
     podRepo.taskExecutions.assertCanDelete(pod.id); // Any unsettled original task run, not just known failures.
-    assertValidationExecutionSettled(pod);
+    assertValidationMutationSettled(podRepo, pod.id);
     for (const peer of repository().taskPodIds(pod.id)) deps.assertIdle(peer);
     deps.assertGuidanceCollected(pod.id);
     repository().assertControlPlaneSettled(pod.id);
@@ -90,6 +90,7 @@ export function createSourceAdoptionController(deps: SourceAdoptionControllerDep
     const current = () => {
       const live = repo.get(row.id);
       const pod = podRepo.getOrThrow(row.podId);
+      assertValidationMutationSettled(podRepo, pod.id);
       if (
         !live ||
         live.error ||

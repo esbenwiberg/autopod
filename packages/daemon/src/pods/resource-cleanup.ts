@@ -4,6 +4,7 @@ import type {
   ResourceCleanupLiveDependencies,
 } from './resource-contracts.js';
 import { CONTAINER_CLEANUP_TIMEOUT_MS } from './resource-policy.js';
+import { assertValidationMutationSettled } from './validation-recovery-policy.js';
 
 export function createResourceCleanup(
   deps: ResourceCleanupLiveDependencies,
@@ -25,8 +26,17 @@ export function createResourceCleanup(
     mode: 'kill' | 'stop' = 'kill',
     assertReleaseAllowed?: () => void,
   ): Promise<void> {
-    assertReleaseAllowed?.();
     const targetContainerId = pod.containerId;
+    // Resource custody survives a missing or different mutable pod identity.
+    // Reject retained resources before resolving that identity, then independently
+    // require task settlement before any destructive or source-related effect.
+    if (targetContainerId) {
+      podRepo.sourceAdoptions?.assertReleasable(targetContainerId);
+      podRepo.sandboxWakeups?.assertReleasable(targetContainerId);
+      if (mode === 'kill') podRepo.externalDeliveries?.assertReleasable(targetContainerId);
+    }
+    assertValidationMutationSettled(podRepo, pod.id);
+    assertReleaseAllowed?.();
     if (!targetContainerId) {
       if (
         mode === 'kill' &&
@@ -44,6 +54,7 @@ export function createResourceCleanup(
     );
     const ownsSharedResources = ownsLifecycle(pod.id, pod.lifecycleGeneration, targetContainerId);
     if (ownsSharedResources) await stopSandboxPreviewProxy(pod.id);
+    assertValidationMutationSettled(podRepo, pod.id);
     assertReleaseAllowed?.();
     if (ownsSharedResources && mode === 'kill' && deps.beforeContainerCleanup) {
       let extractionTimer: ReturnType<typeof setTimeout> | undefined;
@@ -67,10 +78,12 @@ export function createResourceCleanup(
         }),
       ]);
     }
+    assertValidationMutationSettled(podRepo, pod.id);
     assertReleaseAllowed?.();
     // Stop denial receiver before killing/stopping the container so the
     // long-running socat exec gets a clean shutdown signal.
     if (ownsSharedResources) await stopHaproxyDenyReceiver(pod.id);
+    assertValidationMutationSettled(podRepo, pod.id);
     assertReleaseAllowed?.();
     const cm = containerManagerFactory.get(pod.executionTarget);
     if (mode === 'kill') podRepo.externalDeliveries?.assertReleasable(targetContainerId);
@@ -98,6 +111,7 @@ export function createResourceCleanup(
         }, CONTAINER_CLEANUP_TIMEOUT_MS);
       }),
     ]);
+    assertValidationMutationSettled(podRepo, pod.id);
     assertReleaseAllowed?.();
     if (mode === 'kill' && deleted && pod.executionTarget === 'sandbox') {
       const current = podRepo.getOrThrow(pod.id);

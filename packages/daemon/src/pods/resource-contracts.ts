@@ -99,6 +99,7 @@ export interface ResourceCleanupCaptured {
 }
 
 export interface ResourcePreviewTimersCaptured {
+  podRepo: PodRepository;
   stopSandboxPreviewProxy: (podId: string) => Promise<void>;
   containerManagerFactory: { get(target: ExecutionTarget): ContainerManager };
   logger: Logger;

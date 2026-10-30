@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockContainerManager } from '../test-utils/mock-helpers.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
-import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
+import { readArtifactSnapshotFile, verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
 
 let root: string;
 beforeEach(async () => {
@@ -33,6 +33,16 @@ async function collect() {
 }
 
 describe('artifact snapshot integrity receipts', () => {
+  it('returns only bytes captured in the verified inventory, never link targets', async () => {
+    const snapshot = await collect();
+    expect((await readArtifactSnapshotFile(snapshot, root, 3, 0, 'report.md')).toString()).toBe(
+      'saved report',
+    );
+    for (const requested of ['reference', '../report.md', '/etc/passwd', 'missing'])
+      await expect(readArtifactSnapshotFile(snapshot, root, 3, 0, requested)).rejects.toThrow();
+    await writeFile(path.join(snapshot, 'report.md'), 'changed');
+    await expect(readArtifactSnapshotFile(snapshot, root, 3, 0, 'report.md')).rejects.toThrow();
+  });
   it.each(['bytes', 'path', 'mode', 'link', 'missing-file', 'added-file'] as const)(
     'rejects changed %s after publication',
     async (change) => {

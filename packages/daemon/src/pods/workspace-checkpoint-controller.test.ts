@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkspaceCheckpointResult } from '../worktrees/sandbox-workspace-checkpoint.js';
 import {
@@ -35,6 +38,7 @@ function harness() {
     success(sequence),
   );
   const controller = new WorkspaceCheckpointController({
+    captureAuthority: () => () => {},
     observe,
     checkpoint,
     records: {
@@ -63,6 +67,93 @@ function harness() {
 }
 
 describe('WorkspaceCheckpointController interval and durability lease', () => {
+  it('refuses delayed queued checkpoint after custody changes and preserves original source/reports', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'queued-checkpoint-custody-'));
+    const source = path.join(root, 'source.txt');
+    const report = path.join(root, 'report.txt');
+    await writeFile(source, 'original source');
+    await writeFile(report, 'original partial report');
+    let release = () => {};
+    let started = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let held = false;
+    const checkpoint = vi.fn(async (id: string, _reason: string, sequence: number) => {
+      if (id === 'other') {
+        started();
+        await gate;
+      } else {
+        await writeFile(source, 'unsafe host promotion');
+        await writeFile(report, 'unsafe guest checkpoint');
+      }
+      return success(sequence);
+    });
+    const controller = new WorkspaceCheckpointController({
+      captureAuthority: (id: string) => () => {
+        if (id === 'original' && held) throw new Error('Original validation custody held');
+      },
+      observe: async () => fingerprint,
+      checkpoint,
+      maxConcurrent: 1,
+      records: {
+        save: async () => {},
+        latest: async () => null,
+        latestVerified: async () => null,
+        incomplete: async () => [],
+      },
+    });
+    try {
+      const first = controller.request('other', 'completion');
+      await entered;
+      const delayed = controller.poll('original');
+      void delayed.catch(() => {});
+      await new Promise((resolve) => setImmediate(resolve));
+      held = true;
+      release();
+      await first;
+      await expect(delayed).rejects.toThrow('Original validation custody held');
+      expect(checkpoint.mock.calls.filter(([id]) => id === 'original')).toHaveLength(0);
+      expect(await readFile(source, 'utf8')).toBe('original source');
+      expect(await readFile(report, 'utf8')).toBe('original partial report');
+    } finally {
+      release();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rechecks captured authority after retry backoff before another guest checkpoint', async () => {
+    let held = false;
+    const checkpoint = vi.fn(async (_id: string, _reason: string, sequence: number) => ({
+      ...success(sequence),
+      promoted: false,
+      materialized: false,
+      error: { phase: 'capture', code: 'FAILED', retryable: true, message: 'Retryable failure' },
+    }));
+    const controller = new WorkspaceCheckpointController({
+      captureAuthority: () => () => {
+        if (held) throw new Error('Validation custody changed during backoff');
+      },
+      observe: async () => fingerprint,
+      checkpoint,
+      sleep: async () => {
+        held = true;
+      },
+      records: {
+        save: async () => {},
+        latest: async () => null,
+        latestVerified: async () => null,
+        incomplete: async () => [],
+      },
+    });
+    await expect(controller.request('original', 'completion')).rejects.toThrow(
+      'Validation custody changed during backoff',
+    );
+    expect(checkpoint).toHaveBeenCalledTimes(1);
+  });
   it('interval checkpoints changed dirty work once per interval', async () => {
     const h = harness();
     await h.controller.poll('pod');
@@ -70,7 +161,12 @@ describe('WorkspaceCheckpointController interval and durability lease', () => {
     await h.controller.poll('pod');
     await h.controller.poll('pod');
     expect(h.checkpoint).toHaveBeenCalledTimes(1);
-    expect(h.checkpoint).toHaveBeenCalledWith('pod', 'interval', expect.any(Number));
+    expect(h.checkpoint).toHaveBeenCalledWith(
+      'pod',
+      'interval',
+      expect.any(Number),
+      expect.any(Function),
+    );
   });
 
   it('does not report degraded durability when the verified checkpoint matches the live tree', async () => {
@@ -139,6 +235,7 @@ describe('WorkspaceCheckpointController interval and durability lease', () => {
     let peak = 0;
     const records: CheckpointRecord[] = [];
     const controller = new WorkspaceCheckpointController({
+      captureAuthority: () => () => {},
       observe: async () => fingerprint,
       checkpoint: async (_pod, _reason, sequence) => {
         active++;
@@ -183,6 +280,7 @@ describe('WorkspaceCheckpointController checkpoint chaos matrix', () => {
       success(sequence),
     );
     const controller = new WorkspaceCheckpointController({
+      captureAuthority: () => () => {},
       observe: async () => fingerprint,
       checkpoint,
       records: {
@@ -198,7 +296,7 @@ describe('WorkspaceCheckpointController checkpoint chaos matrix', () => {
 
     await controller.request('pod', 'completion');
 
-    expect(checkpoint).toHaveBeenCalledWith('pod', 'completion', 49);
+    expect(checkpoint).toHaveBeenCalledWith('pod', 'completion', 49, expect.any(Function));
     expect(saved.map((record) => record.sequence)).toEqual([49]);
   });
 

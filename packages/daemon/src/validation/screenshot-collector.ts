@@ -11,7 +11,27 @@ export interface CollectedScreenshot {
   ref: ScreenshotRef;
 }
 
-export interface CollectScreenshotsOptions {
+interface ScreenshotCollectionGuards {
+  /** References present in the engine outcome must retain their identity and bytes. */
+  retainedScreenshots?: ReadonlySet<ScreenshotRef>;
+  assertCurrent?(): void;
+}
+
+function wouldOverwriteRetainedScreenshot(
+  options: ScreenshotCollectionGuards,
+  podId: string,
+  source: 'smoke' | 'fact',
+  filename: string,
+): boolean {
+  // Conservatively protect aliases on both case-sensitive and insensitive hosts.
+  // This is collision detection only; canonical reference names preserve case.
+  const target = path.join('screenshots', podId, source, filename).toLowerCase();
+  return [...(options.retainedScreenshots ?? [])].some(
+    (ref) => path.normalize(ref.relativePath).toLowerCase() === target,
+  );
+}
+
+export interface CollectScreenshotsOptions extends ScreenshotCollectionGuards {
   /**
    * Host-side Playwright writes screenshots outside the worktree. When set,
    * absolute screenshot paths under this directory are accepted.
@@ -96,8 +116,10 @@ export async function collectScreenshots(
   const collected: CollectedScreenshot[] = [];
 
   for (let idx = 0; idx < pageResults.length; idx++) {
+    options.assertCurrent?.();
     const page = pageResults[idx];
     if (!page?.screenshotPath) continue;
+    if (page.screenshot && options.retainedScreenshots?.has(page.screenshot)) continue;
 
     const hostPath = resolveSmokeScreenshotPath(worktreePath, page.screenshotPath, options);
     if (!hostPath) continue;
@@ -109,11 +131,15 @@ export async function collectScreenshots(
           : worktreePath;
       if (!allowedRoot) continue;
       const buffer = await readContainedFile(hostPath, allowedRoot);
+      options.assertCurrent?.();
       if (!buffer) continue;
       const filename = `${slugifyPagePath(page.path, idx)}.png`;
+      if (wouldOverwriteRetainedScreenshot(options, podId, 'smoke', filename)) continue;
       const ref = await store.write(podId, 'smoke', filename, buffer);
+      options.assertCurrent?.();
       collected.push({ pagePath: page.path, ref });
     } catch {
+      options.assertCurrent?.();
       // Screenshot file doesn't exist (validation may have failed before capture)
     }
   }
@@ -134,6 +160,7 @@ export async function collectFactScreenshots(
   factValidation: FactValidationResult | null | undefined,
   store: ScreenshotStore,
   podId: string,
+  options: ScreenshotCollectionGuards = {},
 ): Promise<CollectedFactScreenshot[]> {
   const collected: CollectedFactScreenshot[] = [];
   const facts = factValidation?.results ?? [];
@@ -141,8 +168,11 @@ export async function collectFactScreenshots(
   for (const fact of facts) {
     const attachments = fact.attachments ?? [];
     for (let idx = 0; idx < attachments.length; idx++) {
+      options.assertCurrent?.();
       const attachment = attachments[idx];
       if (!attachment || attachment.kind !== 'screenshot') continue;
+      if (attachment.screenshot && options.retainedScreenshots?.has(attachment.screenshot))
+        continue;
       if (path.isAbsolute(attachment.path)) continue;
       if (!attachment.path.toLowerCase().endsWith('.png')) continue;
 
@@ -154,15 +184,19 @@ export async function collectFactScreenshots(
 
       try {
         const buffer = await readContainedFile(hostPath, worktreePath);
+        options.assertCurrent?.();
         if (!buffer) continue;
         const basename = path.basename(attachment.path, path.extname(attachment.path));
         const safeFactId = fact.factId.replace(/[^A-Za-z0-9._-]/g, '_') || 'fact';
         const safeBase = basename.replace(/[^A-Za-z0-9._-]/g, '_') || 'screenshot';
         const filename = `${safeFactId}-${idx}-${safeBase}.png`;
+        if (wouldOverwriteRetainedScreenshot(options, podId, 'fact', filename)) continue;
         const ref = await store.write(podId, 'fact', filename, buffer);
+        options.assertCurrent?.();
         attachment.screenshot = ref;
         collected.push({ factId: fact.factId, attachmentPath: attachment.path, ref });
       } catch {
+        options.assertCurrent?.();
         // Screenshot file doesn't exist or could not be read; keep the textual attachment.
       }
     }

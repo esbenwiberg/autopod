@@ -79,6 +79,7 @@ import { SandboxTerminalReaper } from './pods/sandbox-terminal-reaper.js';
 import { ScreenshotRetention } from './pods/screenshot-retention.js';
 import { createScreenshotStore, resolveDataDir } from './pods/screenshot-store.js';
 import { createTokenTelemetryRepair } from './pods/token-telemetry-repair.js';
+import { captureValidationMutationGuard } from './pods/validation-recovery-policy.js';
 import { WorkspaceCheckpointController } from './pods/workspace-checkpoint-controller.js';
 import { createWorkspaceCheckpointRepository } from './pods/workspace-checkpoint-repository.js';
 import { PodsitterActionExecutor } from './podsitter/action-executor.js';
@@ -731,13 +732,20 @@ function prManagerFactory(
 const pendingRequestsByPod = new Map<string, PendingRequests>();
 let preCleanupMemoryExtraction: (podId: string) => Promise<void> = async () => {};
 const workspaceCheckpointController = new WorkspaceCheckpointController({
+  captureAuthority: (podId) => captureValidationMutationGuard(podRepo, podRepo.getOrThrow(podId)),
   records: createWorkspaceCheckpointRepository(db),
-  observe: async (podId) => {
+  observe: async (podId, assertCurrent) => {
+    assertCurrent();
     const pod = podRepo.getOrThrow(podId);
     if (!pod.containerId) throw new Error('sandbox workspace is unavailable');
-    return observeSandboxWorkspace(containerManagerFactory.get('sandbox'), pod.containerId);
+    return observeSandboxWorkspace(
+      containerManagerFactory.get('sandbox'),
+      pod.containerId,
+      assertCurrent,
+    );
   },
-  checkpoint: async (podId, _reason, sequence) => {
+  checkpoint: async (podId, _reason, sequence, assertCurrent) => {
+    assertCurrent();
     const pod = podRepo.getOrThrow(podId);
     if (!pod.containerId || !pod.worktreePath) throw new Error('sandbox workspace is unavailable');
     return checkpointSandboxWorkspace({
@@ -746,6 +754,7 @@ const workspaceCheckpointController = new WorkspaceCheckpointController({
       podId,
       worktreePath: pod.worktreePath,
       sequence,
+      assertCurrent,
     });
   },
   emit: (event) => logger.info({ checkpoint: event }, 'Sandbox workspace checkpoint'),

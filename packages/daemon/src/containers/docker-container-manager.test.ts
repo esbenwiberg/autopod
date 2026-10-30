@@ -1028,6 +1028,68 @@ describe('DockerContainerManager', () => {
   // ─── execInContainer() ──────────────────────────────────
 
   describe('execInContainer()', () => {
+    it.each(['execInContainer', 'execStreaming'] as const)(
+      'refuses %s start when authority is revoked during delayed exec creation',
+      async (method) => {
+        let release = () => {};
+        let current = true;
+        const mockExec = {
+          id: 'synthetic-exec',
+          start: vi.fn(),
+          inspect: vi.fn(),
+        };
+        container.exec.mockImplementationOnce(async () => {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return mockExec;
+        });
+        const assertCurrent = vi.fn(() => {
+          if (!current) throw new Error('Synthetic authority revoked');
+        });
+        const created = vi.fn();
+        const pending = manager[method]('synthetic-container', ['true'], {
+          assertCurrent,
+          onProcessCreated: created,
+        });
+        const rejected = expect(pending).rejects.toThrow('Synthetic authority revoked');
+        expect(container.exec).toHaveBeenCalledTimes(1);
+        expect(assertCurrent).toHaveBeenCalledTimes(1);
+        current = false;
+        release();
+        await rejected;
+        expect(assertCurrent).toHaveBeenCalledTimes(2);
+        expect(mockExec.start).not.toHaveBeenCalled();
+        expect(mockExec.inspect).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['execInContainer', 'execStreaming'] as const)(
+      'refuses stale %s authority before exec creation',
+      async (method) => {
+        await expect(
+          manager[method]('synthetic-container', ['true'], {
+            assertCurrent: () => {
+              throw new Error('Synthetic authority revoked');
+            },
+          }),
+        ).rejects.toThrow('Synthetic authority revoked');
+        expect(container.exec).not.toHaveBeenCalled();
+      },
+    );
+
+    it('retains normal buffered dispatch and observed exit with unchanged authority', async () => {
+      const { exec } = createMockExec(0);
+      container.exec.mockResolvedValueOnce(exec);
+      const assertCurrent = vi.fn();
+      await expect(
+        manager.execInContainer('synthetic-container', ['true'], { assertCurrent }),
+      ).resolves.toEqual({ stdout: '', stderr: '', exitCode: 0 });
+      expect(assertCurrent).toHaveBeenCalledTimes(2);
+      expect(exec.start).toHaveBeenCalledExactlyOnceWith({ hijack: true, stdin: false });
+      expect(exec.inspect).toHaveBeenCalledOnce();
+    });
+
     it('executes command and returns output', async () => {
       const muxStream = createMockMuxStream('hello world', '');
       const mockExec = {

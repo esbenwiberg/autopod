@@ -107,6 +107,7 @@ export interface AzureSandboxApiClientConfig {
   /** Required to submit resume: durable per-resource claims survive daemon replacement. */
   wakeupJournal?: SandboxWakeupJournal;
   assertReleaseAllowed?: (sandboxId: string) => void;
+  assertWakeAllowed?: (sandboxId: string) => void;
   /**
    * Retry/backoff for the Azure Sandboxes data-plane rate limiter (HTTP 429,
    * 600 req/min). The platform returns `retryAfterSeconds`; we honor it (clamped
@@ -213,6 +214,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private readonly resumeTimeoutMs: number;
   private readonly wakeupJournal?: SandboxWakeupJournal;
   private readonly assertReleaseAllowed?: (sandboxId: string) => void;
+  private readonly assertWakeAllowed?: (sandboxId: string) => void;
   private readonly retryMaxAttempts: number;
   private readonly retryMaxDelayMs: number;
   private readonly retryBaseDelayMs: number;
@@ -220,6 +222,14 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private groupReady: Promise<void> | null = null;
   /** Monotonic counter for unique per-exec streaming wrapper-script paths. */
   private execStreamSeq = 0;
+  get executionResourceScope(): string {
+    return JSON.stringify([
+      this.dataEndpoint,
+      this.config.subscriptionId.toLowerCase(),
+      this.config.resourceGroup.toLowerCase(),
+      this.config.sandboxGroup.toLowerCase(),
+    ]);
+  }
 
   constructor(config: AzureSandboxApiClientConfig, logger: Logger) {
     this.config = {
@@ -240,6 +250,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     this.resumeTimeoutMs = config.resumeTimeoutMs ?? 145_000;
     this.wakeupJournal = config.wakeupJournal;
     this.assertReleaseAllowed = config.assertReleaseAllowed;
+    this.assertWakeAllowed = config.assertWakeAllowed;
     this.retryMaxAttempts = config.retry?.maxAttempts ?? 6;
     this.retryMaxDelayMs = config.retry?.maxDelayMs ?? 30_000;
     this.retryBaseDelayMs = config.retry?.baseDelayMs ?? 1000;
@@ -457,7 +468,12 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       response = await this.requestData<ExecResponse>(
         'POST',
         `${this.sandboxPath(sandboxId)}/executeShellCommand`,
-        { json: body, timeoutMs: options?.timeoutMs, singleAttempt: options?.singleAttempt },
+        {
+          json: body,
+          timeoutMs: options?.timeoutMs,
+          singleAttempt: options?.singleAttempt,
+          beforeSend: options?.beforeSend,
+        },
       );
     } catch (err) {
       // A lost response cannot establish whether this command ran remotely.
@@ -529,7 +545,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     let scriptPath: string;
     if (identity) {
       const root = sandboxGoalRoot(identity);
-      const prepared = await this.exec(sandboxId, ['mkdir', '-m', '0700', root], { user: 'root' });
+      const prepared = await this.exec(sandboxId, ['mkdir', '-m', '0700', root], {
+        user: 'root',
+        beforeSend: options?.beforeSend,
+      });
       if (prepared.exitCode !== 0) throw new Error('Sandbox Goal supervisor preparation failed');
       scriptPath = `${root}/supervisor.py`;
       await this.writeFile(
@@ -538,8 +557,12 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         Buffer.from(
           sandboxGoalSupervisor(identity, command, options?.cwd, options?.env, options?.stdin),
         ),
+        { beforeSend: options?.beforeSend },
       );
-      const staged = await this.exec(sandboxId, ['chmod', '0700', scriptPath], { user: 'root' });
+      const staged = await this.exec(sandboxId, ['chmod', '0700', scriptPath], {
+        user: 'root',
+        beforeSend: options?.beforeSend,
+      });
       if (staged.exitCode !== 0) throw new Error('Sandbox Goal supervisor staging failed');
       // Persist before obtaining a socket or sending any remote start request.
       options?.onProcessCreated?.(identity);
@@ -547,6 +570,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       scriptPath = await this.stageExecutableWrapper(
         sandboxId,
         streamExecScript(command, options?.cwd),
+        options?.beforeSend,
       );
     }
     const pidPath = `${scriptPath}.pid`;
@@ -555,11 +579,14 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     const wsUrl = `${this.dataEndpoint.replace(/^https:/, 'wss:')}${this.sandboxPath(
       sandboxId,
     )}/exec/stream`;
+    options?.beforeSend?.();
     const socket = this.webSocketFactory(wsUrl, { Authorization: `Bearer ${token.token}` });
+    let startSent = false;
     let cancellation: Promise<void> | null = null;
     const cancelRemote = () => {
       cancellation ??= (async () => {
         try {
+          if (!startSent) throw new Error('Sandbox exec was not dispatched');
           if (identity) {
             const exitCode = await this.terminateRecordedExec(identity);
             exitReceived = true;
@@ -622,6 +649,15 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       : null;
 
     socket.onopen = () => {
+      if (closed) return;
+      try {
+        options?.beforeSend?.();
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error('Sandbox exec authority changed'));
+        socket.close();
+        return;
+      }
+      startSent = true;
       socket.send(
         JSON.stringify({
           type: 'start',
@@ -780,7 +816,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         });
         throw timeoutFailure;
       }
-      if (!identity || !failure || exitReceived) throw error;
+      if (!startSent || !identity || !failure || exitReceived) throw error;
       // Losing the RPC transport must stop this owned process. Only its private
       // supervisor receipt can turn transport uncertainty into an observed exit.
       const exitCode = await this.terminateRecordedExec(identity);
@@ -835,10 +871,22 @@ export class AzureSandboxApiClient implements SandboxApiClient {
    * `execStream` and `attachTerminal`, both of which need `command` to be a
    * single executable path.
    */
-  private async stageExecutableWrapper(sandboxId: string, scriptBody: string): Promise<string> {
+  private async stageExecutableWrapper(
+    sandboxId: string,
+    scriptBody: string,
+    assertCurrent?: () => void,
+  ): Promise<string> {
     const scriptPath = `/tmp/.autopod-execstream-${Date.now()}-${this.execStreamSeq++}.sh`;
-    await this.writeFile(sandboxId, scriptPath, Buffer.from(scriptBody, 'utf-8'));
-    const chmod = await this.exec(sandboxId, ['chmod', '0755', scriptPath], { user: 'root' });
+    assertCurrent?.();
+    await this.writeFile(sandboxId, scriptPath, Buffer.from(scriptBody, 'utf-8'), {
+      beforeSend: assertCurrent,
+    });
+    assertCurrent?.();
+    const chmod = await this.exec(sandboxId, ['chmod', '0755', scriptPath], {
+      user: 'root',
+      beforeSend: assertCurrent,
+    });
+    assertCurrent?.();
     if (chmod.exitCode !== 0) {
       throw new AutopodError(
         `Failed to stage sandbox exec-stream wrapper ${scriptPath}: chmod exited ${chmod.exitCode} ${chmod.stderr.trim()}`,
@@ -863,12 +911,14 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     const scriptPath = await this.stageExecutableWrapper(
       sandboxId,
       sandboxRuntimeUserScript(shellCommand),
+      options.assertCurrent,
     );
 
     const token = await this.getAzureToken(DATA_SCOPE, 'data access token', 'AZURE_AUTH');
     const wsUrl = `${this.dataEndpoint.replace(/^https:/, 'wss:')}${this.sandboxPath(
       sandboxId,
     )}/exec/stream`;
+    options.assertCurrent?.();
     const socket = this.webSocketFactory(wsUrl, { Authorization: `Bearer ${token.token}` });
 
     const dataListeners: ((chunk: Buffer) => void)[] = [];
@@ -887,6 +937,14 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     };
 
     socket.onopen = () => {
+      try {
+        options.assertCurrent?.();
+      } catch (error) {
+        closed = true;
+        socket.close();
+        emitError(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
       socket.send(
         JSON.stringify({
           type: 'start',
@@ -1137,6 +1195,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       }, timeoutMs);
     });
     const check = () => {
+      this.assertWakeAllowed?.(sandboxId);
       options.assertCurrent?.();
       // Synchronous SQLite/token work can delay timer delivery beyond the deadline.
       if (Date.now() >= expiresAt) {
@@ -2013,7 +2072,26 @@ export function processGroupProbeScript(): string {
   // A process can disappear after glob expansion/readability observation. Only
   // an absent proc directory settles that entry; unreadable existing entries
   // remain unknown. Unrelated process churn must not masquerade as owned work.
-  return 'group_alive() { for stat_file in /proc/[0-9]*/stat; do [ -r "$stat_file" ] || { [ -d "${stat_file%/stat}" ] && return 0; continue; }; stat=$(cat "$stat_file" 2>/dev/null) || { [ -d "${stat_file%/stat}" ] && return 0; continue; }; rest=${stat##*) }; set -- $rest; [ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0; done; return 1; }';
+  // Read proc records with shell builtins, not one fork/exec per PID per poll.
+  // Join all lines: Linux comm names can contain newlines. A truncated or
+  // unreadable existing record remains unknown, never proof of termination.
+  return [
+    'read_proc_stat() { stat=; while IFS= read -r stat_line; do stat="${stat}${stat:+ }${stat_line}"; done < "$1"; [ -n "$stat" ]; }',
+    'group_alive() { for stat_file in /proc/[0-9]*/stat; do',
+    '[ -r "$stat_file" ] || { [ -d "${stat_file%/stat}" ] && return 0; continue; }',
+    'read_proc_stat "$stat_file" 2>/dev/null || { [ -d "${stat_file%/stat}" ] && return 0; continue; }',
+    'case "$stat" in *") "*) ;; *) [ -d "${stat_file%/stat}" ] && return 0; continue;; esac',
+    'record_pid=${stat%% *}; proc_dir=${stat_file%/stat}',
+    'case "$record_pid" in *[!0-9]*|"") [ -d "$proc_dir" ] && return 0; continue;; esac',
+    '[ "$record_pid" = "${proc_dir##*/}" ] || { [ -d "$proc_dir" ] && return 0; continue; }',
+    'rest=${stat##*) }; set -- $rest',
+    '[ "$#" -ge 20 ] || { [ -d "$proc_dir" ] && return 0; continue; }',
+    'case "$1" in R|S|D|Z|T|t|X|x|K|W|P|I) ;; *) [ -d "$proc_dir" ] && return 0; continue;; esac',
+    'case "$3" in *[!0-9]*|"") [ -d "$proc_dir" ] && return 0; continue;; esac',
+    'case "${20}" in *[!0-9]*|"") [ -d "$proc_dir" ] && return 0; continue;; esac',
+    '[ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0',
+    'done; return 1; }',
+  ].join('\n');
 }
 
 export function terminatePidFileScript(pidPath: string): string {
@@ -2027,7 +2105,7 @@ export function terminatePidFileScript(pidPath: string): string {
     '[ -d /proc/1 ] || exit 1',
     processGroupProbeScript(),
     // A stale PID receipt must never signal an unrelated reused process group.
-    'stat=$(cat /proc/"$pid"/stat) || exit 1',
+    'read_proc_stat /proc/"$pid"/stat || exit 1',
     'rest=${stat##*) }; set -- $rest',
     '[ "$3" = "$pid" ] && [ "${20}" = "$start" ] || exit 1',
     'kill -TERM -"$pid" 2>/dev/null || true',

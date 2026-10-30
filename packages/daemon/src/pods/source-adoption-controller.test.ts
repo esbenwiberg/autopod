@@ -14,6 +14,70 @@ async function fixture(options: { ignoredCollision?: boolean } = {}) {
 }
 
 describe('durable source adoption coordinator (real Git/filesystem, mocked validator/data plane)', () => {
+  it.each(['missing', 'outcome'] as const)(
+    'refuses %s validation dispatch before source adoption or provider calls',
+    async (kind) => {
+      const s = await fixture();
+      const repo = s.f.podRepo;
+      repo.update(s.podId, { containerId: null });
+      repo.update(s.podId, {
+        executionTarget: 'sandbox',
+        containerId: '11111111-1111-4111-8111-111111111111',
+        lastValidationResult: null,
+      });
+      const retries = repo.taskRetries;
+      const executions = repo.validationExecutions;
+      if (!retries || !executions) throw new Error('Missing execution ledgers');
+      const pod = repo.getOrThrow(s.podId);
+      const admission = retries.admit(
+        s.podId,
+        pod.lifecycleGeneration,
+        {
+          source: 'a'.repeat(64),
+          contract: 'b'.repeat(64),
+          commands: 'c'.repeat(64),
+          environment: null,
+          implementation: null,
+        },
+        'd'.repeat(64),
+        [],
+      );
+      retries.start(admission.id);
+      const id = executions.dispatch(pod, admission.id, 1, 'test-scope');
+      if (!id) throw new Error('Missing dispatch');
+      if (kind === 'outcome')
+        executions.recordOutcome(
+          {
+            podId: s.podId,
+            executionDispatchId: id,
+            attempt: 1,
+            timestamp: '2026-10-29T00:00:00Z',
+            overall: 'fail',
+            duration: 1,
+            smoke: {
+              status: 'pass',
+              build: { status: 'pass', output: '', duration: 0 },
+              health: { status: 'skip', url: '', responseCode: null, duration: 0 },
+              pages: [],
+            },
+            taskReview: null,
+          },
+          id,
+        );
+      retries.finish(admission.id, 'nonretryable', 1);
+      const before = repo.getOrThrow(s.podId);
+      await expect(s.submit()).rejects.toMatchObject({ code: 'VALIDATION_EXECUTION_UNVERIFIED' });
+      expect(s.cm.getResourceKey).not.toHaveBeenCalled();
+      expect(s.cm.start).not.toHaveBeenCalled();
+      expect(s.cm.execStreaming).not.toHaveBeenCalled();
+      expect(repo.getOrThrow(s.podId)).toEqual(before);
+      expect((await s.git(s.host, 'rev-parse', 'HEAD')).stdout.trim()).toBe(s.old);
+      expect(await readFile(path.join(s.guest, 'ignored-report.bin'))).toEqual(
+        Buffer.from([0, 1, 255]),
+      );
+    },
+  );
+
   it('preserves BOTH old workspaces, applies exact source and invokes real source-bound revalidation without delivery or reset', async () => {
     const s = await fixture();
     let running = true;

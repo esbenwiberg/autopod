@@ -405,6 +405,18 @@ export interface PodManager {
    * Updates prUrl on success. Throws if the pod is not complete or already has a PR.
    */
   retryCreatePr(podId: string): Promise<void>;
+  getValidationExecutionRecovery: ReturnType<
+    typeof import('./validation-execution-recovery.js').createValidationExecutionRecovery
+  >['getValidationExecutionRecovery'];
+  readValidationEvidence: ReturnType<
+    typeof import('./validation-execution-recovery.js').createValidationExecutionRecovery
+  >['readValidationEvidence'];
+  reconcileValidationExecution: ReturnType<
+    typeof import('./validation-execution-recovery.js').createValidationExecutionRecovery
+  >['reconcileValidationExecution'];
+  authorizeValidationRecoveryBudget: ReturnType<
+    typeof import('./validation-execution-recovery.js').createValidationExecutionRecovery
+  >['authorizeValidationRecoveryBudget'];
   reconcileTermination(
     podId: string,
     runId: string,

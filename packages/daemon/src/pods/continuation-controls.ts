@@ -116,7 +116,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
     assertExecutionTerminationVerified(podId);
     assertGuidanceCollected(podId);
     const pod = podRepo.getOrThrow(podId);
-    assertFailedValidationRecoverable(pod);
+    assertFailedValidationRecoverable(pod, podRepo.validationExecutions?.isSettled(pod));
     if (!pod.containerId)
       throw new AutopodError(
         'Retained validation resource is unavailable. Restore it or request Fix validation.',
@@ -143,7 +143,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
   function assertCanRework(podId: string): void {
     assertExecutionTerminationVerified(podId);
     const pod = podRepo.getOrThrow(podId);
-    assertValidationExecutionSettled(pod);
+    assertValidationExecutionSettled(pod, podRepo.validationExecutions?.isSettled(pod));
     if (deps.launchConfiguration?.read(podId)?.intent === 'goal') {
       const goal = deps.launchConfiguration.goals?.get(podId);
       if (goal?.state !== 'achieved' || !goal.executionStopped)

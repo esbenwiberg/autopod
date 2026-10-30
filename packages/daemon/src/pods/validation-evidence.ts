@@ -1,10 +1,11 @@
 import path from 'node:path';
-import type { Pod, ValidationResult } from '@autopod/shared';
+import type { Pod, ScreenshotRef, ValidationResult } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import { collectFactScreenshots, collectScreenshots } from '../validation/screenshot-collector.js';
 import type { WorkspaceCheckpointResult } from '../worktrees/sandbox-workspace-checkpoint.js';
 import type { ScreenshotStore } from './screenshot-store.js';
+import { requiresValidationSettlement } from './validation-recovery-policy.js';
 
 interface ValidationEvidenceDependencies {
   logger: Pick<Logger, 'info' | 'warn'>;
@@ -30,6 +31,8 @@ export function createValidationEvidence(deps: ValidationEvidenceDependencies): 
     pod: Pod,
     result: ValidationResult,
     validationSyncOk: boolean,
+    assertCurrent?: () => void,
+    assertResourceCurrent?: () => void,
   ): Promise<boolean>;
 } {
   const {
@@ -48,7 +51,24 @@ export function createValidationEvidence(deps: ValidationEvidenceDependencies): 
     pod: Pod,
     result: ValidationResult,
     initialValidationSyncOk: boolean,
+    assertCurrent: () => void = () => {},
+    assertResourceCurrent: () => void = assertCurrent,
   ): Promise<boolean> {
+    if (requiresValidationSettlement({ lastValidationResult: result })) {
+      emitActivityStatus(
+        podId,
+        'Validation termination is unverified; original source and reports retained without checkpoint or sync commands.',
+      );
+      return false;
+    }
+    assertCurrent();
+    const retainedScreenshots = new Set<ScreenshotRef>();
+    for (const page of result.smoke.pages)
+      if (page.screenshot) retainedScreenshots.add(page.screenshot);
+    for (const fact of result.factValidation?.results ?? [])
+      for (const attachment of fact.attachments ?? [])
+        if (attachment.screenshot) retainedScreenshots.add(attachment.screenshot);
+    const collectionGuards = { retainedScreenshots, assertCurrent };
     let validationSyncOk = initialValidationSyncOk;
     const hasFactScreenshotEvidence = result.factValidation?.results.some((fact) =>
       fact.attachments?.some(
@@ -80,20 +100,28 @@ export function createValidationEvidence(deps: ValidationEvidenceDependencies): 
           result.factValidation,
           screenshotStore,
           pod.id,
+          collectionGuards,
         );
+        assertCurrent();
         logger.info({ podId, count: screenshots.length }, 'Collected host fact screenshots');
       } catch (err) {
+        assertCurrent();
         logger.warn({ err, podId }, 'Failed to collect host fact screenshots');
       }
     }
 
     // Sync workspace after validation — screenshots and build artifacts are now in /workspace
     if (pod.containerId && pod.worktreePath) {
+      assertCurrent();
       emitActivityStatus(podId, 'Syncing post-validation workspace…');
       const syncStartedAt = Date.now();
       try {
+        // Recording completed local evidence is separate from authority to run
+        // another checkpoint/copy after the original workflow became terminal.
+        assertResourceCurrent();
         if (pod.executionTarget === 'sandbox') {
           const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
+          assertCurrent();
           validationSyncOk =
             checkpoint.promoted && checkpoint.materialized && checkpoint.lineageVerified;
         } else {
@@ -105,12 +133,14 @@ export function createValidationEvidence(deps: ValidationEvidenceDependencies): 
             podId,
             pod.executionTarget,
           );
+          assertCurrent();
         }
         emitActivityStatus(
           podId,
           `Workspace sync complete (${formatElapsedDuration(Date.now() - syncStartedAt)})`,
         );
       } catch (err) {
+        assertCurrent();
         validationSyncOk = false;
         logger.warn({ err, podId }, 'Failed to sync workspace after validation');
         emitActivityStatus(
@@ -129,10 +159,14 @@ export function createValidationEvidence(deps: ValidationEvidenceDependencies): 
           result.smoke.pages,
           screenshotStore,
           pod.id,
-          { allowedHostScreenshotDir: hostScreenshotDir?.(pod.id) },
+          { ...collectionGuards, allowedHostScreenshotDir: hostScreenshotDir?.(pod.id) },
         );
+        assertCurrent();
         for (const ss of screenshots) {
-          const page = result.smoke.pages.find((p) => p.path === ss.pagePath);
+          const page = result.smoke.pages.find(
+            (p) =>
+              p.path === ss.pagePath && (!p.screenshot || !retainedScreenshots.has(p.screenshot)),
+          );
           if (page) {
             page.screenshot = ss.ref;
           }
@@ -148,6 +182,7 @@ export function createValidationEvidence(deps: ValidationEvidenceDependencies): 
         }
         logger.info({ podId, count: screenshots.length }, 'Collected validation screenshots');
       } catch (err) {
+        assertCurrent();
         logger.warn({ err, podId }, 'Failed to collect screenshots');
       }
     }
@@ -165,13 +200,17 @@ export function createValidationEvidence(deps: ValidationEvidenceDependencies): 
           result.factValidation,
           screenshotStore,
           pod.id,
+          collectionGuards,
         );
+        assertCurrent();
         logger.info({ podId, count: screenshots.length }, 'Collected fact screenshots');
       } catch (err) {
+        assertCurrent();
         logger.warn({ err, podId }, 'Failed to collect fact screenshots');
       }
     }
 
+    assertCurrent();
     return validationSyncOk;
   }
 

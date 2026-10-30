@@ -1,5 +1,9 @@
 import { AutopodError } from '@autopod/shared';
 import type { OperatorToolsCaptured } from './operator-contracts.js';
+import {
+  captureValidationMutationGuard,
+  guardValidationContainer,
+} from './validation-recovery-policy.js';
 export function createOperatorTools(captured: OperatorToolsCaptured) {
   const { podRepo, containerManagerFactory, emitActivityStatus, installGhBinary, installAzViaPip } =
     captured;
@@ -13,6 +17,7 @@ export function createOperatorTools(captured: OperatorToolsCaptured) {
 
   async function installCliTool(podId: string, tool: 'gh' | 'az'): Promise<void> {
     const pod = podRepo.getOrThrow(podId);
+    const assertCurrent = captureValidationMutationGuard(podRepo, pod);
     if (pod.status !== 'running') {
       throw new AutopodError(
         `Pod ${podId} is ${pod.status} — can only install tools into running pods.`,
@@ -23,7 +28,10 @@ export function createOperatorTools(captured: OperatorToolsCaptured) {
     if (!pod.containerId) {
       throw new AutopodError(`Pod ${podId} has no running container`, 'INVALID_STATE', 409);
     }
-    const cm = containerManagerFactory.get(pod.executionTarget);
+    const cm = guardValidationContainer(
+      containerManagerFactory.get(pod.executionTarget),
+      assertCurrent,
+    );
     const containerId = pod.containerId;
 
     const check = await cm.execInContainer(containerId, ['sh', '-c', `command -v ${tool}`]);

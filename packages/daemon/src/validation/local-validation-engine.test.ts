@@ -2156,6 +2156,9 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.factValidation?.status).toBe('skip');
     expect(result.taskReview).toBeNull();
     expect(result.reviewSkipReason).toBe('Skipped — validation setup failed');
+    expect(result.reviewSkipKind).toBeUndefined();
+    expect(result.smoke.build.status).toBe('skip');
+    expect(result.smoke.status).toBe('fail');
   });
 
   it('skips Health and Pages when hasWebUi is false', async () => {
@@ -2992,6 +2995,45 @@ human_review: []
         .mocked(cm.execInContainer)
         .mock.calls.some(([, cmd]) => cmd[2]?.includes('long-running-test')),
     ).toBe(false);
+  });
+
+  it('retains the real unknown-exit failure and partial output when abort arrives with test completion', async () => {
+    const cm = stubContainerManager();
+    const abort = new AbortController();
+    const exitCode = Promise.reject(
+      new AutopodError('No observed test exit', 'EXEC_EXIT_UNVERIFIED', 409),
+    );
+    void exitCode.catch(() => {});
+    vi.mocked(cm.execStreaming).mockResolvedValue({
+      stdout: Readable.from(['FAIL actual assertion before abort\n']),
+      stderr: Readable.from(['original partial stderr\n']),
+      exitCode,
+      kill: vi.fn(),
+    });
+    const result = await createLocalValidationEngine(cm).validate(
+      baseConfig({
+        executionTarget: 'sandbox',
+        testCommand: 'test',
+        startCommand: '',
+        smokePages: [],
+      }),
+      undefined,
+      abort.signal,
+      {
+        onPhaseCompleted: (phase) => {
+          if (phase === 'test') abort.abort();
+        },
+      },
+    );
+    expect(result.infrastructureFailure).toMatchObject({
+      phase: 'test',
+      code: 'EXEC_EXIT_UNVERIFIED',
+      retryable: false,
+    });
+    expect(result.test?.stdout).toContain('FAIL actual assertion before abort');
+    expect(result.test?.stdout).toContain('original partial stderr');
+    expect(result.overall).toBe('fail');
+    expect(cm.execStreaming).toHaveBeenCalledTimes(1);
   });
 
   it('retains buffered stream diagnostics when the sandbox exit is unverified', async () => {

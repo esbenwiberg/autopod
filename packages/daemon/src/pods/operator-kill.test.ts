@@ -1,6 +1,31 @@
+import { readFile, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createOperatorFixture } from '../test-utils/operator-helpers.js';
 describe('operator kill lifetime and fences', () => {
+  it('rechecks validation evidence after asynchronous cleanup before deleting source', async () => {
+    const f = createOperatorFixture();
+    const report = path.join(f.directory, 'retained-failed-validation.txt');
+    await writeFile(report, 'partial assertion output');
+    vi.mocked(f.worktreeManager.cleanup).mockImplementation(async () => {
+      await rm(report);
+    });
+    const ledger = f.podRepo.validationExecutions;
+    if (!ledger) throw new Error('Missing validation ledger');
+    const check = vi.spyOn(ledger, 'assertTaskSettled');
+    f.killCaptured.killSidecarsForPod = vi.fn(async () => {
+      await writeFile(report, 'late failed assertion');
+      check.mockImplementation(() => {
+        throw new Error('Late unknown validation outcome');
+      });
+    });
+    await expect(f.kill().killSession('prepare')).rejects.toThrow(
+      'Late unknown validation outcome',
+    );
+    expect(f.cm.kill).not.toHaveBeenCalled();
+    expect(f.worktreeManager.cleanup).not.toHaveBeenCalled();
+    expect(await readFile(report, 'utf8')).toBe('late failed assertion');
+  });
   it('aborts validation, performs cleanup and closes the live provider attempt before persisted killed history survives reopen', async () => {
     const f = createOperatorFixture(true);
     const owner = f.kill();

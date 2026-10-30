@@ -41,6 +41,7 @@ export interface ContinuationCaptured {
     | 'hasUnansweredDecision'
     | 'executionProvenance'
     | 'taskExecutions'
+    | 'validationExecutions'
     | 'incrementLifecycleGeneration'
     | 'atomically'
     | 'afterCommit'

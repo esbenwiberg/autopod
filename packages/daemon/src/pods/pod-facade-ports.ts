@@ -1,5 +1,6 @@
 import type { createContinuationControls } from './continuation-controls.js';
 import type { createProviderContinuation } from './provider-continuation.js';
+import type { createValidationExecutionRecovery } from './validation-execution-recovery.js';
 import type { createValidationRevalidationWorkflow } from './validation-revalidation-workflow.js';
 import type { createValidationTriggerWorkflow } from './validation-trigger-workflow.js';
 import type { createValidationWorkflowControls } from './validation-workflow-controls.js';
@@ -43,6 +44,7 @@ import type { createWorkspacePromotion } from './workspace-promotion.js';
 import type { createWorkspaceRecoveryCommands } from './workspace-recovery-commands.js';
 import type { createWorkspaceWatchdog } from './workspace-watchdog.js';
 export interface PodFacadeOwners {
+  validationExecutionRecovery: ReturnType<typeof createValidationExecutionRecovery>;
   sourceAdoption?: ReturnType<typeof createSourceAdoptionController>;
   admissionQueries: Pick<
     ReturnType<typeof createAdmissionQueries>,

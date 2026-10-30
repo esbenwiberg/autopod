@@ -1,10 +1,13 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 /** Runtime quiescence for already-entered facade controls, before their first external await.
  * Durable provider intents and execution ledgers remain independently authoritative across restart.
  */
 export function createControlOperationRegistry(
-  assertMutationAllowed: (podId: string) => void = () => {},
+  assertMutationAllowed: (podId: string, operation: string) => void = () => {},
 ) {
   const active = new Map<string, Set<symbol>>();
+  const invocation = new AsyncLocalStorage<{ podId: string; token: symbol; operation: string }>();
   function wrap<T extends object>(target: T): T {
     const cache = new Map<PropertyKey, { original: unknown; wrapped: unknown }>();
     const synchronous = new Set([
@@ -15,6 +18,7 @@ export function createControlOperationRegistry(
       'setSkipValidation',
       'createMemoryWorkspace',
       'createHistoryWorkspace',
+      'authorizeValidationRecoveryBudget',
     ]);
     return new Proxy(target, {
       get(object, key, receiver) {
@@ -22,6 +26,10 @@ export function createControlOperationRegistry(
         if (
           typeof value !== 'function' ||
           key === 'adoptSource' ||
+          key === 'reconcileValidationExecution' ||
+          key === 'readValidationEvidence' ||
+          // This operation is permanently disabled and must reject before resource lookup.
+          key === 'injectCredential' ||
           key === 'touchHeartbeat' ||
           /^(get|list|inspect|watch|assert)/.test(String(key))
         )
@@ -32,7 +40,7 @@ export function createControlOperationRegistry(
           const id = args[0];
           if (typeof id !== 'string') return Reflect.apply(value, receiver, args);
           try {
-            assertMutationAllowed(id);
+            assertMutationAllowed(id, String(key));
           } catch (error) {
             if (synchronous.has(String(key))) throw error;
             return Promise.reject(error);
@@ -46,7 +54,10 @@ export function createControlOperationRegistry(
             if (!claims.size && active.get(id) === claims) active.delete(id);
           };
           try {
-            const result: unknown = Reflect.apply(value, receiver, args);
+            const result: unknown = invocation.run(
+              { podId: id, token, operation: String(key) },
+              () => Reflect.apply(value, receiver, args),
+            );
             if (result instanceof Promise) {
               void result.then(release, release);
               return result;
@@ -63,5 +74,17 @@ export function createControlOperationRegistry(
       },
     });
   }
-  return { wrap, isActive: (podId: string) => Boolean(active.get(podId)?.size) };
+  return {
+    wrap,
+    isActive(podId: string, exceptCurrent?: 'authorizeValidationRecoveryBudget'): boolean {
+      const current = invocation.getStore();
+      return [...(active.get(podId) ?? [])].some(
+        (token) =>
+          !exceptCurrent ||
+          current?.podId !== podId ||
+          current.operation !== exceptCurrent ||
+          current.token !== token,
+      );
+    },
+  };
 }

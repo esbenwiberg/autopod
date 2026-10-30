@@ -16,6 +16,7 @@ import { GoalController } from './goal-controller.js';
 import { type GoalProcessOwner, createGoalProcessRepository } from './goal-process-repository.js';
 import { createGoalRepository } from './goal-repository.js';
 import type { PodRepository } from './pod-repository.js';
+import { assertValidationMutationSettled } from './validation-recovery-policy.js';
 
 export interface PodGoalServiceOptions {
   db: Database.Database;
@@ -36,6 +37,7 @@ export function createPodGoalService(options: PodGoalServiceOptions) {
   const repository = createGoalRepository(options.db);
   const processes = createGoalProcessRepository(options.db);
   function processOwner(podId: string, config: EffectiveLaunchConfig): GoalProcessOwner {
+    assertValidationMutationSettled(options.pods, podId);
     const pod = options.pods.getOrThrow(podId);
     const goal = repository.get(podId);
     if (
@@ -70,6 +72,7 @@ export function createPodGoalService(options: PodGoalServiceOptions) {
       }
     },
     assertCurrent(podId, fence) {
+      assertValidationMutationSettled(options.pods, podId);
       const owner = owners.get(podId);
       if (!owner || options.pods.getOrThrow(podId).lifecycleGeneration !== fence.generation)
         configurationError('Native Goal execution owner changed', 'GOAL_SUPERSEDED', 409);
@@ -324,6 +327,7 @@ export function createPodGoalService(options: PodGoalServiceOptions) {
       }
     },
     async control(podId: string, intent: 'pause' | 'cancel', revision?: number) {
+      assertValidationMutationSettled(options.pods, podId);
       const goal = repository.get(podId);
       if (!goal) configurationError('Pod Goal is unavailable', 'GOAL_NOT_FOUND', 404);
       if (revision !== undefined && goal.revision !== revision)

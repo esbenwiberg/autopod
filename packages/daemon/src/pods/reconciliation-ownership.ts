@@ -1,4 +1,5 @@
 import type { PodRepository } from './pod-repository.js';
+import { assertValidationMutationSettled } from './validation-recovery-policy.js';
 
 /** Restart/wake is not evidence that a saved worker or cleanup request has stopped. */
 export function retainUnresolvedReconciliation(
@@ -9,6 +10,7 @@ export function retainUnresolvedReconciliation(
   try {
     if (!podRepo.taskExecutions || !podRepo.deletionOwnership)
       throw new Error('Ownership evidence unavailable');
+    assertValidationMutationSettled(podRepo, podId);
     podRepo.taskExecutions.assertCanDelete(podId);
     podRepo.deletionOwnership.assertTaskAvailable(podId);
     return false;

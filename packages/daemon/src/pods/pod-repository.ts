@@ -45,7 +45,11 @@ import {
   type CompactPodSource,
 } from './compact-pod-projection.js';
 import { hasUnansweredDecision } from './decision-admission.js';
-import { type DeletionOwnership, createDeletionOwnership } from './deletion-ownership.js';
+import {
+  type DeletionOwnership,
+  assertNoValidationRecovery,
+  createDeletionOwnership,
+} from './deletion-ownership.js';
 import {
   type DispatchPreflightLedger,
   createDispatchPreflightLedger,
@@ -68,6 +72,11 @@ import {
   createSourcePublicationLedger,
 } from './source-publication-ledger.js';
 import { type TaskRetryLedger, createTaskRetryLedger } from './task-retry-ledger.js';
+import {
+  type ValidationExecutionLedger,
+  createValidationExecutionLedger,
+  listValidationExecutionResourceIds,
+} from './validation-execution-ledger.js';
 
 export interface NewPod {
   intentionalRerun?: IntentionalRerun;
@@ -275,6 +284,7 @@ import {
 
 export interface PodRepository extends Partial<UnitOfWork> {
   taskRetries?: TaskRetryLedger;
+  validationExecutions?: ValidationExecutionLedger;
   sandboxStartupRetries?: TaskRetryLedger;
   codexInterruptionRetries?: TaskRetryLedger;
   workerRetries?: TaskRetryLedger;
@@ -800,6 +810,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
       });
     },
     taskRetries: createTaskRetryLedger(db),
+    validationExecutions: createValidationExecutionLedger(db),
     sandboxStartupRetries: createTaskRetryLedger(db, 'sandbox_startup'),
     codexInterruptionRetries: createTaskRetryLedger(db, 'codex_interruption'),
     workerRetries: createTaskRetryLedger(db, 'worker'),
@@ -945,6 +956,17 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     update(id: string, changes: PodUpdates): void {
+      // Any mutation during validation preservation could invalidate its evidence.
+      assertNoValidationRecovery(db, id);
+      if (
+        changes.containerId &&
+        db
+          .prepare(`SELECT 1 FROM validation_recovery_intents i
+        JOIN validation_dispatches d ON d.id=i.dispatch_id WHERE i.receipt IS NULL
+        AND json_extract(d.binding,'$.containerId')=?`)
+          .get(changes.containerId)
+      )
+        throw new Error('Container is reserved by an unresolved validation recovery');
       if (
         [
           'containerId',
@@ -1517,7 +1539,9 @@ export function createPodRepository(db: Database.Database): PodRepository {
            UNION SELECT json_extract(binding,'$.containerId') AS container_id FROM source_adoptions`,
         )
         .all() as { container_id: string }[];
-      return rows.map((r) => r.container_id);
+      return [
+        ...new Set([...rows.map((r) => r.container_id), ...listValidationExecutionResourceIds(db)]),
+      ];
     },
 
     listNonTerminalPodIds(): string[] {
@@ -1537,6 +1561,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     delete: db.transaction((id: string): void => {
+      createValidationExecutionLedger(db).assertTaskSettled(id);
       sourceAdoptions.assertDeletable(id);
       taskExecutions.assertCanDelete(id);
       externalDeliveries.assertDeletable(id);

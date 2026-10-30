@@ -20,6 +20,15 @@ vi.mock('ora', () => ({
 function createMockClient() {
   return {
     listSessions: vi.fn().mockResolvedValue([]),
+    getValidationExecutionRecovery: vi.fn().mockResolvedValue({
+      generation: 1,
+      resultHash: 'a'.repeat(64),
+      required: true,
+      settled: false,
+      allowed: false,
+    }),
+    reconcileValidationExecution: vi.fn().mockResolvedValue({ generation: 1, settled: true }),
+    authorizeValidationRecoveryBudget: vi.fn().mockResolvedValue({ seconds: 900 }),
     getTaskExecution: vi.fn().mockRejectedValue(new Error('Unavailable on older daemon')),
     getTerminationReconciliations: vi.fn().mockResolvedValue({
       pending: [
@@ -1475,4 +1484,77 @@ it('shows a retained recovery hint through actual status HTTP without implying w
     output.mockRestore();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+describe('validation execution recovery commands', () => {
+  async function run(command: string, ...args: string[]) {
+    const client = createMockClient();
+    const program = new Command().exitOverride();
+    registerPodCommands(program, () => client);
+    await program.parseAsync(['node', 'ap', command, 'recovery-example', ...args]);
+    return client;
+  }
+  it('inspects without requesting deletion, checks or a coding worker', async () => {
+    const log = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      const client = await run('reconcile-validation', '--json');
+      expect(client.getValidationExecutionRecovery).toHaveBeenCalledWith('recovery-example');
+      expect(client.reconcileValidationExecution).not.toHaveBeenCalled();
+      expect(client.authorizeValidationRecoveryBudget).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
+  it('requires an explicit apply and exact generation/result before recovery', async () => {
+    await expect(run('reconcile-validation', '--apply')).rejects.toThrow('--apply requires');
+    await expect(run('reconcile-validation', '--reason', 'Preserve source first')).rejects.toThrow(
+      'require --apply',
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const client = await run(
+        'reconcile-validation',
+        '--apply',
+        '--generation',
+        '1',
+        '--result-hash',
+        'a'.repeat(64),
+        '--reason',
+        'Preserve source first',
+      );
+      expect(client.reconcileValidationExecution).toHaveBeenCalledWith('recovery-example', {
+        expectedGeneration: 1,
+        expectedResultHash: 'a'.repeat(64),
+        reason: 'Preserve source first',
+      });
+      expect(client.getValidationExecutionRecovery).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
+  it('sends a separately audited budget in seconds, without settlement', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const client = await run(
+        'validation-recovery-budget',
+        '--seconds',
+        '900',
+        '--generation',
+        '1',
+        '--result-hash',
+        'a'.repeat(64),
+        '--reason',
+        'Measured healthy suite exceeds 600 seconds',
+      );
+      expect(client.authorizeValidationRecoveryBudget).toHaveBeenCalledWith('recovery-example', {
+        testTimeoutSeconds: 900,
+        expectedGeneration: 1,
+        expectedResultHash: 'a'.repeat(64),
+        reason: 'Measured healthy suite exceeds 600 seconds',
+      });
+      expect(client.reconcileValidationExecution).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
 });

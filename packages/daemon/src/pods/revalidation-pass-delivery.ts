@@ -1,5 +1,9 @@
 import { publishScreenshotArtifacts } from '../validation/screenshot-artifacts.js';
 import { isTerminalState } from './state-machine.js';
+import {
+  assertValidationExecutionSettled,
+  captureValidationMutationGuard,
+} from './validation-recovery-policy.js';
 import type {
   RevalidationPassCaptured,
   RevalidationPassContext,
@@ -41,6 +45,8 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
       checksOnly = false,
     }: RevalidationPassContext,
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
+    assertValidationExecutionSettled({ ...s2, lastValidationResult: result });
+    const assertCurrent = captureValidationMutationGuard(podRepo, s2);
     emitActivityStatus(
       podId,
       checksOnly
@@ -54,15 +60,19 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
       // branch. This path builds no PR body, so the ref is simply where a
       // reviewer can find the screenshots.
       if (profile.prProvider !== 'ado') {
+        const screenshotPat = await resolveGitCredential(profile);
+        assertCurrent();
         await publishScreenshotArtifacts({
           worktreeManager,
           logger,
           podId,
           worktreePath: s2.worktreePath,
-          pat: await resolveGitCredential(profile),
+          pat: screenshotPat,
         });
       }
 
+      const pushPat = await resolveGitCredential(profile);
+      assertCurrent();
       try {
         // revalidateSession runs on a worktree just pushed by a human — nothing should
         // be uncommitted. If git add -A finds phantom deletions, it's a sync artifact,
@@ -74,7 +84,7 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
           targetBranch: s2.branch,
           // Pass the PAT explicitly — revalidation often runs after a daemon restart,
           // when the in-memory PAT cache for this bare repo is cold.
-          pat: await resolveGitCredential(profile),
+          pat: pushPat,
           maxDeletions: 0,
           podTask: pod.task,
           profile,
@@ -110,7 +120,9 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
           const s3 = podRepo.getOrThrow(podId);
           warnIfSinglePrSeriesMissingSeriesMeta(s2, logger);
           const baseBranch = resolvePrBaseBranch(s2, profile);
+          assertCurrent();
           await ensurePrBaseBranchOnOrigin(s2, profile, baseBranch, 'revalidation_pass');
+          assertCurrent();
           const createResult = await prManager.createPr({
             // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null here — PR creation only occurs for non-artifact pods which always have a worktree
             worktreePath: s2.worktreePath!,
@@ -165,6 +177,7 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
         emitActivityStatus(podId, `Carrying forward existing PR: ${prUrl}`);
       }
     }
+    assertCurrent();
     const revalidatedPod = transition(s2, 'validated', { prUrl });
     refreshReadiness(podId, {
       advisoryQaInFlight:

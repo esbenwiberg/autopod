@@ -1,8 +1,9 @@
 import type { ResourcePreviewTimersCaptured } from './resource-contracts.js';
 import { PREVIEW_AUTO_STOP_MS } from './resource-policy.js';
+import { captureValidationMutationGuard } from './validation-recovery-policy.js';
 
 export function createResourcePreviewTimers(captured: ResourcePreviewTimersCaptured) {
-  const { stopSandboxPreviewProxy, containerManagerFactory, logger } = captured;
+  const { stopSandboxPreviewProxy, containerManagerFactory, logger, podRepo } = captured;
   const previewTimers = new Map<string, ReturnType<typeof setTimeout>>();
   function clearPreviewTimer(podId: string): void {
     const timer = previewTimers.get(podId);
@@ -18,10 +19,15 @@ export function createResourcePreviewTimers(captured: ResourcePreviewTimersCaptu
     target: import('@autopod/shared').ExecutionTarget,
   ): void {
     clearPreviewTimer(podId);
+    const expected = podRepo.getOrThrow(podId);
+    const assertCurrent = captureValidationMutationGuard(podRepo, expected);
     const timer = setTimeout(async () => {
       previewTimers.delete(podId);
       try {
+        assertCurrent();
+        if (expected.containerId !== containerId || expected.executionTarget !== target) return;
         await stopSandboxPreviewProxy(podId);
+        assertCurrent();
         const cm = containerManagerFactory.get(target);
         await cm.stop(containerId);
         logger.info({ podId, containerId }, 'Preview auto-stopped after timeout');

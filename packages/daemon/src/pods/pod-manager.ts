@@ -3,6 +3,12 @@ import { buildCodeIntelligenceServers } from './provisioning-runtime-files.js';
 import { createProvisioningSandboxState } from './provisioning-sandbox-state.js';
 import { createProvisioningToolInstallation } from './provisioning-tool-installation.js';
 import { createProvisioningWorkflow } from './provisioning-workflow.js';
+import { createValidationExecutionRecovery } from './validation-execution-recovery.js';
+import { ValidationSupersededError } from './validation-ownership.js';
+import {
+  assertValidationMutationSettled,
+  captureValidationMutationGuard,
+} from './validation-recovery-policy.js';
 export {
   AGENT_SHIM_PATH,
   AGENT_ENV_PATH,
@@ -303,6 +309,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
 
   const { clearPreviewTimer, schedulePreviewAutoStop } = createResourcePreviewTimers({
+    podRepo,
     stopSandboxPreviewProxy,
     containerManagerFactory,
     logger,
@@ -589,7 +596,15 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     getEffectiveReviewerConfig,
   });
 
-  const { syncWorkspaceBack, recoverWorktreeFromContainer } = createWorkspaceTransfer({ logger });
+  const { syncWorkspaceBack, recoverWorktreeFromContainer } = createWorkspaceTransfer({
+    logger,
+    captureAuthority: (podId, containerId, worktreePath) => {
+      const pod = podRepo.getOrThrow(podId);
+      if (pod.containerId !== containerId || pod.worktreePath !== worktreePath)
+        throw new ValidationSupersededError();
+      return captureValidationMutationGuard(podRepo, pod);
+    },
+  });
 
   const continuationContext = createContinuationContext(deps, {
     podRepo,
@@ -666,6 +681,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
 
   const { preservePodWorkspace, checkpointSandboxWorkspaceForPod } = createWorkspacePreservation({
+    captureAuthority: (pod) => captureValidationMutationGuard(podRepo, pod),
     getContainerManager: (target) => containerManagerFactory.get(target),
     syncWorkspaceBack,
     workspaceCheckpointController: deps.workspaceCheckpointController,
@@ -745,6 +761,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     resolveEffectiveBoundProfile,
   });
 
+  const { publishValidationResult } = createValidationPublication({
+    podRepo,
+    validationRepo,
+    eventBus,
+  });
+
   const { validateWithInfrastructureRetries } = createValidationExecution({
     logger,
     containerManagerFactory,
@@ -756,6 +778,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     withReviewerLaunchPreflight,
     ownedValidationCallbacks,
     emitActivityStatus,
+    publishValidationResult,
     makeUnexpectedValidationFailureResult,
     validationInfrastructureFailureLabel,
     isReviewInfrastructureOnlyFailure,
@@ -771,12 +794,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     hostScreenshotDir,
     emitActivityStatus,
     formatElapsedDuration,
-  });
-
-  const { publishValidationResult } = createValidationPublication({
-    podRepo,
-    validationRepo,
-    eventBus,
   });
 
   const {
@@ -1377,12 +1394,38 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityStatus,
   });
 
-  const controlOperations = createControlOperationRegistry((podId) => {
+  const controlOperations = createControlOperationRegistry((podId, operation) => {
+    const metadataOnly = new Set([
+      'interruptValidation',
+      'notifyEscalation',
+      'nudgeSession',
+      'setSkipValidation',
+      'authorizeValidationRecoveryBudget',
+      'refreshReadinessAfterQualityScore',
+      'createMemoryWorkspace',
+      'createHistoryWorkspace',
+      'refreshNetworkPolicy',
+      'deleteSeriesWithCascade',
+    ]);
+    if (!metadataOnly.has(operation)) assertValidationMutationSettled(podRepo, podId);
+    podRepo.validationExecutions?.assertNoPendingRecovery(podId);
     if (podRepo.sourceAdoptions?.hasCustody(podId))
       sourceAdoptionError(
         'Source/report custody owns this task. Use source-recovery status/actions; competing controls cannot mutate or release it.',
         'SOURCE_CUSTODY_HELD',
       );
+  });
+  const validationExecutionRecovery = createValidationExecutionRecovery({
+    podRepo,
+    getContainerManager: () => containerManagerFactory.get('sandbox'),
+    isActive: (id, exceptCurrent) =>
+      controlOperations.isActive(id, exceptCurrent) ||
+      activeAgentRuns.has(id) ||
+      validationAbortControllers.has(id) ||
+      infrastructureResumeRuns.has(id) ||
+      artifactResumeRuns.has(id) ||
+      artifactCompletionRuns.has(id) ||
+      attemptExtensionRuns.has(id),
   });
   const sourceAdoption = createSourceAdoptionController({
     podRepo,
@@ -1421,6 +1464,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   return controlOperations.wrap(
     createPodManagerFacade({
       sourceAdoption,
+      validationExecutionRecovery,
       terminationReconciliation,
       admissionQueries,
       admissionResolved,

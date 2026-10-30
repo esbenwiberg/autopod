@@ -3,6 +3,7 @@ import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodRepository, PodUpdates } from './pod-repository.js';
 import type { TaskRetryBlockedError } from './task-retry-ledger.js';
+import { requiresValidationSettlement } from './validation-recovery-policy.js';
 
 interface ValidationInfrastructureDependencies {
   logger: Pick<Logger, 'info' | 'warn'>;
@@ -105,12 +106,19 @@ export function createValidationInfrastructure(deps: ValidationInfrastructureDep
     result: ValidationResult,
   ): Promise<void> {
     const label = validationInfrastructureFailureLabel(result);
-    emitActivityStatus(pod.id, `${label} — parked for explicit Resume`);
+    emitActivityStatus(
+      pod.id,
+      requiresValidationSettlement({ ...pod, lastValidationResult: result })
+        ? `${label} — termination proof required; inspect ap reconcile-validation ${pod.id} --json before retry or repair`
+        : `${label} — parked for explicit Resume`,
+    );
     transition(pod, 'review_required');
     podRepo.update(pod.id, {
       validationAttempts: Math.max(0, pod.validationAttempts - 1),
       lastCorrectionMessage: null,
     });
+
+    if (requiresValidationSettlement({ lastValidationResult: result })) return;
 
     if (pod.containerId) {
       try {

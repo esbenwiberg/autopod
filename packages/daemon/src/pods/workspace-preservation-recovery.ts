@@ -1,6 +1,9 @@
 import type { Pod } from '@autopod/shared';
 import { describeSyncFailure } from './completion-diagnostics.js';
-import { assertValidationExecutionSettled } from './validation-recovery-policy.js';
+import {
+  assertValidationMutationSettled,
+  captureValidationMutationGuard,
+} from './validation-recovery-policy.js';
 import type { WorkspacePreservationRecoveryCaptured } from './workspace-contracts.js';
 
 export function createWorkspacePreservationRecovery(
@@ -21,7 +24,7 @@ export function createWorkspacePreservationRecovery(
     // Never wake a failed/unsettled execution just to collect a checkpoint.
     if (podRepo.taskExecutions?.hasActiveRun(podId)) return;
     try {
-      assertValidationExecutionSettled(pod);
+      assertValidationMutationSettled(podRepo, podId);
       const status = await containerManagerFactory
         .get(pod.executionTarget)
         .getStatus(pod.containerId);
@@ -34,7 +37,7 @@ export function createWorkspacePreservationRecovery(
         podRepo.taskExecutions?.hasActiveRun(podId)
       )
         return;
-      assertValidationExecutionSettled(current);
+      assertValidationMutationSettled(podRepo, podId);
       await preservePodWorkspace(current, reason);
       // A tracked-source checkpoint does not prove ignored report preservation.
       // Leave the original source intact until a dedicated capture/release workflow.
@@ -59,6 +62,7 @@ export function createWorkspacePreservationRecovery(
     err: unknown,
     phase: 'auto-commit' | 'validation',
   ): Promise<boolean> {
+    const assertCurrent = captureValidationMutationGuard(podRepo, pod);
     if (!pod.containerId || !pod.worktreePath) return false;
 
     const detail = describeSyncFailure(err);
@@ -78,6 +82,7 @@ export function createWorkspacePreservationRecovery(
       cm,
       pod.id,
     );
+    assertCurrent();
     if (!recovered) return false;
 
     podRepo.update(pod.id, { worktreeCompromised: false, preSubmitReview: null });

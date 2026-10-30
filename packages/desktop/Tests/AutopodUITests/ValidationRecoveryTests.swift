@@ -129,3 +129,22 @@ func validationRecoveryLayoutAndOwnedRendering(width: Double) async throws {
     try png.write(to: URL(fileURLWithPath: directory).appendingPathComponent("validation-\(Int(width)).png"))
   }
 }
+
+@MainActor @Test func unverifiedValidationOffersReadOnlyReconciliationWithoutDispatchingWork() async {
+  let harness = RecoveryHarness()
+  harness.state = .init(generation: 1, validationTimestamp: "legacy-result",
+    fixValidation: .init(allowed: false, reason: "Termination proof required", code: "VALIDATION_EXECUTION_UNVERIFIED"),
+    retryChecks: .init(allowed: false, code: "VALIDATION_EXECUTION_UNVERIFIED"))
+  let controller = ValidationRecoveryController(podId: "recovery-example", actions: harness.actions)
+  await controller.refresh()
+  #expect(controller.reconciliationCommand == "ap reconcile-validation recovery-example --json")
+  #expect(!controller.canRequest("fix-validation"))
+  #expect(!controller.canRequest("retry-checks"))
+  #expect(harness.requests.isEmpty)
+  harness.state = .init(generation: 1, validationTimestamp: "legacy-result",
+    fixValidation: .init(allowed: true), retryChecks: .init(allowed: false, code: "VALIDATION_RESOURCE_UNAVAILABLE"))
+  await controller.refresh()
+  #expect(controller.reconciliationCommand == nil)
+  #expect(controller.canRequest("fix-validation"))
+  #expect(!controller.canRequest("retry-checks"))
+}

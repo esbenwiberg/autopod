@@ -2040,13 +2040,16 @@ describe('PodManager', () => {
         release.resolve();
         await pending;
 
-        expect(ctx.containerManager.start).toHaveBeenCalledWith(pod.containerId);
+        expect(ctx.containerManager.start).toHaveBeenCalledWith(pod.containerId, {
+          assertCurrent: expect.any(Function),
+        });
         expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalledWith({
           containerManager: ctx.containerManager,
           containerId: pod.containerId,
           podId: pod.id,
           worktreePath: pod.worktreePath,
           sequence: expect.any(Number),
+          assertCurrent: expect.any(Function),
         });
         expect(activity(ctx, pod.id)).toEqual(['Verified workspace checkpoint before probe.']);
         expect(manager.getSession(pod.id)).toMatchObject({
@@ -2126,6 +2129,7 @@ describe('PodManager', () => {
           const records: CheckpointRecord[] = [];
           const capture = vi.fn(async () => proof);
           ctx.deps.workspaceCheckpointController = new WorkspaceCheckpointController({
+            captureAuthority: () => () => {},
             observe: async () => ({ head: proof.sourceHead, tree: proof.sourceTree, dirty: true }),
             checkpoint: capture,
             records: {
@@ -2143,7 +2147,7 @@ describe('PodManager', () => {
           if (materialized) await pending;
           else await expect(pending).rejects.toThrow('retained controller failure');
 
-          expect(capture).toHaveBeenCalledWith(pod.id, 'completion', 1);
+          expect(capture).toHaveBeenCalledWith(pod.id, 'completion', 1, expect.any(Function));
           expect(records[0]?.result).toBe(proof);
           expect(ctx.deps.sandboxWorkspaceCheckpoint).not.toHaveBeenCalled();
           expect(ctx.containerManager.kill).not.toHaveBeenCalled();
@@ -2168,6 +2172,7 @@ describe('PodManager', () => {
         try {
           const error = new Error('controller rejected');
           ctx.deps.workspaceCheckpointController = new WorkspaceCheckpointController({
+            captureAuthority: () => () => {},
             observe: async () => {
               if (phase === 'observation') throw error;
               return { head: 'a', tree: 'b', dirty: true };
@@ -2199,6 +2204,7 @@ describe('PodManager', () => {
     it('falls back to direct capture only when the controller supplies no result', async () => {
       const ctx = sandboxContext();
       const controller = new WorkspaceCheckpointController({
+        captureAuthority: () => () => {},
         observe: async () => ({ head: 'a', tree: 'b', dirty: true }),
         checkpoint: async () => completeProof,
         records: {
@@ -2218,7 +2224,7 @@ describe('PodManager', () => {
 
         await manager.preserveWorkspace(pod.id, 'probe');
 
-        expect(request).toHaveBeenCalledWith(pod.id, 'completion');
+        expect(request).toHaveBeenCalledWith(pod.id, 'completion', undefined, expect.any(Function));
         expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalledOnce();
         expect(activity(ctx, pod.id)).toEqual(['Verified workspace checkpoint before probe.']);
         expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
@@ -2298,7 +2304,7 @@ describe('PodManager', () => {
         expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
           pod.containerId,
           ['sh', '-c', expect.stringContaining('STAGING="/mnt/worktree/.autopod-sync-')],
-          { timeout: 120_000 },
+          { timeout: 120_000, assertCurrent: expect.any(Function) },
         );
         expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
         expect(info).toHaveBeenCalledWith(
@@ -2329,7 +2335,13 @@ describe('PodManager', () => {
       try {
         const error = new Error('archive failed');
         vi.mocked(ctx.containerManager.execInContainer).mockRejectedValue(new Error('exec failed'));
-        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(error);
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementation(
+          async (_id, _source, _target, _excludes, options) => {
+            expect(options?.assertCurrent).toBeTypeOf('function');
+            options?.assertCurrent?.();
+            throw error;
+          },
+        );
         const { manager, pod } = preservationPod(ctx);
 
         await expect(manager.preserveWorkspace(pod.id, 'probe')).rejects.toBe(error);
@@ -2339,6 +2351,7 @@ describe('PodManager', () => {
           '/workspace',
           pod.worktreePath,
           ['.git', 'node_modules', '.serena', '.roslyn-codelens'],
+          { assertCurrent: expect.any(Function) },
         );
         expect(activity(ctx, pod.id)).toEqual([]);
         expect(ctx.containerManager.kill).not.toHaveBeenCalled();
@@ -2434,7 +2447,7 @@ describe('PodManager', () => {
           expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
             pod.containerId,
             ['sh', '-c', expect.stringContaining('staging_count=')],
-            { timeout: 120_000 },
+            { timeout: 120_000, assertCurrent: expect.any(Function) },
           );
           expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();
           expect(manager.getSession(pod.id)).toMatchObject({
@@ -2469,9 +2482,18 @@ describe('PodManager', () => {
             if (!normal) throw new Error('missing normal exec');
             return normal(id, command, options);
           });
+          let guardedCopies = 0;
+          vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementation(
+            async (_id, _source, _target, _excludes, options) => {
+              expect(options?.assertCurrent).toBeTypeOf('function');
+              options?.assertCurrent?.();
+              guardedCopies++;
+            },
+          );
           const { manager, pod } = transferPod(ctx);
 
           await manager.preserveWorkspace(pod.id, 'fallback probe');
+          expect(guardedCopies).toBe(2);
 
           const calls = vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mock.calls;
           expect(calls).toHaveLength(2);
@@ -2480,6 +2502,7 @@ describe('PodManager', () => {
             '/workspace',
             pod.worktreePath,
             ['.git', 'node_modules', '.serena', '.roslyn-codelens'],
+            { assertCurrent: expect.any(Function) },
           ]);
           expect(calls[1]?.[1]).toBe('/workspace/.git');
           temporaryGit = calls[1]?.[2];
@@ -3032,12 +3055,12 @@ describe('PodManager', () => {
               expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
                 pod.containerId,
                 ['git', '-C', '/workspace', 'reset', '--hard', host],
-                { timeout: 30_000 },
+                { timeout: 30_000, assertCurrent: expect.any(Function) },
               );
               expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
                 pod.containerId,
                 ['git', '-C', '/workspace', 'clean', '-fd'],
-                { timeout: 30_000 },
+                { timeout: 30_000, assertCurrent: expect.any(Function) },
               );
             } else {
               expect(trace).toContain('sync');
@@ -3229,7 +3252,9 @@ describe('PodManager', () => {
       });
 
       await expect(manager.recoverWorktree(pod.id)).resolves.toMatchObject({ recovered: true });
-      expect(ctx.containerManager.start).toHaveBeenCalledWith('ctr-1');
+      expect(ctx.containerManager.start).toHaveBeenCalledWith('ctr-1', {
+        assertCurrent: expect.any(Function),
+      });
     });
 
     it('does not recursively extract sandbox source when checkpoint proof is unavailable', async () => {
@@ -15923,12 +15948,12 @@ describe('PodManager', () => {
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'ctr-1',
         ['git', '-C', '/workspace', 'reset', '--hard', hostHead],
-        { timeout: 30_000 },
+        { timeout: 30_000, assertCurrent: expect.any(Function) },
       );
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'ctr-1',
         ['git', '-C', '/workspace', 'clean', '-fd'],
-        { timeout: 30_000 },
+        { timeout: 30_000, assertCurrent: expect.any(Function) },
       );
       const execCalls = vi.mocked(ctx.containerManager.execInContainer).mock.calls;
       const resetIndex = execCalls.findIndex(
@@ -22137,6 +22162,7 @@ describe('PodManager', () => {
         '/workspace',
         '/tmp/wt',
         expect.arrayContaining(['.git', 'node_modules']),
+        { assertCurrent: expect.any(Function) },
       );
     });
 
@@ -22291,8 +22317,9 @@ describe('PodManager', () => {
         return undefined as never;
       });
 
-      (ctx.containerManager.execInContainer as ReturnType<typeof vi.fn>).mockImplementation(
-        async (_containerId: string, cmd: string[]) => {
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (_containerId, cmd, options) => {
+          options?.assertCurrent?.();
           const command = cmd.join(' ');
           if (command.includes('/workspace/.git/objects/info/alternates')) {
             return { stdout: `${bareRepoPath}\n`, stderr: '', exitCode: 0 };
@@ -22320,12 +22347,12 @@ describe('PodManager', () => {
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'ctr-1',
         ['git', 'config', '--global', '--add', 'safe.directory', '/workspace'],
-        { timeout: 5_000 },
+        { timeout: 5_000, assertCurrent: expect.any(Function) },
       );
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'ctr-1',
         ['git', 'config', '--global', '--add', 'safe.directory', bareRepoPath],
-        { timeout: 5_000 },
+        { timeout: 5_000, assertCurrent: expect.any(Function) },
       );
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'ctr-1',
@@ -28590,6 +28617,37 @@ describe('validation evidence compatibility', () => {
       expect(f.stored()).toBeNull();
       expect(f.ctx.validationRepo.getLatest(f.pod.id)).toBeNull();
     } finally {
+      f.close();
+    }
+  });
+
+  it('retains queued guidance instead of publishing into an active workflow during held evidence', async () => {
+    const f = fixture();
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    let run: Promise<void> | undefined;
+    try {
+      f.pages();
+      f.write('page.png', 'held');
+      const write = f.store.write.bind(f.store);
+      vi.spyOn(f.store, 'write').mockImplementation(async (...args) => {
+        entered.resolve();
+        await release.promise;
+        return write(...args);
+      });
+      run = f.run();
+      await entered.promise;
+      const nudges = required(f.ctx.deps.nudgeRepo);
+      nudges.queue(f.pod.id, 'Keep this newer operator decision');
+      release.resolve();
+      await run;
+      expect(nudges.hasPending(f.pod.id)).toBe(true);
+      expect(f.stored()).toBeNull();
+      expect(f.ctx.validationRepo.getLatest(f.pod.id)).toBeNull();
+      expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    } finally {
+      release.resolve();
+      await run;
       f.close();
     }
   });

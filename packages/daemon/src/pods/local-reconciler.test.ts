@@ -403,6 +403,7 @@ describe('reconcileLocalSessions', () => {
       materialized: true,
     }));
     const controller = new WorkspaceCheckpointController({
+      captureAuthority: () => () => {},
       observe: async () => record.fingerprint,
       checkpoint: async () => result,
       records: {
@@ -414,7 +415,7 @@ describe('reconcileLocalSessions', () => {
       materializeImported,
     });
     await controller.reconcileIncomplete();
-    expect(materializeImported).toHaveBeenCalledWith(record);
+    expect(materializeImported).toHaveBeenCalledWith(record, expect.any(Function));
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ verifiedAt: expect.any(String) }));
   });
   it('recovers pod with surviving worktree', async () => {

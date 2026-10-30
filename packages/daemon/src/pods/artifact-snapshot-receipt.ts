@@ -14,12 +14,14 @@ const MAX_BYTES = 1_073_741_824;
 
 export async function fingerprintArtifactSnapshot(
   root: string,
-): Promise<{ sha256: string; entries: number; bytes: number }> {
+  captureFile?: string,
+): Promise<{ sha256: string; entries: number; bytes: number; captured?: Buffer }> {
   const digest = createHash('sha256');
   let entries = 0;
   let fileEntries = 0;
   let directories = 0;
   let bytes = 0;
+  let captured: Buffer | undefined;
   async function visit(relative: string): Promise<void> {
     entries++;
     const fullPath = path.join(root, relative);
@@ -36,6 +38,8 @@ export async function fingerprintArtifactSnapshot(
       digest.update(JSON.stringify({ ...metadata, type: 'directory' }));
       for (const name of (await readdir(fullPath)).sort()) await visit(path.join(relative, name));
     } else if (before.isFile()) {
+      const capture = relative === captureFile;
+      if (capture && before.size > 5 * 1024 * 1024) throw new Error('Evidence file exceeds 5 MiB');
       if (++fileEntries > MAX_FILE_ENTRIES)
         throw new Error('Artifact inventory exceeds 100000 file or link entries');
       bytes += before.size;
@@ -47,10 +51,12 @@ export async function fingerprintArtifactSnapshot(
         if (opened.ino !== before.ino || opened.dev !== before.dev || opened.size !== before.size)
           throw new Error('Artifact file changed during inventory');
         let readBytes = 0;
+        const chunks: Buffer[] = [];
         for await (const chunk of handle.createReadStream({ autoClose: false })) {
           readBytes += chunk.length;
           if (readBytes > before.size) throw new Error('Artifact file grew during inventory');
           digest.update(chunk);
+          if (capture) chunks.push(Buffer.from(chunk));
         }
         const after = await handle.stat();
         if (
@@ -60,6 +66,7 @@ export async function fingerprintArtifactSnapshot(
           after.ctimeMs !== before.ctimeMs
         )
           throw new Error('Artifact file changed during inventory');
+        if (capture) captured = Buffer.concat(chunks);
       } finally {
         await handle.close();
       }
@@ -68,7 +75,7 @@ export async function fingerprintArtifactSnapshot(
     }
   }
   await visit('');
-  return { sha256: digest.digest('hex'), entries, bytes };
+  return { sha256: digest.digest('hex'), entries, bytes, ...(captured ? { captured } : {}) };
 }
 
 export async function writeArtifactSnapshotReceipt(
@@ -98,6 +105,35 @@ export async function verifyArtifactSnapshot(
   generation: number,
   cycle = 0,
 ): Promise<void> {
+  await checkArtifactSnapshot(snapshot, artifactRoot, generation, cycle);
+}
+
+/** Returned bytes participated in the very inventory hash checked against the receipt. */
+export async function readArtifactSnapshotFile(
+  snapshot: string,
+  artifactRoot: string,
+  generation: number,
+  cycle: number,
+  relativePath: string,
+): Promise<Buffer> {
+  const captured = await checkArtifactSnapshot(
+    snapshot,
+    artifactRoot,
+    generation,
+    cycle,
+    relativePath,
+  );
+  if (!captured) throw new Error('Evidence is missing or is not a regular file');
+  return captured;
+}
+
+async function checkArtifactSnapshot(
+  snapshot: string,
+  artifactRoot: string,
+  generation: number,
+  cycle: number,
+  captureFile?: string,
+): Promise<Buffer | undefined> {
   try {
     if (
       path.dirname(path.resolve(snapshot)) !== path.resolve(artifactRoot) ||
@@ -127,13 +163,14 @@ export async function verifyArtifactSnapshot(
       receipt.snapshot !== path.basename(snapshot)
     )
       throw new Error('Artifact receipt does not match this lifecycle');
-    const actual = await fingerprintArtifactSnapshot(snapshot);
+    const actual = await fingerprintArtifactSnapshot(snapshot, captureFile);
     if (
       receipt.sha256 !== actual.sha256 ||
       receipt.entries !== actual.entries ||
       receipt.bytes !== actual.bytes
     )
       throw new Error('Artifact snapshot differs from its preservation receipt');
+    return actual.captured;
   } catch {
     throw new AutopodError(
       'Saved artifact snapshot could not be verified. Restore its snapshot and receipt before finalizing; the settled worker was not restarted.',

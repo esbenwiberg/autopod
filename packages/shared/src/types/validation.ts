@@ -36,6 +36,8 @@ export interface ValidationInfrastructureFailure {
 }
 
 export interface ValidationResult {
+  /** Daemon-owned dispatch identity; absent on historical results. */
+  executionDispatchId?: string;
   podId: string;
   attempt: number;
   timestamp: string;
@@ -91,7 +93,8 @@ export interface SmokeResult {
 }
 
 export interface BuildResult {
-  status: 'pass' | 'fail';
+  /** A skipped build did not execute and is not passing build evidence. */
+  status: 'pass' | 'fail' | 'skip';
   output: string;
   duration: number;
   /**

@@ -32,6 +32,7 @@ export function createOperatorKill(
     podRepo.sourceAdoptions?.assertDeletable(podId);
     podRepo.deletionOwnership?.assertTaskAvailable(podId);
     const pod = podRepo.getOrThrow(podId);
+    podRepo.validationExecutions?.assertTaskSettled(podId);
     podRepo.sandboxWakeups?.assertPodReleasable(podId);
     if (pod.containerId) podRepo.sandboxWakeups?.assertReleasable(pod.containerId);
     clearPreviewTimer(podId);
@@ -47,6 +48,26 @@ export function createOperatorKill(
       );
     }
 
+    let expectedContainerId = pod.containerId;
+    let expectedWorktreePath = pod.worktreePath;
+    const assertDestructionAllowed = () => {
+      const current = podRepo.getOrThrow(podId);
+      if (
+        current.lifecycleGeneration !== pod.lifecycleGeneration ||
+        current.containerId !== expectedContainerId ||
+        current.worktreePath !== expectedWorktreePath
+      )
+        throw new AutopodError(
+          'Kill ownership changed; retained resources preserved',
+          'STALE_KILL',
+          409,
+        );
+      podRepo.validationExecutions?.assertTaskSettled(podId);
+      podRepo.sourceAdoptions?.assertDeletable(podId);
+      podRepo.deletionOwnership?.assertTaskAvailable(podId);
+    };
+    assertDestructionAllowed();
+
     emitActivityStatus(podId, 'Killing pod…');
     transition(pod, 'killing');
     validationAbortControllers.get(podId)?.abort();
@@ -57,6 +78,7 @@ export function createOperatorKill(
     const ownsKillLifecycle = () =>
       podRepo.getOrThrow(podId).lifecycleGeneration === pod.lifecycleGeneration;
     const cleanup = async () => {
+      assertDestructionAllowed();
       if (deps.launchConfiguration?.read(podId)?.intent === 'goal') {
         if (!deps.launchConfiguration.goals)
           throw new AutopodError('Native Goal controls are unavailable', 'GOAL_UNAVAILABLE', 503);
@@ -64,8 +86,10 @@ export function createOperatorKill(
         if (!ownsKillLifecycle()) return;
       }
       // Kill sidecars before the main container so they can't outlive their pod.
+      assertDestructionAllowed();
       await killSidecarsForPod(podId);
       if (!ownsKillLifecycle()) return;
+      assertDestructionAllowed();
       await cleanupTestRunBranches(podId);
       if (!ownsKillLifecycle()) return;
       // Kill container
@@ -79,10 +103,12 @@ export function createOperatorKill(
         if (!ownsKillLifecycle()) return;
         podRepo.sourceAdoptions?.assertReleasable(pod.containerId);
         podRepo.sandboxWakeups?.assertReleasable(pod.containerId);
+        assertDestructionAllowed();
         try {
           await cm.kill(pod.containerId);
           if (ownsLifecycle(podId, pod.lifecycleGeneration, pod.containerId)) {
             podRepo.update(podId, { containerId: null });
+            expectedContainerId = null;
           }
         } catch (err) {
           logger.warn({ err, podId }, 'Failed to kill container');
@@ -91,10 +117,12 @@ export function createOperatorKill(
       if (!ownsKillLifecycle()) return;
       // Remove the per-pod bridge network. Safe now that both the pod and
       // its sidecars are dead; Docker would otherwise refuse the remove.
+      assertDestructionAllowed();
       await destroyPodNetwork(podId);
       if (!ownsKillLifecycle()) return;
 
       // Abort runtime
+      assertDestructionAllowed();
       try {
         const runtime = runtimeRegistry.get(pod.runtime);
         await runtime.abort(podId);
@@ -106,6 +134,7 @@ export function createOperatorKill(
       // Cleanup worktree — always clear the DB path even if cleanup throws,
       // so a subsequent rework doesn't attempt recovery on a stale directory.
       if (pod.worktreePath) {
+        assertDestructionAllowed();
         podRepo.sourceAdoptions?.assertDeletable(podId);
         podRepo.sandboxWakeups?.assertPodReleasable(podId);
         if (pod.containerId) podRepo.sandboxWakeups?.assertReleasable(pod.containerId);
@@ -116,6 +145,7 @@ export function createOperatorKill(
         }
         if (!ownsKillLifecycle()) return;
         podRepo.update(podId, { worktreePath: null });
+        expectedWorktreePath = null;
       }
 
       // Cleanup per-pod conversation-history dirs on the host. Best
@@ -124,6 +154,7 @@ export function createOperatorKill(
         claude: cleanupClaudeState,
         codex: cleanupCodexState,
       };
+      assertDestructionAllowed();
       await runtimeStateDirs[pod.runtime]?.(podId)?.catch((err) => {
         logger.warn({ err, podId }, `Failed to cleanup ${pod.runtime} state dir`);
       });

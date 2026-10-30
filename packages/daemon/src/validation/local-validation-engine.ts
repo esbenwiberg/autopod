@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import type { Dirent } from 'node:fs';
 import { access, mkdir, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -10,7 +11,6 @@ import type {
   FactValidationResult,
   HealthResult,
   PageResult,
-  ReviewFindingCandidate,
   ReviewProgressAxis,
   ReviewProgressSnapshot,
   TaskReviewResult,
@@ -48,7 +48,7 @@ import {
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 import { runAgenticReview } from './review-agentic-runner.js';
-import { createFrozenReviewPacket, runReviewBatch } from './review-batch-runner.js';
+import { REVIEW_AXES, createFrozenReviewPacket, runReviewBatch } from './review-batch-runner.js';
 import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
 import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
 import { applyDiffFilterToParsed } from './review-finding-filter.js';
@@ -430,10 +430,11 @@ export function createLocalValidationEngine(
       }
 
       let stopMonitor: (() => void) | undefined;
+      let infrastructureFailure: ValidationInfrastructureFailure | undefined;
+      const completed: Partial<ValidationResult> = {};
 
       try {
         const skipPhases = config.skipPhases ?? [];
-        let infrastructureFailure: ValidationInfrastructureFailure | undefined;
 
         // ── Phase 0: Reset worktree to HEAD ─────────────────────────────
         // Untracked / uncommitted files must not influence validation.
@@ -567,6 +568,9 @@ export function createLocalValidationEngine(
             config.captureEvidenceIdentity,
           );
         }
+        const { infrastructureFailure: _interruptedLintFailure, ...completedLint } = lintResult;
+        completed.lint = completedLint;
+        completed.setup = setupResult;
         infrastructureFailure = lintResult.infrastructureFailure;
         callbacks?.onPhaseCompleted?.('lint', lintResult.status, lintResult);
 
@@ -580,6 +584,8 @@ export function createLocalValidationEngine(
           if (config.sastCommand) onProgress?.('Running SAST…');
           sastResult = await runSast(containerManager, config, log);
         }
+        const { infrastructureFailure: _interruptedSastFailure, ...completedSast } = sastResult;
+        completed.sast = completedSast;
         infrastructureFailure ??= sastResult.infrastructureFailure;
         callbacks?.onPhaseCompleted?.('sast', sastResult.status, sastResult);
 
@@ -599,6 +605,13 @@ export function createLocalValidationEngine(
           if (config.buildCommand) onProgress?.('Running build…');
           buildResult = await runBuild(containerManager, config, log);
         }
+        const { infrastructureFailure: _interruptedBuildFailure, ...completedBuild } = buildResult;
+        completed.smoke = {
+          status: buildResult.status,
+          build: completedBuild,
+          health: { status: 'skip', url: '', responseCode: null, duration: 0 },
+          pages: [],
+        };
         infrastructureFailure ??= buildResult.infrastructureFailure;
         callbacks?.onPhaseCompleted?.(
           'build',
@@ -625,6 +638,8 @@ export function createLocalValidationEngine(
                 )
               : { status: 'skip' as const, duration: 0 };
         }
+        const { infrastructureFailure: _interruptedTestFailure, ...completedTest } = testResult;
+        completed.test = completedTest;
         infrastructureFailure ??= testResult.infrastructureFailure;
         callbacks?.onPhaseCompleted?.('test', testResult.status, testResult);
 
@@ -657,6 +672,7 @@ export function createLocalValidationEngine(
                   duration: 0,
                 };
         }
+        if (completed.smoke) completed.smoke.health = healthResult;
         const infrastructureAwareHealth = healthResult as HealthResult & InfrastructureAwareResult;
         infrastructureFailure ??= infrastructureAwareHealth.infrastructureFailure;
         callbacks?.onPhaseCompleted?.('health', healthResult.status, healthResult);
@@ -931,13 +947,7 @@ export function createLocalValidationEngine(
             // Axes, synthesis, and (for repair runs) closure each have an
             // independent bounded reviewer phase.
             const reviewGuardrailMs = councilTimeoutMs * (priorActive.length > 0 ? 3 : 2);
-            const reviewProgressAxes: ReviewProgressAxis[] = [
-              'contract_completeness',
-              'security_authority',
-              'lifecycle_reliability',
-              'persistence_reproducibility',
-              'tests_integration',
-            ].map((axis) => ({
+            const reviewProgressAxes: ReviewProgressAxis[] = REVIEW_AXES.map((axis) => ({
               axis,
               status: 'queued',
               attempt: 0,
@@ -1304,7 +1314,11 @@ export function createLocalValidationEngine(
         if (err instanceof ValidationInterruptedError) {
           const reason = crashController.signal.aborted ? 'app-crashed' : 'user';
           log?.info({ podId: config.podId, reason }, 'Validation interrupted');
-          return makeInterruptedResult(config, startTime, err.message);
+          const interrupted = makeInterruptedResult(config, startTime, err.message);
+          // An abort is not termination evidence and cannot erase a native failure.
+          return infrastructureFailure
+            ? { ...interrupted, ...completed, infrastructureFailure, overall: 'fail' }
+            : interrupted;
         }
         throw err;
       } finally {
@@ -1421,7 +1435,7 @@ function makeSetupFailedResult(
     reviewSkipReason: infrastructureFailure
       ? 'Skipped — validation infrastructure failed'
       : 'Skipped — validation setup failed',
-    reviewSkipKind: infrastructureFailure ? 'upstream-failed' : null,
+    reviewSkipKind: infrastructureFailure ? 'upstream-failed' : undefined,
     ...(infrastructureFailure && { infrastructureFailure }),
     overall: 'fail',
     duration: Date.now() - startTime,
@@ -2052,7 +2066,7 @@ async function runFactValidation(
           throw new ValidationCommandInfrastructureError(replacementInfrastructureFailure);
         }
         const replacementPass =
-          replacementExists && replacementChanged && replacementCmd.exitCode === 0;
+          replacementExists === true && replacementChanged && replacementCmd.exitCode === 0;
         results.push({
           factId: fact.id,
           proves: replacement.proves ?? fact.proves,
@@ -2723,7 +2737,7 @@ async function collectHostFactAttachments(
   const attachments: NonNullable<FactCheckResult['attachments']> = [];
 
   async function walk(dir: string): Promise<void> {
-    let entries: Awaited<ReturnType<typeof readdir>>;
+    let entries: Dirent[];
     try {
       entries = await readdir(dir, { withFileTypes: true });
     } catch {
@@ -4496,8 +4510,9 @@ export function parseReviewJson(raw: string): {
     if (typeof parsed.reasoning !== 'string') return null;
     if (!Array.isArray(parsed.issues)) return null;
 
-    const requirementsCheck = Array.isArray(parsed.requirementsCheck)
-      ? parsed.requirementsCheck
+    const rawRequirementsCheck: unknown = parsed.requirementsCheck;
+    const requirementsCheck = Array.isArray(rawRequirementsCheck)
+      ? rawRequirementsCheck
           .filter(
             (item: unknown): item is Record<string, unknown> =>
               typeof item === 'object' &&

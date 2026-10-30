@@ -48,6 +48,19 @@ function build(pods: Pod[]) {
 }
 
 describe('SandboxTerminalReaper', () => {
+  it('retains a task-owned unreported validation dispatch even without a published failed result', async () => {
+    const terminal = pod('killed');
+    const deps = build([terminal]);
+    deps.podRepo.validationExecutions = {
+      assertTaskSettled: () => {
+        throw new Error('Execution outcome unreported');
+      },
+    } as NonNullable<PodRepository['validationExecutions']>;
+    await deps.reaper.runSweep();
+    expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
+    expect(deps.podRepo.update).not.toHaveBeenCalled();
+    expect(terminal.containerId).toBe('sandbox-pod-1');
+  });
   it('retains a failed artifact source until artifact finalization completes', async () => {
     const failed = pod('failed');
     failed.options = { agentMode: 'auto', output: 'artifact', validate: false };

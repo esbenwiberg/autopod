@@ -15,6 +15,8 @@ import type {
   ResourceCommitLiveDependencies,
 } from './resource-contracts.js';
 import { COMMIT_POLL_INTERVAL_MS } from './resource-policy.js';
+import { ValidationSupersededError } from './validation-ownership.js';
+import { assertValidationMutationSettled } from './validation-recovery-policy.js';
 
 export function createResourceCommitPolling(
   deps: ResourceCommitLiveDependencies,
@@ -29,6 +31,7 @@ export function createResourceCommitPolling(
       const current = (): Pod | null => {
         try {
           const pod = podRepo.getOrThrow(podId);
+          assertValidationMutationSettled(podRepo, podId);
           if (
             ownership.isCurrent() &&
             pod.status === 'running' &&
@@ -96,7 +99,10 @@ export function createResourceCommitPolling(
       const lastCommitAt = timeResult.exitCode === 0 ? timeResult.stdout.trim() : null;
       podRepo.update(podId, { commitCount, lastCommitAt });
       if (pod.executionTarget === 'sandbox') {
-        const decision = await deps.workspaceCheckpointController?.poll(podId);
+        const assertCurrent = () => {
+          if (!current()) throw new ValidationSupersededError();
+        };
+        const decision = await deps.workspaceCheckpointController?.poll(podId, assertCurrent);
         if (!current()) return;
         if (decision?.degraded)
           emitActivityStatus(
