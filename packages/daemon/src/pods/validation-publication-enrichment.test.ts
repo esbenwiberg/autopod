@@ -449,29 +449,32 @@ describe('immutable engine evidence and derived validation publication', () => {
     expect(f.ledger.evidence(podId, f.dispatch, validationResultHash(raw)).result).toEqual(raw);
   });
 
-  it('does not overwrite a retained screenshot through another attachment with the same store filename', async () => {
-    const f = fixture();
-    const ref = await f.store.write(
-      podId,
-      'fact',
-      'visible-Fact-0-fact.png',
-      Buffer.from('original fact'),
-    );
-    const fact = required(f.result.factValidation?.results[0]);
-    required(fact.attachments?.[0]).screenshot = ref;
-    required(f.result.factValidation).results.push({
-      ...fact,
-      attachments: [{ kind: 'screenshot', path: 'fact.PNG' }],
-    });
-    f.finish();
-    f.publish(podId, 1, f.result, { intermediate: true });
-    await f.collect();
-    expect(fact.attachments?.[0]?.screenshot).toBe(ref);
-    expect((await f.store.read(ref)).toString()).toBe('original fact');
-    expect(f.result.factValidation?.results[1]?.attachments?.[0]?.screenshot).toBeUndefined();
-    f.publish(podId, 1, f.result);
-    assertPublished(f, f.result);
-  });
+  it.each(['exact', 'case-alias'] as const)(
+    'does not overwrite a retained screenshot through another attachment with a %s store filename',
+    async (mode) => {
+      const f = fixture();
+      const ref = await f.store.write(
+        podId,
+        'fact',
+        mode === 'exact' ? 'visible-Fact-0-fact.png' : 'visible-fact-0-fact.png',
+        Buffer.from('original fact'),
+      );
+      const fact = required(f.result.factValidation?.results[0]);
+      required(fact.attachments?.[0]).screenshot = ref;
+      required(f.result.factValidation).results.push({
+        ...fact,
+        attachments: [{ kind: 'screenshot', path: 'fact.PNG' }],
+      });
+      f.finish();
+      f.publish(podId, 1, f.result, { intermediate: true });
+      await f.collect();
+      expect(fact.attachments?.[0]?.screenshot).toBe(ref);
+      expect((await f.store.read(ref)).toString()).toBe('original fact');
+      expect(f.result.factValidation?.results[1]?.attachments?.[0]?.screenshot).toBeUndefined();
+      f.publish(podId, 1, f.result);
+      assertPublished(f, f.result);
+    },
+  );
 
   it('rejects changes to engine fields, identity, array order, paths, usage and screenshot metadata before and after final publication', async () => {
     const f = fixture();

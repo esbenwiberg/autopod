@@ -23,11 +23,11 @@ function wouldOverwriteRetainedScreenshot(
   source: 'smoke' | 'fact',
   filename: string,
 ): boolean {
-  // Generated collector names already use .png, matching the store's
-  // extension-only normalization without folding a case-sensitive basename.
-  const target = path.join('screenshots', podId, source, filename);
+  // Conservatively protect aliases on both case-sensitive and insensitive hosts.
+  // This is collision detection only; canonical reference names preserve case.
+  const target = path.join('screenshots', podId, source, filename).toLowerCase();
   return [...(options.retainedScreenshots ?? [])].some(
-    (ref) => path.normalize(ref.relativePath) === target,
+    (ref) => path.normalize(ref.relativePath).toLowerCase() === target,
   );
 }
 
