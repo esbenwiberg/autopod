@@ -1,7 +1,6 @@
 import { AutopodError } from '@autopod/shared';
 import { isExpectedDockerError } from '../containers/docker-helpers.js';
 import { parseDiffFilePaths } from '../validation/review-context-builder.js';
-
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
 import {
   type AdoptedSourceValidationRequest,
@@ -17,7 +16,13 @@ import {
   reviewInfrastructureFailureLabel,
 } from './validation-infrastructure.js';
 import { ValidationSupersededError } from './validation-ownership.js';
-import { assertValidationExecutionSettled } from './validation-recovery-policy.js';
+import {
+  assertValidationExecutionSettled,
+  assertValidationMutationSettled,
+  captureValidationMutationGuard,
+  guardValidationContainer,
+  requiresValidationSettlement,
+} from './validation-recovery-policy.js';
 import {
   assertProtectedOperationalPathsInScope,
   getPodValidationSkipPhases,
@@ -92,6 +97,7 @@ export function createValidationRevalidationWorkflow(
       );
     assertExecutionTerminationVerified(podId);
     assertGuidanceCollected(podId);
+    assertValidationExecutionSettled(pod, podRepo.validationExecutions?.isSettled(pod));
     if (
       options?.adoptedSource &&
       (_deps.launchConfiguration?.read(podId)?.intent === 'goal' ||
@@ -113,6 +119,15 @@ export function createValidationRevalidationWorkflow(
       : undefined;
     const owned = <T>(operation: () => Promise<T>) =>
       adopted ? adopted.owned(operation) : operation();
+    let assertPreflight = captureValidationMutationGuard(podRepo, pod);
+    const preflight = async <T>(operation: () => Promise<T>): Promise<T> => {
+      assertPreflight();
+      try {
+        return await owned(operation);
+      } finally {
+        assertPreflight();
+      }
+    };
     const force = options?.force ?? false;
     if (
       pod.status !== 'failed' &&
@@ -177,12 +192,14 @@ export function createValidationRevalidationWorkflow(
     } else {
       emitActivityStatus(podId, 'Pulling latest changes from remote branch…');
       try {
-        const pullResult = await worktreeManager.pullBranch(
-          pod.worktreePath,
-          await resolveGitCredential(profile),
-        );
+        assertPreflight();
+        const pat = await resolveGitCredential(profile);
+        assertPreflight();
+        const pullResult = await worktreeManager.pullBranch(revalidationWorktreePath, pat);
+        assertPreflight();
         newCommits = pullResult.newCommits;
       } catch (err) {
+        assertPreflight();
         if (!force) throw err;
         logger.warn({ err, podId }, 'pullBranch failed — proceeding (force=true)');
         emitActivityStatus(podId, 'Could not pull from remote — revalidating local worktree');
@@ -215,7 +232,7 @@ export function createValidationRevalidationWorkflow(
     if (!adopted) podRepo.update(podId, { validationAttempts: 0 });
 
     // Pre-push security scan: human-pushed fixes also need to clear the gate.
-    await owned(() => runPushCheckpointScan(pod, profile));
+    await preflight(() => runPushCheckpointScan(pod, profile));
 
     // Transition to validating
     if (!pod.containerId && force) {
@@ -223,7 +240,9 @@ export function createValidationRevalidationWorkflow(
         'Resume: container missing — re-provisioning for validation only',
       );
     }
-    transition(pod, 'validating', { failureReason: null });
+    assertPreflight();
+    const validationPod = transition(pod, 'validating', { failureReason: null });
+    assertPreflight = captureValidationMutationGuard(podRepo, validationPod);
 
     // Re-run validation (force=true restarts container, but we don't want agent retry on failure)
     const attempt = adopted ? pod.validationAttempts + 1 : 1;
@@ -249,7 +268,9 @@ export function createValidationRevalidationWorkflow(
       }
 
       // Restart the container with updated worktree
-      const cm = containerManagerFactory.get(pod.executionTarget);
+      const cm = guardValidationContainer(containerManagerFactory.get(pod.executionTarget), () =>
+        assertPreflight(),
+      );
       try {
         if (adopted) {
           const status = await owned(() => cm.getStatus(pod.containerId as string));
@@ -312,7 +333,7 @@ export function createValidationRevalidationWorkflow(
           validationSyncOk =
             err instanceof ValidationWorkspaceReconcileError
               ? false
-              : await tryRecoverAfterWorkspaceSyncFailure(pod, err, 'validation');
+              : await tryRecoverAfterWorkspaceSyncFailure(validationPod, err, 'validation');
         }
       }
       if (!validationSyncOk) {
@@ -472,6 +493,18 @@ export function createValidationRevalidationWorkflow(
       if (isTerminalState(s2.status) || s2.status === 'killing') {
         return { newCommits, result: 'fail' };
       }
+
+      if (requiresValidationSettlement({ lastValidationResult: result })) {
+        if (result.infrastructureFailure?.code === 'VALIDATION_ENGINE_TERMINATION_UNVERIFIED') {
+          emitActivityStatus(
+            podId,
+            'Validation engine failed without termination evidence; retain original source and reports. Retry and source mutation remain blocked.',
+          );
+          transition(s2, 'failed');
+        } else await parkOnValidationInfrastructureFailure(s2, result);
+        return { newCommits, result: 'fail' };
+      }
+      assertValidationMutationSettled(podRepo, podId);
 
       const skipValidatedPod = options?.checksOnly
         ? undefined

@@ -38,11 +38,13 @@ export interface CheckpointRecordStore {
 }
 
 export interface WorkspaceCheckpointControllerDependencies {
-  observe(podId: string): Promise<WorkspaceFingerprint>;
+  captureAuthority(podId: string, reason: CheckpointReason): () => void;
+  observe(podId: string, assertCurrent: () => void): Promise<WorkspaceFingerprint>;
   checkpoint(
     podId: string,
     reason: CheckpointReason,
     sequence: number,
+    assertCurrent: () => void,
   ): Promise<WorkspaceCheckpointResult>;
   records: CheckpointRecordStore;
   now?: () => number;
@@ -55,7 +57,10 @@ export interface WorkspaceCheckpointControllerDependencies {
   maxConcurrent?: number;
   retryDelaysMs?: readonly number[];
   /** Resume a host-imported checkpoint without reading the sandbox again. */
-  materializeImported?: (record: CheckpointRecord) => Promise<WorkspaceCheckpointResult>;
+  materializeImported?: (
+    record: CheckpointRecord,
+    assertCurrent: () => void,
+  ) => Promise<WorkspaceCheckpointResult>;
 }
 
 export interface CheckpointDecision {
@@ -73,7 +78,10 @@ function sameFingerprint(a: WorkspaceFingerprint, b: WorkspaceFingerprint): bool
  * duplicate requests and only retries failures explicitly marked retryable.
  */
 export class WorkspaceCheckpointController {
-  private readonly inFlight = new Map<string, Promise<CheckpointDecision>>();
+  private readonly inFlight = new Map<
+    string,
+    { promise: Promise<CheckpointDecision>; assertCurrent: () => void }
+  >();
   private readonly lastFingerprint = new Map<string, WorkspaceFingerprint>();
   private readonly lastAttemptAt = new Map<string, number>();
   private active = 0;
@@ -97,8 +105,20 @@ export class WorkspaceCheckpointController {
     this.retryDelaysMs = deps.retryDelaysMs ?? [250, 1_000, 4_000];
   }
 
-  async poll(podId: string): Promise<CheckpointDecision> {
-    const fingerprint = await this.deps.observe(podId);
+  private authority(podId: string, reason: CheckpointReason, caller?: () => void) {
+    const captured = this.deps.captureAuthority(podId, reason);
+    const check = () => {
+      captured();
+      caller?.();
+    };
+    check();
+    return check;
+  }
+
+  async poll(podId: string, caller?: () => void): Promise<CheckpointDecision> {
+    const assertCurrent = this.authority(podId, 'interval', caller);
+    const fingerprint = await this.deps.observe(podId, assertCurrent);
+    assertCurrent();
     const previous = this.lastFingerprint.get(podId);
     const changed =
       fingerprint.dirty &&
@@ -109,15 +129,19 @@ export class WorkspaceCheckpointController {
     this.lastFingerprint.set(podId, fingerprint);
     const elapsed = this.now() - (this.lastAttemptAt.get(podId) ?? 0);
     if (!changed || elapsed < this.intervalMs) return this.degradedDecision(podId, fingerprint);
-    return this.run(podId, 'interval', fingerprint);
+    return this.run(podId, 'interval', fingerprint, assertCurrent);
   }
 
   async request(
     podId: string,
     reason: Exclude<CheckpointReason, 'interval'>,
     fingerprint?: WorkspaceFingerprint,
+    caller?: () => void,
   ): Promise<CheckpointDecision> {
-    return this.run(podId, reason, fingerprint ?? (await this.deps.observe(podId)));
+    const assertCurrent = this.authority(podId, reason, caller);
+    const observed = fingerprint ?? (await this.deps.observe(podId, assertCurrent));
+    assertCurrent();
+    return this.run(podId, reason, observed, assertCurrent);
   }
 
   async mayDestroy(podId: string): Promise<boolean> {
@@ -137,7 +161,9 @@ export class WorkspaceCheckpointController {
         !this.deps.materializeImported
       )
         continue;
-      const result = await this.deps.materializeImported(record);
+      const assertCurrent = this.authority(record.podId, 'reconcile');
+      const result = await this.deps.materializeImported(record, assertCurrent);
+      assertCurrent();
       const verified = result.lineageVerified && result.promoted && result.materialized;
       await this.deps.records.save({
         ...record,
@@ -172,13 +198,18 @@ export class WorkspaceCheckpointController {
     podId: string,
     reason: CheckpointReason,
     fingerprint: WorkspaceFingerprint,
+    assertCurrent: () => void,
   ): Promise<CheckpointDecision> {
+    assertCurrent();
     const current = this.inFlight.get(podId);
-    if (current) return current;
-    const promise = this.execute(podId, reason, fingerprint).finally(() =>
+    if (current) {
+      current.assertCurrent();
+      return current.promise;
+    }
+    const promise = this.execute(podId, reason, fingerprint, assertCurrent).finally(() =>
       this.inFlight.delete(podId),
     );
-    this.inFlight.set(podId, promise);
+    this.inFlight.set(podId, { promise, assertCurrent });
     return promise;
   }
 
@@ -210,7 +241,9 @@ export class WorkspaceCheckpointController {
     podId: string,
     reason: CheckpointReason,
     fingerprint: WorkspaceFingerprint,
+    assertCurrent: () => void,
   ): Promise<CheckpointDecision> {
+    assertCurrent();
     const waitMs = await this.acquire();
     const started = this.now();
     this.lastAttemptAt.set(podId, started);
@@ -218,13 +251,19 @@ export class WorkspaceCheckpointController {
     let result: WorkspaceCheckpointResult;
     let shouldRetry = true;
     try {
+      assertCurrent();
       do {
         attempts++;
-        result = await this.deps.checkpoint(podId, reason, await this.nextSequence(podId));
+        assertCurrent();
+        const sequence = await this.nextSequence(podId);
+        assertCurrent();
+        result = await this.deps.checkpoint(podId, reason, sequence, assertCurrent);
+        assertCurrent();
         shouldRetry = !!result.error?.retryable && attempts <= this.retryDelaysMs.length;
         if (!shouldRetry) break;
         const base = this.retryDelaysMs[attempts - 1] ?? 0;
         await this.sleep(Math.floor(base * (0.5 + this.random())));
+        assertCurrent();
       } while (shouldRetry);
       const verified = result.lineageVerified && result.promoted && result.materialized;
       await this.deps.records.save({

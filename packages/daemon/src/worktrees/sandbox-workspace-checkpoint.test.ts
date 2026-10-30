@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { verifyValidationRecoverySource } from '../pods/validation-recovery-reports.js';
 import { createMockContainerManager } from '../test-utils/mock-helpers.js';
 import {
   checkpointSandboxWorkspace,
@@ -71,6 +72,51 @@ describe('checkpointSandboxWorkspace', () => {
     await rm(tmpRoot, { recursive: true, force: true });
   });
 
+  it('retains physical host source and ignored reports if authority is lost after guest export before promotion', async () => {
+    const seed = path.join(tmpRoot, 'seed');
+    const host = path.join(tmpRoot, 'host');
+    const sandbox = path.join(tmpRoot, 'guest');
+    await git(tmpRoot, ['init', '--initial-branch=main', seed]);
+    await writeFile(path.join(seed, 'tracked.txt'), 'original source');
+    await git(seed, ['add', '.']);
+    await git(seed, ['commit', '-m', 'original']);
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, host]);
+    await git(tmpRoot, ['clone', '--no-hardlinks', seed, sandbox]);
+    await writeFile(path.join(host, 'ignored-report.txt'), 'original host report');
+    await writeFile(path.join(sandbox, 'ignored-report.txt'), 'original guest report');
+    await writeFile(path.join(sandbox, 'tracked.txt'), 'new source bytes');
+    const before = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: host })).stdout;
+    const cm = createSandboxContainerManager(sandbox);
+    let held = false;
+    const read = vi.mocked(cm.readFileBinary).getMockImplementation();
+    if (!read) throw new Error('Missing physical guest file reader');
+    vi.mocked(cm.readFileBinary).mockImplementation(async (...args) => {
+      const bytes = await read(...args);
+      held = true;
+      return bytes;
+    });
+    const result = await checkpointSandboxWorkspace({
+      containerManager: cm,
+      containerId: 'guest',
+      podId: path.basename(tmpRoot),
+      worktreePath: host,
+      sequence: 1,
+      assertCurrent: () => {
+        if (held) throw new Error('Validation dispatch now unresolved');
+      },
+    });
+    expect(result.promoted).toBe(false);
+    expect(result.materialized).toBe(false);
+    expect((await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: host })).stdout).toBe(before);
+    expect(await readFile(path.join(host, 'tracked.txt'), 'utf8')).toBe('original source');
+    expect(await readFile(path.join(host, 'ignored-report.txt'), 'utf8')).toBe(
+      'original host report',
+    );
+    expect(await readFile(path.join(sandbox, 'ignored-report.txt'), 'utf8')).toBe(
+      'original guest report',
+    );
+  });
+
   it('can publish again after recapturing unchanged work and resuming in a fresh sandbox', async () => {
     const seed = path.join(tmpRoot, 'seed');
     const remote = path.join(tmpRoot, 'remote.git');
@@ -90,6 +136,7 @@ describe('checkpointSandboxWorkspace', () => {
     await git(sandbox, ['commit', '-am', 'implementation']);
     const capture = (directory: string, sequence: number) =>
       checkpointSandboxWorkspace({
+        assertCurrent: () => {},
         containerManager: createSandboxContainerManager(directory),
         containerId: 'sandbox-1',
         podId: path.basename(tmpRoot),
@@ -133,6 +180,7 @@ describe('checkpointSandboxWorkspace', () => {
     const containerManager = createSandboxContainerManager(sandbox);
 
     const result = await checkpointSandboxWorkspace({
+      assertCurrent: () => {},
       containerManager,
       containerId: 'sandbox-1',
       podId: path.basename(tmpRoot),
@@ -155,10 +203,20 @@ describe('checkpointSandboxWorkspace', () => {
     await expect(
       resolveSandboxCheckpointSourceHead(host, 'different-pod', result.snapshotCommit),
     ).resolves.toBeNull();
+    await expect(
+      verifyValidationRecoverySource(host, path.basename(tmpRoot), result.snapshotCommit),
+    ).resolves.toBeUndefined();
+    await expect(
+      verifyValidationRecoverySource(host, 'different-pod', result.snapshotCommit),
+    ).rejects.toMatchObject({ code: 'VALIDATION_SOURCE_PRESERVATION_REQUIRED' });
     await expect(readFile(path.join(host, 'tracked.txt'), 'utf8')).resolves.toBe(
       'changed in sandbox\n',
     );
     await expect(readFile(path.join(host, 'new.txt'), 'utf8')).resolves.toBe('new sandbox file\n');
+    await writeFile(path.join(host, 'tracked.txt'), 'unexpected host mutation\n');
+    await expect(
+      verifyValidationRecoverySource(host, path.basename(tmpRoot), result.snapshotCommit),
+    ).rejects.toMatchObject({ code: 'VALIDATION_SOURCE_PRESERVATION_REQUIRED' });
   });
 
   it('materializes committed uncommitted mixed empty and net-zero sandbox snapshots', async () => {
@@ -220,6 +278,7 @@ describe('checkpointSandboxWorkspace', () => {
       await scenario.mutate(sandbox);
 
       const result = await checkpointSandboxWorkspace({
+        assertCurrent: () => {},
         containerManager: createSandboxContainerManager(sandbox),
         containerId: `sandbox-${scenario.name}`,
         podId: `${path.basename(tmpRoot)}-${scenario.name}`,
@@ -270,6 +329,7 @@ describe('checkpointSandboxWorkspace', () => {
     const containerManager = createSandboxContainerManager(sandbox);
 
     const result = await checkpointSandboxWorkspace({
+      assertCurrent: () => {},
       containerManager,
       containerId: 'sandbox-1',
       podId: path.basename(tmpRoot),
@@ -302,6 +362,7 @@ describe('checkpointSandboxWorkspace', () => {
     await writeFile(path.join(sandbox, 'tracked.txt'), 'checkpoint one\n');
     const containerManager = createSandboxContainerManager(sandbox);
     const first = await checkpointSandboxWorkspace({
+      assertCurrent: () => {},
       containerManager,
       containerId: 'sandbox-1',
       podId: path.basename(tmpRoot),
@@ -314,6 +375,7 @@ describe('checkpointSandboxWorkspace', () => {
     await git(sandbox, ['commit', '-m', 'agent commit']);
     await writeFile(path.join(sandbox, 'tracked.txt'), 'checkpoint two\n');
     const second = await checkpointSandboxWorkspace({
+      assertCurrent: () => {},
       containerManager,
       containerId: 'sandbox-1',
       podId: path.basename(tmpRoot),
@@ -349,6 +411,7 @@ describe('checkpointSandboxWorkspace', () => {
     await git(sandbox, ['commit', '-m', 'agent correction']);
 
     const result = await checkpointSandboxWorkspace({
+      assertCurrent: () => {},
       containerManager: createSandboxContainerManager(sandbox),
       containerId: 'sandbox-1',
       podId: path.basename(tmpRoot),
@@ -401,6 +464,7 @@ describe('checkpointSandboxWorkspace', () => {
     await git(sandbox, ['commit', '-m', 'agent commit']);
 
     const result = await checkpointSandboxWorkspace({
+      assertCurrent: () => {},
       containerManager: createSandboxContainerManager(sandbox),
       containerId: 'sandbox-1',
       podId: path.basename(tmpRoot),
@@ -435,7 +499,8 @@ describe('observeSandboxWorkspace', () => {
     await rm(tmpRoot, { recursive: true, force: true });
   });
 
-  const observe = () => observeSandboxWorkspace(createSandboxContainerManager(sandbox), 'sandbox');
+  const observe = () =>
+    observeSandboxWorkspace(createSandboxContainerManager(sandbox), 'sandbox', () => {});
 
   it('reports a clean tree as clean', async () => {
     const clean = await observe();

@@ -203,7 +203,7 @@ describe('validation workspace material boundary', () => {
     await writeFile(path.join(f.workspace, "worker's report.md"), 'untracked report\n');
     const before = await identity(f.workspace);
     const gitlink = await readFile(path.join(f.host, '.git'), 'utf8');
-    const transfer = createWorkspaceTransfer({ logger });
+    const transfer = createWorkspaceTransfer({ logger, captureAuthority: () => () => {} });
     const preparation = createValidationWorkspace({
       logger,
       syncWorkspaceBack: transfer.syncWorkspaceBack,

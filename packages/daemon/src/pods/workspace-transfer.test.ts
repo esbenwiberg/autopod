@@ -175,7 +175,7 @@ describe('workspace transfer material boundary', () => {
     const f = await fixture(root);
     const before = await sourceIdentity(f.workspace);
     const gitlink = await readFile(path.join(f.host, '.git'), 'utf8');
-    const transfer = createWorkspaceTransfer({ logger });
+    const transfer = createWorkspaceTransfer({ logger, captureAuthority: () => () => {} });
 
     await expect(
       transfer.syncWorkspaceBack('container', f.host, f.cm, 'pod-mirror'),
@@ -210,7 +210,7 @@ describe('workspace transfer material boundary', () => {
     const source = await sourceIdentity(f.workspace);
 
     await expect(
-      createWorkspaceTransfer({ logger }).syncWorkspaceBack(
+      createWorkspaceTransfer({ logger, captureAuthority: () => () => {} }).syncWorkspaceBack(
         'container',
         f.host,
         f.cm,
@@ -240,7 +240,12 @@ describe('workspace transfer material boundary', () => {
     const gitlink = await readFile(path.join(f.host, '.git'), 'utf8');
 
     await expect(
-      createWorkspaceTransfer({ logger }).syncWorkspaceBack('container', f.host, f.cm, 'pod-stage'),
+      createWorkspaceTransfer({ logger, captureAuthority: () => () => {} }).syncWorkspaceBack(
+        'container',
+        f.host,
+        f.cm,
+        'pod-stage',
+      ),
     ).rejects.toBe(archiveError);
 
     expect(await readFile(path.join(f.host, 'tracked.txt'), 'utf8')).toBe('baseline\n');
@@ -262,7 +267,7 @@ describe('workspace transfer material boundary', () => {
       vi.mocked(f.cm.execInContainer).mockRejectedValue(new Error('exec unavailable'));
 
       await expect(
-        createWorkspaceTransfer({ logger }).syncWorkspaceBack(
+        createWorkspaceTransfer({ logger, captureAuthority: () => () => {} }).syncWorkspaceBack(
           'container',
           f.host,
           f.cm,
@@ -290,7 +295,7 @@ describe('workspace transfer material boundary', () => {
     vi.mocked(f.cm.execInContainer).mockRejectedValue(new Error('exec unavailable'));
 
     await expect(
-      createWorkspaceTransfer({ logger }).syncWorkspaceBack(
+      createWorkspaceTransfer({ logger, captureAuthority: () => () => {} }).syncWorkspaceBack(
         'container',
         f.host,
         f.cm,
@@ -311,12 +316,10 @@ describe('workspace transfer material boundary', () => {
     await rm(path.join(f.host, 'tracked.txt'));
 
     await expect(
-      createWorkspaceTransfer({ logger }).recoverWorktreeFromContainer(
-        'container',
-        f.host,
-        f.cm,
-        'pod-live',
-      ),
+      createWorkspaceTransfer({
+        logger,
+        captureAuthority: () => () => {},
+      }).recoverWorktreeFromContainer('container', f.host, f.cm, 'pod-live'),
     ).resolves.toBe(true);
 
     await assertPublished(f, 'pod-live');

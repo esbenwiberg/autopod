@@ -5,7 +5,10 @@ describe('preview timer ownership', () => {
   it('replaces and unrefs timers, stops the exact captured target once and leaves no timer', async () => {
     vi.useFakeTimers();
     const f = createResourceFixture();
+    f.podRepo.update('prepare', { containerId: 'old' });
     f.timers.schedulePreviewAutoStop('prepare', 'old', 'local');
+    f.sandbox();
+    f.podRepo.update('prepare', { containerId: 'new' });
     f.timers.schedulePreviewAutoStop('prepare', 'new', 'sandbox');
     expect(vi.getTimerCount()).toBe(1);
     await vi.advanceTimersByTimeAsync(600000);
@@ -20,6 +23,7 @@ describe('preview timer ownership', () => {
       throw new Error('Synthetic proxy close');
     });
     const owner = createResourcePreviewTimers({ ...f.core, stopSandboxPreviewProxy: stop });
+    f.podRepo.update('prepare', { containerId: 'other' });
     owner.schedulePreviewAutoStop('prepare', 'other', 'local');
     f.timers.clearPreviewTimer('prepare');
     expect(vi.getTimerCount()).toBe(1);
@@ -33,6 +37,7 @@ describe('preview timer ownership', () => {
     vi.useFakeTimers();
     const f = createResourceFixture();
     const set = vi.spyOn(globalThis, 'setTimeout');
+    f.podRepo.update('prepare', { containerId: 'container' });
     f.timers.schedulePreviewAutoStop('prepare', 'container', 'local');
     const timer = set.mock.results[0]?.value;
     expect(timer.hasRef()).toBe(false);

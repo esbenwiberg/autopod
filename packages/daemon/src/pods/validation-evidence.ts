@@ -5,6 +5,7 @@ import type { ContainerManager } from '../interfaces/container-manager.js';
 import { collectFactScreenshots, collectScreenshots } from '../validation/screenshot-collector.js';
 import type { WorkspaceCheckpointResult } from '../worktrees/sandbox-workspace-checkpoint.js';
 import type { ScreenshotStore } from './screenshot-store.js';
+import { requiresValidationSettlement } from './validation-recovery-policy.js';
 
 interface ValidationEvidenceDependencies {
   logger: Pick<Logger, 'info' | 'warn'>;
@@ -49,6 +50,13 @@ export function createValidationEvidence(deps: ValidationEvidenceDependencies): 
     result: ValidationResult,
     initialValidationSyncOk: boolean,
   ): Promise<boolean> {
+    if (requiresValidationSettlement({ lastValidationResult: result })) {
+      emitActivityStatus(
+        podId,
+        'Validation termination is unverified; original source and reports retained without checkpoint or sync commands.',
+      );
+      return false;
+    }
     let validationSyncOk = initialValidationSyncOk;
     const hasFactScreenshotEvidence = result.factValidation?.results.some((fact) =>
       fact.attachments?.some(

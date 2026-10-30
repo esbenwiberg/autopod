@@ -8,6 +8,7 @@ import {
 import type { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
 
 interface WorkspacePreservationDependencies {
+  captureAuthority(pod: Pod): () => void;
   getContainerManager(target: Pod['executionTarget']): ContainerManager;
   syncWorkspaceBack(
     containerId: string,
@@ -41,15 +42,20 @@ export function createWorkspacePreservation(deps: WorkspacePreservationDependenc
   const sandboxCheckpointRuns = new Map<string, Promise<WorkspaceCheckpointResult>>();
 
   async function preservePodWorkspace(pod: Pod, reason: string): Promise<void> {
+    const assertCurrent = deps.captureAuthority(pod);
+    assertCurrent();
     if (!pod.containerId || !pod.worktreePath) return;
     const cm = getContainerManager(pod.executionTarget);
     if (pod.executionTarget === 'sandbox') {
       const status = await cm.getStatus(pod.containerId);
+      assertCurrent();
       if (status === 'unknown') {
         throw new Error(`Sandbox ${pod.containerId} is unavailable for workspace preservation`);
       }
       if (status === 'stopped') {
+        assertCurrent();
         await cm.start(pod.containerId);
+        assertCurrent();
       }
     }
     if (pod.executionTarget === 'sandbox') {
@@ -81,6 +87,8 @@ export function createWorkspacePreservation(deps: WorkspacePreservationDependenc
   }
 
   async function checkpointSandboxWorkspaceForPod(pod: Pod): Promise<WorkspaceCheckpointResult> {
+    const assertCurrent = deps.captureAuthority(pod);
+    assertCurrent();
     if (!pod.containerId || !pod.worktreePath) {
       return {
         sequence: 0,
@@ -106,7 +114,13 @@ export function createWorkspacePreservation(deps: WorkspacePreservationDependenc
     const existing = sandboxCheckpointRuns.get(pod.id);
     if (existing) return existing;
     if (workspaceCheckpointController) {
-      const decision = await workspaceCheckpointController.request(pod.id, 'completion');
+      const decision = await workspaceCheckpointController.request(
+        pod.id,
+        'completion',
+        undefined,
+        assertCurrent,
+      );
+      assertCurrent();
       if (decision.result) return decision.result;
     }
     const run = (sandboxWorkspaceCheckpoint ?? checkpointSandboxWorkspace)({
@@ -115,6 +129,7 @@ export function createWorkspacePreservation(deps: WorkspacePreservationDependenc
       podId: pod.id,
       worktreePath: pod.worktreePath,
       sequence: Date.now(),
+      assertCurrent,
     }).finally(() => sandboxCheckpointRuns.delete(pod.id));
     sandboxCheckpointRuns.set(pod.id, run);
     return run;

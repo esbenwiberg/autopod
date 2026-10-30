@@ -37,6 +37,32 @@ function makeDismiss(
 // ── applyOverrides ───────────────────────────────────────────────────────────
 
 describe('applyOverrides', () => {
+  it.each(['old review finding', 'unrelated finding'])(
+    'cannot dismiss infrastructure failure with %s',
+    (finding) => {
+      const result = makeBaseResult({
+        test: { status: 'skip', duration: 1, stdout: 'FAIL original partial assertion' },
+        infrastructureFailure: {
+          phase: 'test',
+          code: 'EXEC_EXIT_UNVERIFIED',
+          message: 'Unknown test exit',
+          retryable: false,
+        },
+        taskReview:
+          finding === 'old review finding'
+            ? { status: 'fail', reasoning: 'Earlier review', issues: [finding] }
+            : null,
+      });
+      const patched = applyOverrides(result, [makeDismiss('task_review', finding)]);
+      expect(patched.overall).toBe('fail');
+      expect(patched.infrastructureFailure).toEqual(result.infrastructureFailure);
+      expect(patched.test).toEqual(result.test);
+      expect(result.taskReview?.issues ?? []).toEqual(
+        finding === 'old review finding' ? [finding] : [],
+      );
+    },
+  );
+
   it('keeps a shared rendered issue until every canonical finding is dismissed', () => {
     const result = makeBaseResult({
       taskReview: {

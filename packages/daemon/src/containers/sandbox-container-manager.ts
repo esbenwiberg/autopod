@@ -39,6 +39,7 @@ import {
   extractManagedSandboxOutput,
 } from '../managed/output-extraction.js';
 import { assertSourceResourceReleasable } from '../pods/source-custody-guards.js';
+import { assertValidationResourceSettled } from '../pods/validation-execution-evidence.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
 import {
   CGROUP_EXECUTION_METADATA_PROBE,
@@ -144,6 +145,10 @@ export class SandboxContainerManager implements ContainerManager {
     );
   }
 
+  get executionResourceScope(): string | undefined {
+    return this.client.executionResourceScope;
+  }
+
   get supportsStreamingExec(): boolean {
     return typeof this.client.execStream === 'function';
   }
@@ -169,6 +174,9 @@ export class SandboxContainerManager implements ContainerManager {
         registryCredentials: config.registryCredentials,
         resolveImageDigest: config.resolveImageDigest,
         wakeupJournal: options.wakeupJournal,
+        assertWakeAllowed: (id) => {
+          if (options.managedDatabase) assertValidationResourceSettled(options.managedDatabase, id);
+        },
         assertReleaseAllowed: (id) => {
           if (options.managedDatabase) assertSourceResourceReleasable(options.managedDatabase, id);
         },
@@ -625,7 +633,9 @@ for root in sys.argv[1:]:
     // The platform auto-suspends idle sandboxes (memory snapshot after ~15 min),
     // which a human workspace session will routinely hit. resume() is idempotent —
     // it early-returns when the sandbox is already Running.
-    await this.client.resume(containerId);
+    options.assertCurrent?.();
+    await this.client.resume(containerId, { assertCurrent: options.assertCurrent });
+    options.assertCurrent?.();
     // Mirror the Docker terminal: cd into the workspace, then prefer a persistent
     // tmux session ("new-session -A -s main" creates or reattaches, so WebSocket
     // reconnects resume where the user left off) and fall back to a login bash.
@@ -638,6 +648,7 @@ for root in sys.argv[1:]:
       'exec tmux new-session -A -s main \\; set -g mouse on || ' +
       'exec /bin/bash -l';
     return this.client.attachTerminal(containerId, {
+      assertCurrent: options.assertCurrent,
       cols: options.cols,
       rows: options.rows,
       shellCommand,

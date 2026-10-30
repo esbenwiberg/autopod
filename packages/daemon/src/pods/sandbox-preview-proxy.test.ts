@@ -24,6 +24,7 @@ describe('sandbox preview proxy', () => {
     });
 
     const result = await fetchSandboxPreview({
+      assertCurrent: () => {},
       containerId: 'sandbox-1',
       containerManager,
       method: 'POST',
@@ -67,6 +68,7 @@ describe('sandbox preview proxy', () => {
     });
 
     const proxy = await startSandboxPreviewProxy({
+      assertCurrent: () => {},
       podId: 'pod-1',
       containerId: 'sandbox-1',
       hostPort: 0,

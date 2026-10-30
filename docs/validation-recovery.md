@@ -35,7 +35,7 @@ Eligibility is calculated by the daemon, not inferred from an attempt label.
 }
 ```
 
-It returns `202` with `podId`, `action`, `requestId`, and `alreadyRunning`.
+It returns `202` with `{ "ok": true, "accepted": true }`.
 Execution is detached from the HTTP connection. Poll GET to observe it. Identical
 in-flight requests coalesce; competing actions and stale generations/results
 conflict. Request errors remain available for the same generation and result.
@@ -71,5 +71,16 @@ available through the existing log expansion.
   is now covered by [external-delivery-recovery.md](external-delivery-recovery.md),
   with report recovery explicitly pending and original resources retained.
 
+This change does not deploy a daemon or mutate/recover any live pod.
+
+## Unverified execution settlement and recovery budgets
+
+Use [validation execution recovery](validation-execution-recovery.md) when an unverified
+execution blocks both controls. The read-only `ap reconcile-validation <full-pod-id> --json`
+command explains exact ownership and legacy-evidence eligibility. Unsupported destructive
+reconciliation remains blocked: the current provider cannot prove final source/report
+preservation while the original execution remains unknown. Original resources are retained.
+The original failure and retry accounting remain unchanged. Budget selection, stage retry
+authorization, code repair and checks-only execution are separate operations.
 Installation does not itself request a worker retry or waive validation. Recovery
 operations remain explicit operator actions.

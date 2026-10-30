@@ -1,24 +1,76 @@
-import { AutopodError, type Pod } from '@autopod/shared';
+import { AutopodError, type Pod, type ValidationInfrastructureFailure } from '@autopod/shared';
+import type { ContainerManager } from '../interfaces/container-manager.js';
 import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
+import type { PodRepository } from './pod-repository.js';
+import { captureValidationOwnership } from './validation-ownership.js';
+
+/** No current ordinary-validation adapter supplies qualified final-content proof. */
+export function assertValidationFinalContentSupported(): never {
+  throw new AutopodError(
+    'The provider cannot prove this exact validation execution is quiescent or preserve an immutable final source/report snapshot. Retain original resources; do not resume or delete them, or reuse an older export as final evidence.',
+    'VALIDATION_FINAL_CONTENT_UNVERIFIED',
+    409,
+  );
+}
 
 /** Suspension and a failed command are not proof that an old execution settled. */
-export function assertValidationExecutionSettled(pod: Pod): void {
-  const failure = pod.lastValidationResult?.infrastructureFailure;
-  if (
-    failure &&
-    (['EXEC_EXIT_UNVERIFIED', 'CONTINUATION_OUTCOME_UNVERIFIED'].includes(failure.code) ||
+export function requiresValidationSettlement(pod: Pick<Pod, 'lastValidationResult'>): boolean {
+  return requiresValidationFailureSettlement(pod.lastValidationResult?.infrastructureFailure);
+}
+export function requiresValidationFailureSettlement(
+  failure: ValidationInfrastructureFailure | undefined,
+): boolean {
+  return (
+    !!failure &&
+    ([
+      'EXEC_EXIT_UNVERIFIED',
+      'CONTINUATION_OUTCOME_UNVERIFIED',
+      'AZURE_SANDBOX_EXEC_INVALID_RESPONSE',
+      'VALIDATION_ENGINE_TERMINATION_UNVERIFIED',
+    ].includes(failure.code) ||
       failure.execution?.cleanup === 'failed' ||
       failure.execution?.cleanup === 'unverified')
-  )
+  );
+}
+export function assertValidationExecutionSettled(pod: Pod, settled = false): void {
+  if (requiresValidationSettlement(pod) && !settled)
     throw new AutopodError(
-      'Validation execution termination is unverified. Retain source and reports; reconcile the original execution before retrying or starting a repair worker. A stopped sandbox is not proof of termination.',
+      `Validation execution termination is unverified. Inspect ap reconcile-validation ${pod.id} --json; retain original source and reports. The current provider cannot safely reconcile an unknown mutable execution; retry and repair remain blocked. A stopped sandbox is not termination proof.`,
       'VALIDATION_EXECUTION_UNVERIFIED',
       409,
     );
 }
 
+/** Independent of result overall, dismissals, waivers and recovery intents. */
+export function assertValidationMutationSettled(
+  repo: Pick<PodRepository, 'getOrThrow' | 'validationExecutions'>,
+  podId: string,
+): void {
+  assertValidationExecutionSettled(repo.getOrThrow(podId));
+  repo.validationExecutions?.assertTaskSettled(podId);
+}
+
+/** Recheck exact source ownership and task custody after every awaited preflight. */
+export function captureValidationMutationGuard(
+  repo: Pick<PodRepository, 'getOrThrow' | 'validationExecutions'>,
+  pod: Pod,
+): () => Pod {
+  const ownership = captureValidationOwnership(pod, {
+    statuses: [pod.status],
+    readCurrent: () => repo.getOrThrow(pod.id),
+    isCurrentInvocation: () => true,
+    hasPendingDecision: () => false,
+  });
+  const assertCurrent = () => {
+    assertValidationMutationSettled(repo, pod.id);
+    return ownership.assertCurrent();
+  };
+  assertCurrent();
+  return assertCurrent;
+}
+
 /** This action retries failed checks, not artifact collection, publication or merge. */
-export function assertFailedValidationRecoverable(pod: Pod): void {
+export function assertFailedValidationRecoverable(pod: Pod, settled = false): void {
   if (
     !['failed', 'review_required'].includes(pod.status) ||
     pod.lastValidationResult?.overall !== 'fail'
@@ -63,5 +115,28 @@ export function assertFailedValidationRecoverable(pod: Pod): void {
       'ARTIFACT_RECOVERY_REQUIRED',
       409,
     );
-  assertValidationExecutionSettled(pod);
+  assertValidationExecutionSettled(pod, settled);
+}
+
+/** A bounded control's helper commands retain the same captured source authority. */
+export function guardValidationContainer(
+  manager: ContainerManager,
+  assertCurrent: () => void,
+): ContainerManager {
+  return new Proxy(manager, {
+    get(target, key, receiver) {
+      const value = Reflect.get(target, key, receiver);
+      if (typeof value !== 'function') return value;
+      return (...args: unknown[]) => {
+        assertCurrent();
+        const result = Reflect.apply(value, target, args);
+        return result instanceof Promise
+          ? result.then((value) => {
+              assertCurrent();
+              return value;
+            })
+          : result;
+      };
+    },
+  });
 }

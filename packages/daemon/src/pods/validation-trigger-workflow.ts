@@ -4,6 +4,13 @@ import type { ValidationEngine } from '../interfaces/index.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { addTokenUsage } from '../validation/review-synthesizer.js';
+import {
+  assertValidationExecutionSettled,
+  assertValidationMutationSettled,
+  captureValidationMutationGuard,
+  guardValidationContainer,
+  requiresValidationSettlement,
+} from './validation-recovery-policy.js';
 
 import { AgentContinuationSupersededError } from './continuation-preflight.js';
 import { buildCorrectionMessage } from './correction-context.js';
@@ -105,6 +112,7 @@ export function createValidationTriggerWorkflow(
   ): Promise<void> {
     assertExecutionTerminationVerified(podId);
     let pod = podRepo.getOrThrow(podId);
+    assertValidationExecutionSettled(pod, podRepo.validationExecutions?.isSettled(pod));
     if (deps.launchConfiguration?.read(podId)?.intent === 'goal') {
       const goal = deps.launchConfiguration.goals?.get(podId);
       if (goal?.state !== 'achieved' || !goal.executionStopped)
@@ -172,7 +180,7 @@ export function createValidationTriggerWorkflow(
       emitActivityStatus(podId, 'Re-provisioning pod with fresh container…');
 
       // Fence stale validation and agent cleanup before awaiting any teardown.
-      podRepo.incrementLifecycleGeneration(podId);
+      const reworkGeneration = podRepo.incrementLifecycleGeneration(podId);
       validationAbortControllers.get(podId)?.abort();
 
       if (
@@ -182,7 +190,10 @@ export function createValidationTriggerWorkflow(
         pod.worktreePath
       ) {
         try {
-          await preservePodWorkspace(pod, 'forced Rework');
+          await preservePodWorkspace(
+            { ...pod, lifecycleGeneration: reworkGeneration },
+            'forced Rework',
+          );
         } catch (preserveErr) {
           emitActivityStatus(
             podId,
@@ -301,6 +312,8 @@ export function createValidationTriggerWorkflow(
       fromTerminal,
     );
 
+    const assertPreflight = captureValidationMutationGuard(podRepo, s1);
+
     try {
       if (!pod.containerId) {
         throw new Error(`Pod ${podId} has no container — cannot validate`);
@@ -308,13 +321,19 @@ export function createValidationTriggerWorkflow(
 
       // Restart the container if it was stopped (e.g. after max attempts exhausted)
       if (force) {
-        const cm = containerManagerFactory.get(pod.executionTarget);
+        const cm = guardValidationContainer(
+          containerManagerFactory.get(pod.executionTarget),
+          assertPreflight,
+        );
         await cm.start(pod.containerId);
       } else {
         // Guard: if the container exited before we got here (e.g. agent gave up after a
         // push rejection), fail fast with a human-readable message instead of getting a
         // cryptic Docker 409 "container stopped/paused" error from the exec call below.
-        const cm = containerManagerFactory.get(pod.executionTarget);
+        const cm = guardValidationContainer(
+          containerManagerFactory.get(pod.executionTarget),
+          assertPreflight,
+        );
         const containerStatus = await cm.getStatus(pod.containerId);
         if (containerStatus === 'unknown') {
           emitActivityStatus(
@@ -358,7 +377,7 @@ export function createValidationTriggerWorkflow(
       if (pod.containerId && pod.worktreePath) {
         try {
           if (pod.executionTarget === 'sandbox') {
-            const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
+            const checkpoint = await checkpointSandboxWorkspaceForPod(s1);
             validationSyncOk =
               checkpoint.promoted && checkpoint.materialized && checkpoint.lineageVerified;
           } else {
@@ -376,7 +395,7 @@ export function createValidationTriggerWorkflow(
           validationSyncOk =
             err instanceof ValidationWorkspaceReconcileError
               ? false
-              : await tryRecoverAfterWorkspaceSyncFailure(pod, err, 'validation');
+              : await tryRecoverAfterWorkspaceSyncFailure(s1, err, 'validation');
         }
       }
       if (!validationSyncOk) {
@@ -422,7 +441,7 @@ export function createValidationTriggerWorkflow(
 
       emitActivityStatus(podId, 'Validation checks finished — finalizing result…');
 
-      validationSyncOk = await collectValidationEvidence(podId, pod, result, validationSyncOk);
+      validationSyncOk = await collectValidationEvidence(podId, s1, result, validationSyncOk);
 
       const validationRecord = publishValidationResult(podId, attempt, result);
 
@@ -452,6 +471,19 @@ export function createValidationTriggerWorkflow(
           emitActivityStatus(podId, `  → ${issue}`);
         }
       }
+
+      // Native termination evidence is independent of overall, dismissals and waivers.
+      if (requiresValidationSettlement({ lastValidationResult: result })) {
+        if (result.infrastructureFailure?.code === 'VALIDATION_ENGINE_TERMINATION_UNVERIFIED') {
+          emitActivityStatus(
+            podId,
+            'Validation engine failed without termination evidence; retain original source and reports. Retry and source mutation remain blocked.',
+          );
+          transition(s2, 'review_required');
+        } else await parkOnValidationInfrastructureFailure(s2, result);
+        return;
+      }
+      assertValidationMutationSettled(podRepo, podId);
 
       // ── Validation overrides: apply existing dismissals, detect recurring findings ──
       let effectiveResult = result;
@@ -942,6 +974,14 @@ export function createValidationTriggerWorkflow(
         return;
       }
 
+      if (podRepo.validationExecutions?.unsettled(podId) || requiresValidationSettlement(s2)) {
+        emitActivityStatus(
+          podId,
+          'Validation custody remains held; original source and reports retained. Inspect execution recovery evidence before any retry or source mutation.',
+        );
+        if (s2.status === 'validating') transition(s2, 'review_required');
+        return;
+      }
       // Pod is still `validating`; runUpdateFromBaseAfterAbort handles status transitions.
       if (tryConsumeUpdateIntent()) return;
 

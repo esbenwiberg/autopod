@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { execFile } from 'node:child_process';
 import { mkdir, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -17,6 +18,7 @@ import {
 const execFileAsync = promisify(execFile);
 
 export interface WorkspaceTransferDependencies {
+  captureAuthority(podId: string, containerId: string, worktreePath: string): () => void;
   logger: Pick<Logger, 'info' | 'warn'>;
 }
 
@@ -51,6 +53,43 @@ export async function waitForContainerReachable(
 
 export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
   const { logger } = deps;
+  const authority = new AsyncLocalStorage<() => void>();
+  const assertTransferCurrent = () => {
+    const check = authority.getStore();
+    if (!check) throw new Error('Workspace transfer requires captured mutation authority');
+    check();
+  };
+  const owned = async <T>(operation: () => Promise<T>): Promise<T> => {
+    assertTransferCurrent();
+    const value = await operation();
+    assertTransferCurrent();
+    return value;
+  };
+  async function syncWorkspaceBack(
+    containerId: string,
+    worktreePath: string,
+    cm: ContainerManager,
+    podId: string,
+    executionTarget: ExecutionTarget = 'local',
+  ) {
+    const check = deps.captureAuthority(podId, containerId, worktreePath);
+    check();
+    return authority.run(check, () =>
+      syncWorkspaceBackOwned(containerId, worktreePath, cm, podId, executionTarget),
+    );
+  }
+  async function recoverWorktreeFromContainer(
+    containerId: string,
+    worktreePath: string,
+    cm: ContainerManager,
+    podId: string,
+  ) {
+    const check = deps.captureAuthority(podId, containerId, worktreePath);
+    check();
+    return authority.run(check, () =>
+      recoverWorktreeFromContainerOwned(containerId, worktreePath, cm, podId),
+    );
+  }
 
   /**
    * True when an error looks like a Docker engine stall — the kind that
@@ -146,7 +185,7 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
    * VM pause (typically: laptop sleep) won't leave the host worktree
    * partially populated — see that helper for the rationale.
    */
-  async function syncWorkspaceBack(
+  async function syncWorkspaceBackOwned(
     containerId: string,
     worktreePath: string,
     cm: ContainerManager,
@@ -175,14 +214,16 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
     try {
       // Read the bare repo path from the alternates file written during gitlink conversion.
       // Alternates contains "<bareRepoPath>/objects" — strip the trailing "/objects".
-      const alternatesResult = await cm.execInContainer(
-        containerId,
-        [
-          'sh',
-          '-c',
-          "sed 's|/objects$||' /workspace/.git/objects/info/alternates 2>/dev/null | head -1 || true",
-        ],
-        { timeout: 5_000 },
+      const alternatesResult = await owned(() =>
+        cm.execInContainer(
+          containerId,
+          [
+            'sh',
+            '-c',
+            "sed 's|/objects$||' /workspace/.git/objects/info/alternates 2>/dev/null | head -1 || true",
+          ],
+          { timeout: 5_000 },
+        ),
       );
       const bareRepoPath =
         alternatesResult.exitCode === 0 && alternatesResult.stdout.trim()
@@ -207,10 +248,12 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
           );
         } else {
           for (const safeDirectory of ['/workspace', bareRepoPath]) {
-            const safeDirectoryResult = await cm.execInContainer(
-              containerId,
-              ['git', 'config', '--global', '--add', 'safe.directory', safeDirectory],
-              { timeout: 5_000 },
+            const safeDirectoryResult = await owned(() =>
+              cm.execInContainer(
+                containerId,
+                ['git', 'config', '--global', '--add', 'safe.directory', safeDirectory],
+                { timeout: 5_000 },
+              ),
             );
             if (safeDirectoryResult.exitCode !== 0) {
               logger.warn(
@@ -229,24 +272,27 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
           // (a linked worktree of the bare) has that branch checked out.
           const result = await pushCommitsToBareViaStagingRef(
             async (args) => {
-              const r = await cm.execInContainer(
-                containerId,
-                [
-                  'git',
-                  '-c',
-                  'safe.directory=/workspace',
-                  '-c',
-                  `safe.directory=${bareRepoPath}`,
-                  '-C',
-                  '/workspace',
-                  ...args,
-                ],
-                { timeout: 30_000 },
+              const r = await owned(() =>
+                cm.execInContainer(
+                  containerId,
+                  [
+                    'git',
+                    '-c',
+                    'safe.directory=/workspace',
+                    '-c',
+                    `safe.directory=${bareRepoPath}`,
+                    '-C',
+                    '/workspace',
+                    ...args,
+                  ],
+                  { timeout: 30_000 },
+                ),
               );
               return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode };
             },
             bareRepoPath,
             podId,
+            assertTransferCurrent,
           );
           if (result.pushed) {
             pushed = true;
@@ -299,9 +345,11 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
         ].join(' '),
         'rm -rf "$STAGING"',
       ].join('; ');
-      const syncResult = await cm.execInContainer(containerId, ['sh', '-c', syncScript], {
-        timeout: 120_000,
-      });
+      const syncResult = await owned(() =>
+        cm.execInContainer(containerId, ['sh', '-c', syncScript], {
+          timeout: 120_000,
+        }),
+      );
       if (syncResult.exitCode !== 0) {
         throw new Error(
           `Workspace sync-back command failed (exit ${syncResult.exitCode}): ${syncResult.stderr.trim() || syncResult.stdout.trim()}`,
@@ -334,11 +382,13 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
   ): Promise<{ pushed: boolean }> {
     let pushed = false;
     // Extract workspace files excluding .git so the host gitlink is preserved.
-    await cm.extractDirectoryFromContainer(
-      containerId,
-      '/workspace',
-      worktreePath,
-      WORKSPACE_SYNC_EXCLUDES,
+    await owned(() =>
+      cm.extractDirectoryFromContainer(
+        containerId,
+        '/workspace',
+        worktreePath,
+        WORKSPACE_SYNC_EXCLUDES,
+      ),
     );
 
     // Try to recover commits: extract the container's .git to a temp dir and push to bare.
@@ -352,14 +402,16 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
     if (bareRepoPath) {
       const tmpGitDir = path.join(os.tmpdir(), `autopod-git-${Date.now()}`);
       try {
-        await mkdir(tmpGitDir, { recursive: true });
+        await owned(() => mkdir(tmpGitDir, { recursive: true }));
         // Extract /workspace/.git into tmpGitDir — the alternates inside point at the bare,
         // so git can resolve baseline objects and push only the new ones.
-        await cm.extractDirectoryFromContainer(containerId, '/workspace/.git', tmpGitDir);
+        await owned(() =>
+          cm.extractDirectoryFromContainer(containerId, '/workspace/.git', tmpGitDir),
+        );
         const result = await pushCommitsToBareViaStagingRef(
           async (args) => {
             try {
-              const r = await execFileAsync('git', ['--git-dir', tmpGitDir, ...args]);
+              const r = await owned(() => execFileAsync('git', ['--git-dir', tmpGitDir, ...args]));
               return { stdout: r.stdout, stderr: r.stderr, exitCode: 0 };
             } catch (err) {
               const e = err as { stdout?: string; stderr?: string; code?: number };
@@ -372,6 +424,7 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
           },
           bareRepoPath,
           podId,
+          assertTransferCurrent,
         );
         if (result.pushed) {
           pushed = true;
@@ -387,7 +440,7 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
           'Could not push commits from container during sync fallback — new commits may be lost',
         );
       } finally {
-        await rm(tmpGitDir, { recursive: true, force: true }).catch(() => {});
+        await owned(() => rm(tmpGitDir, { recursive: true, force: true })).catch(() => {});
       }
     }
     if (pushed) {
@@ -401,14 +454,14 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
    * still-running container. Returns true on success, false if the container is gone or the
    * extraction fails (caller should fall through to the compromised path).
    */
-  async function recoverWorktreeFromContainer(
+  async function recoverWorktreeFromContainerOwned(
     containerId: string,
     worktreePath: string,
     cm: ContainerManager,
     podId: string,
   ): Promise<boolean> {
     try {
-      const status = await cm.getStatus(containerId);
+      const status = await owned(() => cm.getStatus(containerId));
       if (status !== 'running') {
         logger.warn(
           { containerId, worktreePath },
@@ -418,14 +471,16 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
       }
 
       // Push any commits the agent made inside the container to the bare repo first.
-      const alternatesResult = await cm.execInContainer(
-        containerId,
-        [
-          'sh',
-          '-c',
-          "sed 's|/objects$||' /workspace/.git/objects/info/alternates 2>/dev/null | head -1 || true",
-        ],
-        { timeout: 5_000 },
+      const alternatesResult = await owned(() =>
+        cm.execInContainer(
+          containerId,
+          [
+            'sh',
+            '-c',
+            "sed 's|/objects$||' /workspace/.git/objects/info/alternates 2>/dev/null | head -1 || true",
+          ],
+          { timeout: 5_000 },
+        ),
       );
       const containerBareRepoPath =
         alternatesResult.exitCode === 0 && alternatesResult.stdout.trim()
@@ -440,15 +495,16 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
         if (expectedBareRepoPath && containerBareRepoPath === expectedBareRepoPath) {
           const result = await pushCommitsToBareViaStagingRef(
             async (args) => {
-              const r = await cm.execInContainer(
-                containerId,
-                ['git', '-C', '/workspace', ...args],
-                { timeout: 30_000 },
+              const r = await owned(() =>
+                cm.execInContainer(containerId, ['git', '-C', '/workspace', ...args], {
+                  timeout: 30_000,
+                }),
               );
               return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode };
             },
             containerBareRepoPath,
             podId,
+            assertTransferCurrent,
           );
           if (!result.pushed) {
             logger.warn(
@@ -459,11 +515,13 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
         }
       }
 
-      await cm.extractDirectoryFromContainer(
-        containerId,
-        '/workspace',
-        worktreePath,
-        WORKSPACE_SYNC_EXCLUDES,
+      await owned(() =>
+        cm.extractDirectoryFromContainer(
+          containerId,
+          '/workspace',
+          worktreePath,
+          WORKSPACE_SYNC_EXCLUDES,
+        ),
       );
       await refreshHostWorktreeIndex(worktreePath, podId);
       logger.info({ containerId, worktreePath }, 'Worktree repopulated from live container');
@@ -476,7 +534,7 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
 
   async function refreshHostWorktreeIndex(worktreePath: string, podId: string): Promise<void> {
     try {
-      await execFileAsync('git', ['reset', '--mixed', 'HEAD'], { cwd: worktreePath });
+      await owned(() => execFileAsync('git', ['reset', '--mixed', 'HEAD'], { cwd: worktreePath }));
       logger.info({ podId, worktreePath }, 'Refreshed host worktree index after sync-back');
     } catch (err) {
       logger.warn(

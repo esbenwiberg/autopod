@@ -84,6 +84,7 @@ export interface SandboxPreviewProxy {
 }
 
 export interface SandboxPreviewProxyOptions {
+  assertCurrent(): void;
   podId: string;
   containerId: string;
   hostPort: number;
@@ -93,6 +94,7 @@ export interface SandboxPreviewProxyOptions {
 }
 
 export interface SandboxPreviewFetchOptions {
+  assertCurrent(): void;
   containerId: string;
   containerManager: ContainerManager;
   method: string;
@@ -113,6 +115,7 @@ export interface SandboxPreviewFetchResult {
 export async function startSandboxPreviewProxy(
   options: SandboxPreviewProxyOptions,
 ): Promise<SandboxPreviewProxy> {
+  options.assertCurrent();
   const server = http.createServer((request, response) => {
     void proxyRequest(options, request, response);
   });
@@ -154,6 +157,7 @@ export async function startSandboxPreviewProxy(
 export async function fetchSandboxPreview(
   options: SandboxPreviewFetchOptions,
 ): Promise<SandboxPreviewFetchResult> {
+  options.assertCurrent();
   const timeoutMs = options.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS;
   const result = await options.containerManager.execInContainer(
     options.containerId,
@@ -207,7 +211,9 @@ async function proxyRequest(
 ): Promise<void> {
   try {
     const body = await readRequestBody(request);
+    options.assertCurrent();
     const upstream = await fetchSandboxPreview({
+      assertCurrent: options.assertCurrent,
       containerId: options.containerId,
       containerManager: options.containerManager,
       method: request.method ?? 'GET',

@@ -1,3 +1,10 @@
+export type {
+  ValidationRecoveryBudgetReceipt,
+  ValidationExecutionBinding,
+  ValidationSettlementReceipt,
+  ValidationExecutionRecoveryState,
+  ValidationExecutionRecoveryRequest,
+} from './types/validation-execution-recovery.js';
 // Types
 export type { ExternalDeliveryReceipt } from './types/external-delivery.js';
 export type {

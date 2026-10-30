@@ -5,6 +5,7 @@ import { cleanupCodexState } from '../runtimes/codex-state-store.js';
 import { runDeletionCleanup } from './deletion-cleanup.js';
 import { deletionOwnershipError } from './deletion-ownership.js';
 import { isTerminalState } from './state-machine.js';
+import { assertValidationMutationSettled } from './validation-recovery-policy.js';
 import type { WorkspaceDeletionCaptured } from './workspace-contracts.js';
 
 export function createWorkspaceDeletion(captured: WorkspaceDeletionCaptured) {
@@ -24,6 +25,7 @@ export function createWorkspaceDeletion(captured: WorkspaceDeletionCaptured) {
   } = captured;
 
   async function deleteSession(podId: string): Promise<void> {
+    assertValidationMutationSettled(podRepo, podId);
     podRepo.taskExecutions?.assertCanDelete(podId);
     podRepo.sourceAdoptions?.assertDeletable(podId);
     podRepo.externalDeliveries?.assertDeletable(podId);
@@ -47,6 +49,7 @@ export function createWorkspaceDeletion(captured: WorkspaceDeletionCaptured) {
     }
     const configuration = JSON.stringify(executionForPod(pod).testPipeline ?? null);
     const assertOwnership = () => {
+      assertValidationMutationSettled(podRepo, podId);
       const current = podRepo.getOrThrow(podId);
       if (
         current.lifecycleGeneration !== pod.lifecycleGeneration ||

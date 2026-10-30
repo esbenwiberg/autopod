@@ -16,10 +16,30 @@ describe('daemon credential and tool controls', () => {
     expect(f.toolsCaptured.installGhBinary).not.toHaveBeenCalled();
     vi.mocked(f.cm.execInContainer).mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 1 });
     await f.tools().installCliTool('prepare', 'gh');
-    expect(f.toolsCaptured.installGhBinary).toHaveBeenCalledWith(f.cm, 'container-123', 'prepare');
+    const ghManager = f.toolsCaptured.installGhBinary.mock.calls[0]?.[0];
+    if (!ghManager) throw new Error('Missing guarded gh manager');
+    expect(f.toolsCaptured.installGhBinary).toHaveBeenCalledWith(
+      ghManager,
+      'container-123',
+      'prepare',
+    );
+    await ghManager.execInContainer('container-123', ['gh-forwarding-proof']);
+    expect(f.cm.execInContainer).toHaveBeenLastCalledWith('container-123', ['gh-forwarding-proof']);
     vi.mocked(f.cm.execInContainer).mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 1 });
     await f.tools().installCliTool('prepare', 'az');
-    expect(f.toolsCaptured.installAzViaPip).toHaveBeenCalledWith(f.cm, 'container-123', 'prepare');
+    const azManager = f.toolsCaptured.installAzViaPip.mock.calls[0]?.[0];
+    if (!azManager) throw new Error('Missing guarded az manager');
+    expect(f.toolsCaptured.installAzViaPip).toHaveBeenCalledWith(
+      azManager,
+      'container-123',
+      'prepare',
+    );
+    await azManager.execInContainer('container-123', ['az-forwarding-proof']);
+    expect(f.cm.execInContainer).toHaveBeenLastCalledWith('container-123', ['az-forwarding-proof']);
+    const calls = vi.mocked(f.cm.execInContainer).mock.calls.length;
+    f.podRepo.incrementLifecycleGeneration('prepare');
+    expect(() => ghManager.execInContainer('container-123', ['stale-install'])).toThrow();
+    expect(vi.mocked(f.cm.execInContainer).mock.calls).toHaveLength(calls);
   });
   it('rejects a stopped pod or missing container before installation', async () => {
     const f = createOperatorFixture();

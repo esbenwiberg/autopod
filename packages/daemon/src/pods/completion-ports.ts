@@ -27,7 +27,11 @@ export interface CompletionLiveDependencies {
 export interface CompletionGuardsCaptured {
   podRepo: Pick<
     PodRepository,
-    'deletionOwnership' | 'taskExecutions' | 'sourceAdoptions' | 'getOrThrow'
+    | 'deletionOwnership'
+    | 'taskExecutions'
+    | 'validationExecutions'
+    | 'sourceAdoptions'
+    | 'getOrThrow'
   >;
   nudgeRepo: Pick<NudgeRepository, 'hasPending'>;
 }

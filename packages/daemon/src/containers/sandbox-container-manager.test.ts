@@ -753,6 +753,25 @@ describe('SandboxContainerManager', () => {
       expect(await mgr.getStatus('sbx-uncertain')).toBe('unknown');
     });
 
+    it('does not attach a terminal after captured task authority changes during wakeup', async () => {
+      const client = new TerminalFakeClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      let held = false;
+      vi.spyOn(client, 'resume').mockImplementation(async () => {
+        held = true;
+      });
+      const options = {
+        cols: 80,
+        rows: 24,
+        assertCurrent: () => {
+          if (held) throw new Error('Validation custody held');
+        },
+      };
+      await expect(mgr.attachTerminal(id, options)).rejects.toThrow('Validation custody held');
+      expect(client.attachCalls).toEqual([]);
+    });
+
     it('attachTerminal resumes an auto-suspended sandbox before attaching', async () => {
       const client = new TerminalFakeClient();
       const mgr = new SandboxContainerManager(client, logger);

@@ -9,6 +9,7 @@ import {
 import type { EventBus } from './event-bus.js';
 import type { PodRepository } from './pod-repository.js';
 import { retainUnresolvedReconciliation } from './reconciliation-ownership.js';
+import { captureValidationMutationGuard } from './validation-recovery-policy.js';
 
 export interface ReconcilerDependencies {
   podRepo: PodRepository;
@@ -73,6 +74,7 @@ export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Pr
 
 async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise<void> {
   const { sandboxContainerManager, podRepo, eventBus, logger } = deps;
+  const assertCurrent = captureValidationMutationGuard(podRepo, pod);
   if (hasInterruptedArtifactCollection(pod)) {
     parkSession(pod, 'failed', ARTIFACT_RESTART_REASON, podRepo, eventBus);
     return;
@@ -85,6 +87,7 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
   const containerId = pod.containerId;
 
   const status = await sandboxContainerManager.getStatus(containerId);
+  assertCurrent();
 
   switch (status) {
     case 'running':
@@ -93,8 +96,11 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
       // The original streaming exec is no longer observable after daemon restart.
       // Stop that worker before snapshotting so it cannot mutate the workspace while
       // recovery is being prepared. The sandbox itself is retained and suspended.
+      assertCurrent();
       await deps.quiesceSandboxAgent(pod.id);
+      assertCurrent();
       await deps.preserveWorkspace(pod.id);
+      assertCurrent();
       await deps.suspendSandbox(pod.id);
       const reason =
         'Sandbox workspace and session were preserved after daemon restart. The sandbox is suspended and will resume in place when work continues.';

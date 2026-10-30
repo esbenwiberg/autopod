@@ -10,6 +10,55 @@ async function fixture(disk = false) {
 }
 import { createFixDelivery } from './fix-delivery.js';
 describe('validated fix delivery leaves parent merge ownership intact', () => {
+  it('refuses queued fix rebase after immutable task custody arrives', async () => {
+    const f = await fixture();
+    f.insertFix();
+    f.podRepo.update('fix-child', { containerId: null });
+    f.podRepo.update('fix-child', {
+      executionTarget: 'sandbox',
+      containerId: '11111111-1111-4111-8111-111111111111',
+    });
+    const fix = f.fix();
+    let release = () => {};
+    let entered = () => {};
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const blocker = f.queue.mergeQueue.enqueueMerge(
+      'https://github.com/org/repo',
+      'main',
+      async () => {
+        entered();
+        await gate;
+      },
+    );
+    await waiting;
+    const delivery = f.delivery().completeFixPodAfterPush(fix);
+    const retries = f.podRepo.taskRetries;
+    const ledger = f.podRepo.validationExecutions;
+    if (!retries || !ledger) throw new Error('Missing durable validation ledger');
+    const identity = {
+      source: 'a'.repeat(64),
+      contract: 'b'.repeat(64),
+      commands: 'c'.repeat(64),
+      environment: null,
+      implementation: null,
+    };
+    const admission = retries.admit(fix.id, fix.lifecycleGeneration, identity, 'd'.repeat(64), []);
+    retries.start(admission.id);
+    expect(ledger.dispatch(fix, admission.id, 1, 'test-scope')).not.toBeNull();
+    release();
+    await blocker;
+    await delivery;
+    expect(f.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+    expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
+    expect(f.admissionCaptured.cleanupContainer).not.toHaveBeenCalled();
+    expect(f.fix().containerId).toBe(fix.containerId);
+  });
+
   it('force-pushes with explicit credentials, replies only afterward and persists completion/history across reopen', async () => {
     const f = await fixture(true);
     const fix = f.insertFix();

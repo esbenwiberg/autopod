@@ -5,6 +5,7 @@ import type {
   Pod,
   PodStatus,
   SystemEvent,
+  ValidationExecutionRecoveryState,
 } from '@autopod/shared';
 import { podStatusSchema } from '@autopod/shared';
 import chalk from 'chalk';
@@ -343,6 +344,86 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         console.log('Rework requested. Inspect status and retry-state for execution outcome.'),
       );
     });
+  program
+    .command('reconcile-validation <id>')
+    .description(
+      'Inspect validation ownership and why unsupported destructive recovery remains blocked',
+    )
+    .option('--apply', 'Request exact-result reconciliation; unsupported recovery is refused')
+    .option('--generation <number>', 'Expected lifecycle generation')
+    .option('--result-hash <sha256>', 'Expected exact validation result hash')
+    .option('--reason <text>', 'Meaningful human reason (10–4000 characters)')
+    .option('--json', 'Output JSON')
+    .action(
+      async (
+        id: string,
+        opts: {
+          apply?: boolean;
+          generation?: string;
+          resultHash?: string;
+          reason?: string;
+          json?: boolean;
+        },
+      ) => {
+        const client = getClient();
+        const podId = await resolvePodId(client, id);
+        if (!opts.apply && (opts.generation || opts.resultHash || opts.reason))
+          throw new Error('Mutation fields require --apply; omit them for read-only inspection.');
+        let state: ValidationExecutionRecoveryState;
+        if (opts.apply) {
+          if (!opts.generation || !opts.resultHash || !opts.reason)
+            throw new Error(
+              '--apply requires --generation, --result-hash and --reason from inspection.',
+            );
+          state = await client.reconcileValidationExecution(podId, {
+            expectedGeneration: Number(opts.generation),
+            expectedResultHash: opts.resultHash,
+            reason: opts.reason,
+          });
+        } else state = await client.getValidationExecutionRecovery(podId);
+        withJsonOutput(opts, state, (value) => {
+          console.log(JSON.stringify(value, null, 2));
+          console.log(
+            `No retry was requested. Unsupported destructive recovery remains blocked; retain original resources and reports. Inspect ap retry-state ${podId} for separate retry limits.`,
+          );
+        });
+      },
+    );
+  program
+    .command('validation-recovery-budget <id>')
+    .description(
+      'Authorize one finite recovery test budget without changing frozen configuration or retry permissions',
+    )
+    .requiredOption('--seconds <number>', 'Finite test timeout, in seconds (1–3600)')
+    .requiredOption('--generation <number>', 'Expected lifecycle generation')
+    .requiredOption(
+      '--result-hash <sha256>',
+      'Expected exact failed result hash from reconcile-validation inspection',
+    )
+    .requiredOption('--reason <text>', 'Meaningful human reason')
+    .option('--json', 'Output JSON')
+    .action(
+      async (
+        id: string,
+        opts: {
+          seconds: string;
+          generation: string;
+          resultHash: string;
+          reason: string;
+          json?: boolean;
+        },
+      ) => {
+        const client = getClient();
+        const podId = await resolvePodId(client, id);
+        const result = await client.authorizeValidationRecoveryBudget(podId, {
+          expectedGeneration: Number(opts.generation),
+          expectedResultHash: opts.resultHash,
+          reason: opts.reason,
+          testTimeoutSeconds: Number(opts.seconds),
+        });
+        withJsonOutput(opts, result, (value) => console.log(JSON.stringify(value, null, 2)));
+      },
+    );
   program
     .command('reconcile-termination <id>')
     .description(

@@ -130,6 +130,47 @@ function registerHandler(
 }
 
 describe('terminalRoutes', () => {
+  it('refuses terminal attachment while validation execution settlement is unverified', async () => {
+    const factory = { get: vi.fn() } as unknown as ContainerManagerFactory;
+    const manager = {
+      getSession: () => makePod(),
+      getValidationExecutionRecovery: () => ({ required: true, settled: false }),
+    } as unknown as PodManager;
+    const handler = registerHandler(
+      manager,
+      factory,
+      { validateToken: async () => testUser } as unknown as AuthModule,
+      { getContainer: vi.fn() } as unknown as Dockerode,
+    );
+    const { socket } = makeSocket();
+    await handler(socket, makeRequest());
+    expect(socket.close).toHaveBeenCalledWith(4009, 'Source custody held');
+    expect(factory.get).not.toHaveBeenCalled();
+  });
+  it('stops existing terminal input when a validation recovery fence appears', async () => {
+    let required = false;
+    const fake = makeFakeSession();
+    const factory = {
+      get: () => ({ attachTerminal: async () => fake.session }),
+    } as unknown as ContainerManagerFactory;
+    const manager = {
+      getSession: () => makePod(),
+      getValidationExecutionRecovery: () => ({ required, settled: false }),
+    } as unknown as PodManager;
+    const handler = registerHandler(
+      manager,
+      factory,
+      { validateToken: async () => testUser } as unknown as AuthModule,
+      { getContainer: vi.fn() } as unknown as Dockerode,
+    );
+    const { socket, emit } = makeSocket();
+    await handler(socket, makeRequest());
+    required = true;
+    emit('message', Buffer.from('run another command\n'), true);
+    expect(fake.writes).toEqual([]);
+    expect(fake.close).toHaveBeenCalledOnce();
+    expect(socket.close).toHaveBeenCalledWith(4009, 'Source custody held');
+  });
   it('refuses a legacy running projection when source custody exists before any terminal attach', async () => {
     const factory = { get: vi.fn() } as unknown as ContainerManagerFactory;
     const manager = {
@@ -174,7 +215,9 @@ describe('terminalRoutes', () => {
   });
   it('wires sandbox terminal sessions through the container manager (no Docker)', async () => {
     const fake = makeFakeSession();
-    const attachTerminal = vi.fn(async () => fake.session);
+    const attachTerminal = vi.fn<NonNullable<ContainerManager['attachTerminal']>>(
+      async () => fake.session,
+    );
     const cm = { attachTerminal } as unknown as ContainerManager;
     const factory = { get: vi.fn(() => cm) } as unknown as ContainerManagerFactory;
 
@@ -189,7 +232,16 @@ describe('terminalRoutes', () => {
 
     expect(docker.getContainer).not.toHaveBeenCalled();
     expect(factory.get).toHaveBeenCalledWith('sandbox');
-    expect(attachTerminal).toHaveBeenCalledWith('sandbox-1', { cols: 80, rows: 24 });
+    expect(attachTerminal).toHaveBeenCalledWith('sandbox-1', {
+      cols: 80,
+      rows: 24,
+      assertCurrent: expect.any(Function),
+    });
+    const authority = attachTerminal.mock.calls[0]?.[1].assertCurrent;
+    if (!authority) throw new Error('Missing captured terminal authority');
+    expect(() => authority()).not.toThrow();
+    vi.mocked(podManager.getSession).mockReturnValueOnce(makePod({ lifecycleGeneration: 2 }));
+    expect(() => authority()).toThrow('Source custody held');
 
     // Output flows session → socket (binary).
     fake.emitData(Buffer.from('hello'));

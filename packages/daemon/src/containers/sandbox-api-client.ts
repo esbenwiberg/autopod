@@ -55,6 +55,7 @@ export interface CreateSandboxOptions {
 }
 
 export interface SandboxExecOptions {
+  beforeSend?: () => void;
   /** Cleanup must not spend the normal data-plane rejection/backoff budget. */
   singleAttempt?: boolean;
   onProcessCreated?: (identity: NativeGoalProcessIdentity) => void;
@@ -107,6 +108,7 @@ export interface SandboxDirListing {
 }
 
 export interface SandboxTerminalOptions {
+  assertCurrent?: () => void;
   cols: number;
   rows: number;
   /**
@@ -200,6 +202,7 @@ export interface SandboxResourceAllocation {
 }
 
 export interface SandboxApiClient {
+  readonly executionResourceScope?: string;
   readonly supportsExecRecovery?: boolean;
   terminateRecordedExec?(identity: NativeGoalProcessIdentity): Promise<number>;
   /** Fresh sandbox-to-disk link and immutable provider image source; null when unverified. */

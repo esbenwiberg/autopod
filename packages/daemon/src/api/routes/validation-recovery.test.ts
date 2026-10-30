@@ -1,6 +1,6 @@
 import { AutopodError } from '@autopod/shared';
 import Fastify from 'fastify';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { terminationAuth } from '../../test-utils/termination-reconciliation-helpers.js';
 import { validationRecoveryFixture } from '../../test-utils/validation-recovery-helpers.js';
 import { errorHandler } from '../error-handler.js';
@@ -29,6 +29,93 @@ describe('validation recovery admission and intent', () => {
     f.db.close();
   });
 
+  it('exposes read-only exact result inspection without granting recovery or retries', async () => {
+    const response = await app.inject({
+      url: `/pods/${f.podId}/validation-execution-recovery`,
+      headers,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      generation: f.input.expectedGeneration,
+      required: false,
+      settled: false,
+      allowed: false,
+    });
+    expect(f.repair).not.toHaveBeenCalled();
+    expect(f.revalidate).not.toHaveBeenCalled();
+  });
+  it('gives the inspection action for an unpublished dispatch even without a current failed result', async () => {
+    f.podRepo.update(f.podId, { lastValidationResult: null });
+    const state = f.manager.getValidationExecutionRecovery(f.podId);
+    vi.spyOn(f.manager, 'getValidationExecutionRecovery').mockReturnValue({
+      ...state,
+      required: true,
+      settled: false,
+      code: 'VALIDATION_RESULT_PUBLICATION_UNVERIFIED',
+      reason: 'Immutable validation dispatch has no matching published result.',
+    });
+    const response = await app.inject({ url: url(), headers });
+    expect(response.json().fixValidation).toMatchObject({
+      allowed: false,
+      code: 'VALIDATION_EXECUTION_UNVERIFIED',
+      reason: expect.stringContaining(`ap reconcile-validation ${f.podId} --json`),
+    });
+    expect(f.repair).not.toHaveBeenCalled();
+    expect(f.revalidate).not.toHaveBeenCalled();
+  });
+  it('requires human authentication and exact evidence identity for immutable report access', async () => {
+    const endpoint = `/pods/${f.podId}/validation-execution-evidence/old-dispatch`;
+    expect((await app.inject({ url: endpoint })).statusCode).toBe(401);
+    expect((await app.inject({ url: endpoint, headers })).statusCode).toBe(400);
+    const read = vi.spyOn(f.manager, 'readValidationEvidence').mockResolvedValue({
+      dispatchId: 'old-dispatch',
+      resultHash: 'a'.repeat(64),
+      path: 'reports/failed.txt',
+      encoding: 'base64',
+      content: 'ZmFpbA==',
+      size: 4,
+    });
+    const response = await app.inject({
+      url: `${endpoint}?resultHash=${'a'.repeat(64)}&path=reports%2Ffailed.txt`,
+      headers,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(read).toHaveBeenCalledExactlyOnceWith(
+      f.podId,
+      'old-dispatch',
+      'a'.repeat(64),
+      'reports/failed.txt',
+    );
+    expect(f.repair).not.toHaveBeenCalled();
+    expect(f.revalidate).not.toHaveBeenCalled();
+  });
+  it('requires authentication and rejects caller-provided proof or stale recovery identity', async () => {
+    const endpoint = `/pods/${f.podId}/validation-execution-recovery`;
+    const input = {
+      expectedGeneration: f.input.expectedGeneration,
+      expectedResultHash: 'a'.repeat(64),
+      reason: 'Preserve source before deleting sandbox',
+    };
+    expect((await app.inject({ method: 'POST', url: endpoint, payload: input })).statusCode).toBe(
+      401,
+    );
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: endpoint,
+          headers,
+          payload: { ...input, proof: 'sandbox-deleted' },
+        })
+      ).statusCode,
+    ).toBe(400);
+    const stale = await app.inject({ method: 'POST', url: endpoint, headers, payload: input });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toMatchObject({ error: 'STALE_VALIDATION_RECOVERY' });
+    expect(f.repair).not.toHaveBeenCalled();
+    expect(f.revalidate).not.toHaveBeenCalled();
+  });
   it('offers repair after a successful worker with failed lint, without requiring a worker failure', async () => {
     const result = await app.inject({ url: url(), headers });
     expect(result.statusCode).toBe(200);

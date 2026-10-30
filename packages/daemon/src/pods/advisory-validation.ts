@@ -5,10 +5,14 @@ import type { NudgeRepository } from './nudge-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import { captureValidationOwnership } from './validation-ownership.js';
 import type { createValidationProgress } from './validation-progress.js';
+import { assertValidationMutationSettled } from './validation-recovery-policy.js';
 import type { ValidationRepository } from './validation-repository.js';
 
 interface AdvisoryValidationDependencies {
-  podRepo: Pick<PodRepository, 'getOrThrow' | 'update' | 'hasUnansweredDecision'>;
+  podRepo: Pick<
+    PodRepository,
+    'getOrThrow' | 'update' | 'hasUnansweredDecision' | 'validationExecutions'
+  >;
   nudgeRepo: Pick<NudgeRepository, 'hasPending'>;
   validationRepo?: Pick<ValidationRepository, 'isLatestForPod' | 'updateAdvisoryResult'>;
   validationEngine: Pick<ValidationEngine, 'runAdvisoryBrowserQa'>;
@@ -68,6 +72,7 @@ export function createAdvisoryValidation(deps: AdvisoryValidationDependencies): 
       isCurrentInvocation: () => {
         if (!ownsInvocation()) return false;
         try {
+          assertValidationMutationSettled(podRepo, expectedPod.id);
           return (
             podRepo.getOrThrow(expectedPod.id).lastValidationResult?.attempt ===
               blockingResult.attempt &&

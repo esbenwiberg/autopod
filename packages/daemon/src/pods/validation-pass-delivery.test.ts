@@ -1,8 +1,48 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createDeliveryFixture } from '../test-utils/delivery-helpers.js';
+import { findingId } from '../validation/finding-fingerprint.js';
+import { applyOverrides } from '../validation/override-applicator.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { createValidationPassDelivery } from './validation-pass-delivery.js';
 describe('validation successful delivery lifetime', () => {
+  it.each(['old review finding', 'unrelated finding'])(
+    'refuses delivery despite a persisted dismissal of %s',
+    async (text) => {
+      const f = createDeliveryFixture();
+      f.validating();
+      const context = f.passContext();
+      const original = {
+        ...context.result,
+        overall: 'fail' as const,
+        taskReview:
+          text === 'old review finding'
+            ? { status: 'fail' as const, reasoning: 'Previous finding', issues: [text] }
+            : null,
+        test: { status: 'skip' as const, duration: 1, stdout: 'FAIL retained partial output' },
+        infrastructureFailure: {
+          phase: 'test' as const,
+          code: 'EXEC_EXIT_UNVERIFIED',
+          message: 'Unknown native execution',
+          retryable: false,
+        },
+      };
+      context.result = applyOverrides(original, [
+        { action: 'dismiss', findingId: findingId('task_review', text), description: text },
+      ]);
+      // Even a stale pass bit cannot authorize delivery beside the native failure.
+      context.result.overall = 'pass';
+      await expect(f.pass().completeValidationPass.call(f.calls, context)).rejects.toMatchObject({
+        code: 'VALIDATION_EXECUTION_UNVERIFIED',
+      });
+      expect(f.worktreeManager.pushArtifactBranch).not.toHaveBeenCalled();
+      expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+      expect(f.provider.createPr).not.toHaveBeenCalled();
+      expect(f.mainCaptured.maybeTriggerDependents).not.toHaveBeenCalled();
+      expect(f.pod().status).toBe('validating');
+      expect(original.test.stdout).toBe('FAIL retained partial output');
+    },
+  );
+
   it('embeds GitHub screenshots only against a successfully published artifact ref', async () => {
     const f = createDeliveryFixture();
     f.validating();

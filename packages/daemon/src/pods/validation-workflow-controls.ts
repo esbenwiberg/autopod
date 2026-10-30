@@ -2,6 +2,11 @@ import type { OperatorActor, Pod, UpdateFromBaseResponse, ValidationResult } fro
 import { AutopodError } from '@autopod/shared';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { captureValidationOwnership } from './validation-ownership.js';
+import {
+  assertValidationExecutionSettled,
+  assertValidationMutationSettled,
+  captureValidationMutationGuard,
+} from './validation-recovery-policy.js';
 import type {
   ValidationWorkflowCalls,
   ValidationWorkflowDependencies,
@@ -68,6 +73,7 @@ export function createValidationWorkflowControls(
     startFollowUpValidation: () => void,
   ): Promise<void> {
     const pod = podRepo.getOrThrow(podId);
+    const assertCurrent = captureValidationMutationGuard(podRepo, pod);
     if (!pod.worktreePath) {
       transition(pod, 'failed');
       return;
@@ -77,13 +83,15 @@ export function createValidationWorkflowControls(
 
     emitActivityStatus(podId, `Update from base: rebasing onto '${baseBranch}'…`);
 
+    const pat = await resolveGitCredential(profile);
+    assertCurrent();
     const rebaseResult = await worktreeManager.rebaseOntoBase({
       worktreePath: pod.worktreePath,
       baseBranch,
-      pat: await resolveGitCredential(profile),
+      pat,
     });
 
-    const freshPod = podRepo.getOrThrow(podId);
+    const freshPod = assertCurrent();
 
     if (rebaseResult.alreadyUpToDate) {
       emitActivityStatus(podId, `Branch already up to date with '${baseBranch}'`);
@@ -109,6 +117,8 @@ export function createValidationWorkflowControls(
 
   function applySkipValidationDecision(pod: Pod, result: ValidationResult): Pod | null {
     if (!pod.skipValidation) return null;
+    assertValidationExecutionSettled({ ...pod, lastValidationResult: result });
+    assertValidationMutationSettled(podRepo, pod.id);
 
     const skipActor = pod.skipValidationActor ?? {
       type: 'automation' as const,
@@ -222,6 +232,7 @@ export function createValidationWorkflowControls(
       return { advanced: false };
     }
 
+    assertValidationMutationSettled(podRepo, podId);
     // Flush pending overrides and merge into permanent overrides
     const pendingOverrides = deps.pendingOverrideRepo?.flush(podId) ?? [];
     const existingOverrides = pod.validationOverrides ?? [];
@@ -299,17 +310,21 @@ export function createValidationWorkflowControls(
       return { ok: true, action: 'queued_after_abort' };
     }
 
+    const assertCurrent = captureValidationMutationGuard(podRepo, pod);
     // For failed / review_required pods: run the rebase directly.
     const profile = executionForPod(pod);
     const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
 
     emitActivityStatus(podId, `Update from base: rebasing onto '${baseBranch}'…`);
 
+    const pat = await resolveGitCredential(profile);
+    assertCurrent();
     const rebaseResult = await worktreeManager.rebaseOntoBase({
       worktreePath: pod.worktreePath,
       baseBranch,
-      pat: await resolveGitCredential(profile),
+      pat,
     });
+    assertCurrent();
     const rebasedBaseCommitSha = rebaseResult.baseCommitSha?.trim() || null;
 
     if (rebaseResult.alreadyUpToDate) {
@@ -350,6 +365,7 @@ export function createValidationWorkflowControls(
     actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
   ): void {
     const pod = podRepo.getOrThrow(podId);
+    if (skip) assertValidationMutationSettled(podRepo, podId);
     podRepo.update(podId, {
       skipValidation: skip,
       skipValidationActor: skip ? actor : null,

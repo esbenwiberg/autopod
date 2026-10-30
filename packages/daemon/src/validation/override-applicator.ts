@@ -22,14 +22,15 @@ export function applyOverrides(
   const patched: ValidationResult = JSON.parse(JSON.stringify(result));
 
   // Apply to task review issues
-  if (patched.taskReview && patched.taskReview.status === 'fail') {
-    patched.taskReview.issues = patched.taskReview.issues.filter(
-      (issue) => !isTaskReviewIssueDismissed(dismissedIds, patched.taskReview, issue),
+  const taskReview = patched.taskReview;
+  if (taskReview && taskReview.status === 'fail') {
+    taskReview.issues = taskReview.issues.filter(
+      (issue) => !isTaskReviewIssueDismissed(dismissedIds, taskReview, issue),
     );
 
     // Apply to requirements check
-    if (patched.taskReview.requirementsCheck) {
-      for (const item of patched.taskReview.requirementsCheck) {
+    if (taskReview.requirementsCheck) {
+      for (const item of taskReview.requirementsCheck) {
         if (!item.met && isDismissed(dismissedIds, 'requirements_check', item.criterion)) {
           item.met = true;
           item.note = `[DISMISSED BY HUMAN] ${item.note ?? ''}`.trim();
@@ -38,14 +39,14 @@ export function applyOverrides(
     }
 
     // Recompute task review status
-    const hasUnmetRequirements = patched.taskReview.requirementsCheck?.some((r) => !r.met);
-    const hasIssues = patched.taskReview.issues.length > 0;
+    const hasUnmetRequirements = taskReview.requirementsCheck?.some((r) => !r.met);
+    const hasIssues = taskReview.issues.length > 0;
     const hasOverflow = Boolean(
-      patched.taskReview.firstGateOverflow ?? patched.taskReview.reviewBatch?.firstGateOverflow,
+      taskReview.firstGateOverflow ?? taskReview.reviewBatch?.firstGateOverflow,
     );
     if (!hasUnmetRequirements && !hasIssues && !hasOverflow) {
-      patched.taskReview.status = 'pass';
-      patched.taskReview.reasoning = `[OVERRIDES APPLIED] ${patched.taskReview.reasoning}`;
+      taskReview.status = 'pass';
+      taskReview.reasoning = `[OVERRIDES APPLIED] ${taskReview.reasoning}`;
     }
   }
 
@@ -118,6 +119,7 @@ function isDismissed(
 }
 
 function computeOverall(result: ValidationResult): 'pass' | 'fail' {
+  if (result.infrastructureFailure) return 'fail';
   // Build/health/smoke failures are objective and not overridable
   if (result.smoke.build.status === 'fail') return 'fail';
   if (result.smoke.health.status === 'fail') return 'fail';

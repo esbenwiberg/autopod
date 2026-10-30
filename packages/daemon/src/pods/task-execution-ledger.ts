@@ -16,6 +16,7 @@ import { ensureMergeIdentityProjection } from './merge-identity-projection.js';
 import { readProviderUsage } from './provider-usage-projection.js';
 import { assertSourceAvailable, assertSourceDeliveryAllowed } from './source-custody-guards.js';
 import { createTerminationReconciliationRepository } from './termination-reconciliation-repository.js';
+import { createValidationExecutionLedger } from './validation-execution-ledger.js';
 
 export interface ExecutionBinding {
   runtime: string;
@@ -563,6 +564,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       assertSourceAvailable(db, podId, '');
       assertSourceDeliveryAllowed(db, podId);
       createDeletionOwnership(db).assertTaskAvailable(podId);
+      createValidationExecutionLedger(db).assertTaskSettled(podId);
       const encoded = JSON.stringify({
         runtime: binding.runtime,
         model: binding.model,

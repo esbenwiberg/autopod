@@ -11,6 +11,8 @@ import {
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { hasUnansweredDecision } from './decision-admission.js';
+import { createDeletionOwnership } from './deletion-ownership.js';
+import { createValidationExecutionLedger } from './validation-execution-ledger.js';
 import { retainWorkerRetryHistory, workerRetryFailure } from './worker-retry-history.js';
 
 export class TaskRetryBlockedError extends AutopodError {
@@ -204,6 +206,8 @@ export function createTaskRetryLedger(
     backoffs: number[],
     workerRunId?: string,
   ) => {
+    createDeletionOwnership(db).assertTaskAvailable(podId);
+    createValidationExecutionLedger(db).assertTaskSettled(podId);
     const member = membership(podId);
     assertNoPendingDecision(podId);
     if (member.generation !== generation)

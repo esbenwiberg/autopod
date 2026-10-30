@@ -12,6 +12,7 @@ import type {
 } from './resource-contracts.js';
 import { hostnameFromUrl, portFromUrl } from './resource-policy.js';
 import { addRuntimeNetworkDefaults } from './runtime-network-defaults.js';
+import { captureValidationMutationGuard } from './validation-recovery-policy.js';
 
 export function createResourceNetwork(
   deps: ResourceNetworkLiveDependencies,
@@ -83,6 +84,7 @@ export function createResourceNetwork(
     await Promise.all(
       runningSessions.map(async (pod) => {
         try {
+          const assertCurrent = captureValidationMutationGuard(podRepo, pod);
           const providerPreflight = resolveProviderPreflight(profile, pod.runtime, pod.model, {
             profileStore,
             providerAccountStore,
@@ -114,6 +116,7 @@ export function createResourceNetwork(
               profile.privateRegistries,
             );
             const cm = containerManagerFactory.get('sandbox');
+            assertCurrent();
             await cm.refreshFirewall(
               containerId,
               sandboxEgressRefreshPayload(runtimeNetworkPolicy.mode ?? 'restricted', allowedHosts),
@@ -134,6 +137,8 @@ export function createResourceNetwork(
             );
             if (!netConfig) return;
             const cm = containerManagerFactory.get('local');
+            assertCurrent();
+            assertCurrent();
             await cm.refreshFirewall(containerId, netConfig.firewallScript);
           }
           logger.info(

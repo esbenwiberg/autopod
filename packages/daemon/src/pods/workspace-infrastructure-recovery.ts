@@ -1,5 +1,6 @@
 import type { Pod } from '@autopod/shared';
 import type { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
+import { assertValidationMutationSettled } from './validation-recovery-policy.js';
 export function sandboxInfrastructureFailure(
   error: SandboxInfrastructureError,
   phase: 'setup' | 'agent',
@@ -139,6 +140,7 @@ export function createWorkspaceInfrastructureRecovery(
       return false;
     }
 
+    assertValidationMutationSettled(podRepo, podId);
     // Fence every stale lifecycle continuation before touching the sandbox identity.
     const recoveryGeneration = podRepo.incrementLifecycleGeneration(podId);
     const oldContainerId = capturedPod.containerId;

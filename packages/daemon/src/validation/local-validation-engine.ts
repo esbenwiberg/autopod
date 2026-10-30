@@ -430,10 +430,11 @@ export function createLocalValidationEngine(
       }
 
       let stopMonitor: (() => void) | undefined;
+      let infrastructureFailure: ValidationInfrastructureFailure | undefined;
+      const completed: Partial<ValidationResult> = {};
 
       try {
         const skipPhases = config.skipPhases ?? [];
-        let infrastructureFailure: ValidationInfrastructureFailure | undefined;
 
         // ── Phase 0: Reset worktree to HEAD ─────────────────────────────
         // Untracked / uncommitted files must not influence validation.
@@ -567,6 +568,9 @@ export function createLocalValidationEngine(
             config.captureEvidenceIdentity,
           );
         }
+        const { infrastructureFailure: _interruptedLintFailure, ...completedLint } = lintResult;
+        completed.lint = completedLint;
+        completed.setup = setupResult;
         infrastructureFailure = lintResult.infrastructureFailure;
         callbacks?.onPhaseCompleted?.('lint', lintResult.status, lintResult);
 
@@ -580,6 +584,8 @@ export function createLocalValidationEngine(
           if (config.sastCommand) onProgress?.('Running SAST…');
           sastResult = await runSast(containerManager, config, log);
         }
+        const { infrastructureFailure: _interruptedSastFailure, ...completedSast } = sastResult;
+        completed.sast = completedSast;
         infrastructureFailure ??= sastResult.infrastructureFailure;
         callbacks?.onPhaseCompleted?.('sast', sastResult.status, sastResult);
 
@@ -599,6 +605,13 @@ export function createLocalValidationEngine(
           if (config.buildCommand) onProgress?.('Running build…');
           buildResult = await runBuild(containerManager, config, log);
         }
+        const { infrastructureFailure: _interruptedBuildFailure, ...completedBuild } = buildResult;
+        completed.smoke = {
+          status: buildResult.status,
+          build: completedBuild,
+          health: { status: 'skip', url: '', responseCode: null, duration: 0 },
+          pages: [],
+        };
         infrastructureFailure ??= buildResult.infrastructureFailure;
         callbacks?.onPhaseCompleted?.(
           'build',
@@ -625,6 +638,8 @@ export function createLocalValidationEngine(
                 )
               : { status: 'skip' as const, duration: 0 };
         }
+        const { infrastructureFailure: _interruptedTestFailure, ...completedTest } = testResult;
+        completed.test = completedTest;
         infrastructureFailure ??= testResult.infrastructureFailure;
         callbacks?.onPhaseCompleted?.('test', testResult.status, testResult);
 
@@ -657,6 +672,7 @@ export function createLocalValidationEngine(
                   duration: 0,
                 };
         }
+        if (completed.smoke) completed.smoke.health = healthResult;
         const infrastructureAwareHealth = healthResult as HealthResult & InfrastructureAwareResult;
         infrastructureFailure ??= infrastructureAwareHealth.infrastructureFailure;
         callbacks?.onPhaseCompleted?.('health', healthResult.status, healthResult);
@@ -1304,7 +1320,11 @@ export function createLocalValidationEngine(
         if (err instanceof ValidationInterruptedError) {
           const reason = crashController.signal.aborted ? 'app-crashed' : 'user';
           log?.info({ podId: config.podId, reason }, 'Validation interrupted');
-          return makeInterruptedResult(config, startTime, err.message);
+          const interrupted = makeInterruptedResult(config, startTime, err.message);
+          // An abort is not termination evidence and cannot erase a native failure.
+          return infrastructureFailure
+            ? { ...interrupted, ...completed, infrastructureFailure, overall: 'fail' }
+            : interrupted;
         }
         throw err;
       } finally {

@@ -107,6 +107,7 @@ export interface AzureSandboxApiClientConfig {
   /** Required to submit resume: durable per-resource claims survive daemon replacement. */
   wakeupJournal?: SandboxWakeupJournal;
   assertReleaseAllowed?: (sandboxId: string) => void;
+  assertWakeAllowed?: (sandboxId: string) => void;
   /**
    * Retry/backoff for the Azure Sandboxes data-plane rate limiter (HTTP 429,
    * 600 req/min). The platform returns `retryAfterSeconds`; we honor it (clamped
@@ -213,6 +214,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private readonly resumeTimeoutMs: number;
   private readonly wakeupJournal?: SandboxWakeupJournal;
   private readonly assertReleaseAllowed?: (sandboxId: string) => void;
+  private readonly assertWakeAllowed?: (sandboxId: string) => void;
   private readonly retryMaxAttempts: number;
   private readonly retryMaxDelayMs: number;
   private readonly retryBaseDelayMs: number;
@@ -220,6 +222,14 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private groupReady: Promise<void> | null = null;
   /** Monotonic counter for unique per-exec streaming wrapper-script paths. */
   private execStreamSeq = 0;
+  get executionResourceScope(): string {
+    return JSON.stringify([
+      this.dataEndpoint,
+      this.config.subscriptionId.toLowerCase(),
+      this.config.resourceGroup.toLowerCase(),
+      this.config.sandboxGroup.toLowerCase(),
+    ]);
+  }
 
   constructor(config: AzureSandboxApiClientConfig, logger: Logger) {
     this.config = {
@@ -240,6 +250,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     this.resumeTimeoutMs = config.resumeTimeoutMs ?? 145_000;
     this.wakeupJournal = config.wakeupJournal;
     this.assertReleaseAllowed = config.assertReleaseAllowed;
+    this.assertWakeAllowed = config.assertWakeAllowed;
     this.retryMaxAttempts = config.retry?.maxAttempts ?? 6;
     this.retryMaxDelayMs = config.retry?.maxDelayMs ?? 30_000;
     this.retryBaseDelayMs = config.retry?.baseDelayMs ?? 1000;
@@ -457,7 +468,12 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       response = await this.requestData<ExecResponse>(
         'POST',
         `${this.sandboxPath(sandboxId)}/executeShellCommand`,
-        { json: body, timeoutMs: options?.timeoutMs, singleAttempt: options?.singleAttempt },
+        {
+          json: body,
+          timeoutMs: options?.timeoutMs,
+          singleAttempt: options?.singleAttempt,
+          beforeSend: options?.beforeSend,
+        },
       );
     } catch (err) {
       // A lost response cannot establish whether this command ran remotely.
@@ -835,10 +851,22 @@ export class AzureSandboxApiClient implements SandboxApiClient {
    * `execStream` and `attachTerminal`, both of which need `command` to be a
    * single executable path.
    */
-  private async stageExecutableWrapper(sandboxId: string, scriptBody: string): Promise<string> {
+  private async stageExecutableWrapper(
+    sandboxId: string,
+    scriptBody: string,
+    assertCurrent?: () => void,
+  ): Promise<string> {
     const scriptPath = `/tmp/.autopod-execstream-${Date.now()}-${this.execStreamSeq++}.sh`;
-    await this.writeFile(sandboxId, scriptPath, Buffer.from(scriptBody, 'utf-8'));
-    const chmod = await this.exec(sandboxId, ['chmod', '0755', scriptPath], { user: 'root' });
+    assertCurrent?.();
+    await this.writeFile(sandboxId, scriptPath, Buffer.from(scriptBody, 'utf-8'), {
+      beforeSend: assertCurrent,
+    });
+    assertCurrent?.();
+    const chmod = await this.exec(sandboxId, ['chmod', '0755', scriptPath], {
+      user: 'root',
+      beforeSend: assertCurrent,
+    });
+    assertCurrent?.();
     if (chmod.exitCode !== 0) {
       throw new AutopodError(
         `Failed to stage sandbox exec-stream wrapper ${scriptPath}: chmod exited ${chmod.exitCode} ${chmod.stderr.trim()}`,
@@ -863,12 +891,14 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     const scriptPath = await this.stageExecutableWrapper(
       sandboxId,
       sandboxRuntimeUserScript(shellCommand),
+      options.assertCurrent,
     );
 
     const token = await this.getAzureToken(DATA_SCOPE, 'data access token', 'AZURE_AUTH');
     const wsUrl = `${this.dataEndpoint.replace(/^https:/, 'wss:')}${this.sandboxPath(
       sandboxId,
     )}/exec/stream`;
+    options.assertCurrent?.();
     const socket = this.webSocketFactory(wsUrl, { Authorization: `Bearer ${token.token}` });
 
     const dataListeners: ((chunk: Buffer) => void)[] = [];
@@ -887,6 +917,14 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     };
 
     socket.onopen = () => {
+      try {
+        options.assertCurrent?.();
+      } catch (error) {
+        closed = true;
+        socket.close();
+        emitError(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
       socket.send(
         JSON.stringify({
           type: 'start',
@@ -1137,6 +1175,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       }, timeoutMs);
     });
     const check = () => {
+      this.assertWakeAllowed?.(sandboxId);
       options.assertCurrent?.();
       // Synchronous SQLite/token work can delay timer delivery beyond the deadline.
       if (Date.now() >= expiresAt) {

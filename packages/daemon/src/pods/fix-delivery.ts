@@ -7,6 +7,7 @@ import { mergeReconciliation } from '../worktrees/merge-source-identity.js';
 import { formatRebaseConflictReason } from './delivery-policy.js';
 import type { FixDeliveryCaptured } from './fix-contracts.js';
 import { isTerminalState } from './state-machine.js';
+import { captureValidationMutationGuard } from './validation-recovery-policy.js';
 export function createFixDelivery(captured: FixDeliveryCaptured) {
   const {
     assertGuidanceCollected,
@@ -24,6 +25,7 @@ export function createFixDelivery(captured: FixDeliveryCaptured) {
     eventBus,
   } = captured;
   async function completeFixPodAfterPush(fixPod: Pod): Promise<void> {
+    const assertCurrent = captureValidationMutationGuard(podRepo, fixPod);
     assertGuidanceCollected(fixPod.id);
     const podId = fixPod.id;
     const profile = executionForPod(fixPod);
@@ -43,6 +45,7 @@ export function createFixDelivery(captured: FixDeliveryCaptured) {
     } else if (worktreePath && branch) {
       try {
         await mergeQueue.enqueueMerge(profile.repoUrl ?? null, baseBranch, async () => {
+          assertCurrent();
           if (linkedParentIsTerminal()) {
             logger.info(
               { podId, parentId: fixPod.linkedPodId },
@@ -66,12 +69,15 @@ export function createFixDelivery(captured: FixDeliveryCaptured) {
             );
 
           emitActivityStatus(podId, `Rebasing onto origin/${baseBranch}…`);
+          const pat = await resolveGitCredential(profile);
+          assertCurrent();
           const rebaseResult = await worktreeManager.rebaseOntoBase({
             worktreePath,
             baseBranch,
-            pat: await resolveGitCredential(profile),
+            pat,
           });
 
+          assertCurrent();
           if (!rebaseResult.rebased) {
             // Conflicts — leave the branch as-is and let the parent's poller
             // surface the conflict via the PR merge gate. The fix pod still
@@ -95,14 +101,17 @@ export function createFixDelivery(captured: FixDeliveryCaptured) {
             return;
           }
 
+          const publicationPat = await resolveGitCredential(profile);
+          assertCurrent();
           await publishFixSource(
             podRepo,
             parent,
             fixPod,
             profile.repoUrl,
             worktreeManager,
-            await resolveGitCredential(profile),
+            publicationPat,
           );
+          assertCurrent();
           branchPushed = true;
           if (!rebaseResult.alreadyUpToDate) {
             emitActivityStatus(podId, 'Rebased fix branch pushed');
@@ -116,10 +125,12 @@ export function createFixDelivery(captured: FixDeliveryCaptured) {
       }
     }
 
+    assertCurrent();
     if (branchPushed) {
       await postFixPodReviewFeedbackReplies(podRepo.getOrThrow(podId));
     }
 
+    assertCurrent();
     emitActivityStatus(podId, 'Fix pod complete — parent poller owns the merge');
     await cleanupContainer(fixPod, 'fix-pod-pushed');
     const approved = transition(fixPod, 'approved');

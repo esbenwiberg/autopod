@@ -1,7 +1,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { AutopodError } from '@autopod/shared';
 import type { TaskRetryIdentity, ValidationResult } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,9 +19,12 @@ import {
   insertTestProfile,
   logger,
 } from '../test-utils/mock-helpers.js';
+import { createLocalValidationEngine } from '../validation/local-validation-engine.js';
+import { captureValidationRetryIdentity } from '../validation/retry-identity.js';
 import { createNudgeRepository } from './nudge-repository.js';
 import { createPodRepository } from './pod-repository.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
+import { createValidationExecutionRecovery } from './validation-execution-recovery.js';
 import { createValidationExecution } from './validation-execution.js';
 import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
 
@@ -68,7 +73,7 @@ function result(kind: 'pass' | 'fail' | 'infra' | 'review' = 'pass'): Validation
     ...(kind === 'review' ? { reviewSkipKind: 'review-timeout' as const } : {}),
   };
 }
-function fixture() {
+function fixture(sandbox = false) {
   const directory = mkdtempSync(join(tmpdir(), 'validation-execution-'));
   const file = join(directory, 'state.db');
   const seed = createTestDb();
@@ -88,7 +93,7 @@ function fixture() {
     status: 'validating',
     model: 'model',
     runtime: 'codex',
-    executionTarget: 'local',
+    executionTarget: sandbox ? 'sandbox' : 'local',
     branch: 'feature',
     userId: 'operator',
     maxValidationAttempts: 3,
@@ -97,7 +102,7 @@ function fixture() {
     options: { agentMode: 'auto', output: 'pr', validate: true, validationSuite: 'full' },
   });
   repo.update('worker', {
-    containerId: 'execution-container',
+    containerId: sandbox ? '11111111-1111-4111-8111-111111111111' : 'execution-container',
     worktreePath: '/private/execution-tree',
   });
   const pod = repo.getOrThrow('worker');
@@ -114,12 +119,13 @@ function fixture() {
   const assert = vi.spyOn(ownership, 'assertCurrent');
   const controller = new AbortController();
   const cm = createMockContainerManager();
+  if (sandbox) Object.assign(cm, { executionResourceScope: 'test-scope' });
   const containerFactory = { get: vi.fn(() => cm) };
   const profile = createMockProfileStore(db).get('test-profile');
   const config: ValidationEngineConfig = {
     podId: 'worker',
-    containerId: 'execution-container',
-    executionTarget: 'local',
+    containerId: sandbox ? '11111111-1111-4111-8111-111111111111' : 'execution-container',
+    executionTarget: sandbox ? 'sandbox' : 'local',
     previewUrl: 'http://preview',
     buildCommand: 'build',
     startCommand: 'start',
@@ -213,6 +219,10 @@ function fixture() {
     withReviewerLaunchPreflight: preflight,
     ownedValidationCallbacks: owned,
     emitActivityStatus: activity,
+    publishValidationResult: (podId, _attempt, value) => {
+      repo.validationExecutions?.recordResult(value);
+      repo.update(podId, { lastValidationResult: value });
+    },
     makeUnexpectedValidationFailureResult: unexpected,
     validationInfrastructureFailureLabel: () => 'Infrastructure during test',
     isReviewInfrastructureOnlyFailure: (r) => r.reviewSkipKind === 'review-timeout',
@@ -220,6 +230,7 @@ function fixture() {
   };
   const module = createValidationExecution(dependencies);
   return {
+    db: () => db,
     repo,
     pod,
     ledger,
@@ -275,7 +286,7 @@ function fixture() {
         ended_at: string | null;
         measured_duration_ms: number | null;
       }>;
-      return { state, rows, pod: reopened.getOrThrow('worker') };
+      return { state, rows, repo: reopened, pod: reopened.getOrThrow('worker') };
     },
     close() {
       db.close();
@@ -285,6 +296,121 @@ function fixture() {
 }
 
 describe('validation execution durable effects', () => {
+  it('keeps real native unknown-exit evidence nonretryable when completion concurrently aborts', async () => {
+    const f = fixture(true);
+    try {
+      f.config.testCommand = 'test';
+      f.config.buildCommand = '';
+      f.config.startCommand = '';
+      f.config.hasWebUi = false;
+      const exitCode = Promise.reject(
+        new AutopodError('Unknown native exit', 'EXEC_EXIT_UNVERIFIED', 409),
+      );
+      void exitCode.catch(() => {});
+      vi.mocked(f.cm.execStreaming).mockResolvedValue({
+        stdout: Readable.from(['FAIL real native assertion\n']),
+        stderr: Readable.from(['retained stderr\n']),
+        exitCode,
+        kill: vi.fn(),
+      });
+      const native = createLocalValidationEngine(f.cm);
+      f.engine.mockImplementation((...args) => native.validate(...args));
+      const output = await createValidationExecution(
+        f.dependencies,
+      ).validateWithInfrastructureRetries(
+        f.config,
+        f.controller,
+        {
+          onPhaseCompleted: (phase) => {
+            if (phase === 'test') f.controller.abort();
+          },
+        },
+        'Native test',
+        f.ownership,
+      );
+      expect(output.infrastructureFailure?.code).toBe('EXEC_EXIT_UNVERIFIED');
+      expect(output.test?.stdout).toContain('FAIL real native assertion');
+      expect(f.ledger.state('worker')).toMatchObject({
+        executedCount: 1,
+        latest: { outcome: 'nonretryable' },
+      });
+      const dispatch = output.executionDispatchId;
+      if (!dispatch) throw new Error('Missing native dispatch');
+      const row = f
+        .db()
+        .prepare('SELECT result FROM validation_dispatch_outcomes WHERE dispatch_id=?')
+        .get(dispatch) as { result: string };
+      expect(JSON.parse(row.result).test.stdout).toContain('retained stderr');
+      expect(() => f.repo.validationExecutions?.assertTaskSettled('worker')).toThrow();
+      expect(f.engine).toHaveBeenCalledTimes(1);
+    } finally {
+      f.close();
+    }
+  });
+
+  it('retains an unverified engine outcome before admission closes, even before publication and after restart', async () => {
+    const f = fixture(true);
+    try {
+      const executions = f.repo.validationExecutions;
+      if (!executions) throw new Error('Missing execution ledger');
+      const record = vi.spyOn(executions, 'recordOutcome');
+      f.engine.mockResolvedValue({
+        ...result('fail'),
+        infrastructureFailure: {
+          phase: 'test',
+          code: 'EXEC_EXIT_UNVERIFIED',
+          message: 'Exit not observed',
+          retryable: false,
+        },
+      });
+      const returned = await f.run();
+      expect(record).toHaveBeenCalledWith(returned, returned.executionDispatchId);
+      expect(record.mock.invocationCallOrder[0]).toBeLessThan(
+        f.finished.mock.invocationCallOrder[0] ?? 0,
+      );
+      expect(f.repo.getOrThrow('worker').lastValidationResult).toBeNull();
+      const reopened = f.reopen();
+      expect(() => reopened.repo.validationExecutions?.assertTaskSettled('worker')).toThrow(
+        'no verified execution settlement',
+      );
+      const state = createValidationExecutionRecovery({
+        podRepo: reopened.repo,
+        getContainerManager: () => f.cm,
+        isActive: () => false,
+      }).getValidationExecutionRecovery('worker');
+      expect(state).toMatchObject({
+        required: true,
+        allowed: false,
+        code: 'VALIDATION_RESULT_PUBLICATION_UNVERIFIED',
+        dispatchId: returned.executionDispatchId,
+      });
+      expect(reopened.repo.listReferencedContainerIds()).toContain(f.config.containerId);
+    } finally {
+      f.close();
+    }
+  });
+  it('fences a crash before outcome commit without inventing an exit or allowing new checks', async () => {
+    const f = fixture(true);
+    try {
+      const executions = f.repo.validationExecutions;
+      if (!executions) throw new Error('Missing execution ledger');
+      vi.spyOn(executions, 'recordOutcome').mockImplementation(() => {
+        throw new Error('Crash before outcome commit');
+      });
+      await expect(f.run()).rejects.toThrow('Crash before outcome commit');
+      expect(f.finished).not.toHaveBeenCalled();
+      const reopened = f.reopen();
+      expect(reopened.state.latest?.endedAt).toBeNull();
+      expect(() => reopened.repo.validationExecutions?.assertTaskSettled('worker')).toThrow(
+        'no verified execution settlement',
+      );
+      expect(reopened.repo.validationExecutions?.unsettled('worker')).toMatchObject({
+        resultHash: null,
+      });
+    } finally {
+      f.close();
+    }
+  });
   it('constructs without I/O and preserves config, collector, signal and engine argument identities', async () => {
     const f = fixture();
     try {
@@ -845,6 +971,33 @@ describe('validation execution durable effects', () => {
       f.close();
     }
   });
+  it.each(['AZURE_SANDBOX_EXEC_INVALID_RESPONSE', 'EXEC_EXIT_UNVERIFIED'])(
+    'never trusts a retryable flag on unknown termination (%s)',
+    async (code) => {
+      const f = fixture(true);
+      try {
+        const failed: ValidationResult = {
+          ...result('infra'),
+          infrastructureFailure: {
+            phase: 'test',
+            code,
+            message: 'No valid command exit',
+            retryable: true,
+          },
+        };
+        f.engine.mockResolvedValue(failed);
+        expect(await f.run()).toBe(failed);
+        expect(f.engine).toHaveBeenCalledOnce();
+        expect(f.capture).toHaveBeenCalledOnce();
+        expect(f.reopen().state).toMatchObject({
+          executedCount: 1,
+          latest: { outcome: 'nonretryable' },
+        });
+      } finally {
+        f.close();
+      }
+    },
+  );
 
   it.each(['confirmed', 'failed', 'unverified'] as const)(
     'durably blocks repeated timeout after %s cleanup',
@@ -912,6 +1065,92 @@ describe('validation execution durable effects', () => {
         executedCount: 2,
         latest: { outcome: 'pass' },
       });
+    } finally {
+      f.close();
+    }
+  });
+  it('converts an audited one-shot budget to milliseconds before retry identity and consumes it only once', async () => {
+    const f = fixture(true);
+    try {
+      const executions = f.repo.validationExecutions;
+      if (!executions) throw new Error('Missing execution ledger');
+      f.repo.update('worker', { lastValidationResult: result('fail') });
+      executions.authorizeBudget(
+        f.repo.getOrThrow('worker'),
+        900,
+        'Measured healthy full suite exceeds old budget',
+        { type: 'human', userId: 'operator' },
+      );
+      f.config.testTimeout = 600000;
+      const timeouts: Array<number | undefined> = [];
+      f.capture.mockImplementation(async (config) => {
+        timeouts.push(config.testTimeout);
+        return captureValidationRetryIdentity(f.cm, config);
+      });
+      f.engine.mockResolvedValueOnce(result('infra')).mockResolvedValueOnce(result());
+      await f.run();
+      expect(timeouts).toEqual([900000, 600000]);
+      expect(f.admitted.mock.calls[0]?.[2].commands).not.toBe(
+        f.admitted.mock.calls[1]?.[2].commands,
+      );
+      expect(executions.budgets('worker')[0]).toMatchObject({
+        seconds: 900,
+        consumedByDispatchId: expect.any(String),
+      });
+      expect(executions.budget(f.repo.getOrThrow('worker'))).toBeNull();
+    } finally {
+      f.close();
+    }
+  });
+  it('does not retain the consumed one-shot timeout when the same config object is reused', async () => {
+    const f = fixture(true);
+    try {
+      const executions = f.repo.validationExecutions;
+      if (!executions) throw new Error('Missing execution ledger');
+      f.repo.update('worker', { lastValidationResult: result('fail') });
+      executions.authorizeBudget(f.repo.getOrThrow('worker'), 900, 'One recovery attempt only', {
+        type: 'human',
+        userId: 'operator',
+      });
+      f.config.testTimeout = 600000;
+      const seen: Array<number | undefined> = [];
+      f.engine.mockImplementation(async (config) => {
+        seen.push(config.testTimeout);
+        return result();
+      });
+      const completed = await f.run();
+      // The caller must publish the completed result before a new dispatch.
+      executions.recordResult(completed);
+      f.repo.update('worker', { lastValidationResult: completed });
+      expect(f.config.testTimeout).toBe(600000);
+      await f.run();
+      expect(seen).toEqual([900000, 600000]);
+    } finally {
+      f.close();
+    }
+  });
+  it('cancels an expired budget admission without starting checks or consuming the one-shot grant', async () => {
+    const f = fixture(true);
+    try {
+      const executions = f.repo.validationExecutions;
+      if (!executions) throw new Error('Missing execution ledger');
+      f.repo.update('worker', { lastValidationResult: result('fail') });
+      executions.authorizeBudget(f.repo.getOrThrow('worker'), 900, 'One recovery attempt only', {
+        type: 'human',
+        userId: 'operator',
+      });
+      vi.useFakeTimers();
+      f.capture.mockImplementation(async () => {
+        vi.setSystemTime(Date.now() + 3600001);
+        return identity;
+      });
+      await expect(f.run()).rejects.toThrow('expired or changed');
+      expect(f.engine).not.toHaveBeenCalled();
+      expect(f.ledger.state('worker')).toMatchObject({
+        executedCount: 0,
+        latest: { outcome: 'cancelled', startedAt: null },
+      });
+      expect(executions.budgets('worker')[0]?.consumedByDispatchId).toBeNull();
     } finally {
       f.close();
     }

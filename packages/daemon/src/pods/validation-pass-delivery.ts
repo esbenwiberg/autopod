@@ -2,6 +2,10 @@ import { publishScreenshotArtifacts } from '../validation/screenshot-artifacts.j
 import { buildGitHubImageUrl } from '../validation/screenshot-collector.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { isTerminalState } from './state-machine.js';
+import {
+  assertValidationExecutionSettled,
+  captureValidationMutationGuard,
+} from './validation-recovery-policy.js';
 import type {
   ValidationPassCaptured,
   ValidationPassContext,
@@ -46,6 +50,8 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
       validationRecord,
     }: ValidationPassContext,
   ): Promise<void> {
+    assertValidationExecutionSettled({ ...s2, lastValidationResult: result });
+    const assertCurrent = captureValidationMutationGuard(podRepo, s2);
     emitActivityStatus(podId, `Validation passed (attempt ${attempt})`);
     const passDefaultBranch = profile.defaultBranch ?? 'main';
     let prUrl: string | null = s2.prUrl ?? null;
@@ -54,6 +60,8 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
       // Publish screenshots to their own ref so the PR body can embed them
       // without the reviewed branch carrying a file the agent never wrote.
       // ADO pods skip this entirely — they upload PR attachments instead.
+      const screenshotPat = await resolveGitCredential(profile);
+      assertCurrent();
       const screenshotBranch =
         profile.prProvider === 'ado'
           ? null
@@ -62,7 +70,7 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
               logger,
               podId,
               worktreePath: s2.worktreePath,
-              pat: await resolveGitCredential(profile),
+              pat: screenshotPat,
             });
 
       // Push branch so `gh pr create --head` can reference it. If sync-back failed
@@ -72,6 +80,8 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
       // path approve & merge a PR whose tip never advanced (real bug from
       // misrouted fix pods writing to the wrong branch).
       emitActivityStatus(podId, 'Branch validated — pushing…');
+      const pushPat = await resolveGitCredential(profile);
+      assertCurrent();
       try {
         await worktreeManager.mergeBranch({
           worktreePath: s2.worktreePath,
@@ -82,7 +92,7 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
           // restart or for recovery pods that mount an existing worktree without
           // re-warming via create(). Without this, ADO URLs of the form
           // https://<org>@dev.azure.com/... cause git to prompt for a password.
-          pat: await resolveGitCredential(profile),
+          pat: pushPat,
           maxDeletions: validationSyncOk ? 100 : 0,
           podTask: pod.task,
           profile,
@@ -109,6 +119,7 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
         throw err;
       }
 
+      assertCurrent();
       // Re-compute diff stats now that auto-commit has run.
       try {
         const prSinceCommit = s2.startCommitSha ?? undefined;
@@ -162,7 +173,9 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
           const s3 = podRepo.getOrThrow(podId);
           warnIfSinglePrSeriesMissingSeriesMeta(s2, logger);
           const baseBranch = resolvePrBaseBranch(s2, profile);
+          assertCurrent();
           await ensurePrBaseBranchOnOrigin(s2, profile, baseBranch, 'validation_pass');
+          assertCurrent();
           const createResult = await prManager.createPr({
             // biome-ignore lint/style/noNonNullAssertion: worktreePath is non-null here — PR creation only occurs for non-artifact pods which always have a worktree
             worktreePath: s2.worktreePath!,
@@ -220,6 +233,7 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
         emitActivityStatus(podId, `Carrying forward existing PR: ${prUrl}`);
       }
     }
+    assertCurrent();
     podRepo.update(podId, { lastCorrectionMessage: null });
     pendingUpdateFromBaseIntents.delete(podId);
     const validatedPod = transition(s2, 'validated', { prUrl });

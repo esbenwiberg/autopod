@@ -2,6 +2,7 @@ import { AutopodError } from '@autopod/shared';
 import { buildSupervisorCommand, parseStatus } from './preview-supervisor.js';
 import type { ResourcePreviewControlsCaptured } from './resource-contracts.js';
 import { CONTAINER_APP_PORT } from './resource-policy.js';
+import { captureValidationMutationGuard } from './validation-recovery-policy.js';
 
 export function createResourcePreviewControls(captured: ResourcePreviewControlsCaptured) {
   const {
@@ -18,6 +19,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
   async function startPreview(podId: string): Promise<{ previewUrl: string }> {
     podRepo.deletionOwnership?.assertTaskAvailable(podId);
     const pod = podRepo.getOrThrow(podId);
+    const assertCurrent = captureValidationMutationGuard(podRepo, pod);
 
     if (!pod.containerId) {
       throw new AutopodError(
@@ -33,6 +35,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
 
     const cm = containerManagerFactory.get(pod.executionTarget);
     const status = await cm.getStatus(pod.containerId);
+    assertCurrent();
 
     if (status === 'unknown') {
       throw new AutopodError(
@@ -56,6 +59,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
               ['sh', '-c', 'cat /tmp/autopod-supervisor.pid 2>/dev/null'],
               {},
             );
+            assertCurrent();
             const pid = pidResult.stdout.trim();
             if (!pid) return false;
             const liveness = await cm.execInContainer(
@@ -63,23 +67,27 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
               ['sh', '-c', `kill -0 ${pid} 2>/dev/null && echo 1 || echo 0`],
               {},
             );
+            assertCurrent();
             return liveness.stdout.trim() === '1';
           } catch {
             return false;
           }
         })();
 
+        assertCurrent();
         if (supervisorAlive) {
           const previewUrl =
             pod.executionTarget === 'sandbox'
               ? await ensureSandboxPreviewProxy(pod)
               : // biome-ignore lint/style/noNonNullAssertion: checked above for local pods
                 pod.previewUrl!;
+          assertCurrent();
           schedulePreviewAutoStop(podId, pod.containerId, pod.executionTarget);
           logger.info({ podId }, 'Supervisor already running — reusing existing preview');
           return { previewUrl };
         }
 
+        assertCurrent();
         // Supervisor is dead — (re)spawn it
         cm.execInContainer(
           pod.containerId,
@@ -95,13 +103,16 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
           ? await ensureSandboxPreviewProxy(pod)
           : // biome-ignore lint/style/noNonNullAssertion: checked above for local pods
             pod.previewUrl!;
+      assertCurrent();
       schedulePreviewAutoStop(podId, pod.containerId, pod.executionTarget);
       logger.info({ podId, previewUrl }, 'Preview started');
       return { previewUrl };
     }
 
     // Container is stopped — start it
+    assertCurrent();
     await cm.start(pod.containerId);
+    assertCurrent();
     const previewUrl =
       pod.executionTarget === 'sandbox'
         ? await ensureSandboxPreviewProxy(pod)
@@ -110,6 +121,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
 
     // Re-run the start command under the supervisor and wait for health check
     if (profile.startCommand) {
+      assertCurrent();
       cm.execInContainer(
         pod.containerId,
         ['sh', '-c', buildSupervisorCommand(profile.startCommand)],
@@ -128,6 +140,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
       const start = Date.now();
 
       while (Date.now() - start < timeoutMs) {
+        assertCurrent();
         try {
           const response = await fetch(healthUrl, {
             signal: AbortSignal.timeout(5_000),
@@ -146,6 +159,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
       }
     }
 
+    assertCurrent();
     schedulePreviewAutoStop(podId, pod.containerId, pod.executionTarget);
     logger.info({ podId, previewUrl }, 'Preview started');
     return { previewUrl };
@@ -153,9 +167,11 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
 
   async function stopPreview(podId: string): Promise<void> {
     podRepo.deletionOwnership?.assertTaskAvailable(podId);
+    const pod = podRepo.getOrThrow(podId);
+    const assertCurrent = captureValidationMutationGuard(podRepo, pod);
     clearPreviewTimer(podId);
     await stopSandboxPreviewProxy(podId);
-    const pod = podRepo.getOrThrow(podId);
+    assertCurrent();
 
     if (!pod.containerId) {
       throw new AutopodError(
@@ -178,6 +194,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
     previewUrl: string | null;
   }> {
     const pod = podRepo.getOrThrow(podId);
+    const assertCurrent = captureValidationMutationGuard(podRepo, pod);
     const safeDefaults = {
       running: false,
       reachable: false,
@@ -195,6 +212,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
     // If the container is not running, the supervisor is definitely not alive.
     try {
       const containerStatus = await cm.getStatus(pod.containerId);
+      assertCurrent();
       if (containerStatus !== 'running') return safeDefaults;
     } catch {
       return safeDefaults;
@@ -213,6 +231,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
     const isNativePreview =
       pod.executionTarget === 'sandbox' && !previewUrl.startsWith('http://127.0.0.1');
 
+    assertCurrent();
     // Exec parallel reads inside the container + an HTTP probe.
     const [pidResult, restartCountResult, logTailResult, httpProbeResult] = await Promise.all([
       cm
@@ -259,6 +278,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
             .catch(() => null),
     ]);
 
+    assertCurrent();
     // Check PID liveness: if we got a PID string, verify the process is still alive.
     const rawPid = pidResult?.stdout?.trim() ?? null;
     let alivePid: string | null = null;

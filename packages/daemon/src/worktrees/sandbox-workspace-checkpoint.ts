@@ -184,7 +184,9 @@ const WORKSPACE_FINGERPRINT_SCRIPT = [
 export async function observeSandboxWorkspace(
   cm: ContainerManager,
   containerId: string,
+  assertCurrent: () => void,
 ): Promise<WorkspaceFingerprint> {
+  assertCurrent();
   const output = await cm.execInContainer(
     containerId,
     ['sh', '-ceu', WORKSPACE_FINGERPRINT_SCRIPT],
@@ -192,6 +194,7 @@ export async function observeSandboxWorkspace(
       timeout: 15_000,
     },
   );
+  assertCurrent();
   if (output.exitCode !== 0)
     throw new Error(`sandbox workspace fingerprint failed: ${output.stderr.trim()}`);
   const [head = '', tree = '', state = 'clean'] = output.stdout.trim().split('\n');
@@ -209,55 +212,65 @@ export interface SandboxWorkspaceCheckpointArgs {
   podId: string;
   worktreePath: string;
   sequence: number;
+  assertCurrent: () => void;
 }
 
 export async function checkpointSandboxWorkspace(
   args: SandboxWorkspaceCheckpointArgs,
 ): Promise<WorkspaceCheckpointResult> {
-  const { containerManager: cm, containerId, podId, worktreePath, sequence } = args;
+  const { containerManager: cm, containerId, podId, worktreePath, sequence, assertCurrent } = args;
+  const owned = async <T>(operation: () => Promise<T>): Promise<T> => {
+    assertCurrent();
+    const value = await operation();
+    assertCurrent();
+    return value;
+  };
+  assertCurrent();
   const token = podId.replace(/[^A-Za-z0-9_-]/g, '_');
   const checkpointRef = `refs/autopod-checkpoints/${token}`;
   const remoteBundle = `/tmp/.autopod-checkpoint-${token}-${sequence}.bundle`;
   const remoteMeta = `${remoteBundle}.meta`;
   try {
-    const capture = await cm.execInContainer(
-      containerId,
-      [
-        'sh',
-        '-ceu',
+    const capture = await owned(() =>
+      cm.execInContainer(
+        containerId,
         [
-          'cd /workspace',
-          'head=$(git rev-parse HEAD)',
-          'tree=$(git rev-parse HEAD^{tree})',
-          'idx=$(mktemp /tmp/autopod-index.XXXXXX)',
-          'trap "rm -f $idx" EXIT',
-          'GIT_INDEX_FILE=$idx git read-tree HEAD',
-          // The index is daemon-owned: this never changes the agent index or HEAD.
-          'GIT_INDEX_FILE=$idx git -c core.hooksPath=/dev/null add -A -- .',
-          'snapshot_tree=$(GIT_INDEX_FILE=$idx git write-tree)',
-          // Rework captures the stopped sandbox again before replacing it. Reuse
-          // identical source/tree snapshots: a timestamp-only sibling would rewind
-          // a branch that was already published and make its next push non-fast-forward.
-          `snapshot=$(git rev-parse --verify ${checkpointRef}^{commit} 2>/dev/null || true)`,
-          'if [ -z "$snapshot" ] || [ "$(git rev-list --parents -n 1 "$snapshot" 2>/dev/null || true)" != "$snapshot $head" ] || [ "$(git rev-parse "$snapshot^{tree}" 2>/dev/null || true)" != "$snapshot_tree" ]; then ' +
-            "snapshot=$(printf 'autopod sandbox checkpoint\\n' | GIT_AUTHOR_NAME=Autopod GIT_AUTHOR_EMAIL=autopod@localhost GIT_COMMITTER_NAME=Autopod GIT_COMMITTER_EMAIL=autopod@localhost git commit-tree $snapshot_tree -p $head); fi",
-          `git update-ref ${checkpointRef} "$snapshot"`,
-          // Bundles must advertise a named ref; a raw commit ID produces an empty bundle.
-          `git bundle create ${remoteBundle} ${checkpointRef}`,
-          `printf '%s\\n%s\\n%s\\n%s\\n' "$head" "$tree" "$snapshot" "$snapshot_tree" > ${remoteMeta}`,
-        ].join('; '),
-      ],
-      { timeout: 120_000 },
+          'sh',
+          '-ceu',
+          [
+            'cd /workspace',
+            'head=$(git rev-parse HEAD)',
+            'tree=$(git rev-parse HEAD^{tree})',
+            'idx=$(mktemp /tmp/autopod-index.XXXXXX)',
+            'trap "rm -f $idx" EXIT',
+            'GIT_INDEX_FILE=$idx git read-tree HEAD',
+            // The index is daemon-owned: this never changes the agent index or HEAD.
+            'GIT_INDEX_FILE=$idx git -c core.hooksPath=/dev/null add -A -- .',
+            'snapshot_tree=$(GIT_INDEX_FILE=$idx git write-tree)',
+            // Rework captures the stopped sandbox again before replacing it. Reuse
+            // identical source/tree snapshots: a timestamp-only sibling would rewind
+            // a branch that was already published and make its next push non-fast-forward.
+            `snapshot=$(git rev-parse --verify ${checkpointRef}^{commit} 2>/dev/null || true)`,
+            'if [ -z "$snapshot" ] || [ "$(git rev-list --parents -n 1 "$snapshot" 2>/dev/null || true)" != "$snapshot $head" ] || [ "$(git rev-parse "$snapshot^{tree}" 2>/dev/null || true)" != "$snapshot_tree" ]; then ' +
+              "snapshot=$(printf 'autopod sandbox checkpoint\\n' | GIT_AUTHOR_NAME=Autopod GIT_AUTHOR_EMAIL=autopod@localhost GIT_COMMITTER_NAME=Autopod GIT_COMMITTER_EMAIL=autopod@localhost git commit-tree $snapshot_tree -p $head); fi",
+            `git update-ref ${checkpointRef} "$snapshot"`,
+            // Bundles must advertise a named ref; a raw commit ID produces an empty bundle.
+            `git bundle create ${remoteBundle} ${checkpointRef}`,
+            `printf '%s\\n%s\\n%s\\n%s\\n' "$head" "$tree" "$snapshot" "$snapshot_tree" > ${remoteMeta}`,
+          ].join('; '),
+        ],
+        { timeout: 120_000 },
+      ),
     );
     if (capture.exitCode !== 0) return empty(sequence, capture.stderr || 'snapshot capture failed');
     const [sourceHead, sourceTree, snapshotCommit, snapshotTree] = (
-      await cm.readFile(containerId, remoteMeta)
+      await owned(() => cm.readFile(containerId, remoteMeta))
     )
       .trim()
       .split('\n');
     if (!sourceHead || !sourceTree || !snapshotCommit || !snapshotTree)
       return empty(sequence, 'checkpoint metadata was incomplete');
-    const bundle = await cm.readFileBinary(containerId, remoteBundle);
+    const bundle = await owned(() => cm.readFileBinary(containerId, remoteBundle));
     const hash = createHash('sha256').update(bundle).digest('hex');
     if (!hash) return empty(sequence, 'checkpoint transfer hash failed', 'transfer');
     const temp = await mkdtemp(path.join(os.tmpdir(), 'autopod-checkpoint-'));
@@ -265,19 +278,25 @@ export async function checkpointSandboxWorkspace(
     try {
       await writeFile(bundlePath, bundle, { mode: 0o600 });
       const common = (
-        await execFileAsync('git', ['rev-parse', '--git-common-dir'], { cwd: worktreePath })
+        await owned(() =>
+          execFileAsync('git', ['rev-parse', '--git-common-dir'], { cwd: worktreePath }),
+        )
       ).stdout.trim();
       const bare = path.resolve(worktreePath, common);
-      await execFileAsync('git', ['bundle', 'verify', bundlePath], { cwd: bare });
+      await owned(() => execFileAsync('git', ['bundle', 'verify', bundlePath], { cwd: bare }));
       const quarantineRef = `refs/autopod-quarantine/${token}/${sequence}`;
-      await execFileAsync('git', ['fetch', bundlePath, `${checkpointRef}:${quarantineRef}`], {
-        cwd: bare,
-      });
+      await owned(() =>
+        execFileAsync('git', ['fetch', bundlePath, `${checkpointRef}:${quarantineRef}`], {
+          cwd: bare,
+        }),
+      );
       const importedTree = (
-        await execFileAsync('git', ['rev-parse', `${quarantineRef}^{tree}`], { cwd: bare })
+        await owned(() =>
+          execFileAsync('git', ['rev-parse', `${quarantineRef}^{tree}`], { cwd: bare }),
+        )
       ).stdout.trim();
       const parent = (
-        await execFileAsync('git', ['rev-parse', `${quarantineRef}^`], { cwd: bare })
+        await owned(() => execFileAsync('git', ['rev-parse', `${quarantineRef}^`], { cwd: bare }))
       ).stdout.trim();
       if (importedTree !== snapshotTree || parent !== sourceHead) {
         return {
@@ -293,21 +312,25 @@ export async function checkpointSandboxWorkspace(
         };
       }
       const branch = (
-        await execFileAsync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: worktreePath })
+        await owned(() =>
+          execFileAsync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: worktreePath }),
+        )
       ).stdout.trim();
       const expected = (
-        await execFileAsync('git', ['rev-parse', `refs/heads/${branch}`], { cwd: bare })
+        await owned(() =>
+          execFileAsync('git', ['rev-parse', `refs/heads/${branch}`], { cwd: bare }),
+        )
       ).stdout.trim();
       // The isolated sandbox normally advances beyond the host branch while the
       // agent works. A prior capture can leave a daemon checkpoint as the host
       // tip while the live sandbox advances independently from its parent. Peel
       // only a safe no-op or an exact prior quarantine commit for this pod;
       // arbitrary host commits remain divergence barriers.
-      const expectedLineageBase = await checkpointLineageBase(bare, expected, token);
-      const fastForward = await execFileAsync(
-        'git',
-        ['merge-base', '--is-ancestor', expectedLineageBase, sourceHead],
-        { cwd: bare },
+      const expectedLineageBase = await owned(() => checkpointLineageBase(bare, expected, token));
+      const fastForward = await owned(() =>
+        execFileAsync('git', ['merge-base', '--is-ancestor', expectedLineageBase, sourceHead], {
+          cwd: bare,
+        }),
       ).then(
         () => true,
         () => false,
@@ -332,32 +355,40 @@ export async function checkpointSandboxWorkspace(
           },
         };
       }
-      await execFileAsync('git', ['update-ref', `refs/heads/${branch}`, snapshotCommit, expected], {
-        cwd: bare,
-      });
+      await owned(() =>
+        execFileAsync('git', ['update-ref', `refs/heads/${branch}`, snapshotCommit, expected], {
+          cwd: bare,
+        }),
+      );
       try {
-        await execFileAsync('git', ['reset', '--hard', snapshotCommit], { cwd: worktreePath });
+        await owned(() =>
+          execFileAsync('git', ['reset', '--hard', snapshotCommit], { cwd: worktreePath }),
+        );
         const finalHead = (
-          await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath })
+          await owned(() => execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath }))
         ).stdout.trim();
         const finalTree = (
-          await execFileAsync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: worktreePath })
+          await owned(() =>
+            execFileAsync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: worktreePath }),
+          )
         ).stdout.trim();
         const clean =
           (
-            await execFileAsync('git', ['status', '--porcelain'], { cwd: worktreePath })
+            await owned(() =>
+              execFileAsync('git', ['status', '--porcelain'], { cwd: worktreePath }),
+            )
           ).stdout.trim() === '';
         if (finalHead !== snapshotCommit || finalTree !== snapshotTree || !clean) {
           // Promotion is reversible until materialization proves the linked
           // worktree matches. Guard the rollback so concurrent host work wins.
-          await execFileAsync(
-            'git',
-            ['update-ref', `refs/heads/${branch}`, expected, snapshotCommit],
-            {
+          await owned(() =>
+            execFileAsync('git', ['update-ref', `refs/heads/${branch}`, expected, snapshotCommit], {
               cwd: bare,
-            },
+            }),
           );
-          await execFileAsync('git', ['reset', '--hard', expected], { cwd: worktreePath });
+          await owned(() =>
+            execFileAsync('git', ['reset', '--hard', expected], { cwd: worktreePath }),
+          );
           return {
             ...empty(sequence, 'host materialization verification failed', 'materialize'),
             sourceHead,
@@ -388,12 +419,10 @@ export async function checkpointSandboxWorkspace(
         };
       } catch (err) {
         // If reset itself fails, return the branch only if it is still ours.
-        await execFileAsync(
-          'git',
-          ['update-ref', `refs/heads/${branch}`, expected, snapshotCommit],
-          {
+        await owned(() =>
+          execFileAsync('git', ['update-ref', `refs/heads/${branch}`, expected, snapshotCommit], {
             cwd: bare,
-          },
+          }),
         ).catch(() => {});
         return {
           ...empty(sequence, err instanceof Error ? err.message : String(err), 'materialize'),

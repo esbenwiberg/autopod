@@ -2,7 +2,7 @@
  * Durable provider intents and execution ledgers remain independently authoritative across restart.
  */
 export function createControlOperationRegistry(
-  assertMutationAllowed: (podId: string) => void = () => {},
+  assertMutationAllowed: (podId: string, operation: string) => void = () => {},
 ) {
   const active = new Map<string, Set<symbol>>();
   function wrap<T extends object>(target: T): T {
@@ -15,6 +15,7 @@ export function createControlOperationRegistry(
       'setSkipValidation',
       'createMemoryWorkspace',
       'createHistoryWorkspace',
+      'authorizeValidationRecoveryBudget',
     ]);
     return new Proxy(target, {
       get(object, key, receiver) {
@@ -22,6 +23,8 @@ export function createControlOperationRegistry(
         if (
           typeof value !== 'function' ||
           key === 'adoptSource' ||
+          key === 'reconcileValidationExecution' ||
+          key === 'readValidationEvidence' ||
           key === 'touchHeartbeat' ||
           /^(get|list|inspect|watch|assert)/.test(String(key))
         )
@@ -32,7 +35,7 @@ export function createControlOperationRegistry(
           const id = args[0];
           if (typeof id !== 'string') return Reflect.apply(value, receiver, args);
           try {
-            assertMutationAllowed(id);
+            assertMutationAllowed(id, String(key));
           } catch (error) {
             if (synchronous.has(String(key))) throw error;
             return Promise.reject(error);

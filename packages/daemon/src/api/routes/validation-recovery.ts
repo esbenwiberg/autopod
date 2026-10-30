@@ -11,6 +11,10 @@ import { assertFailedValidationRecoverable } from '../../pods/validation-recover
 
 type RecoveryManager = Pick<
   PodManager,
+  | 'getValidationExecutionRecovery'
+  | 'readValidationEvidence'
+  | 'reconcileValidationExecution'
+  | 'authorizeValidationRecoveryBudget'
   | 'getSession'
   | 'assertCanRework'
   | 'assertCanRetryValidation'
@@ -41,7 +45,14 @@ export function validationRecoveryRoutes(
         };
   const assertAllowed = (podId: string, action: ValidationRecoveryAction) => {
     const pod = manager.getSession(podId);
-    assertFailedValidationRecoverable(pod);
+    const execution = manager.getValidationExecutionRecovery(podId);
+    if (execution.required && !execution.settled)
+      throw new AutopodError(
+        `Validation execution is unverified. Inspect ap reconcile-validation ${podId} --json. ${execution.reason ?? 'Retain the original resource and reports; unsupported destructive recovery remains blocked.'}`,
+        'VALIDATION_EXECUTION_UNVERIFIED',
+        409,
+      );
+    assertFailedValidationRecoverable(pod, execution.settled);
     if (action === 'fix-validation') {
       if (pod.options.agentMode === 'interactive')
         throw new AutopodError(
@@ -65,6 +76,53 @@ export function validationRecoveryRoutes(
     }
   };
   const isActive = (podId: string) => operations.get(podId)?.active === true;
+
+  app.get('/pods/:podId/validation-execution-evidence/:dispatchId', async (request, reply) => {
+    if (!request.user?.oid)
+      throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
+    const { podId, dispatchId } = request.params as { podId: string; dispatchId: string };
+    const query = z
+      .object({
+        resultHash: z.string().regex(/^[a-f0-9]{64}$/),
+        path: z.string().min(1).max(4096).optional(),
+      })
+      .strict()
+      .parse(request.query);
+    reply.header('Cache-Control', 'no-store');
+    return manager.readValidationEvidence(podId, dispatchId, query.resultHash, query.path);
+  });
+
+  app.get('/pods/:podId/validation-execution-recovery', async (request) => {
+    const { podId } = request.params as { podId: string };
+    return manager.getValidationExecutionRecovery(podId);
+  });
+  const expected = z.object({
+    expectedGeneration: z.number().int().min(0),
+    expectedResultHash: z.string().regex(/^[a-f0-9]{64}$/),
+    reason: z.string().trim().min(10).max(4000),
+  });
+  app.post('/pods/:podId/validation-execution-recovery', async (request) => {
+    if (!request.user?.oid)
+      throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
+    const { podId } = request.params as { podId: string };
+    return manager.reconcileValidationExecution(podId, expected.strict().parse(request.body), {
+      type: 'human',
+      userId: request.user.oid,
+    });
+  });
+  app.post('/pods/:podId/validation-recovery-budget', async (request) => {
+    if (!request.user?.oid)
+      throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
+    const { podId } = request.params as { podId: string };
+    return manager.authorizeValidationRecoveryBudget(
+      podId,
+      expected
+        .extend({ testTimeoutSeconds: z.number().int().min(1).max(3600) })
+        .strict()
+        .parse(request.body),
+      { type: 'human', userId: request.user.oid },
+    );
+  });
 
   app.get('/pods/:podId/validation-recovery', async (request): Promise<ValidationRecoveryState> => {
     const { podId } = request.params as { podId: string };

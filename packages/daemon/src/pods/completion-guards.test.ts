@@ -13,6 +13,17 @@ afterEach(() => {
 });
 
 describe('completion guards', () => {
+  it('consults validation settlement before allowing completion', () => {
+    const f = fixture();
+    const validations = f.podRepo.validationExecutions;
+    if (!validations) throw new Error('Missing real validation ledger fixture');
+    const failure = new Error('Validation execution remains unsettled');
+    const settlement = vi.spyOn(validations, 'assertTaskSettled').mockImplementation(() => {
+      throw failure;
+    });
+    expect(() => f.guards.assertExecutionTerminationVerified('prepare')).toThrow(failure);
+    expect(settlement).toHaveBeenCalledExactlyOnceWith('prepare');
+  });
   it('checks generation and optional container identity using the original repository', () => {
     const f = fixture();
     f.running();

@@ -224,6 +224,81 @@ describe('validation workflow controls', () => {
     expect(() => f.owner.claimValidation(f.pod(), new AbortController())).toThrow(error);
     expect(f.state.validationAbortControllers.size).toBe(0);
   });
+  it('refuses skip-validation delivery for an unknown native result without consuming a waiver', () => {
+    const f = fixture();
+    f.podRepo.update('controls', { skipValidation: true });
+    const native = {
+      ...result(),
+      overall: 'pass' as const,
+      infrastructureFailure: {
+        phase: 'test' as const,
+        code: 'EXEC_EXIT_UNVERIFIED',
+        message: 'No termination proof',
+        retryable: false,
+      },
+    };
+    expect(() => f.owner.applySkipValidationDecision(f.pod(), native)).toThrow(
+      'termination is unverified',
+    );
+    expect(f.buildWaiver).not.toHaveBeenCalled();
+    expect(f.pod().status).toBe('validating');
+  });
+  it('rejects a replacement source after awaited rebase credentials', async () => {
+    const f = fixture('failed');
+    f.captured.resolveGitCredential = async () => {
+      f.podRepo.update('controls', { containerId: 'replacement' });
+      return 'synthetic';
+    };
+    const owner = createValidationWorkflowControls(f.deps, f.captured);
+    await expect(
+      owner.updateFromBase.call({ triggerValidation: vi.fn(async () => {}) }, 'controls'),
+    ).rejects.toBeInstanceOf(ValidationSupersededError);
+    expect(f.worktree.rebaseOntoBase).not.toHaveBeenCalled();
+  });
+  it('refuses queued rebase after abort preserves an unknown execution', async () => {
+    const f = fixture();
+    const original = {
+      ...result(),
+      infrastructureFailure: {
+        phase: 'test' as const,
+        code: 'EXEC_EXIT_UNVERIFIED',
+        message: 'Unknown original execution',
+        retryable: false,
+      },
+    };
+    f.podRepo.update('controls', { lastValidationResult: original });
+    const follow = vi.fn();
+    await expect(f.owner.runUpdateFromBaseAfterAbort('controls', follow)).rejects.toMatchObject({
+      code: 'VALIDATION_EXECUTION_UNVERIFIED',
+    });
+    expect(f.worktree.rebaseOntoBase).not.toHaveBeenCalled();
+    expect(follow).not.toHaveBeenCalled();
+    expect(f.pod().lastValidationResult).toEqual(original);
+  });
+  it('rechecks ownership and validation custody after awaiting rebase credentials', async () => {
+    const f = fixture('failed');
+    const original = f.pod();
+    f.captured.resolveGitCredential = async () => {
+      f.podRepo.update('controls', {
+        lastValidationResult: {
+          ...result(),
+          infrastructureFailure: {
+            phase: 'test',
+            code: 'EXEC_EXIT_UNVERIFIED',
+            message: 'Late unknown outcome',
+            retryable: false,
+          },
+        },
+      });
+      return 'synthetic';
+    };
+    const owner = createValidationWorkflowControls(f.deps, f.captured);
+    await expect(
+      owner.updateFromBase.call({ triggerValidation: vi.fn(async () => {}) }, 'controls'),
+    ).rejects.toMatchObject({ code: 'VALIDATION_EXECUTION_UNVERIFIED' });
+    expect(f.worktree.rebaseOntoBase).not.toHaveBeenCalled();
+    expect(f.pod().lifecycleGeneration).toBe(original.lifecycleGeneration);
+  });
   it('queues update-from-base and aborts exactly the current validation controller', async () => {
     const f = fixture();
     const controller = new AbortController();

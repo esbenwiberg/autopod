@@ -2047,6 +2047,7 @@ describe('PodManager', () => {
           podId: pod.id,
           worktreePath: pod.worktreePath,
           sequence: expect.any(Number),
+          assertCurrent: expect.any(Function),
         });
         expect(activity(ctx, pod.id)).toEqual(['Verified workspace checkpoint before probe.']);
         expect(manager.getSession(pod.id)).toMatchObject({
@@ -2126,6 +2127,7 @@ describe('PodManager', () => {
           const records: CheckpointRecord[] = [];
           const capture = vi.fn(async () => proof);
           ctx.deps.workspaceCheckpointController = new WorkspaceCheckpointController({
+            captureAuthority: () => () => {},
             observe: async () => ({ head: proof.sourceHead, tree: proof.sourceTree, dirty: true }),
             checkpoint: capture,
             records: {
@@ -2143,7 +2145,7 @@ describe('PodManager', () => {
           if (materialized) await pending;
           else await expect(pending).rejects.toThrow('retained controller failure');
 
-          expect(capture).toHaveBeenCalledWith(pod.id, 'completion', 1);
+          expect(capture).toHaveBeenCalledWith(pod.id, 'completion', 1, expect.any(Function));
           expect(records[0]?.result).toBe(proof);
           expect(ctx.deps.sandboxWorkspaceCheckpoint).not.toHaveBeenCalled();
           expect(ctx.containerManager.kill).not.toHaveBeenCalled();
@@ -2168,6 +2170,7 @@ describe('PodManager', () => {
         try {
           const error = new Error('controller rejected');
           ctx.deps.workspaceCheckpointController = new WorkspaceCheckpointController({
+            captureAuthority: () => () => {},
             observe: async () => {
               if (phase === 'observation') throw error;
               return { head: 'a', tree: 'b', dirty: true };
@@ -2199,6 +2202,7 @@ describe('PodManager', () => {
     it('falls back to direct capture only when the controller supplies no result', async () => {
       const ctx = sandboxContext();
       const controller = new WorkspaceCheckpointController({
+        captureAuthority: () => () => {},
         observe: async () => ({ head: 'a', tree: 'b', dirty: true }),
         checkpoint: async () => completeProof,
         records: {
@@ -2218,7 +2222,7 @@ describe('PodManager', () => {
 
         await manager.preserveWorkspace(pod.id, 'probe');
 
-        expect(request).toHaveBeenCalledWith(pod.id, 'completion');
+        expect(request).toHaveBeenCalledWith(pod.id, 'completion', undefined, expect.any(Function));
         expect(ctx.deps.sandboxWorkspaceCheckpoint).toHaveBeenCalledOnce();
         expect(activity(ctx, pod.id)).toEqual(['Verified workspace checkpoint before probe.']);
         expect(ctx.containerManager.extractDirectoryFromContainer).not.toHaveBeenCalled();

@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { assertSourceResourceReleasable } from '../pods/source-custody-guards.js';
+import { assertValidationResourceSettled } from '../pods/validation-execution-evidence.js';
 import { createSandboxWakeupFixture } from '../test-utils/sandbox-wakeup-helpers.js';
+import { validationRecoveryFixture } from '../test-utils/validation-recovery-helpers.js';
 import { createLocalValidationEngine } from '../validation/local-validation-engine.js';
 import { AzureSandboxApiClient, type WebSocketLike } from './azure-sandbox-api-client.js';
 import { type SandboxExecChunk, SandboxInfrastructureError } from './sandbox-api-client.js';
@@ -12,6 +15,115 @@ const logger = pino({ level: 'silent' });
 let wakeupFixture: ReturnType<typeof createSandboxWakeupFixture> | undefined;
 
 describe('source resource release custody', () => {
+  it('refuses provider deletion when immutable validation custody arrives during auth', async () => {
+    const f = validationRecoveryFixture();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const resource = '11111111-1111-4111-8111-111111111111';
+    try {
+      f.podRepo.update(f.podId, { containerId: null });
+      f.podRepo.update(f.podId, { executionTarget: 'sandbox', containerId: resource });
+      const { client, requests } = makeClient([], {
+        credential: {
+          async getToken() {
+            await gate;
+            return { token: 'fixture-token', expiresOnTimestamp: Date.now() + 60000 };
+          },
+        },
+        assertReleaseAllowed: (id) => assertSourceResourceReleasable(f.db, id),
+      });
+      const pending = client.destroy(resource).catch((error: unknown) => error);
+      const retries = f.podRepo.taskRetries;
+      const ledger = f.podRepo.validationExecutions;
+      if (!retries || !ledger) throw new Error('Missing durable validation ledger');
+      const pod = f.podRepo.getOrThrow(f.podId);
+      const admission = retries.admit(
+        pod.id,
+        pod.lifecycleGeneration,
+        {
+          source: 'a'.repeat(64),
+          contract: 'b'.repeat(64),
+          commands: 'c'.repeat(64),
+          environment: null,
+          implementation: null,
+        },
+        'd'.repeat(64),
+        [],
+      );
+      retries.start(admission.id);
+      expect(ledger.dispatch(pod, admission.id, 1, 'test-scope')).not.toBeNull();
+      // Replacement pointers cannot release the original immutable resource.
+      f.podRepo.update(pod.id, { containerId: 'replacement' });
+      release();
+      const outcome = await pending;
+      expect(requests).toEqual([]);
+      expect(outcome).toMatchObject({ code: 'VALIDATION_EXECUTION_UNVERIFIED' });
+      expect(ledger.unsettled(pod.id)).not.toBeNull();
+    } finally {
+      release();
+      f.db.close();
+    }
+  });
+
+  it('refuses a queued wakeup after immutable validation custody arrives during observation auth', async () => {
+    const f = validationRecoveryFixture();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const resource = '11111111-1111-4111-8111-111111111111';
+    try {
+      f.podRepo.update(f.podId, { containerId: null });
+      f.podRepo.update(f.podId, { executionTarget: 'sandbox', containerId: resource });
+      const { client, requests } = makeClient(
+        [{ status: 200, body: { id: resource, state: 'Stopped' } }],
+        {
+          credential: {
+            async getToken() {
+              await gate;
+              return { token: 'fixture-token', expiresOnTimestamp: Date.now() + 60000 };
+            },
+          },
+          wakeupJournal: f.podRepo.sandboxWakeups,
+          assertWakeAllowed: (id) => assertValidationResourceSettled(f.db, id),
+        },
+      );
+      const journal = f.podRepo.sandboxWakeups;
+      if (!journal) throw new Error('Missing wakeup journal');
+      journal.observeRunning(client.getResourceKey(resource), resource);
+      const pending = client.resume(resource).catch((error: unknown) => error);
+      const retries = f.podRepo.taskRetries;
+      const ledger = f.podRepo.validationExecutions;
+      if (!retries || !ledger) throw new Error('Missing durable validation ledger');
+      const pod = f.podRepo.getOrThrow(f.podId);
+      const admission = retries.admit(
+        pod.id,
+        pod.lifecycleGeneration,
+        {
+          source: 'a'.repeat(64),
+          contract: 'b'.repeat(64),
+          commands: 'c'.repeat(64),
+          environment: null,
+          implementation: null,
+        },
+        'd'.repeat(64),
+        [],
+      );
+      retries.start(admission.id);
+      expect(ledger.dispatch(pod, admission.id, 1, 'test-scope')).not.toBeNull();
+      release();
+      const outcome = await pending;
+      expect(requests.every((request) => request.init?.method === 'GET')).toBe(true);
+      expect(outcome).toMatchObject({ code: 'VALIDATION_EXECUTION_UNVERIFIED' });
+      expect(journal.pendingSandboxIds()).toEqual([]);
+    } finally {
+      release();
+      f.db.close();
+    }
+  });
+
   it.each(['destroy', 'suspend'] as const)(
     'rechecks custody after delayed auth before %s dispatch',
     async (action) => {
@@ -1176,6 +1288,54 @@ describe('AzureSandboxApiClient', () => {
       })(),
     ).rejects.toThrow(/cannot run as a specific user/);
     expect(drained).toEqual([]);
+  });
+
+  it('refuses terminal wrapper writes after authority changes during token acquisition', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    const { client, requests } = makeClient([], {
+      credential: {
+        async getToken() {
+          await gate;
+          return { token: 'fixture-token', expiresOnTimestamp: Date.now() + 60000 };
+        },
+      },
+    });
+    const pending = client.attachTerminal('sbx-1', {
+      cols: 80,
+      rows: 24,
+      assertCurrent: () => {
+        if (held) throw new Error('Validation custody held');
+      },
+    });
+    held = true;
+    release();
+    await expect(pending).rejects.toThrow('Validation custody held');
+    expect(requests).toEqual([]);
+  });
+
+  it('does not send a terminal start frame when custody changes during socket connection', async () => {
+    let held = false;
+    const { client, sockets } = makeStreamingClient(() => {});
+    const session = await client.attachTerminal('sbx-1', {
+      cols: 80,
+      rows: 24,
+      assertCurrent: () => {
+        if (held) throw new Error('Validation custody held');
+      },
+    });
+    const socket = sockets[0];
+    if (!socket) throw new Error('Missing staged terminal socket');
+    const errors: Error[] = [];
+    session.onError((error) => errors.push(error));
+    held = true;
+    socket.onopen?.({});
+    expect(socket.sent).toEqual([]);
+    expect(socket.closed).toBe(true);
+    expect(errors[0]?.message).toBe('Validation custody held');
   });
 
   it('opens an interactive TTY terminal session, proxying stdin/resize/output', async () => {

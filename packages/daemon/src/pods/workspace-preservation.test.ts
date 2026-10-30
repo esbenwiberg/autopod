@@ -114,6 +114,7 @@ describe('workspace preservation boundary', () => {
         cm.readFileBinary = vi.fn(async (_containerId, remote) => readFile(localPath(remote)));
         const records: CheckpointRecord[] = [];
         const controller = new WorkspaceCheckpointController({
+          captureAuthority: () => () => {},
           observe: async () => ({
             head: await git(sandbox, ['rev-parse', 'HEAD']),
             tree: await git(sandbox, ['rev-parse', 'HEAD^{tree}']),
@@ -121,6 +122,7 @@ describe('workspace preservation boundary', () => {
           }),
           checkpoint: async (podId, _reason, sequence) =>
             checkpointSandboxWorkspace({
+              assertCurrent: () => {},
               containerManager: cm,
               containerId: 'sandbox-source',
               podId,
@@ -142,6 +144,7 @@ describe('workspace preservation boundary', () => {
           throw new Error('Unexpected local synchronization');
         });
         const preservation = createWorkspacePreservation({
+          captureAuthority: () => () => {},
           getContainerManager: () => cm,
           syncWorkspaceBack: sync,
           ...(routing === 'controller' && { workspaceCheckpointController: controller }),
@@ -198,6 +201,7 @@ describe('workspace preservation boundary', () => {
       const pod = { ...workspacePod('missing-source', '/unused'), [missing]: null };
       const getContainerManager = vi.fn(() => createMockContainerManager());
       const preservation = createWorkspacePreservation({
+        captureAuthority: () => () => {},
         getContainerManager,
         syncWorkspaceBack: async () => ({ pushed: false }),
         logger,
