@@ -46,7 +46,11 @@ admission closes. It does not rewrite migration 222 or backfill guessed outcomes
 Migration 224 distinguishes exactly-once logical history/completion publication
 from intermediate infrastructure-attempt evidence and accounting. Intermediate
 attempts remain inspectable without duplicating the logical history or resetting
-retry allowances; this never closes an unknown-termination fence.
+retry allowances; this never closes an unknown-termination fence. Raw engine JSON and
+hash remain immutable. Logical publication separately pins its final JSON/hash, permitting
+only canonical collected screenshot references to be added. Existing references and all
+execution, identity, usage and failure fields remain unchanged; replay cannot choose a
+different final result.
 
 If a daemon stopped between dispatch/outcome recording and publication, inspection
 returns `VALIDATION_RESULT_PUBLICATION_UNVERIFIED` with the exact retained dispatch
@@ -119,9 +123,10 @@ ap validation-recovery-budget <full-pod-id> --seconds 900 \
 
 Select this **after settlement**, before requesting repair. This is an audited one-shot
 selection of 1–3600 **seconds**, expiring after one hour. Inspection includes the selection,
-expiry and consuming dispatch. Engine input converts seconds to milliseconds before
-capturing retry identity; timeouts participate in the command-input hash. It is consumed
-once at dispatch and does not apply to later automatic infrastructure retries. If it expires
+expiry and consuming dispatch. Engine input converts seconds to milliseconds and records
+the effective bound against its consuming dispatch. Retry permission still uses the frozen
+timeout: selecting or reverting a one-shot bound is not changed conditions and cannot
+independently authorize repeating a nonretryable result. It is consumed once at dispatch and does not apply to later automatic infrastructure retries. If it expires
 before dispatch, frozen settings apply; inspect expiry before proceeding. No current preset
 or unrelated setting is adopted. Neither selection nor consumption grants retry permission,
 changes historical duration, proves termination or resets task-wide accounting.

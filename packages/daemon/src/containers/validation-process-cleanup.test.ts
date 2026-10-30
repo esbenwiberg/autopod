@@ -64,6 +64,32 @@ it.each(['owned-newline', 'foreign-newline', 'truncated'] as const)(
   },
 );
 
+it.each(['pid', 'state', 'group', 'start'] as const)(
+  'retains unknown ownership for a full-length proc record with malformed %s',
+  async (field) => {
+    const root = await mkdtemp(join(tmpdir(), 'validation-proc-malformed-'));
+    await mkdir(join(root, '222'));
+    const fields = ['S', '1', '999', ...Array<string>(17).fill('0')];
+    if (field === 'state') fields[0] = 'invalid';
+    if (field === 'group') fields[2] = 'unknown';
+    if (field === 'start') fields[19] = 'unknown';
+    await writeFile(
+      join(root, '222/stat'),
+      `${field === 'pid' ? 'unknown' : '222'} (fixture) ${fields.join(' ')}\n`,
+    );
+    try {
+      const probe = processGroupProbeScript().replaceAll('/proc/', `${root}/`);
+      const result = await exec('/bin/sh', [
+        '-c',
+        `pid=111; ${probe}; if group_alive; then echo held; else echo absent; fi`,
+      ]);
+      expect(result.stdout.trim()).toBe('held');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
 it.skipIf(process.platform !== 'linux').each(['graceful', 'forced', 'stale'] as const)(
   'verifies owned process group cleanup: %s',
   async (mode) => {

@@ -2056,13 +2056,19 @@ export function processGroupProbeScript(): string {
   // Join all lines: Linux comm names can contain newlines. A truncated or
   // unreadable existing record remains unknown, never proof of termination.
   return [
-    'read_proc_stat() { stat=; while IFS= read -r stat_line; do stat="$stat $stat_line"; done < "$1"; [ -n "$stat" ]; }',
+    'read_proc_stat() { stat=; while IFS= read -r stat_line; do stat="${stat}${stat:+ }${stat_line}"; done < "$1"; [ -n "$stat" ]; }',
     'group_alive() { for stat_file in /proc/[0-9]*/stat; do',
     '[ -r "$stat_file" ] || { [ -d "${stat_file%/stat}" ] && return 0; continue; }',
     'read_proc_stat "$stat_file" 2>/dev/null || { [ -d "${stat_file%/stat}" ] && return 0; continue; }',
     'case "$stat" in *") "*) ;; *) [ -d "${stat_file%/stat}" ] && return 0; continue;; esac',
+    'record_pid=${stat%% *}; proc_dir=${stat_file%/stat}',
+    'case "$record_pid" in *[!0-9]*|"") [ -d "$proc_dir" ] && return 0; continue;; esac',
+    '[ "$record_pid" = "${proc_dir##*/}" ] || { [ -d "$proc_dir" ] && return 0; continue; }',
     'rest=${stat##*) }; set -- $rest',
-    '[ "$#" -ge 20 ] || { [ -d "${stat_file%/stat}" ] && return 0; continue; }',
+    '[ "$#" -ge 20 ] || { [ -d "$proc_dir" ] && return 0; continue; }',
+    'case "$1" in R|S|D|Z|T|t|X|x|K|W|P|I) ;; *) [ -d "$proc_dir" ] && return 0; continue;; esac',
+    'case "$3" in *[!0-9]*|"") [ -d "$proc_dir" ] && return 0; continue;; esac',
+    'case "${20}" in *[!0-9]*|"") [ -d "$proc_dir" ] && return 0; continue;; esac',
     '[ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0',
     'done; return 1; }',
   ].join('\n');
