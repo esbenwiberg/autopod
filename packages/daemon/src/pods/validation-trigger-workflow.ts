@@ -381,7 +381,10 @@ export function createValidationTriggerWorkflow(
             validationSyncOk =
               checkpoint.promoted && checkpoint.materialized && checkpoint.lineageVerified;
           } else {
-            const cm = containerManagerFactory.get(pod.executionTarget);
+            const cm = guardValidationContainer(
+              containerManagerFactory.get(pod.executionTarget),
+              assertPreflight,
+            );
             await prepareWorkspaceForValidation(
               pod.containerId,
               pod.worktreePath,
