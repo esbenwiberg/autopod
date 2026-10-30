@@ -52,6 +52,7 @@ export function createCompletionEvents(captured: CompletionEventsCaptured) {
     }
     podRepo.update(pod.id, updates);
     if (to === 'complete') podRepo.completionJournal?.mark(pod, 'finished');
+    else if (to === 'research_ready') podRepo.completionJournal?.mark(pod, 'ready');
     else if (to === 'validating') podRepo.completionJournal?.mark(pod, 'finalizing');
     const publish = () => {
       eventBus.emit({
