@@ -118,12 +118,20 @@ export function createResourcePreview(captured: ResourcePreviewCaptured) {
       containerManager: containerManagerFactory.get('sandbox'),
       logger,
     });
-    assertCurrent();
-    sandboxPreviewProxies.set(pod.id, { containerId: pod.containerId, proxy, assertCurrent });
-    if (proxy.url !== previewUrl) {
-      podRepo.update(pod.id, { previewUrl: proxy.url });
+    try {
+      assertCurrent();
+      sandboxPreviewProxies.set(pod.id, { containerId: pod.containerId, proxy, assertCurrent });
+      if (proxy.url !== previewUrl) {
+        podRepo.update(pod.id, { previewUrl: proxy.url });
+      }
+      return proxy.url;
+    } catch (error) {
+      // Construction has already opened a listener. A stale owner must not leak
+      // it, or delete a replacement installed by a different invocation.
+      if (sandboxPreviewProxies.get(pod.id)?.proxy === proxy) sandboxPreviewProxies.delete(pod.id);
+      await proxy.close();
+      throw error;
     }
-    return proxy.url;
   }
 
   async function stopSandboxPreviewProxy(podId: string): Promise<void> {

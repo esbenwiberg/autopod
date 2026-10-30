@@ -1069,7 +1069,7 @@ describe('validation execution durable effects', () => {
       f.close();
     }
   });
-  it('converts an audited one-shot budget to milliseconds before retry identity and consumes it only once', async () => {
+  it('records the effective one-shot timeout without treating it as changed retry conditions', async () => {
     const f = fixture(true);
     try {
       const executions = f.repo.validationExecutions;
@@ -1087,12 +1087,15 @@ describe('validation execution durable effects', () => {
         timeouts.push(config.testTimeout);
         return captureValidationRetryIdentity(f.cm, config);
       });
-      f.engine.mockResolvedValueOnce(result('infra')).mockResolvedValueOnce(result());
+      const executedTimeouts: Array<number | undefined> = [];
+      f.engine.mockImplementation(async (config) => {
+        executedTimeouts.push(config.testTimeout);
+        return executedTimeouts.length === 1 ? result('infra') : result();
+      });
       await f.run();
-      expect(timeouts).toEqual([900000, 600000]);
-      expect(f.admitted.mock.calls[0]?.[2].commands).not.toBe(
-        f.admitted.mock.calls[1]?.[2].commands,
-      );
+      expect(timeouts).toEqual([600000, 600000]);
+      expect(executedTimeouts).toEqual([900000, 600000]);
+      expect(f.admitted.mock.calls[0]?.[2].commands).toBe(f.admitted.mock.calls[1]?.[2].commands);
       expect(executions.budgets('worker')[0]).toMatchObject({
         seconds: 900,
         consumedByDispatchId: expect.any(String),
@@ -1102,6 +1105,40 @@ describe('validation execution durable effects', () => {
       f.close();
     }
   });
+  it.each(['select-after-failure', 'revert-after-consumption'] as const)(
+    'timeout-only changes never grant a nonretryable replay: %s',
+    async (mode) => {
+      const f = fixture(true);
+      try {
+        const executions = f.repo.validationExecutions;
+        if (!executions) throw new Error('Missing execution ledger');
+        f.config.testTimeout = 600000;
+        f.capture.mockImplementation((config) => captureValidationRetryIdentity(f.cm, config));
+        const select = () =>
+          executions.authorizeBudget(f.repo.getOrThrow('worker'), 900, 'One measured bound only', {
+            type: 'human',
+            userId: 'operator',
+          });
+        f.repo.update('worker', { lastValidationResult: result('fail') });
+        if (mode === 'revert-after-consumption') select();
+        f.engine.mockResolvedValueOnce(result('fail'));
+        const failed = await f.run();
+        f.repo.update('worker', { lastValidationResult: failed });
+        if (mode === 'select-after-failure') select();
+        await expect(f.run()).rejects.toThrow();
+        expect(f.engine).toHaveBeenCalledOnce();
+        expect(f.ledger.state('worker')).toMatchObject({ executedCount: 1 });
+        expect(f.ledger.state('worker').authorizations).toHaveLength(0);
+        expect(executions.budgets('worker')[0]?.consumedByDispatchId === null).toBe(
+          mode === 'select-after-failure',
+        );
+        expect(f.config.testTimeout).toBe(600000);
+      } finally {
+        f.close();
+      }
+    },
+  );
+
   it('does not retain the consumed one-shot timeout when the same config object is reused', async () => {
     const f = fixture(true);
     try {

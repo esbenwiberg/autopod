@@ -134,9 +134,15 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
           ? recoveryBudget.seconds * 1000
           : originalTestTimeout;
         await recordValidationProvenance(validationConfig, 'validation', ownership.assertCurrent);
+        // A one-shot execution budget is not changed source/commands and cannot
+        // authorize repeating a nonretryable attempt. Record/execute the selected
+        // timeout above, but evaluate retry permission against the frozen timeout.
+        const permissionConfig = recoveryBudget
+          ? { ...validationConfig, testTimeout: originalTestTimeout }
+          : validationConfig;
         const identity = retryLedger
-          ? await (retrySource.captureRetryIdentity?.(validationConfig) ??
-              captureValidationRetryIdentity(cm, validationConfig))
+          ? await (retrySource.captureRetryIdentity?.(permissionConfig) ??
+              captureValidationRetryIdentity(cm, permissionConfig))
           : null;
         resolveEffectiveBoundProfile(ownership.assertCurrent());
         const bindingHash = createHash('sha256')
