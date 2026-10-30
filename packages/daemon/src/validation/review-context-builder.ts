@@ -100,8 +100,9 @@ export function parseDiffFilePaths(diff: string): string[] {
   for (const line of diff.split('\n')) {
     // Match +++ b/path or --- a/path (skip /dev/null)
     const match = line.match(/^(?:\+\+\+|---) [ab]\/(.+)$/);
-    if (match && match[1] !== '/dev/null') {
-      paths.add(match[1]);
+    const filePath = match?.[1];
+    if (filePath && filePath !== '/dev/null') {
+      paths.add(filePath);
     }
   }
   return [...paths];
@@ -386,16 +387,19 @@ async function detectContradictoryOps(
     for (const line of stdout.split('\n')) {
       // Commit header line: <sha> <subject>
       const commitMatch = line.match(/^([0-9a-f]{40})\s+(.*)$/);
-      if (commitMatch) {
-        currentCommit = commitMatch[1].slice(0, 8);
-        currentSubject = commitMatch[2];
+      const commitSha = commitMatch?.[1];
+      const commitSubject = commitMatch?.[2];
+      if (commitSha && commitSubject !== undefined) {
+        currentCommit = commitSha.slice(0, 8);
+        currentSubject = commitSubject;
         continue;
       }
 
       // File operation line: A/M/D/R\t<path>
       const opMatch = line.match(/^([AMDRC])\t(.+)$/);
-      if (opMatch && currentCommit) {
-        const [, op, filePath] = opMatch;
+      const op = opMatch?.[1];
+      const filePath = opMatch?.[2];
+      if (op && filePath && currentCommit) {
         if (!fileOps.has(filePath)) fileOps.set(filePath, []);
         fileOps.get(filePath)?.push({ op, commit: currentCommit, subject: currentSubject });
       }

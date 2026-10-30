@@ -25,6 +25,8 @@ export function createControlOperationRegistry(
           key === 'adoptSource' ||
           key === 'reconcileValidationExecution' ||
           key === 'readValidationEvidence' ||
+          // This operation is permanently disabled and must reject before resource lookup.
+          key === 'injectCredential' ||
           key === 'touchHeartbeat' ||
           /^(get|list|inspect|watch|assert)/.test(String(key))
         )
