@@ -98,6 +98,7 @@ export function createAdvisoryValidation(deps: AdvisoryValidationDependencies): 
       return blockingResult;
     }
 
+    const runAdvisoryBrowserQa = validationEngine.runAdvisoryBrowserQa.bind(validationEngine);
     let registered = false;
     const ownership = advisoryPublicationOwnership(
       expectedPod,
@@ -139,7 +140,7 @@ export function createAdvisoryValidation(deps: AdvisoryValidationDependencies): 
         try {
           ownership.assertCurrent();
           const callbacks = buildPhaseEventCallbacks(podId);
-          advisoryResult = await validationEngine.runAdvisoryBrowserQa(
+          advisoryResult = await runAdvisoryBrowserQa(
             validationConfig,
             blockingResult,
             (phase) => {

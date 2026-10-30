@@ -183,6 +183,24 @@ function fixture() {
 }
 
 describe('advisory validation ownership contract', () => {
+  it('retains the checked advisory method and receiver across a queued slot', async () => {
+    const f = fixture();
+    const slot = deferred<void>();
+    f.acquire.mockImplementation(() => slot.promise);
+    const engine = f.deps.validationEngine;
+    const checked = vi.fn<Runner>(async function (this: typeof engine) {
+      expect(this).toBe(engine);
+      return qa();
+    });
+    engine.runAdvisoryBrowserQa = checked;
+    const pending = f.run();
+    engine.runAdvisoryBrowserQa = undefined;
+    slot.resolve();
+    await expect(pending).resolves.toMatchObject({ advisoryBrowserQa: { status: 'pass' } });
+    expect(checked).toHaveBeenCalledOnce();
+    expect(f.release).toHaveBeenCalledOnce();
+  });
+
   it('refuses queued advisory execution if an immutable unpublished dispatch takes custody', async () => {
     const f = fixture();
     f.repository.update(f.pod.id, { containerId: null });
