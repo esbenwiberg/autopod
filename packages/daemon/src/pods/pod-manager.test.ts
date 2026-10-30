@@ -2333,7 +2333,13 @@ describe('PodManager', () => {
       try {
         const error = new Error('archive failed');
         vi.mocked(ctx.containerManager.execInContainer).mockRejectedValue(new Error('exec failed'));
-        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockRejectedValue(error);
+        vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementation(
+          async (_id, _source, _target, _excludes, options) => {
+            expect(options?.assertCurrent).toBeTypeOf('function');
+            options?.assertCurrent?.();
+            throw error;
+          },
+        );
         const { manager, pod } = preservationPod(ctx);
 
         await expect(manager.preserveWorkspace(pod.id, 'probe')).rejects.toBe(error);
@@ -2343,6 +2349,7 @@ describe('PodManager', () => {
           '/workspace',
           pod.worktreePath,
           ['.git', 'node_modules', '.serena', '.roslyn-codelens'],
+          { assertCurrent: expect.any(Function) },
         );
         expect(activity(ctx, pod.id)).toEqual([]);
         expect(ctx.containerManager.kill).not.toHaveBeenCalled();
@@ -2473,9 +2480,18 @@ describe('PodManager', () => {
             if (!normal) throw new Error('missing normal exec');
             return normal(id, command, options);
           });
+          let guardedCopies = 0;
+          vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mockImplementation(
+            async (_id, _source, _target, _excludes, options) => {
+              expect(options?.assertCurrent).toBeTypeOf('function');
+              options?.assertCurrent?.();
+              guardedCopies++;
+            },
+          );
           const { manager, pod } = transferPod(ctx);
 
           await manager.preserveWorkspace(pod.id, 'fallback probe');
+          expect(guardedCopies).toBe(2);
 
           const calls = vi.mocked(ctx.containerManager.extractDirectoryFromContainer).mock.calls;
           expect(calls).toHaveLength(2);
@@ -2484,6 +2500,7 @@ describe('PodManager', () => {
             '/workspace',
             pod.worktreePath,
             ['.git', 'node_modules', '.serena', '.roslyn-codelens'],
+            { assertCurrent: expect.any(Function) },
           ]);
           expect(calls[1]?.[1]).toBe('/workspace/.git');
           temporaryGit = calls[1]?.[2];
@@ -22141,6 +22158,7 @@ describe('PodManager', () => {
         '/workspace',
         '/tmp/wt',
         expect.arrayContaining(['.git', 'node_modules']),
+        { assertCurrent: expect.any(Function) },
       );
     });
 

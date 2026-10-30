@@ -64,6 +64,32 @@ describe('resource preview caches and transport', () => {
     expect(await (await fetch(replacement)).text()).toBe('local preview');
     await f.preview.stopSandboxPreviewProxy('prepare');
   });
+  it('replaces a cached status guard after pause while still refusing stale requests', async () => {
+    vi.stubEnv('AUTOPOD_SANDBOX_NATIVE_PREVIEW_EMAILS', '');
+    const f = createResourceFixture();
+    f.sandbox();
+    f.podRepo.update('prepare', { previewUrl: await unusedLocalPreviewUrl() });
+    vi.mocked(f.cm.execInContainer).mockResolvedValue(
+      result(JSON.stringify({ statusCode: 200, headers: {}, bodyBase64: '' })),
+    );
+    const url = await f.preview.ensureSandboxPreviewProxy(f.pod());
+    try {
+      expect((await fetch(url, { headers: { connection: 'close' } })).status).toBe(200);
+      f.podRepo.updateStatus('prepare', 'paused');
+      const calls = vi.mocked(f.cm.execInContainer).mock.calls.length;
+      expect((await fetch(url, { headers: { connection: 'close' } })).status).toBe(502);
+      expect(f.cm.execInContainer).toHaveBeenCalledTimes(calls);
+      expect(await f.preview.ensureSandboxPreviewProxy(f.pod())).toBe(url);
+      expect((await fetch(url, { headers: { connection: 'close' } })).status).toBe(200);
+      f.podRepo.update('prepare', { lifecycleGeneration: f.pod().lifecycleGeneration + 1 });
+      const renewedCalls = vi.mocked(f.cm.execInContainer).mock.calls.length;
+      expect((await fetch(url, { headers: { connection: 'close' } })).status).toBe(502);
+      expect(f.cm.execInContainer).toHaveBeenCalledTimes(renewedCalls);
+    } finally {
+      await f.preview.stopSandboxPreviewProxy('prepare');
+    }
+  });
+
   it('warns and falls back when native exposure fails or has no assigned URL', async () => {
     vi.stubEnv('AUTOPOD_SANDBOX_NATIVE_PREVIEW_EMAILS', 'reviewer@invalid.example');
     const f = createResourceFixture();

@@ -1418,8 +1418,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const validationExecutionRecovery = createValidationExecutionRecovery({
     podRepo,
     getContainerManager: () => containerManagerFactory.get('sandbox'),
-    isActive: (id) =>
-      controlOperations.isActive(id) ||
+    isActive: (id, exceptCurrent) =>
+      controlOperations.isActive(id, exceptCurrent) ||
       activeAgentRuns.has(id) ||
       validationAbortControllers.has(id) ||
       infrastructureResumeRuns.has(id) ||

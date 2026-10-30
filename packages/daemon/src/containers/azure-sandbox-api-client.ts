@@ -2052,7 +2052,19 @@ export function processGroupProbeScript(): string {
   // A process can disappear after glob expansion/readability observation. Only
   // an absent proc directory settles that entry; unreadable existing entries
   // remain unknown. Unrelated process churn must not masquerade as owned work.
-  return 'group_alive() { for stat_file in /proc/[0-9]*/stat; do [ -r "$stat_file" ] || { [ -d "${stat_file%/stat}" ] && return 0; continue; }; stat=$(cat "$stat_file" 2>/dev/null) || { [ -d "${stat_file%/stat}" ] && return 0; continue; }; rest=${stat##*) }; set -- $rest; [ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0; done; return 1; }';
+  // Read proc records with shell builtins, not one fork/exec per PID per poll.
+  // Join all lines: Linux comm names can contain newlines. A truncated or
+  // unreadable existing record remains unknown, never proof of termination.
+  return [
+    'read_proc_stat() { stat=; while IFS= read -r stat_line; do stat="$stat $stat_line"; done < "$1"; [ -n "$stat" ]; }',
+    'group_alive() { for stat_file in /proc/[0-9]*/stat; do',
+    '[ -r "$stat_file" ] || { [ -d "${stat_file%/stat}" ] && return 0; continue; }',
+    'read_proc_stat "$stat_file" 2>/dev/null || { [ -d "${stat_file%/stat}" ] && return 0; continue; }',
+    'rest=${stat##*) }; set -- $rest',
+    '[ "$#" -ge 20 ] || { [ -d "${stat_file%/stat}" ] && return 0; continue; }',
+    '[ "$3" = "$pid" ] && [ "$1" != "Z" ] && return 0',
+    'done; return 1; }',
+  ].join('\n');
 }
 
 export function terminatePidFileScript(pidPath: string): string {
@@ -2066,7 +2078,7 @@ export function terminatePidFileScript(pidPath: string): string {
     '[ -d /proc/1 ] || exit 1',
     processGroupProbeScript(),
     // A stale PID receipt must never signal an unrelated reused process group.
-    'stat=$(cat /proc/"$pid"/stat) || exit 1',
+    'read_proc_stat /proc/"$pid"/stat || exit 1',
     'rest=${stat##*) }; set -- $rest',
     '[ "$3" = "$pid" ] && [ "${20}" = "$start" ] || exit 1',
     'kill -TERM -"$pid" 2>/dev/null || true',

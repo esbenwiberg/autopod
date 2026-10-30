@@ -53,6 +53,24 @@ it('refuses new mutations under custody while allowing durable reads and source-
   await expect(owner.adoptSource('pod')).resolves.toBe('pod');
   expect(registry.isActive('pod')).toBe(false);
 });
+it('excludes only the current budget token, never another or enclosing control', () => {
+  const registry = createControlOperationRegistry();
+  const owner = registry.wrap({
+    authorizeValidationRecoveryBudget(id: string) {
+      return {
+        all: registry.isActive(id),
+        others: registry.isActive(id, 'authorizeValidationRecoveryBudget'),
+      };
+    },
+    outerControl(id: string) {
+      return this.authorizeValidationRecoveryBudget(id);
+    },
+  });
+  expect(owner.authorizeValidationRecoveryBudget('pod')).toEqual({ all: true, others: false });
+  expect(owner.outerControl('pod')).toEqual({ all: true, others: true });
+  expect(registry.isActive('pod')).toBe(false);
+});
+
 it('preserves promise identity, shorthand reads and replacement control methods', async () => {
   const registry = createControlOperationRegistry();
   let release = () => {};

@@ -14,7 +14,7 @@ export function createResourcePreview(captured: ResourcePreviewCaptured) {
   const { containerManagerFactory, logger, podRepo } = captured;
   const sandboxPreviewProxies = new Map<
     string,
-    { containerId: string; proxy: SandboxPreviewProxy }
+    { containerId: string; proxy: SandboxPreviewProxy; assertCurrent: () => unknown }
   >();
   const nativePreviewPorts = new Map<string, { containerId: string; port: number; url: string }>();
   async function tryNativeSandboxPreview(pod: Pod, containerId: string): Promise<string | null> {
@@ -92,7 +92,15 @@ export function createResourcePreview(captured: ResourcePreviewCaptured) {
     }
 
     const existing = sandboxPreviewProxies.get(pod.id);
-    if (existing?.containerId === pod.containerId) return existing.proxy.url;
+    if (existing?.containerId === pod.containerId) {
+      try {
+        existing.assertCurrent();
+        return existing.proxy.url;
+      } catch {
+        // The new snapshot was checked above. Retire a proxy whose captured
+        // status/configuration/generation is stale; never reuse its old guard.
+      }
+    }
     if (existing) await stopSandboxPreviewProxy(pod.id);
 
     const hostPort = parsePreviewPort(previewUrl);
@@ -111,7 +119,7 @@ export function createResourcePreview(captured: ResourcePreviewCaptured) {
       logger,
     });
     assertCurrent();
-    sandboxPreviewProxies.set(pod.id, { containerId: pod.containerId, proxy });
+    sandboxPreviewProxies.set(pod.id, { containerId: pod.containerId, proxy, assertCurrent });
     if (proxy.url !== previewUrl) {
       podRepo.update(pod.id, { previewUrl: proxy.url });
     }

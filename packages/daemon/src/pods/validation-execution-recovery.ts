@@ -20,7 +20,7 @@ import {
 export function createValidationExecutionRecovery(deps: {
   podRepo: PodRepository;
   getContainerManager(): ContainerManager;
-  isActive(podId: string): boolean;
+  isActive(podId: string, exceptCurrent?: 'authorizeValidationRecoveryBudget'): boolean;
   dataDir?: string;
 }) {
   const ledger = deps.podRepo.validationExecutions;
@@ -30,7 +30,7 @@ export function createValidationExecutionRecovery(deps: {
       'validation-recovery',
       podId,
     );
-  const assertIdle = (podId: string) => {
+  const assertIdle = (podId: string, exceptCurrent?: 'authorizeValidationRecoveryBudget') => {
     const pod = deps.podRepo.getOrThrow(podId);
     deps.podRepo.sourceAdoptions?.assertAvailable(podId, '');
     if (deps.podRepo.sourceAdoptions?.hasCustody(podId))
@@ -52,7 +52,7 @@ export function createValidationExecutionRecovery(deps: {
       deps.podRepo.hasUnansweredDecision?.(podId) ||
       !pod.worktreePath ||
       pod.worktreeCompromised ||
-      deps.isActive(podId) ||
+      deps.isActive(podId, exceptCurrent) ||
       deps.podRepo.taskExecutions?.hasActiveRun(podId)
     )
       validationRecoveryError(
@@ -166,7 +166,7 @@ export function createValidationExecutionRecovery(deps: {
     input: ValidationExecutionRecoveryRequest & { testTimeoutSeconds: number },
     actor: OperatorActor,
   ) {
-    const pod = assertIdle(podId);
+    const pod = assertIdle(podId, 'authorizeValidationRecoveryBudget');
     if (pod.executionTarget !== 'sandbox' || !deps.getContainerManager().executionResourceScope)
       validationRecoveryError('Recovery budget requires a sandbox with durable dispatch scope');
     deps.podRepo.deletionOwnership?.assertTaskAvailable(podId);

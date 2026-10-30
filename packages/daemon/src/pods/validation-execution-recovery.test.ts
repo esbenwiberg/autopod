@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { logger } from '../test-utils/mock-helpers.js';
 import { validationRecoveryFixture } from '../test-utils/validation-recovery-helpers.js';
 import { writeArtifactSnapshotReceipt } from './artifact-snapshot-receipt.js';
+import { createControlOperationRegistry } from './control-operation-registry.js';
 import { createEventBus } from './event-bus.js';
 import { createEventRepository } from './event-repository.js';
 import { createPodRepository } from './pod-repository.js';
@@ -788,6 +789,40 @@ describe('exact validation execution recovery', () => {
     });
     expect(f.ledger.intent(f.dispatch!)).toBeNull();
   });
+  it('authorizes through the real facade registry without ignoring other entered controls', async () => {
+    const f = fixture();
+    const registry = createControlOperationRegistry();
+    const recovery = createValidationExecutionRecovery({
+      podRepo: f.podRepo,
+      getContainerManager: () => f.containerManager,
+      isActive: (id, exceptCurrent) => registry.isActive(id, exceptCurrent),
+    });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const owner = registry.wrap({
+      authorizeValidationRecoveryBudget: recovery.authorizeValidationRecoveryBudget,
+      async otherControl(_id: string) {
+        await held;
+      },
+    });
+    const input = { ...f.input, testTimeoutSeconds: 900 };
+    const competing = owner.otherControl(f.podId);
+    expect(() => owner.authorizeValidationRecoveryBudget(f.podId, input, actor)).toThrow();
+    expect(f.ledger.budgets(f.podId)).toHaveLength(0);
+    release();
+    await competing;
+    const selected = owner.authorizeValidationRecoveryBudget(f.podId, input, actor);
+    expect(selected.seconds).toBe(900);
+    expect(registry.isActive(f.podId)).toBe(false);
+    expect(f.ledger.budgets(f.podId)).toHaveLength(1);
+    expect(f.podRepo.taskRetries!.state(f.podId).authorizations).toHaveLength(0);
+    expect(recovery.getValidationExecutionRecovery(f.podId).settled).toBe(false);
+    expect(f.containerManager.kill).not.toHaveBeenCalled();
+    expect(f.containerManager.execInContainer).not.toHaveBeenCalled();
+  });
+
   it('allows a narrow finite budget without changing frozen settings or granting retries, then consumes it once', () => {
     const f = fixture();
     const before = f.podRepo.getOrThrow(f.podId).profileSnapshot;
