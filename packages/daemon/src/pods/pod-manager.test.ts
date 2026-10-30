@@ -22317,8 +22317,9 @@ describe('PodManager', () => {
         return undefined as never;
       });
 
-      (ctx.containerManager.execInContainer as ReturnType<typeof vi.fn>).mockImplementation(
-        async (_containerId: string, cmd: string[]) => {
+      vi.mocked(ctx.containerManager.execInContainer).mockImplementation(
+        async (_containerId, cmd, options) => {
+          options?.assertCurrent?.();
           const command = cmd.join(' ');
           if (command.includes('/workspace/.git/objects/info/alternates')) {
             return { stdout: `${bareRepoPath}\n`, stderr: '', exitCode: 0 };
@@ -22346,12 +22347,12 @@ describe('PodManager', () => {
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'ctr-1',
         ['git', 'config', '--global', '--add', 'safe.directory', '/workspace'],
-        { timeout: 5_000 },
+        { timeout: 5_000, assertCurrent: expect.any(Function) },
       );
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'ctr-1',
         ['git', 'config', '--global', '--add', 'safe.directory', bareRepoPath],
-        { timeout: 5_000 },
+        { timeout: 5_000, assertCurrent: expect.any(Function) },
       );
       expect(ctx.containerManager.execInContainer).toHaveBeenCalledWith(
         'ctr-1',
