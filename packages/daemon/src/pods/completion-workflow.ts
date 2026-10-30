@@ -103,6 +103,13 @@ export function createCompletionWorkflow(
           409,
         );
     }
+    if (pod.completionPolicy === 'accept-findings') {
+      const config = deps.launchConfiguration?.read(podId);
+      if (config?.digest !== pod.launchConfigDigest || config.workflow.completion !== 'accept-findings' ||
+          config.intent !== 'task' || config.workflow.agentMode !== 'auto' ||
+          !['artifact', 'none'].includes(config.workflow.output) || config.workflow.validationPhases.length > 0)
+        throw new AutopodError('Frozen findings contract is unavailable or incompatible', 'FINDINGS_CONTRACT_INVALID', 409);
+    }
     // Bail out if pod is already past the running stage (could happen when
     // processPod's spawn unblocks after sendMessage already drove completion)
     if (
@@ -111,6 +118,7 @@ export function createCompletionWorkflow(
       pod.status === 'paused' ||
       pod.status === 'validating' ||
       pod.status === 'validated' ||
+      pod.status === 'research_ready' ||
       pod.status === 'failed' ||
       pod.status === 'review_required'
     ) {
@@ -123,7 +131,7 @@ export function createCompletionWorkflow(
       return;
     }
 
-    if (pod.options.output === 'artifact') {
+    if (pod.options.output === 'artifact' || pod.completionPolicy === 'accept-findings') {
       const key = `${pod.id}:${pod.lifecycleGeneration}:${pod.finalization?.cycle ?? 0}`;
       const pending = artifactCompletionRuns.get(key);
       if (pending) return pending;

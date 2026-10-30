@@ -178,6 +178,7 @@ export type PodStatus =
   | 'awaiting_input'
   | 'validating'
   | 'validated'
+  | 'research_ready'
   | 'failed'
   | 'review_required'
   | 'approved'
@@ -206,7 +207,23 @@ export interface ValidationWaiver {
   failedFactIds: string[];
 }
 
+export interface ResearchFindings {
+  generation: number;
+  cycle: number;
+  configDigest: string;
+  evidenceHash: string;
+  summary: TaskSummary;
+  result: string | null;
+  artifactsPath: string;
+  snapshotHash: string;
+  readyAt: string;
+  acceptance: { actor: OperatorActor; acceptedAt: string } | null;
+}
+
 export interface Pod {
+  /** Frozen workflow projection; absent on historical launches. */
+  completionPolicy?: 'accept-findings' | null;
+  researchFindings?: ResearchFindings | null;
   /** Present for composable launches; a missing/corrupt snapshot must never fall back to a live profile. */
   launchConfigDigest?: string | null;
   /** Durable worker settlement; this never grants validation or delivery authority. */
@@ -684,6 +701,7 @@ export interface PodFleetDisplay {
 }
 
 export interface CompactPod {
+  completionPolicy?: Pod['completionPolicy'];
   /** Absent on older daemons; present with null progress means no reported milestone. */
   display?: PodFleetDisplay;
   finalization?: Pod['finalization'];

@@ -240,7 +240,7 @@ export const workflowPresetSchema = z
       .default(['setup', 'build', 'test', 'review']),
     advisoryBrowserQaEnabled: z.boolean().default(false),
     promotable: z.boolean().default(false),
-    completion: z.enum(['approval', 'deliver', 'merge']).default('approval'),
+    completion: z.enum(['approval', 'deliver', 'merge', 'accept-findings']).default('approval'),
     maxValidationAttempts: z.number().int().min(1).max(10).default(3),
     mergePollIntervalSec: z.number().int().min(5).max(3600).default(60),
     preflightConflictPolicy: z.enum(['warn', 'block']).default('warn'),

@@ -22,6 +22,7 @@ export const COMPACT_JSON_FIELDS = [
 // SQL bounds values before they cross the SQLite/Node boundary. Unrelated prompts,
 // contracts, spec files and validation evidence are not selected or parsed at all.
 export const COMPACT_POD_COLUMNS = [
+  'completion_policy',
   'id',
   'profile_name',
   'status',

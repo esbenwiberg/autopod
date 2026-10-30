@@ -99,7 +99,7 @@ export function PodDetail(): JSX.Element {
   const recoveryReason =
     data.status === 'merge_pending'
       ? data.mergeBlockReason
-      : ['failed', 'validated', 'review_required'].includes(data.status)
+      : ['failed', 'validated', 'research_ready', 'review_required'].includes(data.status)
         ? (data.failureReason ?? data.mergeBlockReason)
         : null;
 
@@ -180,11 +180,24 @@ export function PodDetail(): JSX.Element {
         />
       ) : null}
 
-      <ValidationSummary result={data.lastValidationResult} history={validationHistory} />
+      {data.completionPolicy === 'accept-findings' ? (
+        <section className="info-panel">
+          <h2>{data.status === 'complete' ? 'Accepted findings' : 'Research findings'}</h2>
+          <p>Acceptance acknowledges receipt, not a fix or permission to implement or publish.</p>
+          <p>Not required for this research task: native validation.</p>
+          <p>{data.researchFindings?.summary.actualSummary ?? data.taskSummary?.actualSummary}</p>
+          {data.researchFindings?.acceptance ? (
+            <p>Accepted {data.researchFindings.acceptance.acceptedAt}</p>
+          ) : null}
+          <ResearchReports podId={data.id} />
+        </section>
+      ) : (
+        <ValidationSummary result={data.lastValidationResult} history={validationHistory} />
+      )}
 
       <ActionBar pod={data} />
 
-      <SkipValidationToggle pod={data} />
+      {data.completionPolicy !== 'accept-findings' ? <SkipValidationToggle pod={data} /> : null}
 
       <TaskMarkdownCards markdown={data.task} />
 
@@ -247,5 +260,41 @@ function BackLink(): JSX.Element {
     <Link to="/" className="back-link">
       ← Back
     </Link>
+  );
+}
+
+function ResearchReports({ podId }: { podId: string }): JSX.Element {
+  const [files, setFiles] = useState<Array<{ path: string }>>([]);
+  const [content, setContent] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ files: Array<{ path: string }> }>(`/pods/${podId}/files`)
+      .then((value) => {
+        if (!cancelled) setFiles(value.files);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [podId]);
+  return (
+    <div>
+      {files.map((file) => (
+        <button
+          type="button"
+          key={file.path}
+          onClick={() => {
+            apiFetch<{ content: string }>(
+              `/pods/${podId}/files/content?path=${encodeURIComponent(file.path)}`,
+            )
+              .then((value) => setContent(value.content))
+              .catch((error: Error) => setContent(error.message));
+          }}
+        >
+          Open report: {file.path}
+        </button>
+      ))}
+      {content ? <pre>{content}</pre> : null}
+    </div>
   );
 }

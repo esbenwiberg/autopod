@@ -22,6 +22,7 @@ public enum OutputMode: String, CaseIterable, Sendable {
 public enum PodStatus: String, Sendable {
     case queued, provisioning, running
     case awaitingInput = "awaiting_input"
+    case researchReady = "research_ready"
     case validating, validated, failed
     case reviewRequired = "review_required"
     case approved, merging, mergePending = "merge_pending", complete
@@ -31,6 +32,7 @@ public enum PodStatus: String, Sendable {
 
     public var label: String {
         switch self {
+        case .researchReady: "Research ready"
         case .awaitingInput: "awaiting input"
         case .reviewRequired: "needs review"
         case .mergePending: "merge pending"
@@ -46,6 +48,7 @@ public enum PodStatus: String, Sendable {
         case .running:       .blue
         case .awaitingInput: .orange
         case .validating:    .blue
+        case .researchReady: .orange
         case .validated:     .secondary
         case .failed:          .red
         case .reviewRequired:  .orange
@@ -62,7 +65,7 @@ public enum PodStatus: String, Sendable {
 
     public var needsAttention: Bool {
         switch self {
-        case .awaitingInput, .validated, .failed, .reviewRequired: true
+        case .researchReady, .awaitingInput, .validated, .failed, .reviewRequired: true
         default: false
         }
     }
@@ -860,6 +863,8 @@ public struct TaskSummary: Sendable {
 // MARK: - Pod
 
 public struct Pod: Identifiable, Sendable {
+    public var completionPolicy: String? = nil
+    public var researchFindings: ResearchFindingsResponse? = nil
     public let id: String
     public var status: PodStatus
     public var pod: PodConfig

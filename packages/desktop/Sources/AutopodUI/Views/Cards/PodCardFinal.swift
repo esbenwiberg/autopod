@@ -474,6 +474,9 @@ public struct SessionCardFinal: View {
     @ViewBuilder
     private var workerCompactSummary: some View {
         switch pod.status {
+        case .researchReady:
+            Label("Research ready — accept findings", systemImage: "doc.text")
+                .font(.caption).foregroundStyle(.orange)
         case .running:
             if let phase = pod.phase {
                 HStack(spacing: 6) {
@@ -761,6 +764,9 @@ public struct SessionCardFinal: View {
     @ViewBuilder
     private var expandedStateContent: some View {
         switch pod.status {
+        case .researchReady:
+            Text(pod.taskSummary?.actualSummary ?? "Open details to review and accept findings.")
+                .font(.caption).textSelection(.enabled)
         case .running:
             VStack(alignment: .leading, spacing: 8) {
                 if let activity = pod.latestActivity {

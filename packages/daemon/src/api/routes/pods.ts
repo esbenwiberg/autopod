@@ -170,6 +170,7 @@ function compactPod(
   ) as string;
   return {
     id: pod.id,
+    completionPolicy: pod.completionPolicy,
     recordDiagnostics: pod.recordDiagnostics,
     finalization: pod.finalization,
     title,
@@ -1473,6 +1474,24 @@ export function podRoutes(
       reason: z.string().max(2000).optional(),
     })
     .default({});
+
+  app.get('/pods/:podId/findings-receipts', async (request) => {
+    const { podId } = request.params as { podId: string };
+    return podRepo?.getFindingsReceipts?.(podId) ?? [];
+  });
+
+  app.post('/pods/:podId/accept-findings', async (request) => {
+    const { podId } = request.params as { podId: string };
+    const body = z
+      .object({
+        expectedGeneration: z.number().int().nonnegative(),
+        expectedCycle: z.number().int().positive(),
+        expectedEvidenceHash: z.string().regex(/^[a-f0-9]{64}$/),
+      })
+      .strict()
+      .parse(request.body);
+    return podManager.acceptFindings(podId, body, humanActor(request));
+  });
 
   // POST /pods/:podId/approve — approve pod
   app.post('/pods/:podId/approve', async (request) => {

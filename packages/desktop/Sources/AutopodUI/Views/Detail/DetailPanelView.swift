@@ -143,6 +143,8 @@ public struct DetailPanelView: View {
     }
 
     @State private var requestedEvidenceSection: EvidenceSection?
+    @State private var findingsError: String?
+    @State private var findingsPending = false
     @State private var isInfrastructureResumePending = false
     @State private var didCopyName: Bool = false
     @State private var showRelatedEventsDebug: Bool = false
@@ -181,6 +183,7 @@ public struct DetailPanelView: View {
     /// Artifact payload beats Overview; series membership does not change the landing tab.
     /// Applied on first appear and as the fallback when the selected pod changes.
     nonisolated static func defaultTab(for pod: Pod) -> DetailTab {
+        if pod.completionPolicy == "accept-findings" { return .overview }
         if pod.pod.output == .artifact { return .evidence }
         return .overview
     }
@@ -958,6 +961,20 @@ public struct DetailPanelView: View {
                     EmptyView()
                 }
 
+            case .researchReady:
+                Button("Open report") { selectedTab = .evidence }
+                if let findings = pod.researchFindings {
+                    Button(findingsPending ? "Accepting…" : "Accept findings") {
+                        findingsPending = true
+                        Task {
+                            defer { findingsPending = false }
+                            do { try await actions.acceptFindings(pod.id, findings); findingsError = nil }
+                            catch { findingsError = error.localizedDescription }
+                        }
+                    }.disabled(findingsPending)
+                }
+                Text("Acknowledges receipt, not a fix or implementation permission.").font(.caption)
+                if let findingsError { Text(findingsError).foregroundStyle(.red) }
             case .validated:
                 if pod.validationChecks?.allPassed != false || pod.validationWaiver != nil {
                     // All checks passed, or a human explicitly waived the failures.

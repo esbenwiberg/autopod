@@ -9,6 +9,7 @@ import { apiFetch } from './api.js';
  * step 7 adds force-complete / extend-attempts / update-from-base / spawn-fix.
  */
 export type ActionKind =
+  | 'accept_findings'
   | 'pause'
   | 'resume'
   | 'retry'
@@ -133,6 +134,16 @@ const REWORK: ActionDef = {
 };
 
 const ACTIONS_BY_STATUS: Partial<Record<PodStatus, ActionDef[]>> = {
+  research_ready: [
+    {
+      kind: 'accept_findings',
+      label: 'Accept findings',
+      tone: 'neutral',
+      optimistic: null,
+      promptsForText: false,
+    },
+    KILL,
+  ],
   running: [PAUSE, NUDGE, KILL],
   paused: [RESUME, NUDGE, KILL],
   // Answer surfaces as a dedicated card (EscalationCard) above the bar.
@@ -155,11 +166,11 @@ const ACTIONS_BY_STATUS: Partial<Record<PodStatus, ActionDef[]>> = {
 
 export function availableActions(
   status: PodStatus,
-  pod?: Pick<Pod, 'options' | 'finalization' | 'pendingEscalation'>,
+  pod?: Pick<Pod, 'options' | 'finalization' | 'pendingEscalation' | 'completionPolicy'>,
 ): ActionDef[] {
   if (
     status === 'failed' &&
-    pod?.options.output === 'artifact' &&
+    (pod?.options.output === 'artifact' || pod?.completionPolicy === 'accept-findings') &&
     pod.finalization?.phase === 'preserving' &&
     pod.finalization.agentSettledAt &&
     !pod.pendingEscalation
@@ -172,8 +183,24 @@ export function availableActions(
  * Calls the right daemon endpoint for the given action.
  * No optimistic patch handling here — the caller applies it.
  */
-export async function runAction(podId: string, kind: ActionKind, message?: string): Promise<void> {
+export async function runAction(
+  podId: string,
+  kind: ActionKind,
+  message?: string,
+  findings?: Pod['researchFindings'],
+): Promise<void> {
   switch (kind) {
+    case 'accept_findings':
+      if (!findings) throw new Error('Refresh and review retained findings before accepting');
+      await apiFetch(`/pods/${podId}/accept-findings`, {
+        method: 'POST',
+        body: JSON.stringify({
+          expectedGeneration: findings.generation,
+          expectedCycle: findings.cycle,
+          expectedEvidenceHash: findings.evidenceHash,
+        }),
+      });
+      return;
     case 'pause':
       await apiFetch(`/pods/${podId}/pause`, { method: 'POST' });
       return;

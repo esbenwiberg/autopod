@@ -4,17 +4,19 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { AutopodError, type Pod } from '@autopod/shared';
 import type { Logger } from 'pino';
+import { atomicPodChange } from '../db/unit-of-work.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
 import type { PodRepository } from './pod-repository.js';
+import { retainFindings } from './research-findings.js';
 
 const execFileAsync = promisify(execFile);
 
 interface ArtifactFinalizerDependencies {
-  podRepo: Pick<PodRepository, 'getOrThrow' | 'update' | 'completionJournal'>;
+  podRepo: Pick<PodRepository, 'getOrThrow' | 'update' | 'completionJournal' | 'atomically'>;
   getContainerManager(target: Pod['executionTarget']): ContainerManager;
   ownsArtifactCompletion(pod: Pod, allowRemovedContainer?: boolean): boolean;
   executionForPod(pod: Pod): PodExecutionSettings;
@@ -27,7 +29,8 @@ interface ArtifactFinalizerDependencies {
     mode: 'kill',
     assertReleaseAllowed: () => void,
   ): Promise<void>;
-  transition(pod: Pod, to: 'failed' | 'complete'): Pod;
+  assertExecutionTerminationVerified(podId: string): void;
+  transition(pod: Pod, to: 'failed' | 'complete' | 'research_ready'): Pod;
   logger: Pick<Logger, 'error' | 'warn' | 'info'>;
   emitActivityStatus(podId: string, message: string): void;
   emitActivityError(podId: string, message: string, fatal: boolean): void;
@@ -62,6 +65,7 @@ export function createArtifactFinalizer(deps: ArtifactFinalizerDependencies): {
   }
 
   function assertArtifactFinalizationCurrent(pod: Pod): void {
+    deps.assertExecutionTerminationVerified(pod.id);
     if (!ownsArtifactFinalization(pod))
       throw new AutopodError(
         'Artifact finalization was superseded; current resources retained.',
@@ -130,6 +134,8 @@ export function createArtifactFinalizer(deps: ArtifactFinalizerDependencies): {
     if (!ownsArtifactFinalization(pod)) return;
     await syncSandboxSeriesHandover(podId);
     if (!ownsArtifactFinalization(pod)) return;
+    deps.assertExecutionTerminationVerified(pod.id);
+    const findingsOnly = pod.completionPolicy === 'accept-findings';
     const profile = executionForPod(pod);
     const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
     let artifactsPath: string;
@@ -145,7 +151,7 @@ export function createArtifactFinalizer(deps: ArtifactFinalizerDependencies): {
     // Legacy research profiles selected a destination repository for publication.
     // Native artifact output only authorizes a preserved file snapshot; selecting
     // a source repository is not authorization to push an artifact branch.
-    if (profile.repoUrl && !pod.launchConfigDigest) {
+    if (!findingsOnly && profile.repoUrl && !pod.launchConfigDigest) {
       const repoBranch = pod.branch ?? `research/${podId}`;
       try {
         emitActivityStatus(podId, 'Pushing artifact branch…');
@@ -177,7 +183,9 @@ export function createArtifactFinalizer(deps: ArtifactFinalizerDependencies): {
       }
     }
 
-    // Transition to complete — skip validation entirely
+    const findings = findingsOnly ? await retainFindings(podRepo.getOrThrow(podId)) : null;
+
+    // Release only after receipt verification and task-wide termination checks.
     if (!ownsArtifactFinalization(pod)) return;
     try {
       await cleanupContainer(pod, 'artifact-complete', 'kill', () =>
@@ -188,7 +196,11 @@ export function createArtifactFinalizer(deps: ArtifactFinalizerDependencies): {
       throw err;
     }
     if (!ownsArtifactFinalization(pod, true)) return;
-    transition(podRepo.getOrThrow(podId), 'complete');
+    deps.assertExecutionTerminationVerified(podId);
+    atomicPodChange(podRepo, () => {
+      if (findings) podRepo.update(podId, { researchFindings: findings });
+      transition(podRepo.getOrThrow(podId), findingsOnly ? 'research_ready' : 'complete');
+    });
   }
 
   return { preserveArtifacts, finalizeArtifactPod };

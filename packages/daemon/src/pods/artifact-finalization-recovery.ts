@@ -3,7 +3,7 @@ import type { Pod } from '@autopod/shared';
 /** This phase records an entered collection, not merely an older worker completion. */
 export function hasInterruptedArtifactCollection(pod: Pod): boolean {
   return (
-    pod.options?.output === 'artifact' &&
+    (pod.options?.output === 'artifact' || pod.completionPolicy === 'accept-findings') &&
     ['running', 'paused', 'failed'].includes(pod.status) &&
     pod.finalization?.generation === pod.lifecycleGeneration &&
     pod.finalization?.phase === 'preserving' &&

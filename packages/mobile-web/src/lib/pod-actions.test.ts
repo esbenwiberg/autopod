@@ -4,6 +4,13 @@ import { availableActions, runAction, toggleSkipValidation } from './pod-actions
 import { STORAGE_KEY } from './token.js';
 
 describe('availableActions', () => {
+  it('research ready exposes acceptance without approval or optimistic completion', () => {
+    expect(availableActions('research_ready').map((a) => a.kind)).toEqual([
+      'accept_findings',
+      'kill',
+    ]);
+    expect(availableActions('research_ready')[0]?.optimistic).toBeNull();
+  });
   it('running pods can be paused, nudged, or killed', () => {
     const labels = availableActions('running').map((a) => a.kind);
     expect(labels).toEqual(['pause', 'nudge', 'kill']);

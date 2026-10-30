@@ -35,10 +35,10 @@ export function ActionBar({ pod }: Props): JSX.Element | null {
     if (action.optimistic) patchPodLocal(pod.id, action.optimistic);
 
     try {
-      await runAction(pod.id, action.kind, message);
+      await runAction(pod.id, action.kind, message, pod.researchFindings);
       if (action.kind === 'nudge')
         setNotice('Nudge saved. It remains pending until the worker acknowledges receipt.');
-      if (action.kind === 'retry' || action.kind === 'rework')
+      if (action.kind === 'accept_findings' || action.kind === 'retry' || action.kind === 'rework')
         upsertPod(await apiFetch<Pod>(`/pods/${pod.id}`));
     } catch (err) {
       if (snapshot) patchPodLocal(pod.id, snapshot);

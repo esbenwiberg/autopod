@@ -24,6 +24,7 @@ function summarize(config: EffectiveLaunchConfig): string {
     `AI: ${config.ai.main.runtime} / ${config.ai.main.model}`,
     `Execution: ${config.execution.target} / ${config.resolvedExecution.main.memoryGb} GB`,
     `Intent: ${config.intent}`,
+    `Completion: ${config.workflow.completion}`,
     `Task token limit: ${config.workflow.tokenBudget ?? 'off'}`,
     `Configuration: ${config.digest}`,
   ].join('\n');
@@ -55,6 +56,8 @@ export function registerLaunchCommand(
     .option('--branch <name>', 'Explicit branch name for this work')
     .option('--start-branch <ref>', 'Start from this branch or revision')
     .option('--base-branch <ref>', 'Target this base branch')
+    .option('--completion <policy>', 'Completion: approval, deliver, merge, accept-findings')
+    .option('--output <target>', 'Output: pr, branch, artifact, none')
     .option('--goal <objective>', 'Use a supported native Goal workflow')
     .option('--intent <task|goal>', 'Explicitly override workflow intent')
     .option('--config <file>', 'Full shared LaunchRequest JSON file')
@@ -206,7 +209,9 @@ export function registerLaunchCommand(
       if (
         mode.output &&
         (!request.source || request.source.configuration === 'current') &&
-        request.overrides?.workflow?.output !== mode.output
+        (request.overrides?.workflow?.output !== mode.output ||
+          (mode.name === 'research' &&
+            request.overrides?.workflow?.completion !== 'accept-findings'))
       ) {
         if (request.expectedDigest)
           throw new Error(
@@ -214,13 +219,26 @@ export function registerLaunchCommand(
           );
         request.overrides = {
           ...request.overrides,
-          workflow: { ...request.overrides?.workflow, output: mode.output },
+          workflow: {
+            ...request.overrides?.workflow,
+            output: mode.output,
+            ...(mode.name === 'research'
+              ? {
+                  completion: 'accept-findings' as const,
+                }
+              : {}),
+          },
         };
       }
       // An exact saved retry reaches admission before mutable preset/discovery reads.
       const effective =
         opts.preview || !request.expectedDigest ? await client.resolveLaunch(request) : undefined;
-      if (mode.output && effective && effective.workflow.output !== mode.output)
+      if (
+        mode.output &&
+        effective &&
+        (effective.workflow.output !== mode.output ||
+          (mode.name === 'research' && effective.workflow.completion !== 'accept-findings'))
+      )
         throw new Error(
           'The frozen source does not use artifact output. Choose --source-config current for research.',
         );

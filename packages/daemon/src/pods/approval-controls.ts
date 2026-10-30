@@ -132,6 +132,12 @@ export function createApprovalControls(captured: ApprovalControlsCaptured) {
     actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
   ): Promise<void> {
     const pod = podRepo.getOrThrow(podId);
+    if (pod.completionPolicy === 'accept-findings')
+      throw new AutopodError(
+        'Findings require evidence retention and human acceptance, not validation waiver',
+        'FINDINGS_ACCEPTANCE_REQUIRED',
+        409,
+      );
     const allowed =
       pod.status === 'failed' ||
       pod.status === 'review_required' ||

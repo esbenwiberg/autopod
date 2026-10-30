@@ -60,6 +60,7 @@ export type {
   ProviderAttempt,
   ProviderAttemptOutcome,
   PodStatus,
+  ResearchFindings,
   Pod,
   PodInfrastructureFailure,
   CreatePodRequest,

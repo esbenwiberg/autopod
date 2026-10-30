@@ -335,9 +335,13 @@ export function createLaunchSnapshotRepository(
         );
         const marked = db
           .prepare(
-            'UPDATE pods SET launch_config_digest=? WHERE id=? AND launch_config_digest IS NULL',
+            'UPDATE pods SET launch_config_digest=?, completion_policy=? WHERE id=? AND launch_config_digest IS NULL',
           )
-          .run(digest, podId).changes;
+          .run(
+            digest,
+            input.config.workflow.completion === 'accept-findings' ? 'accept-findings' : null,
+            podId,
+          ).changes;
         if (marked !== 1)
           configurationError(
             'Pod already has a different launch identity',

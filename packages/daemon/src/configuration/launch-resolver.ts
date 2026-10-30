@@ -264,6 +264,18 @@ async function resolve(
     main: { ...profile.payload.execution.main, ...overrides?.execution?.main },
   });
   const intent = request.intent ?? effectiveWorkflow.intent;
+  if (
+    effectiveWorkflow.completion === 'accept-findings' &&
+    (intent !== 'task' ||
+      effectiveWorkflow.agentMode !== 'auto' ||
+      !['artifact', 'none'].includes(effectiveWorkflow.output) ||
+      effectiveWorkflow.validationPhases.length > 0 ||
+      effectiveWorkflow.advisoryBrowserQaEnabled)
+  )
+    configurationError(
+      'Accept findings requires an automatic task, artifact or none output, and no native validation phases or advisory QA',
+      'FINDINGS_WORKFLOW_INCOMPATIBLE',
+    );
   if (intent === 'goal' && (request.task.length > 4000 || effectiveWorkflow.agentMode !== 'auto')) {
     configurationError(
       'Goals require an agent workflow and an objective of at most 4000 characters',

@@ -2,6 +2,7 @@ import type { PodStatus } from '@autopod/shared';
 import type { JSX } from 'react';
 
 const TONE: Record<PodStatus, 'neutral' | 'progress' | 'ok' | 'warn' | 'danger'> = {
+  research_ready: 'warn',
   queued: 'neutral',
   provisioning: 'progress',
   running: 'progress',

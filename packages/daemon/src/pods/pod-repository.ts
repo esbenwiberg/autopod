@@ -167,6 +167,7 @@ export interface PodFilters {
 }
 
 export interface PodUpdates {
+  researchFindings?: Pod['researchFindings'];
   status?: PodStatus;
   /**
    * Update the pod's task description. Used by the single fix-pod path when
@@ -303,6 +304,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   completionJournal?: CompletionJournal;
   hasUnansweredDecision?(podId: string): boolean;
   insert(pod: NewPod): void;
+  getFindingsReceipts?(id: string): NonNullable<Pod['researchFindings']>[];
   getOrThrow(id: string): Pod;
   getRepositoryForDisplay?(id: string): import('@autopod/shared').PodRepositoryDisplay;
   /** Read one live or archived pod without admitting further execution. */
@@ -430,6 +432,8 @@ function decodeSessionRow(row: Record<string, unknown>): Pod {
   return {
     id: row.id as string,
     profileName: row.profile_name as string,
+    completionPolicy: (row.completion_policy as Pod['completionPolicy']) ?? null,
+    researchFindings: row.research_findings ? JSON.parse(row.research_findings as string) : null,
     launchConfigDigest: (row.launch_config_digest as string | null | undefined) ?? null,
     task: Buffer.isBuffer(row.task) ? (row.task as Buffer).toString('utf8') : (row.task as string),
     status: row.status as PodStatus,
@@ -955,6 +959,15 @@ export function createPodRepository(db: Database.Database): PodRepository {
       return pod;
     },
 
+    getFindingsReceipts(id: string) {
+      return (
+        db
+          .prepare(
+            'SELECT receipt FROM research_findings_receipts WHERE pod_id=? ORDER BY generation,cycle,accepted',
+          )
+          .all(id) as Array<{ receipt: string }>
+      ).map((row) => JSON.parse(row.receipt));
+    },
     update(id: string, changes: PodUpdates): void {
       // Any mutation during validation preservation could invalidate its evidence.
       assertNoValidationRecovery(db, id);
@@ -1221,6 +1234,12 @@ export function createPodRepository(db: Database.Database): PodRepository {
       if (changes.linkedPodId !== undefined) {
         setClauses.push('linked_pod_id = @linkedPodId');
         params.linkedPodId = changes.linkedPodId;
+      }
+      if (changes.researchFindings !== undefined) {
+        setClauses.push('research_findings = @researchFindings');
+        params.researchFindings = changes.researchFindings
+          ? JSON.stringify(changes.researchFindings)
+          : null;
       }
       if (changes.taskSummary !== undefined) {
         setClauses.push('task_summary = @taskSummary');
@@ -1613,6 +1632,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
         'awaiting_input',
         'validating',
         'validated',
+        'research_ready',
         'failed',
         'review_required',
         'approved',

@@ -378,6 +378,13 @@ export class AutopodClient {
     return this.request('GET', `/pods/stats${qs ? `?${qs}` : ''}`);
   }
 
+  async acceptFindings(
+    id: string,
+    evidence: { expectedGeneration: number; expectedCycle: number; expectedEvidenceHash: string },
+  ): Promise<Pod['researchFindings']> {
+    return this.request('POST', `/pods/${encodeURIComponent(id)}/accept-findings`, evidence);
+  }
+
   async getSession(id: string): Promise<Pod> {
     return this.request<Pod>('GET', `/pods/${id}`);
   }
