@@ -454,7 +454,7 @@ describe('immutable engine evidence and derived validation publication', () => {
     const ref = await f.store.write(
       podId,
       'fact',
-      'visible-fact-0-fact.png',
+      'visible-Fact-0-fact.png',
       Buffer.from('original fact'),
     );
     const fact = required(f.result.factValidation?.results[0]);
