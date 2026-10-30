@@ -1030,6 +1030,7 @@ function isRegistryQualifiedImage(image: string): boolean {
 function toSandboxExecOptions(options?: ExecOptions): SandboxExecOptions | undefined {
   if (!options) return undefined;
   return {
+    beforeSend: options.assertCurrent,
     cwd: options.cwd,
     timeoutMs: options.timeout,
     user: options.user,

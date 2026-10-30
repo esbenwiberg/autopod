@@ -49,7 +49,7 @@ export function createWorkspaceRecoveryCommands(captured: WorkspaceRecoveryComma
           ': > "$pid_file"',
         ].join('; '),
       ],
-      { timeout: 5_000 },
+      { timeout: 5_000, assertCurrent },
     );
     if (result.exitCode !== 0) {
       throw new Error(`Sandbox worker quiesce failed (exit ${result.exitCode}): ${result.stderr}`);
@@ -104,7 +104,7 @@ export function createWorkspaceRecoveryCommands(captured: WorkspaceRecoveryComma
         const status = await cm.getStatus(pod.containerId);
         assertCurrent();
         if (status === 'stopped') {
-          await cm.start(pod.containerId);
+          await cm.start(pod.containerId, { assertCurrent });
           assertCurrent();
           emitActivityStatus(podId, 'Resumed retained sandbox for checkpoint recovery.');
         }

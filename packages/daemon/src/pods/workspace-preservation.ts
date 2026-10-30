@@ -54,7 +54,7 @@ export function createWorkspacePreservation(deps: WorkspacePreservationDependenc
       }
       if (status === 'stopped') {
         assertCurrent();
-        await cm.start(pod.containerId);
+        await cm.start(pod.containerId, { assertCurrent });
         assertCurrent();
       }
     }

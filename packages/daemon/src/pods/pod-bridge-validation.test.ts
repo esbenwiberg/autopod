@@ -3,6 +3,7 @@ import type { PodBridge } from '@autopod/escalation-mcp';
 import type { EffectiveLaunchConfig } from '@autopod/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveLaunch } from '../configuration/launch-resolver.js';
+import type { ContainerManager } from '../interfaces/container-manager.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { type SessionBridgeDependencies, createSessionBridge } from './pod-bridge-impl.js';
@@ -790,8 +791,10 @@ describe('PodBridge.runPreSubmitReview', () => {
     podRepo: ReturnType<typeof createTestDb>['prepare'];
     containerExecMock: ReturnType<typeof vi.fn>;
     containerStreamingExecMock: ReturnType<typeof vi.fn>;
+    containerStartMock: ReturnType<typeof vi.fn>;
     worktreeGetDiffMock: ReturnType<typeof vi.fn>;
   } {
+    const containerStartMock = vi.fn<ContainerManager['start']>(async () => {});
     const db = createTestDb();
     const podId = 'pre-1';
     insertTestProfile(db, { name: 'proj', defaultBranch: 'main', reviewerModel: 'sonnet' });
@@ -884,6 +887,7 @@ describe('PodBridge.runPreSubmitReview', () => {
       profileStore,
       containerManagerFactory: {
         get: vi.fn().mockReturnValue({
+          start: containerStartMock,
           supportsStreamingExec: true,
           execInContainer: containerExecMock,
           execStreaming: containerStreamingExecMock,
@@ -905,6 +909,7 @@ describe('PodBridge.runPreSubmitReview', () => {
       podRepo: podRepo as never,
       containerExecMock,
       containerStreamingExecMock,
+      containerStartMock,
       worktreeGetDiffMock,
     };
   }
@@ -1410,6 +1415,37 @@ describe('PodBridge.runPreSubmitReview', () => {
       }),
       expect.anything(),
     );
+  });
+
+  it('preserves the supplied start fence through the reviewer environment wrapper', async () => {
+    const assertCurrent = vi.fn();
+    const runResult = {
+      status: 'pass',
+      reasoning: 'synthetic result',
+      issues: [],
+      model: 'synthetic-model',
+      diffHash: 'synthetic-hash',
+      durationMs: 1,
+    } satisfies Awaited<ReturnType<typeof runPreSubmitReview>>;
+    const f = buildBridgeWithWorktree({
+      containerDiff: SAMPLE_DIFF,
+      reviewerExecEnv: { SYNTHETIC_FLAG: 'enabled' },
+      runResult,
+    });
+    f.containerStartMock.mockImplementationOnce(
+      async (_id: string, options?: Parameters<ContainerManager['start']>[1]) => {
+        options?.assertCurrent?.();
+      },
+    );
+    mockRunPreSubmitReview.mockImplementationOnce(async (options) => {
+      await options.containerManager?.start('container-abc', { assertCurrent });
+      return runResult;
+    });
+    await f.bridge.runPreSubmitReview(f.podId, {});
+    expect(f.containerStartMock).toHaveBeenCalledExactlyOnceWith('container-abc', {
+      assertCurrent,
+    });
+    expect(assertCurrent).toHaveBeenCalledOnce();
   });
 
   it('passes fresh reviewer exec env into live-container pre-submit review', async () => {

@@ -24,7 +24,12 @@ describe('daemon credential and tool controls', () => {
       'prepare',
     );
     await ghManager.execInContainer('container-123', ['gh-forwarding-proof']);
-    expect(f.cm.execInContainer).toHaveBeenLastCalledWith('container-123', ['gh-forwarding-proof']);
+    expect(f.cm.execInContainer).toHaveBeenLastCalledWith(
+      'container-123',
+      ['gh-forwarding-proof'],
+      { assertCurrent: expect.any(Function) },
+    );
+    vi.mocked(f.cm.execInContainer).mock.calls.at(-1)?.[2]?.assertCurrent?.();
     vi.mocked(f.cm.execInContainer).mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 1 });
     await f.tools().installCliTool('prepare', 'az');
     const azManager = f.toolsCaptured.installAzViaPip.mock.calls[0]?.[0];
@@ -35,7 +40,12 @@ describe('daemon credential and tool controls', () => {
       'prepare',
     );
     await azManager.execInContainer('container-123', ['az-forwarding-proof']);
-    expect(f.cm.execInContainer).toHaveBeenLastCalledWith('container-123', ['az-forwarding-proof']);
+    expect(f.cm.execInContainer).toHaveBeenLastCalledWith(
+      'container-123',
+      ['az-forwarding-proof'],
+      { assertCurrent: expect.any(Function) },
+    );
+    vi.mocked(f.cm.execInContainer).mock.calls.at(-1)?.[2]?.assertCurrent?.();
     const calls = vi.mocked(f.cm.execInContainer).mock.calls.length;
     f.podRepo.incrementLifecycleGeneration('prepare');
     expect(() => ghManager.execInContainer('container-123', ['stale-install'])).toThrow();

@@ -545,7 +545,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     let scriptPath: string;
     if (identity) {
       const root = sandboxGoalRoot(identity);
-      const prepared = await this.exec(sandboxId, ['mkdir', '-m', '0700', root], { user: 'root' });
+      const prepared = await this.exec(sandboxId, ['mkdir', '-m', '0700', root], {
+        user: 'root',
+        beforeSend: options?.beforeSend,
+      });
       if (prepared.exitCode !== 0) throw new Error('Sandbox Goal supervisor preparation failed');
       scriptPath = `${root}/supervisor.py`;
       await this.writeFile(
@@ -554,8 +557,12 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         Buffer.from(
           sandboxGoalSupervisor(identity, command, options?.cwd, options?.env, options?.stdin),
         ),
+        { beforeSend: options?.beforeSend },
       );
-      const staged = await this.exec(sandboxId, ['chmod', '0700', scriptPath], { user: 'root' });
+      const staged = await this.exec(sandboxId, ['chmod', '0700', scriptPath], {
+        user: 'root',
+        beforeSend: options?.beforeSend,
+      });
       if (staged.exitCode !== 0) throw new Error('Sandbox Goal supervisor staging failed');
       // Persist before obtaining a socket or sending any remote start request.
       options?.onProcessCreated?.(identity);
@@ -563,6 +570,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       scriptPath = await this.stageExecutableWrapper(
         sandboxId,
         streamExecScript(command, options?.cwd),
+        options?.beforeSend,
       );
     }
     const pidPath = `${scriptPath}.pid`;
@@ -571,11 +579,14 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     const wsUrl = `${this.dataEndpoint.replace(/^https:/, 'wss:')}${this.sandboxPath(
       sandboxId,
     )}/exec/stream`;
+    options?.beforeSend?.();
     const socket = this.webSocketFactory(wsUrl, { Authorization: `Bearer ${token.token}` });
+    let startSent = false;
     let cancellation: Promise<void> | null = null;
     const cancelRemote = () => {
       cancellation ??= (async () => {
         try {
+          if (!startSent) throw new Error('Sandbox exec was not dispatched');
           if (identity) {
             const exitCode = await this.terminateRecordedExec(identity);
             exitReceived = true;
@@ -638,6 +649,15 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       : null;
 
     socket.onopen = () => {
+      if (closed) return;
+      try {
+        options?.beforeSend?.();
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error('Sandbox exec authority changed'));
+        socket.close();
+        return;
+      }
+      startSent = true;
       socket.send(
         JSON.stringify({
           type: 'start',
@@ -796,7 +816,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         });
         throw timeoutFailure;
       }
-      if (!identity || !failure || exitReceived) throw error;
+      if (!startSent || !identity || !failure || exitReceived) throw error;
       // Losing the RPC transport must stop this owned process. Only its private
       // supervisor receipt can turn transport uncertainty into an observed exit.
       const exitCode = await this.terminateRecordedExec(identity);

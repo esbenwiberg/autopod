@@ -969,12 +969,14 @@ export class DockerContainerManager implements ContainerManager {
       ...(envList ? { Env: envList } : {}),
     };
 
+    options?.assertCurrent?.();
     const exec = await boundedDockerCall(container.exec(execCreateOptions), {
       label: 'container.exec (execInContainer)',
       timeoutMs: DOCKER_CALL_TIMEOUTS.exec,
       logger: this.logger,
       containerId,
     });
+    options?.assertCurrent?.();
     const stream = await boundedDockerCall(exec.start({ hijack: true, stdin: false }), {
       label: 'exec.start (execInContainer)',
       timeoutMs: DOCKER_CALL_TIMEOUTS.execStart,
@@ -1035,6 +1037,7 @@ export class DockerContainerManager implements ContainerManager {
       'autopod-stream-exec',
       ...command,
     ];
+    options?.assertCurrent?.();
     const exec = await boundedDockerCall(
       container.exec({
         Cmd: wrappedCommand,
@@ -1057,6 +1060,7 @@ export class DockerContainerManager implements ContainerManager {
       options.onProcessCreated({ backend: 'docker', containerId, execId: exec.id, pidPath });
     }
     const attachStdin = options?.stdin === true;
+    options?.assertCurrent?.();
     const muxStream = await boundedDockerCall(exec.start({ hijack: true, stdin: attachStdin }), {
       label: 'exec.start (execStreaming)',
       timeoutMs: DOCKER_CALL_TIMEOUTS.execStart,

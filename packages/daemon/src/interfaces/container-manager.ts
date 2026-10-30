@@ -89,6 +89,8 @@ export interface FileWriteOptions {
 }
 
 export interface ExecOptions {
+  /** Captured authority, rechecked immediately before each backend dispatch/start. */
+  assertCurrent?: () => void;
   cwd?: string;
   timeout?: number;
   /** Run the command as this user inside the container (e.g. 'root'). */

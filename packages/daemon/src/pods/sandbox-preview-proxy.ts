@@ -163,6 +163,7 @@ export async function fetchSandboxPreview(
     options.containerId,
     ['node', '-e', SANDBOX_PREVIEW_FETCH_SCRIPT],
     {
+      assertCurrent: options.assertCurrent,
       timeout: timeoutMs + 5_000,
       env: {
         AUTOPOD_PREVIEW_METHOD: options.method,

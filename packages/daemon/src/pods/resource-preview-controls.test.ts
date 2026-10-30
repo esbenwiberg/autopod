@@ -52,7 +52,10 @@ describe('resource public preview controls', () => {
     const pending = f.controls.startPreview('prepare');
     await vi.advanceTimersByTimeAsync(10000);
     await expect(pending).resolves.toEqual({ previewUrl: 'http://127.0.0.1:12345' });
-    expect(f.cm.start).toHaveBeenCalledWith('container-123');
+    expect(f.cm.start).toHaveBeenCalledWith('container-123', {
+      assertCurrent: expect.any(Function),
+    });
+    vi.mocked(f.cm.start).mock.calls[0]?.[1]?.assertCurrent?.();
     expect(probe).toHaveBeenCalledTimes(5);
     expect(probe).toHaveBeenCalledWith('http://127.0.0.1:12345/health', expect.any(Object));
     f.timers.clearPreviewTimer('prepare');

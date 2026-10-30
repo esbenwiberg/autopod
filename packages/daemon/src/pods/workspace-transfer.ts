@@ -222,7 +222,7 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
             '-c',
             "sed 's|/objects$||' /workspace/.git/objects/info/alternates 2>/dev/null | head -1 || true",
           ],
-          { timeout: 5_000 },
+          { timeout: 5_000, assertCurrent: assertTransferCurrent },
         ),
       );
       const bareRepoPath =
@@ -252,7 +252,7 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
               cm.execInContainer(
                 containerId,
                 ['git', 'config', '--global', '--add', 'safe.directory', safeDirectory],
-                { timeout: 5_000 },
+                { timeout: 5_000, assertCurrent: assertTransferCurrent },
               ),
             );
             if (safeDirectoryResult.exitCode !== 0) {
@@ -285,7 +285,7 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
                     '/workspace',
                     ...args,
                   ],
-                  { timeout: 30_000 },
+                  { timeout: 30_000, assertCurrent: assertTransferCurrent },
                 ),
               );
               return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode };
@@ -348,6 +348,7 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
       const syncResult = await owned(() =>
         cm.execInContainer(containerId, ['sh', '-c', syncScript], {
           timeout: 120_000,
+          assertCurrent: assertTransferCurrent,
         }),
       );
       if (syncResult.exitCode !== 0) {
@@ -482,7 +483,7 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
             '-c',
             "sed 's|/objects$||' /workspace/.git/objects/info/alternates 2>/dev/null | head -1 || true",
           ],
-          { timeout: 5_000 },
+          { timeout: 5_000, assertCurrent: assertTransferCurrent },
         ),
       );
       const containerBareRepoPath =
@@ -501,6 +502,7 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
               const r = await owned(() =>
                 cm.execInContainer(containerId, ['git', '-C', '/workspace', ...args], {
                   timeout: 30_000,
+                  assertCurrent: assertTransferCurrent,
                 }),
               );
               return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode };

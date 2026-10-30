@@ -10,6 +10,29 @@ import type {
 import { RoutingContainerManager } from './routing-container-manager.js';
 
 describe('RoutingContainerManager', () => {
+  it('forwards and exercises the exact captured start fence on either backend', async () => {
+    const local = fakeContainerManager('local');
+    const sandbox = fakeContainerManager('sandbox');
+    const router = new RoutingContainerManager({
+      local,
+      sandbox,
+      resolveTarget: (id) => (id === 'synthetic-sandbox' ? 'sandbox' : 'local'),
+    });
+    for (const [id, manager] of [
+      ['synthetic-local', local],
+      ['synthetic-sandbox', sandbox],
+    ] as const) {
+      const assertCurrent = vi.fn();
+      const options = { assertCurrent };
+      vi.mocked(manager.start).mockImplementationOnce(async (_id, received) => {
+        received?.assertCurrent?.();
+      });
+      await router.start(id, options);
+      expect(manager.start).toHaveBeenCalledExactlyOnceWith(id, options);
+      expect(assertCurrent).toHaveBeenCalledOnce();
+    }
+  });
+
   it('delegates runtime exec calls by resolved execution target', async () => {
     const local = fakeContainerManager('local-container');
     const sandbox = fakeContainerManager('sandbox-container');

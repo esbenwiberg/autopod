@@ -3,6 +3,7 @@ import type { ExecutionTarget } from '@autopod/shared';
 import type {
   ContainerManager,
   ContainerSpawnConfig,
+  ContainerStartOptions,
   DirectoryExtractionOptions,
   ExecOptions,
   FileWriteOptions,
@@ -45,8 +46,8 @@ export class RoutingContainerManager implements ContainerManager {
     return this.delegate(containerId).stop(containerId);
   }
 
-  start(containerId: string): Promise<void> {
-    return this.delegate(containerId).start(containerId);
+  start(containerId: string, options?: ContainerStartOptions): Promise<void> {
+    return this.delegate(containerId).start(containerId, options);
   }
 
   writeFile(

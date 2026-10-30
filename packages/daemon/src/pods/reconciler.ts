@@ -92,7 +92,7 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
   switch (status) {
     case 'running':
     case 'stopped': {
-      if (status === 'stopped') await sandboxContainerManager.start(containerId);
+      if (status === 'stopped') await sandboxContainerManager.start(containerId, { assertCurrent });
       // The original streaming exec is no longer observable after daemon restart.
       // Stop that worker before snapshotting so it cannot mutate the workspace while
       // recovery is being prepared. The sandbox itself is retained and suspended.

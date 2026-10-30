@@ -58,7 +58,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
             const pidResult = await cm.execInContainer(
               retainedContainerId,
               ['sh', '-c', 'cat /tmp/autopod-supervisor.pid 2>/dev/null'],
-              {},
+              { assertCurrent },
             );
             assertCurrent();
             const pid = pidResult.stdout.trim();
@@ -66,7 +66,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
             const liveness = await cm.execInContainer(
               retainedContainerId,
               ['sh', '-c', `kill -0 ${pid} 2>/dev/null && echo 1 || echo 0`],
-              {},
+              { assertCurrent },
             );
             assertCurrent();
             return liveness.stdout.trim() === '1';
@@ -93,7 +93,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
         cm.execInContainer(
           pod.containerId,
           ['sh', '-c', buildSupervisorCommand(profile.startCommand)],
-          { cwd: '/workspace' },
+          { cwd: '/workspace', assertCurrent },
         ).catch((err) => {
           logger.warn({ err, podId }, 'Preview supervisor start errored');
         });
@@ -112,7 +112,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
 
     // Container is stopped — start it
     assertCurrent();
-    await cm.start(pod.containerId);
+    await cm.start(pod.containerId, { assertCurrent });
     assertCurrent();
     const previewUrl =
       pod.executionTarget === 'sandbox'
@@ -126,7 +126,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
       cm.execInContainer(
         pod.containerId,
         ['sh', '-c', buildSupervisorCommand(profile.startCommand)],
-        { cwd: '/workspace' },
+        { cwd: '/workspace', assertCurrent },
       ).catch((err) => {
         logger.warn(
           { err, podId },
@@ -239,21 +239,21 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
         .execInContainer(
           pod.containerId,
           ['sh', '-c', 'cat /tmp/autopod-supervisor.pid 2>/dev/null'],
-          {},
+          { assertCurrent },
         )
         .catch(() => null),
       cm
         .execInContainer(
           pod.containerId,
           ['sh', '-c', 'cat /tmp/autopod-restart-count 2>/dev/null'],
-          {},
+          { assertCurrent },
         )
         .catch(() => null),
       cm
         .execInContainer(
           pod.containerId,
           ['sh', '-c', 'tail -c 200 /tmp/autopod-start.log 2>/dev/null'],
-          {},
+          { assertCurrent },
         )
         .catch(() => null),
       isNativePreview
@@ -267,7 +267,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
                 // a 2xx/3xx success as 200) so leaner warm images still probe.
                 `code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://localhost:${CONTAINER_APP_PORT} 2>/dev/null); if [ -n "$code" ] && [ "$code" != "000" ]; then echo "$code"; elif wget -q -T 3 -O /dev/null http://localhost:${CONTAINER_APP_PORT} 2>/dev/null; then echo 200; fi`,
               ],
-              {},
+              { assertCurrent },
             )
             .then((r) => {
               const code = Number.parseInt(r.stdout.trim(), 10);
@@ -288,7 +288,7 @@ export function createResourcePreviewControls(captured: ResourcePreviewControlsC
         const check = await cm.execInContainer(
           pod.containerId,
           ['sh', '-c', `kill -0 ${rawPid} 2>/dev/null && echo 1 || echo 0`],
-          {},
+          { assertCurrent },
         );
         alivePid = check.stdout.trim() === '1' ? rawPid : null;
       } catch {

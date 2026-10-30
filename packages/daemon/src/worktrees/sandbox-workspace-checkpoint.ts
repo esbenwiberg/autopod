@@ -192,6 +192,7 @@ export async function observeSandboxWorkspace(
     ['sh', '-ceu', WORKSPACE_FINGERPRINT_SCRIPT],
     {
       timeout: 15_000,
+      assertCurrent,
     },
   );
   assertCurrent();
@@ -259,7 +260,7 @@ export async function checkpointSandboxWorkspace(
             `printf '%s\\n%s\\n%s\\n%s\\n' "$head" "$tree" "$snapshot" "$snapshot_tree" > ${remoteMeta}`,
           ].join('; '),
         ],
-        { timeout: 120_000 },
+        { timeout: 120_000, assertCurrent },
       ),
     );
     if (capture.exitCode !== 0) return empty(sequence, capture.stderr || 'snapshot capture failed');

@@ -1,5 +1,9 @@
 import { AutopodError, type Pod, type ValidationInfrastructureFailure } from '@autopod/shared';
-import type { ContainerManager } from '../interfaces/container-manager.js';
+import type {
+  ContainerManager,
+  ContainerStartOptions,
+  ExecOptions,
+} from '../interfaces/container-manager.js';
 import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
 import type { PodRepository } from './pod-repository.js';
 import { captureValidationOwnership } from './validation-ownership.js';
@@ -123,8 +127,42 @@ export function guardValidationContainer(
   manager: ContainerManager,
   assertCurrent: () => void,
 ): ContainerManager {
+  const compose = (supplied?: () => void) => () => {
+    assertCurrent();
+    supplied?.();
+  };
+  const execInContainer: ContainerManager['execInContainer'] = (id, command, options) => {
+    const guarded: ExecOptions = { ...options, assertCurrent: compose(options?.assertCurrent) };
+    guarded.assertCurrent?.();
+    return manager.execInContainer(id, command, guarded).then((result) => {
+      assertCurrent();
+      return result;
+    });
+  };
+  const execStreaming: ContainerManager['execStreaming'] = (id, command, options) => {
+    const guarded: ExecOptions = { ...options, assertCurrent: compose(options?.assertCurrent) };
+    guarded.assertCurrent?.();
+    // Return the owned handle even if authority changes after start. Its caller
+    // must still be able to terminate and retain observed exit evidence.
+    return manager.execStreaming(id, command, guarded);
+  };
+  const start: ContainerManager['start'] = (id, options) => {
+    const guarded: ContainerStartOptions = {
+      ...options,
+      assertCurrent: compose(options?.assertCurrent),
+    };
+    guarded.assertCurrent?.();
+    return manager.start(id, guarded).then(() => {
+      assertCurrent();
+    });
+  };
   return new Proxy(manager, {
     get(target, key, receiver) {
+      if (key === 'execInContainer') return execInContainer;
+      if (key === 'execStreaming') return execStreaming;
+      if (key === 'start') return start;
+      // Exact-original cleanup is execution-owned, independent of caller custody.
+      if (key === 'terminateRecordedExec') return target.terminateRecordedExec?.bind(target);
       const value = Reflect.get(target, key, receiver);
       if (typeof value !== 'function') return value;
       return (...args: unknown[]) => {
