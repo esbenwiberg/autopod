@@ -32,7 +32,8 @@ export function assertValidationScreenshotEnrichment(
 ): void {
   const comparable = JSON.parse(JSON.stringify(enriched)) as ValidationResult;
   const canonicalRef = (ref: ScreenshotRef, source: 'smoke' | 'fact', name: string) => {
-    const filename = name.toLowerCase();
+    // Collector names already end in .png; the store preserves basename case.
+    const filename = name;
     return (
       !filename.includes('..') &&
       isDeepStrictEqual(ref, {

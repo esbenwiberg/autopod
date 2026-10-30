@@ -23,7 +23,9 @@ function wouldOverwriteRetainedScreenshot(
   source: 'smoke' | 'fact',
   filename: string,
 ): boolean {
-  const target = path.join('screenshots', podId, source, filename.toLowerCase());
+  // Generated collector names already use .png, matching the store's
+  // extension-only normalization without folding a case-sensitive basename.
+  const target = path.join('screenshots', podId, source, filename);
   return [...(options.retainedScreenshots ?? [])].some(
     (ref) => path.normalize(ref.relativePath) === target,
   );
