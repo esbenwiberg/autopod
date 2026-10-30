@@ -23,7 +23,7 @@ import {
   isValidationInfrastructureOnlyFailure,
   reviewInfrastructureFailureLabel,
 } from './validation-infrastructure.js';
-import { ValidationSupersededError } from './validation-ownership.js';
+import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
 import {
   failedValidationPhases,
   hasPendingFactDecision,
@@ -417,6 +417,14 @@ export function createValidationTriggerWorkflow(
       let result: Awaited<ReturnType<typeof validationEngine.validate>>;
       const validationController = new AbortController();
       const ownership = claimValidation(pod, validationController);
+      // A status-only terminal change does not erase already completed local
+      // evidence. This grants metadata publication only, never checkpoint/exec.
+      const metadataOwnership = captureValidationOwnership(s1, {
+        statuses: ['validating', 'killing', 'killed', 'complete'],
+        readCurrent: () => podRepo.getOrThrow(podId),
+        isCurrentInvocation: () => validationAbortControllers.get(podId) === validationController,
+        hasPendingDecision: () => false,
+      });
       try {
         result = await validateWithInfrastructureRetries(
           validationConfig,
@@ -433,12 +441,13 @@ export function createValidationTriggerWorkflow(
           result,
           validationSyncOk,
           () => {
-            ownership.assertCurrent();
+            metadataOwnership.assertCurrent();
             assertExecutionTerminationVerified(podId);
             assertValidationMutationSettled(podRepo, podId);
           },
+          ownership.assertCurrent,
         );
-        ownership.assertCurrent();
+        metadataOwnership.assertCurrent();
       } finally {
         if (validationAbortControllers.get(podId) === validationController)
           validationAbortControllers.delete(podId);

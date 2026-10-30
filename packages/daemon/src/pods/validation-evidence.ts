@@ -32,6 +32,7 @@ export function createValidationEvidence(deps: ValidationEvidenceDependencies): 
     result: ValidationResult,
     validationSyncOk: boolean,
     assertCurrent?: () => void,
+    assertResourceCurrent?: () => void,
   ): Promise<boolean>;
 } {
   const {
@@ -51,6 +52,7 @@ export function createValidationEvidence(deps: ValidationEvidenceDependencies): 
     result: ValidationResult,
     initialValidationSyncOk: boolean,
     assertCurrent: () => void = () => {},
+    assertResourceCurrent: () => void = assertCurrent,
   ): Promise<boolean> {
     if (requiresValidationSettlement({ lastValidationResult: result })) {
       emitActivityStatus(
@@ -114,6 +116,9 @@ export function createValidationEvidence(deps: ValidationEvidenceDependencies): 
       emitActivityStatus(podId, 'Syncing post-validation workspace…');
       const syncStartedAt = Date.now();
       try {
+        // Recording completed local evidence is separate from authority to run
+        // another checkpoint/copy after the original workflow became terminal.
+        assertResourceCurrent();
         if (pod.executionTarget === 'sandbox') {
           const checkpoint = await checkpointSandboxWorkspaceForPod(pod);
           assertCurrent();

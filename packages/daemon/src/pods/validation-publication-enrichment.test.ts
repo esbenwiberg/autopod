@@ -196,13 +196,14 @@ function fixture() {
       current.ledger.recordOutcome(result, dispatch);
       retries.finish(admission.id, result.overall === 'pass' ? 'pass' : 'nonretryable', 1);
     },
-    collect: (assertCurrent?: () => void) =>
+    collect: (assertCurrent?: () => void, assertResourceCurrent?: () => void) =>
       evidence.collectValidationEvidence(
         podId,
         current.repo.getOrThrow(podId),
         result,
         true,
         assertCurrent,
+        assertResourceCurrent,
       ),
     reopen: () => {
       db.close();
@@ -692,6 +693,43 @@ describe('immutable engine evidence and derived validation publication', () => {
       expect(reopened.ledger.isSettled(reopened.repo.getOrThrow(podId))).toBe(false);
     },
   );
+
+  it('records completed metadata after a status-only stop without starting another checkpoint', async () => {
+    const f = fixture();
+    const raw = clone(f.result);
+    f.finish();
+    f.publish(podId, 1, f.result, { intermediate: true });
+    const pod = f.repo.getOrThrow(podId);
+    const capture = (statuses: Array<typeof pod.status>) =>
+      captureValidationOwnership(pod, {
+        statuses,
+        readCurrent: () => f.repo.getOrThrow(podId),
+        isCurrentInvocation: () => true,
+        hasPendingDecision: () => false,
+      });
+    const metadata = capture(['validating', 'killed']);
+    const resource = capture(['validating']);
+    const write = f.store.write.bind(f.store);
+    vi.spyOn(f.store, 'write').mockImplementation(async (...args) => {
+      const ref = await write(...args);
+      f.repo.update(podId, { status: 'killed' });
+      return ref;
+    });
+    expect(
+      await f.collect(() => {
+        metadata.assertCurrent();
+        assertValidationMutationSettled(f.repo, podId);
+      }, resource.assertCurrent),
+    ).toBe(false);
+    expect(f.checkpoint).not.toHaveBeenCalled();
+    expect(f.sync).not.toHaveBeenCalled();
+    expect(f.cm.execInContainer).not.toHaveBeenCalled();
+    expect(f.result.factValidation?.results[0]?.attachments?.[0]?.screenshot).toBeDefined();
+    f.publish(podId, 1, f.result);
+    expect(f.repo.getOrThrow(podId).status).toBe('killed');
+    expect(f.history.getForSession(podId)).toHaveLength(1);
+    expect(f.ledger.evidence(podId, f.dispatch, validationResultHash(raw)).result).toEqual(raw);
+  });
 
   it.each(['source', 'cleanup', 'lifecycle'] as const)(
     'rechecks %s ownership after awaited screenshot storage before checkpoint or final publication',
