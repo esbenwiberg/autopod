@@ -75,7 +75,7 @@ describe('resource preview caches and transport', () => {
     const url = await f.preview.ensureSandboxPreviewProxy(f.pod());
     try {
       expect((await fetch(url, { headers: { connection: 'close' } })).status).toBe(200);
-      f.podRepo.updateStatus('prepare', 'paused');
+      f.events.transition(f.pod(), 'paused');
       const calls = vi.mocked(f.cm.execInContainer).mock.calls.length;
       expect((await fetch(url, { headers: { connection: 'close' } })).status).toBe(502);
       expect(f.cm.execInContainer).toHaveBeenCalledTimes(calls);
