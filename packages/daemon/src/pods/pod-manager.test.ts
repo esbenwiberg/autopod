@@ -28621,6 +28621,37 @@ describe('validation evidence compatibility', () => {
     }
   });
 
+  it('retains queued guidance instead of publishing into an active workflow during held evidence', async () => {
+    const f = fixture();
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    let run: Promise<void> | undefined;
+    try {
+      f.pages();
+      f.write('page.png', 'held');
+      const write = f.store.write.bind(f.store);
+      vi.spyOn(f.store, 'write').mockImplementation(async (...args) => {
+        entered.resolve();
+        await release.promise;
+        return write(...args);
+      });
+      run = f.run();
+      await entered.promise;
+      const nudges = required(f.ctx.deps.nudgeRepo);
+      nudges.queue(f.pod.id, 'Keep this newer operator decision');
+      release.resolve();
+      await run;
+      expect(nudges.hasPending(f.pod.id)).toBe(true);
+      expect(f.stored()).toBeNull();
+      expect(f.ctx.validationRepo.getLatest(f.pod.id)).toBeNull();
+      expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    } finally {
+      release.resolve();
+      await run;
+      f.close();
+    }
+  });
+
   it('preserves current persistence before terminal-status check during held evidence', async () => {
     const f = fixture();
     const entered = deferred<void>();

@@ -441,13 +441,17 @@ export function createValidationTriggerWorkflow(
           result,
           validationSyncOk,
           () => {
-            metadataOwnership.assertCurrent();
+            const current = metadataOwnership.assertCurrent();
+            if (!isTerminalState(current.status) && current.status !== 'killing')
+              ownership.assertCurrent();
             assertExecutionTerminationVerified(podId);
             assertValidationMutationSettled(podRepo, podId);
           },
           ownership.assertCurrent,
         );
-        metadataOwnership.assertCurrent();
+        const collectedOwner = metadataOwnership.assertCurrent();
+        if (!isTerminalState(collectedOwner.status) && collectedOwner.status !== 'killing')
+          ownership.assertCurrent();
       } finally {
         if (validationAbortControllers.get(podId) === validationController)
           validationAbortControllers.delete(podId);
