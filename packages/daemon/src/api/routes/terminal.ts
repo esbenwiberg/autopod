@@ -1,4 +1,4 @@
-import type { JwtPayload } from '@autopod/shared';
+import type { JwtPayload, Pod } from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';

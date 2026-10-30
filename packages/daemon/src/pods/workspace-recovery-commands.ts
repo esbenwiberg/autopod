@@ -78,6 +78,9 @@ export function createWorkspaceRecoveryCommands(captured: WorkspaceRecoveryComma
     recovered: boolean;
     message: string;
     blockers?: Array<{ status: string; path: string }>;
+    checkpoint?: Awaited<
+      ReturnType<WorkspaceRecoveryCommandsCaptured['checkpointSandboxWorkspaceForPod']>
+    >;
   }> {
     const pod = podRepo.getOrThrow(podId);
     const assertCurrent = captureValidationMutationGuard(podRepo, pod);
