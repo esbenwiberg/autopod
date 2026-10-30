@@ -171,6 +171,45 @@ describe('workspace transfer material boundary', () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it('fences a delayed sandbox extraction before it can overwrite or prune new host bytes', async () => {
+    const f = await fixture(root);
+    let current = true;
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const originalTracked = await readFile(path.join(f.host, 'tracked.txt'), 'utf8');
+    const retainedReport = path.join(f.host, 'new-report.txt');
+    f.cm.extractDirectoryFromContainer = vi.fn(async (_id, _source, target, _excludes, options) => {
+      enter();
+      await held;
+      // Model the backend publication boundary, with actual overwrite/prune effects.
+      options?.assertCurrent?.();
+      await rm(path.join(target, 'new-report.txt'));
+      await writeFile(path.join(target, 'tracked.txt'), 'stale export');
+    });
+    const transfer = createWorkspaceTransfer({
+      logger,
+      captureAuthority: () => () => {
+        if (!current) throw new Error('Fixture source custody changed');
+      },
+    });
+    const operation = transfer.syncWorkspaceBack('container', f.host, f.cm, 'pod-race', 'sandbox');
+    const rejected = expect(operation).rejects.toThrow('Fixture source custody changed');
+    await entered;
+    await writeFile(retainedReport, 'new owner report');
+    current = false;
+    release();
+    await rejected;
+    expect(await readFile(retainedReport, 'utf8')).toBe('new owner report');
+    expect(await readFile(path.join(f.host, 'tracked.txt'), 'utf8')).toBe(originalTracked);
+    expect(f.cm.extractDirectoryFromContainer).toHaveBeenCalledOnce();
+  });
+
   it('publishes real commits and mirrors dirty files without replacing host Git or caches', async () => {
     const f = await fixture(root);
     const before = await sourceIdentity(f.workspace);

@@ -388,6 +388,7 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
         '/workspace',
         worktreePath,
         WORKSPACE_SYNC_EXCLUDES,
+        { assertCurrent: assertTransferCurrent },
       ),
     );
 
@@ -406,7 +407,9 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
         // Extract /workspace/.git into tmpGitDir — the alternates inside point at the bare,
         // so git can resolve baseline objects and push only the new ones.
         await owned(() =>
-          cm.extractDirectoryFromContainer(containerId, '/workspace/.git', tmpGitDir),
+          cm.extractDirectoryFromContainer(containerId, '/workspace/.git', tmpGitDir, undefined, {
+            assertCurrent: assertTransferCurrent,
+          }),
         );
         const result = await pushCommitsToBareViaStagingRef(
           async (args) => {
@@ -521,6 +524,7 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
           '/workspace',
           worktreePath,
           WORKSPACE_SYNC_EXCLUDES,
+          { assertCurrent: assertTransferCurrent },
         ),
       );
       await refreshHostWorktreeIndex(worktreePath, podId);

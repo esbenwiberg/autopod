@@ -48,7 +48,7 @@ import {
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 import { runAgenticReview } from './review-agentic-runner.js';
-import { createFrozenReviewPacket, runReviewBatch } from './review-batch-runner.js';
+import { REVIEW_AXES, createFrozenReviewPacket, runReviewBatch } from './review-batch-runner.js';
 import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
 import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
 import { applyDiffFilterToParsed } from './review-finding-filter.js';
@@ -947,13 +947,7 @@ export function createLocalValidationEngine(
             // Axes, synthesis, and (for repair runs) closure each have an
             // independent bounded reviewer phase.
             const reviewGuardrailMs = councilTimeoutMs * (priorActive.length > 0 ? 3 : 2);
-            const reviewProgressAxes: ReviewProgressAxis[] = [
-              'contract_completeness',
-              'security_authority',
-              'lifecycle_reliability',
-              'persistence_reproducibility',
-              'tests_integration',
-            ].map((axis) => ({
+            const reviewProgressAxes: ReviewProgressAxis[] = REVIEW_AXES.map((axis) => ({
               axis,
               status: 'queued',
               attempt: 0,
@@ -2072,7 +2066,7 @@ async function runFactValidation(
           throw new ValidationCommandInfrastructureError(replacementInfrastructureFailure);
         }
         const replacementPass =
-          replacementExists && replacementChanged && replacementCmd.exitCode === 0;
+          replacementExists === true && replacementChanged && replacementCmd.exitCode === 0;
         results.push({
           factId: fact.id,
           proves: replacement.proves ?? fact.proves,
