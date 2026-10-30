@@ -25,14 +25,14 @@ public enum OutputTarget: String, CaseIterable, Sendable {
     case pr        // Push branch + open PR (requires repoUrl)
     case branch    // Push branch only
     case artifact  // Extract /workspace to dataDir
-    case none      // Ephemeral; nothing leaves the container
+    case none      // No source publication; findings retain their review evidence
 
     public var label: String {
         switch self {
         case .pr:       "Pull Request"
         case .branch:   "Branch Push"
         case .artifact: "Artifact"
-        case .none:     "Ephemeral"
+        case .none:     "No publication"
         }
     }
 
@@ -41,7 +41,7 @@ public enum OutputTarget: String, CaseIterable, Sendable {
         case .pr:       "Push branch and open a PR"
         case .branch:   "Push branch only, no PR"
         case .artifact: "Extract workspace to artifact dir"
-        case .none:     "No output — container is discarded"
+        case .none:     "No source publication; explicit findings tasks retain review evidence"
         }
     }
 }
