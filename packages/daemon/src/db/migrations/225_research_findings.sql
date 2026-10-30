@@ -1,6 +1,6 @@
 -- @execute-whole
 -- No historical classification. Only new explicit frozen contracts opt in.
-ALTER TABLE pods ADD COLUMN completion_policy TEXT;
+ALTER TABLE pods ADD COLUMN completion_policy TEXT CHECK(completion_policy IS NULL OR completion_policy = 'accept-findings');
 ALTER TABLE pods ADD COLUMN research_findings TEXT CHECK(research_findings IS NULL OR json_valid(research_findings));
 ALTER TABLE task_history_pods ADD COLUMN completion_policy TEXT;
 ALTER TABLE task_history_pods ADD COLUMN research_findings TEXT;

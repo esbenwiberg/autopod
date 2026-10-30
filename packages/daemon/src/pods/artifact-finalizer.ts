@@ -28,7 +28,10 @@ interface ArtifactFinalizerDependencies {
     label: string,
     mode: 'kill',
     assertReleaseAllowed: () => void,
+    strict?: boolean,
   ): Promise<void>;
+  killSidecarsForPod(podId: string, strict: boolean, assertCurrent: () => void): Promise<void>;
+  destroyPodNetwork(podId: string, strict: boolean): Promise<void>;
   assertExecutionTerminationVerified(podId: string): void;
   transition(pod: Pod, to: 'failed' | 'complete' | 'research_ready'): Pod;
   logger: Pick<Logger, 'error' | 'warn' | 'info'>;
@@ -64,9 +67,9 @@ export function createArtifactFinalizer(deps: ArtifactFinalizerDependencies): {
     );
   }
 
-  function assertArtifactFinalizationCurrent(pod: Pod): void {
+  function assertArtifactFinalizationCurrent(pod: Pod, allowRemovedContainer = false): void {
     deps.assertExecutionTerminationVerified(pod.id);
-    if (!ownsArtifactFinalization(pod))
+    if (!ownsArtifactFinalization(pod, allowRemovedContainer))
       throw new AutopodError(
         'Artifact finalization was superseded; current resources retained.',
         'STALE_ARTIFACT_COLLECTION',
@@ -188,9 +191,18 @@ export function createArtifactFinalizer(deps: ArtifactFinalizerDependencies): {
     // Release only after receipt verification and task-wide termination checks.
     if (!ownsArtifactFinalization(pod)) return;
     try {
-      await cleanupContainer(pod, 'artifact-complete', 'kill', () =>
-        assertArtifactFinalizationCurrent(pod),
-      );
+      const assertCurrent = () => assertArtifactFinalizationCurrent(pod);
+      if (findingsOnly) {
+        await cleanupContainer(pod, 'research-ready', 'kill', assertCurrent, true);
+        const assertReleased = () => assertArtifactFinalizationCurrent(pod, true);
+        assertReleased();
+        await deps.killSidecarsForPod(podId, true, assertReleased);
+        assertReleased();
+        await deps.destroyPodNetwork(podId, true);
+        assertReleased();
+      } else {
+        await cleanupContainer(pod, 'artifact-complete', 'kill', assertCurrent);
+      }
     } catch (err) {
       if (err instanceof AutopodError && err.code === 'STALE_ARTIFACT_COLLECTION') return;
       throw err;

@@ -834,6 +834,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     maybeTriggerDependents,
   });
   const { preserveArtifacts, finalizeArtifactPod } = createArtifactFinalizer({
+    killSidecarsForPod,
+    destroyPodNetwork,
     assertExecutionTerminationVerified,
     podRepo,
     getContainerManager: (target) => containerManagerFactory.get(target),

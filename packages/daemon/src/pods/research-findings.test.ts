@@ -67,6 +67,8 @@ function finalizer(report = true) {
   );
   const credentials = vi.fn(async () => 'should never resolve');
   const finalizer = createArtifactFinalizer({
+    killSidecarsForPod: vi.fn(async () => {}),
+    destroyPodNetwork: vi.fn(async () => {}),
     podRepo: f.podRepo,
     getContainerManager: () => cm,
     ownsArtifactCompletion: (pod, removed) => {
