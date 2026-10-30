@@ -1,4 +1,4 @@
-import type { ValidationResult } from '@autopod/shared';
+import { AutopodError, type ValidationResult } from '@autopod/shared';
 import { atomicPodChange } from '../db/unit-of-work.js';
 import type { EventBus } from './event-bus.js';
 import type { PodRepository } from './pod-repository.js';
@@ -33,7 +33,16 @@ export function createValidationPublication(deps: ValidationPublicationDependenc
     const publish = () => {
       const durable = !!result.executionDispatchId && !!podRepo.validationExecutions;
       if (options?.intermediate && !durable) return undefined;
-      const freshEvidence = podRepo.validationExecutions?.recordResult(result) !== false;
+      if (durable && (podId !== result.podId || attempt !== result.attempt))
+        throw new AutopodError(
+          'Validation publication does not match its exact dispatch identity',
+          'VALIDATION_RECOVERY_BLOCKED',
+          409,
+        );
+      const freshEvidence =
+        (options?.intermediate
+          ? podRepo.validationExecutions?.recordResult(result)
+          : podRepo.validationExecutions?.recordEnrichedResult(result)) !== false;
       if (
         !options?.intermediate &&
         durable &&

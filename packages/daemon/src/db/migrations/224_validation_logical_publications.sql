@@ -4,6 +4,8 @@
 CREATE TABLE validation_logical_publications (
   dispatch_id TEXT PRIMARY KEY REFERENCES validation_dispatch_results(dispatch_id),
   result_hash TEXT NOT NULL,
+  -- Final derived evidence is pinned independently of the immutable engine result.
+  result TEXT NOT NULL CHECK(json_valid(result)),
   created_at TEXT NOT NULL
 );
 CREATE TRIGGER validation_logical_publications_no_update BEFORE UPDATE ON validation_logical_publications

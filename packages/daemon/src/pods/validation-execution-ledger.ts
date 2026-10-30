@@ -16,6 +16,7 @@ import { createSourceAdoptionRepository } from './source-adoption-repository.js'
 import {
   type UnsettledValidationDispatch,
   assertTaskValidationSettled,
+  assertValidationScreenshotEnrichment,
   unsettledDispatches,
   validationResultHash,
 } from './validation-execution-evidence.js';
@@ -89,6 +90,8 @@ export interface ValidationExecutionLedger {
   isSettled(pod: Pod): boolean;
   dispatch(pod: Pod, admissionId: string, attempt: number, resourceScope?: string): string | null;
   recordResult(result: ValidationResult, dispatchId?: string): boolean;
+  /** Verify screenshot-only enrichment, recording the original engine evidence once. */
+  recordEnrichedResult(result: ValidationResult): boolean;
   claimLogicalPublication(result: ValidationResult): boolean;
   recordOutcome(result: ValidationResult, dispatchId: string): void;
   assertResourceUnshared(podId: string, containerId: string): void;
@@ -150,11 +153,14 @@ export function createValidationExecutionLedger(db: Database.Database): Validati
     const row = db
       .prepare(`SELECT d.id, d.binding FROM validation_dispatches d
       JOIN validation_dispatch_results r ON r.dispatch_id=d.id
-      WHERE d.pod_id=? AND d.task_id=? AND d.generation=? AND r.result_hash=?`)
+      LEFT JOIN validation_logical_publications p ON p.dispatch_id=d.id
+      WHERE d.pod_id=? AND d.task_id=? AND d.generation=?
+        AND (r.result_hash=? OR p.result_hash=?)`)
       .get(
         pod.id,
         taskId(pod.id),
         pod.lifecycleGeneration,
+        validationResultHash(pod.lastValidationResult),
         validationResultHash(pod.lastValidationResult),
       ) as { id: string; binding: string } | undefined;
     if (!row) return null;
@@ -187,7 +193,12 @@ export function createValidationExecutionLedger(db: Database.Database): Validati
   const ledger: ValidationExecutionLedger = {
     evidence(podId, dispatchId, resultHash) {
       const row = db
-        .prepare(`SELECT d.binding,r.result,i.preservation,'published-result' AS evidence_kind
+        .prepare(`SELECT d.binding,p.result,i.preservation,'published-result' AS evidence_kind
+        FROM validation_dispatches d JOIN validation_logical_publications p ON p.dispatch_id=d.id
+        LEFT JOIN validation_recovery_intents i ON i.dispatch_id=d.id
+        WHERE d.pod_id=? AND d.id=? AND p.result_hash=?
+        UNION ALL
+        SELECT d.binding,r.result,i.preservation,'published-result' AS evidence_kind
         FROM validation_dispatches d JOIN validation_dispatch_results r ON r.dispatch_id=d.id
         LEFT JOIN validation_recovery_intents i ON i.dispatch_id=d.id
         WHERE d.pod_id=? AND d.id=? AND r.result_hash=?
@@ -196,7 +207,17 @@ export function createValidationExecutionLedger(db: Database.Database): Validati
         FROM validation_dispatches d JOIN validation_dispatch_outcomes o ON o.dispatch_id=d.id
         WHERE d.pod_id=? AND d.id=? AND o.result_hash=?
         LIMIT 1`)
-        .get(podId, dispatchId, resultHash, podId, dispatchId, resultHash) as
+        .get(
+          podId,
+          dispatchId,
+          resultHash,
+          podId,
+          dispatchId,
+          resultHash,
+          podId,
+          dispatchId,
+          resultHash,
+        ) as
         | {
             binding: string;
             result: string;
@@ -302,15 +323,38 @@ export function createValidationExecutionLedger(db: Database.Database): Validati
       if (!id) return true;
       const hash = validationResultHash(result);
       const evidence = db
-        .prepare('SELECT result_hash FROM validation_dispatch_results WHERE dispatch_id=?')
-        .get(id) as { result_hash: string } | undefined;
-      if (!evidence || evidence.result_hash !== hash)
+        .prepare('SELECT result FROM validation_dispatch_results WHERE dispatch_id=?')
+        .get(id) as { result: string } | undefined;
+      if (!evidence)
         return validationRecoveryError('Exact dispatch evidence must precede logical publication');
+      assertValidationScreenshotEnrichment(JSON.parse(evidence.result), result);
+      const prior = db
+        .prepare('SELECT result_hash FROM validation_logical_publications WHERE dispatch_id=?')
+        .get(id) as { result_hash: string } | undefined;
+      if (prior) {
+        if (prior.result_hash !== hash)
+          validationRecoveryError('Logical validation publication is immutable');
+        return false;
+      }
       return (
         db
-          .prepare('INSERT OR IGNORE INTO validation_logical_publications VALUES(?,?,?)')
-          .run(id, hash, new Date().toISOString()).changes === 1
+          .prepare(`INSERT INTO validation_logical_publications
+            (dispatch_id,result_hash,result,created_at) VALUES(?,?,?,?)`)
+          .run(id, hash, JSON.stringify(result), new Date().toISOString()).changes === 1
       );
+    },
+    recordEnrichedResult(result) {
+      const id = result.executionDispatchId;
+      if (!id) return true;
+      // Final-before-intermediate is valid. Prefer the separately retained engine
+      // outcome, so an enriched result can never become the raw execution record.
+      const raw = db
+        .prepare(`SELECT result FROM validation_dispatch_outcomes WHERE dispatch_id=?
+          UNION ALL SELECT result FROM validation_dispatch_results WHERE dispatch_id=? LIMIT 1`)
+        .get(id, id) as { result: string } | undefined;
+      const engineResult: ValidationResult = raw ? JSON.parse(raw.result) : result;
+      assertValidationScreenshotEnrichment(engineResult, result);
+      return ledger.recordResult(engineResult);
     },
     recordResult(result: ValidationResult, dispatchId = result.executionDispatchId) {
       if (!dispatchId) return true;
@@ -325,6 +369,13 @@ export function createValidationExecutionLedger(db: Database.Database): Validati
         (result.executionDispatchId !== undefined && result.executionDispatchId !== dispatchId)
       )
         validationRecoveryError('Validation result does not match its exact dispatch identity');
+      const outcome = db
+        .prepare('SELECT result_hash FROM validation_dispatch_outcomes WHERE dispatch_id=?')
+        .get(dispatchId) as { result_hash: string } | undefined;
+      if (outcome && outcome.result_hash !== validationResultHash(result))
+        validationRecoveryError(
+          'Published validation result differs from immutable engine outcome',
+        );
       const prior = db
         .prepare('SELECT result_hash FROM validation_dispatch_results WHERE dispatch_id=?')
         .get(dispatchId) as { result_hash: string } | undefined;

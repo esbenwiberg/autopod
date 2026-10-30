@@ -426,6 +426,19 @@ export function createValidationTriggerWorkflow(
           ownership,
         );
         ownership.assertCurrent();
+        emitActivityStatus(podId, 'Validation checks finished — finalizing result…');
+        validationSyncOk = await collectValidationEvidence(
+          podId,
+          s1,
+          result,
+          validationSyncOk,
+          () => {
+            ownership.assertCurrent();
+            assertExecutionTerminationVerified(podId);
+            assertValidationMutationSettled(podRepo, podId);
+          },
+        );
+        ownership.assertCurrent();
       } finally {
         if (validationAbortControllers.get(podId) === validationController)
           validationAbortControllers.delete(podId);
@@ -438,10 +451,6 @@ export function createValidationTriggerWorkflow(
         );
         return;
       }
-
-      emitActivityStatus(podId, 'Validation checks finished — finalizing result…');
-
-      validationSyncOk = await collectValidationEvidence(podId, s1, result, validationSyncOk);
 
       const validationRecord = publishValidationResult(podId, attempt, result);
 
