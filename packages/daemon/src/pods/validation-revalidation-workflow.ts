@@ -358,13 +358,13 @@ export function createValidationRevalidationWorkflow(
         ? await owned(() =>
             Promise.all([
               worktreeManager.getDiff(
-                pod.worktreePath,
+                revalidationWorktreePath,
                 revalDefaultBranch,
                 undefined,
                 pod.startCommitSha ?? undefined,
               ),
               worktreeManager.getCommitLog(
-                pod.worktreePath,
+                revalidationWorktreePath,
                 revalDefaultBranch,
                 undefined,
                 pod.startCommitSha ?? undefined,
@@ -376,7 +376,7 @@ export function createValidationRevalidationWorkflow(
         pod.worktreePath && worktreeManager.getChangedPathsAgainstBase
           ? await owned(() =>
               worktreeManager.getChangedPathsAgainstBase!(
-                pod.worktreePath as string,
+                revalidationWorktreePath,
                 revalDefaultBranch,
               ),
             )
@@ -384,7 +384,7 @@ export function createValidationRevalidationWorkflow(
       assertProtectedOperationalPathsInScope(pod, changedPathsAgainstBase);
 
       const codeReviewSkill = pod.worktreePath
-        ? await owned(() => loadCodeReviewSkill(pod.worktreePath as string, logger))
+        ? await owned(() => loadCodeReviewSkill(revalidationWorktreePath, logger))
         : undefined;
 
       const { profile: reviewerProfile, credentials: reviewerProviderCredentials } =
