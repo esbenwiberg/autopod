@@ -104,6 +104,8 @@ export interface AzureSandboxApiClientConfig {
   /** Test seam. Defaults to 3s to match the Python SDK poller. */
   pollIntervalMs?: number;
   resumeTimeoutMs?: number;
+  /** Mutating resume response budget, distinct from short GET polling deadlines. */
+  resumeRequestTimeoutMs?: number;
   /** Required to submit resume: durable per-resource claims survive daemon replacement. */
   wakeupJournal?: SandboxWakeupJournal;
   assertReleaseAllowed?: (sandboxId: string) => void;
@@ -212,6 +214,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private readonly resolveImageDigest?: ImageDigestResolver;
   private readonly pollIntervalMs: number;
   private readonly resumeTimeoutMs: number;
+  private readonly resumeRequestTimeoutMs: number;
   private readonly wakeupJournal?: SandboxWakeupJournal;
   private readonly assertReleaseAllowed?: (sandboxId: string) => void;
   private readonly assertWakeAllowed?: (sandboxId: string) => void;
@@ -248,6 +251,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     this.resolveImageDigest = config.resolveImageDigest;
     this.pollIntervalMs = config.pollIntervalMs ?? 3000;
     this.resumeTimeoutMs = config.resumeTimeoutMs ?? 145_000;
+    this.resumeRequestTimeoutMs = config.resumeRequestTimeoutMs ?? 60_000;
     this.wakeupJournal = config.wakeupJournal;
     this.assertReleaseAllowed = config.assertReleaseAllowed;
     this.assertWakeAllowed = config.assertWakeAllowed;
@@ -1180,13 +1184,24 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     const controller = new AbortController();
     const timeoutMs = this.resumeTimeoutMs;
     const expiresAt = Date.now() + timeoutMs;
-    const timeoutError = () =>
-      new AutopodError(
-        'Retained sandbox was not observed Running in time. A dispatched resume may be outcome-unknown; retained intents permit observation, not blind replay.',
-        'SANDBOX_WAKEUP_TIMEOUT',
-        504,
-      );
     let ownedIntent: string | undefined;
+    const pendingError = (intentId: string) =>
+      new AutopodError(
+        `Sandbox wakeup requires reconciliation. Resume request ${intentId} for sandbox ${sandboxId} has not been confirmed Running. No additional resume was sent. Original resources are retained. Inspect wakeup evidence and the Azure request outcome before retrying; do not delete the sandbox.`,
+        'SANDBOX_WAKEUP_RECONCILIATION_REQUIRED',
+        409,
+      );
+    const timeoutError = () => {
+      const pending = this.wakeupJournal?.pendingDispatchedIntent(this.wakeupKey(sandboxId));
+      return pending
+        ? pendingError(pending)
+        : new AutopodError(
+            'Retained sandbox was not observed Running in time.',
+            'SANDBOX_WAKEUP_TIMEOUT',
+            504,
+          );
+    };
+    let rateLimitRejections = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
@@ -1238,6 +1253,10 @@ export class AzureSandboxApiClient implements SandboxApiClient {
             sandboxId,
             typeof owner === 'string' && owner.length <= 256 ? owner : undefined,
           );
+          // A later caller cannot make progress by repeating a full polling budget.
+          // The initiating caller may still observe its own request; others get the
+          // exact retained identity immediately, after a fresh provider GET.
+          if (!intent.acquired && intent.id !== ownedIntent) throw pendingError(intent.id);
           if (intent.acquired) {
             ownedIntent = intent.id;
             try {
@@ -1251,12 +1270,40 @@ export class AzureSandboxApiClient implements SandboxApiClient {
                     check();
                     journal.beginDispatch(intent.id);
                   },
+                  timeoutMs: Math.max(
+                    1,
+                    Math.min(this.resumeRequestTimeoutMs, expiresAt - Date.now()),
+                  ),
+                  onResponse: (response) => {
+                    check();
+                    journal.recordEvidence(intent.id, {
+                      kind: 'response',
+                      status: response.status,
+                      diagnostics: safeAzureResponseDiagnostics(response),
+                    });
+                  },
                   headers: { 'x-ms-client-request-id': intent.id },
                   params: { 'api-version': API_VERSION },
-                  okStatuses: [200, 202, 204, 409],
+                  okStatuses: [200, 202, 204, 409, 429],
                 },
               );
               check();
+              if (response.status === 429) {
+                // The recorded rejection settled atomically, unlike a lost response.
+                if (++rateLimitRejections >= this.retryMaxAttempts)
+                  throw new AutopodError(
+                    'Azure rejected sandbox wakeup because of rate limiting. No resume is pending from this rejection; retry after the provider backoff.',
+                    'SANDBOX_WAKEUP_RATE_LIMITED',
+                    429,
+                  );
+                const waitMs = Math.min(
+                  await retryAfterMs(response, rateLimitRejections, this.retryBaseDelayMs),
+                  this.retryMaxDelayMs,
+                );
+                check();
+                await sleep(Math.max(this.pollIntervalMs, waitMs));
+                continue;
+              }
               if (response.status === 409) {
                 const body = (await readJsonOrEmpty(response)) as { title?: string };
                 check();
@@ -1270,6 +1317,9 @@ export class AzureSandboxApiClient implements SandboxApiClient {
                 journal.rejectLocked(intent.id);
               }
             } catch (error) {
+              // Store only bounded error classification, never raw bodies or credentials.
+              const errorCode = error instanceof AutopodError ? error.code : 'TRANSPORT_ERROR';
+              journal.recordEvidence(intent.id, { kind: 'transport-error', errorCode });
               check();
               if (
                 error instanceof AutopodError &&
@@ -1278,7 +1328,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
               )
                 throw error;
               this.logger.warn(
-                { sandboxId, intentId: intent.id },
+                { sandboxId, intentId: intent.id, errorCode },
                 'Resume response unavailable; observing provider state without another POST',
               );
             }
@@ -1772,6 +1822,8 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         if (timeout) clearTimeout(timeout);
       }
 
+      options.onResponse?.(response);
+
       if (response.status === 429 && !options.singleAttempt && attempt < this.retryMaxAttempts) {
         const waitMs = Math.min(
           await retryAfterMs(response, attempt, this.retryBaseDelayMs),
@@ -1951,6 +2003,8 @@ interface RequestOptions {
   /** Synchronous admission recheck after token acquisition, immediately before transport. */
   beforeSend?: () => void;
   beforeObserve?: () => void;
+  /** Synchronous, bounded response evidence capture before status/body handling. */
+  onResponse?: (response: Response) => void;
   singleAttempt?: boolean;
   params?: Record<string, string | undefined>;
   headers?: Record<string, string>;

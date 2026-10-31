@@ -409,6 +409,34 @@ test('cleanup has its own hard deadline when its child never finishes', async ()
   }
 });
 
+test('standalone qualifier upgrades old wakeup custody without clearing a pending resume', async () => {
+  const dir = mkdtempSync(
+    new URL('../packages/daemon/.turbo-wakeup-upgrade-', import.meta.url).pathname,
+  );
+  let wakeup;
+  try {
+    const built = await buildAdapter(dir);
+    const require = createRequire(built.outfile);
+    const { createSandboxWakeupJournal, wakeupSchema } = require(built.outfile);
+    const Database = require('better-sqlite3');
+    const filename = join(dir, 'wakeups.sqlite');
+    const db = new Database(filename);
+    db.exec(wakeupSchema);
+    const old = createSandboxWakeupJournal(db);
+    old.observeRunning(base, object.id);
+    const intent = old.claim(base, object.id, 'retained-qualifier');
+    old.beginDispatch(intent.id);
+    db.close();
+    wakeup = openWakeupJournal(built.outfile, filename);
+    assert.equal(wakeup.journal.retains(object.id), true);
+    assert.deepEqual(wakeup.journal.claim(base, object.id), { id: intent.id, acquired: false });
+    assert.deepEqual(wakeup.journal.listForPod('retained-qualifier')[0].evidence, []);
+  } finally {
+    wakeup?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('fresh production source bundle exercises guarded adapter paths including suspended extraction', async () => {
   const dir = mkdtempSync(
     new URL('../packages/daemon/.turbo-r01c-test-', import.meta.url).pathname,

@@ -22,6 +22,19 @@ export async function collectArtifactSnapshot(options: {
 }): Promise<string> {
   let stage: 'wakeup' | 'export' = options.wakeupTimeoutMs === undefined ? 'export' : 'wakeup';
   const failure = (cause?: unknown) => {
+    // Keep actionable wakeup outcomes intact through the approval/API boundary.
+    // A generic copy failure must not turn an unresolved request into retry advice.
+    if (
+      stage === 'wakeup' &&
+      cause instanceof AutopodError &&
+      [
+        'SANDBOX_WAKEUP_RECONCILIATION_REQUIRED',
+        'SANDBOX_WAKEUP_RATE_LIMITED',
+        'SANDBOX_WAKEUP_LEGACY_UNVERIFIED',
+        'SANDBOX_WAKEUP_JOURNAL_UNAVAILABLE',
+      ].includes(cause.code)
+    )
+      return cause;
     const error = new AutopodError(
       'Artifact preservation failed. The original container is retained; retry collection before completing.',
       'ARTIFACT_PRESERVATION_FAILED',
