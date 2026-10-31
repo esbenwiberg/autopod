@@ -960,9 +960,7 @@ public struct SessionCardFinal: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                         .font(.system(size: 11))
-                    Text(reviewRequiredAction == .resumeValidation
-                        ? "Validation infrastructure needs retry"
-                        : "Validation attempts exhausted — human review needed")
+                    Text(reviewRequiredExplanation(for: pod.validationChecks, attempts: pod.attempts))
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }

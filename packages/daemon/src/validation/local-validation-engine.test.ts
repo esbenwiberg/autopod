@@ -2036,6 +2036,70 @@ describe('validate() — hasWebUi gating', () => {
     expect(result.overall).toBe('pass');
   });
 
+  it.each([0, 7, 'unverified', 'timeout', 'observed-timeout'] as const)(
+    'streams sandbox setup with its full budget and retains exit/cleanup evidence: %s',
+    async (exit) => {
+      const cm = stubContainerManager();
+      const stream = vi.mocked(cm.execStreaming).mockImplementation(async () => ({
+        stdout: Readable.from(['browser install progress']),
+        stderr: Readable.from(['retained diagnostic']),
+        exitCode:
+          typeof exit === 'number'
+            ? Promise.resolve(exit)
+            : Promise.reject(
+                exit === 'unverified'
+                  ? new AutopodError('Missing sandbox exit', 'EXEC_EXIT_UNVERIFIED', 409)
+                  : new ExecInterruptedError({
+                      cause: 'timeout',
+                      timeoutMs: 600_000,
+                      cleanup: 'confirmed',
+                      ...(exit === 'observed-timeout' ? { observedExitCode: 143 } : {}),
+                    }),
+              ),
+        kill: vi.fn(async () => {}),
+      }));
+      const observed = await createLocalValidationEngine(cm).validate(
+        baseConfig({
+          executionTarget: 'sandbox',
+          validationSetupCommand: 'setup-command',
+          buildTimeout: 600_000,
+          startCommand: '',
+          hasWebUi: false,
+          smokePages: [],
+          skipPhases: ['facts', 'review'],
+          extraExecEnv: { FIXTURE_ONLY: '1' },
+        }),
+      );
+      expect(stream).toHaveBeenCalledExactlyOnceWith(
+        'container-test',
+        expect.any(Array),
+        expect.objectContaining({ timeout: 600_000, env: { FIXTURE_ONLY: '1' } }),
+      );
+      expect(observed.setup?.output).toContain('browser install progress');
+      if (exit !== 0) expect(observed.setup?.output).toContain('retained diagnostic');
+      expect(observed.overall).toBe(exit === 0 ? 'pass' : 'fail');
+      if (typeof exit === 'string') {
+        expect(observed.infrastructureFailure).toMatchObject({
+          phase: 'setup',
+          code: exit === 'observed-timeout' ? 'EXEC_INTERRUPTED' : 'EXEC_EXIT_UNVERIFIED',
+          retryable: false,
+        });
+        if (exit !== 'unverified')
+          expect(observed.infrastructureFailure?.execution).toEqual({
+            cause: 'timeout',
+            timeoutMs: 600_000,
+            cleanup: 'confirmed',
+            ...(exit === 'observed-timeout' ? { observedExitCode: 143 } : {}),
+          });
+      } else expect(observed.setup?.status).toBe(exit === 0 ? 'pass' : 'fail');
+      expect(
+        vi
+          .mocked(cm.execInContainer)
+          .mock.calls.some(([, cmd]) => cmd[2]?.includes('setup-command')),
+      ).toBe(false);
+    },
+  );
+
   it('uses buildTimeout for setup command execution', async () => {
     const { cm, commands, timeouts } = commandTrackingContainerManager();
     const engine = createLocalValidationEngine(cm);

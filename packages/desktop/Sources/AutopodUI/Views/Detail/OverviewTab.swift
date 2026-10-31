@@ -1115,7 +1115,7 @@ struct OverviewTab: View {
                 Text("Review Required")
                     .font(.system(.subheadline).weight(.semibold))
             }
-            Text("Validation attempts exhausted — a human should decide whether to extend or fix manually.")
+            Text(reviewRequiredExplanation(for: pod.validationChecks, attempts: pod.attempts))
                 .font(.callout)
                 .foregroundStyle(.secondary)
             if let err = pod.errorSummary {

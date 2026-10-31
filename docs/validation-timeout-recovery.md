@@ -6,6 +6,13 @@ milliseconds, partial output and measured validation duration. An unexpected
 WebSocket close does not become a timeout merely because it happened near the
 budget. Missing or invalid exit frames never establish successful execution.
 
+Sandbox setup uses the same streaming command path as build/test, with the configured
+`buildTimeout` in milliseconds and the supplied validation environment. This avoids
+waiting for a single buffered setup response and retains partial stdout/stderr if
+setup loses its exit result or times out. Local setup retains its buffered path.
+Setup streaming does not grant retry permission, prove termination, or relax the
+immutable dispatch/outcome and final-content preservation fences described below.
+
 On timeout, the ordinary streaming wrapper's owned process group receives TERM,
 with up to two seconds to exit, then KILL if necessary, with up to two seconds
 for confirmation. Cleanup checks the recorded leader's process start time and
@@ -22,7 +29,10 @@ are optional for old records. Confirmed process-group cleanup does **not** inven
 an exit code or establish that tests passed. Prior failing assertions remain in
 partial output; incomplete test status is not evidence that tests never ran.
 Desktop shows the timeout budget, cleanup result and recovery guidance.
-Cleanup-pending or retry-pending states require durable evidence.
+Cleanup-pending or retry-pending states require durable evidence. Desktop overview
+and card summaries distinguish unknown execution outcomes, infrastructure failures,
+review findings and actual exhausted attempt limits; a generic `review_required`
+status alone is not evidence that the attempt budget was exhausted.
 
 ## Recovery boundary
 

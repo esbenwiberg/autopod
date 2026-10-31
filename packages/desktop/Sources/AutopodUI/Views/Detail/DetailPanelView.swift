@@ -18,6 +18,28 @@ func reviewRequiredPrimaryAction(for checks: ValidationChecks?) -> ReviewRequire
     return .extendAttempts
 }
 
+func reviewRequiredExplanation(for checks: ValidationChecks?, attempts: AttemptInfo?) -> String {
+    if let failure = checks?.infrastructureFailure {
+        if ["EXEC_EXIT_UNVERIFIED", "CONTINUATION_OUTCOME_UNVERIFIED",
+            "AZURE_SANDBOX_EXEC_INVALID_RESPONSE", "VALIDATION_ENGINE_TERMINATION_UNVERIFIED"]
+            .contains(failure.code)
+            || ["failed", "unverified"].contains(failure.execution?.cleanup ?? "") {
+            return "Validation execution outcome is unknown — preserve source and reports; inspect recovery evidence before retrying."
+        }
+        return "Validation infrastructure needs attention — inspect the failure before retrying checks."
+    }
+    if ["review-failed", "review-timeout"].contains(checks?.reviewSkipKind ?? "") {
+        return "Review infrastructure needs attention — inspect the failure before requesting another review."
+    }
+    if reviewRequiredPrimaryAction(for: checks) == .fixReview {
+        return "Review findings need attention — inspect the findings before requesting a fix."
+    }
+    if let attempts, attempts.current >= attempts.max {
+        return "Validation attempts exhausted — a human should decide whether to extend or fix manually."
+    }
+    return "Validation needs human review — inspect the recorded checks and recovery guidance."
+}
+
 /// Detail panel — shown when a pod is selected. Tabbed around operator questions:
 /// Overview, Work, Validation, Readiness, Evidence, Diff, Logs, and Terminal.
 public struct DetailPanelView: View {
