@@ -74,6 +74,7 @@ export async function buildAdapter(directory) {
         "export { SandboxContainerManager } from './packages/daemon/src/containers/sandbox-container-manager.ts';",
         "export { createSandboxWakeupJournal } from './packages/daemon/src/containers/sandbox-wakeup-journal.ts';",
         "export { default as wakeupSchema } from './packages/daemon/src/db/migrations/218_sandbox_wakeup_intents.sql';",
+        "export { default as wakeupEvidenceSchema } from './packages/daemon/src/db/migrations/222_sandbox_wakeup_evidence.sql';",
       ].join('\n'),
       resolveDir: root,
     },
@@ -100,7 +101,7 @@ export async function buildAdapter(directory) {
 }
 
 export function openWakeupJournal(bundle, filename) {
-  const { createSandboxWakeupJournal, wakeupSchema } = daemonRequire(bundle);
+  const { createSandboxWakeupJournal, wakeupSchema, wakeupEvidenceSchema } = daemonRequire(bundle);
   const Database = daemonRequire('better-sqlite3');
   const db = new Database(filename);
   chmodSync(filename, 0o600);
@@ -108,7 +109,13 @@ export function openWakeupJournal(bundle, filename) {
   const initialized = db
     .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sandbox_wakeup_baselines'")
     .get();
-  if (!initialized) db.transaction(() => db.exec(wakeupSchema))();
+  db.transaction(() => {
+    if (!initialized) db.exec(wakeupSchema);
+    const hasEvidence = db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sandbox_wakeup_evidence'")
+      .get();
+    if (!hasEvidence) db.exec(wakeupEvidenceSchema);
+  })();
   return {
     journal: createSandboxWakeupJournal(db),
     close: () => {

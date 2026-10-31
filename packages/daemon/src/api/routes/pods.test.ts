@@ -128,6 +128,48 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     db.close();
   });
 
+  it('reads retained wakeup evidence without changing custody or dispatching recovery', async () => {
+    const repo = createPodRepository(db);
+    repo.insert({
+      id: 'wakeup-api',
+      profileName: 'test-profile',
+      task: 'Observe retained wakeup',
+      status: 'validated',
+      model: 'worker',
+      runtime: 'codex',
+      executionTarget: 'sandbox',
+      branch: 'wakeup-api',
+      userId: 'operator',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      outputMode: 'pr',
+    });
+    const journal = repo.sandboxWakeups;
+    if (!journal) throw new Error('Missing wakeup journal');
+    journal.observeRunning('https://example.invalid/exact-resource', 'sandbox');
+    const intent = journal.claim('https://example.invalid/exact-resource', 'sandbox', 'wakeup-api');
+    journal.beginDispatch(intent.id);
+    journal.recordEvidence(intent.id, {
+      kind: 'transport-error',
+      errorCode: 'AZURE_SANDBOX_TIMEOUT',
+    });
+    const before = db.serialize();
+    const response = await app.inject({ method: 'GET', url: '/pods/wakeup-api/sandbox-wakeup' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      operations: [
+        {
+          id: intent.id,
+          sandboxId: 'sandbox',
+          endedAt: null,
+          evidence: [{ kind: 'transport-error', errorCode: 'AZURE_SANDBOX_TIMEOUT' }],
+        },
+      ],
+    });
+    expect(db.serialize()).toEqual(before);
+    expect(journal.retains('sandbox')).toBe(true);
+  });
+
   it('requires explicit version 2 before returning API provenance to clients', async () => {
     const repo = createPodRepository(db);
     repo.insert({

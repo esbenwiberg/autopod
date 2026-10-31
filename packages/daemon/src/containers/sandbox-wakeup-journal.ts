@@ -2,6 +2,34 @@ import { randomUUID } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
+export type SandboxWakeupEvidence =
+  | { kind: 'response'; status: number; diagnostics: Record<string, string> }
+  | { kind: 'transport-error'; errorCode: string };
+
+export interface SandboxWakeupRecord {
+  id: string;
+  sandboxId: string;
+  startedAt: string;
+  dispatchStartedAt: string | null;
+  endedAt: string | null;
+  settledBy: string | null;
+  evidence: Array<{
+    recordedAt: string;
+    kind: 'response' | 'transport-error';
+    status: number | null;
+    errorCode: string | null;
+    diagnostics: Record<string, string>;
+  }>;
+}
+
+const diagnosticHeaders = new Set([
+  'x-ms-request-id',
+  'x-ms-correlation-request-id',
+  'request-id',
+  'traceparent',
+  'retry-after',
+]);
+
 export interface SandboxWakeupJournal {
   /** Fresh provider Running only; neither suspension nor a caller assertion qualifies. */
   observeRunning(resourceKey: string, sandboxId: string): void;
@@ -10,10 +38,17 @@ export interface SandboxWakeupJournal {
   beginDispatch(id: string): void;
   revokeUnsent(id: string): void;
   rejectLocked(id: string): void;
+  /** Only a recorded HTTP 429 proves rate-limit rejection; never inferred from Stopped. */
+  rejectRateLimited(id: string): void;
+  /** Recording an explicit 429 atomically settles its proved rejection. */
+  recordEvidence(id: string, evidence: SandboxWakeupEvidence): void;
+  /** Bounded read-only history; labels identify custody, not permission to resume. */
+  listForPod(podId: string): SandboxWakeupRecord[];
   retains(sandboxId: string): boolean;
   assertReleasable(sandboxId: string): void;
   assertPodReleasable(podId: string): void;
   pendingSandboxIds(): string[];
+  pendingDispatchedIntent(resourceKey: string): string | undefined;
 }
 
 export function createSandboxWakeupJournal(db: Database.Database): SandboxWakeupJournal {
@@ -21,11 +56,19 @@ export function createSandboxWakeupJournal(db: Database.Database): SandboxWakeup
     db
       .prepare('SELECT id FROM sandbox_wakeup_intents WHERE resource_key=? AND ended_at IS NULL')
       .get(resourceKey) as { id: string } | undefined;
-  const settle = (id: string, proof: 'observed-running' | 'resource-locked') => {
+  const settle = (id: string, proof: 'observed-running' | 'resource-locked' | 'rate-limited') => {
     db.prepare(`UPDATE sandbox_wakeup_intents SET ended_at=?,settled_by=?
       WHERE id=? AND ended_at IS NULL`).run(new Date().toISOString(), proof, id);
   };
   return {
+    pendingDispatchedIntent(resourceKey) {
+      return (
+        db
+          .prepare(`SELECT id FROM sandbox_wakeup_intents
+        WHERE resource_key=? AND ended_at IS NULL AND dispatch_started_at IS NOT NULL`)
+          .get(resourceKey) as { id: string } | undefined
+      )?.id;
+    },
     observeRunning: db.transaction((resourceKey: string, sandboxId: string) => {
       db.prepare(`INSERT OR IGNORE INTO sandbox_wakeup_baselines
         (resource_key,sandbox_id,observed_at) VALUES(?,?,?)`).run(
@@ -89,6 +132,57 @@ export function createSandboxWakeupJournal(db: Database.Database): SandboxWakeup
     },
     rejectLocked(id) {
       settle(id, 'resource-locked');
+    },
+    rejectRateLimited(id) {
+      settle(id, 'rate-limited');
+    },
+    recordEvidence: db.transaction((id: string, evidence: SandboxWakeupEvidence) => {
+      const diagnostics: Record<string, string> = {};
+      if (evidence.kind === 'response') {
+        for (const [name, value] of Object.entries(evidence.diagnostics)) {
+          if (diagnosticHeaders.has(name)) diagnostics[name] = value.slice(0, 256);
+        }
+      }
+      // Late transport cannot append to a settled intent or reinterpret its receipt.
+      db.prepare(`INSERT INTO sandbox_wakeup_evidence
+        (intent_id,recorded_at,kind,status,error_code,diagnostics_json)
+        SELECT id,?,?,?,?,? FROM sandbox_wakeup_intents
+        WHERE id=? AND ended_at IS NULL AND dispatch_started_at IS NOT NULL`).run(
+        new Date().toISOString(),
+        evidence.kind,
+        evidence.kind === 'response' ? evidence.status : null,
+        evidence.kind === 'transport-error' ? evidence.errorCode.slice(0, 128) : null,
+        JSON.stringify(diagnostics),
+        id,
+      );
+      if (evidence.kind === 'response' && evidence.status === 429) settle(id, 'rate-limited');
+    }),
+    listForPod(podId) {
+      const intents = db
+        .prepare(`SELECT id,sandbox_id AS sandboxId,started_at AS startedAt,
+        dispatch_started_at AS dispatchStartedAt,ended_at AS endedAt,settled_by AS settledBy
+        FROM sandbox_wakeup_intents WHERE pod_id=? ORDER BY started_at DESC,id DESC LIMIT 50`)
+        .all(podId) as Omit<SandboxWakeupRecord, 'evidence'>[];
+      return intents.map((intent) => {
+        const rows = db
+          .prepare(`SELECT recorded_at AS recordedAt,kind,status,error_code AS errorCode,
+          diagnostics_json AS diagnosticsJson FROM sandbox_wakeup_evidence
+          WHERE intent_id=? ORDER BY sequence DESC LIMIT 20`)
+          .all(intent.id) as Array<{
+          recordedAt: string;
+          kind: 'response' | 'transport-error';
+          status: number | null;
+          errorCode: string | null;
+          diagnosticsJson: string;
+        }>;
+        return {
+          ...intent,
+          evidence: rows.reverse().map(({ diagnosticsJson, ...row }) => ({
+            ...row,
+            diagnostics: JSON.parse(diagnosticsJson) as Record<string, string>,
+          })),
+        };
+      });
     },
     retains(sandboxId) {
       return Boolean(

@@ -58,7 +58,7 @@ describe('durable sandbox wakeup transport', () => {
     expect(transport.requestId).toBe(transport.claim?.id);
     expect(f.journal.retains(ID)).toBe(false);
   });
-  it('retains accepted/unknown operations across a database reopen without a second POST', async () => {
+  it('fails fast for a retained operation across reopen without a second POST', async () => {
     vi.useFakeTimers();
     const f = createSandboxWakeupFixture(true, true);
     let posts = 0;
@@ -74,13 +74,14 @@ describe('durable sandbox wakeup transport', () => {
     await first;
     expect(f.journal.retains(ID)).toBe(true);
     const next = f.reopen();
-    const retry = expect(createTestWakeupClient(next, fetch).resume(ID)).rejects.toThrow();
-    await vi.advanceTimersByTimeAsync(50);
-    await retry;
+    await expect(createTestWakeupClient(next, fetch).resume(ID)).rejects.toMatchObject({
+      code: 'SANDBOX_WAKEUP_RECONCILIATION_REQUIRED',
+      statusCode: 409,
+    });
     expect(posts).toBe(1);
     expect(next.pendingSandboxIds()).toEqual([ID]);
   });
-  it('coalesces separate clients through the durable claim, not only a process-local map', async () => {
+  it('refuses a second client while the original caller observes its admitted resume', async () => {
     vi.useFakeTimers();
     const f = createSandboxWakeupFixture(true);
     let posts = 0;
@@ -92,14 +93,18 @@ describe('durable sandbox wakeup transport', () => {
       }
       return state(++gets > 4 ? 'Running' : 'Stopped');
     });
-    const done = expect(
-      Promise.all([
-        createTestWakeupClient(f.journal, fetch).resume(ID),
-        createTestWakeupClient(f.journal, fetch).resume(ID),
-      ]),
-    ).resolves.toEqual([undefined, undefined]);
+    const done = Promise.allSettled([
+      createTestWakeupClient(f.journal, fetch).resume(ID),
+      createTestWakeupClient(f.journal, fetch).resume(ID),
+    ]);
     await vi.runAllTimersAsync();
-    await done;
+    expect(await done).toEqual([
+      { status: 'fulfilled', value: undefined },
+      {
+        status: 'rejected',
+        reason: expect.objectContaining({ code: 'SANDBOX_WAKEUP_RECONCILIATION_REQUIRED' }),
+      },
+    ]);
     expect(posts).toBe(1);
   });
   it('cannot borrow a Running baseline from a different provider namespace', async () => {

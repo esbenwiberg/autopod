@@ -27,10 +27,16 @@ worker accounting. Missing journal means no resume mutation.
    identity. Atomically mark dispatch started immediately before transport;
    use the intent ID as `x-ms-client-request-id` for provider investigation.
    This correlation ID is **not** an assumed provider idempotency guarantee.
-5. The exact `409 ResourceLocked` response establishes rejection and permits a
-   later bounded admission. A lost response, timeout, unrelated conflict or
-   server error does not release a dispatched intent. Poll fresh GETs for
-   Running without resubmitting. Observation itself remains bounded.
+5. The exact `409 ResourceLocked` response or explicit HTTP `429` establishes
+   rejection and permits a later bounded admission after backoff and a fresh
+   stopped-state observation. Migration 222 preserves old intents unchanged and
+   adds append-only transport evidence; a `rate-limited` settlement requires a
+   recorded 429, captured atomically with settlement. A lost response, timeout,
+   unrelated conflict or server error does not release a dispatched intent.
+   The initiating caller observes fresh GETs for Running without resubmitting.
+   A later caller gets `SANDBOX_WAKEUP_RECONCILIATION_REQUIRED` immediately after
+   observing a stopped resource with an existing intent. A fresh Running
+   observation still settles that intent; elapsed time never does.
 6. An unsent claim can be atomically revoked on local cancellation/timeout.
    Its delayed transport can no longer pass the dispatch CAS. A dispatched
    claim cannot be revoked this way, cannot expire by elapsed time, and survives
@@ -58,6 +64,14 @@ to bill. Do not roll back to a binary that ignores these holds while pending
 intents exist, and do not manually clear journal rows to make recovery proceed.
 
 ## Existing blocked resources
+
+Authenticated `GET /pods/:podId/sandbox-wakeup` is a read-only journal view with
+at most 50 intents and the last 20 evidence entries per intent. New evidence
+includes HTTP status, allowlisted provider correlation/backoff headers and static
+transport error codes, never bearer tokens or raw response bodies. Old pending
+intents retain their original identity and have no backfilled response evidence.
+This endpoint neither contacts Azure nor grants settlement or replay authority.
+The intent ID is the original `x-ms-client-request-id` for provider investigation.
 
 This protocol does not prove the disposition of a previously lost restore
 response. Keep original resources, snapshots, exclusive operation records and

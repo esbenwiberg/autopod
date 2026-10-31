@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { AutopodError } from '@autopod/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApprovalFixture } from '../test-utils/approval-helpers.js';
 import { APPROVAL_SNAPSHOT_EXCLUDES } from './approval-policy.js';
@@ -16,6 +17,28 @@ afterEach(() => {
 });
 
 describe('approval workspace snapshots', () => {
+  it('returns the exact reconciliation-required outcome without generic retry advice or cleanup', async () => {
+    const f = fixture();
+    f.podRepo.update('prepare', { executionTarget: 'sandbox' });
+    f.validated();
+    const failure = new AutopodError(
+      'Resume request retained-intent requires provider reconciliation. No additional resume was sent.',
+      'SANDBOX_WAKEUP_RECONCILIATION_REQUIRED',
+      409,
+    );
+    vi.mocked(f.cm.extractDirectoryFromContainer).mockRejectedValueOnce(failure);
+    await expect(f.workflow().approveSession('prepare')).rejects.toBe(failure);
+    expect(f.pod()).toMatchObject({
+      status: 'validated',
+      containerId: 'container-123',
+      artifactsPath: null,
+    });
+    expect(f.pod().failureReason).toContain(failure.message);
+    expect(f.pod().failureReason).not.toContain('retry approval');
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.mainCaptured.cleanupContainerAfterAdvisorySettles).not.toHaveBeenCalled();
+  });
+
   it('preserves a real private report snapshot and receipt before source publication and cleanup', async () => {
     const f = fixture();
     f.podRepo.update('prepare', { executionTarget: 'sandbox' });

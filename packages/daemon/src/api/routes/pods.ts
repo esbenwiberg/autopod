@@ -768,6 +768,19 @@ export function podRoutes(
     return { receipt: podManager.getExternalDelivery(podId) };
   });
 
+  // Observation only: never wakes, settles, or releases the original resource.
+  app.get('/pods/:podId/sandbox-wakeup', async (request) => {
+    const { podId } = z.object({ podId: z.string().min(1).max(128) }).parse(request.params);
+    podManager.getSession(podId);
+    if (!podRepo?.sandboxWakeups)
+      throw new AutopodError(
+        'Wakeup evidence unavailable',
+        'SANDBOX_WAKEUP_JOURNAL_UNAVAILABLE',
+        503,
+      );
+    return { operations: podRepo.sandboxWakeups.listForPod(podId) };
+  });
+
   // Task projection deliberately avoids deserializing the pod's contract/validation JSON.
   app.get('/pods/:podId/task-execution', async (request) => {
     const { podId } = request.params as { podId: string };
