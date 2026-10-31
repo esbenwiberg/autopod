@@ -18,17 +18,35 @@ The existing desktop request budget remains 300 seconds, which also includes
 readiness and publication. These are stage bounds, not a promise that all delivery
 work fits inside the desktop request budget.
 
-Azure resume observes Running before any export. Transitional states are polled;
-only a specifically rejected ResourceLocked resume can be retried after backoff
-and a fresh stopped-state observation. An accepted resume is observed, not posted
-again. Auth, missing resources, terminal states, and unrelated conflicts fail.
+Azure resume observes Running before any export. Transitional states are polled.
+An explicit `409 ResourceLocked` or `429` rejection permits bounded readmission
+only after backoff and a fresh stopped-state observation. The resume POST has a
+separate 60-second response budget; GET polling requests remain bounded at 15
+seconds, inside the unchanged 145-second reconciliation budget. An accepted or
+outcome-unknown resume is observed by its initiating caller, never posted again.
+Auth, missing resources, terminal states, and unrelated conflicts fail.
 HTTP calls have bounded fetch deadlines and the entire reconciliation (including
 authentication and response bodies) has a deadline. No generic write retry is added.
 
-On wakeup or export failure, check the stage in activity and daemon logs, inspect
-the retained sandbox's availability, then explicitly retry ordinary approval once
-the issue is resolved. Do not delete the sandbox, skip preservation, or restart an
-agent to bypass the failure. Late extraction cannot publish a snapshot or replace
+A later approval first observes the provider. Running settles a retained wakeup
+and permits export. If it is still stopped with an existing request, approval
+returns HTTP 409 `SANDBOX_WAKEUP_RECONCILIATION_REQUIRED` with the retained request
+ID immediately instead of repeating the full polling budget. This response does
+not cancel the original request or authorize another resume.
+
+Inspect authenticated `GET /pods/:podId/sandbox-wakeup` for bounded recorded
+history (latest 50 intents, latest 20 evidence entries per intent). It reads the
+journal only; it does not contact Azure, settle requests, or wake resources. New
+requests retain response status, allowlisted correlation/backoff headers, and
+bounded transport error classification. Older unknown requests have no invented
+response evidence. Obtain the original provider outcome using the retained
+request ID; a stopped state alone does not prove rejection. There is no blind
+replay or manual-clear recovery action.
+
+On export failure, or once the provider outcome is resolved, explicitly retry
+ordinary approval. Do not delete the sandbox, skip preservation, or restart an
+agent to bypass a wakeup or export failure. Late extraction cannot publish a
+snapshot or replace
 a previous receipt; stale lifecycle ownership cannot publish or trigger cleanup.
 A copy timeout from older versions covered wakeup and export together and cannot
 identify which stage stalled without additional evidence.

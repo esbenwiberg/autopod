@@ -146,7 +146,13 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
           'Approval workspace preservation failed; resources retained',
         );
         assertApprovalCurrent(pod);
-        const reason = `Approval delivery failed. ${error instanceof AutopodError && error.code === 'ARTIFACT_PRESERVATION_FAILED' ? error.message : 'Workspace preservation failed. Original resources retained; retry approval.'}`;
+        const detail =
+          error instanceof AutopodError &&
+          (error.code === 'ARTIFACT_PRESERVATION_FAILED' ||
+            error.code.startsWith('SANDBOX_WAKEUP_'))
+            ? error.message
+            : 'Workspace preservation failed. Original resources retained; retry approval.';
+        const reason = `Approval delivery failed. ${detail}`;
         podRepo.update(podId, { failureReason: reason });
         emitActivityError(podId, reason, false);
         throw error;
