@@ -153,7 +153,10 @@ describe('GET /pods/:podId provider-attempt projection', () => {
       kind: 'transport-error',
       errorCode: 'AZURE_SANDBOX_TIMEOUT',
     });
-    const before = db.serialize();
+    // total_changes includes writes even if a handler later rolls them back.
+    // Avoid an expensive deep comparison of the entire migrated database buffer.
+    const changes = () => db.prepare('SELECT total_changes() AS count').get();
+    const before = changes();
     const response = await app.inject({ method: 'GET', url: '/pods/wakeup-api/sandbox-wakeup' });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
@@ -166,7 +169,7 @@ describe('GET /pods/:podId provider-attempt projection', () => {
         },
       ],
     });
-    expect(db.serialize()).toEqual(before);
+    expect(changes()).toEqual(before);
     expect(journal.retains('sandbox')).toBe(true);
   });
 
