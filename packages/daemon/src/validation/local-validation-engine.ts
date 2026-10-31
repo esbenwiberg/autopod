@@ -477,7 +477,9 @@ export function createLocalValidationEngine(
           const setupStart = Date.now();
           let setupExecResult: { stdout: string; stderr: string; exitCode: number };
           try {
-            setupExecResult = await containerManager.execInContainer(
+            setupExecResult = await runValidationCommand(
+              containerManager,
+              config.executionTarget,
               config.containerId,
               wrapValidationExecCommand(config.validationSetupCommand, config.extraExecEnv),
               {
@@ -496,7 +498,10 @@ export function createLocalValidationEngine(
             if (setupInfrastructureFailure) {
               setupResult = {
                 status: 'skip',
-                output: validationInfrastructureOutput(err),
+                output: validationInfrastructureOutput(
+                  err,
+                  (err as { partialOutput?: string })?.partialOutput ?? '',
+                ),
                 duration,
               };
               callbacks?.onPhaseCompleted?.('setup', 'skip', setupResult);
