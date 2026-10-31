@@ -6,6 +6,8 @@ import {
 } from '@autopod/shared';
 
 export interface LaunchFlags {
+  completion?: 'approval' | 'deliver' | 'merge' | 'accept-findings';
+  output?: 'pr' | 'branch' | 'artifact' | 'none';
   repo?: string;
   reference?: string[];
   references?: boolean;
@@ -65,6 +67,8 @@ export async function buildLaunchRequest(
   const configuredFlags = [
     flags.reference,
     flags.references === false ? false : undefined,
+    flags.completion,
+    flags.output,
     flags.repo,
     flags.emptyWorkspace,
     flags.repositorySetup,
@@ -123,6 +127,10 @@ export async function buildLaunchRequest(
       }
     }),
   );
+  if (flags.completion !== undefined)
+    overrides.workflow = { ...overrides.workflow, completion: flags.completion };
+  if (flags.output !== undefined)
+    overrides.workflow = { ...overrides.workflow, output: flags.output };
   if (flags.tokenBudget !== undefined)
     overrides.workflow = { ...overrides.workflow, tokenBudget: flags.tokenBudget };
   if (flags.githubAccess !== undefined) Reflect.deleteProperty(overrides, 'githubAccess');

@@ -890,3 +890,31 @@ describe('createReadinessService', () => {
     );
   });
 });
+
+describe('findings validation applicability', () => {
+  it('makes native validation not applicable only for an explicit findings contract', () => {
+    const research = review({
+      pod: pod({ status: 'research_ready', completionPolicy: 'accept-findings' }),
+      latestValidation: null,
+    });
+    expect(research.areas.find((area) => area.area === 'validation')?.status).toBe(
+      'not_applicable',
+    );
+    expect(
+      research.findings.some(
+        (finding) =>
+          finding.id === 'validation-unknown' || finding.id === 'lifecycle-readiness-unresolved',
+      ),
+    ).toBe(false);
+    const ordinary = review({
+      pod: pod({ options: { agentMode: 'auto', output: 'none', validate: false } }),
+      latestValidation: null,
+    });
+    expect(ordinary.areas.find((area) => area.area === 'validation')?.status).toBe('risky');
+    const failed = review({
+      pod: pod({ completionPolicy: 'accept-findings', status: 'research_ready' }),
+      latestValidation: validation({ overall: 'fail' }),
+    });
+    expect(failed.areas.find((area) => area.area === 'validation')?.status).toBe('risky');
+  });
+});

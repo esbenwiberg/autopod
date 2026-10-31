@@ -103,7 +103,17 @@ export const AUTOPOD_INSTRUCTIONS_PATH = '/home/autopod/.autopod/system-instruct
 export const VALID_STATUS_TRANSITIONS: Record<PodStatus, PodStatus[]> = {
   queued: ['provisioning', 'awaiting_input', 'failed', 'killing'],
   provisioning: ['running', 'paused', 'killing', 'failed'],
-  running: ['awaiting_input', 'validating', 'paused', 'handoff', 'killing', 'complete', 'failed'],
+  research_ready: ['complete', 'killing'],
+  running: [
+    'research_ready',
+    'awaiting_input',
+    'validating',
+    'paused',
+    'handoff',
+    'killing',
+    'complete',
+    'failed',
+  ],
   // `validating` covers the case where the daemon parked the pod after a
   // post-validation push failed on missing/invalid credentials — once the
   // operator updates the profile PAT, the daemon retries the push from the

@@ -1353,7 +1353,7 @@ struct ConfigurationEditorSheet: View {
           stringPicker("Agent mode", key: "agentMode", values: ["auto", "interactive"])
           stringPicker("Default intent", key: "intent", values: ["task", "goal"])
           stringPicker("Output", key: "output", values: ["pr", "branch", "artifact", "none"])
-        stringPicker("Daemon delivery", key: "completion", values: ["approval", "deliver", "merge"])
+        stringPicker("Daemon delivery", key: "completion", values: ["approval", "deliver", "merge", "accept-findings"])
         Toggle("Can be promoted from interactive to automatic", isOn: boolBinding("promotable"))
       }
       }

@@ -36,6 +36,16 @@ describe('container resource cleanup lifetime', () => {
     expect(f.db.pragma('integrity_check', { simple: true })).toBe('ok');
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
   });
+  it('requires confirmed deletion for strict research cleanup and retains failed resource identity', async () => {
+    const f = createResourceFixture();
+    vi.mocked(f.cm.kill).mockRejectedValueOnce(new Error('provider unavailable'));
+    await expect(
+      f.cleanup.cleanupContainer(f.pod(), 'research-ready', 'kill', () => {}, true),
+    ).rejects.toMatchObject({ code: 'RESOURCE_CLEANUP_UNCONFIRMED' });
+    expect(f.pod().containerId).toBe('container-123');
+    await f.cleanup.cleanupContainer(f.pod(), 'research-ready', 'kill', () => {}, true);
+    expect(f.pod().containerId).toBeNull();
+  });
   it('stops without PIM/lineage release and retains the container identity', async () => {
     const f = createResourceFixture();
     const release = vi.fn();

@@ -186,6 +186,11 @@ export interface PodManagerDependencies {
 }
 
 export interface PodManager {
+  acceptFindings(
+    podId: string,
+    request: import('./research-findings.js').AcceptFindingsRequest,
+    actor: OperatorActor,
+  ): Promise<NonNullable<Pod['researchFindings']>>;
   adoptSource?(
     podId: string,
     input: import('./source-adoption-controller.js').SourceAdoptionRequest,

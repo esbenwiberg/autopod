@@ -261,6 +261,28 @@ describe('continuation controls', () => {
     expect(f.captured.artifactResumeRuns.size).toBe(0);
     expect(f.calls.revalidateSession).not.toHaveBeenCalled();
   });
+  it.each(['ready', 'preserving'] as const)(
+    'resumes explicit settled findings from %s into research ready without a worker',
+    async (phase) => {
+      const f = fixture();
+      f.db.prepare("UPDATE pods SET completion_policy='accept-findings' WHERE id='control'").run();
+      f.pods.update('control', {
+        options: { ...f.pod().options, output: 'none', validate: false },
+      });
+      f.pods.completionJournal?.settle(f.pod(), 'Settled research');
+      f.pods.completionJournal?.mark(f.pod(), phase);
+      f.calls.handleCompletion.mockImplementation(async () => {
+        f.pods.update('control', { status: 'research_ready' });
+      });
+      await expect(f.c.resumePod.call(f.calls, 'control')).resolves.toEqual({
+        action: 'collect-artifacts',
+      });
+      expect(f.pod().status).toBe('research_ready');
+      expect(f.captured.enqueueSession).not.toHaveBeenCalled();
+      expect(f.calls.revalidateSession).not.toHaveBeenCalled();
+      expect(f.calls.approveSession).not.toHaveBeenCalled();
+    },
+  );
   it('retains a failed artifact collection error and cleans coalescing state', async () => {
     const f = fixture();
     f.pods.update('control', {

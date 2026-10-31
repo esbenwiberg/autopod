@@ -231,6 +231,8 @@ export function deriveReadinessReview(inputs: ReadinessInputs): ReadinessReview 
     },
     inputs.pod.status,
     inputs.latestValidation,
+    false,
+    inputs.pod.completionPolicy === 'accept-findings',
   );
 }
 
@@ -296,6 +298,9 @@ function validationArea(inputs: ReadinessInputs): {
 } {
   const { pod, latestValidation } = inputs;
   const refs = SOURCE_REFS.validation;
+  if (pod.completionPolicy === 'accept-findings' && !latestValidation) {
+    return area('validation', 'not_applicable', 'Not required for this research task', []);
+  }
   const forceApproved = pod.lastCorrectionMessage?.startsWith('[FORCE APPROVED]') === true;
   const forceApprovedWithoutPassingValidation =
     forceApproved && latestValidation?.overall !== 'pass';

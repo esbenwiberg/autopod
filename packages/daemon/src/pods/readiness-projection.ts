@@ -19,7 +19,16 @@ export function withLifecycleReadiness(
   status: PodStatus,
   currentValidation: ValidationResult | null,
   sourceHeld = false,
+  findingsContract = false,
 ): ReadinessReview {
+  if (
+    findingsContract &&
+    !sourceHeld &&
+    currentValidation === null &&
+    ['research_ready', 'complete'].includes(status) &&
+    review.areas.some((area) => area.area === 'validation' && area.status === 'not_applicable')
+  )
+    return review;
   if (
     !sourceHeld &&
     review.status !== 'ready' &&

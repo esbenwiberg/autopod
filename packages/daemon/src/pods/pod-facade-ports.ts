@@ -44,6 +44,7 @@ import type { createWorkspacePromotion } from './workspace-promotion.js';
 import type { createWorkspaceRecoveryCommands } from './workspace-recovery-commands.js';
 import type { createWorkspaceWatchdog } from './workspace-watchdog.js';
 export interface PodFacadeOwners {
+  acceptFindings: ReturnType<typeof import('./research-findings.js').createFindingsAcceptance>;
   validationExecutionRecovery: ReturnType<typeof createValidationExecutionRecovery>;
   sourceAdoption?: ReturnType<typeof createSourceAdoptionController>;
   admissionQueries: Pick<

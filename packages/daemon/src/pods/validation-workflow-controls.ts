@@ -365,6 +365,12 @@ export function createValidationWorkflowControls(
     actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
   ): void {
     const pod = podRepo.getOrThrow(podId);
+    if (pod.completionPolicy === 'accept-findings')
+      throw new AutopodError(
+        'Findings acceptance does not use validation waivers',
+        'FINDINGS_VALIDATION_NOT_APPLICABLE',
+        409,
+      );
     if (skip) assertValidationMutationSettled(podRepo, podId);
     podRepo.update(podId, {
       skipValidation: skip,

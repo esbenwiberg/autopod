@@ -89,13 +89,13 @@ public enum PodMapper {
       ?? response.lastCorrectionMessage
       ?? response.mergeBlockReason
       ?? response.failureReason
-    return Pod(
+    var compact = Pod(
       id: response.id,
       status: PodStatus(rawValue: response.status) ?? .queued,
       pod: config,
       hasWorktree: response.worktreePath != nil,
-      artifactCollectionPending: response.status == "failed" && response.options.output == "artifact"
-        && response.finalization?.phase == "preserving" && response.finalization?.agentSettledAt != nil
+      artifactCollectionPending: response.status == "failed" && (response.options.output == "artifact" || response.completionPolicy == "accept-findings")
+        && (response.finalization?.phase == "preserving" || (response.completionPolicy == "accept-findings" && response.finalization?.phase == "ready")) && response.finalization?.agentSettledAt != nil
         && response.finalization?.pendingDecisionId == nil,
       branch: response.branch,
       profileName: response.profileName,
@@ -126,6 +126,8 @@ public enum PodMapper {
       seriesName: response.seriesName,
       runningAt: response.runningAt.map { parseDate($0) }
     )
+    compact.completionPolicy = response.completionPolicy
+    return compact
   }
 
   public static func map(_ response: SessionResponse, baseURL: URL? = nil) -> Pod {
@@ -485,8 +487,8 @@ public enum PodMapper {
       status: status,
       pod: pod,
       hasWorktree: response.worktreePath != nil,
-      artifactCollectionPending: response.status == "failed" && pod.output == .artifact
-        && response.finalization?.phase == "preserving" && response.finalization?.agentSettledAt != nil
+      artifactCollectionPending: response.status == "failed" && (pod.output == .artifact || response.completionPolicy == "accept-findings")
+        && (response.finalization?.phase == "preserving" || (response.completionPolicy == "accept-findings" && response.finalization?.phase == "ready")) && response.finalization?.agentSettledAt != nil
         && response.finalization?.pendingDecisionId == nil,
       branch: response.branch,
       profileName: response.profileName,
@@ -542,6 +544,8 @@ public enum PodMapper {
     result.validationWaiver = mapValidationWaiver(response.validationWaiver)
     result.preSubmitReview = mapPreSubmitReview(response.preSubmitReview)
     result.fixIteration = response.fixIteration ?? 0
+    result.completionPolicy = response.completionPolicy
+    result.researchFindings = response.researchFindings
     result.queueLength = response.queueLength ?? 0
     result.recentQueueMessages = (response.recentQueueMessages ?? []).map { msg in
       PodQueueMessage(

@@ -228,6 +228,11 @@ public final class ActionHandler {
         $0.linkedSessionId == id || $0.id == source.fixPodId || (source.seriesId != nil && $0.seriesId == source.seriesId)
       })
     })
+    result.acceptFindings = { [weak self] id, findings in
+      guard let self else { throw DaemonError.badRequest("Connection unavailable") }
+      try await self.perform { try await self.api.acceptFindings(id, findings: findings) }
+      try await self.perform { await self.podStore.refreshSession(id) }
+    }
     result.approvalPending = { [weak self] id in self?.pendingApprovals.contains(id) == true }
     return result
   }

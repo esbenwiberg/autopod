@@ -147,8 +147,19 @@ function mockExecFileSuccess(): void {
   });
 }
 
+// SQLite owns native allocations that JavaScript GC need not promptly reclaim.
+// Every fixture must release its database, including tests that fail assertions.
+const testDatabases = new Set<Database.Database>();
+afterEach(() => {
+  for (const db of testDatabases) {
+    if (db.open) db.close();
+  }
+  testDatabases.clear();
+});
+
 function createTestDb(): Database.Database {
   const db = new Database(':memory:');
+  testDatabases.add(db);
   db.pragma('foreign_keys = ON');
 
   // Run migrations inline
@@ -16969,6 +16980,7 @@ describe('PodManager', () => {
       const statusGate = deferred<'running'>();
       vi.mocked(ctx.containerManager.getStatus).mockReturnValue(statusGate.promise);
       const manager = createPodManager(ctx.deps);
+      const recovery = vi.spyOn(manager, 'triggerValidation');
 
       const pod = manager.createSession(
         { profileName: 'test-profile', task: 'Add feature' },
@@ -16989,6 +17001,10 @@ describe('PodManager', () => {
 
       statusGate.resolve('running');
       await waitForAssertion(() => expect(ctx.enqueuedSessions).toEqual([pod.id]));
+      expect(recovery).toHaveBeenCalledOnce();
+      // Enqueueing precedes the recovery's final ownership/activity writes.
+      // Wait for those too before releasing this test's database.
+      await recovery.mock.results[0]?.value;
     });
 
     it('passes setup command into validation and summarizes setup failures first', async () => {

@@ -1,4 +1,4 @@
-import type { Pod } from '@autopod/shared';
+import { AutopodError, type Pod } from '@autopod/shared';
 import type {
   ResourceCleanupCaptured,
   ResourceCleanupLiveDependencies,
@@ -25,6 +25,7 @@ export function createResourceCleanup(
     label: string,
     mode: 'kill' | 'stop' = 'kill',
     assertReleaseAllowed?: () => void,
+    strict = false,
   ): Promise<void> {
     const targetContainerId = pod.containerId;
     // Resource custody survives a missing or different mutable pod identity.
@@ -113,7 +114,13 @@ export function createResourceCleanup(
     ]);
     assertValidationMutationSettled(podRepo, pod.id);
     assertReleaseAllowed?.();
-    if (mode === 'kill' && deleted && pod.executionTarget === 'sandbox') {
+    if (strict && !deleted)
+      throw new AutopodError(
+        'Container deletion is unconfirmed. Retained findings and resource identity require cleanup retry before research is ready.',
+        'RESOURCE_CLEANUP_UNCONFIRMED',
+        409,
+      );
+    if (mode === 'kill' && deleted && (pod.executionTarget === 'sandbox' || strict)) {
       const current = podRepo.getOrThrow(pod.id);
       if (
         current.lifecycleGeneration === pod.lifecycleGeneration &&

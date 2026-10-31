@@ -4,17 +4,19 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { AutopodError, type Pod } from '@autopod/shared';
 import type { Logger } from 'pino';
+import { atomicPodChange } from '../db/unit-of-work.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
 import type { PodRepository } from './pod-repository.js';
+import { retainFindings } from './research-findings.js';
 
 const execFileAsync = promisify(execFile);
 
 interface ArtifactFinalizerDependencies {
-  podRepo: Pick<PodRepository, 'getOrThrow' | 'update' | 'completionJournal'>;
+  podRepo: Pick<PodRepository, 'getOrThrow' | 'update' | 'completionJournal' | 'atomically'>;
   getContainerManager(target: Pod['executionTarget']): ContainerManager;
   ownsArtifactCompletion(pod: Pod, allowRemovedContainer?: boolean): boolean;
   executionForPod(pod: Pod): PodExecutionSettings;
@@ -26,8 +28,12 @@ interface ArtifactFinalizerDependencies {
     label: string,
     mode: 'kill',
     assertReleaseAllowed: () => void,
+    strict?: boolean,
   ): Promise<void>;
-  transition(pod: Pod, to: 'failed' | 'complete'): Pod;
+  killSidecarsForPod(podId: string, strict: boolean, assertCurrent: () => void): Promise<void>;
+  destroyPodNetwork(podId: string, strict: boolean): Promise<void>;
+  assertExecutionTerminationVerified(podId: string): void;
+  transition(pod: Pod, to: 'failed' | 'complete' | 'research_ready'): Pod;
   logger: Pick<Logger, 'error' | 'warn' | 'info'>;
   emitActivityStatus(podId: string, message: string): void;
   emitActivityError(podId: string, message: string, fatal: boolean): void;
@@ -61,8 +67,9 @@ export function createArtifactFinalizer(deps: ArtifactFinalizerDependencies): {
     );
   }
 
-  function assertArtifactFinalizationCurrent(pod: Pod): void {
-    if (!ownsArtifactFinalization(pod))
+  function assertArtifactFinalizationCurrent(pod: Pod, allowRemovedContainer = false): void {
+    deps.assertExecutionTerminationVerified(pod.id);
+    if (!ownsArtifactFinalization(pod, allowRemovedContainer))
       throw new AutopodError(
         'Artifact finalization was superseded; current resources retained.',
         'STALE_ARTIFACT_COLLECTION',
@@ -130,6 +137,8 @@ export function createArtifactFinalizer(deps: ArtifactFinalizerDependencies): {
     if (!ownsArtifactFinalization(pod)) return;
     await syncSandboxSeriesHandover(podId);
     if (!ownsArtifactFinalization(pod)) return;
+    deps.assertExecutionTerminationVerified(pod.id);
+    const findingsOnly = pod.completionPolicy === 'accept-findings';
     const profile = executionForPod(pod);
     const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data');
     let artifactsPath: string;
@@ -145,7 +154,7 @@ export function createArtifactFinalizer(deps: ArtifactFinalizerDependencies): {
     // Legacy research profiles selected a destination repository for publication.
     // Native artifact output only authorizes a preserved file snapshot; selecting
     // a source repository is not authorization to push an artifact branch.
-    if (profile.repoUrl && !pod.launchConfigDigest) {
+    if (!findingsOnly && profile.repoUrl && !pod.launchConfigDigest) {
       const repoBranch = pod.branch ?? `research/${podId}`;
       try {
         emitActivityStatus(podId, 'Pushing artifact branch…');
@@ -177,18 +186,46 @@ export function createArtifactFinalizer(deps: ArtifactFinalizerDependencies): {
       }
     }
 
-    // Transition to complete — skip validation entirely
+    const findings = findingsOnly ? await retainFindings(podRepo.getOrThrow(podId)) : null;
+
+    // Release only after receipt verification and task-wide termination checks.
     if (!ownsArtifactFinalization(pod)) return;
     try {
-      await cleanupContainer(pod, 'artifact-complete', 'kill', () =>
-        assertArtifactFinalizationCurrent(pod),
-      );
+      const assertCurrent = () => assertArtifactFinalizationCurrent(pod);
+      if (findingsOnly) {
+        await cleanupContainer(pod, 'research-ready', 'kill', assertCurrent, true);
+        const assertReleased = () => assertArtifactFinalizationCurrent(pod, true);
+        assertReleased();
+        await deps.killSidecarsForPod(podId, true, assertReleased);
+        assertReleased();
+        await deps.destroyPodNetwork(podId, true);
+        assertReleased();
+      } else {
+        await cleanupContainer(pod, 'artifact-complete', 'kill', assertCurrent);
+      }
     } catch (err) {
       if (err instanceof AutopodError && err.code === 'STALE_ARTIFACT_COLLECTION') return;
       throw err;
     }
     if (!ownsArtifactFinalization(pod, true)) return;
-    transition(podRepo.getOrThrow(podId), 'complete');
+    deps.assertExecutionTerminationVerified(podId);
+    if (
+      findings &&
+      (JSON.stringify(podRepo.getOrThrow(podId).taskSummary) !== JSON.stringify(findings.summary) ||
+        podRepo.getOrThrow(podId).finalization?.result !== findings.result)
+    )
+      throw new AutopodError(
+        'Native findings changed during cleanup; review finalization before retrying',
+        'FINDINGS_CONFLICT',
+        409,
+      );
+    atomicPodChange(podRepo, () => {
+      if (findings)
+        podRepo.update(podId, {
+          researchFindings: { ...findings, readyAt: new Date().toISOString() },
+        });
+      transition(podRepo.getOrThrow(podId), findingsOnly ? 'research_ready' : 'complete');
+    });
   }
 
   return { preserveArtifacts, finalizeArtifactPod };

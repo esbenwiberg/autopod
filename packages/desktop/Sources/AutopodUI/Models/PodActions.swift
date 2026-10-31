@@ -34,6 +34,7 @@ public enum PendingPodControl: Sendable, Equatable {
 /// Views call these; the app layer provides real implementations.
 /// All closures default to no-ops so previews work without wiring.
 public struct PodActions: Sendable {
+  public var acceptFindings: @MainActor @Sendable (String, ResearchFindingsResponse) async throws -> Void = { _, _ in }
   public var approvalPending: @MainActor @Sendable (String) -> Bool = { _ in false }
   public var repair: PodRepairActions = .unavailable
   public var approve: @MainActor @Sendable (String, String?) async -> Void

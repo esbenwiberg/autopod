@@ -1,6 +1,12 @@
 /** Export only the fields used by the history artifact; bound JSON before SQLite returns it. */
-export const HISTORY_JSON_FIELDS = ['plan', 'task_summary', 'phase_token_usage'] as const;
+export const HISTORY_JSON_FIELDS = [
+  'plan',
+  'task_summary',
+  'phase_token_usage',
+  'research_findings',
+] as const;
 export const HISTORY_POD_COLUMNS = [
+  'completion_policy',
   'id',
   'profile_name',
   'status',

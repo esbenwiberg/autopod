@@ -258,6 +258,10 @@ public actor DaemonAPI {
 
   static let approvalTimeout: TimeInterval = 300
 
+  public func acceptFindings(_ id: String, findings: ResearchFindingsResponse) async throws {
+    let _: ResearchFindingsResponse = try await request("POST", "/pods/\(id)/accept-findings", body: try encode(AcceptFindingsRequest(findings)))
+  }
+
   public func approvePod(_ id: String, squash: Bool? = nil, reason: String? = nil) async throws {
     let trimmedReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
     let body: Data? = if squash != nil || trimmedReason?.isEmpty == false {

@@ -61,6 +61,7 @@ struct DesktopRepository: Hashable, Sendable, Identifiable {
 enum DesktopLifecycleStage: String, CaseIterable, Sendable {
     case queued = "Queued", provisioning = "Provisioning", running = "Running"
     case validating = "Validating", validated = "Validated", approved = "Approved"
+    case researchReady = "Research ready"
     case merging = "Merging", complete = "Complete"
 }
 
@@ -86,6 +87,7 @@ extension Pod {
         case .provisioning: .provisioning
         case .running, .paused, .awaitingInput, .handoff: .running
         case .validating: .validating
+        case .researchReady: .researchReady
         case .validated, .reviewRequired: .validated
         case .approved: .approved
         case .merging, .mergePending: .merging
@@ -95,6 +97,7 @@ extension Pod {
     }
     var desktopLifecycleStages: [DesktopLifecycleStage] {
         var stages: [DesktopLifecycleStage] = [.queued, .provisioning, .running]
+        if completionPolicy == "accept-findings" || status == .researchReady { return stages + [.researchReady, .complete] }
         if pod.validate { stages += [.validating, .validated] }
         if pod.output == .pr { stages += [.approved, .merging] }
         stages += [.complete]

@@ -3,6 +3,7 @@ import type { Pod, PodStatus } from '@autopod/shared';
 const TERMINAL_STATUSES: ReadonlySet<PodStatus> = new Set(['complete', 'killed']);
 
 const NEEDS_ME_STATUSES: ReadonlySet<PodStatus> = new Set([
+  'research_ready',
   'awaiting_input',
   'review_required',
   'failed',

@@ -18,6 +18,52 @@ describe('launch resolution and snapshots', () => {
   afterEach(() => {
     db.close();
   });
+  it('requires explicit supported findings policy and preserves ordinary defaults', async () => {
+    const { services } = createTestConfiguration(db);
+    const base = await resolveLaunch({ repositoryId: 'repo-a', task: 'Investigate' }, services);
+    expect(base.workflow.completion).toBe('approval');
+    for (const output of ['artifact', 'none'] as const) {
+      const config = await resolveLaunch(
+        {
+          repositoryId: 'repo-a',
+          task: 'Investigate',
+          overrides: {
+            workflow: { completion: 'accept-findings', output, validationPhases: [] },
+          },
+        },
+        services,
+      );
+      expect(config.workflow.completion).toBe('accept-findings');
+    }
+    for (const invalid of [
+      { output: 'pr' as const },
+      { output: 'branch' as const },
+      { agentMode: 'interactive' as const },
+      { intent: 'goal' as const },
+      { validationPhases: ['test' as const] },
+      { advisoryBrowserQaEnabled: true },
+    ])
+      await expect(
+        resolveLaunch(
+          {
+            repositoryId: 'repo-a',
+            task: 'Investigate',
+            overrides: {
+              workflow: {
+                completion: 'accept-findings',
+                output: 'artifact',
+                validationPhases: [],
+                ...invalid,
+              },
+            },
+          },
+          services,
+        ),
+      ).rejects.toMatchObject({ code: 'FINDINGS_WORKFLOW_INCOMPATIBLE' });
+    expect(
+      (await resolveLaunch({ repositoryId: 'repo-a', task: 'Investigate' }, services)).digest,
+    ).toBe(base.digest);
+  });
   it('shares profile categories without sharing repository identity', async () => {
     const { services } = createTestConfiguration(db);
     const a = await resolveLaunch({ repositoryId: 'repo-a', task: 'Fix' }, services);

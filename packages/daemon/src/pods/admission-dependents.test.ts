@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { createAdmissionFixture } from '../test-utils/admission-queries-helpers.js';
 describe('dependent admission and restart', () => {
+  it('retains dependents through research ready and restart until accepted completion', () => {
+    const f = createAdmissionFixture();
+    const parent = f.insert('research', { status: 'research_ready' });
+    f.insert('child', { dependsOnPodIds: ['research'] });
+    f.dependents.maybeTriggerDependents(parent);
+    f.dependents.rehydrateDependentSessions();
+    expect(f.enqueueSession).not.toHaveBeenCalled();
+    f.podRepo.update('research', { status: 'complete' });
+    f.dependents.maybeTriggerDependents(f.podRepo.getOrThrow('research'));
+    expect(f.enqueueSession).toHaveBeenCalledExactlyOnceWith('child');
+  });
   it('waits for fan-in and uses first-parent stacking while excluding missing parents', () => {
     const f = createAdmissionFixture();
     const a = f.insert('a', { status: 'validated', branch: 'feature-a' });

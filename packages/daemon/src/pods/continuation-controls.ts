@@ -240,7 +240,8 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
           );
         if (
           collected.lifecycleGeneration !== pod.lifecycleGeneration ||
-          collected.status !== 'complete'
+          collected.status !==
+            (pod.completionPolicy === 'accept-findings' ? 'research_ready' : 'complete')
         )
           throw new AutopodError(
             'Artifact completion remains unresolved. Refresh the pod and reconcile its current lifecycle.',

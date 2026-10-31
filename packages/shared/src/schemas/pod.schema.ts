@@ -179,6 +179,7 @@ export const createPodRequestSchema = z
   );
 
 export const podStatusSchema = z.enum([
+  'research_ready',
   'queued',
   'provisioning',
   'running',
