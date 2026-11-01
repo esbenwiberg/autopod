@@ -271,7 +271,7 @@ public struct ProfileResponse: Codable, Sendable {
 
   /// Empty init for building responses programmatically (reverse mapping).
   public init() {
-    name = ""; repoUrl = ""; defaultBranch = "main"; template = "node22"
+    name = ""; repoUrl = ""; defaultBranch = "main"; template = "node24"
     buildCommand = nil; startCommand = nil; healthPath = "/"; healthTimeout = 120
     smokePages = []; maxValidationAttempts = 3; defaultModel = "claude-opus-5-5"
     reviewerModel = "claude-sonnet-5-5"; reasoningEffort = .auto
