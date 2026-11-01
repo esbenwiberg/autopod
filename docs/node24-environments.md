@@ -26,6 +26,9 @@ declaration worker failed with `ERR_WORKER_OUT_OF_MEMORY`; the same daemon failu
 the untouched baseline in an isolated worktree using the installed locked dependencies. Dependency
 audit failed with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`; TLS verification was not disabled. Resolve
 these verification gates on the operator host in addition to the image/backend/Mac gates below.
+The first native pre-submit review was uncertain because its truncated diff omitted the new
+PostgreSQL Dockerfile (26 of 27 files reviewed). Require review of that complete file as well as
+successful execution evidence; a partial-diff verdict does not establish image readiness.
 
 ## Version and image policy
 
