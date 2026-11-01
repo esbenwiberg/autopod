@@ -131,6 +131,29 @@ Validation is a multi-phase pipeline with two loops — each phase must pass bef
 
 Autopod computes the blocking validation decision from required phases. If any required phase fails, the agent gets structured feedback (setup output, console errors, build output, screenshot diffs, fact failures, AC failures, reviewer notes) and retries automatically. Advisory browser QA is stored as evidence for the operator and Readiness Review, not as a retry trigger. The AI reviewer receives tiered context: the diff, original task, contract, and findings from prior attempts.
 
+**Worker versus control plane:** workers record the supplied checkout's actual
+starting SHA, make scoped changes, run available checks, commit and report current
+results through `report_task_summary`. Authenticated source refresh/provenance,
+independent configured checks and authorized branch/PR publication belong to the
+daemon. Missing container Git credentials alone do not prove stale source; actual
+baseline mismatches or missing required evidence still need resolution. Workers
+must not fetch/pull, change credentials/remotes or publish merely because task
+prose says “fresh main” or “deliver a PR”. Artifact/none output grants no PR
+publication authority.
+
+Task review and pre-submit review are **pre-publication diff reviews**, not delivery
+readiness verdicts. Their prompts prohibit treating pending daemon-owned
+publication or unavailable container Git authentication as code defects, and
+prohibit inventing requirements-check entries from operational task prose.
+Explicit implementation requirements, dishonest evidence claims and actual code
+defects remain reviewable. Historical summary blockers are not current validation
+results; after recovery, update the structured summary with evidence rather than
+only posting progress. None of this waives failed/pending validation, required
+facts, source custody, approval or delivery guards. A review pass is not a claim
+that a PR exists or that a freshness incident is resolved. Prompt changes do not
+rewrite frozen submissions, repair stale stored summaries or reconcile existing
+pods; those require their own supported recovery paths.
+
 Every validation attempt is stored with full results and **proof-of-work screenshots** — one per smoke page, AC browser check, and review screenshot. Screenshots are served from authenticated URLs like `GET /pods/:id/screenshots/:source/:filename`. Contract fact evidence is also exportable as `GET /pods/:id/validations/:attempt/evidence.yaml`.
 
 After validation, the container is **stopped** (not removed). Launch an on-demand **preview** to interact with the agent's work in a real browser before approving.

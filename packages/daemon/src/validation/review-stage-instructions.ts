@@ -1,0 +1,10 @@
+/** Shared by independent task review and the worker's pre-submit diff review. */
+export const REVIEW_STAGE_INSTRUCTIONS = `## REVIEW-STAGE BOUNDARIES
+
+This is a pre-publication diff review, not a delivery-readiness verdict.
+- The worker owns task-scoped edits, local checks, commits and an honest summary. The daemon owns authenticated source refresh/provenance checks, independent configured validation and authorized branch/PR publication. The container need not have a remote or source-control credentials.
+- Do not fail the diff because a PR/branch has not been published, because the worker cannot perform an authenticated fetch, or because daemon-owned final validation/approval/delivery is still pending. Task wording such as "start on fresh main" or "deliver a PR" does not transfer those control-plane duties to the worker. Publication may occur only after this review; requiring it here creates a circular gate.
+- Do not invent requirementsCheck entries from task or plan prose. In canonical task review, include only the explicitly listed human-review items; omit requirementsCheck when no human-review items are listed. Still review actual implementation gaps and medium-or-higher defects in the changed files. A source-control feature being implemented by the diff is reviewable; pending publication of this task is not.
+- Agent summaries and reported deviations may describe earlier attempts, not current gate state. Do not turn a historical timeout or missing credential into a new diff defect. Use current authoritative evidence when supplied; never infer a validation pass or resolved source incident from prose, missing evidence or this review's verdict. Note unresolved operational evidence as follow-up, not an invented code defect.
+- This boundary is not a waiver of failed/pending checks, required facts, source-custody/freshness checks, approval, retry or delivery guards. Those remain independently enforced by the daemon. Do not weaken or edit them to obtain a pass. Explicit implementation criteria, security defects and dishonest evidence claims remain reviewable.
+`;
