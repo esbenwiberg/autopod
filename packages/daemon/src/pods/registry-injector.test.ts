@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import type { PrivateRegistry } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
@@ -14,6 +15,7 @@ import {
   generateNpmrc,
   generateNuGetConfig,
   validateRegistryFiles,
+  wrapValidationExecCommand,
 } from './registry-injector.js';
 
 describe('buildRegistryFiles', () => {
@@ -613,6 +615,55 @@ describe('ensureNuGetCredentialProvider', () => {
     await expect(ensureNuGetCredentialProvider(cm, 'ctr-1')).rejects.toThrow(
       /Failed to install.*Credential Provider/,
     );
+  });
+});
+
+describe('wrapValidationExecCommand literal child environment', () => {
+  it('serializes only matching literals and keeps scoped credentials out of argv', () => {
+    const value = "spaces ' quotes $() ; newline\nvalue";
+    expect(
+      wrapValidationExecCommand(
+        'tool',
+        {
+          CUSTOM: value,
+          CREDENTIAL: 'synthetic-secret',
+          AUTOPOD_POD_ID: 'daemon-owned',
+        },
+        { CUSTOM: value, AUTOPOD_POD_ID: 'stale-profile-value' },
+      ),
+    ).toEqual(['/usr/bin/env', '--', `CUSTOM=${value}`, 'sh', '-c', 'tool']);
+  });
+
+  it('executes a literal value unchanged in a real non-login child shell', () => {
+    const value = "spaces ' quotes $(exit 99) ; newline\nvalue";
+    const argv = wrapValidationExecCommand(
+      'printf \'%s\' "$CUSTOM"',
+      { CUSTOM: value },
+      { CUSTOM: value },
+    );
+    const result = spawnSync(argv[0] ?? '/bin/false', argv.slice(1), {
+      env: { PATH: '/usr/bin:/bin' },
+      encoding: 'utf8',
+      timeout: 5_000,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(value);
+  });
+
+  it('preserves the optional environment and secret-file shim contracts', () => {
+    expect(wrapValidationExecCommand('tool', undefined)).toEqual(['sh', '-c', 'tool']);
+    const argv = wrapValidationExecCommand('tool', { TOKEN_FILE: '/private/token' }, {});
+    expect(argv).toHaveLength(5);
+    expect(argv[0]).toBe('sh');
+    expect(argv.slice(-3)).toEqual(['sh', '-c', 'tool']);
+    expect(argv).not.toContain('/private/token');
+    const prefixed = wrapValidationExecCommand(
+      'tool',
+      { TOKEN_FILE: '/private/token', CUSTOM: 'literal' },
+      { CUSTOM: 'literal' },
+    );
+    expect(prefixed).toEqual(['/usr/bin/env', '--', 'CUSTOM=literal', ...argv]);
   });
 });
 

@@ -4950,10 +4950,35 @@ describe('validate() — pre-validation worktree reset', () => {
           });
           return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
         });
+        // Setup sees the selected tool and adopted source after reset/clean.
+        // Keep tools outside the worktree, just like installed toolchains.
+        const tools = path.join(tmpDir, 'tools');
+        await fs.mkdir(tools);
+        await fs.writeFile(
+          path.join(tools, 'checkpoint-tool'),
+          '#!/bin/sh\ntest -f proof.json && test -f dispatcher-output/implement.md',
+          { mode: 0o755 },
+        );
+        const env = { PATH: `${tools}:/usr/bin:/bin` };
+        vi.mocked(cm.execStreaming).mockImplementation(async (_id, command) => {
+          const result = await execFileAsync(command[0] ?? 'sh', command.slice(1), {
+            cwd: sandbox,
+            env: { PATH: '/usr/bin:/bin' },
+          });
+          return {
+            stdout: Readable.from([result.stdout]),
+            stderr: Readable.from([result.stderr]),
+            exitCode: Promise.resolve(0),
+            kill: async () => {},
+          };
+        });
         const validation = createLocalValidationEngine(cm).validate(
           minimalConfig({
             executionTarget: 'sandbox',
             worktreePath: host,
+            validationSetupCommand: 'checkpoint-tool',
+            extraExecEnv: env,
+            nonSecretExecEnv: env,
           }),
         );
         if (owned) expect((await validation).overall).toBe('pass');
@@ -4962,6 +4987,7 @@ describe('validate() — pre-validation worktree reset', () => {
             'Verified sandbox validation checkpoint unavailable',
           );
           expect(cm.execInContainer).not.toHaveBeenCalled();
+          expect(cm.execStreaming).not.toHaveBeenCalled();
         }
         expect(
           await fs.readFile(path.join(sandbox, 'dispatcher-output', 'implement.md'), 'utf8'),

@@ -481,7 +481,11 @@ export function createLocalValidationEngine(
               containerManager,
               config.executionTarget,
               config.containerId,
-              wrapValidationExecCommand(config.validationSetupCommand, config.extraExecEnv),
+              wrapValidationExecCommand(
+                config.validationSetupCommand,
+                config.extraExecEnv,
+                config.nonSecretExecEnv,
+              ),
               {
                 cwd: '/workspace',
                 timeout: config.buildTimeout ?? 300_000,
@@ -1668,7 +1672,7 @@ async function runBuild(
       containerManager,
       config.executionTarget,
       config.containerId,
-      wrapValidationExecCommand(config.buildCommand, config.extraExecEnv),
+      wrapValidationExecCommand(config.buildCommand, config.extraExecEnv, config.nonSecretExecEnv),
       {
         cwd: buildCwd,
         timeout: config.buildTimeout ?? 300_000,
@@ -1775,7 +1779,7 @@ async function runTests(
       containerManager,
       config.executionTarget,
       config.containerId,
-      wrapValidationExecCommand(config.testCommand, config.extraExecEnv),
+      wrapValidationExecCommand(config.testCommand, config.extraExecEnv, config.nonSecretExecEnv),
       {
         cwd: testCwd,
         timeout: config.testTimeout ?? 600_000,
@@ -2168,7 +2172,7 @@ async function runFactValidation(
         };
         commandResult = await containerManager.execInContainer(
           config.containerId,
-          wrapValidationExecCommand(fact.command, factEnv),
+          wrapValidationExecCommand(fact.command, factEnv, config.nonSecretExecEnv),
           {
             cwd,
             timeout: config.testTimeout ?? 600_000,
@@ -2885,7 +2889,7 @@ async function runLint(
   try {
     result = await containerManager.execInContainer(
       config.containerId,
-      wrapValidationExecCommand(config.lintCommand, config.extraExecEnv),
+      wrapValidationExecCommand(config.lintCommand, config.extraExecEnv, config.nonSecretExecEnv),
       {
         cwd,
         timeout: config.lintTimeout ?? 120_000,
@@ -2976,7 +2980,7 @@ async function runSast(
   try {
     result = await containerManager.execInContainer(
       config.containerId,
-      wrapValidationExecCommand(config.sastCommand, config.extraExecEnv),
+      wrapValidationExecCommand(config.sastCommand, config.extraExecEnv, config.nonSecretExecEnv),
       {
         cwd,
         timeout: config.sastTimeout ?? 300_000,

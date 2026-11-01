@@ -289,6 +289,23 @@ function fixture() {
 }
 
 describe('validation inputs persisted effects', () => {
+  it('carries only bound projected literals, excluding resolved execution secrets', async () => {
+    const f = fixture();
+    try {
+      f.profile.buildEnv = { PATH: '/selected/bin:/usr/bin' };
+      f.environment.mockResolvedValue({ ...f.profile.buildEnv, CREDENTIAL: 'synthetic-secret' });
+      expect((await f.run()).validationConfig.nonSecretExecEnv).toBeUndefined();
+      f.pod.launchConfigDigest = 'a'.repeat(64);
+      const config = (await f.run()).validationConfig;
+      expect(config.nonSecretExecEnv).toEqual(f.profile.buildEnv);
+      expect(config.nonSecretExecEnv).not.toBe(f.profile.buildEnv);
+      expect(config.nonSecretExecEnv).not.toHaveProperty('CREDENTIAL');
+      expect(config.extraExecEnv).toHaveProperty('CREDENTIAL', 'synthetic-secret');
+    } finally {
+      f.close();
+    }
+  });
+
   it('constructs without I/O and returns config with original pass-through references', async () => {
     const f = fixture();
     try {

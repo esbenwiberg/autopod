@@ -437,6 +437,7 @@ export function createValidationRevalidationWorkflow(
         skipPhases: getPodValidationSkipPhases(profile, pod),
         priorReviewBatch,
         extraExecEnv: revalidationExecEnv,
+        nonSecretExecEnv: pod.launchConfigDigest ? { ...profile.buildEnv } : undefined,
       };
 
       let result: Awaited<ReturnType<typeof validationEngine.validate>>;

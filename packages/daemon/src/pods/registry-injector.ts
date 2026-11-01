@@ -235,9 +235,19 @@ export function buildValidationExecEnv(
 export function wrapValidationExecCommand(
   command: string,
   env: Record<string, string> | undefined,
+  nonSecretEnv?: Record<string, string>,
 ): string[] {
   const hasSecretFileEnv = env ? Object.keys(env).some((key) => key.endsWith('_FILE')) : false;
-  return hasSecretFileEnv ? ['sh', AGENT_SHIM_PATH, 'sh', '-c', command] : ['sh', '-c', command];
+  const shell = hasSecretFileEnv
+    ? ['sh', AGENT_SHIM_PATH, 'sh', '-c', command]
+    : ['sh', '-c', command];
+  // Streaming stages argv in a readable script and sends env separately. Reapply
+  // admitted literals after transport/user wrappers, without serializing resolved
+  // credentials. Matching the resolved env retains daemon-owned context precedence.
+  const literals = Object.entries(nonSecretEnv ?? {})
+    .filter(([key, value]) => env?.[key] === value)
+    .map(([key, value]) => `${key}=${value}`);
+  return literals.length ? ['/usr/bin/env', '--', ...literals, ...shell] : shell;
 }
 
 /**
