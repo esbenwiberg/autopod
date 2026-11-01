@@ -82,6 +82,7 @@ public struct PodFleetDisplayResponse: Codable, Sendable {
 }
 
 public struct CompactPodResponse: Codable, Sendable {
+  public let fleetArchivedAt: String?
   public let display: PodFleetDisplayResponse?
   public let recordDiagnostics: [RecordDiagnosticResponse]?
   public let finalization: FinalizationResponse?
@@ -164,6 +165,7 @@ public struct ProviderAttemptResponse: Codable, Sendable {
 }
 
 public struct SessionResponse: Codable, Sendable {
+  public let fleetArchivedAt: String?
   public let display: PodFleetDisplayResponse?
   public let recordDiagnostics: [RecordDiagnosticResponse]?
   public let finalization: FinalizationResponse?
@@ -283,7 +285,7 @@ public struct SessionResponse: Codable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case id, profileName, task, status, model, runtime, executionTarget, branch
     case containerId, worktreePath, validationAttempts, maxValidationAttempts, reworkCount
-    case providerAttempts, recordDiagnostics, finalization
+    case providerAttempts, recordDiagnostics, finalization, fleetArchivedAt
     case lastValidationResult, validationWaiver, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
     case createdAt, startedAt, runningAt, completedAt, failureReason, updatedAt, userId
     case filesChanged, linesAdded, linesRemoved, previewUrl, hasWebUi, prUrl
