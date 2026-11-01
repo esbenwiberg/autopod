@@ -121,6 +121,8 @@ describe('approval controls', () => {
       pendingEscalation: escalation,
       lastValidationResult: createFailingValidationResult('prepare'),
     });
+    f.podRepo.completionJournal?.settle(f.pod(), 'Worker settled while question was pending');
+    expect(f.pod().finalization?.pendingDecisionId).toBe('question');
     await f
       .controls()
       .forceApprove('prepare', 'Approved override', { type: 'human', userId: 'operator' });
@@ -130,7 +132,19 @@ describe('approval controls', () => {
       status: 'validated',
       pendingEscalation: null,
       validationWaiver: { actor: { type: 'human', userId: 'operator' } },
+      finalization: { phase: 'ready', pendingDecisionId: null },
     });
+    const receipt = f.db.prepare('SELECT * FROM completion_decisions').get();
+    expect(receipt).toMatchObject({
+      decision_id: 'question',
+      response: '[force-approve] Approved override',
+      actor: JSON.stringify({ type: 'human', userId: 'operator' }),
+    });
+    expect(f.podRepo.hasUnansweredDecision?.('prepare')).toBe(false);
+    expect(() => f.context.assertApprovalCurrent(pod)).not.toThrow();
+    expect(f.deps.nudgeRepo.hasPending('prepare')).toBe(false);
+    expect(f.calls.approveSession).not.toHaveBeenCalled();
+    expect(f.calls.revalidateSession).not.toHaveBeenCalled();
     expect(audit.response?.actor).toEqual({ type: 'human', userId: 'operator' });
     expect(f.mainCaptured.cleanupContainerAfterAdvisorySettles).not.toHaveBeenCalled();
     const next = f.reopen();
@@ -138,6 +152,8 @@ describe('approval controls', () => {
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
     expect(next.pods.getOrThrow('prepare')).toEqual(pod);
     expect(createEscalationRepository(f.db).getOrThrow('question')).toEqual(audit);
+    expect(next.pods.hasUnansweredDecision?.('prepare')).toBe(false);
+    expect(f.db.prepare('SELECT * FROM completion_decisions').get()).toEqual(receipt);
   });
 });
 

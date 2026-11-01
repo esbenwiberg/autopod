@@ -881,6 +881,8 @@ public struct Pod: Identifiable, Sendable {
     public var diffStats: DiffStats?
     /// Exact unanswered decision identity; compact summaries may not provide it.
     public var escalationId: String?
+    /// Durable decision can remain pending even when the visible escalation was cleared.
+    public var pendingDecisionId: String?
     public var escalationQuestion: String?
     public var escalationOptions: [String]?
     public var escalationType: String?
@@ -992,6 +994,14 @@ public struct Pod: Identifiable, Sendable {
 
     public var isWorkspace: Bool { pod.agentMode == .interactive }
 
+    public var hasUnansweredDecision: Bool {
+        status == .awaitingInput || escalationId != nil || pendingDecisionId != nil
+    }
+
+    public var hasOrphanedValidationDecision: Bool {
+        status == .validated && validationWaiver != nil && pendingDecisionId != nil && escalationId == nil
+    }
+
     /// Can this pod be promoted to agent-driven mode (interactive → auto)?
     public var isPromotable: Bool {
         guard pod.isPromotable else { return false }
@@ -1032,6 +1042,7 @@ public struct Pod: Identifiable, Sendable {
         contract: SpecContractResponse? = nil,
         diffStats: DiffStats? = nil,
         escalationId: String? = nil,
+        pendingDecisionId: String? = nil,
         escalationQuestion: String? = nil,
         escalationOptions: [String]? = nil,
         escalationType: String? = nil,
@@ -1087,6 +1098,7 @@ public struct Pod: Identifiable, Sendable {
         self.baseBranch = baseBranch
         self.contract = contract
         self.escalationId = escalationId
+        self.pendingDecisionId = pendingDecisionId
         self.diffStats = diffStats; self.escalationQuestion = escalationQuestion
         self.escalationOptions = escalationOptions; self.escalationType = escalationType
         self.validationChecks = validationChecks; self.validationProgress = validationProgress; self.prUrl = prUrl
