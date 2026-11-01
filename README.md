@@ -345,8 +345,9 @@ Available templates:
 | `node22` | Node.js 22 | npm/pnpm/yarn |
 | `node22-pw` | Node.js 22 + Playwright | Chromium for browser validation |
 | `node22-pw-pg` | Node.js 22 + Playwright + PostgreSQL 17 | Browser validation with a transient local database on port 5433 |
-| `node24` | Node.js 24 | Repos pinning Node 24 in `engines` |
+| `node24` | Node.js 24 | Default for new Node workers |
 | `node24-pw` | Node.js 24 + Playwright | Node 24 with Chromium for browser validation |
+| `node24-pw-pg` | Node.js 24 + Playwright + PostgreSQL 17 | Browser validation and transient databases on port 5433 |
 | `dotnet9` | .NET 9 SDK | dotnet CLI |
 | `dotnet10` | .NET 10 + Node.js 22 | Mixed stacks (dotnet + npm/pnpm/yarn) |
 | `dotnet10-go` | .NET 10 + Node.js 22 + Go 1.24 | Dagger-in-Go pipelines against .NET projects (Dagger CLI + SDK pre-cached) |
@@ -1548,3 +1549,5 @@ Recorded aggregate tokens include input/context usage and are not a billing esti
 Regular runtime limits are checked when usage is reported; they are not an exact
 per-token provider spending cap. Hard-limited reviews still require settled usage;
 with the default unlimited budget an active worker can request review normally.
+
+Node24 worker release, real-image smoke checks, migration and rollback: [operator runbook](docs/node24-environments.md). Explicit Node22 templates remain available for compatibility.
