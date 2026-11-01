@@ -8,10 +8,14 @@ import {
 import { createSandboxRecovery } from './sandbox-recovery.js';
 import { assertSourceResourceReleasable } from './source-custody-guards.js';
 import {
+  assertTaskValidationDeletable,
   assertTaskValidationSettled,
   assertValidationResourceSettled,
 } from './validation-execution-evidence.js';
-import { assertValidationMutationSettled } from './validation-recovery-policy.js';
+import {
+  assertValidationDeletionAllowed,
+  assertValidationMutationSettled,
+} from './validation-recovery-policy.js';
 import { createWorkspaceDeletion } from './workspace-deletion.js';
 
 function appendDispatch(f: ReturnType<typeof sandboxValidationAbandonmentFixture>, active = false) {
@@ -69,6 +73,9 @@ describe('explicit destruction of validation-held sandboxes', () => {
     f.cm.kill.mockImplementation(async () => {
       expect(f.journal.recovery.get(f.input.id)?.validationEvidence).toContain(f.dispatch);
       expect(() => assertSourceResourceReleasable(f.db, f.sandboxId)).not.toThrow();
+      // Before GET 404, only resource destruction is authorized, not pod cleanup.
+      expect(() => assertTaskValidationDeletable(f.db, 'prepare')).toThrow('unverified');
+      expect(() => assertValidationDeletionAllowed(f.podRepo, 'prepare')).toThrow('unverified');
       // A destruction capability is not a start, validation, retry or worker grant.
       expect(() => assertValidationResourceSettled(f.db, f.sandboxId)).toThrow(
         'retains this exact',

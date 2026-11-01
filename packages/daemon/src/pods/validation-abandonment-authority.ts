@@ -5,6 +5,7 @@ import type Database from 'better-sqlite3';
 interface DestructionOwner {
   podId: string;
   containerId: string;
+  phase: 'delete' | 'cleanup';
 }
 const scopes = new WeakMap<Database.Database, AsyncLocalStorage<() => DestructionOwner>>();
 
@@ -17,7 +18,7 @@ export function ownsValidationAbandonment(
   return (
     !!owner &&
     ('podId' in selection
-      ? owner.podId === selection.podId
+      ? owner.phase === 'cleanup' && owner.podId === selection.podId
       : owner.containerId === selection.containerId)
   );
 }
@@ -44,7 +45,7 @@ export function withValidationAbandonment<T>(
       validation_evidence AS evidence,completed_at AS completedAt
       FROM sandbox_recovery_requests WHERE id=? AND action='abandon'`)
       .get(requestId) as
-      | (DestructionOwner & { evidence: string | null; completedAt: string | null })
+      | (Omit<DestructionOwner, 'phase'> & { evidence: string | null; completedAt: string | null })
       | undefined;
     if (!receipt || !receipt.evidence || (phase === 'cleanup') !== !!receipt.completedAt)
       throw new AutopodError(
@@ -52,7 +53,7 @@ export function withValidationAbandonment<T>(
         'STALE_SANDBOX_RECOVERY',
         409,
       );
-    return receipt;
+    return { ...receipt, phase };
   };
   authorize();
   let scope = scopes.get(db);
