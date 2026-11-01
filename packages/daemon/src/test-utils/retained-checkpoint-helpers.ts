@@ -5,11 +5,19 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { OperatorActor } from '@autopod/shared';
 import { vi } from 'vitest';
+import { resolveLaunchAgentRoute } from '../configuration/agent-route-resolution.js';
+import { admitLaunch } from '../configuration/launch-admission.js';
+import { resolveLaunchExecutionSettings } from '../configuration/launch-execution-settings.js';
+import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
 import { createCompletionEvents } from '../pods/completion-events.js';
 import { createPodManager } from '../pods/pod-manager.js';
 import { createRetainedCheckpointRecovery } from '../pods/retained-checkpoint-recovery.js';
 import { checkpointHash } from '../pods/retained-checkpoint-repository.js';
 import { resolveReviewerModel, resolveReviewerProvider } from '../pods/runtime-resolver.js';
+import { createProviderAccountStore } from '../provider-accounts/provider-account-store.js';
+import { IsolatedReviewer } from '../validation/isolated-reviewer.js';
+import { ReviewerRunRepository } from '../validation/reviewer-run-repository.js';
+import { createTestConfiguration, testExecutionCapabilities } from './configuration-helpers.js';
 import {
   createFailingValidationResult,
   createPassingValidationResult,
@@ -70,7 +78,10 @@ export async function materializeCheckpointFixture(
   });
 }
 
-export async function retainedCheckpointFixture(kind: 'validation' | 'wakeup' = 'validation') {
+export async function retainedCheckpointFixture(
+  kind: 'validation' | 'wakeup' = 'validation',
+  native = false,
+) {
   const ctx = createTestContext();
   vi.mocked(ctx.profileStore.get).mockReturnValue({
     ...ctx.profileStore.get('test-profile'),
@@ -98,13 +109,68 @@ export async function retainedCheckpointFixture(kind: 'validation' | 'wakeup' = 
       quarantineRef: 'refs/autopod/test-checkpoint',
     };
   });
+  const nativeConfiguration = native ? createTestConfiguration(ctx.db) : null;
+  const snapshots = nativeConfiguration
+    ? createLaunchSnapshotRepository(ctx.db, nativeConfiguration.store)
+    : null;
+  if (nativeConfiguration && snapshots) {
+    vi.mocked(nativeConfiguration.services.executionCapabilities).mockResolvedValue({
+      ...testExecutionCapabilities,
+      target: 'sandbox',
+    });
+    const accounts = createProviderAccountStore(ctx.db);
+    accounts.create({
+      id: 'account',
+      name: 'Fixture account',
+      provider: 'anthropic',
+      credentials: { provider: 'anthropic', apiKey: 'fixture-main' },
+    });
+    vi.mocked(nativeConfiguration.services.resolveAgentRoute).mockImplementation(async (route) =>
+      resolveLaunchAgentRoute(route, accounts),
+    );
+    ctx.deps.providerAccountStore = accounts;
+    ctx.deps.launchConfiguration = {
+      read: snapshots.get,
+      reviewer: new IsolatedReviewer({
+        runs: new ReviewerRunRepository(ctx.db),
+        accounts,
+        logger: ctx.deps.logger,
+        manager: () => ctx.containerManager,
+        image: () => 'fixture.azurecr.io/reviewer:retained',
+        readPod: (id) => ctx.podRepo.getOrThrow(id),
+        assertAllowed: vi.fn(async () => {}),
+      }),
+      executionSettings: (config) =>
+        resolveLaunchExecutionSettings(config, { image: config.resolvedEnvironment.pinnedBase }),
+      assertCurrentCapabilities: vi.fn(async () => {}),
+      prepareEnvironment: vi.fn(async () => 'fixture.azurecr.io/autopod:retained'),
+    };
+  }
   const manager = createPodManager(ctx.deps);
-  const created = manager.createSession(
-    { profileName: 'test-profile', task: 'Recover retained source through real checks' },
-    'operator',
-  );
+  const task = 'Recover retained source through real checks';
+  const nativeAdmission =
+    nativeConfiguration && snapshots
+      ? await admitLaunch({
+          request: {
+            repositoryId: 'repo-a',
+            profileId: 'profile',
+            task,
+            overrides: { execution: { target: 'sandbox' } },
+          },
+          actorId: 'operator',
+          services: nativeConfiguration.services,
+          snapshots,
+          createPod: (config) => manager.createResolvedSession(config, 'operator').id,
+        })
+      : null;
+  const created = nativeAdmission
+    ? ctx.podRepo.getOrThrow(nativeAdmission.podId)
+    : manager.createSession({ profileName: 'test-profile', task }, 'operator');
   const root = await mkdtemp(path.join(os.tmpdir(), 'checkpoint-controller-'));
-  const profile = ctx.profileStore.get(created.profileName);
+  const profile =
+    nativeAdmission && ctx.deps.launchConfiguration
+      ? ctx.deps.launchConfiguration.executionSettings(nativeAdmission.config)
+      : ctx.profileStore.get(created.profileName);
   const retryBinding = checkpointHash({
     runtime: created.runtime,
     model: created.model,
@@ -129,7 +195,7 @@ export async function retainedCheckpointFixture(kind: 'validation' | 'wakeup' = 
   const result =
     kind === 'validation'
       ? createFailingValidationResult(created.id)
-      : createPassingValidationResult(created.id);
+      : createPassingValidationResult(created.id, native ? 2 : 1);
   if (kind === 'validation')
     result.infrastructureFailure = {
       phase: 'setup',
@@ -146,7 +212,7 @@ export async function retainedCheckpointFixture(kind: 'validation' | 'wakeup' = 
     containerId,
     worktreePath: path.join(root, 'original'),
     lastValidationResult: result,
-    validationAttempts: 1,
+    validationAttempts: native ? (kind === 'validation' ? 0 : 2) : 1,
     options: { ...created.options, validationSuite: 'custom', validate: true },
     autoApprove: false,
   });

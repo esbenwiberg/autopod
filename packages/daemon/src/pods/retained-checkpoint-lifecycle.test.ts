@@ -20,47 +20,58 @@ afterEach(async () => {
 });
 
 describe('retained checkpoint through the real manager workflow (provider and checks mocked)', () => {
-  it('a later explicit approval reaches delivery preparation without waking either sandbox or recollecting reports', async () => {
-    const f = await retainedCheckpointFixture('wakeup');
-    fixtures.push(f);
-    vi.stubEnv('DATA_DIR', f.root);
-    await materializeCheckpointFixture(f);
-    await f.submit();
-    await f.recovery.wait(f.input.id);
-    await f.manager.processPod(f.podId);
-    expect(f.pod().status).toBe('validated');
-    const snapshot = f.pod().artifactsPath;
-    const extractionCount = vi.mocked(f.cm.extractDirectoryFromContainer).mock.calls.length;
-    f.ctx.worktreeManager.inspectSource = f.worktrees.inspectSourceAdoption;
-    vi.mocked(f.ctx.worktreeManager.mergeBranch).mockRejectedValue(
-      new Error('Fixture stops at external delivery boundary'),
-    );
-    await expect(
-      f.manager.approveSession(f.podId, {
-        actor: f.actor,
-        reason: 'Explicit fixture approval; external delivery is deliberately not executed',
-      }),
-    ).rejects.toThrow();
-    expect(f.ctx.worktreeManager.mergeBranch).toHaveBeenCalledTimes(1);
-    expect(f.cm.start).not.toHaveBeenCalled();
-    expect(f.cm.extractDirectoryFromContainer).toHaveBeenCalledTimes(extractionCount);
-    expect(f.pod().artifactsPath).toBe(snapshot);
-    expect(f.ctx.podRepo.sandboxWakeups!.listForPod(f.podId)[0]).toMatchObject({
-      endedAt: null,
-      evidence: [],
-    });
-    expect(f.cm.kill).not.toHaveBeenCalled();
-    expect(f.ctx.podRepo.listReferencedContainerIds()).toContain(f.containerId);
-  });
-  it.each(['validation', 'wakeup'] as const)(
-    'takes legacy %s from preserved Git to a fresh validated generation without a worker or delivery',
-    async (kind) => {
-      const f = await retainedCheckpointFixture(kind);
+  it.each([false, true])(
+    'a later explicit approval (frozen launch=%s) reaches delivery preparation without waking either sandbox or recollecting reports',
+    async (native) => {
+      const f = await retainedCheckpointFixture('wakeup', native);
+      fixtures.push(f);
+      vi.stubEnv('DATA_DIR', f.root);
+      await materializeCheckpointFixture(f);
+      await f.submit();
+      await f.recovery.wait(f.input.id);
+      await f.manager.processPod(f.podId);
+      expect(f.pod().status).toBe('validated');
+      const snapshot = f.pod().artifactsPath;
+      const extractionCount = vi.mocked(f.cm.extractDirectoryFromContainer).mock.calls.length;
+      f.ctx.worktreeManager.inspectSource = f.worktrees.inspectSourceAdoption;
+      vi.mocked(f.ctx.worktreeManager.mergeBranch).mockRejectedValue(
+        new Error('Fixture stops at external delivery boundary'),
+      );
+      await expect(
+        f.manager.approveSession(f.podId, {
+          actor: f.actor,
+          reason: 'Explicit fixture approval; external delivery is deliberately not executed',
+        }),
+      ).rejects.toThrow();
+      expect(f.ctx.worktreeManager.mergeBranch).toHaveBeenCalledTimes(1);
+      expect(f.cm.start).not.toHaveBeenCalled();
+      expect(f.cm.extractDirectoryFromContainer).toHaveBeenCalledTimes(extractionCount);
+      expect(f.pod().artifactsPath).toBe(snapshot);
+      expect(f.ctx.podRepo.sandboxWakeups!.listForPod(f.podId)[0]).toMatchObject({
+        endedAt: null,
+        evidence: [],
+      });
+      expect(f.cm.kill).not.toHaveBeenCalled();
+      expect(f.ctx.podRepo.listReferencedContainerIds()).toContain(f.containerId);
+    },
+  );
+  it.each([
+    { kind: 'validation', native: false },
+    { kind: 'wakeup', native: false },
+    { kind: 'validation', native: true },
+    { kind: 'wakeup', native: true },
+  ] as const)(
+    'takes legacy $kind (frozen launch=$native) to a fresh validated generation without a worker or delivery',
+    async ({ kind, native }) => {
+      const f = await retainedCheckpointFixture(kind, native);
       fixtures.push(f);
       vi.stubEnv('DATA_DIR', f.root);
       await materializeCheckpointFixture(f);
       const originalWorktree = f.pod().worktreePath!;
       const original = f.pod().lastValidationResult;
+      const priorAttempts = f.pod().validationAttempts;
+      const digest = f.pod().launchConfigDigest;
+      if (native) expect(digest).toMatch(/^[a-f0-9]{64}$/);
       const messages: string[] = [];
       const warnings = vi.spyOn(f.ctx.deps.logger, 'warn');
       f.ctx.eventBus.subscribe((event) => {
@@ -96,7 +107,8 @@ describe('retained checkpoint through the real manager workflow (provider and ch
       expect(operation.checked?.result.overall).toBe('pass');
       expect(operation.originalEvidence.result).toEqual(original);
       expect(current.lifecycleGeneration).toBe(2);
-      expect(current.validationAttempts).toBe(2);
+      expect(current.validationAttempts).toBe(priorAttempts + 1);
+      expect(current.launchConfigDigest).toBe(digest);
       const retryAfter = f.ctx.podRepo.taskRetries!.state(f.podId);
       expect(retryAfter.executedCount).toBe(retryBefore.executedCount + 1);
       expect(retryAfter.measuredDurationMs).toBeGreaterThanOrEqual(retryBefore.measuredDurationMs);
