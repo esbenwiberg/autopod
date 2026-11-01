@@ -61,6 +61,8 @@ public struct SessionCardFinal: View {
     @Environment(\.desktopPodSelection) private var selectPod
     @State private var isHovered = false
     @State private var isInfrastructureResumePending = false
+    @State private var showArchiveConfirmation = false
+    @State private var archiveReason = ""
 
     private var pendingControl: PendingPodControl? { actions.pendingControl(pod.id) }
 
@@ -90,7 +92,7 @@ public struct SessionCardFinal: View {
 
     private var deleteDialogMessage: String {
         isDeletableNow
-            ? "This will permanently remove the pod record."
+            ? "This deletes the sandbox and working source after safety checks. To only hide the card and keep its resources, cancel and choose Archive (retain resources)."
             : "The pod is still active. It will be killed and then permanently removed."
     }
 
@@ -104,7 +106,12 @@ public struct SessionCardFinal: View {
     }
 
     public var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 0) {
+            if pod.fleetArchivedAt != nil {
+                Label("Archived · resources retained", systemImage: "archivebox")
+                    .font(.caption).foregroundStyle(.secondary).padding(10)
+                    .help("Visibility only: execution may still be active and resources may incur costs.")
+            }
             if redesign { redesignedCard } else { legacyCard }
         }
         .frame(maxWidth: .infinity, maxHeight: density == .detailed ? .infinity : nil, alignment: .top)
@@ -157,6 +164,17 @@ public struct SessionCardFinal: View {
             .accessibilityIdentifier("pod-control-delete-confirm-\(pod.id)")
         } message: {
             Text(deleteDialogMessage)
+        }
+        .alert("Archive pod (retain resources)?", isPresented: $showArchiveConfirmation) {
+            TextField("Reason (10–4000 characters)", text: $archiveReason)
+            Button("Archive (retain resources)") {
+                let reason = archiveReason.trimmingCharacters(in: .whitespacesAndNewlines)
+                Task { await actions.archive(pod.id, reason) }
+            }
+            .disabled(archiveReason.trimmingCharacters(in: .whitespacesAndNewlines).count < 10 || archiveReason.count > 4000)
+            Button("Cancel", role: .cancel) { archiveReason = "" }
+        } message: {
+            Text("Hides this pod from the default fleet. Its sandbox, source, reports and history are retained. Execution may still be active and resources may incur costs. This does not stop, validate or delete anything. Find it in Browse → Archive or search, and restore it from the card menu.")
         }
         .alert("Resume pod", isPresented: $showResumeInput) {
             TextField("Message for the agent…", text: $resumeInputText)
@@ -219,6 +237,18 @@ public struct SessionCardFinal: View {
                 }
             }
             Divider()
+            if pod.fleetArchivedAt != nil {
+                Button("Restore to fleet", systemImage: "arrow.uturn.backward") {
+                    Task { await actions.unarchive(pod.id) }
+                }
+            } else if [.reviewRequired, .failed, .complete, .killed].contains(pod.status) {
+                Button("Archive (retain resources)…", systemImage: "archivebox") {
+                    archiveReason = ""
+                    showArchiveConfirmation = true
+                }
+                .disabled(pendingControl != nil)
+                .accessibilityIdentifier("pod-control-archive-menu-\(pod.id)")
+            }
             if pod.status != .killed && pod.status != .killing {
                 Button(role: .destructive) {
                     Task { await actions.kill(pod.id) }

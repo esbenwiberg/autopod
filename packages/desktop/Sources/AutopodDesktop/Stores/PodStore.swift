@@ -150,7 +150,8 @@ public final class PodStore {
     preserveCurrentStatus: Bool = false,
     preserveCurrentDecision: Bool = false
   ) -> Pod {
-    guard let current else { return incoming }
+    guard var current else { return incoming }
+    current.fleetArchivedAt = incoming.fleetArchivedAt
     if !preferIncomingOnEqual
       && (current.updatedAt > incoming.updatedAt || current.updatedAt == incoming.updatedAt) {
       if current.updatedAt == incoming.updatedAt, current.fleetDisplay == nil,
@@ -193,13 +194,14 @@ public final class PodStore {
     preserveCurrentStatus: Bool,
     preserveCurrentDecision: Bool
   ) -> Pod {
+    // Fleet visibility is independent of the execution's updatedAt timestamp.
+    var hydrated = hydrated
+    hydrated.fleetArchivedAt = incoming.fleetArchivedAt
     guard incoming.updatedAt > hydrated.updatedAt else {
       if incoming.updatedAt == hydrated.updatedAt, hydrated.fleetDisplay == nil,
          incoming.fleetDisplay != nil {
-        var enriched = hydrated
-        enriched.fleetDisplay = incoming.fleetDisplay
-        enriched.phase = incoming.phase
-        return enriched
+        hydrated.fleetDisplay = incoming.fleetDisplay
+        hydrated.phase = incoming.phase
       }
       return hydrated
     }
@@ -250,7 +252,7 @@ public final class PodStore {
     let decisionRevisionSnapshot = decisionRevisions
     let fleetMembershipSnapshot = fleetMembershipRevision
     do {
-      let responses = try await api.listAllCompactPods()
+      let responses = try await api.listAllCompactPods(includeArchived: true)
       guard epoch == configurationEpoch else { return }
       let fresh = PodMapper.map(responses, baseURL: api.baseURL)
       let currentById = Dictionary(uniqueKeysWithValues: pods.map { ($0.id, $0) })

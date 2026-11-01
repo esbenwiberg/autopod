@@ -114,6 +114,8 @@ public final class ActionHandler {
       extendAttempts: { [weak self] id, count in await self?.extendAttempts(id, additionalAttempts: count) },
       extendPrAttempts: { [weak self] id, count in await self?.extendPrAttempts(id, additionalAttempts: count) },
       fork: { [weak self] id in await self?.forkSession(id) },
+      archive: { [weak self] id, reason in await self?.setFleetArchived(id, reason: reason) },
+      unarchive: { [weak self] id in await self?.setFleetArchived(id, reason: nil) },
       delete: { [weak self] id in await self?.deletePod(id) },
       deleteSeries: { [weak self] id in await self?.deleteSeries(id) },
       openLiveApp: { [weak self] id in await self?.openLiveApp(id) },
@@ -686,6 +688,21 @@ public final class ActionHandler {
     } catch { lastError = error.localizedDescription; return nil }
   }
 
+  public func setFleetArchived(_ podId: String, reason: String?) async {
+    pendingAction = "archive-\(podId)"
+    defer { if pendingAction == "archive-\(podId)" { pendingAction = nil } }
+    do {
+      if let reason {
+        try await perform { try await api.archivePod(podId, reason: reason) }
+      } else {
+        try await perform { try await api.unarchivePod(podId) }
+      }
+      let response = try await perform { try await api.getPod(podId) }
+      podStore.upsertSession(PodMapper.map(response))
+      lastError = nil
+    } catch { lastError = error.localizedDescription }
+  }
+
   public func deletePod(_ podId: String) async {
     do { try requireCurrent() } catch { lastError = error.localizedDescription; return }
     if let workflow = deletionWorkflows[podId] {
@@ -702,7 +719,9 @@ public final class ActionHandler {
       podStore.removeSession(podId)
     } catch {
       let message = error.localizedDescription
-      if message.contains("unresolved wakeup") || message.contains("sandbox resume remains outcome-unknown") {
+      if (message.contains("Validation execution termination is unverified") || message.contains("Validation execution is unsettled")) && !message.contains("Archive (retain resources)") {
+        lastError = "\(message) To remove this card without destroying retained evidence, choose Archive (retain resources) from its menu. Archive does not stop execution or release resources."
+      } else if message.contains("unresolved wakeup") || message.contains("sandbox resume remains outcome-unknown") {
         lastError = "\(message) Open this pod’s details and choose Sandbox recovery to check status or explicitly abandon it."
       } else {
         lastError = message
