@@ -10,6 +10,23 @@ Legacy profile import still materializes its historical Node22 fallback. Existin
 presets and frozen launch records are not rewritten. Recovery uses the admitted configuration
 and image identity; never use a current-settings rerun to stand in for original recovery.
 
+## Worker verification receipt (2026-11-01)
+
+Implementation baseline: `7cea091e91204d59b91cfa92ad759e64b0e7df37`.
+The rework worker confirmed the full configured install/native rebuild/build, lint (after
+installation), secret scan, seven publication-tool tests, smoke-script shell syntax and diff
+whitespace checks. No Docker executable/socket was available; no image build, Chromium or
+PostgreSQL execution, publication, desktop execution or live migration is claimed.
+
+Recorded full tests returned no observed result after 307225 ms with
+`Buffered sandbox execution result was not observed; reconcile before another execution.`
+Host reconciliation is required before replay or successful recorded validation/native review;
+this is not a passing test result. Standalone typechecking completed ten tasks before the daemon
+declaration worker failed with `ERR_WORKER_OUT_OF_MEMORY`; the same daemon failure reproduced on
+the untouched baseline in an isolated worktree using the installed locked dependencies. Dependency
+audit failed with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`; TLS verification was not disabled. Resolve
+these verification gates on the operator host in addition to the image/backend/Mac gates below.
+
 ## Version and image policy
 
 All three Node24 Dockerfiles use upstream `node:24-slim`, including its matching `/usr/local`
