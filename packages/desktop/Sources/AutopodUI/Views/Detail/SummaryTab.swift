@@ -167,8 +167,10 @@ struct WorkTab: View {
                 emptyWorkSection("No process signals yet", icon: "gauge.with.dots.needle.67percent")
             }
         case .cost:
-            // Spend first; retry accounting is supporting evidence below it.
-            if let cost {
+            TaskBudgetControls(podId: pod.id, actions: actions.taskBudget, onSaved: { await fetchCost() })
+                .id("\(pod.id).\(actions.taskBudget.scope)")
+            // Spend detail and retry accounting support the task-wide budget controls.
+            if let cost, cost.podId == pod.id {
                 SessionCostCard(breakdown: cost)
             } else {
                 emptyWorkSection("No cost data yet", icon: "dollarsign.circle")

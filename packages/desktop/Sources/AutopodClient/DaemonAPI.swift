@@ -527,6 +527,14 @@ public actor DaemonAPI {
     try await request("GET", "/pods/\(id)/cost")
   }
 
+  public func getTaskExecution(_ id: String) async throws -> TaskExecutionSummary {
+    try await request("GET", "/pods/\(id)/task-execution")
+  }
+
+  public func raiseTaskBudget(_ id: String, request input: TaskBudgetChangeRequest) async throws -> TaskExecutionSummary {
+    try await request("POST", "/pods/\(id)/budget", body: encode(input))
+  }
+
   /// GET /pods/scores — persisted quality-score leaderboard.
   public func listQualityScores(
     runtime: String? = nil,

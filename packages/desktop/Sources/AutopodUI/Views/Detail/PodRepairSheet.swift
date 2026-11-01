@@ -9,6 +9,7 @@ internal struct PodRepairSheet: View {
   var configuration: LaunchConfigurationActions?
   var onSelect: ((String) -> Void)?
   @State private var model: PodRepairModel
+  @State private var budget: TaskBudgetModel
   @State private var snapshot: EffectiveLaunchPreview?
   @State private var snapshotError: String?
   @State private var goalBlocked = false
@@ -18,6 +19,7 @@ internal struct PodRepairSheet: View {
     configuration: LaunchConfigurationActions? = nil, onSelect: ((String) -> Void)? = nil, model: PodRepairModel? = nil) {
     self._isPresented = isPresented; self.pod = pod; self.relatedPods = relatedPods; self.actions = actions
     self.configuration = configuration; self.onSelect = onSelect; self._model = State(initialValue: model ?? PodRepairModel(kind: kind, scope: actions.repair.scope))
+    self._budget = State(initialValue: TaskBudgetModel(podId: pod.id, scope: actions.taskBudget.scope))
   }
   private var observed: Pod { model.observation?.source ?? pod }
   private var repository: String? {
@@ -47,7 +49,7 @@ internal struct PodRepairSheet: View {
           Text(title).font(.title.weight(.semibold))
           Text("Review the effect before continuing.").font(.callout).foregroundStyle(.secondary)
         }
-        Spacer(); Button("Close", systemImage: "xmark", action: close).disabled(model.busy).keyboardShortcut(.cancelAction)
+        Spacer(); Button("Close", systemImage: "xmark", action: close).disabled(model.busy || budget.busy).keyboardShortcut(.cancelAction)
       }.padding(24).background(DesktopTheme.surface)
       Divider(); FollowUpSourceContext(pod: observed, repository: repository); Divider()
       HStack(spacing: 0) {
@@ -59,7 +61,7 @@ internal struct PodRepairSheet: View {
     }.background(DesktopTheme.canvas).tint(DesktopTheme.accent)
       .frame(minWidth: 900, idealWidth: 1120, minHeight: 650, idealHeight: 800)
       .task { await loadSnapshot() }
-      .interactiveDismissDisabled(model.busy || model.uncertain || !model.feedback.isEmpty)
+      .interactiveDismissDisabled(model.busy || budget.busy || model.uncertain || !model.feedback.isEmpty)
       .confirmationDialog("Leave this repair handoff?", isPresented: $confirmClose) {
         Button("Leave handoff", role: .destructive) { isPresented = false }; Button("Keep reviewing", role: .cancel) {}
       } message: { Text(model.uncertain ? "The result is unconfirmed. Check the pod and linked work before repeating the action." : "Your unsubmitted feedback will be discarded.") }
@@ -85,7 +87,7 @@ internal struct PodRepairSheet: View {
           HStack { ForEach([PodRepairKind.rework, .revalidate, .resume]) { kind in
             Button(kind.title) { model.kind = kind }.buttonStyle(.bordered).tint(model.kind == kind ? DesktopTheme.accent : .secondary)
               .accessibilityIdentifier("repair-kind-\(kind.rawValue)")
-          } }.disabled(model.busy)
+          } }.disabled(model.busy || budget.busy)
         }
         Text(explanation).font(.title3.weight(.medium))
         VStack(alignment: .leading, spacing: 12) {
@@ -105,6 +107,15 @@ internal struct PodRepairSheet: View {
           Text("Leave blank to auto-detect CI failures and PR review comments. Feedback may join an existing fix pod.").font(.caption).foregroundStyle(.secondary)
         }
         if let block { Label(block, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+        if [.rework, .revalidate, .resume].contains(model.kind), !observed.isWorkspace {
+          TaskBudgetControls(podId: pod.id, actions: actions.taskBudget, model: budget,
+            continuationTitle: block == nil ? title : nil,
+            onContinue: {
+              guard block == nil else { return }
+              await model.submit(id: pod.id, actions: actions.repair)
+            })
+            .disabled(model.busy)
+        }
       }
       if let observation = model.observation {
         Divider(); Text("Observed state · \(observation.source.status.label)").font(.headline)
@@ -161,7 +172,7 @@ internal struct PodRepairSheet: View {
           .accessibilityIdentifier("repair-inspect")
       } else {
         Button(title) { Task { await model.submit(id: pod.id, actions: actions.repair) } }.buttonStyle(.borderedProminent)
-          .disabled(model.busy || block != nil).accessibilityIdentifier("repair-submit")
+          .disabled(model.busy || budget.busy || block != nil).accessibilityIdentifier("repair-submit")
       }
     }
   }

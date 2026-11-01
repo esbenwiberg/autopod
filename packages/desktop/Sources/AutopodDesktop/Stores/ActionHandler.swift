@@ -228,6 +228,13 @@ public final class ActionHandler {
         $0.linkedSessionId == id || $0.id == source.fixPodId || (source.seriesId != nil && $0.seriesId == source.seriesId)
       })
     })
+    result.taskBudget = TaskBudgetActions(scope: replyContextID.uuidString, load: { [weak self] id in
+      guard let self else { throw DaemonError.networkError("Connection is unavailable") }
+      return try await self.perform { try await self.api.getTaskExecution(id) }
+    }, raise: { [weak self] id, input in
+      guard let self else { throw DaemonError.networkError("Connection is unavailable") }
+      return try await self.perform { try await self.api.raiseTaskBudget(id, request: input) }
+    })
     result.approvalPending = { [weak self] id in self?.pendingApprovals.contains(id) == true }
     return result
   }
