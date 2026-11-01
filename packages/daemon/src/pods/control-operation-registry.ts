@@ -27,6 +27,7 @@ export function createControlOperationRegistry(
           typeof value !== 'function' ||
           key === 'adoptSource' ||
           key === 'recoverCheckpoint' ||
+          key === 'recoverSandbox' ||
           key === 'reconcileValidationExecution' ||
           key === 'readValidationEvidence' ||
           // This operation is permanently disabled and must reject before resource lookup.

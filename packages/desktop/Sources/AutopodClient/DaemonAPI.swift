@@ -38,6 +38,16 @@ public actor DaemonAPI {
     DaemonAuth.normalizeBearerToken(token)
   }
 
+  // MARK: - Sandbox recovery (never resumes the coding agent)
+
+  public func getSandboxRecovery(_ id: String) async throws -> SandboxRecoveryState {
+    try await request("GET", "/pods/\(id)/sandbox-recovery")
+  }
+
+  public func recoverSandbox(_ id: String, body: SandboxRecoveryRequest) async throws -> SandboxRecoveryResult {
+    try await request("POST", "/pods/\(id)/sandbox-recovery", body: encode(body), timeout: 180)
+  }
+
   // MARK: - Health
 
   public func healthCheck() async throws -> Bool {

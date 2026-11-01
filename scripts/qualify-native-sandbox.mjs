@@ -75,6 +75,7 @@ export async function buildAdapter(directory) {
         "export { createSandboxWakeupJournal } from './packages/daemon/src/containers/sandbox-wakeup-journal.ts';",
         "export { default as wakeupSchema } from './packages/daemon/src/db/migrations/218_sandbox_wakeup_intents.sql';",
         "export { default as wakeupEvidenceSchema } from './packages/daemon/src/db/migrations/226_sandbox_wakeup_evidence.sql';",
+        "export { default as sandboxRecoverySchema } from './packages/daemon/src/db/migrations/228_sandbox_recovery_controls.sql';",
       ].join('\n'),
       resolveDir: root,
     },
@@ -101,7 +102,8 @@ export async function buildAdapter(directory) {
 }
 
 export function openWakeupJournal(bundle, filename) {
-  const { createSandboxWakeupJournal, wakeupSchema, wakeupEvidenceSchema } = daemonRequire(bundle);
+  const { createSandboxWakeupJournal, wakeupSchema, wakeupEvidenceSchema, sandboxRecoverySchema } =
+    daemonRequire(bundle);
   const Database = daemonRequire('better-sqlite3');
   const db = new Database(filename);
   chmodSync(filename, 0o600);
@@ -115,6 +117,12 @@ export function openWakeupJournal(bundle, filename) {
       .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sandbox_wakeup_evidence'")
       .get();
     if (!hasEvidence) db.exec(wakeupEvidenceSchema);
+    const hasRecovery = db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sandbox_recovery_requests'",
+      )
+      .get();
+    if (!hasRecovery) db.exec(sandboxRecoverySchema);
   })();
   return {
     journal: createSandboxWakeupJournal(db),

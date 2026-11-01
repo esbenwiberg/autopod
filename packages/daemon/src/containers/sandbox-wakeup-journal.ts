@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { checkpointDetachedWakeup } from '../pods/retained-checkpoint-repository.js';
+import { createSandboxRecoveryJournal } from './sandbox-recovery-journal.js';
 
 export type SandboxWakeupEvidence =
   | { kind: 'response'; status: number; diagnostics: Record<string, string> }
@@ -32,6 +33,7 @@ const diagnosticHeaders = new Set([
 ]);
 
 export interface SandboxWakeupJournal {
+  recovery: ReturnType<typeof createSandboxRecoveryJournal>;
   /** Fresh provider Running only; neither suspension nor a caller assertion qualifies. */
   observeRunning(resourceKey: string, sandboxId: string): void;
   /** Commit before transport. An existing intent permits observation, never another POST. */
@@ -53,6 +55,19 @@ export interface SandboxWakeupJournal {
 }
 
 export function createSandboxWakeupJournal(db: Database.Database): SandboxWakeupJournal {
+  const recovery = createSandboxRecoveryJournal(db);
+  const held = (column: 'sandbox_id' | 'pod_id', value: string, scoped = false) => {
+    const rows = db
+      .prepare(`SELECT id,resource_key AS resourceKey FROM sandbox_wakeup_intents
+      WHERE ${column}=? AND ended_at IS NULL`)
+      .all(value) as { id: string; resourceKey: string }[];
+    return rows.some(
+      (r) =>
+        !recovery.released(r.resourceKey, r.id) &&
+        !(column === 'pod_id' && checkpointDetachedWakeup(db, value, r.resourceKey)) &&
+        !(scoped && recovery.permitsRelease(r.resourceKey)),
+    );
+  };
   const pending = (resourceKey: string) =>
     db
       .prepare('SELECT id FROM sandbox_wakeup_intents WHERE resource_key=? AND ended_at IS NULL')
@@ -62,6 +77,7 @@ export function createSandboxWakeupJournal(db: Database.Database): SandboxWakeup
       WHERE id=? AND ended_at IS NULL`).run(new Date().toISOString(), proof, id);
   };
   return {
+    recovery,
     pendingDispatchedIntent(resourceKey) {
       return (
         db
@@ -90,6 +106,7 @@ export function createSandboxWakeupJournal(db: Database.Database): SandboxWakeup
       if (intent) settle(intent.id, 'observed-running');
     }),
     claim: db.transaction((resourceKey: string, sandboxId: string, podId?: string) => {
+      recovery.assertWakeable(sandboxId);
       const existing = pending(resourceKey);
       if (existing) return { id: existing.id, acquired: false };
       const baseline = db
@@ -186,18 +203,11 @@ export function createSandboxWakeupJournal(db: Database.Database): SandboxWakeup
       });
     },
     retains(sandboxId) {
-      return Boolean(
-        db
-          .prepare('SELECT 1 FROM sandbox_wakeup_intents WHERE sandbox_id=? AND ended_at IS NULL')
-          .get(sandboxId),
-      );
+      return held('sandbox_id', sandboxId);
     },
     assertReleasable(sandboxId) {
-      if (
-        db
-          .prepare('SELECT 1 FROM sandbox_wakeup_intents WHERE sandbox_id=? AND ended_at IS NULL')
-          .get(sandboxId)
-      )
+      recovery.checkReleaseScope(sandboxId);
+      if (held('sandbox_id', sandboxId, true))
         throw new AutopodError(
           'An admitted sandbox resume remains outcome-unknown. Retain the original resource and source; observe provider Running before any release or cleanup.',
           'SANDBOX_WAKEUP_OUTCOME_UNVERIFIED',
@@ -205,12 +215,8 @@ export function createSandboxWakeupJournal(db: Database.Database): SandboxWakeup
         );
     },
     assertPodReleasable(podId) {
-      const pending = db
-        .prepare(
-          'SELECT resource_key FROM sandbox_wakeup_intents WHERE pod_id=? AND ended_at IS NULL',
-        )
-        .all(podId) as { resource_key: string }[];
-      if (pending.some((row) => !checkpointDetachedWakeup(db, podId, row.resource_key)))
+      recovery.assertAvailable(podId);
+      if (held('pod_id', podId))
         throw new AutopodError(
           'An original resource labelled for this pod has an unresolved wakeup. Clearing its current container pointer does not release source or recovery evidence.',
           'SANDBOX_WAKEUP_OUTCOME_UNVERIFIED',
@@ -222,7 +228,9 @@ export function createSandboxWakeupJournal(db: Database.Database): SandboxWakeup
         db
           .prepare('SELECT DISTINCT sandbox_id FROM sandbox_wakeup_intents WHERE ended_at IS NULL')
           .all() as { sandbox_id: string }[]
-      ).map((row) => row.sandbox_id);
+      )
+        .map((row) => row.sandbox_id)
+        .filter((id) => held('sandbox_id', id));
     },
   };
 }

@@ -154,6 +154,7 @@ import { createResourcePreview } from './resource-preview.js';
 
 export type { PodCreator } from './workspace-contracts.js';
 import { mergeOverrides, warnIfSinglePrSeriesMissingSeriesMeta } from './admission-policy.js';
+import { createSandboxRecovery } from './sandbox-recovery.js';
 import { createWorkspaceArtifactObservation } from './workspace-artifact-observation.js';
 import { createWorkspaceBranchSource } from './workspace-branch-source.js';
 import { createWorkspaceBranchSync } from './workspace-branch-sync.js';
@@ -1408,6 +1409,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       'refreshNetworkPolicy',
       'deleteSeriesWithCascade',
     ]);
+    sandboxRecovery.assertAvailable(podId, operation);
     if (operation !== 'processPod') podRepo.retainedCheckpoints?.assertAvailable(podId);
     if (!metadataOnly.has(operation)) assertValidationMutationSettled(podRepo, podId);
     podRepo.validationExecutions?.assertNoPendingRecovery(podId);
@@ -1439,6 +1441,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       Boolean(deps.launchConfiguration?.goals?.get(podId)),
     assertGuidanceCollected,
     assertIdle: (podId) => {
+      sandboxRecovery.assertAvailable(podId);
       if (
         controlOperations.isActive(podId) ||
         activeAgentRuns.has(podId) ||
@@ -1494,8 +1497,25 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         ),
       })
     : undefined;
+  const sandboxRecovery = createSandboxRecovery({
+    podRepo,
+    getContainerManager: () => containerManagerFactory.get('sandbox'),
+    isIdle: (id) =>
+      !controlOperations.isActive(id) &&
+      !activeAgentRuns.has(id) &&
+      !validationAbortControllers.has(id) &&
+      !infrastructureResumeRuns.has(id) &&
+      !artifactResumeRuns.has(id) &&
+      !artifactCompletionRuns.has(id) &&
+      !attemptExtensionRuns.has(id),
+    isGoal: (id) =>
+      deps.launchConfiguration?.read(id)?.intent === 'goal' ||
+      Boolean(deps.launchConfiguration?.goals?.get(id)),
+    deleteSession: workspaceDeletion.deleteSession,
+  });
   return controlOperations.wrap(
     createPodManagerFacade({
+      sandboxRecovery,
       checkpointRecovery,
       sourceAdoption,
       validationExecutionRecovery,

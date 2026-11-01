@@ -359,10 +359,12 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   }
 
   async destroy(sandboxId: string): Promise<void> {
+    this.wakeupJournal?.recovery.checkReleaseScope(sandboxId, this.wakeupKey(sandboxId));
     this.wakeupJournal?.assertReleasable(sandboxId);
     await this.requestData('DELETE', `${this.sandboxPath(sandboxId)}`, {
       okStatuses: [200, 202, 204, 404],
       beforeSend: () => {
+        this.wakeupJournal?.recovery.checkReleaseScope(sandboxId, this.wakeupKey(sandboxId));
         this.assertReleaseAllowed?.(sandboxId);
         this.wakeupJournal?.assertReleasable(sandboxId);
       },
@@ -1210,6 +1212,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       }, timeoutMs);
     });
     const check = () => {
+      this.wakeupJournal?.recovery.assertWakeable(sandboxId);
       this.assertWakeAllowed?.(sandboxId);
       options.assertCurrent?.();
       // Synchronous SQLite/token work can delay timer delivery beyond the deadline.
