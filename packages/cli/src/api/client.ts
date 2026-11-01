@@ -344,6 +344,7 @@ export class AutopodClient {
     limit?: number;
     since?: string;
     compact?: false;
+    archive?: 'exclude' | 'include' | 'only';
   }): Promise<Pod[]>;
   async listSessions(filters: {
     status?: string;
@@ -351,6 +352,7 @@ export class AutopodClient {
     limit?: number;
     since?: string;
     compact: true;
+    archive?: 'exclude' | 'include' | 'only';
   }): Promise<CompactPod[]>;
   async listSessions(filters?: {
     status?: string;
@@ -358,6 +360,7 @@ export class AutopodClient {
     limit?: number;
     since?: string;
     compact?: boolean;
+    archive?: 'exclude' | 'include' | 'only';
   }): Promise<Pod[] | CompactPod[]> {
     const params = new URLSearchParams();
     if (filters?.status) params.set('status', filters.status);
@@ -365,6 +368,7 @@ export class AutopodClient {
     if (filters?.limit !== undefined) params.set('limit', String(filters.limit));
     if (filters?.since) params.set('since', filters.since);
     if (filters?.compact) params.set('compact', 'true');
+    if (filters?.archive) params.set('archive', filters.archive);
     const qs = params.toString();
     return this.request<Pod[] | CompactPod[]>('GET', `/pods${qs ? `?${qs}` : ''}`);
   }
@@ -380,6 +384,20 @@ export class AutopodClient {
 
   async getSession(id: string): Promise<Pod> {
     return this.request<Pod>('GET', `/pods/${id}`);
+  }
+
+  async archivePod(
+    id: string,
+    reason: string,
+  ): Promise<{ fleetArchivedAt: string; retainedResources: true }> {
+    return this.request('POST', `/pods/${encodeURIComponent(id)}/archive`, {
+      reason,
+      retainResources: true,
+    });
+  }
+
+  async unarchivePod(id: string): Promise<{ fleetArchivedAt: null; retainedResources: true }> {
+    return this.request('DELETE', `/pods/${encodeURIComponent(id)}/archive`);
   }
 
   async getPodDiff(id: string): Promise<DiffResponse> {

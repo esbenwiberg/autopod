@@ -172,6 +172,7 @@ function compactPod(
   ) as string;
   return {
     id: pod.id,
+    fleetArchivedAt: pod.fleetArchivedAt,
     recordDiagnostics: pod.recordDiagnostics,
     finalization: pod.finalization,
     title,
@@ -669,7 +670,9 @@ export function podRoutes(
       page?: string;
       cursor?: string;
       since?: string;
+      archive?: 'exclude' | 'include' | 'only';
     };
+    const archive = z.enum(['exclude', 'include', 'only']).default('exclude').parse(query.archive);
     const limit = parsePositiveIntegerQueryParam(query.limit);
     if (limit === null) {
       reply.status(400);
@@ -712,6 +715,7 @@ export function podRoutes(
     const readPods =
       podRepo?.listForDisplay?.bind(podRepo) ?? podManager.listSessions.bind(podManager);
     const filters = {
+      archive,
       profileName: query.profileName ?? query.profile,
       status: statuses,
       userId: query.userId,
@@ -734,6 +738,32 @@ export function podRoutes(
     }
     const pods = readPods(filters);
     return pods.map((pod) => serializePodForRequest(pod, request, providerAttemptRepo, eventRepo));
+  });
+
+  // Metadata-only visibility controls deliberately do not use destructive lifecycle recovery.
+  // No provider calls, status transitions, custody release, or cleanup are performed.
+  app.post('/pods/:podId/archive', async (request, reply) => {
+    if (!podRepo?.fleetArchives)
+      throw new AutopodError('Fleet archive is unavailable', 'FLEET_ARCHIVE_UNAVAILABLE', 503);
+    const { podId } = z.object({ podId: z.string().min(1).max(128) }).parse(request.params);
+    const body = z
+      .object({
+        reason: z.string().trim().min(10).max(4000),
+        retainResources: z.literal(true),
+      })
+      .strict()
+      .parse(request.body);
+    podRepo.fleetArchives.archive(podId, request.user.oid, body.reason);
+    reply.status(200);
+    return { fleetArchivedAt: podRepo.fleetArchives.archivedAt(podId), retainedResources: true };
+  });
+
+  app.delete('/pods/:podId/archive', async (request) => {
+    if (!podRepo?.fleetArchives)
+      throw new AutopodError('Fleet archive is unavailable', 'FLEET_ARCHIVE_UNAVAILABLE', 503);
+    const { podId } = z.object({ podId: z.string().min(1).max(128) }).parse(request.params);
+    podRepo.fleetArchives.restore(podId);
+    return { fleetArchivedAt: null, retainedResources: true };
   });
 
   // GET /pods/stats — pod counts grouped by status

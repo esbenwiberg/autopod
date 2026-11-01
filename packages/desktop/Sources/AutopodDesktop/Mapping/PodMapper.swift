@@ -89,7 +89,7 @@ public enum PodMapper {
       ?? response.lastCorrectionMessage
       ?? response.mergeBlockReason
       ?? response.failureReason
-    return Pod(
+    var result = Pod(
       id: response.id,
       status: PodStatus(rawValue: response.status) ?? .queued,
       pod: config,
@@ -127,6 +127,8 @@ public enum PodMapper {
       seriesName: response.seriesName,
       runningAt: response.runningAt.map { parseDate($0) }
     )
+    result.fleetArchivedAt = response.fleetArchivedAt
+    return result
   }
 
   public static func map(_ response: SessionResponse, baseURL: URL? = nil) -> Pod {
@@ -559,6 +561,7 @@ public enum PodMapper {
       validationProgress.markStarted(.review)
       result.validationProgress = validationProgress
     }
+    result.fleetArchivedAt = response.fleetArchivedAt
     return result
   }
 
