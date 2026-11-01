@@ -225,6 +225,8 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
         const reason = `Approval delivery failed. ${error instanceof Error ? error.message : String(error)} Original resources retained; reconcile delivery before retrying approval.`;
         podRepo.update(podId, { failureReason: reason });
         emitActivityError(podId, reason, false);
+        if (error instanceof AutopodError && error.code === 'DELIVERY_RECONCILIATION_REQUIRED')
+          throw new AutopodError(reason, error.code, 409);
         throw new AutopodError(reason, 'APPROVAL_DELIVERY_FAILED', 502);
       }
     }

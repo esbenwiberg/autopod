@@ -50,6 +50,7 @@ import {
   assertNoValidationRecovery,
   createDeletionOwnership,
 } from './deletion-ownership.js';
+import { deliveryReadinessBlock, withDeliveryReadiness } from './delivery-readiness.js';
 import {
   type DispatchPreflightLedger,
   createDispatchPreflightLedger,
@@ -726,21 +727,20 @@ export function createPodRepository(db: Database.Database): PodRepository {
   const externalDeliveries = createExternalDeliveryRepository(db);
   const sandboxWakeups = createSandboxWakeupJournal(db);
   const sourceAdoptions = createSourceAdoptionRepository(db);
-  const custodyProjection = (pod: Pod): Pod =>
-    pod.readinessReview && sourceAdoptions.hasCustody(pod.id)
-      ? {
-          ...pod,
-          readinessReview: withLifecycleReadiness(
-            pod.readinessReview,
-            pod.status,
-            pod.lastValidationResult,
-            true,
-          ),
-        }
-      : pod;
-  const rowToSession = (row: Record<string, unknown>) => custodyProjection(decodeSessionRow(row));
+  const mergeJournal = createMergeJournal(db);
+  const readinessProjection = (pod: Pod): Pod => {
+    if (!pod.readinessReview) return pod;
+    const review = sourceAdoptions.hasCustody(pod.id)
+      ? withLifecycleReadiness(pod.readinessReview, pod.status, pod.lastValidationResult, true)
+      : pod.readinessReview;
+    return {
+      ...pod,
+      readinessReview: withDeliveryReadiness(review, deliveryReadinessBlock(pod, mergeJournal)),
+    };
+  };
+  const rowToSession = (row: Record<string, unknown>) => readinessProjection(decodeSessionRow(row));
   const rowToDisplaySession = (row: Record<string, unknown>) =>
-    custodyProjection(decodeDisplaySessionRow(row));
+    readinessProjection(decodeDisplaySessionRow(row));
   const dispatchPreflight = createDispatchPreflightLedger(db);
   const taskExecutions = createTaskExecutionLedger(db);
   const deletionOwnership = createDeletionOwnership(db);
@@ -830,7 +830,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     externalDeliveries,
     sandboxWakeups,
     sourceAdoptions,
-    mergeJournal: createMergeJournal(db),
+    mergeJournal,
     taskExecutions,
     deletionOwnership,
     insert: db.transaction((pod: NewPod): void => {
