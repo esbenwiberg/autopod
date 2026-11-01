@@ -69,7 +69,8 @@ RUN cd /opt/autopod \
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 RUN npm install -g playwright && \
     playwright install --with-deps chromium && \
-    chmod -R 755 /opt/pw-browsers
+    chmod -R 755 /opt/pw-browsers && \
+    chown -R autopod:autopod /opt/pw-browsers
 
 # Working directory
 WORKDIR /workspace
@@ -97,6 +98,8 @@ ENV NODE_PATH=/usr/lib/node_modules
 ENV TURBO_CACHE_DIR=/tmp/.turbo
 ENV npm_config_nodedir=/usr
 RUN echo "nodedir=/usr" >> /home/autopod/.npmrc
+# Installers need a writable lock/link cache even when Chromium is already cached.
+RUN node -e "const fs = require('node:fs'); for (const dir of ['/opt/pw-browsers', '/opt/pw-browsers/.links']) { const probe = dir + '/browser-cache-write-check'; fs.mkdirSync(probe); fs.rmdirSync(probe); }"
 # Fail base-image builds when the cached Playwright browser cannot launch as the runtime user.
 RUN node -e "const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); await browser.close(); })().catch((err) => { console.error(err); process.exit(1); });"
 

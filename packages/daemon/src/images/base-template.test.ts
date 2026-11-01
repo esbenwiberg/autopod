@@ -77,6 +77,12 @@ describe('Playwright base image templates', () => {
       expect(dockerfile).toContain('chromium.launch()');
       expect(dockerfile).toContain('await browser.close()');
       expect(dockerfile).toContain('cannot launch as the runtime user');
+      expect(dockerfile).toContain('chown -R autopod:autopod /opt/pw-browsers');
+      expect(dockerfile).toContain("'/opt/pw-browsers/.links'");
+      expect(dockerfile.indexOf('browser-cache-write-check')).toBeGreaterThan(
+        dockerfile.indexOf('USER autopod'),
+      );
+      expect(dockerfile).toContain('fs.mkdirSync(probe); fs.rmdirSync(probe);');
     },
   );
 });

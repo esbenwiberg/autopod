@@ -46,7 +46,8 @@ RUN groupadd --gid 1000 autopod 2>/dev/null || groupmod -n autopod "$(getent gro
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 RUN npm install -g playwright && \
     playwright install --with-deps chromium && \
-    chmod -R 755 /opt/pw-browsers
+    chmod -R 755 /opt/pw-browsers && \
+    chown -R autopod:autopod /opt/pw-browsers
 
 # Azure Artifacts Credential Provider (NuGet auth via env var, no cleartext in config)
 # Verify installation succeeded — the curl|bash can fail silently (GitHub rate limits, etc.)
@@ -167,6 +168,8 @@ ENV TURBO_CACHE_DIR=/tmp/.turbo
 # Point node-gyp at local Node headers so native addon rebuilds work offline
 # (nodesource installs headers under /usr/include/node/).
 ENV npm_config_nodedir=/usr
+# Installers need a writable lock/link cache even when Chromium is already cached.
+RUN node -e "const fs = require('node:fs'); for (const dir of ['/opt/pw-browsers', '/opt/pw-browsers/.links']) { const probe = dir + '/browser-cache-write-check'; fs.mkdirSync(probe); fs.rmdirSync(probe); }"
 # Fail base-image builds when the cached Playwright browser cannot launch as the runtime user.
 RUN node -e "const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); await browser.close(); })().catch((err) => { console.error(err); process.exit(1); });"
 
