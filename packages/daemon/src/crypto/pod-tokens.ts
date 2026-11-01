@@ -16,9 +16,15 @@ export interface PodTokenIssuer {
  * Derives a signing key from the existing secrets.key via HMAC (so we never
  * reuse the AES encryption key directly for a different purpose).
  *
- * Token format: base64url( podId + "." + expiresEpoch + "." + hex(signature) )
+ * Legacy format: base64url(podId + "." + expiresEpoch + "." + signature).
+ * An explicit resource-recovery epoch adds a signed fourth field. Once an epoch
+ * exists, old (including legacy) credentials cannot act for the replacement pod.
+ * The resolver is read at issuance AND verification, never cached across recovery.
  */
-export function createPodTokenIssuer(secretsKeyPath: string): PodTokenIssuer {
+export function createPodTokenIssuer(
+  secretsKeyPath: string,
+  currentEpoch: (podId: string) => string | null = () => null,
+): PodTokenIssuer {
   const masterKey = readFileSync(secretsKeyPath);
   // Derive a purpose-specific key: HMAC(masterKey, "pod-tokens")
   const signingKey = createHmac('sha256', masterKey).update('pod-tokens').digest();
@@ -26,7 +32,10 @@ export function createPodTokenIssuer(secretsKeyPath: string): PodTokenIssuer {
   return {
     generate(podId: string, ttlSeconds = DEFAULT_TTL_SECONDS): string {
       const expires = Math.floor(Date.now() / 1000) + ttlSeconds;
-      const payload = `${podId}.${expires}`;
+      const epoch = currentEpoch(podId);
+      if (epoch !== null && !/^[a-zA-Z0-9-]{1,64}$/.test(epoch))
+        throw new Error('Invalid pod credential epoch');
+      const payload = epoch === null ? `${podId}.${expires}` : `${podId}.${expires}.${epoch}`;
       const sig = createHmac('sha256', signingKey).update(payload).digest('hex');
       return toBase64Url(`${payload}.${sig}`);
     },
@@ -40,18 +49,21 @@ export function createPodTokenIssuer(secretsKeyPath: string): PodTokenIssuer {
       }
 
       const parts = decoded.split('.');
-      if (parts.length !== 3) return null;
+      if (parts.length !== 3 && parts.length !== 4) return null;
 
-      const [podId, expiresStr, providedSig] = parts as [string, string, string];
+      const [podId, expiresStr] = parts;
+      const providedSig = parts.at(-1);
+      if (!podId || !expiresStr || !providedSig) return null;
+      const epoch = parts.length === 4 ? parts[2] : null;
 
       // Check expiry
       const expires = Number(expiresStr);
-      if (Number.isNaN(expires) || Math.floor(Date.now() / 1000) > expires) {
+      if (!Number.isSafeInteger(expires) || Math.floor(Date.now() / 1000) > expires) {
         return null;
       }
 
       // Verify signature (timing-safe comparison)
-      const payload = `${podId}.${expiresStr}`;
+      const payload = parts.slice(0, -1).join('.');
       const expectedSig = createHmac('sha256', signingKey).update(payload).digest('hex');
 
       if (providedSig.length !== expectedSig.length) return null;
@@ -61,6 +73,13 @@ export function createPodTokenIssuer(secretsKeyPath: string): PodTokenIssuer {
       );
       if (!sigMatch) return null;
 
+      // Consult durable state only after authenticating the caller's pod ID.
+      // Unavailable revocation state is never permission to accept old tokens.
+      try {
+        if (epoch !== currentEpoch(podId)) return null;
+      } catch {
+        return null;
+      }
       return podId;
     },
   };

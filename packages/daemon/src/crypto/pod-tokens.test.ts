@@ -71,6 +71,48 @@ describe('PodTokenIssuer', () => {
     expect(issuer.verify(token)).toBe('pod-ttl');
   });
 
+  it('revokes retained-resource credentials without invalidating other pods', () => {
+    const epochs = new Map<string, string>();
+    const issuer = createPodTokenIssuer(keyPath, (id) => epochs.get(id) ?? null);
+    const old = issuer.generate('retained');
+    const unrelated = issuer.generate('unrelated');
+    epochs.set('retained', 'recovery-one');
+    expect(issuer.verify(old)).toBeNull();
+    expect(issuer.verify(unrelated)).toBe('unrelated');
+    const replacement = issuer.generate('retained');
+    expect(issuer.verify(replacement)).toBe('retained');
+    const reopened = createPodTokenIssuer(keyPath, (id) => epochs.get(id) ?? null);
+    expect(reopened.verify(old)).toBeNull();
+    expect(reopened.verify(replacement)).toBe('retained');
+    epochs.set('retained', 'recovery-two');
+    expect(reopened.verify(replacement)).toBeNull();
+  });
+
+  it('signs the epoch and rejects recovery tokens in a legacy verifier', () => {
+    const issuer = createPodTokenIssuer(keyPath, () => 'recovery-one');
+    const token = issuer.generate('retained');
+    const tampered = Buffer.from(token, 'base64url')
+      .toString('utf8')
+      .replace('recovery-one', 'recovery-two');
+    expect(issuer.verify(Buffer.from(tampered).toString('base64url'))).toBeNull();
+    expect(createPodTokenIssuer(keyPath).verify(token)).toBeNull();
+  });
+
+  it('fails closed when the credential epoch cannot be read', () => {
+    const token = createPodTokenIssuer(keyPath).generate('retained');
+    const unavailable = createPodTokenIssuer(keyPath, () => {
+      throw new Error('database unavailable');
+    });
+    expect(unavailable.verify(token)).toBeNull();
+    expect(() => unavailable.generate('retained')).toThrow('database unavailable');
+  });
+
+  it('rejects ambiguous epoch delimiters on issuance', () => {
+    expect(() => createPodTokenIssuer(keyPath, () => 'bad.epoch').generate('retained')).toThrow(
+      'Invalid pod credential epoch',
+    );
+  });
+
   it('scopes token to specific pod ID', () => {
     const issuer = createPodTokenIssuer(keyPath);
     const token = issuer.generate('pod-scoped');
