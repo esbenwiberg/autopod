@@ -9,16 +9,16 @@ describe('workspace state and completion coordinator', () => {
     const a = createWorkspaceRecoveryState();
     const b = createWorkspaceRecoveryState();
     const lease = createWorkspaceLeaseState();
-    expect(a.infrastructureResumeRuns).not.toBe(b.infrastructureResumeRuns);
+    expect(a.validationResumeRuns).not.toBe(b.validationResumeRuns);
     expect(a.artifactResumeRuns).not.toBe(b.artifactResumeRuns);
     expect(a.artifactCompletionRuns).not.toBe(b.artifactCompletionRuns);
     const pending = Promise.resolve();
-    a.infrastructureResumeRuns.set('pod', pending);
-    expect(a.infrastructureResumeRuns.get('pod')).toBe(pending);
-    expect(b.infrastructureResumeRuns.size).toBe(0);
+    a.validationResumeRuns.set('pod', pending);
+    expect(a.validationResumeRuns.get('pod')).toBe(pending);
+    expect(b.validationResumeRuns.size).toBe(0);
     lease.forceWithLeaseAllowances.add('pod');
     expect(createWorkspaceLeaseState().forceWithLeaseAllowances.size).toBe(0);
-    a.infrastructureResumeRuns.delete('pod');
+    a.validationResumeRuns.delete('pod');
     lease.forceWithLeaseAllowances.delete('pod');
   });
   it('coalesces identical requests, rejects conflicting overlap and releases after success or failure', async () => {

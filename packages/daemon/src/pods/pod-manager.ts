@@ -325,7 +325,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const { validationAbortControllers, attemptExtensionRuns, pendingUpdateFromBaseIntents } =
     createValidationWorkflowState();
   const {
-    infrastructureResumeRuns,
+    validationResumeRuns,
     artifactResumeRuns,
     artifactCompletionRuns,
     coordinateInteractiveCompletion,
@@ -665,7 +665,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     assertExecutionTerminationVerified,
     assertGuidanceCollected,
     hasDurableAgentExecutionEvidence,
-    infrastructureResumeRuns,
+    validationResumeRuns,
     artifactResumeRuns,
     activeAgentRuns,
     resolveEffectiveBoundProfile,
@@ -1426,7 +1426,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       controlOperations.isActive(id, exceptCurrent) ||
       activeAgentRuns.has(id) ||
       validationAbortControllers.has(id) ||
-      infrastructureResumeRuns.has(id) ||
+      validationResumeRuns.has(id) ||
       artifactResumeRuns.has(id) ||
       artifactCompletionRuns.has(id) ||
       attemptExtensionRuns.has(id),
@@ -1446,7 +1446,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         controlOperations.isActive(podId) ||
         activeAgentRuns.has(podId) ||
         validationAbortControllers.has(podId) ||
-        infrastructureResumeRuns.has(podId) ||
+        validationResumeRuns.has(podId) ||
         artifactResumeRuns.has(podId) ||
         artifactCompletionRuns.has(podId) ||
         attemptExtensionRuns.has(podId)
@@ -1476,7 +1476,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           !controlOperations.isActive(id) &&
           !activeAgentRuns.has(id) &&
           !validationAbortControllers.has(id) &&
-          !infrastructureResumeRuns.has(id) &&
+          !validationResumeRuns.has(id) &&
           !artifactResumeRuns.has(id) &&
           !artifactCompletionRuns.has(id) &&
           !attemptExtensionRuns.has(id),
@@ -1504,7 +1504,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       !controlOperations.isActive(id) &&
       !activeAgentRuns.has(id) &&
       !validationAbortControllers.has(id) &&
-      !infrastructureResumeRuns.has(id) &&
+      !validationResumeRuns.has(id) &&
       !artifactResumeRuns.has(id) &&
       !artifactCompletionRuns.has(id) &&
       !attemptExtensionRuns.has(id),

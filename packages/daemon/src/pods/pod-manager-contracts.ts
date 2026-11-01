@@ -443,8 +443,13 @@ export interface PodManager {
    * without re-running the agent. Picks the cheapest action that fits the pod's
    * state — push + open PR if validation passed, re-validate if validation
    * failed on infra. Throws when the pod isn't in a recoverable state.
+   * HTTP callers opt into backgroundValidation to acknowledge admission without
+   * waiting for the validation outcome.
    */
-  resumePod(podId: string): Promise<{
+  resumePod(
+    podId: string,
+    options?: { backgroundValidation?: boolean },
+  ): Promise<{
     action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery' | 'retry-agent' | 'collect-artifacts';
   }>;
   /**

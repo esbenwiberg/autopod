@@ -111,6 +111,15 @@ The `PendingRequestsMap` is shared between `PodManager` and `MCP handler` — do
 
 ### Recovery mode
 
+`POST /pods/:podId/resume` acknowledges validation-only recovery after admission
+checks without waiting for the validation pipeline to finish. Follow pod state and
+events for the outcome; HTTP success is not a passing-validation receipt. In-flight
+validation Resume calls coalesce while retaining resource-recovery idle guards.
+Ordinary in-process `resumePod()` callers still await revalidation unless they opt
+into `backgroundValidation`; push/PR and artifact paths retain their existing semantics.
+The desktop Resume delivery handoff dismisses on acceptance, but retains errors
+and uncertain network results without automatically resubmitting.
+
 If `pod.recoveryWorktreePath` is set, `processPod()` mounts the existing worktree instead of
 creating a new one and resumes the Claude pod via `claude_session_id`.
 The flag is cleared **immediately** (one-shot) before the container starts — it will not re-trigger on

@@ -170,7 +170,8 @@ import Testing
     let repair = PodRepairModel(kind: kind, scope: actions.repair.scope)
     let host = LaunchComposerHost(
       PodRepairSheet(
-        isPresented: .constant(true), pod: pod, kind: kind,
+        isPresented: Binding(get: { fixture.presented }, set: { fixture.presented = $0 }),
+        pod: pod, kind: kind,
         relatedPods: [], actions: actions, model: repair), width: 1120)
     defer { host.close() }
     try await host.wait { host.has("task-budget-limit") }
@@ -189,7 +190,8 @@ import Testing
       #expect(host.containsText("uncollected human guidance"))
       try host.capture("task-budget-recovery-rejected")
     } else {
-      try await host.wait { repair.receipt != nil }
+      try await host.wait { repair.receipt != nil && (kind != .resume || !fixture.presented) }
+      #expect(fixture.presented == (kind != .resume))
       #expect(fixture.events == ["budget", kind.rawValue])
       try host.capture("task-budget-\(kind.rawValue)-accepted")
     }
@@ -197,6 +199,7 @@ import Testing
 }
 
 @MainActor private final class TaskBudgetUIFixture {
+  var presented = true
   var budget: Int? = 100
   var requests: [TaskBudgetChangeRequest] = []
   var events: [String] = []

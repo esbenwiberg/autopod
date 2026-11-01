@@ -509,7 +509,10 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     reconcileTermination(podId: string, runId: string, reason: string, actor: OperatorActor) {
       return terminationReconciliation.reconcileTermination(podId, runId, reason, actor);
     },
-    resumePod(podId: string): Promise<{
+    resumePod(
+      podId: string,
+      options?: { backgroundValidation?: boolean },
+    ): Promise<{
       action:
         | 'retry-pr'
         | 'revalidate'
@@ -524,6 +527,7 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
           approveSession: (...args) => this.approveSession(...args),
         },
         podId,
+        options,
       );
     },
     continueProvider(
