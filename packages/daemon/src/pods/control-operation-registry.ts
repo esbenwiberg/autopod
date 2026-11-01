@@ -27,6 +27,7 @@ export function createControlOperationRegistry(
           typeof value !== 'function' ||
           key === 'adoptSource' ||
           key === 'recoverCheckpoint' ||
+          key === 'reconcileCheckpointOutcome' ||
           key === 'recoverSandbox' ||
           key === 'reconcileValidationExecution' ||
           key === 'readValidationEvidence' ||

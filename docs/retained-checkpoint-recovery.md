@@ -107,6 +107,48 @@ interrupted operation requires inspection of retained execution evidence and
 server logs correlated by recovery ID; do not clear rows, mutate the original,
 choose a new ID to force another run, or infer success from `Stopped`.
 
+### Owned no-op checkpoints and already-completed failures
+
+Normal synchronization can add daemon checkpoint commits without changing any
+tracked file. Source checks now accept only an exact chain back to the selected
+commit where **every** added commit is single-parent, has the selected tree,
+has the daemon checkpoint metadata, and is retained under this pod's own
+`refs/autopod-quarantine/<pod>/` namespace. Equal trees, matching commit subjects,
+other pods' checkpoints, merge commits, and change-then-revert histories alone
+are not sufficient. Dirty source, configuration drift and missing lineage proof
+remain blocked. No branch is reset or original resource accessed to establish this.
+
+An older daemon may already have recorded `CHECKPOINT_SOURCE_CHANGED` after a
+replacement execution published a **failing** result. A separate authenticated
+human request can observe that existing outcome without running another check:
+
+```text
+POST /pods/<pod>/checkpoint-recovery/<existing-recovery-id>/reconcile
+{
+  "expectedGeneration": <current replacement generation>,
+  "expectedResultHash": "<SHA256 of exact current stored failing result>",
+  "expectedHead": "<exact current retained host HEAD>",
+  "reason": "Observe completed failed checks after verifying the owned no-op lineage"
+}
+```
+
+Use the existing authenticated human API transport; worker tokens, caller proof,
+force flags, paths, actor overrides and submitted results are refused. Refresh
+GET inspection and the host source identity first. The server requires idle,
+settled task execution, the exact immutable published replacement dispatch/result,
+unchanged frozen configuration, and the owned no-op chain. Unknown exits,
+unpublished outcomes, passing results, other block reasons,
+changed content and unanswered decisions cannot use this path.
+
+The response adds an immutable `reconciled` receipt and exposes its **failed**
+`checked` outcome. The original `blocked` event and original resource holds remain
+unchanged. Repeating the same recovery ID and exact request/actor observes that
+receipt; a changed request conflicts. Migration 229 adds this append-only receipt;
+no historical rows are rewritten. This is not a validation pass, waiver, retry
+grant, budget extension, worker launch, PR publication, merge or resource-release
+authorization. A later validation waiver or repair is a separate explicit decision.
+Successful new checks still require their genuine report snapshot before approval.
+
 ## The two motivating incidents
 
 - `chilly-dog`: preserved commit
@@ -116,10 +158,11 @@ choose a new ID to force another run, or infer success from `Stopped`.
 - `evolutionary-tuna`: preserved commit
   `2fbb347f1a8ea9abe47faf4f3274730c1e42dad9`, also PR #474's inspected head.
   Resume `b9d28ff8-c60e-4347-8dc4-124da5fe4521` remains unresolved. A replacement
-  resource must not replay that request. PR #474's migration 225 independently
-  conflicts with main and must be renumbered above the **fresh** migration maximum
-  and revalidated before any merge. A checkpoint pass does not fix that collision
-  or authorize publication/merge.
+  resource must not replay that request. PR #474 also requires integration against the **fresh** main and real
+  revalidation before merge. Its unpublished migration 225 must be renumbered
+  **above the fresh migration maximum**: even if no current filename collides,
+  databases already past 225 would skip it. Recheck all prefixes during integration.
+  A checkpoint pass does not resolve source conflicts or authorize publication/merge.
 
 These are investigated checkpoints, not automatically executed recovery
 requests. Refresh all live identities before acting. Original sandbox content

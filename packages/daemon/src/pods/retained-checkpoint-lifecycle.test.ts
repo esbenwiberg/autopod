@@ -105,6 +105,12 @@ describe('retained checkpoint through the real manager workflow (provider and ch
       );
       expect(operation.blocked).toBeNull();
       expect(operation.checked?.result.overall).toBe('pass');
+      const capturedSource = await f.worktrees.inspectSourceAdoption(
+        current.worktreePath!,
+        current.branch,
+      );
+      expect(capturedSource.commitSha).not.toBe(operation.prepared?.head);
+      expect(capturedSource.treeSha).toBe(operation.prepared?.tree);
       expect(operation.originalEvidence.result).toEqual(original);
       expect(current.lifecycleGeneration).toBe(2);
       expect(current.validationAttempts).toBe(priorAttempts + 1);
