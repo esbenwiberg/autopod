@@ -1,3 +1,4 @@
+import { type Pod, PodNotFoundError } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { SandboxDescriptor } from '../containers/sandbox-api-client.js';
 import type { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
@@ -5,7 +6,7 @@ import type { PodRepository } from './pod-repository.js';
 
 export interface SandboxOrphanReaperDependencies {
   podRepo: PodRepository;
-  sandboxContainerManager: SandboxContainerManager;
+  sandboxContainerManager: Pick<SandboxContainerManager, 'listSandboxes' | 'kill'>;
   logger: Logger;
   /**
    * Minimum age before an unreferenced sandbox is eligible for deletion.
@@ -176,12 +177,19 @@ export class SandboxOrphanReaper {
   /** A label is a reason to retain possible evidence, never permission to reuse it. */
   private hasRecoveryOwner(sandbox: SandboxDescriptor): boolean {
     const podId = sandbox.labels.podId;
-    const owner = podId ? this.deps.podRepo.get(podId) : undefined;
+    if (!podId) return false;
+    let recoveryOwner: Pod;
+    try {
+      recoveryOwner = this.deps.podRepo.getOrThrow(podId);
+    } catch (err) {
+      // Deleted pod labels are expected; other lookup failures must prevent deletion.
+      if (err instanceof PodNotFoundError) return false;
+      throw err;
+    }
     return Boolean(
-      owner &&
-        (owner.status === 'failed' ||
-          owner.status === 'review_required' ||
-          this.deps.podRepo.taskExecutions?.hasActiveRun(owner.id)),
+      recoveryOwner.status === 'failed' ||
+        recoveryOwner.status === 'review_required' ||
+        this.deps.podRepo.taskExecutions?.hasActiveRun(recoveryOwner.id),
     );
   }
 
