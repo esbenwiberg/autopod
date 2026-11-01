@@ -902,6 +902,51 @@ human_review:
     reason: Requires judgment over the diff, not a deterministic command
 `);
 
+  it('keeps daemon-owned milestones out of pre-publication diff review', () => {
+    const prompt = buildReviewPrompt({
+      ...baseConfig,
+      task: 'Start on fresh main, run configured checks and deliver a PR',
+      taskSummary: {
+        actualSummary: 'Docs committed; authenticated fetch unavailable; PR pending.',
+        how: 'Earlier configured tests timed out.',
+        deviations: [
+          {
+            step: 'Delivery',
+            planned: 'Publish a PR',
+            actual: 'Awaiting daemon-owned publication',
+            reason: 'No remote credentials in the container',
+          },
+        ],
+      },
+    });
+
+    expect(prompt).toContain('## REVIEW-STAGE BOUNDARIES');
+    expect(prompt).toContain('pre-publication diff review, not a delivery-readiness verdict');
+    expect(prompt).toContain('Do not fail the diff because a PR/branch has not been published');
+    expect(prompt).toContain('Do not invent requirementsCheck entries from task or plan prose');
+    expect(prompt).toContain('omit requirementsCheck when no human-review items are listed');
+    expect(prompt).toContain(
+      'Agent summaries and reported deviations may describe earlier attempts',
+    );
+    expect(prompt).toContain(
+      'Do not turn a historical timeout or missing credential into a new diff defect',
+    );
+    expect(prompt).toContain('never infer a validation pass or resolved source incident');
+    expect(prompt).toContain('not a waiver of failed/pending checks');
+    expect(prompt).toContain('Docs committed; authenticated fetch unavailable; PR pending.');
+  });
+
+  it('preserves explicit implementation criteria and required facts alongside stage boundaries', () => {
+    const prompt = buildReviewPrompt({ ...baseConfig, contract });
+
+    expect(prompt).toContain('## REVIEW-STAGE BOUNDARIES');
+    expect(prompt).toContain('[human_review:review-failure-count]');
+    expect(prompt).toContain('ConsecutiveFailureCount increments on failure');
+    expect(prompt).toContain('fact-startup');
+    expect(prompt).toContain('met=false — implementation is absent or clearly wrong');
+    expect(prompt).toContain('one or more requirements unmet');
+  });
+
   it('renders diff-verification requirements from contract human review items', () => {
     const prompt = buildReviewPrompt({ ...baseConfig, contract });
     expect(prompt).toContain('REQUIREMENTS — DIFF VERIFICATION REQUIRED');
