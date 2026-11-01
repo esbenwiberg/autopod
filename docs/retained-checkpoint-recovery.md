@@ -19,7 +19,11 @@ evidence, not as an execution resource.
 2. Preserve host bytes (including ignored reports and symlinks) with an inventory
    receipt; create a Git bundle and independent bare repository/worktree. Preserve
    remote-tracking base refs too. Neither refs nor objects are shared with the
-   original; no network fetch or branch publication occurs.
+   original; no network fetch or branch publication occurs. Only the private clone
+   ignores untracked daemon-generated `.autopod/evidence/` and `.autopod/screenshots/`
+   outputs. These bytes still require report custody; tracked edits and unrelated
+   untracked source remain visible. The original Git excludes and committed
+   `.gitignore` are never changed.
 3. Advance the same pod to a new generation, using only that independent source.
    Keep its task identity, retry history/counters, contract, options, base branch
    and execution settings. Clear old *current* validation/review projections only

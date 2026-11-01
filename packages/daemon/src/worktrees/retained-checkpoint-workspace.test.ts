@@ -90,6 +90,37 @@ describe('retained checkpoint workspace', () => {
     );
   });
 
+  it('ignores only generated evidence in the private clone, never tracked changes or unrelated source', async () => {
+    const f = await fixture();
+    const originalExclude = await readFile(path.join(f.source, '.git/info/exclude'), 'utf8');
+    await mkdir(path.join(f.source, '.autopod/evidence'), { recursive: true });
+    await writeFile(path.join(f.source, '.autopod/evidence/tracked.txt'), 'tracked original');
+    await git(f.source, 'add', '.');
+    await git(f.source, 'commit', '-m', 'tracked evidence remains source');
+    f.options.head = await git(f.source, 'rev-parse', 'HEAD');
+    const prepared = await prepareRetainedCheckpointWorkspace(f.options);
+    for (const folder of ['evidence/fact', 'screenshots']) {
+      await mkdir(path.join(prepared.worktree, '.autopod', folder), { recursive: true });
+      await writeFile(
+        path.join(prepared.worktree, '.autopod', folder, 'report.txt'),
+        'fresh report',
+      );
+    }
+    expect(await git(prepared.worktree, 'status', '--porcelain')).toBe('');
+    expect(await readFile(path.join(f.source, '.git/info/exclude'), 'utf8')).toBe(originalExclude);
+    await expect(
+      git(f.source, 'check-ignore', '--no-index', '.autopod/evidence/fact/report.txt'),
+    ).rejects.toMatchObject({ code: 1 });
+    await writeFile(
+      path.join(prepared.worktree, '.autopod/evidence/tracked.txt'),
+      'changed source',
+    );
+    await writeFile(path.join(prepared.worktree, '.autopod/unexpected.ts'), 'unexpected source');
+    const dirty = await git(prepared.worktree, 'status', '--porcelain', '--untracked-files=all');
+    expect(dirty).toContain('M .autopod/evidence/tracked.txt');
+    expect(dirty).toContain('?? .autopod/unexpected.ts');
+  });
+
   it('refuses a different commit or dirty tracked source before preparing a namespace', async () => {
     const f = await fixture();
     await expect(

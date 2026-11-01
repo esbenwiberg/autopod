@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { chmod, cp, lstat, mkdir, realpath, stat } from 'node:fs/promises';
+import { appendFile, chmod, cp, lstat, mkdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { AutopodError } from '@autopod/shared';
@@ -125,6 +125,15 @@ export async function prepareRetainedCheckpointWorkspace(options: {
   await git(bare)(['remote', 'set-url', 'origin', options.repository]);
   const worktree = path.join(root, 'worktree');
   await git(bare)(['worktree', 'add', '--', worktree, options.branch]);
+  // Checks write daemon-owned reports even when the selected repository does not
+  // ignore them. Exclude only these untracked outputs in the NEW private clone;
+  // tracked changes remain visible and report bytes still require their receipt.
+  // Never modify the original repository's excludes or committed .gitignore.
+  await mkdir(path.join(bare, 'info'), { recursive: true });
+  await appendFile(
+    path.join(bare, 'info', 'exclude'),
+    '\n/.autopod/evidence/\n/.autopod/screenshots/\n',
+  );
   const materialized = await inspectAdoptionGit(git(worktree), options.branch);
   const retained = await inspectAdoptionGit(git(source), options.branch);
   if (

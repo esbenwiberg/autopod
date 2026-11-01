@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -69,8 +69,21 @@ export async function materializeCheckpointFixture(
       'https://management.example.invalid/subscriptions/test/resourcegroups/test/sandboxgroups/test',
   });
   vi.mocked(f.cm.spawn).mockResolvedValue('22222222-2222-4222-8222-222222222222');
+  vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => {
+    // Real report files exercise the post-check Git cleanliness and custody gates.
+    // Neither incident requires its repository to already ignore daemon evidence.
+    for (const folder of ['evidence/fixture', 'screenshots']) {
+      const directory = path.join(config.worktreePath, '.autopod', folder);
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, 'fixture-report.txt'), 'Fresh generated evidence\n');
+    }
+    return createPassingValidationResult(config.podId, config.attempt);
+  });
   vi.mocked(f.cm.extractDirectoryFromContainer!).mockImplementation(async (_id, _remote, local) => {
     await mkdir(local, { recursive: true });
+    await cp(path.join(f.pod().worktreePath!, '.autopod'), path.join(local, '.autopod'), {
+      recursive: true,
+    });
     await writeFile(
       path.join(local, 'fresh-validation-report.txt'),
       'New sandbox validation reports\n',

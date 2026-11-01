@@ -143,6 +143,12 @@ describe('retained checkpoint through the real manager workflow (provider and ch
         current.lifecycleGeneration,
         current.finalization?.cycle ?? 0,
       );
+      expect(
+        await readFile(
+          path.join(current.artifactsPath!, '.autopod/evidence/fixture/fixture-report.txt'),
+          'utf8',
+        ),
+      ).toBe('Fresh generated evidence\n');
       const saved = {
         pod: current,
         podRepo: f.ctx.podRepo,
