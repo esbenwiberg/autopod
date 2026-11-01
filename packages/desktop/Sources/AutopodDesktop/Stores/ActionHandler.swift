@@ -214,6 +214,17 @@ public final class ActionHandler {
         await self?.updateFromBase(id) ?? nil
       }
     )
+    result.sandboxRecovery = SandboxRecoveryActions(scope: replyContextID.uuidString,
+      load: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.getSandboxRecovery(id) }
+      },
+      submit: { [weak self] id, request in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        let result = try await self.perform { try await self.api.recoverSandbox(id, body: request) }
+        if result.podDeleted { self.podStore.removeSession(id) }
+        return result
+      })
     result.repair = PodRepairActions(scope: replyContextID.uuidString, submit: { [weak self] id, kind, message in
       guard let self else { throw DaemonError.networkError("Connection is unavailable") }
       return try await self.submitRepair(id, kind: kind, message: message)

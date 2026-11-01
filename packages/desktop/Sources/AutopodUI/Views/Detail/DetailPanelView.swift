@@ -336,6 +336,12 @@ public struct DetailPanelView: View {
             // Pod header
             detailHeader
 
+            if actions.sandboxRecovery.available &&
+                [.failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status) {
+                SandboxRecoveryCard(podId: pod.id, actions: actions.sandboxRecovery)
+                    .id(actions.sandboxRecovery.scope + ":" + pod.id)
+            }
+
             // Tab bar
             tabBar
 

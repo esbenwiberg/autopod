@@ -19,13 +19,17 @@ describe('immutable sandbox wakeup claims', () => {
           'utf8',
         ),
       );
-      const old = createSandboxWakeupJournal(db);
-      old.observeRunning(KEY, ID);
-      const settled = old.claim(KEY, ID, 'pod');
-      old.beginDispatch(settled.id);
-      old.observeRunning(KEY, ID);
-      const pending = old.claim(KEY, ID, 'pod');
-      old.beginDispatch(pending.id);
+      // Seed the OLD schema directly, rather than running today's adapter against
+      // a database which intentionally has not received today's migrations.
+      const stamp = '2026-10-30T20:00:00Z';
+      db.prepare('INSERT INTO sandbox_wakeup_baselines VALUES(?,?,?)').run(KEY, ID, stamp);
+      const settled = { id: 'legacy-settled' };
+      const pending = { id: 'legacy-pending' };
+      const insert = db.prepare(`INSERT INTO sandbox_wakeup_intents
+        (id,resource_key,sandbox_id,pod_id,started_at,dispatch_started_at,ended_at,settled_by)
+        VALUES(?,?,?,'pod',?,?,?,?)`);
+      insert.run(settled.id, KEY, ID, stamp, stamp, stamp, 'observed-running');
+      insert.run(pending.id, KEY, ID, stamp, stamp, null, null);
       const before = db.prepare('SELECT * FROM sandbox_wakeup_intents ORDER BY id').all();
       db.exec(
         readFileSync(
@@ -34,6 +38,12 @@ describe('immutable sandbox wakeup claims', () => {
         ),
       );
       expect(db.prepare('SELECT * FROM sandbox_wakeup_intents ORDER BY id').all()).toEqual(before);
+      db.exec(
+        readFileSync(
+          new URL('../db/migrations/228_sandbox_recovery_controls.sql', import.meta.url),
+          'utf8',
+        ),
+      );
       const upgraded = createSandboxWakeupJournal(db);
       expect(upgraded.claim(KEY, ID)).toEqual({ id: pending.id, acquired: false });
       expect(upgraded.retains(ID)).toBe(true);

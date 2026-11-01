@@ -44,6 +44,7 @@ import type { createWorkspacePromotion } from './workspace-promotion.js';
 import type { createWorkspaceRecoveryCommands } from './workspace-recovery-commands.js';
 import type { createWorkspaceWatchdog } from './workspace-watchdog.js';
 export interface PodFacadeOwners {
+  sandboxRecovery?: ReturnType<typeof import('./sandbox-recovery.js').createSandboxRecovery>;
   validationExecutionRecovery: ReturnType<typeof createValidationExecutionRecovery>;
   checkpointRecovery?: ReturnType<
     typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery

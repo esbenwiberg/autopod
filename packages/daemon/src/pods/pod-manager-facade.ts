@@ -13,6 +13,10 @@ import type {
   SpawnFixResponse,
   UpdateFromBaseResponse,
 } from '@autopod/shared';
+import {
+  type SandboxRecoveryRequest,
+  recoveryError,
+} from '../containers/sandbox-recovery-journal.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { AgentRunOutcome } from './agent-execution-contracts.js';
 import type { ApproveAllSkippedPod, ApproveSessionOptions } from './approval-contracts.js';
@@ -76,6 +80,18 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
   } = captured;
   return {
     ...captured.validationExecutionRecovery,
+    getSandboxRecovery(podId: string) {
+      return (captured.sandboxRecovery ?? recoveryError('Sandbox recovery unavailable')).inspect(
+        podId,
+      );
+    },
+    recoverSandbox(podId: string, input: SandboxRecoveryRequest, actor: OperatorActor) {
+      return (captured.sandboxRecovery ?? recoveryError('Sandbox recovery unavailable')).submit(
+        podId,
+        input,
+        actor,
+      );
+    },
     recoverCheckpoint(podId: string, input: CheckpointRecoveryRequest, actor: OperatorActor) {
       return (
         captured.checkpointRecovery ?? checkpointError('Checkpoint recovery unavailable')

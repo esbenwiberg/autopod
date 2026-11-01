@@ -52,6 +52,7 @@ import { CONTROL_PLANE_RATE_LIMIT_MAX, rateLimitIdentity } from '../plugins/rate
 import { resolvePublicPreviewOrigin, rewritePreviewUrlForBrowser } from '../preview-url.js';
 import { serializePodForWire, serializeValidationResult } from '../wire-serializers.js';
 import { checkpointRecoveryRoutes } from './checkpoint-recovery.js';
+import { sandboxRecoveryRoutes } from './sandbox-recovery.js';
 import { sourceAdoptionRoutes } from './source-adoption.js';
 import { validationRecoveryRoutes } from './validation-recovery.js';
 
@@ -783,6 +784,7 @@ export function podRoutes(
   });
 
   checkpointRecoveryRoutes(app, podManager);
+  sandboxRecoveryRoutes(app, podManager);
 
   // Task projection deliberately avoids deserializing the pod's contract/validation JSON.
   app.get('/pods/:podId/task-execution', async (request) => {
