@@ -11,7 +11,9 @@ struct SandboxRecoveryCard: View {
   @State private var showSheet = false
 
   var body: some View {
-    Group {
+    // An initially empty Group has no child to receive .task inside the detail
+    // stack. Keep a concrete lifecycle host even before the first observation.
+    VStack(alignment: .leading, spacing: 0) {
       if let snapshot, !snapshot.resources.isEmpty {
         HStack {
           Image(systemName: snapshot.resources.contains(where: { !$0.pendingIntentIds.isEmpty && $0.abandonment?.completedAt == nil })
