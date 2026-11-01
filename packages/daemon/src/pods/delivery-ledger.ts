@@ -93,7 +93,13 @@ export function createDeliveryLedger(db: Database.Database): DeliveryLedger {
           const owner = db
             .prepare('SELECT pod_id AS podId FROM delivery_intents WHERE id = ?')
             .get(intent.id) as { podId: string } | undefined;
-          if (!owner || hasUnansweredDecision(db, owner.podId)) return false;
+          if (!owner) return false;
+          if (hasUnansweredDecision(db, owner.podId))
+            throw new AutopodError(
+              'PR creation was not admitted: a durable human decision remains unanswered. Complete decision reconciliation before retrying; no new provider create was sent.',
+              'HUMAN_DECISION_PENDING',
+              409,
+            );
           assertSourceDeliveryAllowed(db, owner.podId);
           return (
             db

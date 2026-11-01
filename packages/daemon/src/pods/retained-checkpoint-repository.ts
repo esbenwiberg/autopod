@@ -25,6 +25,23 @@ export interface CheckpointRecoveryBinding {
   configurationHash: string;
 }
 export type PreparedCheckpoint = Awaited<ReturnType<typeof prepareRetainedCheckpointWorkspace>>;
+export interface CheckpointOutcomeRequest {
+  expectedGeneration: number;
+  expectedResultHash: string;
+  expectedHead: string;
+  reason: string;
+}
+export interface CheckpointOutcomeReceipt {
+  requestHash: string;
+  actor: OperatorActor;
+  reason: string;
+  generation: number;
+  dispatchId: string;
+  containerId: string;
+  source: { head: string; tree: string; checkpoints: string[] };
+  checked: NonNullable<CheckpointRecoveryRecord['checked']>;
+  observedAt: string;
+}
 export interface CheckpointRecoveryRecord {
   id: string;
   podId: string;
@@ -48,6 +65,7 @@ export interface CheckpointRecoveryRecord {
     snapshot: { path: string; cycle: number; containerId: string } | null;
   } | null;
   blocked: { code: string } | null;
+  reconciled: CheckpointOutcomeReceipt | null;
 }
 const scopes = new WeakMap<Database.Database, AsyncLocalStorage<string>>();
 function scope(db: Database.Database) {
@@ -102,6 +120,7 @@ export function checkpointDetachedWakeup(
     WHERE r.pod_id=? AND r.resource_key=? AND p.lifecycle_generation>r.generation
     AND (p.container_id IS NULL OR p.container_id<>r.container_id)
     AND (EXISTS(SELECT 1 FROM retained_checkpoint_recovery_events c WHERE c.recovery_id=r.id AND c.kind='checked')
+      OR EXISTS(SELECT 1 FROM retained_checkpoint_outcome_reconciliations o WHERE o.recovery_id=r.id)
       OR p.worktree_path=json_extract((SELECT evidence FROM retained_checkpoint_recovery_events WHERE recovery_id=r.id AND kind='prepared'),'$.worktree'))`)
     .get(podId, resourceKey);
 }
@@ -124,6 +143,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
           | 'checking'
           | 'checked'
           | 'blocked'
+          | 'reconciled'
         > & { actor: string; binding: string; originalEvidence: string })
       | undefined;
     if (!raw) return null;
@@ -136,6 +156,14 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       const found = events.find((entry) => entry.kind === kind);
       return found ? (JSON.parse(found.evidence) as T) : null;
     };
+    const outcome = db
+      .prepare(
+        'SELECT evidence FROM retained_checkpoint_outcome_reconciliations WHERE recovery_id=?',
+      )
+      .get(id) as { evidence: string } | undefined;
+    const reconciled: CheckpointOutcomeReceipt | null = outcome
+      ? JSON.parse(outcome.evidence)
+      : null;
     return {
       ...raw,
       actor: JSON.parse(raw.actor),
@@ -144,8 +172,9 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       prepared: event('prepared'),
       activated: event('activated'),
       checking: event('checking'),
-      checked: event('checked'),
+      checked: event<CheckpointRecoveryRecord['checked']>('checked') ?? reconciled?.checked ?? null,
       blocked: event('blocked'),
+      reconciled,
     };
   }
   function latest(podId: string) {
@@ -175,7 +204,8 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
     const rows = db
       .prepare(`SELECT r.id,r.pod_id AS podId FROM retained_checkpoint_recoveries r
       WHERE (r.pod_id=? OR r.task_id=(SELECT task_id FROM task_executions WHERE pod_id=?))
-      AND NOT EXISTS(SELECT 1 FROM retained_checkpoint_recovery_events e WHERE e.recovery_id=r.id AND e.kind='checked')`)
+      AND NOT EXISTS(SELECT 1 FROM retained_checkpoint_recovery_events e WHERE e.recovery_id=r.id AND e.kind='checked')
+      AND NOT EXISTS(SELECT 1 FROM retained_checkpoint_outcome_reconciliations o WHERE o.recovery_id=r.id)`)
       .all(podId, podId) as { id: string; podId: string }[];
     for (const row of rows) {
       const record = get(row.id) ?? checkpointError('Recovery custody record unavailable');
@@ -215,6 +245,51 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
           )
           .all(podId) as { id: string }[]
       ).map((row) => get(row.id) ?? checkpointError('Recovery custody record unavailable'));
+    },
+    reconcile(id: string, receipt: CheckpointOutcomeReceipt) {
+      const prior = get(id) ?? checkpointError('Checkpoint recovery unavailable');
+      if (prior.reconciled) {
+        if (prior.reconciled.requestHash !== receipt.requestHash)
+          checkpointError(
+            'Reconciliation already has a different request',
+            'CHECKPOINT_RECOVERY_CONFLICT',
+          );
+        return prior;
+      }
+      if (
+        prior.checked ||
+        !prior.checking ||
+        prior.blocked?.code !== 'CHECKPOINT_SOURCE_CHANGED' ||
+        receipt.checked.result.overall !== 'fail' ||
+        receipt.checked.snapshot !== null ||
+        receipt.checked.resultHash !== checkpointHash(receipt.checked.result) ||
+        receipt.actor.type !== 'human' ||
+        receipt.generation !== prior.activated?.generation ||
+        receipt.source.tree !== prior.prepared?.tree ||
+        receipt.source.checkpoints.length === 0
+      )
+        checkpointError('Only an exact failed replacement outcome can be reconciled');
+      const published = db
+        .prepare(`SELECT 1 FROM validation_dispatches d
+        JOIN validation_logical_publications p ON p.dispatch_id=d.id
+        WHERE d.id=? AND d.pod_id=? AND d.task_id=? AND d.generation=?
+          AND json_extract(d.binding,'$.containerId')=? AND p.result_hash=?`)
+        .get(
+          receipt.dispatchId,
+          prior.podId,
+          prior.taskId,
+          receipt.generation,
+          receipt.containerId,
+          receipt.checked.resultHash,
+        );
+      if (!published) checkpointError('Exact logical validation publication required');
+      db.prepare('INSERT INTO retained_checkpoint_outcome_reconciliations VALUES(?,?,?,?)').run(
+        id,
+        receipt.requestHash,
+        JSON.stringify(receipt),
+        receipt.observedAt,
+      );
+      return get(id) ?? checkpointError('Reconciliation was not retained');
     },
     owned<T>(id: string, operation: () => T): T {
       return scope(db).run(id, operation);

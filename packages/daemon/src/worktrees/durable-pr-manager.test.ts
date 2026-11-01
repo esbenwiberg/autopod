@@ -123,7 +123,10 @@ describe('durable PR delivery boundary', () => {
         expect(f.repo.hasUnansweredDecision?.('pod')).toBe(true);
         return null;
       });
-      await expect(f.manager.createPr(f.config)).rejects.toThrow(/reconciliation/);
+      await expect(f.manager.createPr(f.config)).rejects.toMatchObject({
+        code: 'HUMAN_DECISION_PENDING',
+        message: expect.stringContaining('no new provider create was sent'),
+      });
       expect(f.provider.createPr).not.toHaveBeenCalled();
       expect(f.db.prepare('SELECT state FROM delivery_intents').get()).toEqual({
         state: 'reserved',

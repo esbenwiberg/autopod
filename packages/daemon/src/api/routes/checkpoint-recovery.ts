@@ -5,7 +5,10 @@ import type { PodManager } from '../../pods/pod-manager.js';
 
 export function checkpointRecoveryRoutes(
   app: FastifyInstance,
-  manager: Pick<PodManager, 'getCheckpointRecoveries' | 'recoverCheckpoint'>,
+  manager: Pick<
+    PodManager,
+    'getCheckpointRecoveries' | 'recoverCheckpoint' | 'reconcileCheckpointOutcome'
+  >,
 ) {
   const params = z.object({ podId: z.string().min(1).max(128) });
   app.get('/pods/:podId/checkpoint-recovery', async (request, reply) => {
@@ -14,6 +17,30 @@ export function checkpointRecoveryRoutes(
     const { podId } = params.parse(request.params);
     reply.header('Cache-Control', 'no-store');
     return { operations: manager.getCheckpointRecoveries(podId) };
+  });
+  app.post('/pods/:podId/checkpoint-recovery/:recoveryId/reconcile', async (request, reply) => {
+    if (!request.user?.oid)
+      throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
+    const { podId, recoveryId } = params
+      .extend({
+        recoveryId: z.string().regex(/^[a-zA-Z0-9-]{1,64}$/),
+      })
+      .parse(request.params);
+    const input = z
+      .object({
+        expectedGeneration: z.number().int().min(1),
+        expectedResultHash: z.string().regex(/^[a-f0-9]{64}$/),
+        expectedHead: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
+        reason: z.string().trim().min(10).max(4000),
+      })
+      .strict()
+      .parse(request.body);
+    const operation = await manager.reconcileCheckpointOutcome(podId, recoveryId, input, {
+      type: 'human',
+      userId: request.user.oid,
+    });
+    reply.header('Cache-Control', 'no-store');
+    return { operation };
   });
   app.post('/pods/:podId/checkpoint-recovery', async (request, reply) => {
     if (!request.user?.oid)

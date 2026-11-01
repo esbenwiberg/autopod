@@ -63,6 +63,44 @@ export async function materializeCheckpointFixture(
     worktreeClean: (await git(cwd, 'status', '--porcelain')).length === 0,
   }));
   f.deps.prepare = undefined; // Real independent archive/bundle/worktree, not an injected receipt.
+  vi.mocked(f.ctx.deps.sandboxWorkspaceCheckpoint!).mockImplementation(async (args) => {
+    args.assertCurrent();
+    const sourceHead = await git(args.worktreePath, 'rev-parse', 'HEAD');
+    const tree = await git(args.worktreePath, 'rev-parse', 'HEAD^{tree}');
+    // Reproduce production's host-side no-op promotion, not the old mock which
+    // returned HEAD unchanged and hid the selected-checkpoint regression.
+    const commit = await git(
+      args.worktreePath,
+      '-c',
+      'user.name=Autopod',
+      '-c',
+      'user.email=autopod@localhost',
+      'commit-tree',
+      tree,
+      '-p',
+      sourceHead,
+      '-m',
+      'autopod sandbox checkpoint',
+    );
+    const quarantineRef = `refs/autopod-quarantine/${args.podId.replace(/[^A-Za-z0-9_-]/g, '_')}/${args.sequence}`;
+    await git(args.worktreePath, 'update-ref', quarantineRef, commit);
+    await git(args.worktreePath, 'reset', '--hard', commit);
+    args.assertCurrent();
+    return {
+      sequence: args.sequence,
+      sourceHead,
+      sourceTree: tree,
+      snapshotCommit: commit,
+      snapshotTree: tree,
+      transferVerified: true,
+      bundleVerified: true,
+      hostImported: true,
+      lineageVerified: true,
+      promoted: true,
+      materialized: true,
+      quarantineRef,
+    };
+  });
   f.cm.getStatus = vi.fn(async (id) => (id === f.containerId ? 'stopped' : 'running'));
   Object.assign(f.cm, {
     executionResourceScope:
@@ -89,6 +127,57 @@ export async function materializeCheckpointFixture(
       'New sandbox validation reports\n',
     );
   });
+}
+
+/** Exercise a real replacement dispatch and published failure, then model the
+ * old final-source comparator rejecting a daemon-only no-op capture.
+ */
+export async function blockedCheckpointOutcomeFixture(
+  f: Awaited<ReturnType<typeof retainedCheckpointFixture>>,
+) {
+  vi.stubEnv('DATA_DIR', f.root);
+  f.ctx.podRepo.update(f.podId, { maxValidationAttempts: f.pod().validationAttempts + 1 });
+  await materializeCheckpointFixture(f);
+  vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) =>
+    createFailingValidationResult(config.podId, config.attempt),
+  );
+  if (f.result.overall === 'fail')
+    f.ctx.podRepo.taskRetries!.authorize(
+      f.podId,
+      'replacement-checks',
+      'Authorize one selected-checkpoint validation while retaining original evidence',
+      f.actor,
+    );
+  await f.submit();
+  await f.recovery.wait(f.input.id);
+  const inspect = f.worktrees.inspectSourceAdoption.getMockImplementation()!;
+  let classifyOldFailure = true;
+  f.worktrees.inspectSourceAdoption.mockImplementation(async (cwd, branch) => {
+    const source = await inspect(cwd, branch);
+    return classifyOldFailure && f.pod().status === 'review_required'
+      ? { ...source, treeSha: '0'.repeat(40) }
+      : source;
+  });
+  try {
+    await f.manager.processPod(f.podId);
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !('code' in error) ||
+      error.code !== 'CHECKPOINT_SOURCE_CHANGED'
+    )
+      throw error;
+  } finally {
+    classifyOldFailure = false;
+  }
+  const source = await inspect(f.pod().worktreePath!, f.pod().branch);
+  return {
+    expectedGeneration: f.pod().lifecycleGeneration,
+    expectedResultHash: checkpointHash(f.pod().lastValidationResult),
+    expectedHead: source.commitSha,
+    reason:
+      'Observe the already-published failed checks after exact owned no-op checkpoint verification',
+  };
 }
 
 export async function retainedCheckpointFixture(

@@ -25,6 +25,7 @@ import { createValidationTriggerCalls } from './pod-facade-calls.js';
 import type { PodFacadeOwners } from './pod-facade-ports.js';
 import type { PodStats } from './pod-repository.js';
 import {
+  type CheckpointOutcomeRequest,
   type CheckpointRecoveryRequest,
   checkpointError,
 } from './retained-checkpoint-repository.js';
@@ -96,6 +97,16 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
       return (
         captured.checkpointRecovery ?? checkpointError('Checkpoint recovery unavailable')
       ).submit(podId, input, actor);
+    },
+    reconcileCheckpointOutcome(
+      podId: string,
+      recoveryId: string,
+      input: CheckpointOutcomeRequest,
+      actor: OperatorActor,
+    ) {
+      return (
+        captured.checkpointRecovery ?? checkpointError('Checkpoint recovery unavailable')
+      ).reconcileOutcome(podId, recoveryId, input, actor);
     },
     getCheckpointRecoveries(podId: string) {
       podRepo.getOrThrow(podId);

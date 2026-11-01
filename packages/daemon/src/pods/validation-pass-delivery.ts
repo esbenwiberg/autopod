@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { publishScreenshotArtifacts } from '../validation/screenshot-artifacts.js';
 import { buildGitHubImageUrl } from '../validation/screenshot-collector.js';
+import { inspectCheckpointSource } from '../worktrees/checkpoint-source-identity.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { APPROVAL_SNAPSHOT_EXCLUDES } from './approval-policy.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
@@ -62,17 +63,16 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
       checkpoint?.activated?.generation === s2.lifecycleGeneration && !checkpoint.checked;
     if (checksOnly) {
       if (!s2.worktreePath) checkpointError('Selected checkpoint worktree unavailable');
-      const source = await worktreeManager.inspectSourceAdoption?.(s2.worktreePath, s2.branch);
-      assertCurrent();
-      if (
-        !source?.worktreeClean ||
-        source.commitSha !== checkpoint.prepared?.head ||
-        source.treeSha !== checkpoint.prepared?.tree
-      )
-        checkpointError(
-          'Validation source differs from the selected checkpoint; no delivery is permitted',
-          'CHECKPOINT_SOURCE_CHANGED',
-        );
+      if (!checkpoint.prepared) checkpointError('Selected checkpoint identity unavailable');
+      await inspectCheckpointSource({
+        podId,
+        worktreePath: s2.worktreePath,
+        branch: s2.branch,
+        head: checkpoint.prepared.head,
+        tree: checkpoint.prepared.tree,
+        worktreeManager,
+        assertCurrent,
+      });
       emitActivityStatus(
         podId,
         'Selected checkpoint checks passed; publication, dependents, approval and merge were not requested.',
