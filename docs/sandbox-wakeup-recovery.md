@@ -67,7 +67,10 @@ intents exist, and do not manually clear journal rows to make recovery proceed.
 
 The pod detail header shows **Sandbox recovery…** for retained sandboxes in idle
 failed/review/validated/complete/killed pods. It shows the recovery hold instead of
-requiring users to discover it through a failed Delete. The sheet provides:
+requiring users to discover it through a failed Delete. Status inspection starts
+on the card's first appearance, including when no recovery state has loaded yet;
+an inspection failure exposes a retry control rather than silently hiding recovery.
+The sheet provides:
 
 - **Check status**: fresh provider GETs and the original wakeup evidence. An exact
   Running observation can settle a wakeup. Inspection never sends a resume,

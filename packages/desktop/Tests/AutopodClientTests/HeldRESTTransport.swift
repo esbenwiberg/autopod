@@ -29,12 +29,30 @@ final class ConfirmedActionPeer: @unchecked Sendable {
   private var recorded: [URLRequest] = []
   private var closed = false
   private var expired = 0
+  private let immediateGETResponses: [String: String]
+  private var immediateRecorded: [URLRequest] = []
+  var immediateRequests: [URLRequest] { lock.withLock { immediateRecorded } }
   var requests: [URLRequest] { lock.withLock { recorded } }
   var activeCount: Int { lock.withLock { active.count } }
   var deadlines: Int { lock.withLock { expired } }
 
-  init() { (stream, continuation) = AsyncStream.makeStream() }
+  init(immediateGETResponses: [String: String] = [:]) {
+    self.immediateGETResponses = immediateGETResponses
+    (stream, continuation) = AsyncStream.makeStream()
+  }
   func receive(_ request: ConfirmedActionProtocol) {
+    // Explicit read-only background observations must not consume the held
+    // pause/kill/delete response stream or masquerade as extra control calls.
+    if request.request.httpMethod == "GET", let path = request.request.url?.path,
+       let body = immediateGETResponses[path] {
+      let accepted = lock.withLock {
+        immediateRecorded.append(request.request)
+        return !closed
+      }
+      if accepted { request.respond(status: 200, body: body) }
+      else { request.fail(URLError(.cancelled)) }
+      return
+    }
     let accepted = lock.withLock {
       recorded.append(request.request)
       guard !closed else { return false }

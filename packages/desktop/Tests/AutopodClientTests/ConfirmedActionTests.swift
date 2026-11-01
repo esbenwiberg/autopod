@@ -84,6 +84,19 @@ func confirmedActionWaitsForObservedState(action: ConfirmedAction, outcome: Stri
   }
 }
 
+@MainActor @Test func confirmedActionFixtureSeparatesRecoveryObservation() async throws {
+  try await withConfirmedActionFixture { fixture in
+    let state = try await fixture.handler.actions.sandboxRecovery.load(fixture.id)
+    #expect(state.podId == fixture.id)
+    #expect(state.resources.isEmpty)
+    #expect(fixture.peer.requests.isEmpty)
+    #expect(fixture.peer.immediateRequests.count == 1)
+    #expect(fixture.peer.immediateRequests.first?.httpMethod == "GET")
+    #expect(fixture.peer.immediateRequests.first?.value(forHTTPHeaderField: "Authorization")
+      == "Bearer synthetic-action-token")
+  }
+}
+
 @MainActor @Test func confirmedActionFixtureCancelsHeldRequest() async throws {
   try await withConfirmedActionFixture { fixture in
     let task = fixture.start(.kill)
@@ -116,7 +129,12 @@ func withConfirmedActionFixture(
 
 @MainActor final class ConfirmedActionFixture {
   let id = "observed-pod"
-  let peer = ConfirmedActionPeer()
+  // Terminal detail views now perform this observation on first appearance.
+  // Keep it explicit and separate from the held control-operation transport.
+  let peer = ConfirmedActionPeer(immediateGETResponses: [
+    "/pods/observed-pod/sandbox-recovery":
+      #"{"podId":"observed-pod","generation":1,"resources":[],"operations":[],"wakeups":[]}"#,
+  ])
   let store = PodStore()
   let handler: ActionHandler
   private let session: URLSession
