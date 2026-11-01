@@ -480,6 +480,15 @@ export class AutopodClient {
   ): Promise<import('@autopod/shared').ValidationExecutionRecoveryState> {
     return this.request('POST', `/pods/${id}/validation-execution-recovery`, input);
   }
+  async getCheckpointRecoveries(id: string): Promise<unknown> {
+    return this.request('GET', `/pods/${id}/checkpoint-recovery`);
+  }
+  async recoverCheckpoint(
+    id: string,
+    input: import('@autopod/shared').CheckpointRecoveryRequest,
+  ): Promise<unknown> {
+    return this.request('POST', `/pods/${id}/checkpoint-recovery`, input);
+  }
   async authorizeValidationRecoveryBudget(
     id: string,
     input: import('@autopod/shared').ValidationExecutionRecoveryRequest & {

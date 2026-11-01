@@ -63,6 +63,11 @@ import { displayRepository, repositoryDisplayColumns } from './pod-display-repos
 import { type ProviderUsageProjection, readProviderUsage } from './provider-usage-projection.js';
 import { withLifecycleReadiness } from './readiness-projection.js';
 import {
+  type RetainedCheckpointRepository,
+  checkpointError,
+  createRetainedCheckpointRepository,
+} from './retained-checkpoint-repository.js';
+import {
   type SourceAdoptionRepository,
   createSourceAdoptionRepository,
 } from './source-adoption-repository.js';
@@ -285,6 +290,7 @@ import {
 export interface PodRepository extends Partial<UnitOfWork> {
   taskRetries?: TaskRetryLedger;
   validationExecutions?: ValidationExecutionLedger;
+  retainedCheckpoints?: RetainedCheckpointRepository;
   sandboxStartupRetries?: TaskRetryLedger;
   codexInterruptionRetries?: TaskRetryLedger;
   workerRetries?: TaskRetryLedger;
@@ -811,6 +817,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
     taskRetries: createTaskRetryLedger(db),
     validationExecutions: createValidationExecutionLedger(db),
+    retainedCheckpoints: createRetainedCheckpointRepository(db),
     sandboxStartupRetries: createTaskRetryLedger(db, 'sandbox_startup'),
     codexInterruptionRetries: createTaskRetryLedger(db, 'codex_interruption'),
     workerRetries: createTaskRetryLedger(db, 'worker'),
@@ -956,6 +963,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     update(id: string, changes: PodUpdates): void {
+      createRetainedCheckpointRepository(db).assertAvailable(id);
       // Any mutation during validation preservation could invalidate its evidence.
       assertNoValidationRecovery(db, id);
       if (
@@ -1536,7 +1544,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
              ELSE 0 END
            UNION SELECT sandbox_id AS container_id FROM sandbox_wakeup_intents
            WHERE ended_at IS NULL
-           UNION SELECT json_extract(binding,'$.containerId') AS container_id FROM source_adoptions`,
+           UNION SELECT json_extract(binding,'$.containerId') AS container_id FROM source_adoptions
+           UNION SELECT container_id FROM retained_checkpoint_recoveries`,
         )
         .all() as { container_id: string }[];
       return [
@@ -1561,6 +1570,11 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     delete: db.transaction((id: string): void => {
+      if (createRetainedCheckpointRepository(db).latest(id))
+        checkpointError(
+          'Original checkpoint recovery resources/evidence remain retained; deletion and archival are unavailable.',
+          'CHECKPOINT_ORIGINAL_RETAINED',
+        );
       createValidationExecutionLedger(db).assertTaskSettled(id);
       sourceAdoptions.assertDeletable(id);
       taskExecutions.assertCanDelete(id);

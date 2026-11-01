@@ -389,6 +389,13 @@ export function createProvisioningWorkspace(
           await access(bareWorktreeDir);
           recoveryViable = true;
         } catch {
+          const checkpoint = podRepo.retainedCheckpoints?.latest(podId);
+          if (checkpoint?.activated?.generation === pod.lifecycleGeneration && !checkpoint.checked)
+            throw new AutopodError(
+              'Selected checkpoint worktree is unavailable; recovery cannot substitute remote source.',
+              'CHECKPOINT_SOURCE_UNVERIFIED',
+              409,
+            );
           logger.warn(
             { podId, worktreePath: pod.recoveryWorktreePath },
             'Recovery worktree missing or bare-repo metadata gone — falling back to fresh worktree',

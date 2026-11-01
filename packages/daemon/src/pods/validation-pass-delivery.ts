@@ -1,6 +1,10 @@
+import path from 'node:path';
 import { publishScreenshotArtifacts } from '../validation/screenshot-artifacts.js';
 import { buildGitHubImageUrl } from '../validation/screenshot-collector.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
+import { APPROVAL_SNAPSHOT_EXCLUDES } from './approval-policy.js';
+import { collectArtifactSnapshot } from './artifact-preservation.js';
+import { checkpointError } from './retained-checkpoint-repository.js';
 import { isTerminalState } from './state-machine.js';
 import {
   assertValidationExecutionSettled,
@@ -53,9 +57,30 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
     assertValidationExecutionSettled({ ...s2, lastValidationResult: result });
     const assertCurrent = captureValidationMutationGuard(podRepo, s2);
     emitActivityStatus(podId, `Validation passed (attempt ${attempt})`);
+    const checkpoint = podRepo.retainedCheckpoints?.latest(podId);
+    const checksOnly =
+      checkpoint?.activated?.generation === s2.lifecycleGeneration && !checkpoint.checked;
+    if (checksOnly) {
+      if (!s2.worktreePath) checkpointError('Selected checkpoint worktree unavailable');
+      const source = await worktreeManager.inspectSourceAdoption?.(s2.worktreePath, s2.branch);
+      assertCurrent();
+      if (
+        !source?.worktreeClean ||
+        source.commitSha !== checkpoint.prepared?.head ||
+        source.treeSha !== checkpoint.prepared?.tree
+      )
+        checkpointError(
+          'Validation source differs from the selected checkpoint; no delivery is permitted',
+          'CHECKPOINT_SOURCE_CHANGED',
+        );
+      emitActivityStatus(
+        podId,
+        'Selected checkpoint checks passed; publication, dependents, approval and merge were not requested.',
+      );
+    }
     const passDefaultBranch = profile.defaultBranch ?? 'main';
     let prUrl: string | null = s2.prUrl ?? null;
-    const prManager = prManagerFactory ? prManagerFactory(profile) : null;
+    const prManager = !checksOnly && prManagerFactory ? prManagerFactory(profile) : null;
     if (prManager && s2.worktreePath && s2.options.output === 'pr') {
       // Publish screenshots to their own ref so the PR body can embed them
       // without the reviewed branch carrying a file the agent never wrote.
@@ -241,7 +266,7 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
       advisoryQaInFlight:
         validationConfig.advisoryBrowserQaEnabled && !!validationEngine.runAdvisoryBrowserQa,
     });
-    maybeTriggerDependents(validatedPod);
+    if (!checksOnly) maybeTriggerDependents(validatedPod);
     await runAdvisoryAfterValidation(
       podId,
       validationConfig,
@@ -254,7 +279,38 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
     if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
       return;
     }
-    if (postAdvisoryPod.linkedPodId) {
+    if (checksOnly && postAdvisoryPod.containerId) {
+      // Capture while this verified execution resource is still Running. Approval
+      // can verify the exact receipt without a second cold resume just to read reports.
+      const artifactsPath = await collectArtifactSnapshot({
+        containerManager: containerManagerFactory.get(postAdvisoryPod.executionTarget),
+        containerId: postAdvisoryPod.containerId,
+        artifactRoot: path.join(
+          process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data'),
+          'artifacts',
+          podId,
+        ),
+        generation: postAdvisoryPod.lifecycleGeneration,
+        cycle: postAdvisoryPod.finalization?.cycle ?? 0,
+        isCurrent: () => {
+          try {
+            advisoryPublicationOwnership(
+              validatedPod,
+              result,
+              validationRecord?.id,
+            ).assertCurrent();
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        excludes: APPROVAL_SNAPSHOT_EXCLUDES,
+        wakeupTimeoutMs: 150_000,
+      });
+      advisoryPublicationOwnership(validatedPod, result, validationRecord?.id).assertCurrent();
+      podRepo.update(podId, { artifactsPath });
+    }
+    if (!checksOnly && postAdvisoryPod.linkedPodId) {
       await completeFixPodAfterPush(postAdvisoryPod);
       return;
     }
@@ -269,7 +325,7 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
         logger.warn({ err, podId }, 'Failed to stop container post-validation');
       }
     }
-    if (postAdvisoryPod.autoApprove) {
+    if (!checksOnly && postAdvisoryPod.autoApprove) {
       emitActivityStatus(podId, 'Auto-approving…');
       logger.info({ podId }, 'Auto-approving pod after validation');
       setImmediate(() => {

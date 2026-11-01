@@ -28,6 +28,10 @@ function createMockClient() {
       allowed: false,
     }),
     reconcileValidationExecution: vi.fn().mockResolvedValue({ generation: 1, settled: true }),
+    getCheckpointRecoveries: vi.fn().mockResolvedValue({ operations: [] }),
+    recoverCheckpoint: vi
+      .fn()
+      .mockResolvedValue({ operation: { id: 'selection-1', checked: null } }),
     authorizeValidationRecoveryBudget: vi.fn().mockResolvedValue({ seconds: 900 }),
     getTaskExecution: vi.fn().mockRejectedValue(new Error('Unavailable on older daemon')),
     getTerminationReconciliations: vi.fn().mockResolvedValue({
@@ -1528,6 +1532,43 @@ describe('validation execution recovery commands', () => {
         reason: 'Preserve source first',
       });
       expect(client.getValidationExecutionRecovery).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
+  it('inspects checkpoint selections without dispatch and requires the complete explicit selection', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const client = await run('checkpoint-recovery');
+      expect(client.getCheckpointRecoveries).toHaveBeenCalledWith('recovery-example');
+      expect(client.recoverCheckpoint).not.toHaveBeenCalled();
+      await expect(run('checkpoint-recovery', '--apply')).rejects.toThrow('--apply requires');
+      await expect(run('checkpoint-recovery', '--head', 'b'.repeat(40))).rejects.toThrow(
+        'require --apply',
+      );
+      const applied = await run(
+        'checkpoint-recovery',
+        '--apply',
+        '--request-id',
+        'selection-1',
+        '--generation',
+        '1',
+        '--result-hash',
+        'a'.repeat(64),
+        '--head',
+        'b'.repeat(40),
+        '--reason',
+        'Choose this saved source; retain unknown original content',
+      );
+      expect(applied.recoverCheckpoint).toHaveBeenCalledExactlyOnceWith('recovery-example', {
+        id: 'selection-1',
+        expectedGeneration: 1,
+        expectedResultHash: 'a'.repeat(64),
+        checkpointHead: 'b'.repeat(40),
+        reason: 'Choose this saved source; retain unknown original content',
+      });
+      expect(applied.reconcileValidationExecution).not.toHaveBeenCalled();
+      expect(log.mock.calls.flat().join('\n')).toContain('not successful validation');
     } finally {
       log.mockRestore();
     }

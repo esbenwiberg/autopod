@@ -74,6 +74,7 @@ import {
   createValidationRepository,
 } from './pods/index.js';
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
+import { checkpointCredentialEpoch } from './pods/retained-checkpoint-repository.js';
 import { SandboxOrphanReaper } from './pods/sandbox-orphan-reaper.js';
 import { SandboxTerminalReaper } from './pods/sandbox-terminal-reaper.js';
 import { ScreenshotRetention } from './pods/screenshot-retention.js';
@@ -276,7 +277,9 @@ const credentialsCipher = loadOrCreateKey(secretsKeyPath);
 
 // Pod token issuer (HMAC-based, derived from secrets.key).
 // Declared early so it can be passed to createPodManager for container authentication.
-const sessionTokenIssuer = createPodTokenIssuer(secretsKeyPath);
+const sessionTokenIssuer = createPodTokenIssuer(secretsKeyPath, (podId) =>
+  checkpointCredentialEpoch(db, podId),
+);
 
 // Repositories
 const profileStore = createProfileStore(db, credentialsCipher);

@@ -1,5 +1,10 @@
 # Reconciling an unverified validation execution
 
+For an explicitly selected **known host checkpoint**, see
+[retained-checkpoint recovery](retained-checkpoint-recovery.md). It retains the
+original unknown execution and reports while running fresh checks independently;
+it does not settle historical ownership, prove final content, or authorize delivery.
+
 This path inspects and fences the exact old execution. Destructive reconciliation is
 unavailable without provider final-content proof. It does not pass tests, waive validation,
 observe an exit code, grant a retry, reset task allowances, or start a worker. The original

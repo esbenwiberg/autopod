@@ -45,6 +45,9 @@ import type { createWorkspaceRecoveryCommands } from './workspace-recovery-comma
 import type { createWorkspaceWatchdog } from './workspace-watchdog.js';
 export interface PodFacadeOwners {
   validationExecutionRecovery: ReturnType<typeof createValidationExecutionRecovery>;
+  checkpointRecovery?: ReturnType<
+    typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
+  >;
   sourceAdoption?: ReturnType<typeof createSourceAdoptionController>;
   admissionQueries: Pick<
     ReturnType<typeof createAdmissionQueries>,

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { checkpointDetachedWakeup } from '../pods/retained-checkpoint-repository.js';
 
 export type SandboxWakeupEvidence =
   | { kind: 'response'; status: number; diagnostics: Record<string, string> }
@@ -204,11 +205,12 @@ export function createSandboxWakeupJournal(db: Database.Database): SandboxWakeup
         );
     },
     assertPodReleasable(podId) {
-      if (
-        db
-          .prepare('SELECT 1 FROM sandbox_wakeup_intents WHERE pod_id=? AND ended_at IS NULL')
-          .get(podId)
-      )
+      const pending = db
+        .prepare(
+          'SELECT resource_key FROM sandbox_wakeup_intents WHERE pod_id=? AND ended_at IS NULL',
+        )
+        .all(podId) as { resource_key: string }[];
+      if (pending.some((row) => !checkpointDetachedWakeup(db, podId, row.resource_key)))
         throw new AutopodError(
           'An original resource labelled for this pod has an unresolved wakeup. Clearing its current container pointer does not release source or recovery evidence.',
           'SANDBOX_WAKEUP_OUTCOME_UNVERIFIED',

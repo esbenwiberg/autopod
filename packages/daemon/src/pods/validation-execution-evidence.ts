@@ -8,6 +8,7 @@ import {
   type ValidationResult,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { assertCheckpointResourceNotRetained } from './retained-checkpoint-repository.js';
 import { slugifyPagePath } from './screenshot-store.js';
 import {
   requiresValidationFailureSettlement,
@@ -157,6 +158,7 @@ export function unsettledDispatches(
 }
 /** Provider transport fence: immutable dispatch custody survives changed pod pointers. */
 export function assertValidationResourceSettled(db: Database.Database, containerId: string): void {
+  assertCheckpointResourceNotRetained(db, containerId);
   const held = unsettledDispatches(db).find((row) => row.binding.containerId === containerId);
   if (held)
     validationRecoveryError(

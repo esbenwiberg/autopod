@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type Database from 'better-sqlite3';
+import { createRetainedCheckpointRepository } from './retained-checkpoint-repository.js';
 import { sourceAdoptionError } from './source-adoption-identity.js';
 import { assertValidationResourceSettled } from './validation-execution-evidence.js';
 
@@ -32,6 +33,7 @@ export function assertSourceAvailable(
   podId: string,
   owner = sourceOwnerScope(db).getStore(),
 ): void {
+  createRetainedCheckpointRepository(db).assertAvailable(podId);
   const blocked = db
     .prepare(`SELECT s.id,s.pod_id AS podId,s.error,
     COALESCE(s.adopted_generation,json_extract(s.binding,'$.generation')) AS generation
@@ -65,6 +67,12 @@ export function assertSourceAvailable(
 }
 /** Delivery/release is NEVER implied by the private mutation capability or passing checks. */
 export function assertSourceDeliveryAllowed(db: Database.Database, podId: string): void {
+  const recovery = createRetainedCheckpointRepository(db).latest(podId);
+  if (recovery && !recovery.checked)
+    sourceAdoptionError(
+      'Checkpoint recovery grants checks only; no source publication or delivery is admitted.',
+      'CHECKPOINT_CHECKS_ONLY',
+    );
   if (
     db
       .prepare(
