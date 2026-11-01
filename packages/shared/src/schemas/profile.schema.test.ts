@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { environmentPresetSchema } from './launch-config.schema.js';
 import { createProfileSchema, updateProfileSchema } from './profile.schema.js';
 import {
   createProviderAccountSchema,
@@ -490,4 +491,21 @@ describe('updateProfileSchema model validation', () => {
       }
     }
   });
+});
+
+describe('Node worker template contract', () => {
+  it('defaults only new base profiles to Node24', () => {
+    expect(createProfileSchema.parse({ name: 'new-node' }).template).toBe('node24');
+    expect(createProfileSchema.parse({ name: 'child', extends: 'base' }).template).toBeNull();
+    expect(updateProfileSchema.parse({})).not.toHaveProperty('template');
+    expect(environmentPresetSchema.safeParse({}).success).toBe(false);
+  });
+  it.each(['node22', 'node22-pw', 'node22-pw-pg', 'node24', 'node24-pw', 'node24-pw-pg'])(
+    'round trips explicit %s in profile and composable environment schemas',
+    (template) => {
+      expect(createProfileSchema.parse({ name: 'explicit', template }).template).toBe(template);
+      expect(updateProfileSchema.parse({ template }).template).toBe(template);
+      expect(environmentPresetSchema.parse({ template }).template).toBe(template);
+    },
+  );
 });

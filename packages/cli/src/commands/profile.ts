@@ -323,7 +323,7 @@ export function registerProfileCommands(program: Command, getClient: () => Autop
         // buildCommand and startCommand are also optional when repoUrl is null.
         repoUrl: null,
         defaultBranch: 'main',
-        template: 'node22',
+        template: 'node24',
         buildCommand: null,
         validationSetupCommand: null,
         startCommand: null,

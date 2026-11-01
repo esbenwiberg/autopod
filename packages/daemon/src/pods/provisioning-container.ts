@@ -143,7 +143,7 @@ export function createProvisioningContainer(
 
     // For .NET templates, cap MSBuild node count to half the available CPUs
     // (min 2, max 4) to prevent dozens of MSBuild workers from exhausting memory.
-    const template = profile.template ?? 'node22';
+    const template = profile.template ?? 'node24';
     const isDotnet = template.startsWith('dotnet');
 
     // Registry authentication is independent from Azure DevOps Git/REST auth.

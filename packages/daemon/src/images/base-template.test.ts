@@ -14,6 +14,7 @@ const playwrightBaseTemplates = [
   'Dockerfile.node22-pw',
   'Dockerfile.node22-pw-pg',
   'Dockerfile.node24-pw',
+  'Dockerfile.node24-pw-pg',
   'Dockerfile.go124-pw',
   'Dockerfile.python-node-pg',
   'Dockerfile.dotnet10',
@@ -31,6 +32,7 @@ const workerBaseTemplates = [
   'Dockerfile.node22-pw-pg',
   'Dockerfile.node24',
   'Dockerfile.node24-pw',
+  'Dockerfile.node24-pw-pg',
   'Dockerfile.python-node',
   'Dockerfile.python-node-pg',
   'Dockerfile.python312',
@@ -99,32 +101,38 @@ describe('tmux toolchain', () => {
 });
 
 describe('PostgreSQL base image templates', () => {
-  it('includes the jq prerequisite required by Scruffy validation', async () => {
-    const dockerfile = await readBaseTemplate('Dockerfile.node22-pw-pg');
+  it.each(['node22-pw-pg', 'node24-pw-pg'])(
+    '%s includes jq for database validation',
+    async (template) => {
+      const dockerfile = await readBaseTemplate(`Dockerfile.${template}`);
 
-    expect(dockerfile).toMatch(/\n\s+jq \\\n/);
-    expect(dockerfile).toContain('command -v jq');
-  });
+      expect(dockerfile).toMatch(/\n\s+jq \\\n/);
+      expect(dockerfile).toContain('command -v jq');
+    },
+  );
 
-  it('configures node22-pw-pg without a volatile runtime socket directory', async () => {
-    const dockerfile = await readBaseTemplate('Dockerfile.node22-pw-pg');
-    const initdbWrapper = await readBaseTemplate('node22-pw-pg-initdb.sh');
+  it.each(['node22-pw-pg', 'node24-pw-pg'])(
+    '%s avoids volatile runtime sockets',
+    async (template) => {
+      const dockerfile = await readBaseTemplate(`Dockerfile.${template}`);
+      const initdbWrapper = await readBaseTemplate('node22-pw-pg-initdb.sh');
 
-    expect(dockerfile).toContain('FROM node:22-slim');
-    expect(dockerfile).toContain('postgresql-17');
-    expect(dockerfile).toContain('/usr/share/postgresql/17/extension/pgcrypto.control');
-    expect(initdbWrapper).toContain("unix_socket_directories = ''");
-    expect(dockerfile).toContain(
-      'COPY templates/base/node22-pw-pg-initdb.sh /usr/local/bin/initdb',
-    );
-    expect(initdbWrapper).toContain('real_initdb=/usr/lib/postgresql/17/bin/initdb');
-    expect(dockerfile).not.toContain('/var/run/postgresql');
-    expect(dockerfile).toContain('ENV PGDATA=/tmp/pgdata');
-    expect(dockerfile).toContain('ENV PGHOST=127.0.0.1');
-    expect(dockerfile).toContain('ENV PGPORT=5433');
-    expect(dockerfile).toContain('for binary in pg_ctl postgres');
-    expect(dockerfile).not.toContain('pip install');
-  });
+      expect(dockerfile).toContain(`FROM node:${template.startsWith('node24') ? 24 : 22}-slim`);
+      expect(dockerfile).toContain('postgresql-17');
+      expect(dockerfile).toContain('/usr/share/postgresql/17/extension/pgcrypto.control');
+      expect(initdbWrapper).toContain("unix_socket_directories = ''");
+      expect(dockerfile).toContain(
+        'COPY templates/base/node22-pw-pg-initdb.sh /usr/local/bin/initdb',
+      );
+      expect(initdbWrapper).toContain('real_initdb=/usr/lib/postgresql/17/bin/initdb');
+      expect(dockerfile).not.toContain('/var/run/postgresql');
+      expect(dockerfile).toContain('ENV PGDATA=/tmp/pgdata');
+      expect(dockerfile).toContain('ENV PGHOST=127.0.0.1');
+      expect(dockerfile).toContain('ENV PGPORT=5433');
+      expect(dockerfile).toContain('for binary in pg_ctl postgres');
+      expect(dockerfile).not.toContain('pip install');
+    },
+  );
 
   it('makes every successfully initialized cluster TCP-only', async () => {
     const dockerfile = await readBaseTemplate('Dockerfile.node22-pw-pg');
@@ -246,4 +254,19 @@ describe('Dagger base image templates', () => {
     expect(declarations.length).toBeGreaterThanOrEqual(1);
     expect(declarations.every((line) => line === `ARG ${versionArgument}=v0.20.8`)).toBe(true);
   });
+});
+
+// Source contracts complement (and do not replace) scripts/smoke-node24-images.sh.
+describe('Node24 family native build contract', () => {
+  it.each(['node24', 'node24-pw', 'node24-pw-pg'])(
+    '%s uses matching bundled runtime and headers',
+    async (template) => {
+      const dockerfile = await readBaseTemplate(`Dockerfile.${template}`);
+      expect(dockerfile).toContain('FROM node:24-slim');
+      expect(dockerfile).toContain('python3 build-essential');
+      expect(dockerfile).toContain('ENV npm_config_nodedir=/usr/local');
+      expect(dockerfile).toContain('USER autopod');
+      expect(dockerfile).not.toContain('.local/node24');
+    },
+  );
 });

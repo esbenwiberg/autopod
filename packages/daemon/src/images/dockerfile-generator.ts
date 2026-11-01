@@ -23,6 +23,7 @@ const BASE_IMAGE_NAMES: Record<StackTemplate, string> = {
   'node22-pw-pg': 'autopod-node22-pw-pg',
   node24: 'autopod-node24',
   'node24-pw': 'autopod-node24-pw',
+  'node24-pw-pg': 'autopod-node24-pw-pg',
   dotnet9: 'autopod-dotnet9',
   dotnet10: 'autopod-dotnet10',
   'dotnet10-go': 'autopod-dotnet10-go',
@@ -31,7 +32,7 @@ const BASE_IMAGE_NAMES: Record<StackTemplate, string> = {
   'python-node-pg': 'autopod-python-node-pg',
   go124: 'autopod-go124',
   'go124-pw': 'autopod-go124-pw',
-  custom: 'autopod-node22',
+  custom: 'autopod-node24',
 };
 
 // Base images that ship with the Dagger CLI already installed in /usr/local/bin.
@@ -62,7 +63,7 @@ export function generateDockerfile(options: DockerfileOptions): string {
   const { profile } = options;
   const digestMap = options.imageDigests ?? _imageDigestsConfig ?? {};
   const daggerVersion = options.daggerCliVersion ?? _daggerCliVersionConfig ?? null;
-  const baseImage = options.baseImage ?? getBaseImage(profile.template ?? 'node22', digestMap);
+  const baseImage = options.baseImage ?? getBaseImage(profile.template ?? 'node24', digestMap);
   const installCommand = getInstallCommand(profile);
 
   const lines: string[] = [
@@ -121,7 +122,7 @@ export function generateDockerfile(options: DockerfileOptions): string {
   // must be present in the image (the pod can't install them at runtime under
   // a restricted network policy). Dagger sidecar → install the Dagger CLI,
   // unless the base image already ships it.
-  const template = profile.template ?? 'node22';
+  const template = profile.template ?? 'node24';
   if (profile.sidecars?.dagger?.enabled && !DAGGER_PREINSTALLED.has(template)) {
     lines.push('', '# Dagger CLI — talks to the dagger-engine sidecar over TCP', 'USER root');
     if (daggerVersion && !daggerVersion.linuxAmd64Digest.includes('PLACEHOLDER')) {
@@ -408,6 +409,7 @@ function serenaWarmupLanguage(template: StackTemplate | null): 'csharp' | 'types
     template === 'node22-pw-pg' ||
     template === 'node24' ||
     template === 'node24-pw' ||
+    template === 'node24-pw-pg' ||
     template === 'python-node' ||
     template === 'python-node-pg'
   ) {

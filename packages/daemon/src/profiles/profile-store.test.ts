@@ -99,7 +99,7 @@ describe('ProfileStore', () => {
     it('should apply defaults for optional fields', () => {
       const profile = store.create(validInput);
       expect(profile.defaultBranch).toBe('main');
-      expect(profile.template).toBe('node22');
+      expect(profile.template).toBe('node24');
       expect(profile.healthPath).toBe('/');
       expect(profile.healthTimeout).toBe(120);
       expect(profile.maxValidationAttempts).toBe(3);
@@ -349,7 +349,7 @@ describe('ProfileStore', () => {
       // Resolved view pulls the parent's values.
       const resolved = store.get('child');
       expect(resolved.defaultBranch).toBe('main');
-      expect(resolved.template).toBe('node22');
+      expect(resolved.template).toBe('node24');
     });
   });
 

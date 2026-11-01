@@ -59,6 +59,9 @@ function mockProfile(overrides: Partial<Profile> = {}): Profile {
 describe('getBaseImage', () => {
   it.each([
     ['node22', 'autopod-node22:latest'],
+    ['node24', 'autopod-node24:latest'],
+    ['node24-pw', 'autopod-node24-pw:latest'],
+    ['node24-pw-pg', 'autopod-node24-pw-pg:latest'],
     ['node22-pw', 'autopod-node22-pw:latest'],
     ['node22-pw-pg', 'autopod-node22-pw-pg:latest'],
     ['dotnet9', 'autopod-dotnet9:latest'],
@@ -69,7 +72,7 @@ describe('getBaseImage', () => {
     ['go124-pw', 'autopod-go124-pw:latest'],
     ['python-node', 'autopod-python-node:latest'],
     ['python-node-pg', 'autopod-python-node-pg:latest'],
-    ['custom', 'autopod-node22:latest'],
+    ['custom', 'autopod-node24:latest'],
   ] as const)('maps %s → %s (no digest)', (template, expected) => {
     expect(getBaseImage(template)).toBe(expected);
   });
@@ -808,5 +811,29 @@ describe('generateDockerfile', () => {
       // base64 decode approach: no single/double quote nesting issues
       expect(df).toContain('| base64 -d > /tmp/serena-warmup.py');
     });
+  });
+});
+
+describe('Node24 worker defaults', () => {
+  it('uses Node24 for null templates without changing explicit Node22 choices', () => {
+    const dockerfile = (template: Profile['template']) =>
+      generateDockerfile({
+        profile: mockProfile({ template }),
+        gitCredentials: 'none',
+      });
+    expect(dockerfile(null)).toContain('FROM autopod-node24:latest');
+    for (const template of ['node22', 'node22-pw', 'node22-pw-pg'] as const) {
+      expect(dockerfile(template)).toContain(`FROM autopod-${template}:latest`);
+    }
+  });
+  it('pins the PostgreSQL variant and warms TypeScript tooling', () => {
+    const digest = `sha256:${'b'.repeat(64)}`;
+    const df = generateDockerfile({
+      profile: mockProfile({ template: 'node24-pw-pg', codeIntelligence: { serena: true } }),
+      gitCredentials: 'none',
+      imageDigests: { 'node24-pw-pg': digest },
+    });
+    expect(df).toContain(`FROM autopod-node24-pw-pg@${digest}`);
+    expect(df).toContain('Serena TypeScript language-server pre-warm');
   });
 });

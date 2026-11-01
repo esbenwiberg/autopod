@@ -191,3 +191,10 @@ test('selected publication rejects duplicate and unknown templates', () => {
     /Unknown base template: missing/,
   );
 });
+
+test('Node24 family is discoverable and publishable without aliases', () => {
+  const templates = ['node24', 'node24-pw', 'node24-pw-pg'];
+  const plan = createPublishPlan({ registry: 'example', revision: 'node24-test', templates });
+  assert.deepEqual(plan.map((entry) => entry.template), [...templates].sort());
+  for (const entry of plan) assert.equal(entry.dockerfile, `templates/base/Dockerfile.${entry.template}`);
+});

@@ -329,6 +329,24 @@ describe('ImageBuilder', () => {
     );
   });
 
+  it.each([null, 'node24-pw-pg'] as const)(
+    'resolves %s through ACR to its immutable base',
+    async (template) => {
+      const { mockDocker, mockAcr, mockProfileStore, dockerfiles } = createMockDeps();
+      const builder = new ImageBuilder({
+        docker: mockDocker,
+        acr: mockAcr,
+        profileStore: mockProfileStore,
+      });
+      await builder.buildWarmImage(mockProfile({ template }));
+      const base = `autopod-${template ?? 'node24'}`;
+      expect(mockAcr.pullPinned).toHaveBeenCalledWith(`${base}:latest`);
+      expect(dockerfiles).toEqual([
+        expect.stringContaining(`FROM ewiacr.azurecr.io/${base}@sha256:base-digest`),
+      ]);
+    },
+  );
+
   it('unresolved-acr-base-fails-actionably', async () => {
     const { mockDocker, mockAcr, mockProfileStore } = createMockDeps();
     vi.mocked(mockAcr.pullPinned).mockRejectedValueOnce(new Error('registry access denied'));
