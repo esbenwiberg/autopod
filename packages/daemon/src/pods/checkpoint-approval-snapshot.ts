@@ -1,5 +1,6 @@
 import type { Pod } from '@autopod/shared';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
+import { verifyRetainedCheckpointSource } from '../worktrees/retained-checkpoint-source.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
 import type { PodRepository } from './pod-repository.js';
 import { checkpointError, checkpointHash } from './retained-checkpoint-repository.js';
@@ -33,13 +34,16 @@ export async function verifiedCheckpointApprovalSnapshot(input: {
       'Saved checkpoint reports no longer match this execution',
       'CHECKPOINT_REPORTS_UNVERIFIED',
     );
-  const source = await worktreeManager.inspectSourceAdoption(prepared.worktree, pod.branch);
+  const source = await verifyRetainedCheckpointSource({
+    worktree: prepared.worktree,
+    podId: pod.id,
+    branch: pod.branch,
+    head: prepared.head,
+    tree: prepared.tree,
+    inspect: worktreeManager.inspectSourceAdoption.bind(worktreeManager),
+  });
   assertCurrent();
-  if (
-    !source.worktreeClean ||
-    source.commitSha !== prepared.head ||
-    source.treeSha !== prepared.tree
-  )
+  if (!source || source.head !== (recovery.checked.source?.head ?? prepared.head))
     checkpointError(
       'Selected source changed after checks; fresh validation is required',
       'CHECKPOINT_SOURCE_CHANGED',

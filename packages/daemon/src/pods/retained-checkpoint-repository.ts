@@ -23,6 +23,8 @@ export interface CheckpointRecoveryBinding {
   cycle: number;
   resultHash: string;
   configurationHash: string;
+  /** Human-authorized setup correction for this generation, not a frozen preset rewrite. */
+  setupCommand?: string;
 }
 export type PreparedCheckpoint = Awaited<ReturnType<typeof prepareRetainedCheckpointWorkspace>>;
 export interface CheckpointRecoveryRecord {
@@ -45,6 +47,8 @@ export interface CheckpointRecoveryRecord {
   checked: {
     result: ValidationResult;
     resultHash: string;
+    source?: { head: string; selectedHead: string; tree: string; checkpoints: string[] };
+    resolution?: { id: string; requestHash: string; actor: OperatorActor; reason: string };
     snapshot: { path: string; cycle: number; containerId: string } | null;
   } | null;
   blocked: { code: string } | null;
@@ -207,6 +211,56 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
     latest,
     append,
     assertAvailable,
+    resolveFailed(id: string, evidence: NonNullable<CheckpointRecoveryRecord['checked']>): void {
+      db.transaction(() => {
+        const record = get(id) ?? checkpointError('Recovery unavailable');
+        const resolution = evidence.resolution;
+        if (
+          record.checked ||
+          record.blocked?.code !== 'CHECKPOINT_SOURCE_CHANGED' ||
+          !record.checking ||
+          !record.activated ||
+          !record.prepared ||
+          !resolution ||
+          resolution.actor.type !== 'human' ||
+          !resolution.actor.userId.trim() ||
+          evidence.result.overall !== 'fail' ||
+          evidence.snapshot !== null ||
+          evidence.resultHash !== checkpointHash(evidence.result) ||
+          evidence.source?.selectedHead !== record.prepared.head ||
+          evidence.source.tree !== record.prepared.tree
+        )
+          checkpointError('Only an exactly verified failed checkpoint outcome can be resolved');
+        const pod = db
+          .prepare(
+            'SELECT lifecycle_generation,container_id,worktree_path,last_validation_result,status FROM pods WHERE id=?',
+          )
+          .get(record.podId) as Record<string, unknown>;
+        if (
+          !pod ||
+          pod.lifecycle_generation !== record.activated.generation ||
+          pod.container_id === record.containerId ||
+          pod.worktree_path !== record.prepared.worktree ||
+          !['failed', 'review_required'].includes(String(pod.status)) ||
+          pod.last_validation_result !== JSON.stringify(evidence.result)
+        )
+          checkpointError(
+            'Failed checkpoint outcome changed before resolution',
+            'STALE_CHECKPOINT_RECOVERY',
+          );
+        // Append a failed outcome and explicit human resolution; never erase the
+        // original blocked event, reset counters, change status or enqueue work.
+        db.prepare(
+          "INSERT INTO retained_checkpoint_recovery_events(recovery_id,kind,evidence,created_at) VALUES(?,'checked',?,?)",
+        ).run(id, JSON.stringify(evidence), new Date().toISOString());
+      })();
+    },
+    setupCommand(pod: Pod): string | undefined {
+      const record = latest(pod.id);
+      return record?.activated?.generation === pod.lifecycleGeneration
+        ? record.binding.setupCommand
+        : undefined;
+    },
     list(podId: string) {
       return (
         db

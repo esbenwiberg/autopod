@@ -1,12 +1,15 @@
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createFailingValidationResult } from '../test-utils/mock-helpers.js';
 import {
   materializeCheckpointFixture,
   retainedCheckpointFixture,
 } from '../test-utils/retained-checkpoint-helpers.js';
+import * as checkpointSource from '../worktrees/retained-checkpoint-source.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
 import { verifiedCheckpointApprovalSnapshot } from './checkpoint-approval-snapshot.js';
+import { checkpointHash } from './retained-checkpoint-repository.js';
 
 const fixtures: Awaited<ReturnType<typeof retainedCheckpointFixture>>[] = [];
 afterEach(async () => {
@@ -20,6 +23,105 @@ afterEach(async () => {
 });
 
 describe('retained checkpoint through the real manager workflow (provider and checks mocked)', () => {
+  it('resolves the historical transport-blocked failure without rerunning, then checks a separately authorized corrected generation', async () => {
+    const f = await retainedCheckpointFixture('wakeup', true);
+    fixtures.push(f);
+    vi.stubEnv('DATA_DIR', f.root);
+    await materializeCheckpointFixture(f);
+    const actualProof = checkpointSource.verifyRetainedCheckpointSource;
+    // Reproduce deployed #477's exact raw-HEAD gate, with the REAL transport.
+    const legacyGate = vi
+      .spyOn(checkpointSource, 'verifyRetainedCheckpointSource')
+      .mockImplementation(async (input) => {
+        const proof = await actualProof(input);
+        return proof?.head === input.head ? proof : null;
+      });
+    const validate = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
+    vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (...args) => {
+      await validate(...args);
+      return createFailingValidationResult(args[0].podId, args[0].attempt);
+    });
+    await f.submit();
+    await f.recovery.wait(f.input.id);
+    await expect(f.manager.processPod(f.podId)).rejects.toMatchObject({
+      code: 'CHECKPOINT_SOURCE_CHANGED',
+    });
+    legacyGate.mockRestore();
+    const failed = f.pod();
+    const first = f.recovery.list(f.podId)[0]!;
+    expect(first.blocked?.code).toBe('CHECKPOINT_SOURCE_CHANGED');
+    const observed = await f.worktrees.inspectSourceAdoption(failed.worktreePath!, failed.branch);
+    const input = {
+      id: 'resolve-failed-transport',
+      resolveFailureOf: first.id,
+      expectedGeneration: failed.lifecycleGeneration,
+      expectedResultHash: checkpointHash(failed.lastValidationResult),
+      checkpointHead: observed.commitSha,
+      reason:
+        'Resolve verified transport metadata only; retain the failed result and all accounting',
+    };
+    const before = f.ctx.podRepo.taskRetries!.state(f.podId);
+    await expect(
+      f.recovery.submit(f.podId, { ...input, expectedResultHash: 'f'.repeat(64) }, f.actor),
+    ).rejects.toThrow();
+    await expect(
+      f.recovery.submit(f.podId, { ...input, setupCommand: 'true' }, f.actor),
+    ).rejects.toThrow();
+    const resolved = await f.recovery.submit(f.podId, input, f.actor);
+    expect(resolved.checked?.result).toEqual(failed.lastValidationResult);
+    expect(resolved.blocked).toEqual(first.blocked);
+    expect(await f.recovery.submit(f.podId, input, f.actor)).toEqual(resolved);
+    expect(f.ctx.podRepo.taskRetries!.state(f.podId)).toEqual(before);
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+    expect(f.pod().lifecycleGeneration).toBe(2);
+    const next = {
+      id: 'corrected-setup-checks',
+      expectedGeneration: 2,
+      expectedResultHash: input.expectedResultHash,
+      checkpointHead: observed.commitSha,
+      reason:
+        'One fresh generation with dependency bootstrap before lint; no waiver or counter reset',
+      setupCommand: 'npm ci',
+    };
+    vi.mocked(f.cm.getStatus).mockResolvedValue('stopped');
+    vi.mocked(f.cm.getResourceKey!).mockImplementation(async (id) =>
+      f.resourceKey.replace(f.containerId, id),
+    );
+    await expect(f.recovery.submit(f.podId, next, f.actor)).rejects.toThrow('one-shot');
+    f.ctx.podRepo.taskRetries!.authorize(
+      f.podId,
+      'extra-checks-authority',
+      'Owner permits exactly one additional checks execution',
+      f.actor,
+    );
+    await f.recovery.submit(f.podId, next, f.actor);
+    await f.recovery.wait(next.id);
+    expect(f.recovery.list(f.podId)[0]?.blocked).toBeNull();
+    const fresh = '33333333-3333-4333-8333-333333333333';
+    vi.mocked(f.cm.getStatus).mockImplementation(async (id) =>
+      id === fresh ? 'running' : 'stopped',
+    );
+    vi.mocked(f.cm.spawn).mockResolvedValue(fresh);
+    vi.mocked(f.ctx.validationEngine.validate).mockImplementation(validate);
+    await f.manager.processPod(f.podId);
+    expect(f.pod().status).toBe('validated');
+    expect(f.pod().lifecycleGeneration).toBe(3);
+    expect(f.pod().validationAttempts).toBe(4);
+    expect(f.ctx.validationEngine.validate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ validationSetupCommand: 'npm ci' }),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(
+      f.ctx.podRepo.taskRetries!.state(f.podId).authorizations[0]?.usedByAttemptId,
+    ).toBeTruthy();
+    expect(f.ctx.podRepo.listReferencedContainerIds()).toEqual(
+      expect.arrayContaining([f.containerId, failed.containerId!]),
+    );
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(f.ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+  });
   it.each([false, true])(
     'a later explicit approval (frozen launch=%s) reaches delivery preparation without waking either sandbox or recollecting reports',
     async (native) => {
@@ -105,6 +207,8 @@ describe('retained checkpoint through the real manager workflow (provider and ch
       );
       expect(operation.blocked).toBeNull();
       expect(operation.checked?.result.overall).toBe('pass');
+      expect(operation.checked?.source?.head).not.toBe(operation.prepared?.head);
+      expect(operation.checked?.source?.checkpoints.length).toBeGreaterThan(0);
       expect(operation.originalEvidence.result).toEqual(original);
       expect(current.lifecycleGeneration).toBe(2);
       expect(current.validationAttempts).toBe(priorAttempts + 1);

@@ -5,4 +5,8 @@ export interface CheckpointRecoveryRequest {
   expectedResultHash: string;
   checkpointHead: string;
   reason: string;
+  /** Correct setup for this fresh checks generation; original presets remain immutable. */
+  setupCommand?: string;
+  /** Resolve only the named failed transport-blocked outcome; never executes checks. */
+  resolveFailureOf?: string;
 }

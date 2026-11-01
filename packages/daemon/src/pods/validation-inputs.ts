@@ -23,7 +23,7 @@ const CONTAINER_APP_PORT = 3000;
 interface ValidationInputsDependencies {
   logger: Logger;
   worktreeManager: Pick<WorktreeManager, 'getDiff' | 'getCommitLog' | 'getChangedPathsAgainstBase'>;
-  podRepo: Pick<PodRepository, 'update'>;
+  podRepo: Pick<PodRepository, 'update' | 'retainedCheckpoints'>;
   validationRepo?: Pick<ValidationRepository, 'getLatest' | 'getLatestReviewBatch'>;
   overrideSource: { pendingOverrideRepo?: Pick<PendingOverrideRepository, 'flush'> };
   validationEnvironmentForPod(
@@ -157,7 +157,10 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
       previewUrl: pod.previewUrl ?? `http://127.0.0.1:${CONTAINER_APP_PORT}`,
       containerBaseUrl: `http://127.0.0.1:${CONTAINER_APP_PORT}`,
       webProbeMode: pod.executionTarget === 'sandbox' ? ('container' as const) : ('host' as const),
-      validationSetupCommand: profile.validationSetupCommand ?? undefined,
+      validationSetupCommand:
+        podRepo.retainedCheckpoints?.setupCommand(pod) ??
+        profile.validationSetupCommand ??
+        undefined,
       buildCommand: profile.buildCommand ?? '',
       startCommand: profile.startCommand ?? '',
       buildWorkDir: profile.buildWorkDir ?? undefined,

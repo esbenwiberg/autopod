@@ -5,6 +5,7 @@ import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
+import { verifyRetainedCheckpointSource } from '../worktrees/retained-checkpoint-source.js';
 import {
   assertCheckpointRepository,
   prepareRetainedCheckpointWorkspace,
@@ -96,7 +97,27 @@ export function createRetainedCheckpointRecovery(deps: {
     for (const id of deps.podRepo.sourceAdoptions.taskPodIds(pod.id))
       if (!deps.isIdle(id)) checkpointError('A task invocation is still active');
     deps.assertGuidanceCollected(pod.id);
+    const failedCheckpoint = repo
+      .list(pod.id)
+      .find(
+        (prior) =>
+          prior.activated?.generation === pod.lifecycleGeneration &&
+          prior.checked?.result.overall === 'fail' &&
+          prior.checked.resultHash === checkpointHash(pod.lastValidationResult),
+      );
+    if (failedCheckpoint && pod.validationAttempts >= pod.maxValidationAttempts) {
+      const retries = deps.podRepo.taskRetries?.state(pod.id);
+      if (
+        !retries?.authorizations.some(
+          (entry) => !entry.usedByAttemptId && entry.failureId === retries.latest?.id,
+        )
+      )
+        checkpointError(
+          'The attempt limit requires a separately audited one-shot validation retry',
+        );
+    }
     if (
+      !failedCheckpoint &&
       !requiresValidationSettlement(pod) &&
       !deps.podRepo.sandboxWakeups
         ?.listForPod(pod.id)
@@ -178,6 +199,12 @@ export function createRetainedCheckpointRecovery(deps: {
       input.reason.length > 4000
     )
       checkpointError('Authenticated human, stable request ID and meaningful reason required');
+    if (input.resolveFailureOf) return resolveFailure(podId, input, actor);
+    if (
+      input.setupCommand !== undefined &&
+      (!input.setupCommand.trim() || input.setupCommand.length > 16000)
+    )
+      checkpointError('Setup correction must be a bounded nonempty command');
     const replay = () => {
       const prior = repo.get(input.id);
       if (
@@ -253,6 +280,7 @@ export function createRetainedCheckpointRecovery(deps: {
         cycle: pod.finalization?.cycle ?? 0,
         resultHash: input.expectedResultHash,
         configurationHash: anchor,
+        ...(input.setupCommand === undefined ? {} : { setupCommand: input.setupCommand }),
       },
     });
     if (claimed.acquired) {
@@ -315,7 +343,7 @@ export function createRetainedCheckpointRecovery(deps: {
             ['validated', 'review_required', 'failed'].includes(current.status)
           ) {
             assertValidationExecutionSettled(current);
-            await verifySource(podId);
+            const source = await verifySource(podId);
             if (
               current.lastValidationResult.overall === 'pass' &&
               (!current.artifactsPath || !current.containerId)
@@ -327,6 +355,7 @@ export function createRetainedCheckpointRecovery(deps: {
             repo.append(record.id, 'checked', {
               result: current.lastValidationResult,
               resultHash: checkpointHash(current.lastValidationResult),
+              source,
               snapshot:
                 current.artifactsPath && current.containerId
                   ? {
@@ -365,23 +394,126 @@ export function createRetainedCheckpointRecovery(deps: {
     const pod = deps.podRepo.getOrThrow(podId);
     if (!deps.worktreeManager.inspectSourceAdoption)
       checkpointError('Source inspection is unavailable');
-    const actual = await deps.worktreeManager.inspectSourceAdoption(
-      record.prepared.worktree,
-      record.binding.branch,
-    );
+    const actual = await verifyRetainedCheckpointSource({
+      worktree: record.prepared.worktree,
+      podId,
+      branch: record.binding.branch,
+      head: record.prepared.head,
+      tree: record.prepared.tree,
+      inspect: deps.worktreeManager.inspectSourceAdoption.bind(deps.worktreeManager),
+    });
     repo.assertAvailable(podId);
     if (
       pod.lifecycleGeneration !== record.activated.generation ||
       pod.worktreePath !== record.prepared.worktree ||
       configuration(pod) !== record.binding.configurationHash ||
-      !actual.worktreeClean ||
-      actual.commitSha !== record.prepared.head ||
-      actual.treeSha !== record.prepared.tree
+      !actual
     )
       checkpointError(
         'Fresh checks no longer match the selected source/configuration',
         'CHECKPOINT_SOURCE_CHANGED',
       );
+    return actual;
+  }
+  async function resolveFailure(
+    podId: string,
+    input: CheckpointRecoveryRequest,
+    actor: OperatorActor,
+  ) {
+    if (input.setupCommand !== undefined)
+      checkpointError('Failure resolution cannot amend setup or execute checks');
+    const record = repo.get(input.resolveFailureOf!) ?? checkpointError('Recovery unavailable');
+    const requestHash = checkpointHash([podId, input, actor]);
+    if (record.podId !== podId) checkpointError('Recovery belongs to another pod');
+    if (record.checked) {
+      if (record.checked.resolution?.requestHash !== requestHash)
+        checkpointError(
+          'Failure resolution does not match saved request',
+          'CHECKPOINT_RECOVERY_CONFLICT',
+        );
+      return record;
+    }
+    const assertCurrent = () => {
+      const pod = deps.podRepo.getOrThrow(podId);
+      if (
+        repo.latest(podId)?.id !== record.id ||
+        record.blocked?.code !== 'CHECKPOINT_SOURCE_CHANGED' ||
+        !record.checking ||
+        !record.prepared ||
+        !record.activated ||
+        pod.lifecycleGeneration !== input.expectedGeneration ||
+        pod.lifecycleGeneration !== record.activated.generation ||
+        !['failed', 'review_required'].includes(pod.status) ||
+        pod.lastValidationResult?.overall !== 'fail' ||
+        checkpointHash(pod.lastValidationResult) !== input.expectedResultHash ||
+        pod.worktreePath !== record.prepared.worktree ||
+        configuration(pod) !== record.binding.configurationHash ||
+        pod.pendingEscalation ||
+        deps.podRepo.hasUnansweredDecision?.(podId) ||
+        deps.isGoal(podId)
+      )
+        checkpointError(
+          'Only the unchanged failed transport-blocked generation can be resolved',
+          'STALE_CHECKPOINT_RECOVERY',
+        );
+      if (
+        !deps.podRepo.taskExecutions ||
+        !deps.podRepo.validationExecutions ||
+        !deps.podRepo.sourceAdoptions
+      )
+        checkpointError('Execution custody ledgers unavailable');
+      deps.podRepo.taskExecutions.assertCanDelete(podId);
+      deps.podRepo.validationExecutions.assertNoActiveTaskExecution(podId);
+      if (deps.podRepo.validationExecutions.unsettled(podId))
+        checkpointError('Validation execution is unsettled');
+      assertValidationExecutionSettled(pod);
+      for (const id of deps.podRepo.sourceAdoptions.taskPodIds(podId))
+        if (!deps.isIdle(id)) checkpointError('A task invocation is still active');
+      deps.assertGuidanceCollected(podId);
+      const result = pod.lastValidationResult!;
+      if (!result.executionDispatchId)
+        checkpointError('An immutable new validation dispatch is required');
+      const evidence = deps.podRepo.validationExecutions.evidence(
+        podId,
+        result.executionDispatchId,
+        input.expectedResultHash,
+      );
+      if (
+        evidence.binding.generation !== pod.lifecycleGeneration ||
+        evidence.binding.containerId !== pod.containerId ||
+        evidence.binding.worktreePath !== pod.worktreePath
+      )
+        checkpointError('Failed outcome is not bound to this generation and resource');
+      return pod;
+    };
+    assertCurrent();
+    if (!record.prepared || !deps.worktreeManager.inspectSourceAdoption)
+      checkpointError('Source inspection unavailable');
+    const source = await verifyRetainedCheckpointSource({
+      worktree: record.prepared.worktree,
+      podId,
+      branch: record.binding.branch,
+      head: record.prepared.head,
+      tree: record.prepared.tree,
+      inspect: deps.worktreeManager.inspectSourceAdoption.bind(deps.worktreeManager),
+    });
+    const completed = repo.get(record.id);
+    if (completed?.checked) {
+      if (completed.checked.resolution?.requestHash !== requestHash)
+        checkpointError('Failure resolution has another request', 'CHECKPOINT_RECOVERY_CONFLICT');
+      return completed;
+    }
+    const pod = assertCurrent();
+    if (!source || source.head !== input.checkpointHead)
+      checkpointError('Exact verified transport source is required', 'CHECKPOINT_SOURCE_CHANGED');
+    repo.resolveFailed(record.id, {
+      result: pod.lastValidationResult!,
+      resultHash: input.expectedResultHash,
+      source,
+      snapshot: null,
+      resolution: { id: input.id, requestHash, actor, reason: input.reason.trim() },
+    });
+    return repo.get(record.id)!;
   }
   return {
     submit,

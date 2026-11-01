@@ -26,14 +26,23 @@ export function checkpointRecoveryRoutes(
         expectedResultHash: z.string().regex(/^[a-f0-9]{64}$/),
         checkpointHead: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
         reason: z.string().trim().min(10).max(4000),
+        setupCommand: z.string().trim().min(1).max(16000).optional(),
+        resolveFailureOf: z
+          .string()
+          .regex(/^[a-zA-Z0-9-]{1,64}$/)
+          .optional(),
       })
       .strict()
+      .refine(
+        (input) => !(input.resolveFailureOf && input.setupCommand !== undefined),
+        'Resolution cannot also amend setup',
+      )
       .parse(request.body);
     const operation = await manager.recoverCheckpoint(podId, input, {
       type: 'human',
       userId: request.user.oid,
     });
     reply.header('Cache-Control', 'no-store');
-    return reply.code(202).send({ operation });
+    return reply.code(input.resolveFailureOf ? 200 : 202).send({ operation });
   });
 }

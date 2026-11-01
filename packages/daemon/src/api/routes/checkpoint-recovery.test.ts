@@ -58,6 +58,10 @@ describe('human-only retained checkpoint selection', () => {
       { sourcePath: '/tmp/other' },
       { expectedGeneration: 0 },
       { checkpointHead: 'main' },
+      { setupCommand: '' },
+      { setupCommand: 'x'.repeat(16001) },
+      { setupCommand: 'npm ci', resolveFailureOf: 'prior' },
+      { resolveFailureOf: '../other' },
     ]) {
       const response = await app.inject({
         method: 'POST',
@@ -68,6 +72,19 @@ describe('human-only retained checkpoint selection', () => {
       expect(response.statusCode).toBe(400);
     }
     expect(f.cm.getStatus).not.toHaveBeenCalled();
+  });
+  it('records setup correction as an explicit selection without editing frozen configuration', async () => {
+    const launch = f.pod().launchConfigDigest;
+    const response = await app.inject({
+      method: 'POST',
+      url: endpoint(),
+      headers,
+      payload: { ...f.input, setupCommand: 'npm ci' },
+    });
+    expect(response.statusCode).toBe(202);
+    await f.recovery.wait(f.input.id);
+    expect(f.recovery.list(f.podId)[0]?.binding.setupCommand).toBe('npm ci');
+    expect(f.pod().launchConfigDigest).toBe(launch);
   });
   it('returns a durable 202 selection before preparation completes and replays without another operation', async () => {
     let finish: () => void = () => {};

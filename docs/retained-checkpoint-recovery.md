@@ -32,7 +32,11 @@ evidence, not as an execution resource.
    checks and configured review. No coding worker is admitted by this operation.
    Recheck exact source and configuration before accepting its outcome. Source
    edits, missing worktrees, unknown execution outcomes and failed preservation
-   fail closed; the daemon must not substitute a fresh remote checkout.
+   fail closed; the daemon must not substitute a fresh remote checkout. Empty
+   transport descendants are accepted only through the maintained pod-owned
+   quarantine resolver, with same-tree single-parent ancestry at every step,
+   bounded depth and a final clean-source observation. A matching tree or commit
+   subject alone is not proof. Completion and later approval use the same verifier.
 5. On a pass, preserve the new sandbox reports **before suspension**. No PR push,
    creation, dependent launch, approval or merge is performed. A later, separate
    approval can reuse only the exact generation/resource/result/source-bound
@@ -65,7 +69,9 @@ Selection is limited to idle ordinary sandbox pods with an existing result and
 retained host source, no unresolved worker/immutable validation execution,
 competing source custody, Goal, waivers, sidecars or pending human decision.
 A valid existing immutable validation dispatch requires its own recovery; this
-legacy path must not detach it.
+legacy path must not detach it. A known failed outcome from an already checked
+checkpoint recovery can instead be explicitly selected for another fresh checks
+operation; its dispatch must be settled and all previous evidence stays retained.
 
 **Retry permission is separate.** A selection does not create a retry grant or
 reset any allowance. If the prior validation failed nonretryably and changed
@@ -88,7 +94,8 @@ ap checkpoint-recovery <full-pod-id> --apply \
 
 HTTP equivalents are authenticated-human `GET` and `POST`
 `/pods/:podId/checkpoint-recovery`. POST accepts only `id`, `expectedGeneration`,
-`expectedResultHash`, `checkpointHead` and `reason`. It returns `202` with the
+`expectedResultHash`, `checkpointHead`, `reason`, and optional `setupCommand` or
+`resolveFailureOf` (mutually exclusive). Ordinary selection returns `202` with the
 recorded selection, not successful checks. There is no caller-supplied proof,
 source path, settlement, force flag or alternate actor.
 
@@ -106,6 +113,44 @@ provider calls. Concurrent queue callbacks coalesce in-process. An interrupted
 interrupted operation requires inspection of retained execution evidence and
 server logs correlated by recovery ID; do not clear rows, mutate the original,
 choose a new ID to force another run, or infer success from `Stopped`.
+
+## Repair an already blocked failed transport outcome
+
+The initial implementation rejected normal empty checkpoint commits. A narrow,
+human-only resolution is available **only** for `CHECKPOINT_SOURCE_CHANGED` with
+an immutable, settled **failed** validation result bound to the current generation,
+container and worktree. It does not turn failure into a pass, collect missing
+reports, settle the historical original, change status/counters or execute anything.
+
+```sh
+ap checkpoint-recovery <pod> --apply \
+  --request-id <stable-resolution-id> --resolve-failure <blocked-recovery-id> \
+  --generation <current-generation> --result-hash <exact-current-failed-result-hash> \
+  --head <current-verified-transport-head> \
+  --reason 'Record the known failed checks after verifying transport-only ancestry; retain the original block' \
+  --json
+```
+
+The server independently verifies source, configuration, immutable dispatch and
+idle task ownership. It appends a `checked` **failure** with the human resolution
+and transport proof, retaining the original `blocked` event. HTTP returns `200`;
+there is no queue admission. Same-request replay returns that saved failure.
+Passing, unknown, replaced or active executions cannot use this resolution.
+
+A subsequent fresh selection is a **separate** explicit operation. Inspect the
+new failure and select its exact clean current host commit/generation/result.
+When setup itself was wrong, `--setup-command-file <file>` records an explicit,
+bounded setup correction in that selection. It applies only to its activated
+generation (including later checks), not the original frozen launch snapshot or
+shared preset. Setup still runs before lint; all required checks/review remain.
+The selected private clone is archived independently like any original. If the
+pod is already at its configured attempt limit, record a separately authorized
+one-shot validation retry first. The ledger consumes it normally; counters are
+never reset, including when the next attempt exceeds the original maximum.
+
+Do not downgrade to a release that lacks these resolution/setup-correction rules
+once they are in use. Keep setup files free of credentials and preserve the
+request, exact command, result and grant receipts in the incident record.
 
 ## The two motivating incidents
 

@@ -2,6 +2,7 @@ import path from 'node:path';
 import { publishScreenshotArtifacts } from '../validation/screenshot-artifacts.js';
 import { buildGitHubImageUrl } from '../validation/screenshot-collector.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
+import { verifyRetainedCheckpointSource } from '../worktrees/retained-checkpoint-source.js';
 import { APPROVAL_SNAPSHOT_EXCLUDES } from './approval-policy.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import { checkpointError } from './retained-checkpoint-repository.js';
@@ -62,13 +63,19 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
       checkpoint?.activated?.generation === s2.lifecycleGeneration && !checkpoint.checked;
     if (checksOnly) {
       if (!s2.worktreePath) checkpointError('Selected checkpoint worktree unavailable');
-      const source = await worktreeManager.inspectSourceAdoption?.(s2.worktreePath, s2.branch);
+      const source =
+        checkpoint.prepared && worktreeManager.inspectSourceAdoption
+          ? await verifyRetainedCheckpointSource({
+              worktree: s2.worktreePath,
+              podId,
+              branch: s2.branch,
+              head: checkpoint.prepared.head,
+              tree: checkpoint.prepared.tree,
+              inspect: worktreeManager.inspectSourceAdoption.bind(worktreeManager),
+            })
+          : null;
       assertCurrent();
-      if (
-        !source?.worktreeClean ||
-        source.commitSha !== checkpoint.prepared?.head ||
-        source.treeSha !== checkpoint.prepared?.tree
-      )
+      if (!source)
         checkpointError(
           'Validation source differs from the selected checkpoint; no delivery is permitted',
           'CHECKPOINT_SOURCE_CHANGED',

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { cp, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -17,9 +17,11 @@ import { resolveReviewerModel, resolveReviewerProvider } from '../pods/runtime-r
 import { createProviderAccountStore } from '../provider-accounts/provider-account-store.js';
 import { IsolatedReviewer } from '../validation/isolated-reviewer.js';
 import { ReviewerRunRepository } from '../validation/reviewer-run-repository.js';
+import { checkpointSandboxWorkspace } from '../worktrees/sandbox-workspace-checkpoint.js';
 import { createTestConfiguration, testExecutionCapabilities } from './configuration-helpers.js';
 import {
   createFailingValidationResult,
+  createMockContainerManager,
   createPassingValidationResult,
   createTestContext,
 } from './mock-helpers.js';
@@ -63,6 +65,32 @@ export async function materializeCheckpointFixture(
     worktreeClean: (await git(cwd, 'status', '--porcelain')).length === 0,
   }));
   f.deps.prepare = undefined; // Real independent archive/bundle/worktree, not an injected receipt.
+  // Execute the maintained checkpoint shell/bundle/import implementation against
+  // a local guest clone. Only the provider transport is replaced, not its Git semantics.
+  vi.mocked(f.ctx.deps.sandboxWorkspaceCheckpoint!).mockImplementation(async (args) => {
+    const guest = await mkdtemp(path.join(f.root, 'guest-'));
+    await git(f.root, 'clone', '--no-local', '--branch', f.pod().branch, args.worktreePath, guest);
+    const cm = createMockContainerManager();
+    cm.execInContainer = vi.fn(async (_id, command) => {
+      const [program, ...argv] = command;
+      if (!program) throw new Error('Missing checkpoint command');
+      const result = await exec(
+        program,
+        argv.map((arg) => arg.replace('cd /workspace', `cd ${guest}`)),
+        {
+          env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
+        },
+      );
+      return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
+    });
+    cm.readFile = vi.fn(async (_id, remote) => readFile(remote, 'utf8'));
+    cm.readFileBinary = vi.fn(async (_id, remote) => readFile(remote));
+    try {
+      return await checkpointSandboxWorkspace({ ...args, containerManager: cm });
+    } finally {
+      await rm(guest, { recursive: true, force: true });
+    }
+  });
   f.cm.getStatus = vi.fn(async (id) => (id === f.containerId ? 'stopped' : 'running'));
   Object.assign(f.cm, {
     executionResourceScope:

@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import type {
   AgentActivityEvent,
   CompactPod,
@@ -403,6 +404,14 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
     .option('--result-hash <sha256>', 'Expected exact stored validation result hash')
     .option('--head <sha>', 'Exact retained host checkpoint commit, not a branch name')
     .option(
+      '--setup-command-file <file>',
+      'Audited setup correction for this fresh generation; does not rewrite frozen presets',
+    )
+    .option(
+      '--resolve-failure <recovery-id>',
+      'Record an exactly verified failed transport-blocked outcome; does not run checks',
+    )
+    .option(
       '--reason <text>',
       'Human selection reason, explicitly accepting a known checkpoint rather than final sandbox content',
     )
@@ -416,14 +425,24 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           generation?: string;
           resultHash?: string;
           head?: string;
+          setupCommandFile?: string;
+          resolveFailure?: string;
           reason?: string;
           json?: boolean;
         },
       ) => {
         const mutation =
-          opts.requestId || opts.generation || opts.resultHash || opts.head || opts.reason;
+          opts.requestId ||
+          opts.generation ||
+          opts.resultHash ||
+          opts.head ||
+          opts.reason ||
+          opts.setupCommandFile ||
+          opts.resolveFailure;
         if (!opts.apply && mutation)
           throw new Error('Mutation fields require --apply; omit them for read-only inspection.');
+        if (opts.resolveFailure && opts.setupCommandFile)
+          throw new Error('Failure resolution cannot also amend setup or run checks.');
         if (
           opts.apply &&
           (!opts.requestId || !opts.generation || !opts.resultHash || !opts.head || !opts.reason)
@@ -440,6 +459,10 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
               expectedResultHash: opts.resultHash as string,
               checkpointHead: opts.head as string,
               reason: opts.reason as string,
+              ...(opts.setupCommandFile
+                ? { setupCommand: await readFile(opts.setupCommandFile, 'utf8') }
+                : {}),
+              ...(opts.resolveFailure ? { resolveFailureOf: opts.resolveFailure } : {}),
             })
           : await client.getCheckpointRecoveries(podId);
         withJsonOutput(opts, state, (value) => {

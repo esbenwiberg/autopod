@@ -33,6 +33,7 @@ function createMockClient() {
       .fn()
       .mockResolvedValue({ operation: { id: 'selection-1', checked: null } }),
     authorizeValidationRecoveryBudget: vi.fn().mockResolvedValue({ seconds: 900 }),
+    authorizeRetry: vi.fn().mockResolvedValue({}),
     getTaskExecution: vi.fn().mockRejectedValue(new Error('Unavailable on older daemon')),
     getTerminationReconciliations: vi.fn().mockResolvedValue({
       pending: [
@@ -1571,6 +1572,61 @@ describe('validation execution recovery commands', () => {
       expect(log.mock.calls.flat().join('\n')).toContain('not successful validation');
     } finally {
       log.mockRestore();
+    }
+  });
+  it('sends explicit failed-outcome resolution separately from setup corrections', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const directory = await mkdtemp(`${tmpdir()}/checkpoint-cli-`);
+    const file = `${directory}/setup.sh`;
+    await writeFile(file, 'npm ci\n');
+    const selection = [
+      '--apply',
+      '--request-id',
+      'correction',
+      '--generation',
+      '2',
+      '--result-hash',
+      'a'.repeat(64),
+      '--head',
+      'b'.repeat(40),
+      '--reason',
+      'Owner corrects cold setup before fresh checks',
+    ];
+    try {
+      await expect(run('checkpoint-recovery', '--setup-command-file', file)).rejects.toThrow(
+        'require --apply',
+      );
+      await expect(
+        run(
+          'checkpoint-recovery',
+          ...selection,
+          '--resolve-failure',
+          'prior',
+          '--setup-command-file',
+          file,
+        ),
+      ).rejects.toThrow('cannot also amend');
+      const corrected = await run(
+        'checkpoint-recovery',
+        ...selection,
+        '--setup-command-file',
+        file,
+      );
+      expect(corrected.recoverCheckpoint).toHaveBeenCalledWith(
+        'recovery-example',
+        expect.objectContaining({ setupCommand: 'npm ci\n' }),
+      );
+      const resolved = await run('checkpoint-recovery', ...selection, '--resolve-failure', 'prior');
+      expect(resolved.recoverCheckpoint).toHaveBeenCalledWith(
+        'recovery-example',
+        expect.objectContaining({ resolveFailureOf: 'prior' }),
+      );
+      expect(resolved.authorizeRetry).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+      await rm(directory, { recursive: true, force: true });
     }
   });
   it('sends a separately audited budget in seconds, without settlement', async () => {

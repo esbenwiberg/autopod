@@ -400,7 +400,10 @@ export function createValidationRevalidationWorkflow(
         webProbeMode:
           pod.executionTarget === 'sandbox' ? ('container' as const) : ('host' as const),
         validationSetupCommand:
-          adopted?.setupCommand ?? profile.validationSetupCommand ?? undefined,
+          adopted?.setupCommand ??
+          podRepo.retainedCheckpoints?.setupCommand(pod) ??
+          profile.validationSetupCommand ??
+          undefined,
         buildCommand: profile.buildCommand ?? '',
         startCommand: profile.startCommand ?? '',
         buildWorkDir: profile.buildWorkDir ?? undefined,
