@@ -417,20 +417,28 @@ test('standalone qualifier upgrades old wakeup custody without clearing a pendin
   try {
     const built = await buildAdapter(dir);
     const require = createRequire(built.outfile);
-    const { createSandboxWakeupJournal, wakeupSchema } = require(built.outfile);
+    const { wakeupSchema } = require(built.outfile);
     const Database = require('better-sqlite3');
     const filename = join(dir, 'wakeups.sqlite');
     const db = new Database(filename);
     db.exec(wakeupSchema);
-    const old = createSandboxWakeupJournal(db);
-    old.observeRunning(base, object.id);
-    const intent = old.claim(base, object.id, 'retained-qualifier');
-    old.beginDispatch(intent.id);
+    // Seed the legacy schema without running today's adapter before its migrations.
+    const stamp = '2026-10-30T20:00:00Z';
+    const intent = { id: 'legacy-qualifier-wakeup' };
+    db.prepare('INSERT INTO sandbox_wakeup_baselines VALUES(?,?,?)').run(base, object.id, stamp);
+    db.prepare(`INSERT INTO sandbox_wakeup_intents
+      (id,resource_key,sandbox_id,pod_id,started_at,dispatch_started_at)
+      VALUES(?,?,?,'retained-qualifier',?,?)`).run(intent.id, base, object.id, stamp, stamp);
     db.close();
     wakeup = openWakeupJournal(built.outfile, filename);
     assert.equal(wakeup.journal.retains(object.id), true);
     assert.deepEqual(wakeup.journal.claim(base, object.id), { id: intent.id, acquired: false });
     assert.deepEqual(wakeup.journal.listForPod('retained-qualifier')[0].evidence, []);
+    assert.deepEqual(wakeup.journal.recovery.list('retained-qualifier'), []);
+    wakeup.close();
+    wakeup = openWakeupJournal(built.outfile, filename);
+    assert.equal(wakeup.journal.retains(object.id), true);
+    assert.deepEqual(wakeup.journal.recovery.list('retained-qualifier'), []);
   } finally {
     wakeup?.close();
     rmSync(dir, { recursive: true, force: true });
