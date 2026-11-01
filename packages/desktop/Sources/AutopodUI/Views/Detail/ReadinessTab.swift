@@ -29,7 +29,7 @@ struct ReadinessTab: View {
     }
 
     private var canApprove: Bool {
-        guard isApprovalState else { return false }
+        guard isApprovalState, !pod.hasUnansweredDecision else { return false }
         guard let decisionStatus, decisionStatus.canApproveFromReadinessTab else { return false }
         return !requiresReason || !approvalReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -442,6 +442,22 @@ struct ReadinessTab: View {
                     .foregroundStyle(.green)
                 Text("Delivery is recorded. Any retained reports or resource-recovery follow-ups are listed in the review.")
                     .font(.caption).foregroundStyle(.secondary)
+            } else if pod.hasUnansweredDecision {
+                Text("Human decision blocks approval")
+                    .font(.callout.weight(.semibold))
+                Text(pod.hasOrphanedValidationDecision
+                    ? "The validation waiver was saved, but its durable decision is still unanswered. Open Validation to review and explicitly reapply the override. This does not start an agent or deliver code."
+                    : "Resolve the pending question in Overview before approving. An approval reason does not answer a human decision.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let decisionId = pod.pendingDecisionId ?? pod.escalationId {
+                    Text("Decision: \(decisionId)").font(.caption.monospaced()).textSelection(.enabled)
+                }
+                Button(pod.hasOrphanedValidationDecision ? "Open validation decision" : "Open pending question") {
+                    onOpenTab(pod.hasOrphanedValidationDecision ? .validation : .overview)
+                }
+                .buttonStyle(.borderedProminent).controlSize(.small)
+                .accessibilityIdentifier("readiness.openHumanDecision")
             } else if !isApprovalState {
                 Text("Normal approval is unavailable")
                     .font(.callout.weight(.semibold))

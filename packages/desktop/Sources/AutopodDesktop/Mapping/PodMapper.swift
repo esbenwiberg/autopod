@@ -109,6 +109,7 @@ public enum PodMapper {
         removed: response.linesRemoved ?? 0,
         files: response.filesChanged ?? 0
       ),
+      pendingDecisionId: response.finalization?.pendingDecisionId,
       escalationQuestion: response.pendingEscalationSummary,
       containerUrl: response.previewUrl.flatMap(URL.init(string:)),
       hasWebUi: response.hasWebUi,
@@ -498,6 +499,7 @@ public enum PodMapper {
       contract: response.contract,
       diffStats: diffStats,
       escalationId: escalationId,
+      pendingDecisionId: response.finalization?.pendingDecisionId,
       escalationQuestion: escalationQuestion,
       escalationOptions: escalationOptions,
       escalationType: escalationType,

@@ -702,7 +702,7 @@ public struct DetailPanelView: View {
     }
 
     private func routeApprovalFromHeader() {
-        guard activeReadinessStatus?.canApproveFromHeader == true else {
+        guard !pod.hasUnansweredDecision, activeReadinessStatus?.canApproveFromHeader == true else {
             selectedTab = .readiness
             return
         }
@@ -992,7 +992,7 @@ public struct DetailPanelView: View {
                     Button {
                         routeApprovalFromHeader()
                     } label: {
-                        Label(actions.approvalPending(pod.id) ? "Preparing approval…" : activeReadinessStatus?.canApproveFromHeader == true ? "Approve" : "Review & Approve", systemImage: "checkmark")
+                        Label(pod.hasUnansweredDecision ? "Review decision" : actions.approvalPending(pod.id) ? "Preparing approval…" : activeReadinessStatus?.canApproveFromHeader == true ? "Approve" : "Review & Approve", systemImage: "checkmark")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
