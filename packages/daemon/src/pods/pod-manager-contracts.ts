@@ -405,6 +405,12 @@ export interface PodManager {
    * Updates prUrl on success. Throws if the pod is not complete or already has a PR.
    */
   retryCreatePr(podId: string): Promise<void>;
+  recoverCheckpoint: ReturnType<
+    typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
+  >['submit'];
+  getCheckpointRecoveries: ReturnType<
+    typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
+  >['list'];
   getValidationExecutionRecovery: ReturnType<
     typeof import('./validation-execution-recovery.js').createValidationExecutionRecovery
   >['getValidationExecutionRecovery'];

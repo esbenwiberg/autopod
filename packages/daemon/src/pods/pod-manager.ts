@@ -3,6 +3,7 @@ import { buildCodeIntelligenceServers } from './provisioning-runtime-files.js';
 import { createProvisioningSandboxState } from './provisioning-sandbox-state.js';
 import { createProvisioningToolInstallation } from './provisioning-tool-installation.js';
 import { createProvisioningWorkflow } from './provisioning-workflow.js';
+import { createRetainedCheckpointRecovery } from './retained-checkpoint-recovery.js';
 import { createValidationExecutionRecovery } from './validation-execution-recovery.js';
 import { ValidationSupersededError } from './validation-ownership.js';
 import {
@@ -1407,6 +1408,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       'refreshNetworkPolicy',
       'deleteSeriesWithCascade',
     ]);
+    if (operation !== 'processPod') podRepo.retainedCheckpoints?.assertAvailable(podId);
     if (!metadataOnly.has(operation)) assertValidationMutationSettled(podRepo, podId);
     podRepo.validationExecutions?.assertNoPendingRecovery(podId);
     if (podRepo.sourceAdoptions?.hasCustody(podId))
@@ -1461,8 +1463,40 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     ),
     emit: emitActivityStatus,
   });
+  const checkpointRecovery = podRepo.retainedCheckpoints
+    ? createRetainedCheckpointRecovery({
+        podRepo,
+        executionForPod,
+        worktreeManager,
+        getContainerManager: () => containerManagerFactory.get('sandbox'),
+        isIdle: (id) =>
+          !controlOperations.isActive(id) &&
+          !activeAgentRuns.has(id) &&
+          !validationAbortControllers.has(id) &&
+          !infrastructureResumeRuns.has(id) &&
+          !artifactResumeRuns.has(id) &&
+          !artifactCompletionRuns.has(id) &&
+          !attemptExtensionRuns.has(id),
+        isGoal: (id) =>
+          deps.launchConfiguration?.read(id)?.intent === 'goal' ||
+          Boolean(deps.launchConfiguration?.goals?.get(id)),
+        assertGuidanceCollected,
+        enqueue: enqueueSession,
+        logger,
+        transition,
+        emit: emitActivityStatus,
+        root: path.join(
+          process.env.DATA_DIR ??
+            (process.env.DB_PATH
+              ? path.dirname(path.resolve(process.env.DB_PATH))
+              : path.join(process.cwd(), '.autopod-data')),
+          'checkpoint-recoveries',
+        ),
+      })
+    : undefined;
   return controlOperations.wrap(
     createPodManagerFacade({
+      checkpointRecovery,
       sourceAdoption,
       validationExecutionRecovery,
       terminationReconciliation,

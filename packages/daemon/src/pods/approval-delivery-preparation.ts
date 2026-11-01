@@ -13,6 +13,7 @@ import type { ApprovalDeliveryPreparationCaptured } from './approval-contracts.j
 import { reconcileExternalApproval } from './approval-external-delivery.js';
 import { APPROVAL_SNAPSHOT_EXCLUDES } from './approval-policy.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
+import { verifiedCheckpointApprovalSnapshot } from './checkpoint-approval-snapshot.js';
 import type {
   ApprovalPreparationContext,
   ApprovalPreparationResult,
@@ -121,23 +122,32 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
         }
       };
       try {
-        const artifactsPath = await collectArtifactSnapshot({
-          containerManager: containerManagerFactory.get(pod.executionTarget),
-          containerId: pod.containerId,
+        const saved = await verifiedCheckpointApprovalSnapshot({
+          pod,
+          podRepo,
+          worktreeManager,
           artifactRoot: path.join(dataDir, 'artifacts', pod.id),
-          generation: pod.lifecycleGeneration,
-          cycle: pod.finalization?.cycle ?? 0,
-          isCurrent,
-          excludes: APPROVAL_SNAPSHOT_EXCLUDES,
-          wakeupTimeoutMs: 150_000,
-          onStage: (stage) =>
-            emitActivityStatus(
-              podId,
-              stage === 'wakeup'
-                ? 'Waking retained sandbox for approval…'
-                : 'Preserving workspace reports…',
-            ),
+          assertCurrent: () => assertApprovalCurrent(pod),
         });
+        const artifactsPath =
+          saved ??
+          (await collectArtifactSnapshot({
+            containerManager: containerManagerFactory.get(pod.executionTarget),
+            containerId: pod.containerId,
+            artifactRoot: path.join(dataDir, 'artifacts', pod.id),
+            generation: pod.lifecycleGeneration,
+            cycle: pod.finalization?.cycle ?? 0,
+            isCurrent,
+            excludes: APPROVAL_SNAPSHOT_EXCLUDES,
+            wakeupTimeoutMs: 150_000,
+            onStage: (stage) =>
+              emitActivityStatus(
+                podId,
+                stage === 'wakeup'
+                  ? 'Waking retained sandbox for approval…'
+                  : 'Preserving workspace reports…',
+              ),
+          }));
         assertApprovalCurrent(pod);
         podRepo.update(podId, { artifactsPath });
       } catch (error) {

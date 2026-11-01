@@ -390,6 +390,67 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       },
     );
   program
+    .command('checkpoint-recovery <id>')
+    .description(
+      'Inspect retained-checkpoint recovery; --apply selects exact saved Git source for fresh checks, retaining the original',
+    )
+    .option(
+      '--apply',
+      'Quarantine original evidence and queue fresh checks only; never a worker, publication or merge',
+    )
+    .option('--request-id <id>', 'Stable recovery request ID; reuse it to observe a lost response')
+    .option('--generation <number>', 'Expected original lifecycle generation')
+    .option('--result-hash <sha256>', 'Expected exact stored validation result hash')
+    .option('--head <sha>', 'Exact retained host checkpoint commit, not a branch name')
+    .option(
+      '--reason <text>',
+      'Human selection reason, explicitly accepting a known checkpoint rather than final sandbox content',
+    )
+    .option('--json', 'Output JSON')
+    .action(
+      async (
+        id: string,
+        opts: {
+          apply?: boolean;
+          requestId?: string;
+          generation?: string;
+          resultHash?: string;
+          head?: string;
+          reason?: string;
+          json?: boolean;
+        },
+      ) => {
+        const mutation =
+          opts.requestId || opts.generation || opts.resultHash || opts.head || opts.reason;
+        if (!opts.apply && mutation)
+          throw new Error('Mutation fields require --apply; omit them for read-only inspection.');
+        if (
+          opts.apply &&
+          (!opts.requestId || !opts.generation || !opts.resultHash || !opts.head || !opts.reason)
+        )
+          throw new Error(
+            '--apply requires --request-id, --generation, --result-hash, --head and --reason.',
+          );
+        const client = getClient();
+        const podId = await resolvePodId(client, id);
+        const state = opts.apply
+          ? await client.recoverCheckpoint(podId, {
+              id: opts.requestId as string,
+              expectedGeneration: Number(opts.generation),
+              expectedResultHash: opts.resultHash as string,
+              checkpointHead: opts.head as string,
+              reason: opts.reason as string,
+            })
+          : await client.getCheckpointRecoveries(podId);
+        withJsonOutput(opts, state, (value) => {
+          console.log(JSON.stringify(value, null, 2));
+          console.log(
+            'An accepted selection is not successful validation. Inspect the durable operation and pod activity. Original evidence remains retained; approval and delivery are separate.',
+          );
+        });
+      },
+    );
+  program
     .command('validation-recovery-budget <id>')
     .description(
       'Authorize one finite recovery test budget without changing frozen configuration or retry permissions',

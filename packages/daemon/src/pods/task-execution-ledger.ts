@@ -14,6 +14,7 @@ import { hasUnansweredDecision } from './decision-admission.js';
 import { createDeletionOwnership } from './deletion-ownership.js';
 import { ensureMergeIdentityProjection } from './merge-identity-projection.js';
 import { readProviderUsage } from './provider-usage-projection.js';
+import { createRetainedCheckpointRepository } from './retained-checkpoint-repository.js';
 import { assertSourceAvailable, assertSourceDeliveryAllowed } from './source-custody-guards.js';
 import { createTerminationReconciliationRepository } from './termination-reconciliation-repository.js';
 import { createValidationExecutionLedger } from './validation-execution-ledger.js';
@@ -561,6 +562,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           .get(podId),
       ),
     beginRun: db.transaction((podId, generation, cycle, binding) => {
+      createRetainedCheckpointRepository(db).assertWorkerAllowed(podId);
       assertSourceAvailable(db, podId, '');
       assertSourceDeliveryAllowed(db, podId);
       createDeletionOwnership(db).assertTaskAvailable(podId);

@@ -1,5 +1,11 @@
 # Retained sandbox approval recovery
 
+An outcome-unknown original resume is not reissued by
+[retained-checkpoint recovery](retained-checkpoint-recovery.md). That separate
+human-selected source workflow retains the original, runs fresh checks without
+publishing, and preserves new reports before suspension. Later approval may reuse
+only the exact verified new-execution report receipt; the old intent stays unresolved.
+
 Approval of a validated sandbox PR or branch preserves ignored workspace reports
 before publishing source, merging, or removing the original sandbox. Readiness
 is a separate verdict: a ready pod can still encounter a delivery failure.
