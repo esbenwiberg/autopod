@@ -33,6 +33,24 @@ import Testing
     #expect(summary.escalationQuestion == pod.escalationQuestion)
   }
 
+  @Test func preservesOrphanedDurableDecisionInValidatedDetailAndCompactViews() throws {
+    let contract = try fixture()
+    var detail = try #require(contract["detail"] as? [String: Any])
+    var compact = try #require(contract["compact"] as? [String: Any])
+    detail["status"] = "validated"
+    detail["pendingEscalation"] = NSNull()
+    compact["status"] = "validated"
+    compact["pendingEscalationSummary"] = NSNull()
+    let response = try JSONDecoder().decode(SessionResponse.self, from: JSONSerialization.data(withJSONObject: detail))
+    let summary = try JSONDecoder().decode(CompactPodResponse.self, from: JSONSerialization.data(withJSONObject: compact))
+    for pod in [PodMapper.map(response), PodMapper.map(summary)] {
+      #expect(pod.pendingDecisionId == "decision-contract-question")
+      #expect(pod.escalationId == nil)
+      #expect(pod.escalationQuestion == nil)
+      #expect(pod.hasUnansweredDecision)
+    }
+  }
+
   @Test(arguments: [false, true]) func acceptsMissingOrNullOptionalFieldsAndUnknownKeys(explicitNull: Bool) throws {
     let contract = try fixture()
     var detail = try #require(contract["detail"] as? [String: Any])

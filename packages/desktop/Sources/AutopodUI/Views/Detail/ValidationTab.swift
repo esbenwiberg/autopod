@@ -841,7 +841,7 @@ public struct ValidationTab: View {
           .tint(.orange)
           .disabled(isInterrupting)
         }
-        if pod.status == .failed || pod.status == .reviewRequired {
+        if pod.status == .failed || pod.status == .reviewRequired || pod.hasOrphanedValidationDecision {
           Button {
             showForceApprovePopover = true
           } label: {
@@ -851,7 +851,7 @@ public struct ValidationTab: View {
                 Text("Approving…").lineLimit(1)
               }
             } else {
-              Label("Override validation…", systemImage: "exclamationmark.shield").lineLimit(1)
+              Label(pod.hasOrphanedValidationDecision ? "Reapply validation decision…" : "Override validation…", systemImage: "exclamationmark.shield").lineLimit(1)
             }
           }
           .buttonStyle(.bordered)
@@ -958,10 +958,15 @@ public struct ValidationTab: View {
   private var forceApprovePopover: some View {
     VStack(alignment: .leading, spacing: 12) {
       Text("Force Approve").font(.headline)
-      Text("Bypass validation and mark this pod as validated. Use when the fix is clearly correct but validation is flaky.")
+      Text(pod.hasOrphanedValidationDecision
+        ? "Review the saved waiver and decision \(pod.pendingDecisionId ?? "unknown") before confirming. This records a fresh human override for that exact saved question. It does not run an agent, create a PR, or merge. The original waiver and its restrictions are retained alongside your new reason."
+        : "Bypass validation and mark this pod as validated. If a human question is pending, this also records your override as its answer. No agent run or delivery is performed.")
         .font(.caption)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
+      if pod.hasOrphanedValidationDecision, let waiver = pod.validationWaiver {
+        Text(waiver.reason).font(.caption).textSelection(.enabled)
+      }
       TextField("Reason (required)", text: $forceApproveReason).textFieldStyle(.roundedBorder)
       HStack {
         Button("Cancel") { showForceApprovePopover = false }
