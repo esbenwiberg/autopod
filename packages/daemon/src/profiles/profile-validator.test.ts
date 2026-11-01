@@ -454,3 +454,7 @@ describe('ProfileValidator', () => {
     });
   });
 });
+
+it('accepts the maintained Node24 PostgreSQL worker', () => {
+  expect(validateProfile({ ...validInput, template: 'node24-pw-pg' }).valid).toBe(true);
+});

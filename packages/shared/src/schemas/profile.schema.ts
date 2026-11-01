@@ -324,6 +324,7 @@ const createProfileBaseSchema = z.object({
       'node22-pw-pg',
       'node24',
       'node24-pw',
+      'node24-pw-pg',
       'dotnet9',
       'dotnet10',
       'dotnet10-go',
@@ -335,7 +336,7 @@ const createProfileBaseSchema = z.object({
       'custom',
     ])
     .nullable()
-    .default('node22'),
+    .default('node24'),
   buildCommand: z.string().min(1).nullable().default(null),
   startCommand: z.string().min(1).nullable().default(null),
   /** Optional subdirectory under /workspace where build/test/start commands run. */

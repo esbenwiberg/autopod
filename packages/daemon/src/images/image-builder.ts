@@ -281,7 +281,7 @@ export class ImageBuilder {
   private async resolveBaseImage(profile: Profile): Promise<string | undefined> {
     if (!this.acr) return undefined;
 
-    const template = profile.template ?? 'node22';
+    const template = profile.template ?? 'node24';
     const configured = getConfiguredBaseImage(template);
     const qualified = this.acr.resolveTag(configured);
     try {

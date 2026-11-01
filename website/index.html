@@ -210,7 +210,7 @@ ap login</code></pre>
   <h3>5. Create your first profile</h3>
   <pre><code class="language-bash">ap profile create my-app \
   --repo owner/my-app \
-  --template node22-pw \
+  --template node24-pw \
   --build "npm ci && npm run build" \
   --start "npm run preview -- --host 0.0.0.0 --port \$PORT" \
   --health "/" \
@@ -351,7 +351,7 @@ ap memory delete &lt;id&gt;</code></pre>
   <pre><code class="language-bash">ap profile create my-app \
   --repo owner/my-app \
   --branch main \
-  --template node22-pw \
+  --template node24-pw \
   --build "npm ci && npm run build" \
   --start "npm run preview -- --host 0.0.0.0 --port \$PORT" \
   --test "npm test" \
@@ -383,6 +383,9 @@ prProvider: ado
   <table>
     <thead><tr><th>Template</th><th>Stack</th><th>Includes</th></tr></thead>
     <tbody>
+      <tr><td><code>node24</code></td><td>Node.js 24</td><td>Default for new Node workers</td></tr>
+      <tr><td><code>node24-pw</code></td><td>Node.js 24 + Playwright</td><td>Chromium for browser validation</td></tr>
+      <tr><td><code>node24-pw-pg</code></td><td>Node.js 24 + Playwright + PostgreSQL 17</td><td>Browser validation and transient databases on port 5433</td></tr>
       <tr><td><code>node22</code></td><td>Node.js 22</td><td>npm / pnpm / yarn</td></tr>
       <tr><td><code>node22-pw</code></td><td>Node.js 22 + Playwright</td><td>Chromium for browser validation</td></tr>
       <tr><td><code>node22-pw-pg</code></td><td>Node.js 22 + Playwright + PostgreSQL 17</td><td>Browser validation with a transient local database on port 5433</td></tr>
@@ -510,7 +513,7 @@ ap status a1b2c3d4       # Shows: profile: my-app v7 · branch: autopod/a1b2c3d4
   <h3>Profile Inheritance</h3>
   <pre><code class="language-yaml"># base.yaml
 name: frontend-base
-template: node22-pw
+template: node24-pw
 build: "npm ci && npm run build"
 escalation:
   askHuman: true

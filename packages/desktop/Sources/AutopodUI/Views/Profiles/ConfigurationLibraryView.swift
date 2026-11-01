@@ -1510,7 +1510,7 @@ struct ConfigurationEditorSheet: View {
         stringPicker(
           "Template", key: "template",
           values: [
-            "node22", "node22-pw", "node22-pw-pg", "node24", "node24-pw", "dotnet9", "dotnet10",
+            "node22", "node22-pw", "node22-pw-pg", "node24", "node24-pw", "node24-pw-pg", "dotnet9", "dotnet10",
             "dotnet10-go", "python312", "python-node", "python-node-pg", "go124", "go124-pw", "custom",
           ])
         Text(
@@ -1672,7 +1672,7 @@ struct ConfigurationEditorSheet: View {
     case .ai: ["main": .object(initialRoute), "reviewer": .object(["mode": .string("follow-main")])]
     case .workflow: ["agentMode": .string("auto"), "intent": .string("task"), "output": .string("pr"), "completion": .string("approval"), "validationPhases": .array(["setup", "build", "test", "review"].map(ConfigurationJSON.string)), "tokenBudget": .null, "reviewerTokenBudget": .null]
     case .repository: ["provider": .string("github"), "remote": .string(""), "providerRepositoryId": .null, "usualProfileId": .null, "setups": .array([.object(["id": .string("default"), "name": .string("Default"), "defaultBranch": .string("main"), "buildCommand": .null, "testCommand": .null])]), "defaultSetupId": .string("default"), "trustedSetupIds": .array([])]
-    case .environment: ["template": .string("node22"), "baseImage": .null, "tools": .array([]), "prepareCommands": .array([]), "capabilities": .array([]), "sidecars": .array([])]
+    case .environment: ["template": .string("node24"), "baseImage": .null, "tools": .array([]), "prepareCommands": .array([]), "capabilities": .array([]), "sidecars": .array([])]
     case .toolPack: ["instructions": .array([]), "skills": .array([]), "mcpServers": .array([]), "requiredCapabilities": .array([])]
     case .packageFeed: ["type": .string("npm"), "url": .string(""), "credential": .null, "expiresAt": .null]
     }
