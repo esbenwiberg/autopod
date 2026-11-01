@@ -1542,8 +1542,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
                json_type(binding, '$.resource.containerId') = 'text' AND
                json_extract(binding, '$.resource.containerId') != ''
              ELSE 0 END
-           UNION SELECT sandbox_id AS container_id FROM sandbox_wakeup_intents
-           WHERE ended_at IS NULL
+           UNION SELECT sandbox_id AS container_id FROM sandbox_wakeup_intents w
+           WHERE ended_at IS NULL AND NOT EXISTS (
+             SELECT 1 FROM sandbox_recovery_requests r,json_each(r.intent_ids) i
+             WHERE r.resource_key=w.resource_key AND r.action='abandon'
+               AND r.completed_at IS NOT NULL AND i.value=w.id
+           )
+           UNION SELECT sandbox_id AS container_id FROM sandbox_recovery_requests
+           WHERE action='abandon' AND completed_at IS NULL
            UNION SELECT json_extract(binding,'$.containerId') AS container_id FROM source_adoptions
            UNION SELECT container_id FROM retained_checkpoint_recoveries`,
         )

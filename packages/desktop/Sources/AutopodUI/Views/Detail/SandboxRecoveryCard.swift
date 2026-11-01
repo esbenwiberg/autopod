@@ -114,6 +114,7 @@ struct SandboxRecoverySheet: View {
         .font(.caption).foregroundStyle(.secondary)
     }
     .padding(20).frame(width: 680, height: 650)
+    .background(Color(nsColor: .windowBackgroundColor))
     .task { await refresh() }
     .confirmationDialog("Permanently abandon sandbox and delete pod?", isPresented: Binding(
       get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }), titleVisibility: .visible) {
@@ -155,7 +156,7 @@ struct SandboxRecoverySheet: View {
           reason: reason, acceptsLoss: acknowledgeLoss, busy: busy))
         .accessibilityIdentifier("sandbox-recovery-abandon")
       }
-    }.padding(12).background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+    }.padding(12).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
   }
 
   private func refresh() async {

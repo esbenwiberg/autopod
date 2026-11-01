@@ -155,9 +155,9 @@ This endpoint neither contacts Azure nor grants settlement or replay authority.
 The intent ID is the original `x-ms-client-request-id` for provider investigation.
 
 This protocol does not prove the disposition of a previously lost restore
-response. Keep original resources, snapshots, exclusive operation records and
-unknown usage intact. Obtain fresh provider evidence and diagnose the original
+response. Outside the explicitly confirmed abandonment path, keep original
+resources, snapshots, exclusive operation records and unknown usage intact. Obtain fresh provider evidence and diagnose the original
 operation; do not clone, delete, fabricate a rejection/exit, grant new execution
-or relabel old-source validation. Current-source handoff, verified report
+or relabel old-source validation. Current-source handoff and verified report
 capture remain separate work. The explicit abandonment path above permits deliberate
 loss, not an assertion that those captures succeeded.

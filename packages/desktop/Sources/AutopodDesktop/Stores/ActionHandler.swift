@@ -701,7 +701,12 @@ public final class ActionHandler {
       try await perform { try await api.deletePod(podId) }
       podStore.removeSession(podId)
     } catch {
-      lastError = error.localizedDescription
+      let message = error.localizedDescription
+      if message.contains("unresolved wakeup") || message.contains("sandbox resume remains outcome-unknown") {
+        lastError = "\(message) Open this pod’s details and choose Sandbox recovery to check status or explicitly abandon it."
+      } else {
+        lastError = message
+      }
     }
     if pendingAction == "delete-\(podId)" { pendingAction = nil }
   }

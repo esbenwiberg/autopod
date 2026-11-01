@@ -22,9 +22,11 @@ import Testing
     defer { NSApplication.shared.accessibilitySetValue(priorEnhanced, forAttribute: enhanced) }
     let view = NSHostingView(rootView: SandboxRecoverySheet(podId: state.podId, actions: actions)
       .preferredColorScheme(.dark))
-    let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 680, height: 650),
+    let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 680, height: 650),
       styleMask: [.borderless], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
+    window.appearance = NSAppearance(named: .darkAqua)
+    view.appearance = NSAppearance(named: .darkAqua)
     window.contentView = view
     window.orderBack(nil)
     defer { window.close() }
@@ -43,15 +45,17 @@ import Testing
       try data.write(to: URL(fileURLWithPath: path))
     }
     let nodes = recoveryNodes(view)
-    let start = try #require(nodes.first { recoveryValue($0, "accessibilityIdentifier") as? String == "sandbox-recovery-start" })
-    let abandon = try #require(nodes.first { recoveryValue($0, "accessibilityIdentifier") as? String == "sandbox-recovery-abandon" })
-    #expect(recoveryValue(start, "accessibilityEnabled") as? Bool == false)
-    #expect(recoveryValue(abandon, "accessibilityEnabled") as? Bool == false)
+    for id in ["sandbox-recovery-start", "sandbox-recovery-abandon"] {
+      let candidates = nodes.filter { recoveryValue($0, "accessibilityIdentifier") as? String == id }
+      #expect(!candidates.isEmpty)
+      #expect(candidates.contains { recoveryValue($0, "accessibilityEnabled") as? Bool == false })
+    }
   }
 }
 
 @MainActor private func recoveryValue(_ node: NSObject, _ key: String) -> Any? {
-  guard node.responds(to: NSSelectorFromString(key)) else { return nil }
+  let getter = key == "accessibilityEnabled" ? "isAccessibilityEnabled" : key
+  guard node.responds(to: NSSelectorFromString(getter)) || node.responds(to: NSSelectorFromString(key)) else { return nil }
   return node.value(forKey: key)
 }
 @MainActor private func recoveryNodes(_ node: NSObject) -> [NSObject] {

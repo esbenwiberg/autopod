@@ -57,6 +57,7 @@ describe('human sandbox recovery', () => {
     });
     const result = await f.recovery.submit('prepare', f.input, f.actor);
     expect(result.podDeleted).toBe(true);
+    expect(f.podRepo.listReferencedContainerIds()).not.toContain(f.sandboxId);
     expect(f.journal.listForPod('prepare')).toEqual(original);
     expect(f.journal.recovery.list('prepare')[0]).toMatchObject({
       userId: f.actor.userId,
