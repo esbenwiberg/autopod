@@ -90,7 +90,7 @@ function fixture(disk = false) {
     assertExecutionTerminationVerified: vi.fn(),
     assertGuidanceCollected: vi.fn(),
     hasDurableAgentExecutionEvidence: vi.fn(() => false),
-    infrastructureResumeRuns: new Map<string, Promise<void>>(),
+    validationResumeRuns: new Map<string, Promise<void>>(),
     artifactResumeRuns: new Map<string, Promise<void>>(),
     activeAgentRuns: new Map<string, unknown>(),
     resolveEffectiveBoundProfile: () => profiles.get('test-profile'),
@@ -180,6 +180,104 @@ describe('continuation controls', () => {
     );
     expect(f.captured.assertGuidanceCollected).toHaveBeenCalledExactlyOnceWith('control');
   });
+  it('accepts background validation before completion and coalesces across status changes', async () => {
+    const f = fixture();
+    const pending = gate();
+    f.calls.revalidateSession.mockReturnValue(pending.promise);
+    const options = { backgroundValidation: true };
+    try {
+      const first = f.c.resumePod.call(f.calls, 'control', options);
+      const duplicate = f.c.resumePod.call(f.calls, 'control', options);
+      await expect(first).resolves.toEqual({ action: 'revalidate' });
+      await expect(duplicate).resolves.toEqual({ action: 'revalidate' });
+      expect(f.calls.revalidateSession).toHaveBeenCalledExactlyOnceWith('control', { force: true });
+      const shared = f.captured.validationResumeRuns.get('control');
+      expect(shared).toBeDefined();
+      f.pods.update('control', { status: 'validating' });
+      await expect(f.c.resumePod.call(f.calls, 'control', options)).resolves.toEqual({
+        action: 'revalidate',
+      });
+      expect(f.calls.revalidateSession).toHaveBeenCalledOnce();
+      expect(f.captured.validationResumeRuns.get('control')).toBe(shared);
+      pending.release();
+      await shared;
+      expect(f.captured.validationResumeRuns.size).toBe(0);
+    } finally {
+      pending.release();
+    }
+  });
+  it('keeps ordinary in-process Resume completion-waiting unless explicitly detached', async () => {
+    const f = fixture();
+    const pending = gate();
+    f.calls.revalidateSession.mockReturnValue(pending.promise);
+    let finished = false;
+    const resume = f.c.resumePod.call(f.calls, 'control').then(() => {
+      finished = true;
+    });
+    await Promise.resolve();
+    expect(finished).toBe(false);
+    pending.release();
+    await resume;
+    expect(finished).toBe(true);
+  });
+  it('reports a detached validation failure and releases its recovery claim', async () => {
+    const f = fixture();
+    const pending = gate();
+    f.calls.revalidateSession.mockImplementation(async () => {
+      await pending.promise;
+      throw new Error('Synthetic recovery failure');
+    });
+    await expect(
+      f.c.resumePod.call(f.calls, 'control', { backgroundValidation: true }),
+    ).resolves.toEqual({ action: 'revalidate' });
+    const shared = f.captured.validationResumeRuns.get('control');
+    pending.release();
+    await shared;
+    expect(f.captured.emitActivityStatus).toHaveBeenCalledWith(
+      'control',
+      'Validation Resume failed: Synthetic recovery failure',
+    );
+    expect(f.captured.validationResumeRuns.size).toBe(0);
+    f.calls.revalidateSession.mockResolvedValue(undefined);
+    await f.c.resumePod.call(f.calls, 'control', { backgroundValidation: true });
+    await f.captured.validationResumeRuns.get('control');
+    expect(f.calls.revalidateSession).toHaveBeenCalledTimes(2);
+  });
+  it.each(['state', 'worktree', 'compromised', 'termination', 'guidance', 'validation'])(
+    'rejects %s admission before starting background validation',
+    async (block) => {
+      const f = fixture();
+      if (block === 'state') f.pods.update('control', { status: 'running' });
+      if (block === 'worktree') f.pods.update('control', { worktreePath: null });
+      if (block === 'compromised') f.pods.update('control', { worktreeCompromised: true });
+      if (block === 'termination')
+        f.captured.assertExecutionTerminationVerified.mockImplementation(() => {
+          throw new Error('Unsettled worker');
+        });
+      if (block === 'guidance')
+        f.captured.assertGuidanceCollected.mockImplementation(() => {
+          throw new Error('Uncollected guidance');
+        });
+      if (block === 'validation')
+        f.pods.update('control', {
+          lastValidationResult: {
+            ...validation(),
+            overall: 'fail',
+            infrastructureFailure: {
+              phase: 'test',
+              code: 'EXEC_EXIT_UNVERIFIED',
+              message: 'Unsettled validation',
+              retryable: false,
+            },
+          },
+        });
+      await expect(
+        f.c.resumePod.call(f.calls, 'control', { backgroundValidation: true }),
+      ).rejects.toThrow();
+      expect(f.calls.revalidateSession).not.toHaveBeenCalled();
+      expect(f.captured.validationResumeRuns.size).toBe(0);
+    },
+  );
   it('retains termination/guidance errors before starting recovery', async () => {
     const f = fixture();
     const error = new Error('Human decision');
@@ -228,13 +326,13 @@ describe('continuation controls', () => {
       },
     });
     await expect(f.c.resumePod.call(f.calls, 'control')).resolves.toEqual({ action: 'revalidate' });
-    const shared = f.captured.infrastructureResumeRuns.get('control');
+    const shared = f.captured.validationResumeRuns.get('control');
     expect(shared).toBeDefined();
     await f.c.resumePod.call(f.calls, 'control');
     expect(f.calls.revalidateSession).toHaveBeenCalledOnce();
     pending.release();
     await shared;
-    expect(f.captured.infrastructureResumeRuns.size).toBe(0);
+    expect(f.captured.validationResumeRuns.size).toBe(0);
   });
   it('coalesces artifact recovery and clears its shared map after original completion succeeds', async () => {
     const f = fixture();

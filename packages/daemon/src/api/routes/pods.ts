@@ -1353,10 +1353,11 @@ export function podRoutes(
   // POST /pods/:podId/resume — operator escape hatch for failed pods and
   // infrastructure-blocked review_required pods. Picks the cheapest recovery path:
   // push + open PR if validation passed, otherwise validation-only. No agent rework.
+  // Validation acknowledges admission promptly; its outcome is observed via pod state/events.
   app.post('/pods/:podId/resume', async (request, reply) => {
     const { podId } = request.params as { podId: string };
     try {
-      const result = await podManager.resumePod(podId);
+      const result = await podManager.resumePod(podId, { backgroundValidation: true });
       return { ok: true, action: result.action };
     } catch (err) {
       if (err instanceof AutopodError) {

@@ -16709,6 +16709,7 @@ describe('PodManager', () => {
       await manager.revalidateSession(pod.id, { force: true });
       expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
       expect(manager.getSession(pod.id).failureReason).toContain('Unchanged');
+      const revalidate = vi.spyOn(manager, 'revalidateSession');
       const app = Fastify();
       app.setErrorHandler(errorHandler);
       authPlugin(app, {
@@ -16759,8 +16760,11 @@ describe('PodManager', () => {
           headers,
         });
         expect(resumed.statusCode).toBe(200);
+        // HTTP success acknowledges admission; wait separately for execution evidence.
+        await revalidate.mock.results[0]?.value;
         expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
         await app.inject({ method: 'POST', url: `/pods/${pod.id}/resume`, headers });
+        await revalidate.mock.results[1]?.value;
         expect(ctx.validationEngine.validate).toHaveBeenCalledTimes(2);
         const state = await app.inject({
           method: 'GET',
@@ -16875,7 +16879,7 @@ describe('PodManager', () => {
 
       expect(outcome).toEqual({ action: 'revalidate' });
       expect(duplicate).toEqual({ action: 'revalidate' });
-      expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledTimes(1);
+      await waitForAssertion(() => expect(ctx.worktreeManager.pullBranch).toHaveBeenCalledTimes(1));
       expect(manager.getSession(pod.id).status).toBe('review_required');
 
       pullGate.resolve({ newCommits: false });
@@ -22711,6 +22715,72 @@ describe('PodManager', () => {
       // Cheapest possible recovery — never spawn the agent runtime again.
       expect(ctx.runtime.spawn).not.toHaveBeenCalled();
       expect(ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+
+    it('HTTP Resume acknowledges a pending validation run and coalesces duplicate requests', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, { validationOverall: 'fail' });
+      let release = () => {};
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.mocked(ctx.validationEngine.validate).mockImplementationOnce(async () => {
+        await held;
+        return makeValidationResult({ podId: pod.id });
+      });
+      const revalidate = vi.spyOn(manager, 'revalidateSession');
+      const app = Fastify();
+      app.setErrorHandler(errorHandler);
+      podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+      const request = () => app.inject({ method: 'POST', url: `/pods/${pod.id}/resume` });
+      let acknowledged = false;
+      const pendingResponse = request().then((response) => {
+        acknowledged = true;
+        return response;
+      });
+      try {
+        // A completion-waiting regression must fail promptly and still release the held run.
+        await vi.waitFor(() => expect(acknowledged).toBe(true));
+        const response = await pendingResponse;
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toEqual({ ok: true, action: 'revalidate' });
+        await vi.waitFor(() => expect(ctx.validationEngine.validate).toHaveBeenCalledOnce());
+        expect(manager.getSession(pod.id).status).toBe('validating');
+        const duplicate = await request();
+        expect(duplicate.statusCode).toBe(200);
+        expect(duplicate.json()).toEqual(response.json());
+        expect(revalidate).toHaveBeenCalledExactlyOnceWith(pod.id, { force: true });
+        expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        release();
+        await revalidate.mock.results[0]?.value;
+        expect(manager.getSession(pod.id).status).toBe('validated');
+      } finally {
+        release();
+        await revalidate.mock.results[0]?.value;
+        await pendingResponse;
+        await app.close();
+      }
+    });
+
+    it('HTTP Resume rejects admission without starting background validation', async () => {
+      const ctx = createTestContext();
+      const { manager, pod } = setupFailedPod(ctx, {
+        validationOverall: 'fail',
+        worktreeCompromised: true,
+      });
+      const app = Fastify();
+      app.setErrorHandler(errorHandler);
+      podRoutes(app, manager, ctx.eventRepo, undefined, ctx.podRepo);
+      try {
+        const response = await app.inject({ method: 'POST', url: `/pods/${pod.id}/resume` });
+        expect(response.statusCode).toBe(409);
+        expect(response.json().code).toBe('WORKTREE_COMPROMISED');
+        expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+        expect(manager.getSession(pod.id).status).toBe('failed');
+      } finally {
+        await app.close();
+      }
     });
 
     it('Path 2: human validation waiver overrides a failed Resume revalidation', async () => {

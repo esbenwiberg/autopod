@@ -2,21 +2,21 @@ import { createInteractiveCompletionCoordinator } from './interactive-completion
 import type { WorkspaceCompletionResult } from './workspace-contracts.js';
 
 export function createWorkspaceRecoveryState(): {
-  infrastructureResumeRuns: Map<string, Promise<void>>;
+  validationResumeRuns: Map<string, Promise<void>>;
   artifactResumeRuns: Map<string, Promise<void>>;
   artifactCompletionRuns: Map<string, Promise<void>>;
   coordinateInteractiveCompletion: ReturnType<
     typeof createInteractiveCompletionCoordinator<WorkspaceCompletionResult>
   >;
 } {
-  const infrastructureResumeRuns = new Map<string, Promise<void>>();
+  const validationResumeRuns = new Map<string, Promise<void>>();
   const artifactResumeRuns = new Map<string, Promise<void>>();
   const artifactCompletionRuns = new Map<string, Promise<void>>();
   const coordinateInteractiveCompletion =
     createInteractiveCompletionCoordinator<WorkspaceCompletionResult>();
 
   return {
-    infrastructureResumeRuns,
+    validationResumeRuns,
     artifactResumeRuns,
     artifactCompletionRuns,
     coordinateInteractiveCompletion,

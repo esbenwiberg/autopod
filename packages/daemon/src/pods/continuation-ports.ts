@@ -93,7 +93,7 @@ export interface ContinuationCaptured {
   ownsLifecycle: (podId: string, generation: number, containerId: string | null) => boolean;
   isRetryableFixDeliveryFailure: (pod: Pod) => boolean;
   completeFixPodAfterPush: (fixPod: Pod) => Promise<void>;
-  infrastructureResumeRuns: Map<string, Promise<void>>;
+  validationResumeRuns: Map<string, Promise<void>>;
   hasDurableAgentExecutionEvidence: (pod: Pod) => boolean;
   pushAndCreatePr: (pod: Pod, callerLabel: string) => Promise<string>;
 }

@@ -29,7 +29,7 @@ type Captured = Pick<
   | 'assertExecutionTerminationVerified'
   | 'assertGuidanceCollected'
   | 'hasDurableAgentExecutionEvidence'
-  | 'infrastructureResumeRuns'
+  | 'validationResumeRuns'
   | 'artifactResumeRuns'
   | 'activeAgentRuns'
   | 'resolveEffectiveBoundProfile'
@@ -50,7 +50,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
     assertExecutionTerminationVerified,
     assertGuidanceCollected,
     hasDurableAgentExecutionEvidence,
-    infrastructureResumeRuns,
+    validationResumeRuns,
     artifactResumeRuns,
     activeAgentRuns,
     resolveEffectiveBoundProfile,
@@ -176,6 +176,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
       'handleCompletion' | 'revalidateSession' | 'approveSession'
     >,
     podId: string,
+    options?: { backgroundValidation?: boolean },
   ): Promise<{
     action: 'retry-pr' | 'revalidate' | 'retry-fix-delivery' | 'retry-agent' | 'collect-artifacts';
   }> {
@@ -196,6 +197,10 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
       return { action: 'collect-artifacts' };
     }
     const pod = podRepo.getOrThrow(podId);
+    if (validationResumeRuns.has(podId)) {
+      logger.info({ podId }, 'Coalesced duplicate validation Resume');
+      return { action: 'revalidate' };
+    }
     if (pod.status === 'failed' && hasInterruptedArtifactCollection(pod)) {
       if (!pod.finalization?.sourcePreservedAt && !pod.containerId)
         throw new AutopodError(
@@ -295,10 +300,6 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
         409,
       );
     }
-    if (isInfrastructureReviewResume && infrastructureResumeRuns.has(podId)) {
-      logger.info({ podId }, 'Coalesced duplicate validation infrastructure Resume');
-      return { action: 'revalidate' };
-    }
     if (pod.executionTarget === 'sandbox' && podRepo.sandboxStartupRetries) {
       const latest = podRepo.sandboxStartupRetries.state(podId).latest;
       if (latest && latest.outcome !== 'pass') {
@@ -388,27 +389,15 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
       return { action: 'retry-agent' };
     }
 
-    if (isInfrastructureReviewResume) {
-      emitActivityStatus(podId, 'Resume accepted — re-running validation without agent rework');
-      const recovery = this.revalidateSession(podId, { force: true })
-        .catch((err: unknown) => {
-          logger.warn({ err, podId }, 'Validation infrastructure Resume failed after acceptance');
-          emitActivityStatus(
-            podId,
-            `Validation Resume failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        })
-        .finally(() => {
-          infrastructureResumeRuns.delete(podId);
-        });
-      infrastructureResumeRuns.set(podId, recovery);
-      void recovery;
-      return { action: 'revalidate' };
-    }
+    assertValidationExecutionSettled(pod, podRepo.validationExecutions?.isSettled(pod));
 
     // Path 1: validation already passed, downstream step (push / PR) blew up.
     // Push + open PR, no agent rework, no validation rerun. Cheapest possible recovery.
-    if (pod.lastValidationResult?.overall === 'pass' && !pod.prUrl) {
+    if (
+      !isInfrastructureReviewResume &&
+      pod.lastValidationResult?.overall === 'pass' &&
+      !pod.prUrl
+    ) {
       emitActivityStatus(podId, 'Resume: pushing branch + opening PR…');
       const newPrUrl = await pushAndCreatePr(pod, 'resume');
       // Transition the pod from `failed → validated` so it rejoins the normal
@@ -432,10 +421,31 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
     // Path 2: validation didn't pass (or never ran). Re-run validation only —
     // no agent rework. force=true skips the no-new-commits gate so a Resume
     // works even when the worktree wasn't touched between attempts.
-    if (pod.prUrl) {
+    if (isInfrastructureReviewResume) {
+      emitActivityStatus(podId, 'Resume accepted — re-running validation without agent rework');
+    } else if (pod.prUrl) {
       emitActivityStatus(podId, 'Resume: PR already exists — re-running validation only');
     } else {
       emitActivityStatus(podId, 'Resume: re-running validation (no agent rework)');
+    }
+    if (isInfrastructureReviewResume || options?.backgroundValidation) {
+      // HTTP callers need acceptance, not the result of a potentially minutes-long run.
+      // Retain the promise through preflight and finalization so duplicates coalesce and
+      // source/resource recovery cannot mistake an accepted invocation for an idle pod.
+      const recovery = Promise.resolve()
+        .then(() => this.revalidateSession(podId, { force: true }))
+        .catch((err: unknown) => {
+          logger.warn({ err, podId }, 'Validation Resume failed after acceptance');
+          emitActivityStatus(
+            podId,
+            `Validation Resume failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        })
+        .finally(() => {
+          validationResumeRuns.delete(podId);
+        });
+      validationResumeRuns.set(podId, recovery);
+      return { action: 'revalidate' };
     }
     await this.revalidateSession(podId, { force: true });
     return { action: 'revalidate' };

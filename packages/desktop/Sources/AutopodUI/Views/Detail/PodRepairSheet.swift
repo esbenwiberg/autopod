@@ -61,6 +61,9 @@ internal struct PodRepairSheet: View {
     }.background(DesktopTheme.canvas).tint(DesktopTheme.accent)
       .frame(minWidth: 900, idealWidth: 1120, minHeight: 650, idealHeight: 800)
       .task { await loadSnapshot() }
+      .onChange(of: model.receipt != nil) { _, accepted in
+        if accepted && model.kind == .resume { isPresented = false }
+      }
       .interactiveDismissDisabled(model.busy || budget.busy || model.uncertain || !model.feedback.isEmpty)
       .confirmationDialog("Leave this repair handoff?", isPresented: $confirmClose) {
         Button("Leave handoff", role: .destructive) { isPresented = false }; Button("Keep reviewing", role: .cancel) {}
