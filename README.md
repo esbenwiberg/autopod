@@ -324,7 +324,7 @@ looks like this:
 name: my-app
 repoUrl: https://github.com/owner/my-app.git
 defaultBranch: main
-template: node22-pw
+template: node24-pw
 buildCommand: npm ci && npm run build
 validationSetupCommand: null
 testCommand: npm test
@@ -714,7 +714,7 @@ name: my-app
 repoUrl: https://github.com/owner/my-app.git
 defaultBranch: main
 extends: frontend-base
-template: node22-pw
+template: node24-pw
 buildWorkDir: null
 validationSetupCommand: npm ci
 lintCommand: npx pnpm lint

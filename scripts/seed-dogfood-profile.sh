@@ -17,7 +17,7 @@ BODY=$(cat <<'JSON'
   "name": "autopod-self",
   "repoUrl": "https://github.com/esbenwiberg/autopod",
   "defaultBranch": "main",
-  "template": "node22-pw",
+  "template": "node24-pw",
   "buildCommand": "npx pnpm install && npm_config_nodedir=/usr/local npx pnpm rebuild better-sqlite3 && npx pnpm build",
   "testCommand": "npx pnpm test",
   "startCommand": "NODE_ENV=development AUTOPOD_MOCK_DOCKER=true HOST=0.0.0.0 PORT=$PORT node packages/daemon/dist/index.js",

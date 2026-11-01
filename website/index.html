@@ -210,7 +210,7 @@ ap login</code></pre>
   <h3>5. Create your first profile</h3>
   <pre><code class="language-bash">ap profile create my-app \
   --repo owner/my-app \
-  --template node22-pw \
+  --template node24-pw \
   --build "npm ci && npm run build" \
   --start "npm run preview -- --host 0.0.0.0 --port \$PORT" \
   --health "/" \
@@ -351,7 +351,7 @@ ap memory delete &lt;id&gt;</code></pre>
   <pre><code class="language-bash">ap profile create my-app \
   --repo owner/my-app \
   --branch main \
-  --template node22-pw \
+  --template node24-pw \
   --build "npm ci && npm run build" \
   --start "npm run preview -- --host 0.0.0.0 --port \$PORT" \
   --test "npm test" \
@@ -513,7 +513,7 @@ ap status a1b2c3d4       # Shows: profile: my-app v7 · branch: autopod/a1b2c3d4
   <h3>Profile Inheritance</h3>
   <pre><code class="language-yaml"># base.yaml
 name: frontend-base
-template: node22-pw
+template: node24-pw
 build: "npm ci && npm run build"
 escalation:
   askHuman: true
