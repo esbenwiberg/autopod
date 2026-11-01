@@ -2,10 +2,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type Database from 'better-sqlite3';
 import { createRetainedCheckpointRepository } from './retained-checkpoint-repository.js';
 import { sourceAdoptionError } from './source-adoption-identity.js';
-import { assertValidationResourceSettled } from './validation-execution-evidence.js';
+import { assertValidationResourceReleasable } from './validation-execution-evidence.js';
 
 export function assertSourceResourceReleasable(db: Database.Database, containerId: string): void {
-  assertValidationResourceSettled(db, containerId);
+  assertValidationResourceReleasable(db, containerId);
   if (
     db
       .prepare(
