@@ -22,11 +22,23 @@ separate from the worker's final prose or terminal pod status.
 - Serialize setup/build/test/typecheck; overlapping installs can race native addon
   compilation, and overlapping checks multiply memory pressure. More container RAM
   alone does not establish adequate declaration-worker heap or passing tests.
+- The extended daemon declaration typecheck defaults to a bounded 4 GiB V8 heap
+  only for that command. It still checks the full declaration surface. Caller
+  `NODE_OPTIONS` are preserved verbatim: if set, include the required heap setting
+  there yourself. This is not a global agent/build/test heap override or permission
+  to exceed the worker's admitted memory allocation.
 - Keep setup, lint, build, test and independent review enabled in the effective
   workflow. Clone a repository-specific workflow rather than changing a shared
   preset to accommodate one repository.
 - Native desktop source still needs macOS verification; Linux/Docker unit tests
   cannot establish Swift compilation or desktop rendering.
+
+An isolated Linux Node22 check at 8 GiB reproduced `ERR_WORKER_OUT_OF_MEMORY`
+with the default roughly 2 GiB V8 heap, without a cgroup OOM. The unchanged full
+command passed with a 4 GiB heap, using about 4.4 GiB container peak memory. This
+is a targeted compiler proof, not full profile or provider acceptance; preserve
+8 GiB allocation and serialize expensive checks rather than treating heap size
+as a memory reservation or removing declaration scope to make a check pass.
 
 The streaming self-validation repair is already present in PR #496. See
 [validation execution reliability](validation-execution-reliability.md). A daemon
