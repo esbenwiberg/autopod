@@ -361,6 +361,55 @@ describe('research findings contract', () => {
       expect(service.dependents).not.toHaveBeenCalled();
     },
   );
+  it.each(['ordinary-task', 'workspace', 'artifact-export'] as const)(
+    'never infers findings acceptance for %s',
+    async (kind) => {
+      f.db.prepare("UPDATE pods SET completion_policy=NULL WHERE id='prepare'").run();
+      f.podRepo.update('prepare', {
+        options: {
+          agentMode: kind === 'workspace' ? 'interactive' : 'auto',
+          output: kind === 'artifact-export' ? 'artifact' : 'none',
+          validate: false,
+        },
+      });
+      const service = acceptance();
+      await expect(
+        service.accept(
+          'prepare',
+          {
+            expectedGeneration: f.pod().lifecycleGeneration,
+            expectedCycle: f.pod().finalization?.cycle ?? 1,
+            expectedEvidenceHash: 'a'.repeat(64),
+          },
+          human,
+        ),
+      ).rejects.toMatchObject({ code: 'FINDINGS_CONFLICT' });
+      expect(service.completed).not.toHaveBeenCalled();
+      expect(service.dependents).not.toHaveBeenCalled();
+      expect(f.pod().researchFindings).toBeNull();
+    },
+  );
+  it.each(['summary', 'digest'] as const)(
+    'rejects changed %s identity after readiness',
+    async (field) => {
+      await finalizer().finalizeArtifactPod(f.pod());
+      const reviewed = request();
+      if (field === 'summary')
+        f.podRepo.update('prepare', {
+          taskSummary: { actualSummary: 'Different investigation', deviations: [] },
+        });
+      else
+        f.db
+          .prepare("UPDATE pods SET launch_config_digest=? WHERE id='prepare'")
+          .run('c'.repeat(64));
+      const service = acceptance();
+      await expect(service.accept('prepare', reviewed, human)).rejects.toMatchObject({
+        code: 'FINDINGS_CONFLICT',
+      });
+      expect(f.pod().status).toBe('research_ready');
+      expect(service.completed).not.toHaveBeenCalled();
+    },
+  );
   it('retains resources when preservation fails and identifies settled none-output recovery', async () => {
     const service = finalizer();
     vi.mocked(service.cm.extractDirectoryFromContainer).mockRejectedValue(
