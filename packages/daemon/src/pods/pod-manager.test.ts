@@ -147,8 +147,18 @@ function mockExecFileSuccess(): void {
   });
 }
 
+const testDatabases = new Set<Database.Database>();
+
+afterEach(() => {
+  for (const db of testDatabases) {
+    if (db.open) db.close();
+  }
+  testDatabases.clear();
+});
+
 function createTestDb(): Database.Database {
   const db = new Database(':memory:');
+  testDatabases.add(db);
   db.pragma('foreign_keys = ON');
 
   // Run migrations inline
@@ -16980,6 +16990,7 @@ describe('PodManager', () => {
       const statusGate = deferred<'running'>();
       vi.mocked(ctx.containerManager.getStatus).mockReturnValue(statusGate.promise);
       const manager = createPodManager(ctx.deps);
+      const validation = vi.spyOn(manager, 'triggerValidation');
 
       const pod = manager.createSession(
         { profileName: 'test-profile', task: 'Add feature' },
@@ -17000,6 +17011,8 @@ describe('PodManager', () => {
 
       statusGate.resolve('running');
       await waitForAssertion(() => expect(ctx.enqueuedSessions).toEqual([pod.id]));
+      expect(validation).toHaveBeenCalledTimes(1);
+      await validation.mock.results[0]?.value;
     });
 
     it('passes setup command into validation and summarizes setup failures first', async () => {

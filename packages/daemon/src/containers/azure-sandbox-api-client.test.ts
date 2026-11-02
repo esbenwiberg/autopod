@@ -1,15 +1,18 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AutopodError } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resolveLaunch } from '../configuration/launch-resolver.js';
 import type { ValidationEngineConfig } from '../interfaces/validation-engine.js';
 import { type SessionBridgeDependencies, createSessionBridge } from '../pods/pod-bridge-impl.js';
 import { assertSourceResourceReleasable } from '../pods/source-custody-guards.js';
 import { assertValidationResourceSettled } from '../pods/validation-execution-evidence.js';
+import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
+import { createTestDb } from '../test-utils/mock-helpers.js';
 import { createSandboxWakeupFixture } from '../test-utils/sandbox-wakeup-helpers.js';
 import { validationRecoveryFixture } from '../test-utils/validation-recovery-helpers.js';
 import { createLocalValidationEngine } from '../validation/local-validation-engine.js';
@@ -880,13 +883,16 @@ describe('AzureSandboxApiClient', () => {
   });
 
   it.skipIf(process.platform !== 'linux')(
-    'selects admitted tools in native and final non-login execs despite stream env loss',
+    'selects admitted tools in streamed self-validation and final execs despite env loss',
     async () => {
       // The shipped wrapper records Linux /proc process identity. Run it unmodified
       // on Linux, not a macOS emulation of process ownership or privilege switching.
       // Fault injection, not a claim about the live Azure service: the stream starts
       // with image env only. Execute the shipped wrapper in a real child shell.
       const root = mkdtempSync(join(tmpdir(), 'validation-tools-'));
+      // Root-started wrappers really drop to autopod: allow that user to enter
+      // the fixture without making receipts or scripts worker-writable.
+      chmodSync(root, 0o755);
       const base = join(root, 'base');
       const selected = join(root, 'selected');
       mkdirSync(base);
@@ -930,7 +936,8 @@ describe('AzureSandboxApiClient', () => {
         const script = scripts.at(-1) ?? '';
         expect(script).toContain('#!/bin/sh');
         expect(script).not.toContain(scoped.CREDENTIAL);
-        const path = join(root, 'stream.sh');
+        // The real provider allocates a new wrapper/receipt for every dispatch.
+        const path = join(root, `stream-${streamed.length}.sh`);
         writeFileSync(path, script);
         streamed.push(script);
         const result = run(['/bin/sh', path], baseEnv);
@@ -965,24 +972,40 @@ describe('AzureSandboxApiClient', () => {
         sandbox,
         resolveTarget: () => 'sandbox',
       });
+      const db = createTestDb();
+      const { services } = createTestConfiguration(db);
+      const launch = await resolveLaunch(
+        { repositoryId: 'repo-a', task: 'Toolchain parity' },
+        services,
+      );
+      if (!launch.repository) throw new Error('Fixture requires a repository');
+      Object.assign(launch.repository.setup, {
+        validationSetupCommand: commands.setup,
+        buildCommand: commands.build,
+        testCommand: commands.test,
+        buildEnv: {
+          ...Object.fromEntries(Object.entries(literals).map(([key, value]) => [key, { value }])),
+          CREDENTIAL: { secretId: 'fixture-secret' },
+        },
+      });
+      launch.workflow.validationPhases = ['setup', 'build', 'test'];
       const bridge = createSessionBridge({
         podManager: {
           touchHeartbeat() {},
           getSession: () => ({
             id: 'fixture',
             profileName: 'fixture',
+            launchConfigDigest: launch.digest,
             containerId: 'sbx-1',
             executionTarget: 'sandbox',
           }),
+          getLaunchConfiguration: () => launch,
+          getValidationEnvironment: async () => scoped,
         },
         profileStore: {
-          get: () => ({
-            validationSetupCommand: commands.setup,
-            buildCommand: commands.build,
-            testCommand: commands.test,
-            buildEnv: scoped,
-            privateRegistries: [],
-          }),
+          get: () => {
+            throw new Error('Frozen self-validation cannot read a live profile');
+          },
         },
         containerManagerFactory: { get: () => sandbox },
         eventBus: { emit() {} },
@@ -1010,7 +1033,8 @@ describe('AzureSandboxApiClient', () => {
       };
       try {
         for (const phase of ['setup', 'build', 'tests'] as const) {
-          expect(await bridge.runValidationPhase('fixture', phase)).toMatchObject({ passed: true });
+          const result = await bridge.runValidationPhase('fixture', phase);
+          expect(result, JSON.stringify(result)).toMatchObject({ passed: true });
         }
         const selectedPath = scoped.PATH;
         scoped.PATH = baseEnv.PATH;
@@ -1023,7 +1047,7 @@ describe('AzureSandboxApiClient', () => {
         expect(result.setup?.status, JSON.stringify(result.setup)).toBe('pass');
         expect(result.smoke.build.status).toBe('pass');
         expect(result.test?.status).toBe('pass');
-        expect(streamed).toHaveLength(3);
+        expect(streamed).toHaveLength(7);
         // Revalidation preserves the same selection; no source/checkpoint rules change.
         expect((await engine.validate({ ...config, attempt: 2 })).overall).toBe('pass');
         const beforeFailure = streamed.length;
@@ -1050,8 +1074,9 @@ describe('AzureSandboxApiClient', () => {
         ).toBe('pass');
         expect(
           buffered.filter((command) => command.join(' ').includes('fixture-tool')),
-        ).toHaveLength(4);
+        ).toHaveLength(0);
       } finally {
+        db.close();
         rmSync(root, { recursive: true, force: true });
       }
     },
@@ -1184,9 +1209,9 @@ describe('AzureSandboxApiClient', () => {
         'stat=$(cat /proc/$$/stat) || exit 1',
         'rest=${stat##*) }; set -- $rest',
         'start=$(printf \'%s\' "${20}")',
-        'printf \'%s %s\\n\' "$$" "$start" > "$0.pid"',
+        '(set -C; printf \'%s %s\\n\' "$$" "$start" > "$0.pid") || exit 1',
         'if [ "$(id -u)" = "0" ]; then',
-        "  exec env HOME=/home/autopod USER=autopod LOGNAME=autopod su -m -s /bin/sh autopod -c 'cd /workspace || exit 1\nexec echo hello'",
+        "  exec env HOME=/home/autopod USER=autopod LOGNAME=autopod su -m -s /bin/sh autopod --session-command 'cd /workspace || exit 1\nexec echo hello'",
         'fi',
         'cd /workspace || exit 1',
         'exec echo hello',
@@ -1282,6 +1307,8 @@ describe('AzureSandboxApiClient', () => {
     expect(killBody).toContain('kill -TERM -');
     expect(killBody).toContain('kill -KILL -');
     expect(killBody).toContain('group_alive');
+    expect(jsonBody(killRequest)).toMatchObject({ user: 'root' });
+    expect(String((requests[0] ?? failRequest()).init?.body)).toContain('--session-command');
     expect(String((requests[0] ?? failRequest()).init?.body)).toContain('setsid -w "$0"');
   });
 

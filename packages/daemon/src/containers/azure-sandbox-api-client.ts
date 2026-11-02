@@ -602,8 +602,8 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           }
           const termination = await this.exec(
             sandboxId,
-            ['sh', '-c', terminatePidFileScript(pidPath)],
-            { timeoutMs: 5_000, singleAttempt: true },
+            ['sh', '-c', cancelStreamExecScript(pidPath)],
+            { user: 'root', timeoutMs: 5_000, singleAttempt: true },
           );
           if (termination.exitCode !== 0) {
             throw new AutopodError(
@@ -2088,21 +2088,26 @@ function defaultWebSocketFactory(url: string, headers: Record<string, string>): 
  * exec-stream sessions that start as root, an optional `cd` into `cwd`, then
  * `exec <argv>` so the command's exit code propagates as the script's own.
  */
-function streamExecScript(command: string[], cwd?: string): string {
+export function streamExecScript(command: string[], cwd?: string): string {
   const argv = command.map(shellQuote).join(' ');
   const lines: string[] = [];
   if (cwd) lines.push(`cd ${shellQuote(cwd)} || exit 1`);
   lines.push(`exec ${argv}`);
-  return sandboxRuntimeUserScript(lines.join('\n'), [
-    'if [ "${AUTOPOD_STREAM_SESSION:-}" != "1" ]; then',
-    '  exec env AUTOPOD_STREAM_SESSION=1 setsid -w "$0"',
-    'fi',
-    'umask 077',
-    'stat=$(cat /proc/$$/stat) || exit 1',
-    'rest=${stat##*) }; set -- $rest',
-    'start=$(printf \'%s\' "${20}")',
-    'printf \'%s %s\\n\' "$$" "$start" > "$0.pid"',
-  ]);
+  // su -c may create another session: keep descendants in the receipt's group.
+  return sandboxRuntimeUserScript(
+    lines.join('\n'),
+    [
+      'if [ "${AUTOPOD_STREAM_SESSION:-}" != "1" ]; then',
+      '  exec env AUTOPOD_STREAM_SESSION=1 setsid -w "$0"',
+      'fi',
+      'umask 077',
+      'stat=$(cat /proc/$$/stat) || exit 1',
+      'rest=${stat##*) }; set -- $rest',
+      'start=$(printf \'%s\' "${20}")',
+      '(set -C; printf \'%s %s\\n\' "$$" "$start" > "$0.pid") || exit 1',
+    ],
+    true,
+  );
 }
 
 /**
@@ -2112,13 +2117,17 @@ function streamExecScript(command: string[], cwd?: string): string {
  * workspace, otherwise agent/test caches become root-owned and later
  * validation fails with EACCES. Non-root streams retain their existing user.
  */
-function sandboxRuntimeUserScript(scriptBody: string, prelude: string[] = []): string {
+function sandboxRuntimeUserScript(
+  scriptBody: string,
+  prelude: string[] = [],
+  preserveProcessGroup = false,
+): string {
   const identity = `HOME=${shellQuote(CONTAINER_HOME_DIR)} USER=${shellQuote(CONTAINER_USER)} LOGNAME=${shellQuote(CONTAINER_USER)}`;
   return [
     '#!/bin/sh',
     ...prelude,
     'if [ "$(id -u)" = "0" ]; then',
-    `  exec env ${identity} su -m -s /bin/sh ${shellQuote(CONTAINER_USER)} -c ${shellQuote(scriptBody)}`,
+    `  exec env ${identity} su -m -s /bin/sh ${shellQuote(CONTAINER_USER)} ${preserveProcessGroup ? '--session-command' : '-c'} ${shellQuote(scriptBody)}`,
     'fi',
     scriptBody,
     '',
@@ -2151,10 +2160,29 @@ export function processGroupProbeScript(): string {
   ].join('\n');
 }
 
+/** Select receipt authority before signalling; worker receipts never authorize root kills. */
+export function cancelStreamExecScript(pidPath: string): string {
+  const terminate = terminatePidFileScript(pidPath);
+  return [
+    `pid_file=${shellQuote(pidPath)}`,
+    '[ -f "$pid_file" ] && [ ! -L "$pid_file" ] || exit 1',
+    'receipt_authority=$(stat -c \'%u:%a\' "$pid_file") || exit 1',
+    'if [ "$receipt_authority" = 0:600 ]; then',
+    terminate,
+    'else',
+    `worker_uid=$(id -u ${shellQuote(CONTAINER_USER)}) || exit 1`,
+    '[ "$worker_uid" -gt 0 ] && [ "$receipt_authority" = "$worker_uid:600" ] || { echo \'Untrusted sandbox exec receipt\' >&2; exit 1; }',
+    `exec su -m -s /bin/sh ${shellQuote(CONTAINER_USER)} --session-command ${shellQuote(terminate)}`,
+    'fi',
+  ].join('\n');
+}
+
 export function terminatePidFileScript(pidPath: string): string {
   return [
     `pid_file=${shellQuote(pidPath)}`,
-    '[ -s "$pid_file" ] || exit 1',
+    '[ -f "$pid_file" ] && [ ! -L "$pid_file" ] && [ -s "$pid_file" ] || exit 1',
+    // Elevated cleanup must never trust a receipt writable by the worker.
+    'if [ "$(id -u)" = 0 ]; then [ "$(stat -c \'%u:%a\' "$pid_file")" = 0:600 ] || { echo \'Untrusted sandbox exec receipt\' >&2; exit 1; }; fi',
     'read -r pid start < "$pid_file" || exit 1',
     'case "$start" in *[!0-9]*|"") exit 1;; esac',
     'case "$pid" in *[!0-9]*|"") exit 1;; esac',
