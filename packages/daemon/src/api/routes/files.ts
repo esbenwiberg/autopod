@@ -1,5 +1,6 @@
 import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { AutopodError, type Pod } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ContainerManager } from '../../interfaces/container-manager.js';
 import {
@@ -58,6 +59,22 @@ const SKIP_DIRS = [
 ];
 const SKIP_DIRS_SET = new Set(SKIP_DIRS);
 
+function assertRetainedFindingsAvailable(pod: Pod): void {
+  if (
+    pod.completionPolicy === 'accept-findings' &&
+    (pod.status === 'research_ready' ||
+      pod.status === 'complete' ||
+      pod.finalization?.agentSettledAt) &&
+    !pod.researchFindings
+  ) {
+    throw new AutopodError(
+      'Settled research requires its retained findings receipt before reports can be read',
+      'FINDINGS_RECEIPT_UNAVAILABLE',
+      409,
+    );
+  }
+}
+
 export function filesRoutes(
   app: FastifyInstance,
   podManager: PodManager,
@@ -70,6 +87,7 @@ export function filesRoutes(
     const { podId } = request.params as { podId: string };
     const query = request.query as { ext?: string };
     const pod = podManager.getSession(podId);
+    assertRetainedFindingsAvailable(pod);
 
     const extensions = parseExtensions(query.ext);
 
@@ -116,6 +134,7 @@ export function filesRoutes(
     const { podId } = request.params as { podId: string };
     const query = request.query as { path?: string };
     const pod = podManager.getSession(podId);
+    assertRetainedFindingsAvailable(pod);
 
     const relPath = query.path;
     if (!relPath || typeof relPath !== 'string') {

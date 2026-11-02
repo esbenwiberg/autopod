@@ -52,6 +52,10 @@ pointers. Reads verify the inventory hash pinned in the immutable database recei
 well as the snapshot sidecar; changing both snapshot and sidecar cannot rewrite accepted
 history. The CLI `ap findings` exposes these archived receipts and reports. Current evidence stays in pod detail/history.
 Artifact reads verify the retained receipt and never fall back to a live worktree.
+A settled findings pod whose current receipt projection is missing refuses generic
+file reads; its immutable archived receipt remains the report authority. Desktop
+and phone report content requests bind the displayed generation, cycle and evidence
+hash, including after acceptance; desktop resets report views when that identity changes.
 
 Interrupted collection/cleanup uses the existing artifact finalization recovery:
 inspect the failure and explicitly Resume finalization. A recorded settled worker

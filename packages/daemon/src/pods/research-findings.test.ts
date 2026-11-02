@@ -178,6 +178,24 @@ describe('research findings contract', () => {
       await app.close();
     }
   });
+  it('refuses report fallback when settled findings lose their current receipt projection', async () => {
+    await finalizer().finalizeArtifactPod(f.pod());
+    f.podRepo.update('prepare', { researchFindings: null, worktreePath: root });
+    await writeFile(path.join(root, 'arbitrary-report.md'), 'Unreviewed live report');
+    const app = Fastify();
+    filesRoutes(app, { getSession: () => f.pod() } as unknown as PodManager);
+    try {
+      for (const url of [
+        '/pods/prepare/files',
+        '/pods/prepare/files/content?path=arbitrary-report.md',
+      ]) {
+        expect((await app.inject({ method: 'GET', url })).statusCode).toBe(409);
+      }
+      expect(f.podRepo.getFindingsReceipts?.('prepare')).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
   it('reads exact accepted evidence after pod archival and rejects rewritten snapshot receipts', async () => {
     await finalizer().finalizeArtifactPod(f.pod());
     const reviewed = request();

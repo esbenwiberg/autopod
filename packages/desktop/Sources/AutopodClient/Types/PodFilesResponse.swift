@@ -30,7 +30,7 @@ public struct SessionFileContent: Codable, Sendable {
 }
 
 /// Exact archived receipt response, independent of the pod's current lifecycle.
-struct FindingsFileResponse: Decodable {
+struct FindingsFileResponse: Decodable, Sendable {
   let path: String
   let content: String
   let size: Int
