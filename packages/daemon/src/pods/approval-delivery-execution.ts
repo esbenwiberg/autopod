@@ -47,12 +47,18 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
     };
     const deliveryCredential = (profile: PodExecutionSettings) =>
       deliveryOperation(() => resolveGitCredential(profile));
-    const failDelivery = (detail: string): never => {
+    const failDelivery = (detail: string, cause?: unknown): never => {
       assertApprovalCurrent(mergingAnchor);
-      const reason = `Approval delivery failed. ${detail} Original resources retained; repair delivery and retry approval.`;
+      const reconciliation =
+        cause instanceof AutopodError && cause.code === 'DELIVERY_RECONCILIATION_REQUIRED';
+      const advice = reconciliation
+        ? 'reconcile delivery before retrying approval'
+        : 'repair delivery and retry approval';
+      const reason = `Approval delivery failed. ${detail} Original resources retained; ${advice}.`;
       transition(mergingAnchor, 'validated', { failureReason: reason });
       assertApprovalCurrent({ ...pod, status: 'validated' });
       emitActivityError(podId, reason, false);
+      if (reconciliation) throw new AutopodError(reason, 'DELIVERY_RECONCILIATION_REQUIRED', 409);
       throw new AutopodError(reason, 'APPROVAL_DELIVERY_FAILED', 502);
     };
 
@@ -126,7 +132,7 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
       type MergeOutcome =
         | { kind: 'merged' }
         | { kind: 'merge_pending'; blockReason: string }
-        | { kind: 'merge_failed'; reason: string };
+        | { kind: 'merge_failed'; reason: string; cause?: unknown };
 
       const outcome = await mergeQueue
         .run<MergeOutcome>(queueKey, async () => {
@@ -253,7 +259,11 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
               { err: statusErr, podId, prUrl },
               'Failed to check PR review decision before merge — retaining resources',
             );
-            return { kind: 'merge_failed', reason: 'PR review status is unavailable.' };
+            return {
+              kind: 'merge_failed',
+              reason: 'PR review status is unavailable.',
+              cause: statusErr,
+            };
           }
 
           emitActivityStatus(podId, `Merging PR: ${prUrl}`);
@@ -294,13 +304,20 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
           } catch (err) {
             assertApprovalCurrent(mergingAnchor);
             logger.error({ err, podId, prUrl }, 'Failed to merge PR');
-            return { kind: 'merge_failed', reason: 'PR merge could not be confirmed.' };
+            return {
+              kind: 'merge_failed',
+              reason:
+                err instanceof AutopodError && err.code === 'DELIVERY_RECONCILIATION_REQUIRED'
+                  ? err.message
+                  : 'PR merge could not be confirmed.',
+              cause: err,
+            };
           }
         })
         .catch((err): MergeOutcome => {
           assertApprovalCurrent(mergingAnchor);
           logger.error({ err, podId }, 'Approval delivery operation failed; retaining resources');
-          return { kind: 'merge_failed', reason: 'PR preparation did not complete.' };
+          return { kind: 'merge_failed', reason: 'PR preparation did not complete.', cause: err };
         });
 
       assertApprovalCurrent(mergingAnchor);
@@ -314,7 +331,7 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
         startMergePolling(podId);
         return { kind: 'halted' };
       } else {
-        failDelivery(outcome.reason);
+        failDelivery(outcome.reason, outcome.cause);
       }
     } else if (!pod.prUrl && prManager && pod.worktreePath && pod.options.output === 'pr') {
       // PR creation failed during validation — retry it now
@@ -456,7 +473,8 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
           failDelivery('Source synchronization was rejected by the deletion guard.');
         }
         const message = err instanceof Error ? err.message : String(err);
-        if (retryPrUrl) failDelivery(`Merge after PR creation could not be confirmed: ${message}`);
+        if (retryPrUrl)
+          failDelivery(`Merge after PR creation could not be confirmed: ${message}`, err);
         emitActivityStatus(podId, `PR creation failed: ${message} — pod returned to validated`);
         failDelivery('PR creation did not complete.');
       }

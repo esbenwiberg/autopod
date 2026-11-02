@@ -18,30 +18,93 @@ async function input(
   };
 }
 describe('approval delivery stages', () => {
-  it('recognizes a prior source-bound merge during preparation without republishing it', async () => {
+  it.each([false, true])(
+    'recognizes a source-bound external merge without republishing (admitted: %s)',
+    async (admitted) => {
+      const f = createDeliveryFixture();
+      const planned = await f.planMerge();
+      if (admitted)
+        f.podRepo.mergeJournal?.claim(
+          f.pod(),
+          f.pod(),
+          planned.publication.publicationId,
+          planned.entry.request.config,
+        );
+      f.podRepo.update('prepare', { status: 'validated' });
+      f.provider.getPrStatus.mockResolvedValue(
+        pendingStatus({
+          merged: true,
+          open: false,
+          headSha: planned.publication.commitSha,
+          sourceTarget: {
+            repository: planned.publication.repository,
+            branch: 'branch',
+            baseBranch: 'main',
+          },
+        }),
+      );
+      const prepared = await createApprovalDeliveryPreparation({
+        ...f.mainCaptured,
+        prManagerFactory: () => f.provider,
+      }).prepareApprovalDelivery(await input(f));
+      expect(prepared).toMatchObject({ kind: 'ready', recoveredMerge: true });
+      expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+      expect(f.worktreeManager.pushBranch).toHaveBeenCalledOnce();
+    },
+  );
+  it('preserves typed reconciliation on retry of an admitted unknown merge', async () => {
     const f = createDeliveryFixture();
-    const planned = await f.planMerge();
-    f.podRepo.update('prepare', { status: 'validated' });
-    f.provider.getPrStatus.mockResolvedValue(
-      pendingStatus({
-        merged: true,
-        open: false,
-        headSha: planned.publication.commitSha,
-        sourceTarget: {
-          repository: planned.publication.repository,
-          branch: 'branch',
-          baseBranch: 'main',
-        },
-      }),
+    const { publication, entry } = await f.planMerge();
+    f.podRepo.mergeJournal?.claim(
+      f.pod(),
+      f.pod(),
+      publication.publicationId,
+      entry.request.config,
     );
-    const prepared = await createApprovalDeliveryPreparation({
-      ...f.mainCaptured,
-      prManagerFactory: () => f.provider,
-    }).prepareApprovalDelivery(await input(f));
-    expect(prepared).toMatchObject({ kind: 'ready', recoveredMerge: true });
-    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
-    expect(f.worktreeManager.pushBranch).toHaveBeenCalledOnce();
+    f.podRepo.update('prepare', { status: 'validated' });
+    f.provider.getPrStatus.mockResolvedValue(pendingStatus());
+    await expect(
+      createApprovalDeliveryPreparation({
+        ...f.mainCaptured,
+        prManagerFactory: () => f.provider,
+      }).prepareApprovalDelivery(await input(f)),
+    ).rejects.toMatchObject({
+      code: 'DELIVERY_RECONCILIATION_REQUIRED',
+      statusCode: 409,
+    });
+    expect(f.pod().status).toBe('validated');
+    expect(f.podRepo.mergeJournal?.find(f.pod())?.state).toBe('admitted');
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+    expect(f.mainCaptured.cleanupContainerAfterAdvisorySettles).not.toHaveBeenCalled();
   });
+
+  it.each([true, false])(
+    'preserves an unknown merge and its typed error (existing PR: %s)',
+    async (existingPr) => {
+      const f = createDeliveryFixture();
+      f.podRepo.update('prepare', {
+        prUrl: existingPr ? 'https://github.com/org/repo/pull/27' : null,
+        options: { ...f.pod().options, output: 'pr' },
+      });
+      f.provider.mergePr.mockImplementation(async (config) => {
+        config.onPrepared?.();
+        throw new Error('Connection lost after merge admission');
+      });
+      const captured = { ...f.mainCaptured, prManagerFactory: () => f.provider };
+      const preparation = createApprovalDeliveryPreparation(captured);
+      const execution = createApprovalDeliveryExecution(captured);
+      const workflow = createApprovalWorkflow({ ...captured, ...preparation, ...execution });
+      await expect(workflow.approveSession('prepare')).rejects.toMatchObject({
+        code: 'DELIVERY_RECONCILIATION_REQUIRED',
+        statusCode: 409,
+      });
+      expect(f.pod().status).toBe('validated');
+      expect(f.podRepo.mergeJournal?.find(f.pod())?.state).toBe('admitted');
+      expect(f.provider.mergePr).toHaveBeenCalledOnce();
+      expect(f.mainCaptured.cleanupContainerAfterAdvisorySettles).not.toHaveBeenCalled();
+    },
+  );
+
   it('fences a replacement lifecycle after execution returns and before final cleanup', async () => {
     const f = createDeliveryFixture();
     const preparation = createApprovalDeliveryPreparation(f.mainCaptured);

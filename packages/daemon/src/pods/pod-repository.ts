@@ -50,6 +50,7 @@ import {
   assertNoValidationRecovery,
   createDeletionOwnership,
 } from './deletion-ownership.js';
+import { deliveryReadinessBlock, withDeliveryReadiness } from './delivery-readiness.js';
 import {
   type DispatchPreflightLedger,
   createDispatchPreflightLedger,
@@ -734,21 +735,20 @@ export function createPodRepository(db: Database.Database): PodRepository {
   const externalDeliveries = createExternalDeliveryRepository(db);
   const sandboxWakeups = createSandboxWakeupJournal(db);
   const sourceAdoptions = createSourceAdoptionRepository(db);
-  const custodyProjection = (pod: Pod): Pod =>
-    pod.readinessReview && sourceAdoptions.hasCustody(pod.id)
-      ? {
-          ...pod,
-          readinessReview: withLifecycleReadiness(
-            pod.readinessReview,
-            pod.status,
-            pod.lastValidationResult,
-            true,
-          ),
-        }
-      : pod;
+  const mergeJournal = createMergeJournal(db);
+  const readinessProjection = (pod: Pod): Pod => {
+    if (!pod.readinessReview) return pod;
+    const review = sourceAdoptions.hasCustody(pod.id)
+      ? withLifecycleReadiness(pod.readinessReview, pod.status, pod.lastValidationResult, true)
+      : pod.readinessReview;
+    return {
+      ...pod,
+      readinessReview: withDeliveryReadiness(review, deliveryReadinessBlock(pod, mergeJournal)),
+    };
+  };
   const fleetArchives = createFleetArchiveRepository(db);
   const withFleetArchive = (pod: Pod): Pod => ({
-    ...custodyProjection(pod),
+    ...readinessProjection(pod),
     fleetArchivedAt: fleetArchives.archivedAt(pod.id),
   });
   const rowToSession = (row: Record<string, unknown>) => withFleetArchive(decodeSessionRow(row));
@@ -849,7 +849,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     externalDeliveries,
     sandboxWakeups,
     sourceAdoptions,
-    mergeJournal: createMergeJournal(db),
+    mergeJournal,
     taskExecutions,
     deletionOwnership,
     insert: db.transaction((pod: NewPod): void => {

@@ -8953,7 +8953,8 @@ describe('PodManager', () => {
         open: false,
       });
       await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
-        code: 'APPROVAL_DELIVERY_FAILED',
+        code: 'DELIVERY_RECONCILIATION_REQUIRED',
+        statusCode: 409,
       });
       expect(manager.getSession(pod.id)).toMatchObject({
         status: 'validated',
@@ -9056,7 +9057,10 @@ describe('PodManager', () => {
               requestCount: planned ? 1 : 2,
             });
           } else {
-            await expect(approval).rejects.toMatchObject({ code: 'APPROVAL_DELIVERY_FAILED' });
+            await expect(approval).rejects.toMatchObject({
+              code: 'DELIVERY_RECONCILIATION_REQUIRED',
+              statusCode: 409,
+            });
             expect(ctx.prManager.mergePr).not.toHaveBeenCalled();
             expect(ctx.containerManager.kill).not.toHaveBeenCalled();
           }
@@ -9327,7 +9331,8 @@ describe('PodManager', () => {
             throw new Error('provider response lost after mutation');
           });
           await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
-            code: 'APPROVAL_DELIVERY_FAILED',
+            code: 'DELIVERY_RECONCILIATION_REQUIRED',
+            statusCode: 409,
           });
           expect(manager.getSession(pod.id)).toMatchObject({
             status: 'validated',
@@ -9371,7 +9376,8 @@ describe('PodManager', () => {
               worktreeClean: sourceState !== 'dirty',
             });
             await expect(restarted.approveSession(pod.id)).rejects.toMatchObject({
-              code: 'APPROVAL_DELIVERY_FAILED',
+              code: 'DELIVERY_RECONCILIATION_REQUIRED',
+              statusCode: 409,
             });
             expect(restarted.getSession(pod.id)).toMatchObject({
               status: 'validated',
@@ -9422,7 +9428,8 @@ describe('PodManager', () => {
         autoMergeScheduled: false,
       });
       await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
-        code: 'APPROVAL_DELIVERY_FAILED',
+        code: 'DELIVERY_RECONCILIATION_REQUIRED',
+        statusCode: 409,
       });
       expect(manager.getSession(pod.id).status).toBe('validated');
       expect(ctx.containerManager.kill).not.toHaveBeenCalled();

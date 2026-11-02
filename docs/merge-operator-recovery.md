@@ -1,5 +1,31 @@
 # Operator recovery of an uncertain ADO merge
 
+## GitHub approval gates and retained unknown requests
+
+Pending checks, legacy commit statuses and non-clean/unknown GitHub merge gates
+now defer to `merge_pending` before admitting a merge request. Polling waits for
+fresh provider evidence; it never bypasses branch protection. A timeout or lost
+reply after admission still has an unknown outcome and cannot be retried merely
+because the PR remains open.
+
+An unresolved admitted request or retained delivery failure is projected into
+current Readiness Review, including older cached ready snapshots, without
+rewriting validation or historical approval. Delivery-only warnings do not waive
+validation or require a validation override; the source-bound recovery guard
+still controls retries. Approval preserves `DELIVERY_RECONCILIATION_REQUIRED`
+(409) for unknown-request/source/target reconciliation rather than wrapping it
+as a generic 502. Original resources remain retained.
+
+For an older GitHub request, inspect the exact PR/source/base and its actual CI
+failures. Do not delete journal rows, force-complete the pod, or use the ADO-only
+operator recovery command below. A normal human merge after the required gates
+pass can be reconciled by approval when the provider proves the exact admitted
+source/target and the retained source is still verifiable. A changed PR head is
+not permission to reuse or overwrite the original admission. An open PR alone
+is not a recovery receipt; otherwise leave it retained for explicit recovery.
+
+## Explicit recovery of an uncertain ADO request
+
 Use only after explicit human authorization to retry an old request whose outcome
 is unknown. An active PR does not prove that the original mutation was rejected.
 This action accepts that uncertainty rather than fabricating a provider response.
