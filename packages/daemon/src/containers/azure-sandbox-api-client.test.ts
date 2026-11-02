@@ -1184,9 +1184,9 @@ describe('AzureSandboxApiClient', () => {
         'stat=$(cat /proc/$$/stat) || exit 1',
         'rest=${stat##*) }; set -- $rest',
         'start=$(printf \'%s\' "${20}")',
-        'printf \'%s %s\\n\' "$$" "$start" > "$0.pid"',
+        '(set -C; printf \'%s %s\\n\' "$$" "$start" > "$0.pid") || exit 1',
         'if [ "$(id -u)" = "0" ]; then',
-        "  exec env HOME=/home/autopod USER=autopod LOGNAME=autopod su -m -s /bin/sh autopod -c 'cd /workspace || exit 1\nexec echo hello'",
+        "  exec env HOME=/home/autopod USER=autopod LOGNAME=autopod su -m -s /bin/sh autopod --session-command 'cd /workspace || exit 1\nexec echo hello'",
         'fi',
         'cd /workspace || exit 1',
         'exec echo hello',
@@ -1282,6 +1282,8 @@ describe('AzureSandboxApiClient', () => {
     expect(killBody).toContain('kill -TERM -');
     expect(killBody).toContain('kill -KILL -');
     expect(killBody).toContain('group_alive');
+    expect(jsonBody(killRequest)).toMatchObject({ user: 'root' });
+    expect(String((requests[0] ?? failRequest()).init?.body)).toContain('--session-command');
     expect(String((requests[0] ?? failRequest()).init?.body)).toContain('setsid -w "$0"');
   });
 

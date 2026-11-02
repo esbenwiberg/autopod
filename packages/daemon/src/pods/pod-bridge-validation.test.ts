@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 import type { PodBridge } from '@autopod/escalation-mcp';
 import type { EffectiveLaunchConfig } from '@autopod/shared';
@@ -38,7 +39,9 @@ interface BuildOpts {
   containerId?: string | null;
   containerStatus?: 'running' | 'stopped' | 'deleted' | 'unknown';
   reviewerExecEnv?: Record<string, string>;
+  validationExecEnv?: Record<string, string>;
   executionTarget?: 'local' | 'sandbox';
+  streamImpl?: ContainerManager['execStreaming'];
   execImpl?: (
     containerId: string,
     command: string[],
@@ -97,7 +100,9 @@ function buildBridge(opts: BuildOpts = {}): {
     })),
     touchHeartbeat,
     getLaunchConfiguration: vi.fn(() => opts.launch ?? null),
-    getValidationEnvironment: vi.fn(async () => ({ SCOPED_VALUE: 'selected' })),
+    getValidationEnvironment: vi.fn(
+      async () => opts.validationExecEnv ?? { SCOPED_VALUE: 'selected' },
+    ),
     getReviewerConfig: vi.fn().mockReturnValue({
       profile: reviewerProfile,
       credentials: reviewerProfile.providerCredentials ?? null,
@@ -110,19 +115,22 @@ function buildBridge(opts: BuildOpts = {}): {
   const cm = {
     execInContainer: execMock,
     supportsStreamingExec: true,
-    execStreaming: vi.fn(async (id, command, options) => {
-      const result = await execMock(id, command, options);
-      const stdout = new PassThrough();
-      const stderr = new PassThrough();
-      stdout.end(result.stdout);
-      stderr.end(result.stderr);
-      return {
-        stdout,
-        stderr,
-        exitCode: Promise.resolve(result.exitCode),
-        kill: vi.fn(async () => {}),
-      };
-    }),
+    execStreaming: vi.fn(
+      opts.streamImpl ??
+        (async (id, command, options) => {
+          const result = await execMock(id, command, options);
+          const stdout = new PassThrough();
+          const stderr = new PassThrough();
+          stdout.end(result.stdout);
+          stderr.end(result.stderr);
+          return {
+            stdout,
+            stderr,
+            exitCode: Promise.resolve(result.exitCode),
+            kill: vi.fn(async () => {}),
+          };
+        }),
+    ),
     getStatus: vi.fn().mockResolvedValue(opts.containerStatus ?? 'running'),
     writeFile: vi.fn().mockResolvedValue(undefined),
   };
@@ -161,34 +169,121 @@ function validationActivityMessages(eventEmit: ReturnType<typeof vi.fn>): string
 }
 
 describe('PodBridge.runValidationPhase', () => {
-  it('uses frozen workflow/setup and scoped validation credentials without a legacy profile read', async () => {
+  it('reapplies frozen literals in the streamed child without serializing scoped credentials', async () => {
     const db = createTestDb();
     try {
       const { services } = createTestConfiguration(db);
       const launch = await resolveLaunch({ repositoryId: 'repo-a', task: 'Check' }, services);
-      const { bridge, execMock, podId, profileRead } = buildBridge({
-        launch,
-        profileOverrides: { buildCommand: 'wrong-live-command' },
+      if (!launch.repository) throw new Error('Fixture requires a repository');
+      const literal = "selected ' ; $(false)";
+      launch.repository.setup.buildCommand = 'printf "%s" "$SELECTED"';
+      launch.repository.setup.buildEnv = {
+        SELECTED: { value: literal },
+        OVERRIDE: { value: 'stale literal' },
+        AUTH: { secretId: 'scoped-secret' },
+      };
+      const streamImpl = vi.fn<ContainerManager['execStreaming']>(async (_id, command) => {
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        // Fault injection: discard the transport env before executing the real argv.
+        stdout.end(execFileSync(command[0] ?? '', command.slice(1), { env: {} }));
+        stderr.end();
+        return { stdout, stderr, exitCode: Promise.resolve(0), kill: vi.fn(async () => {}) };
       });
-      vi.mocked(profileRead)
-        .mockClear()
-        .mockImplementation(() => {
-          throw new Error('Legacy profile read');
-        });
-      expect(bridge.getMaxAiCalls(podId)).toBe(launch.workflow.escalation?.askAi.maxCalls ?? 5);
-      const result = await bridge.runValidationPhase(podId, 'build');
-      expect(result.command).toBe('npm run build');
-      expect(result.passed).toBe(true);
-      expect(execMock).toHaveBeenCalledWith(
+      const { bridge, podId, execMock } = buildBridge({
+        launch,
+        executionTarget: 'sandbox',
+        streamImpl,
+        validationExecEnv: { SELECTED: literal, OVERRIDE: 'daemon-owned', AUTH: 'private-value' },
+      });
+      await expect(bridge.runValidationPhase(podId, 'build')).resolves.toMatchObject({
+        passed: true,
+        output: literal,
+      });
+      expect(streamImpl).toHaveBeenCalledExactlyOnceWith(
         'container-abc',
-        ['sh', '-c', 'npm run build'],
-        expect.objectContaining({ env: { SCOPED_VALUE: 'selected' } }),
+        ['/usr/bin/env', '--', `SELECTED=${literal}`, 'sh', '-c', 'printf "%s" "$SELECTED"'],
+        expect.objectContaining({
+          env: { SELECTED: literal, OVERRIDE: 'daemon-owned', AUTH: 'private-value' },
+        }),
       );
-      expect(profileRead).not.toHaveBeenCalled();
+      expect(execMock).not.toHaveBeenCalled();
     } finally {
       db.close();
     }
   });
+
+  it.each(['setup', 'build', 'tests', 'lint'] as const)(
+    'streams sandbox self-validation %s with scoped options and no buffered dispatch',
+    async (phase) => {
+      const streamImpl = vi.fn(async () => {
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        stdout.end('streamed stdout');
+        stderr.end('streamed stderr');
+        return { stdout, stderr, exitCode: Promise.resolve(0), kill: vi.fn(async () => {}) };
+      });
+      const { bridge, podId, execMock } = buildBridge({
+        executionTarget: 'sandbox',
+        streamImpl,
+        profileOverrides: {
+          validationSetupCommand: 'setup',
+          buildCommand: 'build',
+          testCommand: 'test',
+          lintCommand: 'lint',
+          buildWorkDir: 'nested',
+          buildEnv: { TOKEN_FILE: '/run/secret' },
+        },
+      });
+      const result = await bridge.runValidationPhase(podId, phase);
+      expect(result).toMatchObject({ passed: true, exitCode: 0 });
+      expect(result.output).toContain('streamed stdout');
+      expect(result.output).toContain('streamed stderr');
+      expect(execMock).not.toHaveBeenCalled();
+      expect(streamImpl).toHaveBeenCalledExactlyOnceWith(
+        'container-abc',
+        ['sh', '/run/autopod/agent-shim.sh', 'sh', '-c', phase === 'tests' ? 'test' : phase],
+        expect.objectContaining({
+          cwd: '/workspace/nested',
+          timeout: expect.any(Number),
+          env: expect.objectContaining({ TOKEN_FILE: '/run/secret' }),
+        }),
+      );
+    },
+  );
+
+  it.each(['local', 'sandbox'] as const)(
+    'uses frozen workflow/setup and scoped credentials on %s without a legacy profile read',
+    async (executionTarget) => {
+      const db = createTestDb();
+      try {
+        const { services } = createTestConfiguration(db);
+        const launch = await resolveLaunch({ repositoryId: 'repo-a', task: 'Check' }, services);
+        const { bridge, execMock, podId, profileRead } = buildBridge({
+          launch,
+          executionTarget,
+          profileOverrides: { buildCommand: 'wrong-live-command' },
+        });
+        vi.mocked(profileRead)
+          .mockClear()
+          .mockImplementation(() => {
+            throw new Error('Legacy profile read');
+          });
+        expect(bridge.getMaxAiCalls(podId)).toBe(launch.workflow.escalation?.askAi.maxCalls ?? 5);
+        const result = await bridge.runValidationPhase(podId, 'build');
+        expect(result.command).toBe('npm run build');
+        expect(result.passed).toBe(true);
+        expect(execMock).toHaveBeenCalledWith(
+          'container-abc',
+          ['sh', '-c', 'npm run build'],
+          expect.objectContaining({ env: { SCOPED_VALUE: 'selected' } }),
+        );
+        expect(profileRead).not.toHaveBeenCalled();
+      } finally {
+        db.close();
+      }
+    },
+  );
   it('returns configured=false when the profile has no command for the phase', async () => {
     const { bridge, execMock, podId } = buildBridge({
       profileOverrides: { lintCommand: null },

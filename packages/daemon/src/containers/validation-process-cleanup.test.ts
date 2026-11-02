@@ -1,10 +1,25 @@
 import { execFile, spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  chown,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, it } from 'vitest';
-import { processGroupProbeScript, terminatePidFileScript } from './azure-sandbox-api-client.js';
+import {
+  cancelStreamExecScript,
+  processGroupProbeScript,
+  streamExecScript,
+  terminatePidFileScript,
+} from './azure-sandbox-api-client.js';
 
 const exec = promisify(execFile);
 
@@ -100,6 +115,7 @@ it.skipIf(process.platform !== 'linux').each(['graceful', 'forced', 'stale'] as 
       [
         '-c',
         [
+          'umask 077',
           'stat=$(cat /proc/$$/stat); rest=${stat##*) }; set -- $rest',
           mode === 'forced' ? "trap '' TERM" : "trap 'exit 0' TERM",
           // Publish readiness only once the requested signal disposition exists.
@@ -146,4 +162,132 @@ it.skipIf(process.platform !== 'linux').each(['graceful', 'forced', 'stale'] as 
     }
   },
   10_000,
+);
+
+// Runs only in a disposable root-capable Linux fixture; never elevates the test runner.
+it
+  .skipIf(process.platform !== 'linux' || process.getuid?.() !== 0)
+  .each(['root', 'worker'] as const)(
+  '%s stream keeps its group and is cancelled with receipt-matched authority',
+  async (mode, context) => {
+    let workerUid: number;
+    let workerGid: number;
+    try {
+      workerUid = Number((await exec('id', ['-u', 'autopod'])).stdout.trim());
+      workerGid = Number((await exec('id', ['-g', 'autopod'])).stdout.trim());
+    } catch {
+      context.skip();
+      return;
+    }
+    if (workerUid === 0) {
+      context.skip();
+      return;
+    }
+    const directory = await mkdtemp(join(tmpdir(), 'validation-cross-uid-'));
+    await chmod(directory, 0o755);
+    const work = join(directory, 'work');
+    await mkdir(work, { mode: 0o777 });
+    await chmod(work, 0o1777);
+    const script = join(mode === 'root' ? directory : work, 'stream.sh');
+    const receipt = `${script}.pid`;
+    const ready = join(work, 'child.pid');
+    await writeFile(
+      script,
+      streamExecScript(
+        ['sh', '-c', `trap '' TERM; echo $$ > '${ready}'; while :; do sleep 1; done`],
+        work,
+      ),
+      { mode: 0o755 },
+    );
+    const child = spawn(script, [], {
+      detached: true,
+      stdio: 'ignore',
+      ...(mode === 'worker' ? { uid: workerUid, gid: workerGid } : {}),
+    });
+    const exited = new Promise<void>((resolve, reject) => {
+      child.once('exit', () => resolve());
+      child.once('error', reject);
+    });
+    let leader: number | undefined;
+    try {
+      let workerPid = '';
+      for (let i = 0; i < 200; i++) {
+        try {
+          workerPid = (await readFile(ready, 'utf8')).trim();
+        } catch {
+          /* startup */
+        }
+        if (workerPid) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(workerPid).toMatch(/^[0-9]+$/);
+      leader = Number((await readFile(receipt, 'utf8')).split(' ')[0]);
+      const forged = join(directory, 'forged.pid');
+      await writeFile(forged, await readFile(receipt), { mode: 0o600 });
+      await chown(forged, 65534, 65534);
+      await expect(exec('sh', ['-c', terminatePidFileScript(forged)])).rejects.toThrow(
+        /Untrusted sandbox exec receipt/,
+      );
+      expect(child.exitCode).toBeNull();
+      expect(child.signalCode).toBeNull();
+      const ownership = await stat(receipt);
+      expect(ownership.uid).toBe(mode === 'root' ? 0 : workerUid);
+      expect(ownership.mode & 0o777).toBe(0o600);
+      await expect(exec('cat', [receipt], { uid: 65534, gid: 65534 })).rejects.toThrow();
+      const worker = await readFile(`/proc/${workerPid}/status`, 'utf8');
+      expect(worker).not.toMatch(/Uid:\s+0\s/);
+      const proc = await readFile(`/proc/${workerPid}/stat`, 'utf8');
+      expect(Number(proc.slice(proc.lastIndexOf(') ') + 2).split(' ')[2])).toBe(leader);
+      await exec('sh', ['-c', cancelStreamExecScript(receipt)], { timeout: 6000 });
+      await exited;
+      await expect(readFile(receipt)).rejects.toThrow();
+      // Confirmation probes all live group members, including the su child and sleep.
+      const probe = await exec('sh', [
+        '-c',
+        `pid=${leader}; ${processGroupProbeScript()}; if group_alive; then exit 1; fi`,
+      ]);
+      expect(probe.stderr).toBe('');
+    } finally {
+      if (leader) {
+        try {
+          process.kill(-leader, 'SIGKILL');
+        } catch {
+          /* already gone */
+        }
+      }
+      if (child.pid) {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          /* already gone */
+        }
+      }
+      await exited;
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+  10_000,
+);
+
+it.skipIf(process.platform !== 'linux').each(['existing', 'symlink'] as const)(
+  'does not overwrite or follow a preexisting %s PID receipt',
+  async (mode) => {
+    const directory = await mkdtemp(join(tmpdir(), 'validation-exclusive-receipt-'));
+    const script = join(directory, 'stream.sh');
+    const receipt = `${script}.pid`;
+    const target = join(directory, 'protected');
+    await writeFile(target, 'retain original bytes');
+    if (mode === 'symlink') await symlink(target, receipt);
+    else await writeFile(receipt, 'retain receipt');
+    await writeFile(script, streamExecScript(['echo', 'must not dispatch']), { mode: 0o755 });
+    try {
+      await expect(exec(script)).rejects.toMatchObject({ code: 1, stdout: '' });
+      expect(await readFile(target, 'utf8')).toBe('retain original bytes');
+      expect(await readFile(receipt, 'utf8')).toBe(
+        mode === 'symlink' ? 'retain original bytes' : 'retain receipt',
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
 );
