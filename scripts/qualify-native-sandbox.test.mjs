@@ -445,6 +445,53 @@ test('standalone qualifier upgrades old wakeup custody without clearing a pendin
   }
 });
 
+test('standalone qualifier upgrades recovery decisions without retroactive validation authority', async () => {
+  const dir = mkdtempSync(
+    new URL('../packages/daemon/.turbo-recovery-upgrade-', import.meta.url).pathname,
+  );
+  let wakeup;
+  try {
+    const built = await buildAdapter(dir);
+    const require = createRequire(built.outfile);
+    const { wakeupSchema, wakeupEvidenceSchema, sandboxRecoverySchema } = require(built.outfile);
+    const Database = require('better-sqlite3');
+    const filename = join(dir, 'wakeups.sqlite');
+    const db = new Database(filename);
+    db.exec(wakeupSchema);
+    db.exec(wakeupEvidenceSchema);
+    db.exec(sandboxRecoverySchema);
+    const id = 'legacy-recovery-decision';
+    db.prepare(`INSERT INTO sandbox_recovery_requests
+      (id,pod_id,sandbox_id,resource_key,generation,action,user_id,reason,request_hash,binding,intent_ids,created_at)
+      VALUES(?,?,?, ?,1,'abandon','qualifier-human','Original explicit loss decision',?,?,'[]',?)`).run(
+      id,
+      'retained-qualifier',
+      object.id,
+      base,
+      'a'.repeat(64),
+      'b'.repeat(64),
+      '2026-10-30T20:00:00Z',
+    );
+    db.close();
+    for (let reopen = 0; reopen < 2; reopen++) {
+      wakeup = openWakeupJournal(built.outfile, filename);
+      const decision = wakeup.journal.recovery.get(id);
+      assert.equal(decision.userId, 'qualifier-human');
+      assert.equal(decision.reason, 'Original explicit loss decision');
+      assert.equal(decision.validationEvidence, null);
+      assert.equal(decision.completedAt, null);
+      assert.throws(
+        () => wakeup.journal.recovery.assertAvailable('retained-qualifier'),
+        /in progress/,
+      );
+      wakeup.close();
+    }
+  } finally {
+    wakeup?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('fresh production source bundle exercises guarded adapter paths including suspended extraction', async () => {
   const dir = mkdtempSync(
     new URL('../packages/daemon/.turbo-r01c-test-', import.meta.url).pathname,

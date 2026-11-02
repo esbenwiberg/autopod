@@ -81,6 +81,7 @@ import {
   createSourcePublicationLedger,
 } from './source-publication-ledger.js';
 import { type TaskRetryLedger, createTaskRetryLedger } from './task-retry-ledger.js';
+import { assertTaskValidationDeletable } from './validation-execution-evidence.js';
 import {
   type ValidationExecutionLedger,
   createValidationExecutionLedger,
@@ -1599,7 +1600,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           'Original checkpoint recovery resources/evidence remain retained; deletion and archival are unavailable.',
           'CHECKPOINT_ORIGINAL_RETAINED',
         );
-      createValidationExecutionLedger(db).assertTaskSettled(id);
+      assertTaskValidationDeletable(db, id);
       sourceAdoptions.assertDeletable(id);
       taskExecutions.assertCanDelete(id);
       externalDeliveries.assertDeletable(id);

@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { withValidationAbandonment } from '../pods/validation-abandonment-authority.js';
 
 export function recoveryError(message: string, code = 'SANDBOX_RECOVERY_BLOCKED'): never {
   throw new AutopodError(message, code, 409);
@@ -30,15 +31,22 @@ export interface SandboxRecoveryReceipt {
   requestHash: string;
   binding: string;
   intentIds: string[];
+  validationEvidence: string | null;
   createdAt: string;
   completedAt: string | null;
 }
+type SandboxRecoveryAdmission = Omit<
+  SandboxRecoveryReceipt,
+  'createdAt' | 'completedAt' | 'validationEvidence'
+> & {
+  validationEvidence?: string | null;
+};
 export interface SandboxRecoveryJournal {
   get(id: string): SandboxRecoveryReceipt | undefined;
   append(id: string, kind: 'admitted' | 'dispatch' | 'running' | 'deleted' | 'unverified'): void;
   hasDispatched(id: string): boolean;
   list(podId: string): SandboxRecoveryReceipt[];
-  admit(input: Omit<SandboxRecoveryReceipt, 'createdAt' | 'completedAt'>): SandboxRecoveryReceipt;
+  admit(input: SandboxRecoveryAdmission): SandboxRecoveryReceipt;
   complete(id: string, proof: 'running' | 'deleted'): void;
   resources(podId: string): Array<{ sandboxId: string; resourceKey: string }>;
   pendingIntents(resourceKey: string): string[];
@@ -47,6 +55,11 @@ export interface SandboxRecoveryJournal {
   released(resourceKey: string, intentId: string): boolean;
   checkReleaseScope(sandboxId: string, resourceKey?: string): void;
   permitsRelease(resourceKey: string): boolean;
+  withAbandonmentCleanup<T>(
+    id: string,
+    assertCurrent: () => void,
+    operation: () => Promise<T>,
+  ): Promise<T>;
   withAbandonment<T>(
     id: string,
     assertCurrent: () => void,
@@ -62,7 +75,7 @@ export function createSandboxRecoveryJournal(db: Database.Database): SandboxReco
   }
   const fields = `id,pod_id AS podId,sandbox_id AS sandboxId,resource_key AS resourceKey,
     generation,action,user_id AS userId,reason,request_hash AS requestHash,binding,
-    intent_ids AS intentIds,created_at AS createdAt,completed_at AS completedAt`;
+    intent_ids AS intentIds,validation_evidence AS validationEvidence,created_at AS createdAt,completed_at AS completedAt`;
   type Row = Omit<SandboxRecoveryReceipt, 'intentIds'> & { intentIds: string };
   const decode = (row: Row): SandboxRecoveryReceipt => ({
     ...row,
@@ -101,7 +114,7 @@ export function createSandboxRecoveryJournal(db: Database.Database): SandboxReco
           .all(podId) as Row[]
       ).map(decode);
     },
-    admit: db.transaction((input: Omit<SandboxRecoveryReceipt, 'createdAt' | 'completedAt'>) => {
+    admit: db.transaction((input: SandboxRecoveryAdmission) => {
       const existing = get(input.id);
       if (existing) {
         if (existing.requestHash !== input.requestHash)
@@ -123,8 +136,8 @@ export function createSandboxRecoveryJournal(db: Database.Database): SandboxReco
           'SANDBOX_RECOVERY_CONFLICT',
         );
       db.prepare(`INSERT INTO sandbox_recovery_requests
-        (id,pod_id,sandbox_id,resource_key,generation,action,user_id,reason,request_hash,binding,intent_ids,created_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        (id,pod_id,sandbox_id,resource_key,generation,action,user_id,reason,request_hash,binding,intent_ids,validation_evidence,created_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         input.id,
         input.podId,
         input.sandboxId,
@@ -136,6 +149,7 @@ export function createSandboxRecoveryJournal(db: Database.Database): SandboxReco
         input.requestHash,
         input.binding,
         JSON.stringify(input.intentIds),
+        input.validationEvidence ?? null,
         new Date().toISOString(),
       );
       append(input.id, 'admitted');
@@ -236,6 +250,19 @@ export function createSandboxRecoveryJournal(db: Database.Database): SandboxReco
       // Scope calls its owner fence afresh at every transport-side check.
       return scope.getStore()?.() === resourceKey;
     },
+    withAbandonmentCleanup<T>(
+      id: string,
+      assertCurrent: () => void,
+      operation: () => Promise<T>,
+    ): Promise<T> {
+      const record = get(id) ?? recoveryError('Abandonment decision unavailable');
+      if (record.action !== 'abandon' || !record.completedAt)
+        recoveryError('Deletion must be confirmed before cleanup');
+      assertCurrent();
+      return record.validationEvidence
+        ? withValidationAbandonment(db, id, 'cleanup', assertCurrent, operation)
+        : operation();
+    },
     withAbandonment<T>(
       id: string,
       assertCurrent: () => void,
@@ -255,8 +282,13 @@ export function createSandboxRecoveryJournal(db: Database.Database): SandboxReco
           recoveryError('A new wakeup was admitted after this abandonment decision');
         return record.resourceKey;
       };
+      const record = get(id) ?? recoveryError('Abandonment decision unavailable');
       authorize();
-      return scope.run(authorize, operation);
+      return scope.run(authorize, () =>
+        record.validationEvidence
+          ? withValidationAbandonment(db, id, 'delete', assertCurrent, operation)
+          : operation(),
+      );
     },
   };
 }

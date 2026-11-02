@@ -1,6 +1,9 @@
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { sandboxRecoveryFixture } from '../../test-utils/sandbox-recovery-helpers.js';
+import {
+  sandboxRecoveryFixture,
+  sandboxValidationAbandonmentFixture,
+} from '../../test-utils/sandbox-recovery-helpers.js';
 import { terminationAuth } from '../../test-utils/termination-reconciliation-helpers.js';
 import { errorHandler } from '../error-handler.js';
 import { authPlugin } from '../plugins/auth.js';
@@ -17,8 +20,8 @@ describe('human sandbox recovery API', () => {
     app.setErrorHandler(errorHandler);
     authPlugin(app, terminationAuth());
     sandboxRecoveryRoutes(app, {
-      getSandboxRecovery: f.recovery.inspect,
-      recoverSandbox: f.recovery.submit,
+      getSandboxRecovery: (id) => f.recovery.inspect(id),
+      recoverSandbox: (id, input, actor) => f.recovery.submit(id, input, actor),
     });
     await app.ready();
   });
@@ -66,6 +69,30 @@ describe('human sandbox recovery API', () => {
     expect(second.json().operation).toEqual(first.json().operation);
     expect(f.cm.kill).toHaveBeenCalledTimes(1);
     expect((await app.inject({ url, headers })).statusCode).toBe(404);
+  });
+  it('offers explicit abandonment for an exact validation hold, while Start and missing consent remain blocked', async () => {
+    const held = sandboxValidationAbandonmentFixture();
+    f = held;
+    const inspected = await app.inject({ url, headers });
+    expect(inspected.statusCode).toBe(200);
+    expect(inspected.json().resources[0]).toMatchObject({ abandonBlocked: null });
+    expect(inspected.json().resources[0].startBlocked).toContain('termination is unverified');
+    for (const change of [{ action: 'start' }, { acknowledgeDataLoss: false }]) {
+      const response = await app.inject({
+        method: 'POST',
+        url,
+        headers,
+        payload: { ...held.input, ...change },
+      });
+      expect(response.statusCode).toBe(409);
+    }
+    expect(held.cm.kill).not.toHaveBeenCalled();
+    const abandoned = await app.inject({ method: 'POST', url, headers, payload: held.input });
+    expect(abandoned.statusCode).toBe(200);
+    expect(abandoned.json().podDeleted).toBe(true);
+    expect(abandoned.json().operation.validationEvidence).toContain(held.dispatch);
+    expect(held.cm.start).not.toHaveBeenCalled();
+    expect(held.validations.intent(held.dispatch)).toBeNull();
   });
   it('returns 409 rather than replaying an outcome-unknown resume', async () => {
     const response = await app.inject({

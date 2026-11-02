@@ -76,6 +76,7 @@ export async function buildAdapter(directory) {
         "export { default as wakeupSchema } from './packages/daemon/src/db/migrations/218_sandbox_wakeup_intents.sql';",
         "export { default as wakeupEvidenceSchema } from './packages/daemon/src/db/migrations/226_sandbox_wakeup_evidence.sql';",
         "export { default as sandboxRecoverySchema } from './packages/daemon/src/db/migrations/228_sandbox_recovery_controls.sql';",
+        "export { default as validationAbandonmentSchema } from './packages/daemon/src/db/migrations/231_validation_sandbox_abandonment.sql';",
       ].join('\n'),
       resolveDir: root,
     },
@@ -102,8 +103,13 @@ export async function buildAdapter(directory) {
 }
 
 export function openWakeupJournal(bundle, filename) {
-  const { createSandboxWakeupJournal, wakeupSchema, wakeupEvidenceSchema, sandboxRecoverySchema } =
-    daemonRequire(bundle);
+  const {
+    createSandboxWakeupJournal,
+    wakeupSchema,
+    wakeupEvidenceSchema,
+    sandboxRecoverySchema,
+    validationAbandonmentSchema,
+  } = daemonRequire(bundle);
   const Database = daemonRequire('better-sqlite3');
   const db = new Database(filename);
   chmodSync(filename, 0o600);
@@ -123,6 +129,11 @@ export function openWakeupJournal(bundle, filename) {
       )
       .get();
     if (!hasRecovery) db.exec(sandboxRecoverySchema);
+    const hasValidationSelection = db
+      .prepare('PRAGMA table_info(sandbox_recovery_requests)')
+      .all()
+      .some((column) => column.name === 'validation_evidence');
+    if (!hasValidationSelection) db.exec(validationAbandonmentSchema);
   })();
   return {
     journal: createSandboxWakeupJournal(db),

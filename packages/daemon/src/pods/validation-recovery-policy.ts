@@ -11,7 +11,7 @@ import { captureValidationOwnership } from './validation-ownership.js';
 /** No current ordinary-validation adapter supplies qualified final-content proof. */
 export function assertValidationFinalContentSupported(): never {
   throw new AutopodError(
-    'The provider cannot prove this exact validation execution is quiescent or preserve an immutable final source/report snapshot. Retain original resources; do not resume or delete them, or reuse an older export as final evidence.',
+    'The provider cannot prove this exact validation execution is quiescent or preserve an immutable final source/report snapshot. Retain original resources for preservation, or use explicit Sandbox recovery abandonment to accept losing unpreserved files and reports when exact ownership permits it. Abandonment is not settlement; do not resume or reuse an older export as final evidence.',
     'VALIDATION_FINAL_CONTENT_UNVERIFIED',
     409,
   );
@@ -52,6 +52,15 @@ export function assertValidationMutationSettled(
 ): void {
   assertValidationExecutionSettled(repo.getOrThrow(podId));
   repo.validationExecutions?.assertTaskSettled(podId);
+}
+
+/** Explicit destruction may discard validation evidence, but never admits checks or START. */
+export function assertValidationDeletionAllowed(
+  repo: Pick<PodRepository, 'getOrThrow' | 'validationExecutions'>,
+  podId: string,
+): void {
+  if (!repo.validationExecutions?.hasAbandonmentAuthority(podId))
+    assertValidationMutationSettled(repo, podId);
 }
 
 /** Recheck exact source ownership and task custody after every awaited preflight. */

@@ -33,7 +33,24 @@ export function createSandboxRecovery(deps: {
       p.launchConfigDigest,
       p.lastValidationResult,
     ]);
-  function policy(podId: string, owner?: string) {
+  const validationEvidence = (pod: Pod, sandboxId: string) => {
+    const validations = deps.podRepo.validationExecutions;
+    if (!validations) recoveryError('Durable validation custody ledger is required');
+    return validations.captureAbandonment(
+      pod,
+      sandboxId,
+      deps.getContainerManager().executionResourceScope,
+    );
+  };
+  const selectionBinding = (pod: Pod, evidence: string | null) =>
+    evidence ? recoveryHash([binding(pod), evidence]) : binding(pod);
+  function policy(
+    podId: string,
+    action: 'start' | 'abandon',
+    owner?: string,
+    sandboxId?: string,
+    completedCleanup?: SandboxRecoveryReceipt,
+  ) {
     if (active.has(podId) && active.get(podId) !== owner)
       recoveryError('Another sandbox recovery is in flight');
     const pod = deps.podRepo.getOrThrow(podId);
@@ -50,7 +67,8 @@ export function createSandboxRecovery(deps: {
       recoveryError(
         'Native Goal custody requires Goal-aware recovery; these sandbox-only controls cannot override it.',
       );
-    assertValidationMutationSettled(deps.podRepo, podId);
+    if (action === 'start') assertValidationMutationSettled(deps.podRepo, podId);
+    else validationEvidence(pod, sandboxId ?? pod.containerId ?? '');
     if (
       !deps.podRepo.taskExecutions ||
       !deps.podRepo.sourceAdoptions ||
@@ -60,7 +78,15 @@ export function createSandboxRecovery(deps: {
     deps.podRepo.taskExecutions.assertCanDelete(podId);
     deps.podRepo.sourceAdoptions.assertDeletable(podId);
     deps.podRepo.externalDeliveries.assertDeletable(podId);
-    deps.podRepo.deletionOwnership?.assertTaskAvailable(podId);
+    // Post-404 cleanup resumes through deleteSession's exact durable cleanup
+    // claim. That claim, not a blanket availability check, fences active attempts.
+    if (
+      !completedCleanup?.completedAt ||
+      completedCleanup.sandboxId !== sandboxId ||
+      selectionBinding(pod, validationEvidence(pod, completedCleanup.sandboxId)) !==
+        completedCleanup.binding
+    )
+      deps.podRepo.deletionOwnership?.assertTaskAvailable(podId);
     if (deps.podRepo.retainedCheckpoints?.latest(podId))
       recoveryError('Retained checkpoint recovery still owns original evidence');
     if (pod.pendingEscalation || deps.podRepo.hasUnansweredDecision?.(podId))
@@ -129,9 +155,21 @@ export function createSandboxRecovery(deps: {
       const abandoned = [...operations]
         .reverse()
         .find((r) => r.action === 'abandon' && r.resourceKey === resource.resourceKey);
-      const currentAbandonment = abandoned?.binding === original ? abandoned : undefined;
       const policyBlock = reasonFor(() => {
-        policy(podId);
+        policy(podId, 'start');
+      });
+      let currentAbandonment: SandboxRecoveryReceipt | undefined;
+      const abandonmentPolicyBlock = reasonFor(() => {
+        const evidence = validationEvidence(pod, resource.sandboxId);
+        currentAbandonment =
+          abandoned?.binding === selectionBinding(pod, evidence) ? abandoned : undefined;
+        policy(
+          podId,
+          'abandon',
+          undefined,
+          resource.sandboxId,
+          currentAbandonment?.completedAt ? currentAbandonment : undefined,
+        );
       });
       const startBlocked =
         observationError ??
@@ -149,7 +187,8 @@ export function createSandboxRecovery(deps: {
                   : null);
       // Explicit loss acceptance authorizes DELETE, not a readiness inference.
       // Unavailable state can never authorize START, but need not strand abandonment.
-      const abandonBlocked = (namespaceVerified ? null : observationError) ?? policyBlock;
+      const abandonBlocked =
+        (namespaceVerified ? null : observationError) ?? abandonmentPolicyBlock;
       observations.push({
         ...resource,
         providerState,
@@ -173,8 +212,14 @@ export function createSandboxRecovery(deps: {
     if (!ledger || !journal) recoveryError('Durable sandbox recovery is unavailable');
     const cm = deps.getContainerManager();
     const assertCurrent = () => {
-      const pod = policy(record.podId, record.id);
-      if (pod.lifecycleGeneration !== record.generation || binding(pod) !== record.binding)
+      const pod = policy(record.podId, record.action, record.id, record.sandboxId);
+      const evidence =
+        record.action === 'abandon' ? validationEvidence(pod, record.sandboxId) : null;
+      if (
+        evidence !== record.validationEvidence ||
+        pod.lifecycleGeneration !== record.generation ||
+        selectionBinding(pod, evidence) !== record.binding
+      )
         recoveryError(
           'Recovery selection was superseded. No mutation was authorized.',
           'STALE_SANDBOX_RECOVERY',
@@ -242,7 +287,7 @@ export function createSandboxRecovery(deps: {
     if (record && record.requestHash !== hash)
       recoveryError('Recovery request ID conflict', 'SANDBOX_RECOVERY_CONFLICT');
     if (!record) {
-      const pod = policy(podId);
+      const pod = policy(podId, input.action, undefined, input.sandboxId);
       if (pod.lifecycleGeneration !== input.expectedGeneration)
         recoveryError('Pod generation changed. Refresh.', 'STALE_SANDBOX_RECOVERY');
       const snapshot = await inspect(podId);
@@ -252,7 +297,7 @@ export function createSandboxRecovery(deps: {
       if (!resource) recoveryError('Selected original sandbox is unavailable');
       const block = input.action === 'start' ? resource.startBlocked : resource.abandonBlocked;
       if (block) recoveryError(block);
-      const current = policy(podId);
+      const current = policy(podId, input.action, undefined, input.sandboxId);
       if (binding(current) !== binding(pod))
         recoveryError('Pod changed. Refresh.', 'STALE_SANDBOX_RECOVERY');
       record = ledger.admit({
@@ -265,8 +310,13 @@ export function createSandboxRecovery(deps: {
         userId: actor.userId,
         reason: input.reason,
         requestHash: hash,
-        binding: binding(pod),
+        binding: selectionBinding(
+          pod,
+          input.action === 'abandon' ? validationEvidence(pod, input.sandboxId) : null,
+        ),
         intentIds: resource.pendingIntentIds,
+        validationEvidence:
+          input.action === 'abandon' ? validationEvidence(pod, input.sandboxId) : null,
       });
     }
     if (!record.completedAt) {
@@ -301,12 +351,22 @@ export function createSandboxRecovery(deps: {
       if (!current) podDeleted = true;
       else {
         try {
-          if (binding(deps.podRepo.getOrThrow(podId)) !== record.binding)
-            recoveryError(
-              'Original pod selection changed; sandbox deletion does not authorize deleting its replacement.',
-              'STALE_SANDBOX_RECOVERY',
-            );
-          await deps.deleteSession(podId);
+          const completed = record;
+          const assertCleanupCurrent = () => {
+            const selected = deps.podRepo.getOrThrow(podId);
+            const evidence = validationEvidence(selected, completed.sandboxId);
+            if (
+              evidence !== completed.validationEvidence ||
+              selectionBinding(selected, evidence) !== completed.binding
+            )
+              recoveryError(
+                'Original pod or validation selection changed; sandbox deletion does not authorize deleting its replacement.',
+                'STALE_SANDBOX_RECOVERY',
+              );
+          };
+          await ledger.withAbandonmentCleanup(completed.id, assertCleanupCurrent, () =>
+            deps.deleteSession(podId),
+          );
           podDeleted = true;
         } catch (error) {
           cleanupError = error instanceof Error ? error.message : 'Pod cleanup remains blocked';

@@ -13,6 +13,7 @@ import { createSandboxWakeupJournal } from '../containers/sandbox-wakeup-journal
 import { assertNoValidationRecovery, createDeletionOwnership } from './deletion-ownership.js';
 import { createExternalDeliveryRepository } from './external-delivery-repository.js';
 import { createSourceAdoptionRepository } from './source-adoption-repository.js';
+import { ownsValidationAbandonment } from './validation-abandonment-authority.js';
 import {
   type UnsettledValidationDispatch,
   assertTaskValidationSettled,
@@ -20,7 +21,10 @@ import {
   unsettledDispatches,
   validationResultHash,
 } from './validation-execution-evidence.js';
-import { assertValidationFinalContentSupported } from './validation-recovery-policy.js';
+import {
+  assertValidationFinalContentSupported,
+  requiresValidationSettlement,
+} from './validation-recovery-policy.js';
 export {
   validationResultHash,
   listValidationExecutionResourceIds,
@@ -86,6 +90,12 @@ export interface ValidationExecutionLedger {
   assertNoPendingRecovery(podId: string): void;
   assertNoActiveTaskExecution(podId: string): void;
   assertTaskSettled(podId: string): void;
+  hasAbandonmentAuthority(podId: string): boolean;
+  captureAbandonment(
+    pod: Pod,
+    containerId: string,
+    resourceScope: string | undefined,
+  ): string | null;
   hasGoal(podId: string): boolean;
   isSettled(pod: Pod): boolean;
   dispatch(pod: Pod, admissionId: string, attempt: number, resourceScope?: string): string | null;
@@ -243,6 +253,75 @@ export function createValidationExecutionLedger(db: Database.Database): Validati
     },
     assertTaskSettled(podId: string): void {
       assertTaskValidationSettled(db, podId);
+    },
+    hasAbandonmentAuthority(podId) {
+      return ownsValidationAbandonment(db, { podId });
+    },
+    captureAbandonment(pod, containerId, resourceScope) {
+      const rows = unsettledDispatches(db, taskId(pod.id));
+      ledger.assertNoActiveTaskExecution(pod.id);
+      ledger.assertNoPendingRecovery(pod.id);
+      const peers = db
+        .prepare(`SELECT p.last_validation_result AS result FROM pods p
+        JOIN task_executions e ON e.pod_id=p.id WHERE e.task_id=? AND p.id<>?
+        AND p.last_validation_result IS NOT NULL`)
+        .all(taskId(pod.id), pod.id) as Array<{ result: string }>;
+      if (
+        peers.some((row) =>
+          requiresValidationSettlement({ lastValidationResult: JSON.parse(row.result) }),
+        )
+      )
+        validationRecoveryError('Another task owner retains unverified validation evidence');
+      if (!rows.length && !requiresValidationSettlement(pod)) return null;
+      ledger.assertResourceUnshared(pod.id, containerId);
+      if (ledger.hasGoal(pod.id))
+        validationRecoveryError(
+          'Native Goal validation cannot be abandoned through sandbox-only controls',
+        );
+      const exact = find(pod);
+      if (requiresValidationSettlement(pod) && (!exact || !rows.some((row) => row.id === exact.id)))
+        validationRecoveryError(
+          'Immutable validation ownership for the current result is unavailable; abandonment cannot infer it from a mutable container pointer',
+        );
+      if (
+        !resourceScope ||
+        !rows.length ||
+        rows.some(
+          ({ binding }) =>
+            binding.podId !== pod.id ||
+            binding.generation !== pod.lifecycleGeneration ||
+            binding.executionTarget !== 'sandbox' ||
+            binding.containerId !== containerId ||
+            binding.resourceScope !== resourceScope ||
+            binding.worktreePath !== pod.worktreePath ||
+            binding.providerBinding !== validationProviderBinding(pod),
+        )
+      )
+        validationRecoveryError(
+          'Another validation task, generation, provider namespace or original resource remains in custody',
+        );
+      if (
+        unsettledDispatches(db).some(
+          (row) =>
+            row.binding.containerId === containerId &&
+            !rows.some((selected) => selected.id === row.id),
+        )
+      )
+        validationRecoveryError('Another task retains this validation resource');
+      // Include append-only outcomes/publication hashes so late evidence or a new
+      // dispatch requires a fresh human decision, even when the pod projection is unchanged.
+      const evidence = rows.map((row) => ({
+        ...row,
+        hashes: db
+          .prepare(`SELECT
+        r.result_hash AS result,o.result_hash AS outcome,p.result_hash AS publication
+        FROM validation_dispatches d
+        LEFT JOIN validation_dispatch_results r ON r.dispatch_id=d.id
+        LEFT JOIN validation_dispatch_outcomes o ON o.dispatch_id=d.id
+        LEFT JOIN validation_logical_publications p ON p.dispatch_id=d.id WHERE d.id=?`)
+          .get(row.id),
+      }));
+      return JSON.stringify(evidence);
     },
     assertNoActiveTaskExecution(podId: string): void {
       if (
