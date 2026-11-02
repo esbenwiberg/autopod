@@ -180,6 +180,7 @@ function compactPod(
     display: {
       repository: pod.repositoryDisplay ?? { kind: 'unavailable' },
       progress: compactMilestoneProgress(pod.progress),
+      activeTime: pod.activeTime ?? null,
     },
     taskSummary: compactText(pod.taskSummary?.actualSummary),
     profileName: pod.profileName,
@@ -788,6 +789,7 @@ export function podRoutes(
       wire.display = {
         repository: podRepo.getRepositoryForDisplay(podId),
         progress: compactMilestoneProgress(pod.progress),
+        activeTime: podRepo.getActiveTimeForDisplay?.(podId) ?? null,
       };
     }
     if (podManager.getArtifactResumeObservation)

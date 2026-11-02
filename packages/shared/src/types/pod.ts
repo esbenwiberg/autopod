@@ -683,6 +683,8 @@ export type PodRepositoryDisplay =
 export interface PodFleetDisplay {
   repository: PodRepositoryDisplay;
   progress: Pod['progress'];
+  /** Running/validating state time, not CPU or billing. Null/absent means historical coverage unavailable. */
+  activeTime?: { elapsedMs: number; activeSince: string | null } | null;
 }
 
 export interface CompactPod {

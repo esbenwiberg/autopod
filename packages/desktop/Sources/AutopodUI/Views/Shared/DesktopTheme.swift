@@ -35,6 +35,22 @@ public enum DesktopTheme {
     public static var line: Color { adaptive(0xDDE5DD, 0x354138) }
     public static var accent: Color { adaptive(0x277D68, 0x83C9AE) }
     public static var selection: Color { adaptive(0xDFEDE5, 0x2B4034) }
+
+    /// Muted semantic colors tuned to the desktop's green/neutral surfaces.
+    public static func statusColor(_ status: PodStatus) -> Color {
+        switch status {
+        case .provisioning, .running, .validating, .merging, .handoff:
+            adaptive(0x35658A, 0x91B5D8)
+        case .awaitingInput, .reviewRequired, .validated, .mergePending:
+            adaptive(0x8B631D, 0xD4B479)
+        case .complete, .approved:
+            accent
+        case .failed, .killing:
+            adaptive(0xA33E3A, 0xE39A94)
+        case .queued, .paused, .killed:
+            adaptive(0x5E6A62, 0xA4ADA5)
+        }
+    }
     private static func adaptive(_ light: UInt32, _ dark: UInt32) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
