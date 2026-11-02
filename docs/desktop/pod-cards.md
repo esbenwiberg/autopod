@@ -23,7 +23,7 @@ merge-pending/CI waits do not accumulate. Completed, failed and killed pods free
 A daemon outage while a pod remains in a counted state is still state time, not
 proof of uninterrupted execution.
 
-Migration `231_pod_active_time.sql` creates a small per-live-pod ledger. SQLite
+Migration `232_pod_active_time.sql` creates a small per-live-pod ledger. SQLite
 triggers initialize newly inserted pods and account for every actual status
 change transactionally; repeated status writes and heartbeats do not reset the
 clock. Compact discovery and detail responses expose the optional

@@ -198,6 +198,43 @@ describe('GhPrManager', () => {
     expect(onPrepared).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    { gate: 'CLEAN', checks: [], blocked: false },
+    { gate: 'BLOCKED', checks: [], blocked: true },
+    { gate: 'BEHIND', checks: [], blocked: true },
+    { gate: 'UNKNOWN', checks: [], blocked: true },
+    { gate: undefined, checks: [], blocked: true },
+    {
+      gate: 'CLEAN',
+      checks: [{ name: 'CI', status: 'IN_PROGRESS', conclusion: '' }],
+      blocked: true,
+    },
+    { gate: 'CLEAN', checks: [{ context: 'Vercel', state: 'PENDING' }], blocked: true },
+    { gate: 'CLEAN', checks: [{ context: 'Vercel', state: 'FAILURE' }], blocked: true },
+    { gate: 'CLEAN', checks: [{ context: 'Vercel', state: 'SUCCESS' }], blocked: false },
+  ])(
+    'defers pending/unknown GitHub gates before approval can admit a mutation (%j)',
+    async ({ gate, checks, blocked }) => {
+      execResponses.push({
+        stdout: JSON.stringify({
+          state: 'OPEN',
+          mergeStateStatus: gate,
+          statusCheckRollup: checks,
+          reviewDecision: '',
+        }),
+        stderr: '',
+      });
+      const result = await new GhPrManager({ logger, githubAuth }).getPrStatus({
+        prUrl: 'https://github.com/org/repo/pull/42',
+      });
+      expect(result.mergeBlocked).toBe(blocked);
+      if (checks[0] && 'context' in checks[0] && blocked)
+        expect(result.blockReason).toContain('Vercel');
+      expect(execCalls).toHaveLength(1);
+      expect(execCalls[0]?.[1]).toEqual(expect.arrayContaining(['view']));
+    },
+  );
+
   it('can be instantiated', () => {
     const manager = new GhPrManager({ logger, githubAuth });
     expect(manager).toBeDefined();

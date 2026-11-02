@@ -10,6 +10,7 @@ import {
 import type Database from 'better-sqlite3';
 import { assertCheckpointResourceNotRetained } from './retained-checkpoint-repository.js';
 import { slugifyPagePath } from './screenshot-store.js';
+import { ownsValidationAbandonment } from './validation-abandonment-authority.js';
 import {
   requiresValidationFailureSettlement,
   requiresValidationSettlement,
@@ -177,6 +178,21 @@ export function assertValidationResourceSettled(db: Database.Database, container
     )
   )
     validationRecoveryError('Validation termination is unverified for this retained resource.');
+}
+
+/** Only explicit destruction may discard held evidence; START keeps the strict fence above. */
+export function assertValidationResourceReleasable(
+  db: Database.Database,
+  containerId: string,
+): void {
+  assertCheckpointResourceNotRetained(db, containerId);
+  if (!ownsValidationAbandonment(db, { containerId }))
+    assertValidationResourceSettled(db, containerId);
+}
+
+/** This exception is deletion-only; task admission always calls assertTaskValidationSettled. */
+export function assertTaskValidationDeletable(db: Database.Database, podId: string): void {
+  if (!ownsValidationAbandonment(db, { podId })) assertTaskValidationSettled(db, podId);
 }
 
 export function listValidationExecutionResourceIds(db: Database.Database): string[] {

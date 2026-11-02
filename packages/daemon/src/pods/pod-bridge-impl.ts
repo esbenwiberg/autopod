@@ -41,6 +41,7 @@ import {
   hashDiff,
   runPreSubmitReview,
 } from '../validation/pre-submit-review.js';
+import { runValidationCommand } from '../validation/run-validation-command.js';
 import { isBlockingEscalation, persistEscalation } from './escalation-coordinator.js';
 import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
@@ -1210,6 +1211,15 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
             legacy?.registryPat ?? null,
             legacy?.buildEnv ?? null,
           );
+      // Like final validation, reapply only admitted literals after streaming's
+      // user/transport wrappers. Resolved credentials stay in the scoped env.
+      const nonSecretEnv = launch
+        ? Object.fromEntries(
+            Object.entries(launch.repository?.setup.buildEnv ?? {}).flatMap(([name, value]) =>
+              'value' in value ? [[name, value.value]] : [],
+            ),
+          )
+        : undefined;
       const cm = containerManagerFactory.get(pod.executionTarget);
 
       const startedAt = Date.now();
@@ -1230,9 +1240,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       activityTimer.unref?.();
 
       try {
-        const result = await cm.execInContainer(
+        const result = await runValidationCommand(
+          cm,
+          pod.executionTarget,
           pod.containerId,
-          wrapValidationExecCommand(phaseConfig.command, env),
+          wrapValidationExecCommand(phaseConfig.command, env, nonSecretEnv),
           {
             cwd,
             timeout: phaseConfig.timeoutMs,

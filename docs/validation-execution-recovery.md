@@ -11,6 +11,14 @@ observe an exit code, grant a retry, reset task allowances, or start a worker. T
 failed result, partial output, attempt, metered usage and admission remain unchanged.
 Worker `reconcile-termination` and native Goal process receipts are separate evidence.
 
+If preservation is no longer wanted, [Sandbox recovery — Abandon and delete](sandbox-wakeup-recovery.md#desktop-recovery-controls)
+is a separate, explicit data-loss decision for an idle sandbox with exact immutable
+validation ownership. It can delete that resource and then its pod without claiming
+settlement or final-content preservation. A meaningful human reason, loss consent,
+exact namespace/generation and fresh evidence binding are mandatory. Other custody
+owners and active admissions still block it. Legacy missing ownership remains
+unsupported. This does not enable Start, retry, repair or reuse of old validation.
+
 ## Inspect first
 
 After deployment of this implementation, use the full pod ID:
@@ -115,8 +123,11 @@ ap reconcile-validation <full-pod-id> --apply \
 ```
 
 This request cannot currently delete or settle an unknown validation execution.
-Retain original resources and escalate the provider-proof limitation. There is no
-force, human-assertion, worker/Goal-receipt or snapshot-reuse bypass. Old deletion
+Retain original resources and escalate the provider-proof limitation when final
+content must be preserved. Explicit sandbox abandonment instead accepts loss and
+retains the original dispatch/result audit; it does not bypass reconciliation or
+invent final-content proof. There is no force, human-assertion, worker/Goal-receipt
+or snapshot-reuse bypass. Old deletion
 receipts remain inspectable but cannot certify final report preservation or unlock
 retry. Existing source custody, wakeup, external-delivery, lifecycle and task-wide
 execution fences remain authoritative. GET inspection never contacts the provider

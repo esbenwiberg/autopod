@@ -137,6 +137,10 @@ export interface ValidationEngineConfig {
    * execInContainer and would otherwise see no creds — causing NU1301 on cold caches.
    */
   extraExecEnv?: Record<string, string>;
+  /** Frozen literal build values only, never resolved credential references.
+   * Reapplied inside configured commands after streaming/user wrappers.
+   */
+  nonSecretExecEnv?: Record<string, string>;
   /**
    * Cached verdict from the agent's `pre_submit_review` tool call. When the
    * cached `diffHash` matches the current diff's hash AND the cached status

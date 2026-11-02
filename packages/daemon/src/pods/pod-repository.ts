@@ -50,6 +50,7 @@ import {
   assertNoValidationRecovery,
   createDeletionOwnership,
 } from './deletion-ownership.js';
+import { deliveryReadinessBlock, withDeliveryReadiness } from './delivery-readiness.js';
 import {
   type DispatchPreflightLedger,
   createDispatchPreflightLedger,
@@ -81,6 +82,7 @@ import {
   createSourcePublicationLedger,
 } from './source-publication-ledger.js';
 import { type TaskRetryLedger, createTaskRetryLedger } from './task-retry-ledger.js';
+import { assertTaskValidationDeletable } from './validation-execution-evidence.js';
 import {
   type ValidationExecutionLedger,
   createValidationExecutionLedger,
@@ -734,21 +736,20 @@ export function createPodRepository(db: Database.Database): PodRepository {
   const externalDeliveries = createExternalDeliveryRepository(db);
   const sandboxWakeups = createSandboxWakeupJournal(db);
   const sourceAdoptions = createSourceAdoptionRepository(db);
-  const custodyProjection = (pod: Pod): Pod =>
-    pod.readinessReview && sourceAdoptions.hasCustody(pod.id)
-      ? {
-          ...pod,
-          readinessReview: withLifecycleReadiness(
-            pod.readinessReview,
-            pod.status,
-            pod.lastValidationResult,
-            true,
-          ),
-        }
-      : pod;
+  const mergeJournal = createMergeJournal(db);
+  const readinessProjection = (pod: Pod): Pod => {
+    if (!pod.readinessReview) return pod;
+    const review = sourceAdoptions.hasCustody(pod.id)
+      ? withLifecycleReadiness(pod.readinessReview, pod.status, pod.lastValidationResult, true)
+      : pod.readinessReview;
+    return {
+      ...pod,
+      readinessReview: withDeliveryReadiness(review, deliveryReadinessBlock(pod, mergeJournal)),
+    };
+  };
   const fleetArchives = createFleetArchiveRepository(db);
   const withFleetArchive = (pod: Pod): Pod => ({
-    ...custodyProjection(pod),
+    ...readinessProjection(pod),
     fleetArchivedAt: fleetArchives.archivedAt(pod.id),
   });
   const rowToSession = (row: Record<string, unknown>) => withFleetArchive(decodeSessionRow(row));
@@ -849,7 +850,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     externalDeliveries,
     sandboxWakeups,
     sourceAdoptions,
-    mergeJournal: createMergeJournal(db),
+    mergeJournal,
     taskExecutions,
     deletionOwnership,
     insert: db.transaction((pod: NewPod): void => {
@@ -1614,7 +1615,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           'Original checkpoint recovery resources/evidence remain retained; deletion and archival are unavailable.',
           'CHECKPOINT_ORIGINAL_RETAINED',
         );
-      createValidationExecutionLedger(db).assertTaskSettled(id);
+      assertTaskValidationDeletable(db, id);
       sourceAdoptions.assertDeletable(id);
       taskExecutions.assertCanDelete(id);
       externalDeliveries.assertDeletable(id);

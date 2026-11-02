@@ -88,7 +88,15 @@ The sheet provides:
   provider namespace and pod selection are durably retained before DELETE. This
   authorizes loss of unpreserved files/reports, not a fabricated rejection or
   worker exit. Unknown readiness does not prevent an explicitly authorized
-  DELETE, but every other custody hold still applies. Actual provider deletion
+  DELETE. An idle sandbox held only by an exact immutable validation dispatch can
+  also be abandoned: the decision captures its dispatch IDs, resource/configuration
+  bindings, and immutable result/outcome/publication hashes before deletion. This
+  deliberately discards unpreserved final source/reports; it does not claim to
+  reconcile the execution or preserve its final content. Active task invocations,
+  worker/validation admissions, other task/resource owners, Goal, checkpoint,
+  source-adoption and delivery custody still block abandonment. Historical
+  validation without immutable ownership cannot be inferred from a container
+  pointer. Start and ordinary Delete retain their existing validation fences. Actual provider deletion
   must be confirmed by GET 404 before this wakeup hold releases. Ordinary Kill,
   reapers and Delete do not inherit a pending abandonment's authority.
 
@@ -144,8 +152,14 @@ not require data-loss acknowledgement. The response includes `operation`,
 `podDeleted`, and `cleanupError`. The request ID is bound to its full payload and
 authenticated actor. Replays with different content/actor, caller-supplied proof,
 force flags, source substitution and unknown fields are rejected. Migration 228
-adds immutable decision identities and append-only events; no existing wakeup
-history is rewritten.
+adds immutable decision identities and append-only events. Migration 231 adds an
+immutable `validationEvidence` selection to the decision; existing requests default
+to no validation authority and cannot be silently upgraded. No existing wakeup or
+validation history is rewritten. Validation destruction authority exists only
+inside the exact provider DELETE and post-confirmed-deletion cleanup callbacks;
+it is rechecked after awaits, expires when each callback returns, and never grants
+Start, retry, validation, worker or delivery permission. The original validation
+failure and unknown execution remain in retained audit history after pod deletion.
 
 ## Existing blocked resources
 

@@ -532,7 +532,7 @@ export class GhPrManager implements PrManager {
       'view',
       config.prUrl,
       '--json',
-      'state,mergedAt,statusCheckRollup,reviewDecision,autoMergeRequest,headRefOid,url,headRefName,baseRefName,isCrossRepository',
+      'state,mergedAt,statusCheckRollup,reviewDecision,autoMergeRequest,headRefOid,url,headRefName,baseRefName,isCrossRepository,mergeStateStatus',
     ];
 
     const { stdout } = await this.execGh(args, {
@@ -547,7 +547,14 @@ export class GhPrManager implements PrManager {
       headRefOid?: string;
       state: string;
       mergedAt: string | null;
-      statusCheckRollup: Array<{ name: string; status: string; conclusion: string }> | null;
+      mergeStateStatus?: string;
+      statusCheckRollup: Array<{
+        name?: string;
+        context?: string;
+        status?: string;
+        state?: string;
+        conclusion?: string;
+      }> | null;
       reviewDecision: string;
       autoMergeRequest: unknown | null;
     };
@@ -597,8 +604,14 @@ export class GhPrManager implements PrManager {
     const reasons: string[] = [];
     const ciFailures: CiFailureDetail[] = [];
 
-    if (pr.statusCheckRollup?.length) {
-      const pending = pr.statusCheckRollup.filter(
+    // Both CheckRun and legacy StatusContext entries occur in this union.
+    const checks = pr.statusCheckRollup?.map((check) => ({
+      name: check.name ?? check.context ?? 'Unnamed check',
+      status: check.status ?? check.state ?? 'UNKNOWN',
+      conclusion: check.conclusion || check.state || '',
+    }));
+    if (checks?.length) {
+      const pending = checks.filter(
         (c) =>
           c.conclusion !== 'SUCCESS' && c.conclusion !== 'NEUTRAL' && c.conclusion !== 'SKIPPED',
       );
@@ -697,11 +710,18 @@ export class GhPrManager implements PrManager {
       reasons.push(label);
     }
 
+    // Pending/unknown checks and branch policies must defer BEFORE durable
+    // mutation admission. Otherwise gh's ordinary policy refusal looks like
+    // an ambiguous merge and strands a newly created PR on approval retry.
+    const mergeBlocked = reasons.length > 0 || pr.mergeStateStatus !== 'CLEAN';
+    if (pr.mergeStateStatus !== 'CLEAN')
+      reasons.push(`GitHub merge gate: ${pr.mergeStateStatus ?? 'UNKNOWN'}`);
     return {
       headSha: sourceCommit(pr.headRefOid),
       sourceTarget,
       merged: false,
       open: true,
+      mergeBlocked,
       blockReason: reasons.length > 0 ? reasons.join('; ') : 'Waiting for merge conditions',
       ciFailures,
       reviewComments,
