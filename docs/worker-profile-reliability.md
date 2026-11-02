@@ -66,10 +66,16 @@ changing the branch under an existing task.
 
 Before operator-fixture work:
 
-- Bake a compatible Git into the reusable environment and prove the actual
-  `git merge-tree --write-tree --merge-base=<oid>` operation using disposable local
-  commits. A version string or a one-off installation in a previous pod is not
-  sufficient. Do not weaken integration assertions for older Git.
+- The Node22/Node24 PostgreSQL base templates bake Git 2.56.0 into `/usr/local`,
+  independently of the distribution Git package. The installer checks the pinned
+  upstream archive SHA-256 before compilation and retains HTTP(S) transports.
+  Both images run `autopod-check-git` as the non-root worker during the build. It
+  proves `git merge-tree --write-tree --merge-base=<oid>` with disposable local
+  commits, ignores inherited checkout/index selectors and cleans only its fixture.
+  Re-run that check when qualifying the selected environment and fresh containers;
+  a version string or one-off installation in a previous pod is not sufficient.
+  Other template families retain their distribution Git; do not weaken integration
+  assertions to accommodate an older binary.
 - Run the repository's cached-browser prerequisite helper from the selected
   source. The cached Chromium bootstrap repair is already merged in platform
   PR #110; do not replace qualified cached browsers with unconditional downloads.

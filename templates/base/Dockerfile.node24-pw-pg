@@ -16,10 +16,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ripgrep \
     tmux \
     python3 build-essential \
+    libcurl4-openssl-dev libexpat1-dev libssl-dev zlib1g-dev \
     && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
     && locale-gen \
     && command -v jq \
     && rm -rf /var/lib/apt/lists/*
+
+# Keep Git integration capabilities independent of the Debian package version.
+COPY templates/base/install-worker-git.sh /tmp/install-worker-git.sh
+COPY templates/base/check-worker-git.sh /usr/local/bin/autopod-check-git
+RUN sh /tmp/install-worker-git.sh \
+    && rm /tmp/install-worker-git.sh \
+    && chmod 0755 /usr/local/bin/autopod-check-git
 
 # Pin PostgreSQL 17 through the official PGDG repository rather than inheriting
 # the Debian release's default server major version.
@@ -99,6 +107,7 @@ WORKDIR /workspace
 RUN chown autopod:autopod /workspace
 
 USER autopod
+RUN autopod-check-git
 
 # Transient validation databases run as the non-root user on the project port.
 ENV PGDATA=/tmp/pgdata
