@@ -45,9 +45,11 @@ child shells. Its fake provider translates logical `/workspace` into a private
 fixture directory before staging the unmodified wrapper, so it needs no host
 `/workspace`; configured commands assert the translated working directory.
 Synthetic executables model image and explicitly selected tools.
-The fixture deliberately discards the streaming environment frame: native
-setup/build/test pass, final setup fails without hardening, and final
-setup/build/test plus repeated validation pass with hardening. Wrong/missing
+The fixture deliberately discards the streaming environment frame: streamed
+self-validation and final setup/build/test plus repeated validation pass with
+admitted-literal hardening; final setup fails without it. Self-validation now
+shares final validation's streaming executor (see
+[execution reliability](validation-execution-reliability.md)). Wrong/missing
 selection still fails setup and prevents later streamed phases. This fault
 injection does **not** establish live service behavior.
 
@@ -56,8 +58,9 @@ rewritten to fake process ownership. A portable real-shell test separately check
 literal metacharacter handling. Existing real-Git checkpoint tests verify selected
 tools after reset and forbid any exec for unowned checkpoints. Engine-owned reset,
 permission and staging operations in the adapter fixture are acknowledged rather
-than run against the checkout. Root-to-runtime-user switching and live Azure
-acceptance are not qualified by these tests.
+than run against the checkout. On a disposable root-capable Linux fixture with an
+`autopod` user, the real wrapper also drops to that user; non-root Linux retains
+same-user execution. Neither path establishes live Azure acceptance.
 
 ## Local implementation and operator acceptance
 
