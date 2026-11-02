@@ -900,12 +900,16 @@ describe('AzureSandboxApiClient', () => {
         });
       }
       const baseEnv = { PATH: `${base}:/usr/bin:/bin`, AUTOPOD_STREAM_SESSION: '1' };
-      const literals = { PATH: `${selected}:${baseEnv.PATH}`, CUSTOM: 'literal $() ; value' };
+      const literals = {
+        PATH: `${selected}:${baseEnv.PATH}`,
+        CUSTOM: 'literal $() ; value',
+        FIXTURE_WORKSPACE: root,
+      };
       const scoped = { ...literals, CREDENTIAL: 'synthetic-secret-never-in-script' };
       const commands = Object.fromEntries(
         ['setup', 'build', 'test'].map((phase) => [
           phase,
-          `test "$(fixture-tool)" = selected && test "$CUSTOM" = 'literal $() ; value' && printf '${phase} selected\\n'`,
+          `actual=$(fixture-tool); test "$actual" = selected || { printf 'Expected selected tool, got %s\\n' "$actual" >&2; exit 1; }; test "$PWD" = "$FIXTURE_WORKSPACE" && test "$CUSTOM" = 'literal $() ; value' && printf '${phase} selected\\n'`,
         ]),
       );
       const scripts: string[] = [];
@@ -914,6 +918,7 @@ describe('AzureSandboxApiClient', () => {
       const run = (command: string[], env: Record<string, string>) => {
         const child = spawnSync(command[0] ?? '/bin/false', command.slice(1), {
           env,
+          cwd: root,
           encoding: 'utf8',
           timeout: 5_000,
         });
@@ -933,6 +938,14 @@ describe('AzureSandboxApiClient', () => {
         socket.emit({ type: 'stderr', data: Buffer.from(result.stderr).toString('base64') });
         socket.emit({ type: 'exit_code', exitCode: result.exitCode });
       });
+      // The fake provider has no container filesystem namespace. Translate its
+      // logical /workspace to our private fixture directory before the real Azure
+      // adapter stages its unmodified wrapper; never require a host /workspace.
+      const execStream = fixture.client.execStream.bind(fixture.client);
+      vi.spyOn(fixture.client, 'execStream').mockImplementation((id, command, options) => {
+        expect(options?.cwd).toBe('/workspace');
+        return execStream(id, command, { ...options, cwd: root });
+      });
       vi.spyOn(fixture.client, 'writeFile').mockImplementation(async (_id, _path, body) => {
         scripts.push(String(body));
       });
@@ -940,8 +953,10 @@ describe('AzureSandboxApiClient', () => {
         buffered.push(command);
         // Only configured validation commands run locally. Engine-owned reset,
         // permissions and staging are acknowledged; never reset this checkout.
-        if (command.join(' ').includes('fixture-tool'))
+        if (command.join(' ').includes('fixture-tool')) {
+          expect(options?.cwd).toBe('/workspace');
           return run(command, { ...baseEnv, ...options?.env });
+        }
         return { stdout: '', stderr: '', exitCode: 0 };
       });
       const sandbox = new SandboxContainerManager(fixture.client, logger);

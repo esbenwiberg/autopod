@@ -41,7 +41,10 @@ both its checkpoint transport changes and this literal projection when integrati
 
 The Linux-only adapter regression executes the actual staged wrapper, through
 engine → routing manager → sandbox manager → Azure adapter, in real non-login
-child shells. Synthetic executables model image and explicitly selected tools.
+child shells. Its fake provider translates logical `/workspace` into a private
+fixture directory before staging the unmodified wrapper, so it needs no host
+`/workspace`; configured commands assert the translated working directory.
+Synthetic executables model image and explicitly selected tools.
 The fixture deliberately discards the streaming environment frame: native
 setup/build/test pass, final setup fails without hardening, and final
 setup/build/test plus repeated validation pass with hardening. Wrong/missing
