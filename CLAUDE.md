@@ -1,5 +1,42 @@
 # Autopod Development Guide
 
+## Agent execution safeguards
+
+Do not retry an identical failing command more than twice. Diagnose the root
+cause or try a different approach.
+
+### Configured Autopod workers (Linux containers)
+
+These restrictions apply inside an Autopod worker, not to ordinary local human
+development or deliberately authorized source changes to build tooling.
+
+- **Native bindings:** Run the worker's configured build command, which handles
+  native addon compilation (including `better-sqlite3`). If native binding errors
+  occur after that build has run, call `report_blocker` immediately and report the
+  command and failure evidence as infrastructure trouble. Do not repair the
+  environment by running `node-gyp`, installing headers, modifying `.npmrc`, or
+  changing build configuration. This repository-specific rule requires immediate
+  reporting even if generic worker troubleshooting suggests another build retry.
+- **Host daemon boundary:** Do not read `~/.autopod/dev-token`, authenticate with
+  the host daemon API, or attempt direct host daemon access. All external
+  communication must go through the provided MCP tools; do not reproduce MCP
+  calls with HTTP clients or extract host credentials.
+- **Ports:** Port 3100 belongs to the host control plane in this environment.
+  `localhost:3100` is not a worker application endpoint and must not be probed as
+  a route to the host daemon. Use the worker's assigned `$PORT` for the application
+  under test and the provided MCP tools for control-plane communication.
+- **Validation and evidence:** Run the configured worker checks and independent
+  review; do not disable gates for documentation changes. Report actual commands,
+  failures, and deferred checks. Linux workers cannot validate macOS desktop code:
+  defer Xcode/Swift checks to a Mac. Mock, unit, or browser results do not prove
+  unavailable hardware or live infrastructure works.
+- **Delivery:** Follow the active worker's delivery instructions: commit changes
+  and leave pushing/PR creation to the host when it owns delivery, rather than
+  following the local push commands below. Repository instruction changes do not
+  detach live tool packs or alter frozen launches; operators must verify the
+  instruction-owning revision is merged into the intended default source before
+  migrating live references and archiving an old pack.
+
 ## Quick Reference
 
 ```bash
@@ -298,6 +335,7 @@ Each runtime (`claude-runtime.ts`, `codex-runtime.ts`, `copilot-runtime.ts`) has
 | `AZURE_RESOURCE_GROUP` | — | no | Required for Sandbox execution target |
 | `AZURE_LOCATION` | `westeurope` | no | Region for Sandbox placement |
 | `AUTOPOD_CONTAINER_HOST` | — | no | Override host for MCP base URL inside containers |
+| `AUTOPOD_MCP_BASE_URL` | — | no | Full MCP base URL for containers when it differs from `http://AUTOPOD_CONTAINER_HOST:PORT` |
 | `AUTOPOD_MOBILE_DIST` | — | no | Override mobile PWA dist dir (default: `packages/mobile-web/dist`). See `docs/mobile.md`. |
 | `SANDBOX_TERMINAL_REAPER_INTERVAL_MS` | `300000` | no | How often the DB-driven terminal sandbox reaper sweeps. Clamped to 1 s–24 h. |
 | `SANDBOX_ORPHAN_REAPER_INTERVAL_MS` | `1800000` | no | How often the platform-driven orphan sandbox reaper sweeps. Clamped to 1 s–24 h. |
