@@ -861,6 +861,8 @@ public struct TaskSummary: Sendable {
 
 public struct Pod: Identifiable, Sendable {
     public let id: String
+    /// Visibility only. Does not certify termination or release retained resources.
+    public var fleetArchivedAt: String? = nil
     public var status: PodStatus
     public var pod: PodConfig
     public var hasWorktree: Bool

@@ -570,6 +570,39 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       });
     });
 
+  program
+    .command('archive <id>')
+    .description(
+      'Hide a review/terminal pod from the fleet; retain all resources and unresolved execution evidence',
+    )
+    .requiredOption(
+      '--reason <text>',
+      'Human reason (10–4000 characters); resources may continue to incur costs',
+    )
+    .option('--json', 'Output as JSON')
+    .action(async (id: string, opts: { reason: string; json?: boolean }) => {
+      const reason = opts.reason.trim();
+      if (reason.length < 10 || reason.length > 4000)
+        throw new Error('reason must be 10–4000 characters');
+      const value = await getClient().archivePod(id, reason);
+      withJsonOutput(opts, value, () =>
+        console.log(
+          `${id} archived from fleet. Resources retained; execution may remain active and incur costs. Find it with ap ls --archived or ap status ${id}.`,
+        ),
+      );
+    });
+
+  program
+    .command('unarchive <id>')
+    .description('Restore fleet visibility only; do not resume execution')
+    .option('--json', 'Output as JSON')
+    .action(async (id: string, opts: { json?: boolean }) => {
+      const value = await getClient().unarchivePod(id);
+      withJsonOutput(opts, value, () =>
+        console.log(`${id} restored to fleet. Execution unchanged.`),
+      );
+    });
+
   // ap ls
   program
     .command('ls')
@@ -582,6 +615,8 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       return Number.parseInt(value, 10);
     })
     .option('--compact', 'Return compact pod records (best used with --json)')
+    .option('--archived', 'Show only pods explicitly archived from the fleet')
+    .option('--include-archived', 'Include pods archived from the fleet')
     .option('--json', 'Output as JSON')
     .action(
       async (opts: {
@@ -590,12 +625,24 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         limit?: number;
         since?: string;
         compact?: boolean;
+        archived?: boolean;
+        includeArchived?: boolean;
         json?: boolean;
       }) => {
         validatePodStatuses(opts.status);
         const since = opts.since === undefined ? undefined : parseSince(opts.since);
         const client = getClient();
-        const filters = { status: opts.status, profile: opts.profile, limit: opts.limit, since };
+        const filters = {
+          status: opts.status,
+          profile: opts.profile,
+          limit: opts.limit,
+          since,
+          ...(opts.archived
+            ? { archive: 'only' as const }
+            : opts.includeArchived
+              ? { archive: 'include' as const }
+              : {}),
+        };
         if (opts.compact) {
           const pods = await withSpinner('Fetching pods...', () =>
             client.listSessions({ ...filters, compact: true }),
@@ -674,6 +721,10 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       console.log(chalk.dim('─'.repeat(50)));
       console.log(`${chalk.bold('Profile:')}      ${s.profileName}`);
       console.log(`${chalk.bold('Status:')}       ${formatStatus(s.status)}`);
+      if (s.fleetArchivedAt)
+        console.log(
+          `Fleet archived: ${s.fleetArchivedAt}. Resources retained; execution unchanged.`,
+        );
       if (s.failureReason) console.log(`${chalk.bold('Failure:')} ${s.failureReason}`);
       if (s.lastRecoveryTrigger && s.lastCorrectionMessage)
         console.log(`${chalk.bold('Recovery note:')} ${s.lastCorrectionMessage}`);

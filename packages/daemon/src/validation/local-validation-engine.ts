@@ -61,6 +61,7 @@ import {
   parseClosureVerification,
   reconcileReviewLedger,
 } from './review-ledger.js';
+import { REVIEW_STAGE_INSTRUCTIONS } from './review-stage-instructions.js';
 import {
   reviewClosureOutputContract,
   taskReviewOutputContract,
@@ -3539,6 +3540,7 @@ Core principles:
 - HARD RULE — every issue you raise MUST cite a file path that appears as a header in the DIFF section above (\`+++ b/<path>\` or \`--- a/<path>\`). If a file is not in the DIFF, you may Read it for CONTEXT only — never to flag a new issue in it. Findings citing only paths outside the diff are automatically discarded by the harness; including them wastes the cycle.
 - Use the CODEBASE CONTEXT section (if present) to verify claims made in the diff. Auto-detected warnings are high-confidence signals — investigate them seriously.
 ${repoRulesSection}
+${REVIEW_STAGE_INSTRUCTIONS}
 ## TASK
 
 ${config.task}

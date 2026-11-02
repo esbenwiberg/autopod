@@ -138,6 +138,45 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('tests: `npm test`');
   });
 
+  it.each(['pr', 'branch'] as const)(
+    'assigns authenticated source refresh and %s delivery to the daemon',
+    (outputMode) => {
+      const sha = 'a'.repeat(40);
+      const md = generateSystemInstructions(
+        makeProfile({ outputMode }),
+        makeSession({
+          task: 'Start on fresh main, run checks and deliver a PR',
+          startCommitSha: sha,
+        }),
+        'http://localhost:8080/mcp/abc12345',
+      );
+
+      expect(md).toContain(`Daemon-recorded starting commit: \`${sha}\``);
+      expect(md).toContain('Authenticated remote refresh is a daemon responsibility');
+      expect(md).toContain('Do not attempt `git fetch`, `git pull`');
+      expect(md).toContain('Missing remote credentials in the container are expected');
+      expect(md).toContain('Record the actual materialized source SHA');
+      expect(md).toContain('Do NOT run `git push`');
+      expect(md).toContain('PR publication pending (daemon-owned)');
+      expect(md).toContain('not permission to skip validation or source checks');
+      expect(md).toContain('Update `report_task_summary` after recovery');
+      expect(md).toContain('earlier failures remain historical');
+    },
+  );
+
+  it('does not require a starting SHA or promise publication for output-none tasks', () => {
+    const md = generateSystemInstructions(
+      makeProfile({ outputMode: 'none' }),
+      makeSession(),
+      'http://localhost:8080/mcp/abc12345',
+    );
+
+    expect(md).not.toContain('Daemon-recorded starting commit:');
+    expect(md).not.toContain('PR publication pending (daemon-owned)');
+    expect(md).toContain('Do NOT attempt to `git push` or create PRs');
+    expect(md).toContain('Update `report_task_summary` after recovery');
+  });
+
   it('tells agents to reference hyphenated pod ids without shortening them', () => {
     const md = generateSystemInstructions(
       makeProfile(),

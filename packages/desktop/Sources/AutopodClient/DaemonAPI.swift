@@ -161,19 +161,21 @@ public actor DaemonAPI {
 
   public func listCompactPodPage(
     cursor: String? = nil,
-    limit: Int = 500
+    limit: Int = 500,
+    includeArchived: Bool = false
   ) async throws -> CompactPodPageResponse {
     var query = ["compact": "true", "page": "true", "limit": String(limit)]
+    if includeArchived { query["archive"] = "include" }
     if let cursor { query["cursor"] = cursor }
     return try await request("GET", "/pods", query: query)
   }
 
-  public func listAllCompactPods(limit: Int = 500) async throws -> [CompactPodResponse] {
+  public func listAllCompactPods(limit: Int = 500, includeArchived: Bool = false) async throws -> [CompactPodResponse] {
     var pods: [CompactPodResponse] = []
     var cursor: String?
     var seenCursors = Set<String>()
     repeat {
-      let page = try await listCompactPodPage(cursor: cursor, limit: limit)
+      let page = try await listCompactPodPage(cursor: cursor, limit: limit, includeArchived: includeArchived)
       pods.append(contentsOf: page.pods)
       cursor = page.nextCursor
       if let cursor, !seenCursors.insert(cursor).inserted {
@@ -478,6 +480,15 @@ public actor DaemonAPI {
   public func kickPod(_ id: String, reason: String?) async throws -> KickResponse {
     let body = try reason.map { try encode(KickBody(reason: $0)) }
     return try await request("POST", "/pods/\(id)/kick", body: body)
+  }
+
+  public func archivePod(_ id: String, reason: String) async throws {
+    struct Body: Encodable { let reason: String; let retainResources: Bool }
+    let _: EmptyResponse = try await request("POST", "/pods/\(id)/archive", body: encode(Body(reason: reason, retainResources: true)))
+  }
+
+  public func unarchivePod(_ id: String) async throws {
+    let _: EmptyResponse = try await request("DELETE", "/pods/\(id)/archive")
   }
 
   public func deletePod(_ id: String) async throws {

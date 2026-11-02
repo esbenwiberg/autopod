@@ -187,6 +187,7 @@ export function generateSystemInstructions(
     options?.availableActions ?? [],
     pod.executionTarget,
     !!pod.referenceRepos?.length,
+    pod.startCommitSha,
   );
 
   // MCP Servers section
@@ -601,6 +602,13 @@ export function generateSystemInstructions(
     );
   }
   lines.push(
+    '   - Separate completed worker work from pending daemon validation, approval and delivery. ' +
+      'Missing container Git credentials or a not-yet-created PR are not failed implementation steps. ' +
+      'Report actual failed/blocked checks honestly; never claim a pass or delivery without evidence. ' +
+      'Update `report_task_summary` after recovery with current results and evidence; earlier failures remain historical, ' +
+      'not silently relabeled as passes. A progress update or final chat narrative does not replace the structured summary.',
+  );
+  lines.push(
     '   Transparency is rewarded — the independent reviewer will see your deviations and assess ' +
       'whether they were justified. A well-reasoned deviation is better than silently skipping a step.',
   );
@@ -793,6 +801,7 @@ function generateOperatingEnvironment(
   availableActions: ActionDefinition[],
   executionTarget: ExecutionTarget,
   hasReferenceRepos: boolean,
+  startCommitSha: Pod['startCommitSha'],
 ): void {
   lines.push('## Operating Environment');
   lines.push('');
@@ -981,6 +990,22 @@ function generateOperatingEnvironment(
   // Git Operations
   lines.push('### Git Operations');
   const profileOutputTarget = profile.pod?.output ?? profile.outputMode;
+  if (profile.repoUrl) {
+    if (startCommitSha) {
+      lines.push(`- Daemon-recorded starting commit: \`${startCommitSha}\`.`);
+    }
+    lines.push(
+      '- Record the actual materialized source SHA and work from the supplied checkout. ' +
+        'Authenticated remote refresh is a daemon responsibility, not a worker prerequisite. ' +
+        'Do not attempt `git fetch`, `git pull`, credential injection or remote reconfiguration to satisfy task prose such as "start on fresh main". ' +
+        'Missing remote credentials in the container are expected; they do not alone mean provisioning used stale source.',
+    );
+    lines.push(
+      '- If the supplied source contradicts the requested baseline or required freshness evidence is missing, ' +
+        'report the exact SHA and gap for daemon/operator resolution. Use configured read-only action tools when available for supporting evidence, ' +
+        'but do not bypass source checks or assert freshness without evidence. This is not permission to skip validation or source checks.',
+    );
+  }
   if (!profile.repoUrl || profileOutputTarget === 'none') {
     lines.push('- There is no remote repository for this session.');
     lines.push(
@@ -998,6 +1023,12 @@ function generateOperatingEnvironment(
     );
     lines.push('  in case of interruptions.');
     lines.push('- Do NOT run `git push` — the system pushes and creates PRs on your behalf');
+    lines.push(
+      '- Requests to "deliver a PR" describe the overall workflow, not an instruction to publish from this container. ' +
+        'Finish scoped edits, checks, commits and `report_task_summary`; the daemon owns independent validation/review and authorized publication. ' +
+        'For PR output, report "PR publication pending (daemon-owned)" until a real PR reference exists; ' +
+        'for branch output, report branch publication pending. Neither grants merge, deployment or extra publication authority.',
+    );
   }
   lines.push('');
 

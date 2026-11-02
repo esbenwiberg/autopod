@@ -207,6 +207,8 @@ export interface ValidationWaiver {
 }
 
 export interface Pod {
+  /** Hidden from the default fleet only; no execution or resource custody is released. */
+  fleetArchivedAt?: string | null;
   /** Present for composable launches; a missing/corrupt snapshot must never fall back to a live profile. */
   launchConfigDigest?: string | null;
   /** Durable worker settlement; this never grants validation or delivery authority. */
@@ -684,6 +686,7 @@ export interface PodFleetDisplay {
 }
 
 export interface CompactPod {
+  fleetArchivedAt?: string | null;
   /** Absent on older daemons; present with null progress means no reported milestone. */
   display?: PodFleetDisplay;
   finalization?: Pod['finalization'];

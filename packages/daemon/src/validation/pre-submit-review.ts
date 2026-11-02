@@ -10,6 +10,7 @@ import {
   type CodexReviewTokenUsage,
   runCodexReview,
 } from './review-codex-runner.js';
+import { REVIEW_STAGE_INSTRUCTIONS } from './review-stage-instructions.js';
 
 export type PreSubmitSkipReason = 'no-diff' | 'no-task' | 'parse-failure' | 'cli-error';
 
@@ -193,7 +194,7 @@ function resolvePreSubmitRunner(opts: PreSubmitReviewOpts): 'claude' | 'codex' |
 }
 
 function buildPrompt(opts: PreSubmitReviewOpts): string {
-  const sections: string[] = [PRE_SUBMIT_PROMPT_HEADER, ''];
+  const sections: string[] = [PRE_SUBMIT_PROMPT_HEADER, '', REVIEW_STAGE_INSTRUCTIONS, ''];
   sections.push('## TASK');
   sections.push(opts.task.trim());
   sections.push('');

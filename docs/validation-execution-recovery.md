@@ -64,6 +64,39 @@ blocked even when the pod's published result is older or absent. This operation 
 not invent a published result or replay checks to resolve that case; preserve its
 source/reports and escalate the saved admission/publication evidence for repair.
 
+## Remove a blocked card without deleting its evidence
+
+Use **Archive (retain resources)…** in the desktop card menu to remove a
+review-required, failed, or terminal pod from the default fleet. Supply a meaningful
+reason and confirm retention. Find the card again with **Browse → Archive** or
+Browse search; its menu offers **Restore to fleet**.
+
+CLI equivalents (use full pod IDs):
+
+```sh
+ap archive <full-pod-id> --reason 'No further work requested; retain original source and reports'
+ap ls --archived --json
+ap ls --include-archived --json
+ap status <full-pod-id> --json
+ap unarchive <full-pod-id>
+```
+
+Fleet archive is **visibility only**. It does not stop an unknown execution, release
+its resources, snapshot final content, pass checks, admit retries, abandon custody,
+or authorize deletion/delivery. The original pod, lifecycle, reports, source,
+execution ledgers, accounting and orphan-retention references remain intact.
+**Retained resources can continue to incur costs.** Unarchive does not resume work.
+Archiving queued, running, provisioning, validating, merging or other active/control
+states is refused; it is not a substitute for stopping a worker.
+
+Authenticated API: `POST /pods/:id/archive` with
+`{"reason":"meaningful human reason", "retainResources":true}`; reverse with
+`DELETE /pods/:id/archive`. `GET /pods` excludes explicitly archived cards by
+default; `archive=include` or `archive=only` applies before limits/pagination in both
+full and compact projections. Exact-ID reads remain available. Internal lifecycle,
+resource-retention and accounting reads do not inherit fleet visibility filters.
+This is distinct from historical archival after qualified destructive deletion.
+
 ## Destructive reconciliation is blocked
 
 The current ordinary-validation provider adapter cannot establish exact-execution

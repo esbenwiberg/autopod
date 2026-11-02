@@ -49,9 +49,22 @@ describe('current delivery readiness', () => {
     };
     expect(JSON.parse(stored.readiness_review)).toEqual(original);
     expect(f.podRepo.mergeJournal?.find(f.pod())?.state).toBe('admitted');
+    // Archiving a failed retained pod must compose with delivery readiness.
+    f.podRepo.update('prepare', { status: 'failed' });
+    f.podRepo.fleetArchives?.archive('prepare', 'operator', 'Retain blocked delivery');
+    const archivedAt = f.podRepo.fleetArchives?.archivedAt('prepare');
+    expect(archivedAt).toBeTruthy();
+    expect(f.podRepo.list({ archive: 'only' })[0]).toMatchObject({
+      fleetArchivedAt: archivedAt,
+      readinessReview: {
+        status: 'needs_review',
+        summary: expect.stringContaining('cannot be verified'),
+      },
+    });
     const reopened = f.reopen().pods.getOrThrow('prepare');
+    expect(reopened.fleetArchivedAt).toBe(archivedAt);
     expect(reopened.readinessReview?.status).toBe('needs_review');
-    expect(reopened.readinessReview?.summary).toContain('no confirmed outcome');
+    expect(reopened.readinessReview?.summary).toContain('cannot be verified');
     expect(reopened.readinessReview?.approval).toEqual(original.approval);
   });
 
