@@ -64,7 +64,7 @@ there is no force-accept or termination-proof bypass.
 
 ## Compatibility and rollout
 
-Migration 232 adds nullable projections and append-only findings receipts, with no
+Migration 233 adds nullable projections and append-only findings receipts, with no
 historical classification or backfill. Old frozen launch digests and default workflow
 semantics remain unchanged. Ordinary empty diffs, disabled validation, artifact exports,
 interactive workspaces and scheduled tasks retain their old semantics unless they
@@ -98,16 +98,17 @@ source; its branch and pod are unchanged. The supplied main baseline was
 `48879be864f9ec4b464183c2456b31441078c542` (schema 231).
 
 The original candidate migration 225 is below main's recorded version and would
-be skipped. Migration 232 is the next free version checked during integration.
-Production-runner regression coverage builds main through 231, retains a failed
-sandbox and unresolved dispatched wakeup, and compares every original business
-row and custody after upgrade. Empty databases and repeated current upgrades
+be skipped. The findings integration initially reused 232, which the earlier
+active-time migration already owns. Findings now uses 233; the collision guard
+remains unchanged. Production-runner regression coverage builds main through 232,
+retains the active-time ledger, a failed sandbox and unresolved dispatched wakeup,
+and compares every original business row and custody after upgrade. Empty databases and repeated current upgrades
 are also covered. Existing rows receive null findings fields, never inferred
 classification.
 
 Databases where the unpublished 225 candidate actually ran are **not supported
-for automatic upgrade**: 232 fails on existing candidate columns and rolls back
+for automatic upgrade**: 233 fails on existing candidate columns and rolls back
 its transaction. Do not suppress duplicate-column errors, edit published SQL,
-or mark 232 applied manually. Reconcile that lineage separately on a verified
+or mark 233 applied manually. Reconcile that lineage separately on a verified
 backup with exact schema and receipt evidence before any rollout. This change
 neither silently adopts candidate receipts nor provides a migration bypass.

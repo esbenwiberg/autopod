@@ -8,10 +8,10 @@ import { runMigrations } from './migrate.js';
 
 const migrations = new URL('./migrations', import.meta.url).pathname;
 const logger = pino({ level: 'silent' });
-const findingsFile = '232_research_findings.sql';
+const findingsFile = '233_research_findings.sql';
 
 // Deliberately use the production runner, never createTestDb's SQL-file loop.
-describe('research findings production upgrade from main schema 231', () => {
+describe('research findings production upgrade from main schema 232', () => {
   let db: Database.Database;
   let root: string;
   beforeEach(() => {
@@ -19,7 +19,7 @@ describe('research findings production upgrade from main schema 231', () => {
     db.pragma('foreign_keys = ON');
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'findings-upgrade-'));
     for (const file of fs.readdirSync(migrations)) {
-      if (file.endsWith('.sql') && Number.parseInt(file, 10) <= 231) {
+      if (file.endsWith('.sql') && Number.parseInt(file, 10) <= 232) {
         fs.copyFileSync(path.join(migrations, file), path.join(root, file));
       }
     }
@@ -37,7 +37,7 @@ describe('research findings production upgrade from main schema 231', () => {
   }
   function populateMain() {
     runMigrations(db, root, logger);
-    expect(version()).toBe(231);
+    expect(version()).toBe(232);
     db.exec(`
       INSERT INTO profiles (name, repo_url, build_command, start_command)
         VALUES ('retained-profile', 'https://example.invalid/repo', '', '');
@@ -86,6 +86,10 @@ describe('research findings production upgrade from main schema 231', () => {
   }
   it('upgrades populated main without changing any original business row or custody', () => {
     populateMain();
+    db.prepare('UPDATE pod_active_time SET elapsed_ms = ? WHERE pod_id = ?').run(
+      12345,
+      'retained-sandbox',
+    );
     const before = originalRows();
     // Reproduce the historical numbering bug using only a temporary copy.
     fs.copyFileSync(
@@ -93,7 +97,7 @@ describe('research findings production upgrade from main schema 231', () => {
       path.join(root, '225_research_findings.sql'),
     );
     runMigrations(db, root, logger);
-    expect(version()).toBe(231);
+    expect(version()).toBe(232);
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name='research_findings_receipts'").get(),
     ).toBeUndefined();
@@ -102,7 +106,7 @@ describe('research findings production upgrade from main schema 231', () => {
     ).not.toContain('completion_policy');
     fs.unlinkSync(path.join(root, '225_research_findings.sql'));
     runMigrations(db, migrations, logger);
-    expect(version()).toBe(232);
+    expect(version()).toBe(233);
     assertFindingsSchema();
     assertPreserved(before);
     const current = originalRows();
@@ -111,7 +115,7 @@ describe('research findings production upgrade from main schema 231', () => {
   });
   it('builds the complete schema from empty using production version selection', () => {
     runMigrations(db, migrations, logger);
-    expect(version()).toBe(232);
+    expect(version()).toBe(233);
     expect(db.prepare('SELECT * FROM research_findings_receipts').all()).toEqual([]);
     expect(db.prepare('SELECT completion_policy, research_findings FROM pods').all()).toEqual([]);
     expect(db.pragma('foreign_key_check')).toEqual([]);
@@ -125,7 +129,7 @@ describe('research findings production upgrade from main schema 231', () => {
       ('historical-research', 1, 1, 0, '{"retained":"candidate evidence"}')`);
     const before = originalRows();
     expect(() => runMigrations(db, migrations, logger)).toThrow(/duplicate column/);
-    expect(version()).toBe(231);
+    expect(version()).toBe(232);
     assertPreserved(before);
     expect(() => db.exec("UPDATE research_findings_receipts SET receipt='{}'")).toThrow(
       /immutable/,
