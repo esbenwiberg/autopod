@@ -14,6 +14,7 @@ import { saveSeriesReceipt } from '../config/launch-store.js';
 import { formatStatus } from '../output/colors.js';
 import { withSpinner } from '../output/spinner.js';
 import { type LaunchFlags, buildLaunchRequest } from './launch-request.js';
+import { validateLaunchSources } from './launch-sources.js';
 import { preflightSeriesFolder } from './spec-preflight.js';
 
 /** Infer series name from a spec root folder path. */
@@ -89,9 +90,12 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
     .option('--request-id <id>', 'Stable admission request ID')
     .option(
       '--start-branch <branch>',
-      'Branch/ref to start root pods from while targeting --base-branch',
+      'Published remote branch name to start root pods from while targeting --base-branch',
     )
-    .option('-b, --base-branch <branch>', 'Base branch (default: profile default)')
+    .option(
+      '-b, --base-branch <branch>',
+      'Published remote base branch name (default: profile default)',
+    )
     .option(
       '--pr-mode <mode>',
       'PR creation mode: single (one PR for full series), stacked (one PR per pod), none',
@@ -152,6 +156,7 @@ export function registerSeriesCommands(program: Command, getClient: () => Autopo
           chalk.cyan(`\nCreating series "${seriesName}" with ${briefs.length} pods...\n`),
         );
 
+        validateLaunchSources(opts);
         const resolvedRequest = await buildLaunchRequest({ ...opts, task: seriesName }, (kind) =>
           client.listConfigurations(kind),
         );

@@ -463,6 +463,27 @@ ap profile action-override remove <name> <action>
 
 ### Pods
 
+Source selection in the updated CLI uses **published remote branch names**:
+`--start-branch feature/prep` selects the starting source, `--base-branch main`
+selects the base (and fallback starting source), and `--branch fix/result` names
+the output branch. Full commit SHAs and Git revision expressions are refused for
+start/base selectors on new requests, including configuration previews and JSON
+configuration files. This change takes effect when the updated CLI is released.
+
+Keep a researched baseline SHA in task evidence separately from the launch branch.
+Record the actual supplied checkout SHA and any mismatch with that baseline.
+A preview resolves configuration; it does not prove remote branch availability
+or pin a moving branch. Exact-revision requirements need a separately supported
+control-plane path. `--reference repository=SHA` retains its independent snapshot
+semantics. Exact saved-request retries preserve their identity and digest and go
+straight to daemon admission without new source checks or mutable discovery;
+previewing such a receipt does run source checks and does not rewrite it.
+
+```bash
+ap run --repo Project --task "Implement the fix" \
+  --start-branch feature/prep --base-branch main --branch fix/result
+```
+
 ```bash
 # Create
 ap run <profile> "<task>"                   # Start a pod
@@ -471,7 +492,7 @@ ap run <profile> "<task>" --runtime codex   # Use Codex runtime
 ap run <profile> "<task>" --runtime copilot # Use Copilot runtime
 ap run <profile> "<task>" --branch feat/x   # Custom branch name
 ap run <profile> "<task>" --skip-validation # Skip auto-validation
-ap run <profile> "<task>" --base-branch feat/plan  # Branch from a specific base (e.g. workspace output)
+ap run --repo Project --task "Implement" --base-branch feat/plan  # Published source/base branch
 ap run <profile> "<task>" --ac-from specs/ac.md    # Load acceptance criteria from a file in the repo
 ap run <profile> "<task>" --sidecar dagger          # Request a configured sidecar
 ap run <profile> "<task>" --ref-repo https://github.com/org/repo.git
