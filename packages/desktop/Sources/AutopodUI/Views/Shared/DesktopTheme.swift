@@ -41,7 +41,7 @@ public enum DesktopTheme {
         switch status {
         case .provisioning, .running, .validating, .merging, .handoff:
             adaptive(0x35658A, 0x91B5D8)
-        case .awaitingInput, .reviewRequired, .validated, .mergePending:
+        case .awaitingInput, .reviewRequired, .validated, .researchReady, .mergePending:
             adaptive(0x8B631D, 0xD4B479)
         case .complete, .approved:
             accent
