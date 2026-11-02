@@ -4,9 +4,15 @@ import { buildGitHubImageUrl } from '../validation/screenshot-collector.js';
 import { inspectCheckpointSource } from '../worktrees/checkpoint-source-identity.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { APPROVAL_SNAPSHOT_EXCLUDES } from './approval-policy.js';
+import {
+  approvalReportPreservationFailure,
+  needsApprovalReportSnapshot,
+  preserveApprovalReportSnapshot,
+} from './approval-report-snapshot.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import { checkpointError } from './retained-checkpoint-repository.js';
 import { isTerminalState } from './state-machine.js';
+import { ValidationSupersededError } from './validation-ownership.js';
 import {
   assertValidationExecutionSettled,
   captureValidationMutationGuard,
@@ -309,6 +315,29 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
       });
       advisoryPublicationOwnership(validatedPod, result, validationRecord?.id).assertCurrent();
       podRepo.update(podId, { artifactsPath });
+    }
+    if (!checksOnly && needsApprovalReportSnapshot(postAdvisoryPod)) {
+      const assertReportsCurrent = () =>
+        advisoryPublicationOwnership(validatedPod, result, validationRecord?.id).assertCurrent();
+      try {
+        await preserveApprovalReportSnapshot({
+          pod: postAdvisoryPod,
+          podRepo,
+          worktreeManager,
+          containerManager: containerManagerFactory.get(postAdvisoryPod.executionTarget),
+          assertCurrent: assertReportsCurrent,
+          onStage: () => emitActivityStatus(podId, 'Preserving workspace reports before stop…'),
+        });
+      } catch (err) {
+        if (err instanceof ValidationSupersededError) throw err;
+        assertReportsCurrent();
+        logger.error({ err, podId }, 'Pre-stop approval report preservation failed');
+        const failureReason = approvalReportPreservationFailure(err);
+        podRepo.update(podId, { failureReason });
+        emitActivityStatus(podId, failureReason);
+        refreshReadiness(podId, { advisoryQaInFlight: false });
+        return;
+      }
     }
     if (!checksOnly && postAdvisoryPod.linkedPodId) {
       await completeFixPodAfterPush(postAdvisoryPod);

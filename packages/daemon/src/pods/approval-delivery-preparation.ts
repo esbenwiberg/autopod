@@ -12,6 +12,10 @@ import { mergeReconciliation } from '../worktrees/merge-source-identity.js';
 import type { ApprovalDeliveryPreparationCaptured } from './approval-contracts.js';
 import { reconcileExternalApproval } from './approval-external-delivery.js';
 import { APPROVAL_SNAPSHOT_EXCLUDES } from './approval-policy.js';
+import {
+  verifiedApprovalReportSnapshot,
+  waitForApprovalReportSnapshot,
+} from './approval-report-snapshot.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import { verifiedCheckpointApprovalSnapshot } from './checkpoint-approval-snapshot.js';
 import type {
@@ -122,13 +126,25 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
         }
       };
       try {
-        const saved = await verifiedCheckpointApprovalSnapshot({
-          pod,
-          podRepo,
-          worktreeManager,
-          artifactRoot: path.join(dataDir, 'artifacts', pod.id),
-          assertCurrent: () => assertApprovalCurrent(pod),
-        });
+        await waitForApprovalReportSnapshot(podRepo, podId);
+        assertApprovalCurrent(pod);
+        // Read again after advisory/pre-stop collection: the approval anchor may
+        // predate both the final advisory result and the published report path.
+        const current = podRepo.getOrThrow(podId);
+        const saved =
+          (await verifiedCheckpointApprovalSnapshot({
+            pod: current,
+            podRepo,
+            worktreeManager,
+            artifactRoot: path.join(dataDir, 'artifacts', pod.id),
+            assertCurrent: () => assertApprovalCurrent(pod),
+          })) ??
+          (await verifiedApprovalReportSnapshot({
+            pod: current,
+            podRepo,
+            worktreeManager,
+            assertCurrent: () => assertApprovalCurrent(pod),
+          }));
         const artifactsPath =
           saved ??
           (await collectArtifactSnapshot({

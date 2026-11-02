@@ -12,6 +12,8 @@ export async function collectArtifactSnapshot(options: {
   artifactRoot: string;
   generation: number;
   cycle?: number;
+  /** Exact source/execution selection for pre-stop approval reuse; not delivery authority. */
+  approvalBinding?: string;
   isCurrent: () => boolean;
   timeoutMs?: number;
   /** Sandbox wakeup has its own budget; export retains the normal copy budget. */
@@ -139,7 +141,13 @@ export async function collectArtifactSnapshot(options: {
     if (timer) clearTimeout(timer);
     if (!options.isCurrent()) throw failure();
     snapshot = path.join(options.artifactRoot, `generation-${options.generation}-${randomUUID()}`);
-    await writeArtifactSnapshotReceipt(staging, snapshot, options.generation, options.cycle ?? 0);
+    await writeArtifactSnapshotReceipt(
+      staging,
+      snapshot,
+      options.generation,
+      options.cycle ?? 0,
+      options.approvalBinding,
+    );
     if (!options.isCurrent()) throw failure();
     await rename(staging, snapshot);
     return snapshot;

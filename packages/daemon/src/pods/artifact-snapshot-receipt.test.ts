@@ -4,7 +4,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockContainerManager } from '../test-utils/mock-helpers.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
-import { readArtifactSnapshotFile, verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
+import {
+  readArtifactSnapshotFile,
+  verifyApprovalSnapshotBinding,
+  verifyArtifactSnapshot,
+} from './artifact-snapshot-receipt.js';
 
 let root: string;
 beforeEach(async () => {
@@ -63,6 +67,14 @@ describe('artifact snapshot integrity receipts', () => {
       });
     },
   );
+
+  it('legacy receipts remain readable but do not authorize approval reuse', async () => {
+    const snapshot = await collect();
+    await expect(verifyArtifactSnapshot(snapshot, root, 3)).resolves.toBeUndefined();
+    await expect(verifyApprovalSnapshotBinding(snapshot, root, 3, 0, 'a'.repeat(64))).resolves.toBe(
+      false,
+    );
+  });
 
   it('rejects wrong generation, wrong root and missing or oversized receipts', async () => {
     const snapshot = await collect();

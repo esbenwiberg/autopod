@@ -1,5 +1,11 @@
 import { publishScreenshotArtifacts } from '../validation/screenshot-artifacts.js';
+import {
+  approvalReportPreservationFailure,
+  needsApprovalReportSnapshot,
+  preserveApprovalReportSnapshot,
+} from './approval-report-snapshot.js';
 import { isTerminalState } from './state-machine.js';
+import { ValidationSupersededError } from './validation-ownership.js';
 import {
   assertValidationExecutionSettled,
   captureValidationMutationGuard,
@@ -199,6 +205,33 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
     const postAdvisoryPod = podRepo.getOrThrow(podId);
     if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
       return { newCommits, result: 'pass' };
+    }
+    if (
+      !checksOnly &&
+      needsApprovalReportSnapshot(postAdvisoryPod) &&
+      !podRepo.sourceAdoptions?.retains(postAdvisoryPod.containerId ?? '')
+    ) {
+      const assertReportsCurrent = () =>
+        advisoryPublicationOwnership(revalidatedPod, result, validationRecord?.id).assertCurrent();
+      try {
+        await preserveApprovalReportSnapshot({
+          pod: postAdvisoryPod,
+          podRepo,
+          worktreeManager,
+          containerManager: containerManagerFactory.get(postAdvisoryPod.executionTarget),
+          assertCurrent: assertReportsCurrent,
+          onStage: () => emitActivityStatus(podId, 'Preserving workspace reports before stop…'),
+        });
+      } catch (err) {
+        if (err instanceof ValidationSupersededError) throw err;
+        assertReportsCurrent();
+        logger.error({ err, podId }, 'Pre-stop approval report preservation failed');
+        const failureReason = approvalReportPreservationFailure(err);
+        podRepo.update(podId, { failureReason });
+        emitActivityStatus(podId, failureReason);
+        refreshReadiness(podId, { advisoryQaInFlight: false });
+        return { newCommits, result: 'pass' };
+      }
     }
     // The source coordinator still needs the original Running resource for its
     // final exact-source verification. A pass does not release source/report
