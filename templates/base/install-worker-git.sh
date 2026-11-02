@@ -20,9 +20,10 @@ curl --fail --silent --show-error --location --retry 1 \
   --output "$work/git.tar.gz"
 printf '%s  %s\n' "$sha256" "$work/git.tar.gz" | sha256sum -c -
 tar -xzf "$work/git.tar.gz" -C "$work"
-# Keep HTTP(S) transports; only GUI and translation tooling are unnecessary.
-make -C "$work/git-$version" -j2 prefix=/usr/local NO_TCLTK=YesPlease NO_GETTEXT=YesPlease all
-make -C "$work/git-$version" prefix=/usr/local NO_TCLTK=YesPlease NO_GETTEXT=YesPlease install
+# Keep HTTP(S) transports. Use Git 2.x's supported C implementation instead of
+# adding an optional Rust toolchain; GUI and translation tooling are unnecessary.
+make -C "$work/git-$version" -j2 prefix=/usr/local NO_RUST=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease all
+make -C "$work/git-$version" prefix=/usr/local NO_RUST=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease install
 /usr/local/bin/git --version | grep -Fx "git version $version"
 test -x /usr/local/libexec/git-core/git-remote-http
 test -x /usr/local/libexec/git-core/git-remote-https

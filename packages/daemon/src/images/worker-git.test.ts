@@ -39,6 +39,7 @@ describe('durable PostgreSQL worker Git', () => {
     expect(script).toContain('https://www.kernel.org/pub/software/scm/git/git-$version.tar.gz');
     expect(script.indexOf('sha256sum -c -')).toBeLessThan(script.indexOf('tar -xzf'));
     expect(script.indexOf('tar -xzf')).toBeLessThan(script.indexOf('make -C'));
+    expect(script.match(/NO_RUST=YesPlease/g)).toHaveLength(2);
     expect(script).toContain('test -x /usr/local/libexec/git-core/git-remote-https');
     expect(script).not.toContain('NO_CURL');
     expect(script).not.toContain('|| true');
