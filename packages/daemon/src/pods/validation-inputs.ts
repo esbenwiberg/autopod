@@ -195,6 +195,9 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
       advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
       reviewerApiKey: pod.launchConfigDigest ? undefined : process.env.ANTHROPIC_API_KEY,
       extraExecEnv: validationExecEnv,
+      // Bound execution settings project literals only; legacy buildEnv has no
+      // credential/literal distinction and stays in the scoped exec channel.
+      nonSecretExecEnv: pod.launchConfigDigest ? { ...profile.buildEnv } : undefined,
       preSubmitReview: pod.preSubmitReview ?? undefined,
       skipPhases: getPodValidationSkipPhases(profile, s1),
       priorReviewBatch,

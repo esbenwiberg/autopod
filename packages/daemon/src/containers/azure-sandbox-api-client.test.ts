@@ -1,13 +1,20 @@
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AutopodError } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ValidationEngineConfig } from '../interfaces/validation-engine.js';
+import { type SessionBridgeDependencies, createSessionBridge } from '../pods/pod-bridge-impl.js';
 import { assertSourceResourceReleasable } from '../pods/source-custody-guards.js';
 import { assertValidationResourceSettled } from '../pods/validation-execution-evidence.js';
 import { createSandboxWakeupFixture } from '../test-utils/sandbox-wakeup-helpers.js';
 import { validationRecoveryFixture } from '../test-utils/validation-recovery-helpers.js';
 import { createLocalValidationEngine } from '../validation/local-validation-engine.js';
 import { AzureSandboxApiClient, type WebSocketLike } from './azure-sandbox-api-client.js';
+import { RoutingContainerManager } from './routing-container-manager.js';
 import { type SandboxExecChunk, SandboxInfrastructureError } from './sandbox-api-client.js';
 import { SandboxContainerManager } from './sandbox-container-manager.js';
 
@@ -871,6 +878,184 @@ describe('AzureSandboxApiClient', () => {
       labels: diskImageLabelsFor(image, `sha256:${'3'.repeat(64)}`),
     });
   });
+
+  it.skipIf(process.platform !== 'linux')(
+    'selects admitted tools in native and final non-login execs despite stream env loss',
+    async () => {
+      // The shipped wrapper records Linux /proc process identity. Run it unmodified
+      // on Linux, not a macOS emulation of process ownership or privilege switching.
+      // Fault injection, not a claim about the live Azure service: the stream starts
+      // with image env only. Execute the shipped wrapper in a real child shell.
+      const root = mkdtempSync(join(tmpdir(), 'validation-tools-'));
+      const base = join(root, 'base');
+      const selected = join(root, 'selected');
+      mkdirSync(base);
+      mkdirSync(selected);
+      for (const [directory, value] of [
+        [base, 'base'],
+        [selected, 'selected'],
+      ] as const) {
+        writeFileSync(join(directory, 'fixture-tool'), `#!/bin/sh\nprintf '%s' '${value}'`, {
+          mode: 0o755,
+        });
+      }
+      const baseEnv = { PATH: `${base}:/usr/bin:/bin`, AUTOPOD_STREAM_SESSION: '1' };
+      const literals = {
+        PATH: `${selected}:${baseEnv.PATH}`,
+        CUSTOM: 'literal $() ; value',
+        FIXTURE_WORKSPACE: root,
+      };
+      const scoped = { ...literals, CREDENTIAL: 'synthetic-secret-never-in-script' };
+      const commands = Object.fromEntries(
+        ['setup', 'build', 'test'].map((phase) => [
+          phase,
+          `actual=$(fixture-tool); test "$actual" = selected || { printf 'Expected selected tool, got %s\\n' "$actual" >&2; exit 1; }; test "$PWD" = "$FIXTURE_WORKSPACE" && test "$CUSTOM" = 'literal $() ; value' && printf '${phase} selected\\n'`,
+        ]),
+      );
+      const scripts: string[] = [];
+      const streamed: string[] = [];
+      const buffered: string[][] = [];
+      const run = (command: string[], env: Record<string, string>) => {
+        const child = spawnSync(command[0] ?? '/bin/false', command.slice(1), {
+          env,
+          cwd: root,
+          encoding: 'utf8',
+          timeout: 5_000,
+        });
+        if (child.error) throw child.error;
+        return { stdout: child.stdout, stderr: child.stderr, exitCode: child.status ?? 1 };
+      };
+      const fixture = makeStreamingClient((socket) => {
+        socket.onopen?.({});
+        const script = scripts.at(-1) ?? '';
+        expect(script).toContain('#!/bin/sh');
+        expect(script).not.toContain(scoped.CREDENTIAL);
+        const path = join(root, 'stream.sh');
+        writeFileSync(path, script);
+        streamed.push(script);
+        const result = run(['/bin/sh', path], baseEnv);
+        socket.emit({ type: 'stdout', data: Buffer.from(result.stdout).toString('base64') });
+        socket.emit({ type: 'stderr', data: Buffer.from(result.stderr).toString('base64') });
+        socket.emit({ type: 'exit_code', exitCode: result.exitCode });
+      });
+      // The fake provider has no container filesystem namespace. Translate its
+      // logical /workspace to our private fixture directory before the real Azure
+      // adapter stages its unmodified wrapper; never require a host /workspace.
+      const execStream = fixture.client.execStream.bind(fixture.client);
+      vi.spyOn(fixture.client, 'execStream').mockImplementation((id, command, options) => {
+        expect(options?.cwd).toBe('/workspace');
+        return execStream(id, command, { ...options, cwd: root });
+      });
+      vi.spyOn(fixture.client, 'writeFile').mockImplementation(async (_id, _path, body) => {
+        scripts.push(String(body));
+      });
+      vi.spyOn(fixture.client, 'exec').mockImplementation(async (_id, command, options) => {
+        buffered.push(command);
+        // Only configured validation commands run locally. Engine-owned reset,
+        // permissions and staging are acknowledged; never reset this checkout.
+        if (command.join(' ').includes('fixture-tool')) {
+          expect(options?.cwd).toBe('/workspace');
+          return run(command, { ...baseEnv, ...options?.env });
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      });
+      const sandbox = new SandboxContainerManager(fixture.client, logger);
+      const routing = new RoutingContainerManager({
+        local: sandbox,
+        sandbox,
+        resolveTarget: () => 'sandbox',
+      });
+      const bridge = createSessionBridge({
+        podManager: {
+          touchHeartbeat() {},
+          getSession: () => ({
+            id: 'fixture',
+            profileName: 'fixture',
+            containerId: 'sbx-1',
+            executionTarget: 'sandbox',
+          }),
+        },
+        profileStore: {
+          get: () => ({
+            validationSetupCommand: commands.setup,
+            buildCommand: commands.build,
+            testCommand: commands.test,
+            buildEnv: scoped,
+            privateRegistries: [],
+          }),
+        },
+        containerManagerFactory: { get: () => sandbox },
+        eventBus: { emit() {} },
+        logger,
+      } as unknown as SessionBridgeDependencies);
+      const config: ValidationEngineConfig = {
+        podId: 'fixture',
+        containerId: 'sbx-1',
+        executionTarget: 'sandbox',
+        previewUrl: '',
+        startCommand: '',
+        healthPath: '',
+        healthTimeout: 1,
+        smokePages: [],
+        attempt: 1,
+        task: 'toolchain parity',
+        diff: '',
+        hasWebUi: false,
+        validationSetupCommand: commands.setup,
+        buildCommand: commands.build ?? '',
+        testCommand: commands.test,
+        extraExecEnv: scoped,
+        nonSecretExecEnv: literals,
+        skipPhases: ['review'],
+      };
+      try {
+        for (const phase of ['setup', 'build', 'tests'] as const) {
+          expect(await bridge.runValidationPhase('fixture', phase)).toMatchObject({ passed: true });
+        }
+        const selectedPath = scoped.PATH;
+        scoped.PATH = baseEnv.PATH;
+        expect(await bridge.runValidationPhase('fixture', 'setup')).toMatchObject({
+          passed: false,
+        });
+        scoped.PATH = selectedPath;
+        const engine = createLocalValidationEngine(routing, logger);
+        const result = await engine.validate(config);
+        expect(result.setup?.status, JSON.stringify(result.setup)).toBe('pass');
+        expect(result.smoke.build.status).toBe('pass');
+        expect(result.test?.status).toBe('pass');
+        expect(streamed).toHaveLength(3);
+        // Revalidation preserves the same selection; no source/checkpoint rules change.
+        expect((await engine.validate({ ...config, attempt: 2 })).overall).toBe('pass');
+        const beforeFailure = streamed.length;
+        const failed = await engine.validate({
+          ...config,
+          nonSecretExecEnv: { ...literals, PATH: baseEnv.PATH },
+        });
+        expect(failed.setup?.status).toBe('fail');
+        expect(streamed).toHaveLength(beforeFailure + 1);
+        expect(
+          (await engine.validate({ ...config, nonSecretExecEnv: undefined })).setup?.status,
+        ).toBe('fail');
+        expect(
+          (
+            await engine.validate({
+              ...config,
+              validationSetupCommand: 'true',
+              buildCommand: '',
+              testCommand: null,
+              extraExecEnv: undefined,
+              nonSecretExecEnv: undefined,
+            })
+          ).overall,
+        ).toBe('pass');
+        expect(
+          buffered.filter((command) => command.join(' ').includes('fixture-tool')),
+        ).toHaveLength(4);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('collects a six-minute observed test exit through the real sandbox streaming seam', async () => {
     vi.useFakeTimers();
