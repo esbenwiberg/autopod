@@ -3,6 +3,20 @@
 Autopod can provision `executionTarget: sandbox` containers in Azure Container Apps Sandboxes.
 This target is production-supported only with Autopod warm images published to ACR.
 
+## Playwright browser cache in new base images
+
+All eight current Playwright base templates (node22-pw, node22-pw-pg,
+node24-pw, node24-pw-pg, go124-pw, python-node-pg, dotnet10 and dotnet10-go)
+install browsers at /opt/pw-browsers and recursively assign the cache to
+autopod:autopod. Playwright needs to create installer locks and .links entries
+even when Chromium is already cached. Each template probes writes in both
+directories as the runtime user before the existing real Chromium launch gate.
+
+This correction applies to newly built images. Published or frozen image digests
+are not repaired automatically. Source contract tests verify template intent;
+they do not prove that a new image was built or launched. Root-owned caches are
+a confirmed source defect, but do not explain every historical timeout.
+
 ## Current Contract
 
 Supported:
