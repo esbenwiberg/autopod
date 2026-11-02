@@ -152,6 +152,7 @@ describe('shared launch request CLI', () => {
       work: { startBranch: 'a'.repeat(40) },
       requestId: 'saved',
       expectedDigest: 'b'.repeat(64),
+      referenceRepositories: [],
     };
     const file = join(temporary(), 'saved.json');
     const original = JSON.stringify(request);
@@ -170,6 +171,14 @@ describe('shared launch request CLI', () => {
     expect(client.launchPod).toHaveBeenCalledWith(request);
     expect(client.resolveLaunch).not.toHaveBeenCalled();
     expect(client.listConfigurations).not.toHaveBeenCalled();
+    expect(readFileSync(file, 'utf8')).toBe(original);
+    const preview = new Command().exitOverride();
+    registerLaunchCommand(preview, () => client as unknown as AutopodClient, save);
+    await expect(
+      preview.parseAsync(['node', 'ap', 'run', '--config', file, '--preview']),
+    ).rejects.toThrow('work.startBranch');
+    expect(client.launchPod).toHaveBeenCalledOnce();
+    expect(save).toHaveBeenCalledOnce();
     expect(readFileSync(file, 'utf8')).toBe(original);
   });
   it('preserves reference SHA, output branch and task evidence on a valid launch', async () => {

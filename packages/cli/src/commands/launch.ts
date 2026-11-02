@@ -139,8 +139,10 @@ export function registerLaunchCommand(
         };
       }
       if (opts.preview || !(file as LaunchRequest | undefined)?.expectedDigest) {
-        validateLaunchSources((file as LaunchRequest | undefined)?.work);
-        validateLaunchSources(taskInput.work);
+        validateLaunchSources({
+          ...(file as LaunchRequest | undefined)?.work,
+          ...taskInput.work,
+        });
       }
       const flags =
         mode.analysis && !file && !opts.task && !opts.goal
