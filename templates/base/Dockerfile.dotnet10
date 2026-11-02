@@ -26,6 +26,8 @@ RUN mkdir -p /etc/apt/keyrings \
     && rm -rf /var/lib/apt/lists/*
 
 ENV LANG=en_US.UTF-8
+# Extend Node's bundled roots with the operator-managed system trust store.
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
 # Node.js 22 (for npm frontend builds)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
