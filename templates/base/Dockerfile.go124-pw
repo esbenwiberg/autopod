@@ -75,7 +75,8 @@ RUN curl -fsSL https://dl.dagger.io/dagger/install.sh \
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 RUN npm install -g playwright && \
     playwright install --with-deps chromium && \
-    chmod -R 755 /opt/pw-browsers
+    chmod -R 755 /opt/pw-browsers && \
+    chown -R autopod:autopod /opt/pw-browsers
 
 # Go environment — give autopod user a writable module + build cache
 ENV GOPATH=/home/autopod/go
@@ -118,6 +119,8 @@ ENV NODE_PATH=/usr/lib/node_modules
 ENV TURBO_CACHE_DIR=/tmp/.turbo
 ENV npm_config_nodedir=/usr/local
 RUN echo "nodedir=/usr/local" >> /home/autopod/.npmrc
+# Playwright needs writable installer locks and package links even with cached browsers.
+RUN node -e "const fs = require('node:fs'); for (const dir of ['/opt/pw-browsers', '/opt/pw-browsers/.links']) { const probe = dir + '/browser-cache-write-check'; fs.mkdirSync(probe); fs.rmdirSync(probe); }"
 # Fail base-image builds when the cached Playwright browser cannot launch as the runtime user.
 RUN node -e "const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); await browser.close(); })().catch((err) => { console.error(err); process.exit(1); });"
 
