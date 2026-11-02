@@ -312,6 +312,37 @@ describe('research findings contract', () => {
     });
     expect(service.completed).not.toHaveBeenCalled();
   });
+  it('rejects uncollected operator guidance without consuming it or completing', async () => {
+    await finalizer().finalizeArtifactPod(f.pod());
+    f.deps.nudgeRepo.queue('prepare', 'Review an unresolved follow-up before acceptance');
+    const service = acceptance();
+    await expect(service.accept('prepare', request(), human)).rejects.toMatchObject({
+      code: 'UNCOLLECTED_HUMAN_GUIDANCE',
+    });
+    expect(f.deps.nudgeRepo.hasPending('prepare')).toBe(true);
+    expect(f.pod().status).toBe('research_ready');
+    expect(service.completed).not.toHaveBeenCalled();
+  });
+  it.each(['projection', 'durable'] as const)(
+    'rejects pending human work in %s authority',
+    async (kind) => {
+      await finalizer().finalizeArtifactPod(f.pod());
+      const service = acceptance();
+      if (kind === 'projection') {
+        f.podRepo.update('prepare', { pendingEscalation: { id: 'unanswered', response: null } });
+      } else {
+        f.db
+          .prepare(
+            "UPDATE pod_finalizations SET pending_decision_id='unanswered' WHERE pod_id='prepare'",
+          )
+          .run();
+      }
+      await expect(service.accept('prepare', request(), human)).rejects.toThrow();
+      expect(f.pod().status).toBe('research_ready');
+      expect(service.completed).not.toHaveBeenCalled();
+      expect(service.dependents).not.toHaveBeenCalled();
+    },
+  );
   it('retains resources when preservation fails and identifies settled none-output recovery', async () => {
     const service = finalizer();
     vi.mocked(service.cm.extractDirectoryFromContainer).mockRejectedValue(

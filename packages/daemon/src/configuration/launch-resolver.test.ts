@@ -64,6 +64,49 @@ describe('launch resolution and snapshots', () => {
       (await resolveLaunch({ repositoryId: 'repo-a', task: 'Investigate' }, services)).digest,
     ).toBe(base.digest);
   });
+  it('freezes findings at admission and rejects incompatible re-digested snapshots before pod creation', async () => {
+    const { services, store } = createTestConfiguration(db);
+    const config = await resolveLaunch(
+      {
+        repositoryId: 'repo-a',
+        task: 'Investigate',
+        overrides: {
+          workflow: { completion: 'accept-findings', output: 'none', validationPhases: [] },
+        },
+      },
+      services,
+    );
+    const snapshots = createLaunchSnapshotRepository(db, store);
+    const createPod = vi.fn(() => insertConfigurationTestPod(db, 'findings-launch'));
+    snapshots.admit({ config, requestDigest: 'findings-request', createPod });
+    expect(snapshots.get('findings-launch')).toEqual(config);
+    expect(
+      db.prepare("SELECT completion_policy FROM pods WHERE id='findings-launch'").get(),
+    ).toEqual({ completion_policy: 'accept-findings' });
+    for (const change of [
+      { output: 'pr' as const },
+      { intent: 'goal' as const },
+      { agentMode: 'interactive' as const },
+      { validationPhases: ['test' as const] },
+      { advisoryBrowserQaEnabled: true },
+    ]) {
+      const { digest: _, ...body } = config;
+      const changed = {
+        ...body,
+        workflow: { ...body.workflow, ...change },
+        ...(change.intent ? { intent: change.intent } : {}),
+      };
+      const rejected = vi.fn();
+      expect(() =>
+        snapshots.admit({
+          config: { ...changed, digest: configurationDigest(changed) },
+          requestDigest: 'invalid',
+          createPod: rejected,
+        }),
+      ).toThrow();
+      expect(rejected).not.toHaveBeenCalled();
+    }
+  });
   it('shares profile categories without sharing repository identity', async () => {
     const { services } = createTestConfiguration(db);
     const a = await resolveLaunch({ repositoryId: 'repo-a', task: 'Fix' }, services);
