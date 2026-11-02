@@ -24,10 +24,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Keep Git integration capabilities independent of the Debian package version.
 COPY templates/base/install-worker-git.sh /tmp/install-worker-git.sh
+RUN sh /tmp/install-worker-git.sh && rm /tmp/install-worker-git.sh
 COPY templates/base/check-worker-git.sh /usr/local/bin/autopod-check-git
-RUN sh /tmp/install-worker-git.sh \
-    && rm /tmp/install-worker-git.sh \
-    && chmod 0755 /usr/local/bin/autopod-check-git
+# Bounded workers must not acquire untracked background Git writers.
+RUN chmod 0755 /usr/local/bin/autopod-check-git \
+    && mkdir -p /usr/local/etc \
+    && git config --system maintenance.auto false \
+    && git config --system gc.auto 0
 
 # Pin PostgreSQL 17 through the official PGDG repository rather than inheriting
 # the Debian release's default server major version.

@@ -59,10 +59,11 @@ family, but do not prove a provider's injected certificates or runtime environme
 
 ## agent-pods-platform
 
-The reusable repository setup must match its selected source. A foundation branch
-with `control-plane/` and main's operator fixtures are different setups: preserve
-both explicitly rather than assuming an absent directory was deleted or silently
-changing the branch under an existing task.
+The reusable repository setup must match its selected source. Foundation and
+operator fixtures are distinct setups, even when both have landed on main.
+Reinspect current source before changing defaults: a historical absence of
+`control-plane/` does not justify replacing a now-valid foundation setup. Preserve
+both explicitly without silently changing the branch under an existing task.
 
 Before operator-fixture work:
 
@@ -74,6 +75,13 @@ Before operator-fixture work:
   commits, ignores inherited checkout/index selectors and cleans only its fixture.
   Re-run that check when qualifying the selected environment and fresh containers;
   a version string or one-off installation in a previous pod is not sufficient.
+  Automatic background maintenance and auto-GC are disabled by default in these
+  worker images: an unowned maintenance process can otherwise mutate `.git` during
+  preservation/capture checks. Explicit maintenance remains possible; applications
+  that deliberately ignore system config retain responsibility for their own Git
+  execution settings. The isolated capability fixture also disables automatic
+  maintenance in its private command environment. No preservation assertion is
+  weakened or lock file ignored to obtain a pass.
   Other template families retain their distribution Git; do not weaken integration
   assertions to accommodate an older binary.
 - Run the repository's cached-browser prerequisite helper from the selected

@@ -26,6 +26,8 @@ describe('durable PostgreSQL worker Git', () => {
       expect(dockerfile).toContain(
         'COPY templates/base/check-worker-git.sh /usr/local/bin/autopod-check-git',
       );
+      expect(dockerfile).toContain('git config --system maintenance.auto false');
+      expect(dockerfile).toContain('git config --system gc.auto 0');
       expect(dockerfile).toContain('USER autopod\nRUN autopod-check-git');
     },
   );
