@@ -4,6 +4,13 @@ import { availableActions, runAction, toggleSkipValidation } from './pod-actions
 import { STORAGE_KEY } from './token.js';
 
 describe('availableActions', () => {
+  it('research ready exposes acceptance without approval or optimistic completion', () => {
+    expect(availableActions('research_ready').map((a) => a.kind)).toEqual([
+      'accept_findings',
+      'kill',
+    ]);
+    expect(availableActions('research_ready')[0]?.optimistic).toBeNull();
+  });
   it('running pods can be paused, nudged, or killed', () => {
     const labels = availableActions('running').map((a) => a.kind);
     expect(labels).toEqual(['pause', 'nudge', 'kill']);
@@ -103,6 +110,22 @@ describe('runAction', () => {
     return vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }));
   }
 
+  it('accepts only the exact evidence passed from the reviewed pod', async () => {
+    const spy = mockFetch();
+    await expect(runAction('pod-1', 'accept_findings')).rejects.toThrow('Refresh and review');
+    expect(spy).not.toHaveBeenCalled();
+    await runAction('pod-1', 'accept_findings', undefined, {
+      generation: 2,
+      cycle: 3,
+      evidenceHash: 'reviewed-hash',
+    } as NonNullable<Pod['researchFindings']>);
+    expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/accept-findings');
+    expect(JSON.parse(String(spy.mock.calls[0]?.[1]?.body))).toEqual({
+      expectedGeneration: 2,
+      expectedCycle: 3,
+      expectedEvidenceHash: 'reviewed-hash',
+    });
+  });
   it('pause posts to /pods/:id/pause', async () => {
     const spy = mockFetch();
     await runAction('pod-1', 'pause');

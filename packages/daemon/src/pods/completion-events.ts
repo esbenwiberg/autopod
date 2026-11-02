@@ -52,6 +52,7 @@ export function createCompletionEvents(captured: CompletionEventsCaptured) {
     }
     podRepo.update(pod.id, updates);
     if (to === 'complete') podRepo.completionJournal?.mark(pod, 'finished');
+    else if (to === 'research_ready') podRepo.completionJournal?.mark(pod, 'ready');
     else if (to === 'validating') podRepo.completionJournal?.mark(pod, 'finalizing');
     const publish = () => {
       eventBus.emit({
@@ -64,7 +65,12 @@ export function createCompletionEvents(captured: CompletionEventsCaptured) {
     };
     if (podRepo.afterCommit) podRepo.afterCommit(publish);
     else publish();
-    if (to === 'validated' || to === 'review_required' || to === 'failed') {
+    if (
+      to === 'research_ready' ||
+      to === 'validated' ||
+      to === 'review_required' ||
+      to === 'failed'
+    ) {
       refreshReadiness(pod.id);
     }
     return podRepo.getOrThrow(pod.id);

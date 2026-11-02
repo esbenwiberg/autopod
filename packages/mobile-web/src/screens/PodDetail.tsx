@@ -6,6 +6,7 @@ import { ActionBar } from '../components/ActionBar.js';
 import { ActivityList } from '../components/ActivityList.js';
 import { DispatchPreflightPanel } from '../components/DispatchPreflightPanel.js';
 import { EscalationCard } from '../components/EscalationCard.js';
+import { ResearchReports } from '../components/ResearchReports.js';
 import { SkipValidationToggle } from '../components/SkipValidationToggle.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { TaskExecutionPanel } from '../components/TaskExecutionPanel.js';
@@ -99,7 +100,7 @@ export function PodDetail(): JSX.Element {
   const recoveryReason =
     data.status === 'merge_pending'
       ? data.mergeBlockReason
-      : ['failed', 'validated', 'review_required'].includes(data.status)
+      : ['failed', 'validated', 'research_ready', 'review_required'].includes(data.status)
         ? (data.failureReason ?? data.mergeBlockReason)
         : null;
 
@@ -180,11 +181,33 @@ export function PodDetail(): JSX.Element {
         />
       ) : null}
 
-      <ValidationSummary result={data.lastValidationResult} history={validationHistory} />
+      {data.completionPolicy === 'accept-findings' ? (
+        <section className="info-panel">
+          <h2>{data.status === 'complete' ? 'Accepted findings' : 'Research findings'}</h2>
+          <p>Acceptance acknowledges receipt, not a fix or permission to implement or publish.</p>
+          <p>Not required for this research task: native validation.</p>
+          <p>{data.researchFindings?.summary.actualSummary ?? data.taskSummary?.actualSummary}</p>
+          {data.researchFindings?.acceptance ? (
+            <p>
+              Accepted by{' '}
+              {data.researchFindings.acceptance.actor.type === 'human'
+                ? (data.researchFindings.acceptance.actor.displayName ??
+                  data.researchFindings.acceptance.actor.userId)
+                : data.researchFindings.acceptance.actor.type}{' '}
+              at {data.researchFindings.acceptance.acceptedAt}
+            </p>
+          ) : null}
+          {data.researchFindings ? (
+            <ResearchReports podId={data.id} findings={data.researchFindings} />
+          ) : null}
+        </section>
+      ) : (
+        <ValidationSummary result={data.lastValidationResult} history={validationHistory} />
+      )}
 
       <ActionBar pod={data} />
 
-      <SkipValidationToggle pod={data} />
+      {data.completionPolicy !== 'accept-findings' ? <SkipValidationToggle pod={data} /> : null}
 
       <TaskMarkdownCards markdown={data.task} />
 

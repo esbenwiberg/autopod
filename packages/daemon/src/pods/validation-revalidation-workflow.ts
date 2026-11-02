@@ -90,6 +90,12 @@ export function createValidationRevalidationWorkflow(
     },
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
     const pod = podRepo.getOrThrow(podId);
+    if (pod.completionPolicy === 'accept-findings')
+      throw new AutopodError(
+        'Research findings have no native validation phases; resume interrupted finalization or launch new work explicitly',
+        'FINDINGS_VALIDATION_NOT_APPLICABLE',
+        409,
+      );
     if (!options?.adoptedSource && podRepo.sourceAdoptions?.hasCustody(podId))
       sourceAdoptionError(
         'Use source-bound checks; ordinary revalidation may pull or rewrite preserved source.',

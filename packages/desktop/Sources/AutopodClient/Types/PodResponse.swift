@@ -87,6 +87,7 @@ public struct CompactPodResponse: Codable, Sendable {
   public let recordDiagnostics: [RecordDiagnosticResponse]?
   public let finalization: FinalizationResponse?
   public let id: String
+  public let completionPolicy: String?
   public let title: String
   public let taskExcerpt: String?
   public let taskSummary: String?
@@ -219,6 +220,8 @@ public struct SessionResponse: Codable, Sendable {
   public let lastCommitAt: String?
   public let linkedPodId: String?
   public let linkedSessionId: String?
+  public let completionPolicy: String?
+  public let researchFindings: ResearchFindingsResponse?
   public let taskSummary: TaskSummaryResponse?
   public let lastCorrectionMessage: String?
   public let lastRecoveryTrigger: String?
@@ -286,6 +289,7 @@ public struct SessionResponse: Codable, Sendable {
     case id, profileName, task, status, model, runtime, executionTarget, branch
     case containerId, worktreePath, validationAttempts, maxValidationAttempts, reworkCount
     case providerAttempts, recordDiagnostics, finalization, fleetArchivedAt
+    case completionPolicy, researchFindings
     case lastValidationResult, validationWaiver, lastValidationFindings, pendingEscalation, escalationCount, skipValidation
     case createdAt, startedAt, runningAt, completedAt, failureReason, updatedAt, userId
     case filesChanged, linesAdded, linesRemoved, previewUrl, hasWebUi, prUrl
@@ -814,5 +818,29 @@ public struct SessionStatsResponse: Codable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case byStatus
     case counts
+  }
+}
+
+public struct ResearchFindingsResponse: Codable, Sendable {
+  public let generation: Int
+  public let cycle: Int
+  public let configDigest: String
+  public let evidenceHash: String
+  public let summary: TaskSummaryResponse
+  public let readyAt: String
+  public let acceptance: FindingsAcceptanceResponse?
+}
+public struct FindingsAcceptanceResponse: Codable, Sendable {
+  public let actor: ConfigurationJSON
+  public let acceptedAt: String
+}
+public struct AcceptFindingsRequest: Codable, Sendable {
+  public let expectedGeneration: Int
+  public let expectedCycle: Int
+  public let expectedEvidenceHash: String
+  public init(_ findings: ResearchFindingsResponse) {
+    expectedGeneration = findings.generation
+    expectedCycle = findings.cycle
+    expectedEvidenceHash = findings.evidenceHash
   }
 }

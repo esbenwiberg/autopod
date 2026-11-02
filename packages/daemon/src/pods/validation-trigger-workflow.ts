@@ -112,6 +112,12 @@ export function createValidationTriggerWorkflow(
   ): Promise<void> {
     assertExecutionTerminationVerified(podId);
     let pod = podRepo.getOrThrow(podId);
+    if (pod.completionPolicy === 'accept-findings')
+      throw new AutopodError(
+        'Research findings have no native validation phases; resume interrupted finalization or launch new work explicitly',
+        'FINDINGS_VALIDATION_NOT_APPLICABLE',
+        409,
+      );
     assertValidationExecutionSettled(pod, podRepo.validationExecutions?.isSettled(pod));
     if (deps.launchConfiguration?.read(podId)?.intent === 'goal') {
       const goal = deps.launchConfiguration.goals?.get(podId);
