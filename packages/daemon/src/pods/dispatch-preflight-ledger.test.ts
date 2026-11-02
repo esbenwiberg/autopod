@@ -59,7 +59,8 @@ describe('dispatch admission against immutable execution evidence', () => {
       );
       const rerun = ledger.inspect('rerun', 1, repository, 'main', base);
       expect(rerun).toMatchObject({
-        status: 'admitted',
+        // The linked fix is an additional active execution, absent from this grant.
+        status: 'review_required',
         rerun: { ofPodId: 'first', actor: { type: 'human', userId: 'operator' } },
       });
       expect(rerun.executionId).not.toBe(first.executionId);

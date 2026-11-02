@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
+import { DISPATCH_CANDIDATES_SQL } from './dispatch-preflight-ledger.js';
 import { type NewPod, createPodRepository } from './pod-repository.js';
 
 const base = 'a'.repeat(40);
@@ -315,4 +316,193 @@ describe('canonical PR repair dispatch and exact rerun authorization', () => {
       f.db.close();
     }
   });
+});
+
+it.each([false, true])(
+  'keeps immutable parent-first ancestry for active generic receipts, corrupt=%s',
+  (corrupt) => {
+    const f = fixture();
+    try {
+      addRepair(f, 'old-parent', 'old-fix', 11);
+      recordLegacyRepair(f, 'old-fix');
+      if (corrupt) f.repo.update('old-parent', { fixPodId: null });
+      const receipt = f.db.prepare('SELECT * FROM execution_dispatch_preflights').all();
+      f.repo.delete('old-parent');
+      expect(f.repo.getOrThrow('old-fix').linkedPodId).toBeNull();
+      addRepair(f, 'new-parent', 'new-fix', 12);
+      expect(f.ledger.inspect('new-fix', 1, repository, 'main', base).status).toBe(
+        corrupt ? 'review_required' : 'admitted',
+      );
+      expect(
+        f.db.prepare("SELECT * FROM execution_dispatch_preflights WHERE id='legacy-old-fix'").all(),
+      ).toEqual(receipt);
+      expect(f.db.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      f.db.close();
+    }
+  },
+);
+
+it.each(['base', 'repository', 'branch', 'pointer', 'series', 'missing-pr'] as const)(
+  'keeps contradictory generic receipt witnesses blocking: %s',
+  (kind) => {
+    const f = fixture();
+    try {
+      addRepair(f, 'old-parent', 'old-fix', 11);
+      recordLegacyRepair(f, 'old-fix');
+      if (kind === 'base') f.repo.update('old-parent', { baseBranch: 'release' });
+      if (kind === 'repository')
+        f.db
+          .prepare("UPDATE pods SET profile_snapshot=? WHERE id='old-parent'")
+          .run(
+            JSON.stringify({ repoUrl: 'https://github.com/foreign/repo', defaultBranch: 'main' }),
+          );
+      if (kind === 'repository')
+        f.db
+          .prepare(
+            "DELETE FROM execution_dispatch_bindings WHERE execution_id=(SELECT execution_id FROM task_executions WHERE pod_id='old-parent')",
+          )
+          .run();
+      if (kind === 'branch')
+        f.db.prepare("UPDATE pods SET branch='foreign' WHERE id='old-parent'").run();
+      if (kind === 'pointer') f.repo.update('old-parent', { fixPodId: null });
+      if (kind === 'series')
+        f.db
+          .prepare("UPDATE pods SET pr_mode='single', series_id=NULL WHERE id='old-parent'")
+          .run();
+      if (kind === 'missing-pr') {
+        f.repo.update('old-parent', { prUrl: null });
+        f.repo.delete('old-parent');
+      }
+      addRepair(f, 'new-parent', 'new-fix', 12);
+      expect(f.ledger.inspect('new-fix', 1, repository, 'main', base).status).toBe(
+        'review_required',
+      );
+    } finally {
+      f.db.close();
+    }
+  },
+);
+
+it.each(['missing-parent', 'missing-pr', 'base', 'series', 'foreign-repository'] as const)(
+  'refuses missing or changed current repair ownership: %s',
+  (kind) => {
+    const f = fixture();
+    try {
+      addRepair(f, 'parent', 'fix', 11);
+      if (kind === 'missing-parent') f.repo.delete('parent');
+      if (kind === 'missing-pr') f.repo.update('parent', { prUrl: null });
+      if (kind === 'base') f.repo.update('parent', { baseBranch: 'release' });
+      if (kind === 'series')
+        f.db.prepare("UPDATE pods SET pr_mode='single', series_id=NULL WHERE id='parent'").run();
+      if (kind === 'foreign-repository') {
+        f.repo.update('parent', { prUrl: 'https://github.com/foreign/repo/pull/11' });
+        f.repo.update('fix', { prUrl: 'https://github.com/foreign/repo/pull/11' });
+      }
+      expect(() => f.ledger.inspect('fix', 1, repository, 'main', base)).toThrow('repair identity');
+      expect(f.ledger.latest('fix')).toBeNull();
+    } finally {
+      f.db.close();
+    }
+  },
+);
+
+it.each([false, true])('supports equivalent ADO PR URLs, admitted receipt=%s', (admitted) => {
+  const f = fixture();
+  try {
+    const remote = 'https://dev.azure.com/Org/Project/_git/Repo';
+    f.db.prepare('UPDATE profiles SET repo_url=?').run(remote);
+    addRepair(f, 'parent-a', 'fix-a', 11);
+    addRepair(f, 'parent-b', 'fix-b', 11);
+    for (const id of ['parent-a', 'fix-a'])
+      f.repo.update(id, { prUrl: 'https://Org.visualstudio.com/Project/_git/Repo/pullrequest/11' });
+    for (const id of ['parent-b', 'fix-b'])
+      f.repo.update(id, { prUrl: 'https://dev.azure.com/org/Project/_git/Repo/pullrequest/11/' });
+    if (admitted)
+      expect(f.ledger.inspect('fix-a', 1, remote, 'main', base).status).toBe('admitted');
+    expect(f.ledger.inspect('fix-b', 1, remote, 'main', base).status).toBe('review_required');
+    f.repo.update('parent-b', {
+      prUrl: 'https://dev.azure.com/org/Project/_git/Repo/pullrequest/12',
+    });
+    f.repo.update('fix-b', { prUrl: 'https://dev.azure.com/org/Project/_git/Repo/pullrequest/12' });
+    expect(f.ledger.inspect('fix-b', 1, remote, 'main', base).status).toBe('admitted');
+  } finally {
+    f.db.close();
+  }
+});
+
+it('requires an exact displayed conflict set when an old conflict has settled', () => {
+  const f = fixture();
+  try {
+    f.repo.insert(request('first'));
+    f.ledger.inspect('first', 1, repository, 'main', base);
+    f.repo.insert(
+      request('second', {
+        intentionalRerun: { ofPodId: 'first', requestKey: 'second', reason: 'Reviewed original' },
+        rerunRequestHash: 'a'.repeat(64),
+      }),
+    );
+    f.ledger.inspect('second', 1, repository, 'main', base);
+    f.repo.insert(request('blocked'));
+    expect(f.ledger.inspect('blocked', 1, repository, 'main', base).conflicts).toHaveLength(2);
+    f.repo.update('second', { status: 'complete' });
+    f.repo.insert(
+      request('rerun', {
+        intentionalRerun: {
+          ofPodId: 'blocked',
+          requestKey: 'rerun',
+          reason: 'Reviewed old displayed set',
+        },
+        rerunRequestHash: 'b'.repeat(64),
+      }),
+    );
+    expect(f.ledger.inspect('rerun', 1, repository, 'main', base).status).toBe('review_required');
+  } finally {
+    f.db.close();
+  }
+});
+
+it('bounds receipt candidates before reading retained history without UNION-view materialization', () => {
+  const f = fixture();
+  try {
+    const plan = f.db
+      .prepare(`EXPLAIN QUERY PLAN ${DISPATCH_CANDIDATES_SQL}`)
+      .all('github.com/org/repo', 'main', 'a'.repeat(64), 'b'.repeat(64), 'task') as Array<{
+      detail: string;
+    }>;
+    const detail = plan.map((p) => p.detail).join('\n');
+    expect(detail).toContain('execution_preflight_identity');
+    expect(detail).not.toMatch(/MATERIALIZE|SCAN task_history/);
+  } finally {
+    f.db.close();
+  }
+});
+
+it('bounds active receipt candidates while leaving large deleted history untouched', () => {
+  const f = fixture();
+  try {
+    for (let i = 0; i < 105; i++) {
+      addRepair(f, `parent-${i}`, `fix-${i}`, i + 1);
+      recordLegacyRepair(f, `fix-${i}`);
+      f.repo.delete(`parent-${i}`);
+      f.repo.delete(`fix-${i}`);
+    }
+    addRepair(f, 'current-parent', 'current-fix', 200);
+    expect(f.ledger.inspect('current-fix', 1, repository, 'main', base).status).toBe('admitted');
+    expect(f.db.prepare('SELECT COUNT(*) AS n FROM execution_dispatch_preflights').get()).toEqual({
+      n: 106,
+    });
+    // Construct independent historical admissions; never mutate existing receipts.
+    for (let i = 0; i < 101; i++) {
+      addRepair(f, `active-parent-${i}`, `active-fix-${i}`, i + 1);
+      recordLegacyRepair(f, `active-fix-${i}`);
+    }
+    addRepair(f, 'bounded-parent', 'bounded-fix', 300);
+    expect(() => f.ledger.inspect('bounded-fix', 1, repository, 'main', base)).toThrow(
+      'exceeds 100 receipts',
+    );
+    expect(f.ledger.latest('bounded-fix')).toBeNull();
+  } finally {
+    f.db.close();
+  }
 });
