@@ -94,6 +94,15 @@ public struct EvidenceTab: View {
   }
 
   public var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      if pod.completionPolicy == "accept-findings" {
+        Text(pod.researchFindings?.summary.actualSummary ?? pod.taskSummary?.actualSummary ?? "Retained research evidence").textSelection(.enabled).padding()
+      }
+      evidenceBody
+    }
+  }
+
+  private var evidenceBody: some View {
     Group {
       if redesign {
         HStack(spacing: 0) {
@@ -120,7 +129,10 @@ public struct EvidenceTab: View {
       }
     }
     .animation(.easeInOut(duration: 0.18), value: isLightboxPresented)
-    .onAppear { consumeRequestedSection() }
+    .onAppear {
+      if pod.completionPolicy == "accept-findings" { selectedSection = .artifacts }
+      consumeRequestedSection()
+    }
     .onChange(of: requestedSection) { _, _ in consumeRequestedSection() }
   }
 

@@ -49,6 +49,14 @@ public struct DetailPanelView: View {
     public let pod: Pod
     public let events: [AgentEvent]
     public var configurationActions: LaunchConfigurationActions?
+    private var findingsContentLoader: ((String, String) async throws -> SessionFileContent)? {
+        guard pod.completionPolicy == "accept-findings" else { return loadContent }
+        guard let findings = pod.researchFindings else {
+            return { _, _ in throw DaemonError.badRequest("Refresh findings before opening reports") }
+        }
+        return { id, path in try await actions.loadFindingsContent(id, findings, path) }
+    }
+
     public var actions: PodActions
     /// All pods in the currently-selected pod's series, for the Series tab.
     /// Empty when the pod is standalone.
@@ -165,6 +173,8 @@ public struct DetailPanelView: View {
     }
 
     @State private var requestedEvidenceSection: EvidenceSection?
+    @State private var findingsError: String?
+    @State private var findingsPending = false
     @State private var isInfrastructureResumePending = false
     @State private var didCopyName: Bool = false
     @State private var showRelatedEventsDebug: Bool = false
@@ -203,6 +213,7 @@ public struct DetailPanelView: View {
     /// Artifact payload beats Overview; series membership does not change the landing tab.
     /// Applied on first appear and as the fallback when the selected pod changes.
     nonisolated static func defaultTab(for pod: Pod) -> DetailTab {
+        if pod.completionPolicy == "accept-findings" { return .overview }
         if pod.pod.output == .artifact { return .evidence }
         return .overview
     }
@@ -398,11 +409,12 @@ public struct DetailPanelView: View {
                     pod: pod,
                     loadFiles: loadFiles,
                     loadArtifacts: loadArtifacts,
-                    loadContent: loadContent,
+                    loadContent: findingsContentLoader,
                     loadFirewallDenials: loadFirewallDenials,
                     loadActionAudit: loadActionAudit,
                     requestedSection: $requestedEvidenceSection
                 )
+                .id("\(pod.id):\(pod.researchFindings?.evidenceHash ?? "current")")
                 case .terminal:   EmptyView()
                 case .series: EmptyView() // Retained as an input compatibility case; never selectable.
                 }
@@ -986,6 +998,20 @@ public struct DetailPanelView: View {
                     EmptyView()
                 }
 
+            case .researchReady:
+                Button("Open report / summary") { requestedEvidenceSection = .artifacts; selectedTab = .evidence }
+                if let findings = pod.researchFindings {
+                    Button(findingsPending ? "Accepting…" : "Accept findings") {
+                        findingsPending = true
+                        Task {
+                            defer { findingsPending = false }
+                            do { try await actions.acceptFindings(pod.id, findings); findingsError = nil }
+                            catch { findingsError = error.localizedDescription }
+                        }
+                    }.disabled(findingsPending)
+                }
+                Text("Acknowledges receipt, not a fix or implementation permission.").font(.caption)
+                if let findingsError { Text(findingsError).foregroundStyle(.red) }
             case .validated:
                 if pod.validationChecks?.allPassed != false || pod.validationWaiver != nil {
                     // All checks passed, or a human explicitly waived the failures.

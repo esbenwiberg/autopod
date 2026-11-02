@@ -56,7 +56,7 @@ public enum VillageStage: String, Codable, Sendable {
         case "running": self = .working
         case "validating": self = .validating
         case "validated", "review_required": self = .review
-        case "awaiting_input": self = .attention
+        case "awaiting_input", "research_ready": self = .attention
         case "approved", "merging", "merge_pending", "handoff": self = .releasing
         case "complete": self = .complete
         case "failed": self = .failed

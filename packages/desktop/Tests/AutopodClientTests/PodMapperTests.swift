@@ -1669,3 +1669,65 @@ func mapsPersistedFailureReasonAfterRefreshWithoutValidation(reason: String) thr
   #expect(PodMapper.map(try JSONDecoder().decode(SessionResponse.self, from: omitted)).latestActivity == message)
   #expect(PodMapper.map(try JSONDecoder().decode(CompactPodResponse.self, from: omitted)).latestActivity == message)
 }
+
+@Test func mapsResearchReadyWithoutCoercingToQueued() throws {
+  let json = """
+  {
+    "completionPolicy": "accept-findings",
+    "id": "feat-oauth-a1b2",
+    "profileName": "my-app",
+    "task": "Add OAuth login",
+    "status": "research_ready",
+    "lastRecoveryTrigger": "restart",
+    "lastCorrectionMessage": "Recovery paused: task execution ownership remains unresolved.",
+    "model": "opus",
+    "runtime": "claude",
+    "executionTarget": "local",
+    "branch": "feat/oauth",
+    "containerId": "abc123",
+    "worktreePath": null,
+    "validationAttempts": 0,
+    "maxValidationAttempts": 3,
+    "lastValidationResult": null,
+    "pendingEscalation": null,
+    "escalationCount": 0,
+    "skipValidation": false,
+    "createdAt": "2026-04-01T09:00:00Z",
+    "startedAt": "2026-04-01T09:00:05Z",
+    "runningAt": "2026-04-01T09:00:35Z",
+    "completedAt": null,
+    "updatedAt": "2026-04-01T09:05:00Z",
+    "userId": "user-1",
+    "filesChanged": 5,
+    "linesAdded": 89,
+    "linesRemoved": 12,
+    "previewUrl": "http://localhost:3001",
+    "prUrl": null,
+    "plan": { "summary": "Add OAuth flow", "steps": ["Setup", "Implement"] },
+    "progress": { "phase": "implementation", "description": "Writing routes", "currentPhase": 3, "totalPhases": 5 },
+    "claudeSessionId": null,
+    "outputMode": "pr",
+    "options": {
+      "agentMode": "auto",
+      "output": "none",
+      "validate": false,
+      "advisoryBrowserQaEnabled": true,
+      "promotable": false
+    },
+    "baseBranch": null,
+    "recoveryWorktreePath": null,
+    "lastHeartbeatAt": null,
+    "inputTokens": 15000,
+    "outputTokens": 3000,
+    "costUsd": 0.42,
+    "commitCount": 2,
+    "lastCommitAt": null
+  }
+  """.data(using: .utf8)!
+  let response = try JSONDecoder().decode(SessionResponse.self, from: json)
+  let pod = PodMapper.map(response)
+  #expect(pod.status == .researchReady)
+  #expect(pod.status.needsAttention)
+  #expect(pod.completionPolicy == "accept-findings")
+  #expect(!pod.status.isActive)
+}

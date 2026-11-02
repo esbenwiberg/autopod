@@ -8,6 +8,7 @@ interface StatusStyle {
 }
 
 const STATUS_MAP: Record<PodStatus, StatusStyle> = {
+  research_ready: { color: chalk.yellow, symbol: '●', label: 'Research ready' },
   queued: { color: chalk.dim, symbol: '○', label: 'Queued' },
   provisioning: { color: chalk.dim, symbol: '◌', label: 'Provisioning' },
   running: { color: chalk.cyan, symbol: '◉', label: 'Running' },

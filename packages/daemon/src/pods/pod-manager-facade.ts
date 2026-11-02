@@ -80,6 +80,7 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     terminationReconciliation,
   } = captured;
   return {
+    acceptFindings: captured.acceptFindings,
     ...captured.validationExecutionRecovery,
     getSandboxRecovery(podId: string) {
       return (captured.sandboxRecovery ?? recoveryError('Sandbox recovery unavailable')).inspect(

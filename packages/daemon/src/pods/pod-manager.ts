@@ -44,6 +44,7 @@ import { createValidationWorkflowState } from './validation-workflow-state.js';
 import { createAdvisoryValidation } from './advisory-validation.js';
 
 import { createArtifactFinalizer } from './artifact-finalizer.js';
+import { createFindingsAcceptance } from './research-findings.js';
 
 import { createReviewerContext } from './reviewer-context.js';
 
@@ -826,7 +827,18 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityStatus,
   });
 
+  const acceptFindings = createFindingsAcceptance({
+    podRepo,
+    assertExecutionTerminationVerified,
+    assertGuidanceCollected,
+    transition,
+    emitPodCompletedEvent,
+    maybeTriggerDependents,
+  });
   const { preserveArtifacts, finalizeArtifactPod } = createArtifactFinalizer({
+    killSidecarsForPod,
+    destroyPodNetwork,
+    assertExecutionTerminationVerified,
     podRepo,
     getContainerManager: (target) => containerManagerFactory.get(target),
     ownsArtifactCompletion,
@@ -1517,6 +1529,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     createPodManagerFacade({
       sandboxRecovery,
       checkpointRecovery,
+      acceptFindings,
       sourceAdoption,
       validationExecutionRecovery,
       terminationReconciliation,

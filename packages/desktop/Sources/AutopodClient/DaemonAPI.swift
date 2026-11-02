@@ -270,6 +270,10 @@ public actor DaemonAPI {
 
   static let approvalTimeout: TimeInterval = 300
 
+  public func acceptFindings(_ id: String, findings: ResearchFindingsResponse) async throws {
+    let _: ResearchFindingsResponse = try await request("POST", "/pods/\(id)/accept-findings", body: try encode(AcceptFindingsRequest(findings)))
+  }
+
   public func approvePod(_ id: String, squash: Bool? = nil, reason: String? = nil) async throws {
     let trimmedReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
     let body: Data? = if squash != nil || trimmedReason?.isEmpty == false {
@@ -643,6 +647,25 @@ public actor DaemonAPI {
       "GET", "/pods/\(id)/files", query: ["ext": ext]
     )
     return res.files
+  }
+
+  public func getFindingsFileContent(
+    _ id: String, findings: ResearchFindingsResponse, path: String
+  ) async throws -> SessionFileContent {
+    let value: FindingsFileResponse = try await request(
+      "GET", "/pods/\(id)/findings-receipts/\(findings.generation)/\(findings.cycle)/content",
+      query: ["evidenceHash": findings.evidenceHash, "path": path]
+    )
+    guard value.evidenceHash == findings.evidenceHash, value.path == path,
+          value.encoding == "base64", let bytes = Data(base64Encoded: value.content),
+          bytes.count == value.size else {
+      throw DaemonError.badRequest("Report does not match the displayed findings receipt")
+    }
+    let binary = ["png", "jpg", "jpeg", "gif", "pdf", "webp", "ico"]
+      .contains((path as NSString).pathExtension.lowercased())
+    return SessionFileContent(path: path,
+      content: binary ? value.content : String(decoding: bytes, as: UTF8.self),
+      size: value.size, encoding: binary ? "base64" : nil)
   }
 
   public func getSessionFileContent(_ id: String, path: String) async throws -> SessionFileContent {

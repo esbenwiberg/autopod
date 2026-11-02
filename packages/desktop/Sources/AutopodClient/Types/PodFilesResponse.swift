@@ -28,3 +28,12 @@ public struct SessionFileContent: Codable, Sendable {
     self.encoding = encoding
   }
 }
+
+/// Exact archived receipt response, independent of the pod's current lifecycle.
+struct FindingsFileResponse: Decodable, Sendable {
+  let path: String
+  let content: String
+  let size: Int
+  let encoding: String
+  let evidenceHash: String
+}
