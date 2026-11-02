@@ -104,7 +104,7 @@ private func cardPod(status: PodStatus = .mergePending) -> Pod {
             }
             let complete = NSColor(DesktopTheme.statusColor(.complete)).usingColorSpace(.sRGB)
             let findings = NSColor(DesktopTheme.statusColor(.researchReady)).usingColorSpace(.sRGB)
-            let attention = NSColor(DesktopTheme.statusColor(.awaitingInput)).usingColorSpace(.sRGB)
+            let attention = NSColor(DesktopTheme.statusColor(.reviewRequired)).usingColorSpace(.sRGB)
             #expect(complete != nil && findings != nil && attention != nil)
             #expect(NSColor(DesktopTheme.statusColor(.mergePending)).usingColorSpace(.sRGB) != complete)
             #expect(findings == attention)
