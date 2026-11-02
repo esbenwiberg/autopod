@@ -245,6 +245,34 @@ func fleetDisplayEnrichesEqualVersionRecordsAfterDaemonUpgrade(hydrate: Bool) as
   #expect(store.pods.first?.phase?.current == 3)
 }
 
+@MainActor @Test(arguments: [false, true]) func fleetArchiveRefreshesWithoutAnExecutionTimestampChange(hydrate: Bool) async throws {
+  let mode = FleetMode()
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [FleetURLProtocol.self]
+  FleetURLProtocol.handler = { request in
+    if request.url?.path == "/pods/scores" { return SelfResponse.json("[]", for: request) }
+    if request.url?.path == "/pods/retained" { return SelfResponse.json(fullPod(id: "retained"), for: request) }
+    let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+    #expect(query?.contains(URLQueryItem(name: "archive", value: "include")) == true)
+    let archive = await mode.isNewer ? #""2026-11-01T12:00:00Z""# : "null"
+    let page = compactPage(id: "retained", hasNext: false, updatedAt: "2026-07-01T00:10:00Z")
+      .replacingOccurrences(of: "\"title\":", with: "\"fleetArchivedAt\":\(archive),\"title\":")
+    return SelfResponse.json(page, for: request)
+  }
+  defer { FleetURLProtocol.handler = nil }
+  let store = PodStore()
+  store.configure(api: DaemonAPI(baseURL: URL(string: "https://daemon.example.com")!, token: "test", session: URLSession(configuration: configuration)))
+  await store.loadSessions()
+  if hydrate { await store.hydrateSessionIfNeeded("retained") }
+  let task = store.pods.first?.task
+  let timestamp = store.pods.first?.updatedAt
+  await mode.advance()
+  await store.loadSessions()
+  #expect(store.pods.first?.fleetArchivedAt == "2026-11-01T12:00:00Z")
+  #expect(store.pods.first?.updatedAt == timestamp)
+  #expect(store.pods.first?.task == task)
+}
+
 }
 
 private func compactPage(

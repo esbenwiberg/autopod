@@ -270,6 +270,27 @@ describe('runPreSubmitReview', () => {
     expect(result.reasoning).toContain('timed out');
   });
 
+  it('gives the pre-submit reviewer the same pre-publication ownership boundary', async () => {
+    mockRunClaudeCli.mockResolvedValueOnce({
+      stdout: JSON.stringify({ status: 'pass', reasoning: 'Clean docs diff.', issues: [] }),
+    });
+
+    await runPreSubmitReview({
+      task: 'Start on fresh main and deliver a PR with native validation',
+      diff: 'diff --git a/CLAUDE.md b/CLAUDE.md\n+Report mobile evidence separately.',
+      reviewerModel: 'sonnet',
+      plannedSummary: 'Docs committed; authenticated fetch unavailable; PR pending.',
+    });
+
+    const prompt = mockRunClaudeCli.mock.calls[0]?.[0].input ?? '';
+    expect(prompt).toContain('## REVIEW-STAGE BOUNDARIES');
+    expect(prompt).toContain('pre-publication diff review, not a delivery-readiness verdict');
+    expect(prompt).toContain('Do not fail the diff because a PR/branch has not been published');
+    expect(prompt).toContain('not a waiver of failed/pending checks');
+    expect(prompt).toContain('never infer a validation pass or resolved source incident');
+    expect(prompt).toContain('Docs committed; authenticated fetch unavailable; PR pending.');
+  });
+
   it('forwards the planned summary and deviations into the prompt', async () => {
     mockRunClaudeCli.mockResolvedValueOnce({
       stdout: JSON.stringify({ status: 'pass', reasoning: 'ok', issues: [] }),

@@ -125,6 +125,34 @@ async function expectProviderBlocked(f: ReturnType<typeof fixture>, recovery = f
   expect(f.runtime.spawn).not.toHaveBeenCalled();
 }
 describe('exact validation execution recovery', () => {
+  it('fleet archive retains immutable unknown validation ownership even without mutable resource/result pointers', async () => {
+    const f = fixture();
+    f.podRepo.update(f.podId, { containerId: null, lastValidationResult: null });
+    const original = f.db.prepare('SELECT * FROM pods WHERE id=?').get(f.podId);
+    const dispatches = f.db.prepare('SELECT * FROM validation_dispatches').all();
+    const results = f.db.prepare('SELECT * FROM validation_dispatch_results').all();
+    const retries = f.podRepo.taskRetries?.state(f.podId);
+    const archives = f.podRepo.fleetArchives;
+    if (!archives) throw new Error('Missing fleet archive repository');
+    archives.archive(
+      f.podId,
+      actor.userId,
+      'Hide blocked card while retaining unknown execution and reports',
+    );
+    expect(f.podRepo.list({ archive: 'exclude' }).some((pod) => pod.id === f.podId)).toBe(false);
+    expect(f.podRepo.listReferencedContainerIds()).toContain(resource);
+    expect(() => f.ledger.assertTaskSettled(f.podId)).toThrow();
+    await expect(f.manager.deleteSession(f.podId)).rejects.toMatchObject({ statusCode: 409 });
+    archives.restore(f.podId);
+    expect(f.db.prepare('SELECT * FROM pods WHERE id=?').get(f.podId)).toEqual(original);
+    expect(f.db.prepare('SELECT * FROM validation_dispatches').all()).toEqual(dispatches);
+    expect(f.db.prepare('SELECT * FROM validation_dispatch_results').all()).toEqual(results);
+    expect(f.podRepo.taskRetries?.state(f.podId)).toEqual(retries);
+    expect(f.containerManager.kill).not.toHaveBeenCalled();
+    expect(f.containerManager.start).not.toHaveBeenCalled();
+    expect(f.containerManager.execInContainer).not.toHaveBeenCalled();
+    expect(f.worktreeManager.cleanup).not.toHaveBeenCalled();
+  });
   it('rolls back durable completion event insertion failure and publishes exactly once after restart', async () => {
     const f = fixture(false, false, false);
     if (!f.dispatch) throw new Error('Missing dispatch');

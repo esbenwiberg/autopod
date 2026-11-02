@@ -438,10 +438,11 @@ public struct MainView: View {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard scope == .recent && trimmed.isEmpty else { return pods }
 
-        var result = recentBrowsePods(pods, limit: limit)
+        let fleet = pods.filter { $0.fleetArchivedAt == nil }
+        var result = recentBrowsePods(fleet, limit: limit)
         if let selectedPodId,
            !result.contains(where: { $0.id == selectedPodId }),
-           let selected = pods.first(where: { $0.id == selectedPodId }) {
+           let selected = fleet.first(where: { $0.id == selectedPodId }) {
             result.append(selected)
         }
         return result
@@ -473,7 +474,7 @@ public struct MainView: View {
                 selectedPodId: selectedPodId,
                 limit: limit
             )
-            : filterPods(scoped, for: selection)
+            : filterPods(scoped.filter { $0.fleetArchivedAt == nil }, for: selection)
         return sortPods(searchPods(base, query: query, profiles: profiles, repositoryIndex: repositoryIndex), by: sortOrder)
     }
 

@@ -28,7 +28,7 @@ public struct SidebarView: View {
         managedPodCount: Int = 0,
         onShowSettings: (() -> Void)? = nil
     ) {
-        self.pods = pods
+        self.pods = pods.filter { $0.fleetArchivedAt == nil }
         self._selection = selection
         self._showCreateSheet = showCreateSheet
         self._showCreateSeriesSheet = showCreateSeriesSheet

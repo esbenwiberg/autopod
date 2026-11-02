@@ -59,6 +59,10 @@ import {
   type ExecutionProvenanceLedger,
   createExecutionProvenanceLedger,
 } from './execution-provenance-ledger.js';
+import {
+  type FleetArchiveRepository,
+  createFleetArchiveRepository,
+} from './fleet-archive-repository.js';
 import { displayRepository, repositoryDisplayColumns } from './pod-display-repository.js';
 import { type ProviderUsageProjection, readProviderUsage } from './provider-usage-projection.js';
 import { withLifecycleReadiness } from './readiness-projection.js';
@@ -160,6 +164,8 @@ export interface NewPod {
 }
 
 export interface PodFilters {
+  /** Operator visibility only; internal reads include every pod unless explicitly filtered. */
+  archive?: 'exclude' | 'include' | 'only';
   repositoryId?: string;
   profileName?: string;
   status?: PodStatus | PodStatus[];
@@ -307,6 +313,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   mergeJournal?: MergeJournal;
   taskExecutions?: TaskExecutionLedger;
   deletionOwnership?: DeletionOwnership;
+  fleetArchives?: FleetArchiveRepository;
   completionJournal?: CompletionJournal;
   hasUnansweredDecision?(podId: string): boolean;
   insert(pod: NewPod): void;
@@ -739,9 +746,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
           ),
         }
       : pod;
-  const rowToSession = (row: Record<string, unknown>) => custodyProjection(decodeSessionRow(row));
+  const fleetArchives = createFleetArchiveRepository(db);
+  const withFleetArchive = (pod: Pod): Pod => ({
+    ...custodyProjection(pod),
+    fleetArchivedAt: fleetArchives.archivedAt(pod.id),
+  });
+  const rowToSession = (row: Record<string, unknown>) => withFleetArchive(decodeSessionRow(row));
   const rowToDisplaySession = (row: Record<string, unknown>) =>
-    custodyProjection(decodeDisplaySessionRow(row));
+    withFleetArchive(decodeDisplaySessionRow(row));
   const dispatchPreflight = createDispatchPreflightLedger(db);
   const taskExecutions = createTaskExecutionLedger(db);
   const deletionOwnership = createDeletionOwnership(db);
@@ -754,6 +766,11 @@ export function createPodRepository(db: Database.Database): PodRepository {
     const whereClauses: string[] = [];
     const params: Record<string, unknown> = {};
 
+    if (filters?.archive === 'exclude' || filters?.archive === 'only') {
+      whereClauses.push(`${filters.archive === 'exclude' ? 'NOT ' : ''}EXISTS (
+        SELECT 1 FROM pod_fleet_archives archive
+        WHERE archive.pod_id = ${table}.id AND archive.restored_at IS NULL)`);
+    }
     if (filters?.repositoryId !== undefined) {
       whereClauses.push(`EXISTS (SELECT 1 FROM retained_pod_launch_snapshots launch
         WHERE launch.pod_id = ${table}.id AND json_extract(launch.payload, '$.repository.id') = @repositoryId)`);
@@ -798,6 +815,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
 
   return {
     ...createUnitOfWork(db),
+    fleetArchives,
     afterInsertCommitted(id, effect) {
       if (!db.inTransaction) {
         effect();
