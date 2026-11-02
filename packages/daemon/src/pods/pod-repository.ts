@@ -318,6 +318,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   insert(pod: NewPod): void;
   getOrThrow(id: string): Pod;
   getRepositoryForDisplay?(id: string): import('@autopod/shared').PodRepositoryDisplay;
+  getActiveTimeForDisplay?(id: string): import('@autopod/shared').PodFleetDisplay['activeTime'];
   /** Read one live or archived pod without admitting further execution. */
   getForHistory?(id: string): Pod;
   update(id: string, changes: PodUpdates): void;
@@ -1490,6 +1491,13 @@ export function createPodRepository(db: Database.Database): PodRepository {
       });
     },
 
+    getActiveTimeForDisplay(id: string) {
+      const row = db
+        .prepare('SELECT elapsed_ms, active_since FROM pod_active_time WHERE pod_id = ?')
+        .get(id) as { elapsed_ms: number; active_since: string | null } | undefined;
+      return row ? { elapsedMs: row.elapsed_ms, activeSince: row.active_since } : null;
+    },
+
     getRepositoryForDisplay(id: string) {
       const row = db
         .prepare(`SELECT ${repositoryDisplayColumns('retained_pods')},
@@ -1513,6 +1521,13 @@ export function createPodRepository(db: Database.Database): PodRepository {
           return {
             ...pod,
             repositoryDisplay: displayRepository(row, pod.profileSnapshot?.repoUrl ?? undefined),
+            activeTime:
+              typeof row.active_elapsed_ms === 'number'
+                ? {
+                    elapsedMs: row.active_elapsed_ms,
+                    activeSince: typeof row.active_since === 'string' ? row.active_since : null,
+                  }
+                : null,
             finalization:
               completionJournal.getForDisplay?.(pod.id, pod.lifecycleGeneration) ?? null,
           };

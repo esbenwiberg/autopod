@@ -443,6 +443,7 @@ describe('GET /pods/:podId provider-attempt projection', () => {
       const pods = response.json().pods as Array<{ id: string; display: unknown }>;
       expect(pods.find((p) => p.id === 'captured-fleet')?.display).toEqual({
         repository: { kind: 'repository', remote: 'https://github.com/acme/captured.git' },
+        activeTime: { elapsedMs: 0, activeSince: expect.any(String) },
         progress: {
           phase: 'Work',
           description: 'Reported milestone',
@@ -467,6 +468,10 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     expect(detail.json().display.repository).toEqual({
       kind: 'repository',
       remote: 'https://github.com/acme/captured.git',
+    });
+    expect(detail.json().display.activeTime).toEqual({
+      elapsedMs: 0,
+      activeSince: expect.any(String),
     });
   });
 

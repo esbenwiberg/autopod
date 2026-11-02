@@ -1,4 +1,4 @@
-import type { CompactPod, Pod, PodRepositoryDisplay } from '@autopod/shared';
+import type { CompactPod, Pod, PodFleetDisplay, PodRepositoryDisplay } from '@autopod/shared';
 
 /** Only the source fields consumed by compact serialization; never a control-plane pod. */
 export type CompactPodSource = Pick<
@@ -9,7 +9,10 @@ export type CompactPodSource = Pick<
   | 'progress'
   | 'pendingEscalation'
   | 'validationAttempts'
-> & { repositoryDisplay?: PodRepositoryDisplay };
+> & {
+  repositoryDisplay?: PodRepositoryDisplay;
+  activeTime?: PodFleetDisplay['activeTime'];
+};
 
 export const COMPACT_JSON_MAX_BYTES = 64 * 1024;
 export const COMPACT_JSON_FIELDS = [
@@ -47,6 +50,8 @@ export const COMPACT_POD_COLUMNS = [
   'running_at',
   'updated_at',
   'completed_at',
+  '(SELECT elapsed_ms FROM pod_active_time WHERE pod_id = pods.id) AS active_elapsed_ms',
+  '(SELECT active_since FROM pod_active_time WHERE pod_id = pods.id) AS active_since',
   'last_heartbeat_at',
   'input_tokens',
   'output_tokens',

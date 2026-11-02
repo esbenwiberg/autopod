@@ -73,11 +73,21 @@ public struct PodRepositoryDisplayResponse: Codable, Sendable {
   public init(kind: String, remote: String? = nil) { self.kind = kind; self.remote = remote }
 }
 
+public struct PodActiveTimeResponse: Codable, Sendable {
+  public let elapsedMs: Double
+  public let activeSince: String?
+  public init(elapsedMs: Double, activeSince: String? = nil) {
+    self.elapsedMs = elapsedMs; self.activeSince = activeSince
+  }
+}
+
 public struct PodFleetDisplayResponse: Codable, Sendable {
   public let repository: PodRepositoryDisplayResponse
   public let progress: ProgressResponse?
-  public init(repository: PodRepositoryDisplayResponse, progress: ProgressResponse? = nil) {
-    self.repository = repository; self.progress = progress
+  public let activeTime: PodActiveTimeResponse?
+  public init(repository: PodRepositoryDisplayResponse, progress: ProgressResponse? = nil,
+              activeTime: PodActiveTimeResponse? = nil) {
+    self.repository = repository; self.progress = progress; self.activeTime = activeTime
   }
 }
 

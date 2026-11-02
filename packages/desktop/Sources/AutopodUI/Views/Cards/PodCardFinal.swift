@@ -288,10 +288,10 @@ public struct SessionCardFinal: View {
     private var redesignedCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
-                Circle().fill(pod.status.needsAttention ? pod.status.color : DesktopTheme.accent).frame(width: 5, height: 5)
+                Circle().fill(DesktopTheme.statusColor(pod.status)).frame(width: 5, height: 5)
                 Text(pod.status.label.capitalized).font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(pod.status.needsAttention ? pod.status.color : DesktopTheme.accent)
-                    .lineLimit(1)
+                    .foregroundStyle(DesktopTheme.statusColor(pod.status))
+                    .lineLimit(1).layoutPriority(1)
                 Spacer(minLength: 0)
                 modeBadge
                 Text(pod.id).font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
@@ -302,12 +302,15 @@ public struct SessionCardFinal: View {
                 Text(pod.desktopTitle).font(.system(size: 14, weight: .semibold))
                     .lineLimit(density == .compact ? 1 : 2, reservesSpace: true)
                     .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain).help(pod.desktopTitle)
+            }.buttonStyle(DesktopCardLinkStyle()).help(pod.desktopTitle)
             if let repository = repositories[pod.id] {
                 Button { filterRepository?(repository.id) } label: {
-                    Label(repository.label, systemImage: "folder").font(.system(size: 11, weight: .medium))
-                        .lineLimit(1).truncationMode(.middle).foregroundStyle(DesktopTheme.accent)
-                }.buttonStyle(.plain).help(repository.isSnapshot ? "Filter by captured repository" : "Filter by current profile repository; original snapshot unavailable")
+                    Label(repository.name, systemImage: "folder").font(.system(size: 11, weight: .medium))
+                        .lineLimit(1).truncationMode(.tail).foregroundStyle(DesktopTheme.accent)
+                }.buttonStyle(DesktopCardLinkStyle())
+                    .help("\(repository.label)\n" + (repository.isSnapshot ? "Filter by captured repository" : "Filter by current profile repository; original snapshot unavailable"))
+                    .accessibilityLabel("Filter by repository \(repository.label)")
+                    .accessibilityIdentifier("pod-repository-link-\(pod.id)")
             } else {
                 Label(pod.desktopRepositoryPlaceholder, systemImage: "folder").font(.caption2).foregroundStyle(.secondary)
             }
@@ -317,7 +320,7 @@ public struct SessionCardFinal: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(DesktopTheme.accent)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(DesktopCardLinkStyle())
                 .help("Open pull request: \(url.absoluteString)")
                 .accessibilityIdentifier("pod-pr-link-\(pod.id)")
             }
@@ -341,9 +344,14 @@ public struct SessionCardFinal: View {
                 }.font(.system(size: 10)).foregroundStyle(.secondary)
             }
             HStack(spacing: 4) {
-                Text("\(pod.profileName) · \(pod.model)").lineLimit(1).truncationMode(.middle)
+                Text(pod.desktopCardMetadata).lineLimit(1).truncationMode(.tail)
+                    .help(pod.desktopCardMetadata)
                 Spacer(minLength: 4)
-                Text("\(pod.duration) · \(String(format: "$%.2f", pod.costUsd))").fixedSize()
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    Text(pod.desktopActiveDuration(at: context.date)).fixedSize()
+                }
+                .help("Recorded time in running and validating states, including idle time within those states. Excludes queueing, pauses, human waits and merge/CI waits. Not CPU or billed time. — means historical timing is unavailable.")
+                Text("· \(String(format: "$%.2f", pod.costUsd))").fixedSize()
                     .help("Stored cost subtotal; billing unverified")
             }.font(.system(size: 10)).foregroundStyle(.secondary)
         }

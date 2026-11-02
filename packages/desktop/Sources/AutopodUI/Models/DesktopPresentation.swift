@@ -7,6 +7,9 @@ struct DesktopRepository: Hashable, Sendable, Identifiable {
     let label: String
     let isSnapshot: Bool
 
+    /// Short card label only; filtering/search retain the full credential-free identity.
+    var name: String { label.split(separator: "/").last.map(String.init) ?? label }
+
     init?(url raw: String, isSnapshot: Bool = true) {
         var normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if !normalized.contains("://"), let at = normalized.firstIndex(of: "@"),
@@ -65,6 +68,35 @@ enum DesktopLifecycleStage: String, CaseIterable, Sendable {
 }
 
 extension Pod {
+    var desktopCardMetadata: String {
+        let name = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let opaque = UUID(uuidString: name) != nil
+            || name.range(of: #"^profile-[0-9a-fA-F]{24}$"#, options: .regularExpression) != nil
+        return name.isEmpty || opaque ? model : "\(name) · \(model)"
+    }
+
+    /// Recorded running/validating state time. Never infer missing history from pod age.
+    func desktopActiveDuration(at date: Date) -> String {
+        guard let time = fleetDisplay?.activeTime, time.elapsedMs.isFinite, time.elapsedMs >= 0 else {
+            return "Active —"
+        }
+        var seconds = time.elapsedMs / 1000
+        if let since = time.activeSince {
+            // A status event may arrive ahead of the refreshed timing projection.
+            guard status == .running || status == .validating,
+                  let start = (try? Date(since, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)))
+                    ?? (try? Date(since, strategy: .iso8601)), start <= date else { return "Active —" }
+            seconds += date.timeIntervalSince(start)
+        }
+        // Bound conversion even when talking to a malformed/older daemon.
+        guard seconds.isFinite, seconds < Double(Int.max / 1000) else { return "Active —" }
+        let minutes = Int(seconds / 60)
+        if seconds == 0 { return "Active 0m" }
+        if minutes == 0 { return "Active <1m" }
+        if minutes < 60 { return "Active \(minutes)m" }
+        return "Active \(minutes / 60)h \(minutes % 60)m"
+    }
+
     var desktopRepositoryPlaceholder: String {
         fleetDisplay?.repository.kind == "empty" ? "Empty workspace" : "Repository unavailable"
     }
