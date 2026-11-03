@@ -1,5 +1,6 @@
 import {
   AutopodError,
+  type CliTool,
   type EnvironmentPreset,
   type Profile,
   type ResolvedEnvironment,
@@ -12,6 +13,7 @@ import { boundedDockerCall } from '../containers/docker-bounds.js';
 import { buildNuGetCredentialEnv } from '../pods/registry-injector.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { AcrClient } from './acr-client.js';
+import { cliToolInstallCommands } from './cli-tools.js';
 import { generateDockerfile, getConfiguredBaseImage } from './dockerfile-generator.js';
 import { generateEnvironmentDockerfile } from './environment-dockerfile.js';
 import { type EnvironmentBuildInputs, environmentImageKey } from './environment-image-key.js';
@@ -55,6 +57,7 @@ export class ImageBuilder {
   async resolveEnvironment(
     environment: EnvironmentPreset,
     target: 'local' | 'sandbox',
+    clis: CliTool[] = [],
   ): Promise<ResolvedEnvironment> {
     const base = environment.baseImage ?? getConfiguredBaseImage(environment.template);
     let pinnedBase: string;
@@ -82,7 +85,14 @@ export class ImageBuilder {
     const toolInstallCommands = softwareToolInstallCommands(environment.tools);
     // Agent binaries and bundled extensions are part of the immutable base layer.
     const agentToolingDigest = configurationDigest({ pinnedBase, toolInstallCommands });
-    const binding = { pinnedBase, platform, toolInstallCommands, agentToolingDigest };
+    const cliInstallCommands = cliToolInstallCommands(clis, platform);
+    const binding = {
+      pinnedBase,
+      platform,
+      toolInstallCommands,
+      agentToolingDigest,
+      ...(cliInstallCommands.length ? { cliInstallCommands } : {}),
+    };
     return { ...binding, imageKey: environmentImageKey({ environment, ...binding }) };
   }
 

@@ -202,8 +202,8 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     deploymentAvailable: !!deployments,
     readLaunch: snapshots.get,
     store,
-    resolveEnvironment: (environment, target) =>
-      options.images.resolveEnvironment(environment, target),
+    resolveEnvironment: (environment, target, clis) =>
+      options.images.resolveEnvironment(environment, target, clis),
     githubRepositories: (rule, repository) => github.resolveRepositories(rule, repository),
     githubWorkflows: (rule) => github.resolveWorkflows(rule),
     resolveAgentRoute: async (route) => resolveLaunchAgentRoute(route, options.accounts),

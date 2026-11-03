@@ -4,6 +4,7 @@ import {
   type ValidationPhase,
   outputModeFromPodOptions,
 } from '@autopod/shared';
+import { cliToolInstructions, frozenCliTools } from '../images/cli-tools.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import { configurationError } from './configuration-store.js';
 import { launchPodOptions } from './launch-pod-options.js';
@@ -90,8 +91,13 @@ export function resolveLaunchExecutionSettings(
     reasoningEffort: main.reasoningEffort,
     executionTarget: config.execution.target,
     customInstructions:
-      config.toolPacks
-        .flatMap((p) => p.instructions.map((i) => `## ${i.heading}\n\n${i.content}`))
+      [
+        ...config.toolPacks.flatMap((p) =>
+          p.instructions.map((i) => `## ${i.heading}\n\n${i.content}`),
+        ),
+        cliToolInstructions(frozenCliTools(config.toolPacks)),
+      ]
+        .filter(Boolean)
         .join('\n\n') || null,
     agentDonePrompt: flow.agentDonePrompt,
     escalation: flow.escalation,

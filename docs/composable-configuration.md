@@ -49,6 +49,8 @@ Create recurring tasks with `ap schedule create '0 9 * * *' --repo autopod --tem
 
 Scheduled scans retain the configuration used when collecting each report. A human-selected repair uses those saved choices after preset edits and requires approval before delivery. Retrying the same selection returns the same repair pod. Older reports without a configuration snapshot require a new collection before launching a repair.
 
+Tool packs can also own pinned CLI tools, their prerequisites and agent-facing usage guidance. Selecting a pack installs its CLIs into the worker image without separately editing the environment. Public npm packages, pinned public GitHub source recipes and checksum-verified GitHub release executables are supported. See [CLI tools in tool packs](tool-pack-clis.md) for source definitions, discretionary-use guidance and current private-source/Hindsight limitations.
+
 The native library offers forms for project setups, tools, sidecars, instructions, skills and MCP connections; complete JSON remains available for advanced fields. For an isolated local interaction preview, run `swift run --package-path packages/desktop ConfigurationPreview`. It keeps edits in memory and connects to no daemon or provider.
 
 ## Package feeds

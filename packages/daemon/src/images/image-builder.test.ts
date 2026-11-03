@@ -1,4 +1,4 @@
-import { type Profile, environmentPresetSchema } from '@autopod/shared';
+import { type Profile, cliToolSchema, environmentPresetSchema } from '@autopod/shared';
 import { extract as tarExtract } from 'tar-stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProfileStore } from '../profiles/index.js';
@@ -108,6 +108,41 @@ function createMockDeps() {
 }
 
 describe('ImageBuilder', () => {
+  it.each(['local', 'sandbox'] as const)(
+    'binds selected CLI installation to the %s software image',
+    async (target) => {
+      const deps = createMockDeps();
+      vi.mocked(deps.mockDocker.getImage('base').inspect).mockResolvedValue({
+        Id: `sha256:${'a'.repeat(64)}`,
+        Os: 'linux',
+        Architecture: 'arm64',
+      } as unknown as import('dockerode').ImageInspectInfo);
+      vi.mocked(deps.mockAcr.resolveTag).mockImplementation((tag) => tag);
+      const builder = new ImageBuilder({
+        docker: deps.mockDocker,
+        acr: deps.mockAcr,
+        profileStore: deps.mockProfileStore,
+      });
+      const environment = environmentPresetSchema.parse({
+        template: 'node22',
+        baseImage: `ewiacr.azurecr.io/base@sha256:${'b'.repeat(64)}`,
+      });
+      const cli = cliToolSchema.parse({
+        name: 'lesson',
+        description: 'Lessons',
+        instructions: 'lesson --help',
+        verifyArgs: ['--help'],
+        source: { type: 'npm', package: 'lesson', version: '1.2.3', executable: 'lesson' },
+      });
+      const plain = await builder.resolveEnvironment(environment, target);
+      const selected = await builder.resolveEnvironment(environment, target, [cli]);
+      expect(selected.cliInstallCommands?.join('\n')).toContain("'lesson@1.2.3'");
+      expect(selected.imageKey).not.toBe(plain.imageKey);
+      expect(selected.platform).toBe(target === 'sandbox' ? 'linux/amd64' : 'linux/arm64');
+      expect(deps.mockDocker.buildImage).not.toHaveBeenCalled();
+      expect(deps.mockAcr.push).not.toHaveBeenCalled();
+    },
+  );
   it('resolves software-only preview inputs without pulling, building or publishing', async () => {
     const deps = createMockDeps();
     const inspect = vi.mocked(deps.mockDocker.getImage('base').inspect);
