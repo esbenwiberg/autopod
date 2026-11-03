@@ -4,9 +4,17 @@ import { buildGitHubImageUrl } from '../validation/screenshot-collector.js';
 import { inspectCheckpointSource } from '../worktrees/checkpoint-source-identity.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { APPROVAL_SNAPSHOT_EXCLUDES } from './approval-policy.js';
+import {
+  approvalReportPreservationFailure,
+  needsApprovalReportSnapshot,
+  preserveApprovalReportSnapshot,
+} from './approval-report-snapshot.js';
+import { rewriteError, rewriteHash } from './approval-source-rewrite-repository.js';
+import { verifyApprovalRewriteSource } from './approval-source-rewrite.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import { checkpointError } from './retained-checkpoint-repository.js';
 import { isTerminalState } from './state-machine.js';
+import { ValidationSupersededError } from './validation-ownership.js';
 import {
   assertValidationExecutionSettled,
   captureValidationMutationGuard,
@@ -68,8 +76,8 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
         podId,
         worktreePath: s2.worktreePath,
         branch: s2.branch,
-        head: checkpoint.prepared.head,
-        tree: checkpoint.prepared.tree,
+        head: checkpoint.selected?.head ?? checkpoint.prepared.head,
+        tree: checkpoint.selected?.tree ?? checkpoint.prepared.tree,
         worktreeManager,
         assertCurrent,
       });
@@ -78,9 +86,21 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
         'Selected checkpoint checks passed; publication, dependents, approval and merge were not requested.',
       );
     }
+    const rewrite = podRepo.approvalRewrites?.latest(s2);
+    const rewriteChecks = Boolean(rewrite?.activated && !rewrite.checked);
+    if (rewriteChecks) {
+      await verifyApprovalRewriteSource(podRepo, s2, worktreeManager, assertCurrent);
+      if (result.overall !== 'pass' || result.taskReview?.status !== 'pass')
+        rewriteError('Rebased candidate requires passing checks and independent review.');
+    }
+    if (rewrite && !rewriteChecks)
+      rewriteError(
+        'Candidate checks are already settled or not selected; validation cannot publish source or consume a prior approval.',
+      );
+    const deliveryHeld = checksOnly || Boolean(rewrite);
     const passDefaultBranch = profile.defaultBranch ?? 'main';
     let prUrl: string | null = s2.prUrl ?? null;
-    const prManager = !checksOnly && prManagerFactory ? prManagerFactory(profile) : null;
+    const prManager = !deliveryHeld && prManagerFactory ? prManagerFactory(profile) : null;
     if (prManager && s2.worktreePath && s2.options.output === 'pr') {
       // Publish screenshots to their own ref so the PR body can embed them
       // without the reviewed branch carrying a file the agent never wrote.
@@ -266,7 +286,7 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
       advisoryQaInFlight:
         validationConfig.advisoryBrowserQaEnabled && !!validationEngine.runAdvisoryBrowserQa,
     });
-    if (!checksOnly) maybeTriggerDependents(validatedPod);
+    if (!deliveryHeld) maybeTriggerDependents(validatedPod);
     await runAdvisoryAfterValidation(
       podId,
       validationConfig,
@@ -278,6 +298,25 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
     const postAdvisoryPod = podRepo.getOrThrow(podId);
     if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
       return;
+    }
+    if (rewriteChecks && rewrite) {
+      const assertRewriteCurrent = () =>
+        advisoryPublicationOwnership(validatedPod, result, validationRecord?.id).assertCurrent();
+      const { source } = await verifyApprovalRewriteSource(
+        podRepo,
+        postAdvisoryPod,
+        worktreeManager,
+        assertRewriteCurrent,
+      );
+      podRepo.approvalRewrites?.append(rewrite.id, 'checked', {
+        head: source.head,
+        tree: source.tree,
+        validationHash: rewriteHash(postAdvisoryPod.lastValidationResult),
+      });
+      emitActivityStatus(
+        podId,
+        'Rebased source checks and review passed — ready for a new approval. No candidate publication or merge was requested.',
+      );
     }
     if (checksOnly && postAdvisoryPod.containerId) {
       // Capture while this verified execution resource is still Running. Approval
@@ -310,7 +349,30 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
       advisoryPublicationOwnership(validatedPod, result, validationRecord?.id).assertCurrent();
       podRepo.update(podId, { artifactsPath });
     }
-    if (!checksOnly && postAdvisoryPod.linkedPodId) {
+    if (!checksOnly && needsApprovalReportSnapshot(postAdvisoryPod)) {
+      const assertReportsCurrent = () =>
+        advisoryPublicationOwnership(validatedPod, result, validationRecord?.id).assertCurrent();
+      try {
+        await preserveApprovalReportSnapshot({
+          pod: postAdvisoryPod,
+          podRepo,
+          worktreeManager,
+          containerManager: containerManagerFactory.get(postAdvisoryPod.executionTarget),
+          assertCurrent: assertReportsCurrent,
+          onStage: () => emitActivityStatus(podId, 'Preserving workspace reports before stop…'),
+        });
+      } catch (err) {
+        if (err instanceof ValidationSupersededError) throw err;
+        assertReportsCurrent();
+        logger.error({ err, podId }, 'Pre-stop approval report preservation failed');
+        const failureReason = approvalReportPreservationFailure(err);
+        podRepo.update(podId, { failureReason });
+        emitActivityStatus(podId, failureReason);
+        refreshReadiness(podId, { advisoryQaInFlight: false });
+        return;
+      }
+    }
+    if (!deliveryHeld && postAdvisoryPod.linkedPodId) {
       await completeFixPodAfterPush(postAdvisoryPod);
       return;
     }
@@ -325,7 +387,7 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
         logger.warn({ err, podId }, 'Failed to stop container post-validation');
       }
     }
-    if (!checksOnly && postAdvisoryPod.autoApprove) {
+    if (!deliveryHeld && postAdvisoryPod.autoApprove) {
       emitActivityStatus(podId, 'Auto-approving…');
       logger.info({ podId }, 'Auto-approving pod after validation');
       setImmediate(() => {

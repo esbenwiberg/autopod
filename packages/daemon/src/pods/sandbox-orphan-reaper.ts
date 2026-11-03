@@ -116,6 +116,7 @@ export class SandboxOrphanReaper {
       const claimed = new Set([
         ...this.deps.podRepo.listReferencedContainerIds(),
         ...(this.deps.podRepo.externalDeliveries?.retainedSandboxIds() ?? []),
+        ...(this.deps.podRepo.approvalRewrites?.retainedSandboxIds() ?? []),
       ]);
       const result = { ...empty, listed: sandboxes.length };
       const candidates: SandboxDescriptor[] = [];
@@ -153,6 +154,7 @@ export class SandboxOrphanReaper {
         if (
           this.deps.podRepo.sourceAdoptions?.retains(sandbox.id) ||
           this.deps.podRepo.externalDeliveries?.retains(sandbox.id) ||
+          this.deps.podRepo.approvalRewrites?.retains(sandbox.id) ||
           this.deps.podRepo.listReferencedContainerIds().includes(sandbox.id) ||
           this.hasRecoveryOwner(sandbox)
         ) {

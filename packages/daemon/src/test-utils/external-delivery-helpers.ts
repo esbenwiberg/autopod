@@ -33,6 +33,9 @@ export function createExternalDeliveryFixture(disk = false) {
     reviewComments: [],
   };
   const provider = {
+    verifyMergedSourceAncestry: vi.fn<NonNullable<PrManager['verifyMergedSourceAncestry']>>(
+      async () => null,
+    ),
     getPrStatus: vi.fn<PrManager['getPrStatus']>(async () => ({ ...status })),
     createPr: vi.fn<PrManager['createPr']>(async () => ({ url: '', usedFallback: false })),
     mergePr: vi.fn<PrManager['mergePr']>(async () => ({ merged: true, autoMergeScheduled: false })),

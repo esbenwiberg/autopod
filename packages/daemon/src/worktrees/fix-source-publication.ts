@@ -50,6 +50,7 @@ export async function publishFixSource(
   let publicationId: string | undefined;
   const receipt = await manager.pushBranch(fix.worktreePath, fix.branch, {
     force: true,
+    expectedRemoteCommitSha: entry.request.config.expectedHeadSha,
     pat,
     expectedRepository: repository,
     onPrepared(source) {

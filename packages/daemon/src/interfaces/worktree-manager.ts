@@ -23,6 +23,8 @@ export type BranchPublicationSource = Omit<
 export interface BranchPublicationOptions {
   expectedRepository?: string;
   force?: boolean;
+  /** Exact durable predecessor; never inferred from a mutable tracking ref. */
+  expectedRemoteCommitSha?: string;
   pat?: string;
   /** Synchronous durable admission; throwing prevents the external push. */
   onPrepared?: (source: BranchPublicationSource) => void;
@@ -135,6 +137,26 @@ export interface BranchDiffConfig {
   maxLength?: number;
 }
 
+export interface ApprovalRebaseConfig {
+  worktreePath: string;
+  branch: string;
+  baseBranch: string;
+  repository: string;
+  head: string;
+  tree: string;
+  root: string;
+  generation: number;
+  cycle: number;
+  pat?: string;
+  assertCurrent(): void;
+  /** Persist rewrite intent before creating/mutating the isolated candidate. */
+  onPrepared(baseCommitSha: string): void;
+}
+export type ApprovalRebaseResult =
+  | { kind: 'unchanged'; baseCommitSha: string }
+  | { kind: 'conflict'; baseCommitSha: string; conflicts: string[] }
+  | { kind: 'candidate'; baseCommitSha: string; worktreePath: string; head: string; tree: string };
+
 export interface RebaseOntoBaseConfig {
   worktreePath: string;
   baseBranch: string;
@@ -214,6 +236,19 @@ export interface PrepareSourceAdoption {
 }
 
 export interface WorktreeManager {
+  prepareApprovalRebase?(config: ApprovalRebaseConfig): Promise<ApprovalRebaseResult>;
+  /** Only a newly-created independent continuation checkout; never the retained original. */
+  selectRetainedContinuationSource?(config: {
+    worktreePath: string;
+    originalWorktreePath: string;
+    repository: string;
+    branch: string;
+    head: string;
+    remoteHead?: string;
+    baseBranch: string;
+    assertCurrent(): void;
+  }): Promise<{ head: string; tree: string; baseCommitSha: string }>;
+  assertSourceDescendsFrom?(worktreePath: string, head: string): Promise<void>;
   /** Strict clean identity, refusing hidden indexes, executable filters and submodules before status. */
   inspectSourceAdoption?(
     worktreePath: string,

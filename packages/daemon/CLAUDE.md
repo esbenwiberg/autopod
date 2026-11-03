@@ -88,7 +88,8 @@ requires reconciliation, not a status override.
 Fix delivery records a parent-bound source handoff before publishing and plans a
 new merge intent without overwriting the original source. Already-merged ADO PRs
 may complete on provider-proven ancestry when a human extended the published
-branch. This is external-delivery evidence only: open PR mutations remain bound
+branch; GitHub provides the same read-only proof for journal-backed and legacy
+sandbox approval reconciliation. This is external-delivery evidence only: open PR mutations remain bound
 to the exact admitted SHA. Missing local worktrees prevent unsafe cleanup, not
 source-proven completion. See `docs/merge-operator-recovery.md` at the repository
 root for normal reconciliation and the explicit legacy-fix recovery command.
@@ -131,6 +132,32 @@ The full checklist (5 layers + verification) lives in the `/add-pod-state` skill
 run it whenever you're adding a `PodStatus` value. Skipping a layer typically means
 the state is unreachable (transition table miss) or pods land in it and idle
 (`processPod()` miss).
+
+### Approval-time source updates
+
+Approval prepares rebased candidates in independent Git checkouts, not in the
+approved worktree. Append-only `approval_source_rewrites` facts bind the original
+publication/remote SHA, base, candidate and current checks. A changed candidate
+uses fresh validation-only provisioning (`skipAgent`), preserving attempt/retry
+budgets and original resources; passing configured checks/review require a new
+human approval. Publication uses the exact recorded predecessor lease rather
+than `origin/<branch>` or an in-memory force allowance. Read-only status is
+included in `ap source-recovery`. Missing/uncertain preparation evidence fails
+closed; historical incidents do not acquire retroactive rewrite permission.
+
+### Retention-safe task continuation
+
+`ap retained-continuation` explicitly selects independent source for ordinary
+PR/branch tasks, including custom workflows with independent review. It reuses
+retained-checkpoint custody/epochs/accounting, not destructive Rework. Originals
+are preserved; exact remote selection and prepare-only human repair are supported.
+A separately previewed execution profile may select software/resources only;
+original repository, AI, workflow, network and other authority remain frozen.
+No coding worker starts or budget resets. Fresh checks/review and new reports
+stop at validated for a separate authenticated human approval. Legacy recovery
+controls remain blocked while this source is owned. Never clear custody to retry
+or downgrade to an unaware binary after selection. See
+`docs/retained-pod-continuation.md` at the repository root.
 
 ## Database
 

@@ -83,6 +83,7 @@ export async function writeArtifactSnapshotReceipt(
   snapshot: string,
   generation: number,
   cycle: number,
+  approvalBinding?: string,
 ): Promise<void> {
   const identity = await fingerprintArtifactSnapshot(staging);
   await writeFile(
@@ -92,6 +93,7 @@ export async function writeArtifactSnapshotReceipt(
       generation,
       cycle,
       snapshot: path.basename(snapshot),
+      ...(approvalBinding ? { approvalBinding } : {}),
       ...identity,
     }),
     { flag: 'wx', mode: 0o600 },
@@ -118,6 +120,18 @@ export async function verifiedArtifactSnapshotHash(
   cycle: number,
 ): Promise<string> {
   return (await checkArtifactSnapshot(snapshot, artifactRoot, generation, cycle)).sha256;
+}
+
+/** A legacy or stale binding cannot authorize reuse; corrupt bytes always fail closed. */
+export async function verifyApprovalSnapshotBinding(
+  snapshot: string,
+  artifactRoot: string,
+  generation: number,
+  cycle: number,
+  expectedBinding: string,
+): Promise<boolean> {
+  const receipt = await checkArtifactSnapshot(snapshot, artifactRoot, generation, cycle);
+  return receipt.approvalBinding === expectedBinding;
 }
 
 /** Returned bytes participated in the very inventory hash checked against the receipt. */
@@ -156,7 +170,7 @@ async function checkArtifactSnapshot(
   generation: number,
   cycle: number,
   captureFile?: string,
-): Promise<{ sha256: string; captured?: Buffer }> {
+): Promise<{ sha256: string; captured?: Buffer; approvalBinding?: string }> {
   try {
     if (
       path.dirname(path.resolve(snapshot)) !== path.resolve(artifactRoot) ||
@@ -193,7 +207,11 @@ async function checkArtifactSnapshot(
       receipt.bytes !== actual.bytes
     )
       throw new Error('Artifact snapshot differs from its preservation receipt');
-    return { sha256: actual.sha256, captured: actual.captured };
+    return {
+      sha256: actual.sha256,
+      captured: actual.captured,
+      approvalBinding: receipt.approvalBinding,
+    };
   } catch {
     throw new AutopodError(
       'Saved artifact snapshot could not be verified. Restore its snapshot and receipt before finalizing; the settled worker was not restarted.',

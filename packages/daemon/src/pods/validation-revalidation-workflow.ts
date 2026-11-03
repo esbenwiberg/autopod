@@ -6,6 +6,7 @@ import {
   type AdoptedSourceValidationRequest,
   openAdoptedSourceValidation,
 } from './adopted-source-validation.js';
+import { rewriteError } from './approval-source-rewrite-repository.js';
 import { resolveReviewerModel, resolveReviewerProvider } from './runtime-resolver.js';
 import { sourceAdoptionError } from './source-adoption-repository.js';
 import { isTerminalState } from './state-machine.js';
@@ -90,6 +91,10 @@ export function createValidationRevalidationWorkflow(
     },
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
     const pod = podRepo.getOrThrow(podId);
+    if (podRepo.approvalRewrites?.latest(pod))
+      rewriteError(
+        'The selected rebase owns exact source checks. Ordinary revalidation cannot pull, reset budgets or replace its resource.',
+      );
     if (pod.completionPolicy === 'accept-findings')
       throw new AutopodError(
         'Research findings have no native validation phases; resume interrupted finalization or launch new work explicitly',

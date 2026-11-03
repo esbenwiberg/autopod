@@ -8,10 +8,16 @@ import {
   reconcileMerge,
 } from '../worktrees/durable-merge.js';
 import { publishCommittedSource, publishSource } from '../worktrees/durable-source-publication.js';
-import { mergeReconciliation } from '../worktrees/merge-source-identity.js';
+import { assertMergeRepository, mergeReconciliation } from '../worktrees/merge-source-identity.js';
 import type { ApprovalDeliveryPreparationCaptured } from './approval-contracts.js';
 import { reconcileExternalApproval } from './approval-external-delivery.js';
 import { APPROVAL_SNAPSHOT_EXCLUDES } from './approval-policy.js';
+import {
+  verifiedApprovalReportSnapshot,
+  waitForApprovalReportSnapshot,
+} from './approval-report-snapshot.js';
+import { rewriteError } from './approval-source-rewrite-repository.js';
+import { rewriteConfiguration } from './approval-source-rewrite.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import { verifiedCheckpointApprovalSnapshot } from './checkpoint-approval-snapshot.js';
 import type {
@@ -51,6 +57,7 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
       pushOptions?: { force?: boolean; pat?: string },
     ) => {
       assertApprovalCurrent(anchor);
+      if (anchor.prUrl) podRepo.mergeJournal?.assertPublicationAllowed?.(anchor.prUrl);
       const ledger = podRepo.sourcePublications;
       const repository = executionForPod(anchor).repoUrl;
       if (!ledger || !repository)
@@ -59,13 +66,57 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
           'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
           409,
         );
-      return publishSource(ledger, anchor, repository, worktreeManager, pushOptions);
+      const rewrite = podRepo.approvalRewrites?.assertDelivery(anchor, true);
+      const selection = podRepo.approvalRewrites?.latest(anchor);
+      if (selection) {
+        if (
+          selection.binding.configurationHash !==
+          rewriteConfiguration(anchor, executionForPod(anchor))
+        )
+          rewriteError('Candidate configuration changed after selection.');
+        const source = await worktreeManager.inspectSource?.(
+          anchor.worktreePath ?? '',
+          anchor.branch,
+        );
+        assertApprovalCurrent(anchor);
+        if (
+          !source?.worktreeClean ||
+          source.branch !== anchor.branch ||
+          source.commitSha !==
+            (rewrite?.checked?.head ?? selection.binding.predecessor.commitSha) ||
+          source.treeSha !== (rewrite?.checked?.tree ?? selection.binding.predecessor.treeSha)
+        )
+          rewriteError('Candidate source changed after checks.');
+      }
+      // Compatibility with an explicitly requested legacy update-from-base:
+      // an ephemeral hint alone cannot authorize replacement. Require an
+      // immutable earlier publication; absent evidence needs reconciliation.
+      const legacyLease =
+        !selection && forceWithLeaseAllowances.has(anchor.id)
+          ? (ledger.latestConfirmed?.(anchor) ??
+            rewriteError(
+              'Legacy update-from-base has no confirmed predecessor publication. Inspect source recovery before retrying.',
+            ))
+          : null;
+      if (legacyLease)
+        assertMergeRepository(
+          { repository, branch: anchor.branch, baseBranch: anchor.baseBranch ?? 'main' },
+          legacyLease.repository,
+        );
+      const lease = rewrite?.binding.predecessor.commitSha ?? legacyLease?.commitSha;
+      const published = await publishSource(ledger, anchor, repository, worktreeManager, {
+        ...pushOptions,
+        ...(lease ? { force: true, expectedRemoteCommitSha: lease } : {}),
+      });
+      forceWithLeaseAllowances.delete(anchor.id);
+      return published;
     };
     const commitAndPublishApprovalBranch = (
       anchor: Pod,
       config: Parameters<WorktreeManager['mergeBranch']>[0],
     ) => {
       assertApprovalCurrent(anchor);
+      if (anchor.prUrl) podRepo.mergeJournal?.assertPublicationAllowed?.(anchor.prUrl);
       const ledger = podRepo.sourcePublications;
       const repository = executionForPod(anchor).repoUrl;
       if (!ledger || !repository)
@@ -77,6 +128,26 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
       return publishCommittedSource(ledger, anchor, repository, worktreeManager, config);
     };
     assertApprovalCurrent(pod);
+    const continuation = podRepo.retainedCheckpoints?.latest(podId);
+    if (
+      continuation?.binding.continuation &&
+      continuation.activated?.generation === pod.lifecycleGeneration &&
+      (actor.type !== 'human' || !actor.userId.trim())
+    )
+      throw new AutopodError(
+        'Retained continuation requires a fresh authenticated human approval. Original resources remain retained.',
+        'DELIVERY_RECONCILIATION_REQUIRED',
+        409,
+      );
+    const selectedRewrite = podRepo.approvalRewrites?.assertDelivery(pod, true);
+    const rewriteSelection = podRepo.approvalRewrites?.latest(pod);
+    if (
+      rewriteSelection &&
+      rewriteSelection.binding.configurationHash !== rewriteConfiguration(pod, executionForPod(pod))
+    )
+      rewriteError('Source rewrite configuration changed; prior checks cannot be reused.');
+    if (selectedRewrite && actor.type !== 'human')
+      rewriteError('Rebased source requires a fresh authenticated human approval.');
     if (pod.options.output === 'pr' || pod.options.output === 'branch') {
       const missingIdentity = !pod.worktreePath?.trim()
         ? 'Worktree identity is unavailable.'
@@ -122,13 +193,25 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
         }
       };
       try {
-        const saved = await verifiedCheckpointApprovalSnapshot({
-          pod,
-          podRepo,
-          worktreeManager,
-          artifactRoot: path.join(dataDir, 'artifacts', pod.id),
-          assertCurrent: () => assertApprovalCurrent(pod),
-        });
+        await waitForApprovalReportSnapshot(podRepo, podId);
+        assertApprovalCurrent(pod);
+        // Read again after advisory/pre-stop collection: the approval anchor may
+        // predate both the final advisory result and the published report path.
+        const current = podRepo.getOrThrow(podId);
+        const saved =
+          (await verifiedCheckpointApprovalSnapshot({
+            pod: current,
+            podRepo,
+            worktreeManager,
+            artifactRoot: path.join(dataDir, 'artifacts', pod.id),
+            assertCurrent: () => assertApprovalCurrent(pod),
+          })) ??
+          (await verifiedApprovalReportSnapshot({
+            pod: current,
+            podRepo,
+            worktreeManager,
+            assertCurrent: () => assertApprovalCurrent(pod),
+          }));
         const artifactsPath =
           saved ??
           (await collectArtifactSnapshot({
@@ -300,12 +383,7 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
         if (shouldPushBranch) {
           if (!pod.branch) failBranchPreservation(pod);
           try {
-            const useForce = forceWithLeaseAllowances.has(podId);
-            if (useForce) {
-              await publishApprovalBranch(pod, { force: true });
-            } else {
-              await publishApprovalBranch(pod);
-            }
+            await publishApprovalBranch(pod);
           } catch (err) {
             logger.warn(
               { err, podId },
@@ -314,9 +392,6 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
             failBranchPreservation(pod);
           }
           assertApprovalCurrent(pod);
-          forceWithLeaseAllowances.delete(podId);
-        } else {
-          forceWithLeaseAllowances.delete(podId);
         }
         // transition publishes status synchronously and returns the current row.
         // A listener can replace that row; retain the original approval identity.

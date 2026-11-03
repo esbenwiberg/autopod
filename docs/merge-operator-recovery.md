@@ -24,6 +24,52 @@ source/target and the retained source is still verifiable. A changed PR head is
 not permission to reuse or overwrite the original admission. An open PR alone
 is not a recovery receipt; otherwise leave it retained for explicit recovery.
 
+## Approval rebase candidates and exact publication leases
+
+Approval never rebases the approved checkout in place. If the fetched base is
+already included, normal approval continues. Otherwise the daemon preserves the
+original host source, prepares an independent Git checkout, and records an
+append-only `approval_source_rewrites` binding before preparing the candidate.
+The binding pins the confirmed predecessor publication and remote SHA, exact
+base, original resource, candidate source, and configuration. Unknown or scheduled
+merge requests on the same PR remain publication blockers across lifecycle changes.
+
+A clean candidate is queued through validation-only provisioning (`skipAgent`):
+no coding agent is started and validation attempts/task retry budgets are not
+reset. Candidate publication, automatic approval and dependent delivery are held.
+Configured validation and independent review must pass against the selected
+source (only proven same-pod no-op checkpoint lineage may extend it). The task
+returns to ready for a **new authenticated human approval**. Conflicts and failed
+checks retain the original work; a clean Git rebase is not passing validation.
+
+Inspect with `ap source-recovery POD --json` (or its ordinary text output). The
+read-only `approvalRewrite` projection distinguishes preparing, prepared,
+checking, checks-held (failed/interrupted invocation), and checked source; it grants no adoption, retry or publication
+permission. A prepared candidate interrupted before activation can be verified
+and selected by ordinary approval without repeating preparation. An admission
+without a certified candidate remains reconciliation-required, not replayable.
+A failed checks-only invocation requires its exact execution/retry evidence;
+ordinary Rework/Resume cannot bypass the rewrite selection or restart an agent.
+
+New approval publishes the checked source using an explicit lease against the
+**recorded predecessor SHA**, never a late remote observation or mutable
+`origin/<branch>` ref. If the remote already equals the candidate, observation
+confirms the receipt without another push; another remote head/deletion refuses
+overwrite. Lost responses and daemon restarts preserve the original lease.
+Legacy explicit update-from-base allowances also require a genuine earlier
+publication receipt; a boolean allowance or tracking ref alone is insufficient.
+Parent-bound fix publication uses its recorded merge source as predecessor.
+
+Original source/resources remain held independently of the candidate's current
+container. Neither completion nor these records authorizes deleting historical
+source, releasing reports, or settling an uncertain Azure wakeup. Old incidents
+without a rewrite binding do not acquire retroactive force-push authority; retain
+and inspect their exact source before any separately authorized recovery.
+[Retention-safe continuation](retained-pod-continuation.md) can explicitly select
+an exact current remote source into an independent checkout, preserve the old
+source/resource, and require fresh configured checks/review and a new human
+approval. It grants no historical force lease and never rewinds the remote.
+
 ## Explicit recovery of an uncertain ADO request
 
 Use only after explicit human authorization to retry an old request whose outcome
@@ -66,10 +112,13 @@ still govern merging, and CI failures still flow through the normal fix-pod path
 Do **not** authorize another merge request for an already-merged PR.
 
 - An exact source/target match completes normally.
-- For ADO, a human may have added commits before completing the PR. Polling can
-  also complete when ADO's commit comparison proves the recorded publication is
-  an ancestor of `lastMergeSourceCommit`. The comparison uses the PR's source
-  head, **not** its squash result on the target branch. Repository, PR, source
+- A human may have added commits before completing the PR. ADO and GitHub can
+  also complete when provider comparison proves the recorded publication is
+  an ancestor of the merged PR source head (ADO `lastMergeSourceCommit`, GitHub
+  the exact merged PR's `head.sha`/`headRefOid`). GitHub re-observes merged PR
+  identity around an authenticated full-SHA comparison and requires the recorded
+  source to be the exact merge base, with no commits behind. The comparison uses
+  the PR's source head, **not** its squash result on the target branch. Repository, PR, source
   branch and target branch must still match. Unsupported providers, unavailable
   comparisons and unrelated histories remain blocked.
 - This is evidence of external delivery, not approval of the extra commits or
@@ -81,6 +130,15 @@ Do **not** authorize another merge request for an already-merged PR.
   Completion is recorded, but unsafe/unverifiable local resources are retained
   rather than deleted; activity explains the cleanup warning. Review retained
   resources separately before releasing them.
+
+Legacy sandbox approvals without a merge journal can also record provider-proven
+merged-descendant delivery. Their immutable external-delivery receipt retains
+original `headSha`/`treeSha` semantics and separately records `mergedHeadSha` and
+ancestry proof; it does not fabricate a daemon merge request or validate the
+additional commits. This observation runs before sandbox wakeup and continues to
+hold the original resource while ignored reports remain pending. Dirty/missing
+legacy retained source, unowned checkpoint lookalikes, unavailable provider proof,
+wrong targets and unrelated histories still require reconciliation.
 
 New fix pods publish through a durable parent-bound handoff before completing.
 `fix_source_handoffs` records the originating fix lifecycle and superseded intent;

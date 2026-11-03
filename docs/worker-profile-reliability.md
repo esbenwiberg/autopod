@@ -46,6 +46,13 @@ release predating that merge still uses the older implementation; changing a
 profile timeout does not deploy the repair. Qualification and deployment are
 separate operations, not permission to retry an unobserved command.
 
+For retained ordinary PR/branch work, an explicitly previewed
+[retained continuation](retained-pod-continuation.md) can select qualified software
+and resources without deleting the old worker or rewriting its original launch.
+Only the new generation uses that immutable selection. Preset edits alone still
+do nothing to an existing worker; image qualification, fresh checks/review and
+subsequent human approval remain separate.
+
 ## Node certificate trust
 
 Newly built worker base templates set:

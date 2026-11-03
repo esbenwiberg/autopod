@@ -21,6 +21,7 @@ import type {
 import type { Logger } from 'pino';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
 import type { LaunchExecutionCredentials } from '../configuration/execution-credentials.js';
+import type { RetainedExecutionSelection } from '../configuration/retained-continuation-launch.js';
 import type { SidecarManager } from '../containers/sidecar-manager.js';
 import type { PodTokenIssuer } from '../crypto/pod-tokens.js';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
@@ -74,6 +75,10 @@ export interface PodManagerDependencies {
     executionSettings(config: EffectiveLaunchConfig): PodExecutionSettings;
     assertCurrentCapabilities(config: EffectiveLaunchConfig): Promise<void>;
     prepareEnvironment(config: EffectiveLaunchConfig): Promise<string>;
+    previewRetainedExecution?(
+      podId: string,
+      profileId: string,
+    ): Promise<RetainedExecutionSelection>;
     beginGoalRework?(
       podId: string,
       task: string,
@@ -197,6 +202,9 @@ export interface PodManager {
     actor: OperatorActor,
   ): Promise<import('./source-adoption-types.js').SourceAdoptionState>;
   getSourceAdoptions?(podId: string): import('./source-adoption-types.js').SourceAdoptionState[];
+  getApprovalSourceRewrite?(
+    podId: string,
+  ): import('@autopod/shared').SourceAdoptionList['approvalRewrite'];
   getLaunchConfiguration?(podId: string): EffectiveLaunchConfig | null;
   createResolvedSession?(
     config: EffectiveLaunchConfig,
@@ -416,6 +424,15 @@ export interface PodManager {
   recoverSandbox: ReturnType<
     typeof import('./sandbox-recovery.js').createSandboxRecovery
   >['submit'];
+  previewRetainedExecution: ReturnType<
+    typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
+  >['previewExecution'];
+  continueRetained: ReturnType<
+    typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
+  >['continueRetained'];
+  checkRetainedCandidate: ReturnType<
+    typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
+  >['checkCandidate'];
   recoverCheckpoint: ReturnType<
     typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
   >['submit'];

@@ -1437,9 +1437,16 @@ describe('LocalWorktreeManager', () => {
       expect(receipt.repository).toBe('https://github.com/org/repo');
     });
 
-    it('pins a force push lease to the remote-tracking branch OID', async () => {
-      const calls = publicationGit('feat/security', `${'b'.repeat(40)}\trefs/heads/feat/security`);
-      await manager.pushBranch('/tmp/worktree/sess', 'feat/security', { force: true });
+    it('pins a force push to an explicit predecessor, ignoring mutable tracking refs', async () => {
+      const calls = publicationGit(
+        'feat/security',
+        `${'b'.repeat(40)}\trefs/heads/feat/security`,
+        'c'.repeat(40),
+      );
+      await manager.pushBranch('/tmp/worktree/sess', 'feat/security', {
+        force: true,
+        expectedRemoteCommitSha: 'b'.repeat(40),
+      });
       expect(calls.find((args) => args.includes('push'))).toEqual([
         'push',
         '--no-verify',
@@ -1471,7 +1478,10 @@ describe('LocalWorktreeManager', () => {
         'feature',
         `${'a'.repeat(40)}\trefs/heads/nested/feature\n${'b'.repeat(40)}\trefs/heads/feature`,
       );
-      await manager.pushBranch('/tmp/worktree/sess', 'feature', { force: true });
+      await manager.pushBranch('/tmp/worktree/sess', 'feature', {
+        force: true,
+        expectedRemoteCommitSha: 'b'.repeat(40),
+      });
       expect(calls.find((args) => args.includes('push'))).toEqual([
         'push',
         '--no-verify',

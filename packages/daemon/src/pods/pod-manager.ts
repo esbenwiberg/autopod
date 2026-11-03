@@ -4,6 +4,7 @@ import { createProvisioningSandboxState } from './provisioning-sandbox-state.js'
 import { createProvisioningToolInstallation } from './provisioning-tool-installation.js';
 import { createProvisioningWorkflow } from './provisioning-workflow.js';
 import { createRetainedCheckpointRecovery } from './retained-checkpoint-recovery.js';
+import { checkpointError } from './retained-checkpoint-repository.js';
 import { createValidationExecutionRecovery } from './validation-execution-recovery.js';
 import { ValidationSupersededError } from './validation-ownership.js';
 import {
@@ -82,6 +83,7 @@ import { createApprovalDeliveryExecution } from './approval-delivery-execution.j
 import { createApprovalDeliveryPreparation } from './approval-delivery-preparation.js';
 import { actorLabel, buildValidationWaiver, legacyRespondedBy } from './approval-policy.js';
 import { createApprovalReadiness, createReadinessRefresh } from './approval-readiness.js';
+import { rewriteError } from './approval-source-rewrite-repository.js';
 import { createApprovalWorkflow } from './approval-workflow.js';
 import {
   formatElapsedDuration,
@@ -1118,6 +1120,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     maybeTriggerDependents,
   });
   const { executeApprovalDelivery } = createApprovalDeliveryExecution({
+    isGoal: (id) =>
+      deps.launchConfiguration?.read(id)?.intent === 'goal' ||
+      Boolean(deps.launchConfiguration?.goals?.get(id)),
+    enqueueSession,
     podRepo,
     assertApprovalCurrent,
     executionForPod,
@@ -1422,6 +1428,50 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       'refreshNetworkPolicy',
       'deleteSeriesWithCascade',
     ]);
+    const continuation = podRepo.retainedCheckpoints?.latest(podId);
+    if (
+      continuation?.binding.continuation &&
+      ![
+        'approveSession',
+        'processPod',
+        'interruptValidation',
+        'notifyEscalation',
+        'nudgeSession',
+        'refreshReadinessAfterQualityScore',
+        'authorizeValidationRecoveryBudget',
+        ...(!continuation.checked &&
+        continuation.activated &&
+        podRepo.getOrThrow(podId).status === 'running'
+          ? ['triggerValidation']
+          : []),
+      ].includes(operation)
+    )
+      checkpointError(
+        'Retained continuation owns this source. Use exact candidate selection or fresh human approval; legacy Rework, budget resets and competing source changes are not authorized.',
+        'CONTINUATION_SOURCE_HELD',
+      );
+    // Some registry calls take a profile name, not a pod ID. Query custody
+    // first rather than resolving an unrelated first string as a pod.
+    const rewritePod = podRepo.approvalRewrites?.has(podId) ? podRepo.getOrThrow(podId) : undefined;
+    const rewrite = rewritePod ? podRepo.approvalRewrites?.latest(rewritePod) : null;
+    if (
+      rewrite &&
+      ![
+        'approveSession',
+        'processPod',
+        'interruptValidation',
+        'notifyEscalation',
+        'nudgeSession',
+        'refreshReadinessAfterQualityScore',
+        'authorizeValidationRecoveryBudget',
+        ...(rewrite.activated && !rewrite.checked && rewritePod?.status === 'running'
+          ? ['triggerValidation']
+          : []),
+      ].includes(operation)
+    )
+      rewriteError(
+        `Rewrite ${rewrite.id} owns candidate checks/publication. Competing source mutation is not authorized.`,
+      );
     sandboxRecovery.assertAvailable(podId, operation);
     if (operation !== 'processPod') podRepo.retainedCheckpoints?.assertAvailable(podId);
     if (!metadataOnly.has(operation)) assertValidationMutationSettled(podRepo, podId);
@@ -1484,7 +1534,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         podRepo,
         executionForPod,
         worktreeManager,
-        getContainerManager: () => containerManagerFactory.get('sandbox'),
+        getContainerManager: (target = 'sandbox') => containerManagerFactory.get(target),
+        readLaunch: deps.launchConfiguration?.read,
+        executionSettings: deps.launchConfiguration?.executionSettings,
+        previewExecution: deps.launchConfiguration?.previewRetainedExecution,
         isIdle: (id) =>
           !controlOperations.isActive(id) &&
           !activeAgentRuns.has(id) &&

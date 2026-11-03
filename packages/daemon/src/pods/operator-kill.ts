@@ -30,6 +30,7 @@ export function createOperatorKill(
   } = captured;
   async function killSession(podId: string): Promise<void> {
     podRepo.sourceAdoptions?.assertDeletable(podId);
+    podRepo.approvalRewrites?.assertDeletable(podId);
     podRepo.deletionOwnership?.assertTaskAvailable(podId);
     const pod = podRepo.getOrThrow(podId);
     podRepo.validationExecutions?.assertTaskSettled(podId);

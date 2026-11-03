@@ -90,12 +90,41 @@ export async function reconcileExternalApproval(
     !source.worktreeClean ||
     source.branch !== pod.branch ||
     !sourceCommit(source.treeSha) ||
-    !sourceCommit(status.headSha) ||
-    source.commitSha !== status.headSha
+    !sourceCommit(source.commitSha) ||
+    !sourceCommit(status.headSha)
   )
     mergeReconciliation(
-      'Retained source does not exactly match the completed PR. No ancestry or checkpoint exemption was inferred.',
+      'Retained source identity is unavailable or dirty; retain it for reconciliation.',
     );
+  const ancestry =
+    source.commitSha === status.headSha
+      ? undefined
+      : await provider.verifyMergedSourceAncestry?.({
+          prUrl: pod.prUrl,
+          publishedHeadSha: source.commitSha,
+          mergedHeadSha: status.headSha as string,
+          expectedTarget: target,
+        });
+  assertApprovalCurrent(pod);
+  if (source.commitSha !== status.headSha) {
+    if (
+      !ancestry ||
+      ancestry.publishedHeadSha !== source.commitSha ||
+      ancestry.mergedHeadSha !== status.headSha ||
+      !Number.isFinite(Date.parse(ancestry.observedAt))
+    )
+      mergeReconciliation('The completed PR does not prove inclusion of the retained source.');
+    assertMergeTarget(target, ancestry.target);
+    const after = await worktreeManager.inspectSource(pod.worktreePath, pod.branch);
+    assertApprovalCurrent(pod);
+    if (
+      !after.worktreeClean ||
+      after.branch !== source.branch ||
+      after.commitSha !== source.commitSha ||
+      after.treeSha !== source.treeSha
+    )
+      mergeReconciliation('Retained source changed during external delivery observation.');
+  }
   const now = new Date().toISOString();
   const receipt: ExternalDeliveryReceipt = {
     id: randomUUID(),
@@ -107,13 +136,14 @@ export async function reconcileExternalApproval(
     baseBranch: target.baseBranch,
     headSha: source.commitSha,
     treeSha: source.treeSha,
+    ...(ancestry ? { mergedHeadSha: ancestry.mergedHeadSha, ancestry } : {}),
     validationTimestamp: pod.lastValidationResult.timestamp,
     observedAt: now,
     recordedAt: now,
     actor,
     reason:
       approvalReason ??
-      'Human approval reconciled a provider-confirmed external merge. Reports remain pending; original recovery resources are retained.',
+      'Human approval reconciled provider-proven external delivery. Additional commits are not validated by this observation. Reports remain pending; original recovery resources are retained.',
     retainedSandboxId: pod.containerId,
     sandboxStatusAtObservation: sandboxStatus,
     worktreePath: pod.worktreePath,
@@ -141,7 +171,7 @@ export async function reconcileExternalApproval(
   assertApprovalCurrent(anchor);
   emitActivityStatus(
     podId,
-    `External delivery verified at exact source ${receipt.headSha}. Receipt ${receipt.id}. Workspace reports remain pending; original sandbox ${receipt.retainedSandboxId} and worktree are retained, not cleaned up. No merge, push or wakeup was requested.`,
+    `External delivery verified for retained source ${receipt.headSha}${ancestry ? ` in merged source ${ancestry.mergedHeadSha} by provider ancestry` : ''}. Receipt ${receipt.id}. Workspace reports remain pending; original sandbox ${receipt.retainedSandboxId} and worktree are retained, not cleaned up. No merge, push or wakeup was requested.`,
   );
   eventBus.emit({
     type: 'pod.completed',

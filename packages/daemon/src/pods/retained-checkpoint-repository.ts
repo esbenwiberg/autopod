@@ -9,6 +9,7 @@ import {
 } from '@autopod/shared';
 export type { CheckpointRecoveryRequest } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import type { RetainedExecutionSelection } from '../configuration/retained-continuation-launch.js';
 import type { prepareRetainedCheckpointWorkspace } from '../worktrees/retained-checkpoint-workspace.js';
 
 export const checkpointHash = (value: unknown) =>
@@ -23,8 +24,16 @@ export interface CheckpointRecoveryBinding {
   cycle: number;
   resultHash: string;
   configurationHash: string;
+  /** New explicit selection, not legacy unknown-execution reconciliation. */
+  continuation?: {
+    remoteHead?: string;
+    prepareOnly: boolean;
+    execution?: RetainedExecutionSelection;
+  };
 }
-export type PreparedCheckpoint = Awaited<ReturnType<typeof prepareRetainedCheckpointWorkspace>>;
+export type PreparedCheckpoint = Awaited<ReturnType<typeof prepareRetainedCheckpointWorkspace>> & {
+  baseCommitSha?: string;
+};
 export interface CheckpointOutcomeRequest {
   expectedGeneration: number;
   expectedResultHash: string;
@@ -57,6 +66,13 @@ export interface CheckpointRecoveryRecord {
   originalEvidence: { result: ValidationResult; preSubmitReview: Pod['preSubmitReview'] };
   createdAt: string;
   prepared: PreparedCheckpoint | null;
+  selected: {
+    head: string;
+    tree: string;
+    actor: OperatorActor;
+    reason: string;
+    requestHash: string;
+  } | null;
   activated: { generation: number } | null;
   checking: { generation: number } | null;
   checked: {
@@ -99,11 +115,14 @@ export function assertCheckpointResourceNotRetained(
   db: Database.Database,
   containerId: string,
 ): void {
-  if (
-    db.prepare('SELECT 1 FROM retained_checkpoint_recoveries WHERE container_id=?').get(containerId)
-  )
+  const retained = db
+    .prepare('SELECT binding FROM retained_checkpoint_recoveries WHERE container_id=?')
+    .get(containerId) as { binding: string } | undefined;
+  if (retained)
     checkpointError(
-      'Original checkpoint-recovery resource retains unknown execution/report evidence. No wake, exec or release is authorized.',
+      JSON.parse(retained.binding).continuation
+        ? 'Original continuation resource retains source/report evidence. No wake, exec or release is authorized.'
+        : 'Original checkpoint-recovery resource retains unknown execution/report evidence. No wake, exec or release is authorized.',
       'CHECKPOINT_ORIGINAL_RETAINED',
     );
 }
@@ -139,6 +158,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
           | 'binding'
           | 'originalEvidence'
           | 'prepared'
+          | 'selected'
           | 'activated'
           | 'checking'
           | 'checked'
@@ -170,6 +190,12 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       binding: JSON.parse(raw.binding),
       originalEvidence: JSON.parse(raw.originalEvidence),
       prepared: event('prepared'),
+      selected: (() => {
+        const selection = db
+          .prepare('SELECT evidence FROM retained_continuation_sources WHERE recovery_id=?')
+          .get(id) as { evidence: string } | undefined;
+        return selection ? JSON.parse(selection.evidence) : null;
+      })(),
       activated: event('activated'),
       checking: event('checking'),
       checked: event<CheckpointRecoveryRecord['checked']>('checked') ?? reconciled?.checked ?? null,
@@ -236,6 +262,59 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
     get,
     latest,
     append,
+    activateExecution(id: string) {
+      const record = get(id) ?? checkpointError('Recovery unavailable');
+      const execution = record.binding.continuation?.execution;
+      if (
+        !execution ||
+        !record.prepared ||
+        record.activated ||
+        record.blocked ||
+        record.checked ||
+        scope(db).getStore() !== id ||
+        !db.inTransaction ||
+        !/^[a-f0-9]{64}$/.test(execution.digest) ||
+        !/^[a-f0-9]{64}$/.test(execution.configurationHash ?? '')
+      )
+        checkpointError('Only owned atomic continuation activation can select execution');
+      const changed = db
+        .prepare(
+          'UPDATE pods SET launch_config_digest=? WHERE id=? AND launch_config_digest=? AND lifecycle_generation=? AND container_id IS NULL AND worktree_path=? AND skip_agent=1 AND execution_target=?',
+        )
+        .run(
+          execution.digest,
+          record.podId,
+          execution.parentDigest,
+          record.generation + 1,
+          record.prepared.worktree,
+          execution.target,
+        ).changes;
+      if (changed !== 1)
+        checkpointError('Original execution binding changed before atomic activation');
+    },
+    select(id: string, evidence: NonNullable<CheckpointRecoveryRecord['selected']>) {
+      const record = get(id) ?? checkpointError('Recovery unavailable');
+      if (
+        !record.binding.continuation ||
+        !record.prepared ||
+        record.activated ||
+        record.blocked ||
+        record.checked ||
+        scope(db).getStore() !== id ||
+        !db.inTransaction ||
+        evidence.actor.type !== 'human' ||
+        !evidence.actor.userId.trim() ||
+        !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(evidence.head) ||
+        !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(evidence.tree)
+      )
+        checkpointError('Only the owned prepared continuation may select an exact candidate');
+      db.prepare('INSERT INTO retained_continuation_sources VALUES(?,?,?,?)').run(
+        id,
+        evidence.requestHash,
+        JSON.stringify(evidence),
+        new Date().toISOString(),
+      );
+    },
     assertAvailable,
     list(podId: string) {
       return (

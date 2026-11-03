@@ -26,6 +26,8 @@ import Testing
     try host.press("repair-submit")
     try await host.wait { fixture.pending != nil }
     #expect(model.busy && fixture.presented && model.receipt == nil)
+    // Model state precedes SwiftUI's accessibility update; keep the receipt pending.
+    try await host.wait { host.has("repair-submit") && !host.enabled("repair-submit") }
     #expect(!host.enabled("repair-submit"))
     fixture.release()
     try await host.wait { !model.busy }

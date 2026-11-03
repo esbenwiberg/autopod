@@ -432,6 +432,10 @@ function createMockWorktreeManager(): WorktreeManager {
     pushBranch: vi.fn(mockBranchPublication),
     ensureRemoteBranch: vi.fn(async ({ branch }) => ({ branch, created: false })),
     pullBranch: vi.fn(async () => ({ newCommits: false })),
+    prepareApprovalRebase: vi.fn(async () => ({
+      kind: 'unchanged' as const,
+      baseCommitSha: 'b'.repeat(40),
+    })),
     rebaseOntoBase: vi.fn(async () => ({ alreadyUpToDate: false, rebased: true, conflicts: [] })),
     getCommitLog: vi.fn(async () => 'abc1234 feat: implement feature\ndef5678 fix: edge case'),
     readBranchFolder: vi.fn(async ({ relPath }) => ({
@@ -9478,7 +9482,9 @@ describe('PodManager', () => {
       expect(manager.getSession(pod.id).containerId).toBe('retained-source');
     });
 
-    it.each(['existing', 'rebased', 'new'] as const)(
+    // Rebased candidates now require separate checks and fresh approval; see
+    // approval-source-rewrite.test.ts. Only unchanged/new PR delivery merges here.
+    it.each(['existing', 'new'] as const)(
       'binds approval merge to the latest durable publication (%s)',
       async (path) => {
         const ctx = createTestContext();
@@ -9512,13 +9518,8 @@ describe('PodManager', () => {
             return receipt;
           },
         );
-        vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
-          rebased: true,
-          alreadyUpToDate: path !== 'rebased',
-          conflicts: [],
-        });
         await manager.approveSession(pod.id);
-        const sha = (path === 'rebased' ? 'b' : 'a').repeat(40);
+        const sha = 'a'.repeat(40);
         expect(ctx.prManager.mergePr).toHaveBeenCalledWith(
           expect.objectContaining({
             expectedHeadSha: sha,
@@ -9533,7 +9534,7 @@ describe('PodManager', () => {
           .prepare('SELECT receipt FROM source_publication_receipts')
           .all() as Array<{ receipt: string }>;
         expect(rows.map((row) => JSON.parse(row.receipt).commitSha)).toContain(sha);
-        expect(rows).toHaveLength(path === 'rebased' ? 2 : 1);
+        expect(rows).toHaveLength(1);
         expect(manager.getSession(pod.id).status).toBe('complete');
       },
     );
@@ -9608,7 +9609,7 @@ describe('PodManager', () => {
       );
       vi.mocked(ctx.worktreeManager.pushBranch).mockResolvedValue(undefined);
       await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
-        code: 'APPROVAL_DELIVERY_FAILED',
+        code: 'DELIVERY_RECONCILIATION_REQUIRED',
       });
       expect(manager.getSession(pod.id)).toMatchObject({
         status: 'validated',
@@ -9622,7 +9623,7 @@ describe('PodManager', () => {
       );
     });
 
-    it.each(['initial-push', 'rebased-push', 'rebase-conflict'] as const)(
+    it.each(['initial-push', 'candidate-preparation', 'rebase-conflict'] as const)(
       'keeps failed PR preparation out of merge polling across restart (%s)',
       async (failure) => {
         vi.useFakeTimers();
@@ -9643,19 +9644,21 @@ describe('PodManager', () => {
             }),
           );
           const push = vi.mocked(ctx.worktreeManager.pushBranch);
-          const rebase = vi.mocked(ctx.worktreeManager.rebaseOntoBase);
+          const prepareRebase = ctx.worktreeManager.prepareApprovalRebase;
+          if (!prepareRebase) throw new Error('Missing candidate preparation');
+          const rebase = vi.mocked(prepareRebase);
           if (failure === 'initial-push')
             push.mockRejectedValueOnce(new Error('publication unavailable'));
-          else if (failure === 'rebased-push') {
-            rebase.mockResolvedValueOnce({ rebased: true, alreadyUpToDate: false, conflicts: [] });
-            push
-              .mockImplementationOnce(mockBranchPublication)
-              .mockRejectedValueOnce(new Error('rewritten source unpublished'));
+          else if (failure === 'candidate-preparation') {
+            rebase.mockRejectedValueOnce(new Error('candidate preparation unavailable'));
           } else
-            rebase.mockResolvedValueOnce({
-              rebased: false,
-              alreadyUpToDate: false,
-              conflicts: ['src/source.ts'],
+            rebase.mockImplementationOnce(async (config) => {
+              config.onPrepared('b'.repeat(40));
+              return {
+                kind: 'conflict',
+                baseCommitSha: 'b'.repeat(40),
+                conflicts: ['src/source.ts'],
+              };
             });
           // Publication fails while the initial PR observation is open.
           vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
@@ -9672,15 +9675,18 @@ describe('PodManager', () => {
             if (event.type === 'pod.completed') completed.push(event.podId);
           });
           await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
-            code: 'APPROVAL_DELIVERY_FAILED',
-            statusCode: 502,
+            code:
+              failure === 'rebase-conflict'
+                ? 'DELIVERY_RECONCILIATION_REQUIRED'
+                : 'APPROVAL_DELIVERY_FAILED',
+            statusCode: failure === 'rebase-conflict' ? 409 : 502,
           });
           expect(manager.getSession(pod.id)).toMatchObject({
             status: 'validated',
             containerId: 'retained-source',
             worktreePath: '/tmp/unpublished-source',
             completedAt: null,
-            failureReason: expect.stringContaining('retry approval'),
+            failureReason: expect.stringContaining('Original resources retained'),
           });
           expect(transitions).not.toContain('merge_pending');
           vi.mocked(ctx.prManager.getPrStatus).mockResolvedValue({
@@ -10477,11 +10483,14 @@ describe('PodManager', () => {
         vi.mocked(ctx.worktreeManager.pushBranch).mockImplementationOnce(async () => {
           replace();
         });
-      if (step === 'rebase')
-        vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockImplementationOnce(async () => {
+      if (step === 'rebase') {
+        const prepare = ctx.worktreeManager.prepareApprovalRebase;
+        if (!prepare) throw new Error('Missing candidate preparation');
+        vi.mocked(prepare).mockImplementationOnce(async () => {
           replace();
-          return { rebased: true, alreadyUpToDate: true, conflicts: [] };
+          return { kind: 'unchanged', baseCommitSha: 'b'.repeat(40) };
         });
+      }
       if (step === 'create')
         vi.mocked(ctx.prManager.createPr).mockImplementationOnce(async () => {
           replace();
@@ -10598,7 +10607,9 @@ describe('PodManager', () => {
           prUrl: 'https://github.com/org/repo/pull/42',
         }),
       );
-      vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockRejectedValue(new Error('git unavailable'));
+      const prepare = ctx.worktreeManager.prepareApprovalRebase;
+      if (!prepare) throw new Error('Missing candidate preparation');
+      vi.mocked(prepare).mockRejectedValue(new Error('git unavailable'));
       await expect(manager.approveSession(pod.id)).rejects.toMatchObject({
         code: 'APPROVAL_DELIVERY_FAILED',
       });
@@ -25258,7 +25269,7 @@ describe('updateFromBase', () => {
     expect(manager.getSession(pod.id).startCommitSha).toBe('latest-base-sha');
   });
 
-  it('next pushBranch after clean rebase uses { force: true }, then clears the allowance', async () => {
+  it('legacy update-from-base uses its confirmed predecessor lease once, not the allowance alone', async () => {
     const ctx = createTestContext({ overall: 'pass' });
     vi.mocked(ctx.worktreeManager.rebaseOntoBase).mockResolvedValue({
       alreadyUpToDate: false,
@@ -25267,6 +25278,30 @@ describe('updateFromBase', () => {
     });
     const { manager, pod } = setupParkedPod(ctx, 'failed');
 
+    // Model the genuine earlier publication. A boolean allowance without this
+    // immutable receipt is deliberately no longer force-push authority.
+    ctx.podRepo.update(pod.id, {
+      ...validatedPodUpdates(pod.id),
+      prUrl: 'https://github.com/org/repo/pull/42',
+    });
+    const predecessor = {
+      branch: pod.branch,
+      repository: 'https://github.com/org/repo',
+      commitSha: 'a'.repeat(40),
+      treeSha: 'b'.repeat(40),
+      remoteRef: `refs/heads/${pod.branch}`,
+      worktreeClean: true as const,
+      observedRemoteCommitSha: 'a'.repeat(40),
+      observedAt: new Date().toISOString(),
+    };
+    const ledger = ctx.podRepo.sourcePublications;
+    if (!ledger) throw new Error('Missing source ledger');
+    ledger.confirm(
+      ctx.podRepo.getOrThrow(pod.id),
+      ledger.admit(ctx.podRepo.getOrThrow(pod.id), predecessor),
+      predecessor,
+    );
+    ctx.podRepo.update(pod.id, { status: 'failed' });
     // Set the force allowance via updateFromBase (spy on triggerValidation to avoid running it)
     vi.spyOn(manager, 'triggerValidation').mockResolvedValue(undefined);
     await manager.updateFromBase(pod.id);
@@ -25281,7 +25316,10 @@ describe('updateFromBase', () => {
 
     const pushCalls = vi.mocked(ctx.worktreeManager.pushBranch).mock.calls;
     // The pre-merge pushBranch call must use force: true
-    expect(pushCalls[0]?.[2]).toMatchObject({ force: true });
+    expect(pushCalls[0]?.[2]).toMatchObject({
+      force: true,
+      expectedRemoteCommitSha: predecessor.commitSha,
+    });
 
     // A second approveSession (no update-from-base in between) must NOT use force
     vi.mocked(ctx.worktreeManager.pushBranch).mockClear();

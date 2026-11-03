@@ -6,7 +6,7 @@ const head = z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
 /** Durable status survives HTTP loss; repeating POST observes the original request, never relaunches. */
 export function sourceAdoptionRoutes(
   app: FastifyInstance,
-  manager: Pick<PodManager, 'adoptSource' | 'getSourceAdoptions'>,
+  manager: Pick<PodManager, 'adoptSource' | 'getSourceAdoptions' | 'getApprovalSourceRewrite'>,
 ) {
   app.get('/pods/:podId/source-adoptions', async (request) => {
     if (!request.user?.oid)
@@ -14,7 +14,11 @@ export function sourceAdoptionRoutes(
     if (!manager.getSourceAdoptions)
       throw new AutopodError('Source recovery unavailable', 'SOURCE_RECOVERY_UNAVAILABLE', 503);
     const { podId } = request.params as { podId: string };
-    return { operations: manager.getSourceAdoptions(podId) };
+    const approvalRewrite = manager.getApprovalSourceRewrite?.(podId);
+    return {
+      operations: manager.getSourceAdoptions(podId),
+      ...(approvalRewrite ? { approvalRewrite } : {}),
+    };
   });
   app.post('/pods/:podId/source-adoptions', async (request, reply) => {
     if (!request.user?.oid)
