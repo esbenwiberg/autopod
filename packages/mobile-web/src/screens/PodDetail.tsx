@@ -100,7 +100,9 @@ export function PodDetail(): JSX.Element {
   const recoveryReason =
     data.status === 'merge_pending'
       ? data.mergeBlockReason
-      : ['failed', 'validated', 'research_ready', 'review_required'].includes(data.status)
+      : ['running', 'paused', 'failed', 'validated', 'research_ready', 'review_required'].includes(
+            data.status,
+          )
         ? (data.failureReason ?? data.mergeBlockReason)
         : null;
 
