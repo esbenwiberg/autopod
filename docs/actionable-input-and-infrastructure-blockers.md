@@ -24,9 +24,13 @@ pending question and no automatic coding or validation dispatch. Workspace captu
 is attempted before the transition; capture failures retain original resources and
 are explicit. An existing unanswered question takes priority and is never displaced.
 At the configured report threshold, Autopod also requests the existing owned pause:
-only infrastructure reports from the current lifecycle count, and the pause waits
-for the active run to settle before changing status. It retains the infrastructure
-reason without manufacturing a question. A pending real question prevents this
+only infrastructure reports from the current lifecycle count, and the stop waits
+for the active run to settle before parking as failed. It retains the infrastructure
+reason without manufacturing a question. Ordinary Resume, Rework, tell and nudge
+cannot clear the recorded infrastructure need or dispatch the same lifecycle. No
+in-place chat recovery is supported: Autopod must diagnose the needs and provision
+a qualified execution. Restart retains the block rather than inventing artifact
+collection recovery. A pending real question prevents this
 automatic pause. AI advice cannot consume this report stop threshold.
 Stream closure alone is not native termination proof: an unverified execution
 retains its active ownership and resources without another stop or retry.

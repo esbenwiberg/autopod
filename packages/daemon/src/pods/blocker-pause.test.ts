@@ -151,13 +151,28 @@ it.each([
       release();
       await process;
       if (!hasQuestion && threshold === 3)
-        await vi.waitFor(() => expect(manager.getSession(pod.id).status).toBe('paused'));
+        await vi.waitFor(() => expect(manager.getSession(pod.id).status).toBe('failed'));
       expect(manager.getSession(pod.id)).toMatchObject({
-        status: hasQuestion ? 'awaiting_input' : threshold === 3 ? 'paused' : 'failed',
+        status: hasQuestion ? 'awaiting_input' : 'failed',
         pendingEscalation: hasQuestion ? expect.objectContaining({ id: 'real-question' }) : null,
         failureReason: expect.stringContaining('Infrastructure blocked:'),
       });
       expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      if (!hasQuestion) {
+        await expect(manager.resumePod(pod.id)).rejects.toMatchObject({
+          code: 'INFRASTRUCTURE_BLOCKED',
+        });
+        await expect(
+          manager.sendMessage(pod.id, 'ok', { type: 'human', id: 'owner' }),
+        ).rejects.toMatchObject({ code: 'INFRASTRUCTURE_BLOCKED' });
+        const restarted = createPodManager(ctx.deps);
+        await expect(restarted.resumePod(pod.id)).rejects.toMatchObject({
+          code: 'INFRASTRUCTURE_BLOCKED',
+        });
+        expect(ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+        expect(ctx.runtime.resume).not.toHaveBeenCalled();
+        expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      }
       await client.close();
       await server.close();
       ctx.db.close();

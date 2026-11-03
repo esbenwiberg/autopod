@@ -109,10 +109,18 @@ export function createOperatorPause(
       );
       throw error;
     }
-    transition(settledPod, 'paused', { pauseReason: 'manual' });
+    const infrastructure = podRepo.hasInfrastructureBlocker?.(podId) === true;
+    transition(settledPod, infrastructure ? 'failed' : 'paused', {
+      pauseReason: infrastructure ? null : 'manual',
+    });
     if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);
-    emitActivityStatus(podId, 'Pod paused — use [t] tell or [u] nudge to resume');
-    logger.info({ podId }, 'Pod paused');
+    emitActivityStatus(
+      podId,
+      infrastructure
+        ? 'Infrastructure blocked; execution settled and source retained. Ordinary Resume, tell and nudge cannot repair the recorded needs. Autopod execution diagnosis and a qualified execution are required.'
+        : 'Pod paused — use [t] tell or [u] nudge to resume',
+    );
+    logger.info({ podId }, infrastructure ? 'Pod blocked by infrastructure' : 'Pod paused');
   }
   return { pauseSession };
 }

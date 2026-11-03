@@ -318,6 +318,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   fleetArchives?: FleetArchiveRepository;
   completionJournal?: CompletionJournal;
   hasUnansweredDecision?(podId: string): boolean;
+  hasInfrastructureBlocker?(podId: string): boolean;
   insert(pod: NewPod): void;
   getFindingsReceipts?(id: string): NonNullable<Pod['researchFindings']>[];
   getOrThrow(id: string): Pod;
@@ -852,6 +853,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
     executionProvenance: createExecutionProvenanceLedger(db),
     completionJournal,
     hasUnansweredDecision: (podId) => hasUnansweredDecision(db, podId),
+    hasInfrastructureBlocker: (podId) =>
+      Boolean(
+        db
+          .prepare(`SELECT 1 FROM escalations e JOIN pods p ON p.id=e.pod_id
+      WHERE p.id=? AND e.type='report_blocker' AND json_extract(e.payload,'$.kind')='infrastructure'
+      AND json_extract(e.payload,'$.lifecycleGeneration')=p.lifecycle_generation LIMIT 1`)
+          .get(podId),
+      ),
     deliveryLedger: createDeliveryLedger(db),
     sourcePublications: createSourcePublicationLedger(db),
     externalDeliveries,

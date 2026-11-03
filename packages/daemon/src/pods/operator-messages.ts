@@ -13,7 +13,7 @@ import {
   prepareRetainedAgentContinuation,
 } from './continuation-preflight.js';
 import { resolvePrBaseBranch } from './delivery-policy.js';
-import { persistCompletionReply } from './escalation-coordinator.js';
+import { assertNoInfrastructureBlocker, persistCompletionReply } from './escalation-coordinator.js';
 import type {
   OperatorMessageCalls,
   OperatorMessageLiveDependencies,
@@ -72,6 +72,8 @@ export function createOperatorMessages(
       );
     }
     const pod = podRepo.getOrThrow(podId);
+    if (pod.status === 'paused' || pod.status === 'failed')
+      assertNoInfrastructureBlocker(podRepo, podId);
     if (deps.launchConfiguration?.read(podId)?.intent === 'goal') {
       const goal = deps.launchConfiguration.goals?.get(podId);
       const escalation = pod.pendingEscalation;

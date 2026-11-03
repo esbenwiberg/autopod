@@ -339,6 +339,7 @@ describe('completion human gate persistence', () => {
       });
       expect(f.repo.getOrThrow('worker').status).toBe('running');
       const reopened = f.reopen();
+      expect(reopened.repo.hasInfrastructureBlocker?.('worker')).toBe(true);
       const gate = createCompletionHumanGate({
         ...f.dependencies,
         podRepo: reopened.repo,

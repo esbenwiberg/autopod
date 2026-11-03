@@ -75,6 +75,14 @@ export async function reconcileSandboxSessions(deps: ReconcilerDependencies): Pr
 async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise<void> {
   const { sandboxContainerManager, podRepo, eventBus, logger } = deps;
   const assertCurrent = captureValidationMutationGuard(podRepo, pod);
+  if (podRepo.hasInfrastructureBlocker?.(pod.id)) {
+    podRepo.update(pod.id, {
+      lastRecoveryTrigger: 'restart',
+      lastCorrectionMessage:
+        'Infrastructure remains blocked. Original execution, source and reports retained; no automatic retry or chat recovery is supported.',
+    });
+    return;
+  }
   if (hasInterruptedArtifactCollection(pod)) {
     parkSession(pod, 'failed', ARTIFACT_RESTART_REASON, podRepo, eventBus);
     return;
