@@ -514,9 +514,7 @@ it.each(['series_id', 'pr_mode'] as const)(
     try {
       addRepair(f, 'parent', 'fix', 11);
       f.db.prepare(`UPDATE pods SET ${column}='foreign' WHERE id='fix'`).run();
-      expect(() => f.ledger.inspect('fix', 1, repository, 'main', base)).toThrow(
-        'repair identity',
-      );
+      expect(() => f.ledger.inspect('fix', 1, repository, 'main', base)).toThrow('repair identity');
       expect(f.ledger.latest('fix')).toBeNull();
     } finally {
       f.db.close();
