@@ -15,6 +15,7 @@ import { basename, dirname, join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { type ArtifactOutput, AutopodError, type NativeGoalProcessIdentity } from '@autopod/shared';
+import type Database from 'better-sqlite3';
 import Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 import tar from 'tar-stream';
@@ -30,6 +31,7 @@ import type {
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
 import { extractManagedDockerOutput } from '../managed/output-extraction.js';
+import { assertCheckpointResourceNotRetained } from '../pods/retained-checkpoint-repository.js';
 import { assertDirectoryExtractionCurrent } from './directory-extraction-ownership.js';
 import {
   DOCKER_CALL_TIMEOUTS,
@@ -192,6 +194,7 @@ interface DockerContainerManagerOptions {
   docker?: Dockerode;
   logger: Logger;
   imagePuller?: ImagePuller | null;
+  managedDatabase?: Database.Database;
 }
 
 interface ImagePuller {
@@ -203,9 +206,15 @@ export class DockerContainerManager implements ContainerManager {
   private docker: Dockerode;
   private logger: Logger;
   private imagePuller: ImagePuller | null;
+  private managedDatabase?: Database.Database;
+  private assertNotRetained(containerId: string) {
+    if (this.managedDatabase)
+      assertCheckpointResourceNotRetained(this.managedDatabase, containerId);
+  }
   readonly supportsExecRecovery = true;
 
-  constructor({ docker, logger, imagePuller }: DockerContainerManagerOptions) {
+  constructor({ docker, logger, imagePuller, managedDatabase }: DockerContainerManagerOptions) {
+    this.managedDatabase = managedDatabase;
     this.docker = docker ?? new Dockerode();
     this.logger = logger;
     this.imagePuller = imagePuller ?? null;
@@ -480,6 +489,7 @@ export class DockerContainerManager implements ContainerManager {
   }
 
   async stop(containerId: string): Promise<void> {
+    this.assertNotRetained(containerId);
     try {
       const container = this.docker.getContainer(containerId);
       await boundedDockerCall(container.stop({ t: 10 }), {
@@ -552,9 +562,11 @@ export class DockerContainerManager implements ContainerManager {
   }
 
   async start(containerId: string, options: ContainerStartOptions = {}): Promise<void> {
+    this.assertNotRetained(containerId);
     try {
       options.assertCurrent?.();
       const running = await this.isContainerListedAsRunning(containerId);
+      this.assertNotRetained(containerId);
       options.assertCurrent?.();
       if (running) {
         this.logger.debug({ containerId }, 'Container already running');
@@ -580,6 +592,7 @@ export class DockerContainerManager implements ContainerManager {
   }
 
   async kill(containerId: string): Promise<void> {
+    this.assertNotRetained(containerId);
     try {
       const container = this.docker.getContainer(containerId);
       try {
@@ -605,6 +618,7 @@ export class DockerContainerManager implements ContainerManager {
         }
       }
       try {
+        this.assertNotRetained(containerId);
         await boundedDockerCall(container.remove({ force: true }), {
           label: 'container.remove (kill)',
           timeoutMs: DOCKER_CALL_TIMEOUTS.remove,
@@ -648,6 +662,7 @@ export class DockerContainerManager implements ContainerManager {
     content: string | Buffer,
     options?: FileWriteOptions,
   ): Promise<void> {
+    this.assertNotRetained(containerId);
     options?.assertCurrent?.();
     const container = this.docker.getContainer(containerId);
 
@@ -716,6 +731,7 @@ export class DockerContainerManager implements ContainerManager {
   }
 
   async readFileBinary(containerId: string, filePath: string): Promise<Buffer> {
+    this.assertNotRetained(containerId);
     const container = this.docker.getContainer(containerId);
 
     // getArchive returns a tar stream of the file/directory at the given path
@@ -756,6 +772,7 @@ export class DockerContainerManager implements ContainerManager {
     staging: string,
     output: ArtifactOutput,
   ): Promise<void> {
+    this.assertNotRetained(containerId);
     const archive = await boundedDockerCall(
       this.docker.getContainer(containerId).getArchive({ path: '/output' }),
       {
@@ -775,6 +792,7 @@ export class DockerContainerManager implements ContainerManager {
     excludes?: string[],
     options?: DirectoryExtractionOptions,
   ): Promise<void> {
+    this.assertNotRetained(containerId);
     assertDirectoryExtractionCurrent(options);
     const container = this.docker.getContainer(containerId);
     // getArchive works on stopped containers — safe to call after container exits
@@ -953,6 +971,7 @@ export class DockerContainerManager implements ContainerManager {
     command: string[],
     options?: ExecOptions,
   ): Promise<ExecResult> {
+    this.assertNotRetained(containerId);
     const container = this.docker.getContainer(containerId);
     const safeCommand = command.map((a) => (a.length > 1024 ? `<arg: ${a.length} bytes>` : a));
 
@@ -977,6 +996,7 @@ export class DockerContainerManager implements ContainerManager {
       containerId,
     });
     options?.assertCurrent?.();
+    this.assertNotRetained(containerId);
     const stream = await boundedDockerCall(exec.start({ hijack: true, stdin: false }), {
       label: 'exec.start (execInContainer)',
       timeoutMs: DOCKER_CALL_TIMEOUTS.execStart,
@@ -1020,6 +1040,7 @@ export class DockerContainerManager implements ContainerManager {
     command: string[],
     options?: ExecOptions,
   ): Promise<StreamingExecResult> {
+    this.assertNotRetained(containerId);
     const container = this.docker.getContainer(containerId);
     const safeCommand = command.map((a) => (a.length > 1024 ? `<arg: ${a.length} bytes>` : a));
 

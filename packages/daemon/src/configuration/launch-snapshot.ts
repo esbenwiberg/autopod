@@ -4,6 +4,10 @@ import { createScanReportRepository } from '../scheduled-jobs/scan-report-reposi
 import { type ConfigurationStore, configurationError } from './configuration-store.js';
 import { deriveLaunch } from './derive-launch.js';
 import { assertFindingsWorkflow, configurationDigest } from './launch-resolver.js';
+import {
+  type RetainedExecutionSelection,
+  retainedContinuationLaunch,
+} from './retained-continuation-launch.js';
 import { deriveScanRepair, readScanConfiguration } from './scan-repair-config.js';
 
 export interface LaunchSnapshotRepository {
@@ -76,13 +80,32 @@ export function createLaunchSnapshotRepository(
     const phases = db
       .prepare('SELECT digest,parent_digest,payload FROM pod_launch_phases WHERE pod_id=?')
       .all(podId) as Array<{ digest: string; parent_digest: string; payload: string }>;
+    const continuations = (
+      db
+        .prepare(`SELECT r.binding FROM retained_checkpoint_recoveries r
+      WHERE r.pod_id=? AND EXISTS(SELECT 1 FROM retained_checkpoint_recovery_events e WHERE e.recovery_id=r.id AND e.kind='activated')
+      AND json_extract(r.binding,'$.continuation.execution') IS NOT NULL`)
+        .all(podId) as { binding: string }[]
+    ).map((row) => JSON.parse(row.binding).continuation.execution as RetainedExecutionSelection);
     let current = result;
     const visited = new Set([current.digest]);
     // Worker promotion is a bounded continuation of the original admitted template.
     for (let hop = 0; hop < 32; hop++) {
       const next = phases.filter((phase) => phase.parent_digest === current.digest);
-      if (next.length !== 1 || !next[0]) break;
+      const continuation = continuations.filter(
+        (selection) => selection.parentDigest === current.digest,
+      );
+      if (next.length + continuation.length !== 1) break;
+      if (continuation[0]) {
+        current = retainedContinuationLaunch(current, podId, continuation[0]);
+        if (visited.has(current.digest))
+          configurationError('Continuation launch cycle', 'SNAPSHOT_CORRUPT', 500);
+        visited.add(current.digest);
+        if (current.digest === row.launch_config_digest) return current;
+        continue;
+      }
       const phase = next[0];
+      if (!phase) break;
       const config = JSON.parse(phase.payload) as EffectiveLaunchConfig;
       if (
         visited.has(phase.digest) ||

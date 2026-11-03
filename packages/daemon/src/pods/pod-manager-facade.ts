@@ -95,6 +95,30 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
         actor,
       );
     },
+    previewRetainedExecution(podId: string, profileId: string) {
+      return (
+        captured.checkpointRecovery ?? checkpointError('Retained continuation unavailable')
+      ).previewExecution(podId, profileId);
+    },
+    continueRetained(
+      podId: string,
+      input: import('@autopod/shared').RetainedContinuationRequest,
+      actor: OperatorActor,
+    ) {
+      return (
+        captured.checkpointRecovery ?? checkpointError('Retained continuation unavailable')
+      ).continueRetained(podId, input, actor);
+    },
+    checkRetainedCandidate(
+      podId: string,
+      recoveryId: string,
+      input: import('@autopod/shared').RetainedContinuationCheckRequest,
+      actor: OperatorActor,
+    ) {
+      return (
+        captured.checkpointRecovery ?? checkpointError('Retained continuation unavailable')
+      ).checkCandidate(podId, recoveryId, input, actor);
+    },
     recoverCheckpoint(podId: string, input: CheckpointRecoveryRequest, actor: OperatorActor) {
       return (
         captured.checkpointRecovery ?? checkpointError('Checkpoint recovery unavailable')

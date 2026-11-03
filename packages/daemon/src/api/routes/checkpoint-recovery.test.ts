@@ -24,6 +24,9 @@ describe('human-only retained checkpoint selection', () => {
       recoverCheckpoint: f.recovery.submit,
       getCheckpointRecoveries: f.recovery.list,
       reconcileCheckpointOutcome: f.recovery.reconcileOutcome,
+      continueRetained: f.recovery.continueRetained,
+      checkRetainedCandidate: f.recovery.checkCandidate,
+      previewRetainedExecution: f.recovery.previewExecution,
     });
     await app.ready();
   });
@@ -33,6 +36,59 @@ describe('human-only retained checkpoint selection', () => {
     f.ctx.db.close();
     await rm(f.root, { recursive: true, force: true });
     vi.unstubAllEnvs();
+  });
+  it('strictly authenticates new continuation and candidate selection without accepting caller proof', async () => {
+    const url = `/pods/${f.podId}/retained-continuation`;
+    const input = { ...f.input, prepareOnly: true };
+    for (const authorization of [undefined, 'Bearer pod-token']) {
+      for (const path of [url, `${url}/${f.input.id}/check`]) {
+        const result = await app.inject({
+          method: 'POST',
+          url: path,
+          payload: input,
+          headers: authorization ? { authorization } : {},
+        });
+        expect(result.statusCode).toBe(401);
+      }
+    }
+    for (const extra of [
+      { force: true },
+      { actor: f.actor },
+      { sourcePath: '/tmp/other' },
+      { launchConfig: {} },
+      { result: { overall: 'pass' } },
+      { checkpointHead: 'main' },
+    ]) {
+      expect(
+        (await app.inject({ method: 'POST', url, headers, payload: { ...input, ...extra } }))
+          .statusCode,
+      ).toBe(400);
+    }
+    expect(f.cm.getStatus).not.toHaveBeenCalled();
+    f.worktrees.selectRetainedContinuationSource = vi.fn(async () => ({
+      head: f.prepared.head,
+      tree: f.prepared.tree,
+      baseCommitSha: '1'.repeat(40),
+    }));
+    const result = await app.inject({ method: 'POST', url, headers, payload: input });
+    expect(result.statusCode, result.body).toBe(202);
+    await f.recovery.wait(f.input.id);
+    expect(f.pod().status).toBe('review_required');
+    expect(f.deps.enqueue).not.toHaveBeenCalled();
+    const check = await app.inject({
+      method: 'POST',
+      url: `${url}/${f.input.id}/check`,
+      headers,
+      payload: {
+        expectedGeneration: f.input.expectedGeneration,
+        expectedResultHash: f.input.expectedResultHash,
+        candidateHead: f.prepared.head,
+        reason: 'Select prepared exact source for new checks and independent review',
+      },
+    });
+    expect(check.statusCode, check.body).toBe(202);
+    expect(check.json().operation.selected.head).toBe(f.prepared.head);
+    expect(f.deps.enqueue).toHaveBeenCalledTimes(1);
   });
   it('inspects without any provider observation, credential rotation or queue dispatch', async () => {
     const result = await app.inject({ url: endpoint(), headers });

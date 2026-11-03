@@ -115,6 +115,15 @@ checks and before canonical result publication. Unexpected tracked/lockfile
 mutation fails closed. Returned results are retained as **unaccepted observations**
 before certification; current proof is never relabelled from historical results.
 
+## Independent continuation instead of in-place adoption
+
+For an ordinary PR/branch task using custom validation or divergent legacy source,
+use [retention-safe continuation](retained-pod-continuation.md) after deploying its
+version. It preserves the original and selects a separate checkout for explicit
+repair/fresh checks, with optional previewed replacement software/resources. It
+does not relax this in-place controller's full-suite/FF/host-container constraints,
+settle an original unknown execution, or grant publication/retry authority.
+
 ## Deliberate limits and remaining recovery work
 
 - Errors/crashes/lost transport retain phase, immutable evidence and originals;

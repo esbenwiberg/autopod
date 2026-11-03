@@ -65,6 +65,10 @@ container. Neither completion nor these records authorizes deleting historical
 source, releasing reports, or settling an uncertain Azure wakeup. Old incidents
 without a rewrite binding do not acquire retroactive force-push authority; retain
 and inspect their exact source before any separately authorized recovery.
+[Retention-safe continuation](retained-pod-continuation.md) can explicitly select
+an exact current remote source into an independent checkout, preserve the old
+source/resource, and require fresh configured checks/review and a new human
+approval. It grants no historical force lease and never rewinds the remote.
 
 ## Explicit recovery of an uncertain ADO request
 

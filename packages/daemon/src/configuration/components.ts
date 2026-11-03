@@ -42,10 +42,18 @@ import { deriveLaunch } from './derive-launch.js';
 import { createLaunchExecutionCredentials } from './execution-credentials.js';
 import { admitLaunch } from './launch-admission.js';
 import { resolveLaunchExecutionSettings } from './launch-execution-settings.js';
-import { type LaunchResolutionServices, configurationDigest } from './launch-resolver.js';
+import {
+  type LaunchResolutionServices,
+  configurationDigest,
+  resolveLaunch,
+} from './launch-resolver.js';
 import { createLaunchSnapshotRepository } from './launch-snapshot.js';
 import { nativeGoalCapabilities } from './native-goal-capabilities.js';
 import { resolveExecution } from './resolve-execution.js';
+import {
+  type RetainedExecutionSelection,
+  retainedContinuationLaunch,
+} from './retained-continuation-launch.js';
 import { createScanLaunches } from './scan-launches.js';
 import { createScopedPodTools } from './scoped-pod-tools.js';
 import { ConfigurationSecurityPolicyStore } from './security-policy.js';
@@ -270,6 +278,42 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     executionSettings: (config) =>
       resolveLaunchExecutionSettings(config, { image: config.resolvedEnvironment.pinnedBase }),
     assertCurrentCapabilities: assertCurrent,
+    async previewRetainedExecution(podId, profileId) {
+      const parent = snapshots.get(podId);
+      if (!parent?.repository)
+        configurationError('Original task launch unavailable', 'CONFIG_SOURCE_MISSING', 409);
+      const template = await resolveLaunch(
+        {
+          repositoryId: parent.repository.id,
+          repositorySetupId: parent.repository.setup.id,
+          profileId,
+          task: parent.task,
+        },
+        resolution,
+      );
+      if (
+        template.requiredSidecarIds.length ||
+        Object.keys(template.resolvedExecution.sidecars).length
+      )
+        configurationError(
+          'Replacement sidecars are not supported',
+          'CONTINUATION_EXECUTION_INVALID',
+          409,
+        );
+      const selection: RetainedExecutionSelection = {
+        profileId,
+        parentDigest: parent.digest,
+        environment: template.environment,
+        resolvedEnvironment: template.resolvedEnvironment,
+        target: template.execution.target,
+        main: template.resolvedExecution.main,
+        resolvedExecution: template.resolvedExecution,
+        digest: '',
+      };
+      const config = retainedContinuationLaunch(parent, podId, selection);
+      await assertCurrent(config);
+      return { ...selection, digest: config.digest };
+    },
     async beginGoalRework(podId, task, apply) {
       const owner = options.pods.getOrThrow(podId);
       const parent = snapshots.get(podId);

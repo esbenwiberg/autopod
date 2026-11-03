@@ -128,6 +128,17 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
       return publishCommittedSource(ledger, anchor, repository, worktreeManager, config);
     };
     assertApprovalCurrent(pod);
+    const continuation = podRepo.retainedCheckpoints?.latest(podId);
+    if (
+      continuation?.binding.continuation &&
+      continuation.activated?.generation === pod.lifecycleGeneration &&
+      (actor.type !== 'human' || !actor.userId.trim())
+    )
+      throw new AutopodError(
+        'Retained continuation requires a fresh authenticated human approval. Original resources remain retained.',
+        'DELIVERY_RECONCILIATION_REQUIRED',
+        409,
+      );
     const selectedRewrite = podRepo.approvalRewrites?.assertDelivery(pod, true);
     const rewriteSelection = podRepo.approvalRewrites?.latest(pod);
     if (

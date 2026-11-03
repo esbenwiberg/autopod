@@ -419,6 +419,127 @@ export interface LocalWorktreeManagerConfig {
  * Each pod gets its own worktree checked out from the bare repo.
  */
 export class LocalWorktreeManager implements WorktreeManager {
+  async assertSourceDescendsFrom(worktreePath: string, head: string): Promise<void> {
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(head))
+      throw new AutopodError('Exact source ancestor required', 'CHECKPOINT_SOURCE_UNVERIFIED', 409);
+    await git(
+      [
+        '--no-replace-objects',
+        '-c',
+        'core.hooksPath=/dev/null',
+        'merge-base',
+        '--is-ancestor',
+        head,
+        'HEAD',
+      ],
+      { cwd: worktreePath, env: SOURCE_GIT_ENV },
+    );
+  }
+
+  async selectRetainedContinuationSource(
+    config: Parameters<NonNullable<WorktreeManager['selectRetainedContinuationSource']>>[0],
+  ) {
+    const [candidate, original] = await Promise.all([
+      fs.realpath(config.worktreePath),
+      fs.realpath(config.originalWorktreePath),
+    ]);
+    const independent = async () => {
+      const common = async (cwd: string) =>
+        fs.realpath(
+          path.resolve(
+            cwd,
+            (
+              await git(['rev-parse', '--git-common-dir'], { cwd, env: SOURCE_GIT_ENV })
+            ).stdout.trim(),
+          ),
+        );
+      const [left, right] = await Promise.all([common(candidate), common(original)]);
+      if (candidate === original || left === right)
+        throw new AutopodError(
+          'Continuation must use independent source and Git storage',
+          'CHECKPOINT_SOURCE_UNVERIFIED',
+          409,
+        );
+      config.assertCurrent();
+    };
+    await independent();
+    const before = await this.inspectSourceAdoption(candidate, config.branch);
+    if (
+      before.commitSha !== config.head ||
+      (config.remoteHead !== undefined &&
+        !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(config.remoteHead))
+    )
+      throw new AutopodError(
+        'Prepared source or exact remote selection changed',
+        'CHECKPOINT_SOURCE_UNVERIFIED',
+        409,
+      );
+    const remote = await this.getAuthenticatedRemote(candidate);
+    assertMergeRepository(
+      { repository: config.repository, branch: config.branch, baseBranch: config.branch },
+      remote.url,
+    );
+    const ref = 'refs/autopod/retained-continuation/source';
+    const baseRef = `refs/remotes/origin/${config.baseBranch}`;
+    await git(['check-ref-format', `refs/heads/${config.branch}`], {
+      cwd: candidate,
+      env: SOURCE_GIT_ENV,
+    });
+    await git(['check-ref-format', baseRef], { cwd: candidate, env: SOURCE_GIT_ENV });
+    await git(
+      [
+        '--no-replace-objects',
+        '-c',
+        'core.hooksPath=/dev/null',
+        'fetch',
+        '--no-tags',
+        remote.url,
+        `+refs/heads/${config.baseBranch}:${baseRef}`,
+        ...(config.remoteHead ? [`refs/heads/${config.branch}:${ref}`] : []),
+      ],
+      {
+        cwd: candidate,
+        credential: remote.credential,
+        credentialUrl: remote.url,
+        env: SOURCE_GIT_ENV,
+        timeout: 60_000,
+      },
+    );
+    await independent();
+    const baseCommitSha = (
+      await git(['rev-parse', baseRef], { cwd: candidate, env: SOURCE_GIT_ENV })
+    ).stdout.trim();
+    const fetched = config.remoteHead
+      ? (await git(['rev-parse', ref], { cwd: candidate, env: SOURCE_GIT_ENV })).stdout.trim()
+      : config.head;
+    if (config.remoteHead && fetched !== config.remoteHead)
+      throw new AutopodError(
+        'Remote branch changed; original work remains retained',
+        'SOURCE_REMOTE_CHANGED',
+        409,
+      );
+    // This branch belongs to a new private clone, never the original or a remote ref.
+    if (config.remoteHead)
+      await git(
+        [
+          '--no-replace-objects',
+          '-c',
+          'core.hooksPath=/dev/null',
+          'checkout',
+          '--no-overwrite-ignore',
+          '-B',
+          config.branch,
+          ref,
+        ],
+        { cwd: candidate, env: SOURCE_GIT_ENV },
+      );
+    await independent();
+    const source = await this.inspectSourceAdoption(candidate, config.branch);
+    if (source.commitSha !== fetched)
+      throw new AutopodError('Selected source changed', 'CHECKPOINT_SOURCE_UNVERIFIED', 409);
+    return { head: source.commitSha, tree: source.treeSha, baseCommitSha };
+  }
+
   async prepareSourceAdoption(config: PrepareSourceAdoption) {
     const remote = await this.getAuthenticatedRemote(config.worktreePath);
     assertMergeRepository(

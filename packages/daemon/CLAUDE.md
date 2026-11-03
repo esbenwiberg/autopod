@@ -145,6 +145,20 @@ than `origin/<branch>` or an in-memory force allowance. Read-only status is
 included in `ap source-recovery`. Missing/uncertain preparation evidence fails
 closed; historical incidents do not acquire retroactive rewrite permission.
 
+### Retention-safe task continuation
+
+`ap retained-continuation` explicitly selects independent source for ordinary
+PR/branch tasks, including custom workflows with independent review. It reuses
+retained-checkpoint custody/epochs/accounting, not destructive Rework. Originals
+are preserved; exact remote selection and prepare-only human repair are supported.
+A separately previewed execution profile may select software/resources only;
+original repository, AI, workflow, network and other authority remain frozen.
+No coding worker starts or budget resets. Fresh checks/review and new reports
+stop at validated for a separate authenticated human approval. Legacy recovery
+controls remain blocked while this source is owned. Never clear custody to retry
+or downgrade to an unaware binary after selection. See
+`docs/retained-pod-continuation.md` at the repository root.
+
 ## Database
 
 ### Connection (`src/db/connection.ts`)

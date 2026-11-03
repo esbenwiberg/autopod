@@ -491,7 +491,12 @@ if (MOCK_DOCKER) {
     const { AcrClient } = await import('./images/acr-client.js');
     acr = new AcrClient({ registryUrl: ACR_REGISTRY_URL }, d);
   }
-  containerManager = new DockerContainerManager({ docker: d, logger, imagePuller: acr });
+  containerManager = new DockerContainerManager({
+    docker: d,
+    logger,
+    imagePuller: acr,
+    managedDatabase: db,
+  });
   networkManager = new DockerNetworkManager({ docker: d, logger });
   sidecarManager = new DockerSidecarManager({ docker: d, logger });
 }

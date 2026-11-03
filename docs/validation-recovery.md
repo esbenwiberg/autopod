@@ -78,6 +78,15 @@ A per-cycle “attempt 1 of 3” label is not three new task-wide retry grants. 
 admission requires human authorization, use the explicit retry-authorization card;
 these controls neither authorize nor reset allowances automatically.
 
+## Retained source ownership
+
+An explicit [retained continuation](retained-pod-continuation.md) owns its selected
+source through checks and subsequent approval. Ordinary Fix validation/Rework and
+Retry checks are then unavailable, including after a failed check: they cannot
+replace the resource, reset counters or detach that source. Inspect the durable
+operation and current execution first. Passing source-bound checks/review still
+requires fresh human approval; automation cannot consume the earlier approval.
+
 ## Diagnostics
 
 Worker feedback retains bounded log head **and tail**. The desktop lifts decisive

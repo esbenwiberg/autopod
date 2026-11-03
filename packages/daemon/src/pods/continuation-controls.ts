@@ -112,7 +112,16 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
     });
   }
 
+  function assertOrdinaryRecoveryAllowed(podId: string) {
+    if (podRepo.retainedCheckpoints?.latest(podId)?.binding.continuation)
+      throw new AutopodError(
+        'Retained continuation owns this source; select a retained candidate instead of legacy Rework or Retry checks.',
+        'CONTINUATION_SOURCE_HELD',
+        409,
+      );
+  }
   function assertCanRetryValidation(podId: string): void {
+    assertOrdinaryRecoveryAllowed(podId);
     assertExecutionTerminationVerified(podId);
     assertGuidanceCollected(podId);
     const pod = podRepo.getOrThrow(podId);
@@ -141,6 +150,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
   }
 
   function assertCanRework(podId: string): void {
+    assertOrdinaryRecoveryAllowed(podId);
     assertExecutionTerminationVerified(podId);
     const pod = podRepo.getOrThrow(podId);
     assertValidationExecutionSettled(pod, podRepo.validationExecutions?.isSettled(pod));
