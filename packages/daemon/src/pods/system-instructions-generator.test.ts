@@ -203,6 +203,7 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('TLS bypass');
     expect(md).toContain('Linux cannot run Xcode');
     expect(md).not.toContain('You face a meaningful decision with multiple reasonable paths');
+    expect(md).not.toContain('Use ask_human when uncertain rather than guessing');
     expect(md).toContain('ask_ai');
     expect(md).toContain('report_blocker');
   });

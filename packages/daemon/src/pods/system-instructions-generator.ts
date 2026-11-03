@@ -760,7 +760,9 @@ export function generateSystemInstructions(
         'If you use the shell, keep each read a simple standalone command on a repository path (`sed -n 1,200p src/file.ts`, `cat src/file.ts | head -80`). ' +
         'Process-health telemetry only credits reads it can attribute to a specific file; reads hidden in recursive greps, subshells, or command substitution look like blind edits.',
     );
-    lines.push('- Use ask_human when uncertain rather than guessing');
+    lines.push(
+      '- Use ask_human for actionable scope, product or authority decisions after bounded investigation. Use report_blocker for infrastructure; make reasonable local implementation choices within the brief.',
+    );
     lines.push('- Do NOT modify configuration files unless required by the task');
   }
   lines.push('');
