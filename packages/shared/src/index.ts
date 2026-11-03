@@ -6,7 +6,11 @@ export type {
   ValidationExecutionRecoveryRequest,
 } from './types/validation-execution-recovery.js';
 // Types
-export type { CheckpointRecoveryRequest } from './types/checkpoint-recovery.js';
+export type {
+  CheckpointRecoveryRequest,
+  RetainedContinuationRequest,
+  RetainedContinuationCheckRequest,
+} from './types/checkpoint-recovery.js';
 export type { ExternalDeliveryReceipt } from './types/external-delivery.js';
 export type {
   ValidationRecoveryAction,

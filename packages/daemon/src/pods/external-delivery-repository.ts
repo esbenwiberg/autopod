@@ -1,5 +1,6 @@
 import { AutopodError, type ExternalDeliveryReceipt } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { assertMergeTarget } from '../worktrees/merge-source-identity.js';
 
 export function createExternalDeliveryRepository(db: Database.Database) {
   const get = (podId: string): ExternalDeliveryReceipt | null => {
@@ -71,6 +72,22 @@ export function createExternalDeliveryRepository(db: Database.Database) {
           'STALE_EXTERNAL_DELIVERY',
           409,
         );
+      }
+      if (receipt.ancestry || receipt.mergedHeadSha) {
+        const proof = receipt.ancestry;
+        if (
+          !proof ||
+          proof.publishedHeadSha !== receipt.headSha ||
+          proof.mergedHeadSha !== receipt.mergedHeadSha ||
+          !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(proof.mergedHeadSha) ||
+          !Number.isFinite(Date.parse(proof.observedAt))
+        )
+          throw new AutopodError(
+            'External ancestry evidence is invalid',
+            'STALE_EXTERNAL_DELIVERY',
+            409,
+          );
+        assertMergeTarget(receipt, proof.target);
       }
       const validation = JSON.parse(String(current.last_validation_result)) as {
         overall?: string;

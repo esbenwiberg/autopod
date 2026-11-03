@@ -8,6 +8,8 @@ import type { Logger } from 'pino';
 import { type DaemonGitHubAuth, DaemonGitHubAuthError } from '../github/daemon-github-auth.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type {
+  ApprovalRebaseConfig,
+  ApprovalRebaseResult,
   BranchDiffConfig,
   BranchFolderContents,
   BranchPublicationOptions,
@@ -42,6 +44,7 @@ import {
   truncateDiffAtFileBoundary,
 } from './diff-utils.js';
 import { assertMergeRepository } from './merge-source-identity.js';
+import { prepareRetainedCheckpointWorkspace } from './retained-checkpoint-workspace.js';
 import {
   applyPinnedAdoption,
   inspectAdoptionGit,
@@ -416,6 +419,127 @@ export interface LocalWorktreeManagerConfig {
  * Each pod gets its own worktree checked out from the bare repo.
  */
 export class LocalWorktreeManager implements WorktreeManager {
+  async assertSourceDescendsFrom(worktreePath: string, head: string): Promise<void> {
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(head))
+      throw new AutopodError('Exact source ancestor required', 'CHECKPOINT_SOURCE_UNVERIFIED', 409);
+    await git(
+      [
+        '--no-replace-objects',
+        '-c',
+        'core.hooksPath=/dev/null',
+        'merge-base',
+        '--is-ancestor',
+        head,
+        'HEAD',
+      ],
+      { cwd: worktreePath, env: SOURCE_GIT_ENV },
+    );
+  }
+
+  async selectRetainedContinuationSource(
+    config: Parameters<NonNullable<WorktreeManager['selectRetainedContinuationSource']>>[0],
+  ) {
+    const [candidate, original] = await Promise.all([
+      fs.realpath(config.worktreePath),
+      fs.realpath(config.originalWorktreePath),
+    ]);
+    const independent = async () => {
+      const common = async (cwd: string) =>
+        fs.realpath(
+          path.resolve(
+            cwd,
+            (
+              await git(['rev-parse', '--git-common-dir'], { cwd, env: SOURCE_GIT_ENV })
+            ).stdout.trim(),
+          ),
+        );
+      const [left, right] = await Promise.all([common(candidate), common(original)]);
+      if (candidate === original || left === right)
+        throw new AutopodError(
+          'Continuation must use independent source and Git storage',
+          'CHECKPOINT_SOURCE_UNVERIFIED',
+          409,
+        );
+      config.assertCurrent();
+    };
+    await independent();
+    const before = await this.inspectSourceAdoption(candidate, config.branch);
+    if (
+      before.commitSha !== config.head ||
+      (config.remoteHead !== undefined &&
+        !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(config.remoteHead))
+    )
+      throw new AutopodError(
+        'Prepared source or exact remote selection changed',
+        'CHECKPOINT_SOURCE_UNVERIFIED',
+        409,
+      );
+    const remote = await this.getAuthenticatedRemote(candidate);
+    assertMergeRepository(
+      { repository: config.repository, branch: config.branch, baseBranch: config.branch },
+      remote.url,
+    );
+    const ref = 'refs/autopod/retained-continuation/source';
+    const baseRef = `refs/remotes/origin/${config.baseBranch}`;
+    await git(['check-ref-format', `refs/heads/${config.branch}`], {
+      cwd: candidate,
+      env: SOURCE_GIT_ENV,
+    });
+    await git(['check-ref-format', baseRef], { cwd: candidate, env: SOURCE_GIT_ENV });
+    await git(
+      [
+        '--no-replace-objects',
+        '-c',
+        'core.hooksPath=/dev/null',
+        'fetch',
+        '--no-tags',
+        remote.url,
+        `+refs/heads/${config.baseBranch}:${baseRef}`,
+        ...(config.remoteHead ? [`refs/heads/${config.branch}:${ref}`] : []),
+      ],
+      {
+        cwd: candidate,
+        credential: remote.credential,
+        credentialUrl: remote.url,
+        env: SOURCE_GIT_ENV,
+        timeout: 60_000,
+      },
+    );
+    await independent();
+    const baseCommitSha = (
+      await git(['rev-parse', baseRef], { cwd: candidate, env: SOURCE_GIT_ENV })
+    ).stdout.trim();
+    const fetched = config.remoteHead
+      ? (await git(['rev-parse', ref], { cwd: candidate, env: SOURCE_GIT_ENV })).stdout.trim()
+      : config.head;
+    if (config.remoteHead && fetched !== config.remoteHead)
+      throw new AutopodError(
+        'Remote branch changed; original work remains retained',
+        'SOURCE_REMOTE_CHANGED',
+        409,
+      );
+    // This branch belongs to a new private clone, never the original or a remote ref.
+    if (config.remoteHead)
+      await git(
+        [
+          '--no-replace-objects',
+          '-c',
+          'core.hooksPath=/dev/null',
+          'checkout',
+          '--no-overwrite-ignore',
+          '-B',
+          config.branch,
+          ref,
+        ],
+        { cwd: candidate, env: SOURCE_GIT_ENV },
+      );
+    await independent();
+    const source = await this.inspectSourceAdoption(candidate, config.branch);
+    if (source.commitSha !== fetched)
+      throw new AutopodError('Selected source changed', 'CHECKPOINT_SOURCE_UNVERIFIED', 409);
+    return { head: source.commitSha, tree: source.treeSha, baseCommitSha };
+  }
+
   async prepareSourceAdoption(config: PrepareSourceAdoption) {
     const remote = await this.getAuthenticatedRemote(config.worktreePath);
     assertMergeRepository(
@@ -1715,17 +1839,22 @@ export class LocalWorktreeManager implements WorktreeManager {
         return confirm();
       }
 
-      // URL pushes do not reliably associate an implicit lease with origin/<branch>.
-      // Pin the lease to the remote-tracking OID captured by the rebase fetch so a
-      // concurrent remote advance is rejected without relying on remote config.
-      const trackingRef = `refs/remotes/origin/${expectedBranch}`;
-      const { stdout: expectedRemoteOid } = await git(['rev-parse', '--verify', trackingRef], {
-        cwd: worktreePath,
-      });
+      // A freshly observed remote or a tracking ref is not overwrite authority.
+      // The caller must supply the exact predecessor bound before the rewrite.
+      const expectedRemoteOid = options?.expectedRemoteCommitSha;
+      requireEvidence(
+        typeof expectedRemoteOid === 'string' &&
+          /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(expectedRemoteOid),
+        'An exact durable predecessor lease is required before replacing remote history.',
+      );
+      requireEvidence(
+        observedRemoteOid === expectedRemoteOid,
+        'Remote branch changed or disappeared since the recorded predecessor; no overwrite is authorized.',
+      );
       pushArgs = [
         'push',
         '--no-verify',
-        `--force-with-lease=refs/heads/${expectedBranch}:${expectedRemoteOid.trim()}`,
+        `--force-with-lease=refs/heads/${expectedBranch}:${expectedRemoteOid}`,
         remote.url,
         refspec,
       ];
@@ -1737,7 +1866,28 @@ export class LocalWorktreeManager implements WorktreeManager {
         credentialUrl: remote.url,
       });
     } catch (err) {
-      throw this.classifyRemoteError(sanitizeGitError(err), 'push');
+      const classified = this.classifyRemoteError(sanitizeGitError(err), 'push');
+      if (!force) throw classified; // Preserve ordinary credential-repair behavior.
+      // A lost reply is not proof of failed publication. Observe only; never
+      // send a second write or replace the original predecessor lease.
+      let observed: string | null;
+      try {
+        observed = await observeRemote();
+      } catch {
+        if (classified instanceof GitCredentialError) throw classified;
+        throw new AutopodError(
+          'Publication outcome is unknown; retain the admitted source and inspect its original lease before retrying.',
+          'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+          409,
+        );
+      }
+      if (observed === source.head) return confirm();
+      if (force)
+        requireEvidence(
+          observed === options?.expectedRemoteCommitSha,
+          'Remote changed during leased publication; reconcile source rather than overwriting it.',
+        );
+      throw classified;
     }
     return confirm();
   }
@@ -1778,6 +1928,110 @@ export class LocalWorktreeManager implements WorktreeManager {
     } catch (err) {
       throw this.classifyRemoteError(sanitizeGitError(err), 'push');
     }
+  }
+
+  async prepareApprovalRebase(config: ApprovalRebaseConfig): Promise<ApprovalRebaseResult> {
+    const owned = async <T>(run: () => Promise<T>) => {
+      config.assertCurrent();
+      try {
+        return await run();
+      } finally {
+        config.assertCurrent();
+      }
+    };
+    const remote = await owned(() => this.getAuthenticatedRemote(config.worktreePath, config.pat));
+    await owned(() =>
+      git(
+        [
+          'fetch',
+          remote.url,
+          `+refs/heads/${config.baseBranch}:refs/remotes/origin/${config.baseBranch}`,
+        ],
+        { cwd: config.worktreePath, credential: remote.credential, credentialUrl: remote.url },
+      ),
+    );
+    const baseCommitSha = (
+      await owned(() =>
+        git(['rev-parse', '--verify', `refs/remotes/origin/${config.baseBranch}^{commit}`], {
+          cwd: config.worktreePath,
+        }),
+      )
+    ).stdout.trim();
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(baseCommitSha))
+      throw new AutopodError('Base identity unavailable', 'DELIVERY_RECONCILIATION_REQUIRED', 409);
+    let includesBase = false;
+    try {
+      await owned(() =>
+        git(['merge-base', '--is-ancestor', baseCommitSha, config.head], {
+          cwd: config.worktreePath,
+        }),
+      );
+      includesBase = true;
+    } catch (error) {
+      if ((error as { code?: unknown }).code !== 1) throw error;
+    }
+    if (includesBase) return { kind: 'unchanged', baseCommitSha };
+    config.assertCurrent();
+    config.onPrepared(baseCommitSha);
+    const saved = await owned(() =>
+      prepareRetainedCheckpointWorkspace({
+        source: config.worktreePath,
+        root: config.root,
+        branch: config.branch,
+        repository: config.repository,
+        head: config.head,
+        generation: config.generation,
+        cycle: config.cycle,
+        assertCurrent: config.assertCurrent,
+      }),
+    );
+    if (saved.tree !== config.tree)
+      throw new AutopodError(
+        'Source changed before isolated rebase',
+        'DELIVERY_RECONCILIATION_REQUIRED',
+        409,
+      );
+    try {
+      await owned(() =>
+        git(
+          [
+            '-c',
+            'core.hooksPath=/dev/null',
+            '-c',
+            'user.name=Autopod',
+            '-c',
+            'user.email=autopod@localhost',
+            'rebase',
+            '--no-autostash',
+            baseCommitSha,
+          ],
+          { cwd: saved.worktree },
+        ),
+      );
+    } catch (error) {
+      const conflicts = (
+        await owned(() => git(['diff', '--name-only', '--diff-filter=U'], { cwd: saved.worktree }))
+      ).stdout
+        .trim()
+        .split('\n')
+        .filter(Boolean);
+      if (!conflicts.length) throw error;
+      // Only the isolated disposable candidate is aborted; original source is untouched.
+      await owned(() =>
+        git(['-c', 'core.hooksPath=/dev/null', 'rebase', '--abort'], { cwd: saved.worktree }),
+      );
+      return { kind: 'conflict', baseCommitSha, conflicts };
+    }
+    const candidate = await owned(() => this.inspectSource(saved.worktree, config.branch));
+    if (!candidate.worktreeClean)
+      throw new AutopodError('Rebase candidate is dirty', 'DELIVERY_RECONCILIATION_REQUIRED', 409);
+    return {
+      kind: 'candidate',
+      baseCommitSha,
+      worktreePath: saved.worktree,
+      head: candidate.commitSha,
+      tree: candidate.treeSha,
+    };
   }
 
   async rebaseOntoBase(config: RebaseOntoBaseConfig): Promise<RebaseOntoBaseResult> {

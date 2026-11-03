@@ -12,6 +12,7 @@ import type { ValidationEngineConfig } from '../interfaces/validation-engine.js'
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import { parseDiffFilePaths } from '../validation/review-context-builder.js';
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
+import { rewriteError } from './approval-source-rewrite-repository.js';
 import type { PendingOverrideRepository } from './pending-override-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import { resolveReviewerModel, resolveReviewerProvider } from './runtime-resolver.js';
@@ -23,7 +24,7 @@ const CONTAINER_APP_PORT = 3000;
 interface ValidationInputsDependencies {
   logger: Logger;
   worktreeManager: Pick<WorktreeManager, 'getDiff' | 'getCommitLog' | 'getChangedPathsAgainstBase'>;
-  podRepo: Pick<PodRepository, 'update'>;
+  podRepo: Pick<PodRepository, 'update' | 'approvalRewrites' | 'retainedCheckpoints'>;
   validationRepo?: Pick<ValidationRepository, 'getLatest' | 'getLatestReviewBatch'>;
   overrideSource: { pendingOverrideRepo?: Pick<PendingOverrideRepository, 'flush'> };
   validationEnvironmentForPod(
@@ -92,7 +93,11 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
     // parent branch is not the agent's responsibility. Stats/file counts still
     // use the full branch diff (computed earlier) for accurate PR sizing.
     emitActivityStatus(podId, 'Computing diff…');
-    const diffSinceCommit = pod.startCommitSha ?? undefined;
+    const retained = podRepo.retainedCheckpoints?.latest(podId);
+    const diffSinceCommit =
+      retained?.binding.continuation && retained.activated?.generation === pod.lifecycleGeneration
+        ? retained.prepared?.baseCommitSha
+        : (pod.startCommitSha ?? undefined);
     const validationDefaultBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
     const validationExecEnv = {
       ...((await validationEnvironmentForPod(pod, profile)) ?? {}),
@@ -100,7 +105,7 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
         podId,
         headBranch: pod.branch,
         baseBranch: validationDefaultBranch,
-        startCommitSha: pod.startCommitSha,
+        startCommitSha: diffSinceCommit ?? null,
       }),
     };
     const [diff, commitLog] = pod.worktreePath
@@ -139,8 +144,13 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
 
     // Attempt is a resettable per-cycle budget. Capture chronological history
     // before this run so rework attempt 1 still closes the prior council ledger.
-    const previousValidation = validationRepo?.getLatest(podId) ?? null;
-    const priorReviewBatch = validationRepo?.getLatestReviewBatch(podId);
+    const rewrite = podRepo.approvalRewrites?.latest(s1);
+    // A changed integration source needs independent review, not a cached
+    // pre-submit verdict or closure ledger from the pre-rebase bytes.
+    const continuation = podRepo.retainedCheckpoints?.latest(podId)?.binding.continuation;
+    const freshSource = rewrite || continuation;
+    const previousValidation = freshSource ? null : (validationRepo?.getLatest(podId) ?? null);
+    const priorReviewBatch = freshSource ? undefined : validationRepo?.getLatestReviewBatch(podId);
 
     // Flush any pending overrides enqueued via API and merge into pod overrides
     const pendingOverrides = overrideSource.pendingOverrideRepo?.flush(podId) ?? [];
@@ -150,6 +160,8 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
       podRepo.update(podId, { validationOverrides: currentOverrides });
     }
 
+    if (freshSource && (currentOverrides.length > 0 || pod.skipValidation || pod.validationWaiver))
+      rewriteError('Rebased source checks cannot inherit overrides or validation waivers.');
     const validationConfig = {
       podId,
       containerId: pod.containerId,
@@ -166,7 +178,9 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
       smokePages: profile.smokePages,
       attempt,
       validationSuite,
-      task: pod.task,
+      task: continuation
+        ? `${pod.task}\n\nRetained source continuation: independently review the current selected source against its pinned base. Historical worker reports and selection reasons are context, not passing evidence or waivers.\nSelection reason: ${retained?.selected?.reason ?? retained?.reason ?? ''}\nHistorical worker summary: ${pod.taskSummary?.actualSummary ?? 'None'}`
+        : pod.task,
       diff,
       testCommand: profile.testCommand,
       buildTimeout: (profile.buildTimeout ?? 300) * 1_000,
@@ -185,11 +199,11 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
       codeReviewSkill,
       commitLog: commitLog || undefined,
       plan: pod.plan ?? undefined,
-      taskSummary: pod.taskSummary ?? undefined,
+      taskSummary: continuation ? undefined : (pod.taskSummary ?? undefined),
       briefTouches: pod.touches ?? undefined,
       briefDoesNotTouch: pod.doesNotTouch ?? undefined,
       worktreePath: pod.worktreePath ?? undefined,
-      startCommitSha: pod.startCommitSha ?? undefined,
+      startCommitSha: diffSinceCommit,
       overrides: currentOverrides.length > 0 ? currentOverrides : undefined,
       hasWebUi: profile.hasWebUi ?? true,
       advisoryBrowserQaEnabled: pod.options.advisoryBrowserQaEnabled ?? false,
@@ -198,7 +212,7 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
       // Bound execution settings project literals only; legacy buildEnv has no
       // credential/literal distinction and stays in the scoped exec channel.
       nonSecretExecEnv: pod.launchConfigDigest ? { ...profile.buildEnv } : undefined,
-      preSubmitReview: pod.preSubmitReview ?? undefined,
+      preSubmitReview: freshSource ? undefined : (pod.preSubmitReview ?? undefined),
       skipPhases: getPodValidationSkipPhases(profile, s1),
       priorReviewBatch,
     };

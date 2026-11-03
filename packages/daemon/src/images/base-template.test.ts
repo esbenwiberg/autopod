@@ -55,6 +55,20 @@ async function readScript(filename: string): Promise<string> {
 }
 
 describe('Trusted Pi worker base image prerequisites', () => {
+  it.each(workerBaseTemplates)(
+    '%s extends Node trust with system-managed roots',
+    async (filename) => {
+      const dockerfile = await readBaseTemplate(filename);
+      const trustIndex = dockerfile.indexOf(
+        'ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt',
+      );
+      expect(trustIndex).toBeGreaterThan(dockerfile.indexOf('ca-certificates'));
+      expect(trustIndex).toBeLessThan(dockerfile.indexOf('npm install'));
+      expect(dockerfile).not.toContain('NODE_TLS_REJECT_UNAUTHORIZED=0');
+      expect(dockerfile).not.toContain('strict-ssl=false');
+    },
+  );
+
   it.each(workerBaseTemplates)('%s installs pinned pnpm before using it', async (filename) => {
     const dockerfile = await readBaseTemplate(filename);
     const installIndex = dockerfile.indexOf('npm install -g pnpm@9');

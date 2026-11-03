@@ -28,6 +28,8 @@ export function createResourceCleanup(
     strict = false,
   ): Promise<void> {
     const targetContainerId = pod.containerId;
+    if (targetContainerId && mode === 'kill')
+      podRepo.approvalRewrites?.assertReleasable(targetContainerId);
     // Resource custody survives a missing or different mutable pod identity.
     // Reject retained resources before resolving that identity, then independently
     // require task settlement before any destructive or source-related effect.
@@ -90,6 +92,7 @@ export function createResourceCleanup(
     if (mode === 'kill') podRepo.externalDeliveries?.assertReleasable(targetContainerId);
     podRepo.sandboxWakeups?.assertReleasable(targetContainerId);
     podRepo.sourceAdoptions?.assertReleasable(targetContainerId);
+    if (mode === 'kill') podRepo.approvalRewrites?.assertReleasable(targetContainerId);
     const op = mode === 'kill' ? cm.kill(targetContainerId) : cm.stop(targetContainerId);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deleted = await Promise.race([

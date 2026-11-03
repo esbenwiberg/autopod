@@ -5,7 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import Database from 'better-sqlite3';
 import pino from 'pino';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import { createPodRepository } from '../pods/pod-repository.js';
 import { createSourcePublicationLedger } from '../pods/source-publication-ledger.js';
@@ -120,7 +120,12 @@ describe('LocalWorktreeManager real Git regressions', () => {
   it('force-pushes to a URL when the explicit remote OID lease still matches', async () => {
     const worktree = await createRebasedFeature('lease-success');
 
-    const receipt = await manager.pushBranch(worktree, 'feature', { force: true });
+    const predecessor = await git(remote, ['rev-parse', 'refs/heads/feature']);
+    await git(worktree, ['update-ref', '-d', 'refs/remotes/origin/feature']);
+    const receipt = await manager.pushBranch(worktree, 'feature', {
+      force: true,
+      expectedRemoteCommitSha: predecessor,
+    });
     expect(receipt).toMatchObject({
       commitSha: await git(worktree, ['rev-parse', 'HEAD']),
       treeSha: await git(worktree, ['rev-parse', 'HEAD^{tree}']),
@@ -265,8 +270,39 @@ describe('LocalWorktreeManager real Git regressions', () => {
     const concurrentOid = await commitFile(seed, 'concurrent.txt', 'other\n', 'concurrent');
     await git(seed, ['push', 'origin', 'feature']);
 
-    await expect(manager.pushBranch(worktree, 'feature', { force: true })).rejects.toThrow();
+    const predecessor = await git(worktree, ['rev-parse', 'refs/remotes/origin/feature']);
+    await expect(
+      manager.pushBranch(worktree, 'feature', {
+        force: true,
+        expectedRemoteCommitSha: predecessor,
+      }),
+    ).rejects.toThrow();
     expect(await git(remote, ['rev-parse', 'refs/heads/feature'])).toBe(concurrentOid);
+  });
+
+  it('rejects a concurrent ref advance after observation and before the leased push commits', async () => {
+    const worktree = await createRebasedFeature('lease-race');
+    const predecessor = await git(remote, ['rev-parse', 'refs/heads/feature']);
+    const local = await git(worktree, ['rev-parse', 'HEAD']);
+    await git(seed, ['fetch', 'origin', 'feature:feature']);
+    await git(seed, ['checkout', 'feature']);
+    const concurrent = await commitFile(seed, 'concurrent.txt', 'concurrent\n', 'concurrent');
+    await git(seed, ['push', 'origin', 'HEAD:refs/heads/concurrent']);
+    // Simulate another publisher after ls-remote but before receive-pack's CAS.
+    // Its objects were already published; only this test's standalone bare ref moves.
+    await writeFile(
+      path.join(remote, 'hooks', 'pre-receive'),
+      `#!/bin/sh\nenv -u GIT_QUARANTINE_PATH -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES git update-ref refs/heads/feature ${concurrent} ${predecessor}\n`,
+      { mode: 0o755 },
+    );
+    await expect(
+      manager.pushBranch(worktree, 'feature', {
+        force: true,
+        expectedRemoteCommitSha: predecessor,
+      }),
+    ).rejects.toMatchObject({ code: 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED' });
+    expect(await git(remote, ['rev-parse', 'feature'])).toBe(concurrent);
+    expect(await git(worktree, ['rev-parse', 'HEAD'])).toBe(local);
   });
 
   it('succeeds when remote already matches HEAD despite a stale tracked OID', async () => {
@@ -283,6 +319,64 @@ describe('LocalWorktreeManager real Git regressions', () => {
 
     expect(await git(remote, ['rev-parse', 'refs/heads/feature'])).toBe(localOid);
     expect(await git(worktree, ['rev-parse', 'refs/remotes/origin/feature'])).toBe(staleTrackedOid);
+  });
+
+  it('isolates an actual rebase before publication, preserves original bytes, and publishes without a tracking ref', async () => {
+    const source = await manager.create({
+      repoUrl: 'https://github.com/org/repo',
+      branch: 'feature',
+      baseBranch: 'main',
+      sessionId: 'isolated-rebase',
+    });
+    await commitFile(source.worktreePath, 'feature.txt', 'feature\n', 'feature');
+    const predecessor = await manager.pushBranch(source.worktreePath, 'feature');
+    await git(source.worktreePath, ['update-ref', '-d', 'refs/remotes/origin/feature']);
+    await commitFile(seed, 'new-main.txt', 'base advanced\n', 'new main');
+    await git(seed, ['push', 'origin', 'main']);
+    const onPrepared = vi.fn();
+    const result = await manager.prepareApprovalRebase({
+      worktreePath: source.worktreePath,
+      branch: 'feature',
+      baseBranch: 'main',
+      repository: 'https://github.com/org/repo',
+      head: predecessor.commitSha,
+      tree: predecessor.treeSha,
+      root: path.join(root, 'candidate'),
+      generation: 1,
+      cycle: 1,
+      assertCurrent: () => {},
+      onPrepared,
+    });
+    expect(result.kind).toBe('candidate');
+    if (result.kind !== 'candidate') throw new Error('No candidate');
+    expect(onPrepared).toHaveBeenCalledWith(await git(remote, ['rev-parse', 'main']));
+    expect(await git(source.worktreePath, ['rev-parse', 'HEAD'])).toBe(predecessor.commitSha);
+    expect(await git(remote, ['rev-parse', 'feature'])).toBe(predecessor.commitSha);
+    expect(await git(result.worktreePath, ['show', 'HEAD:feature.txt'])).toBe('feature');
+    expect(await git(result.worktreePath, ['show', 'HEAD:new-main.txt'])).toBe('base advanced');
+    await expect(manager.pushBranch(result.worktreePath, 'feature')).rejects.toThrow();
+    const receipt = await manager.pushBranch(result.worktreePath, 'feature', {
+      force: true,
+      expectedRemoteCommitSha: predecessor.commitSha,
+    });
+    expect(receipt.commitSha).toBe(result.head);
+    // Lost acknowledgement: repeated exact publication observes the same source.
+    expect(
+      (
+        await manager.pushBranch(result.worktreePath, 'feature', {
+          force: true,
+          expectedRemoteCommitSha: predecessor.commitSha,
+        })
+      ).commitSha,
+    ).toBe(result.head);
+    expect(await git(source.worktreePath, ['rev-parse', 'HEAD'])).toBe(predecessor.commitSha);
+  });
+
+  it('refuses implicit overwrite authority even when a tracking ref exists', async () => {
+    const worktree = await createRebasedFeature('implicit-lease');
+    await expect(manager.pushBranch(worktree, 'feature', { force: true })).rejects.toMatchObject({
+      code: 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+    });
   });
 
   it('materializes exact fresh remote base and start SHAs despite stale local heads', async () => {

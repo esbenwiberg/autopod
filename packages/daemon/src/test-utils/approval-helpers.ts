@@ -58,6 +58,7 @@ export function createApprovalFixture(disk = false) {
   });
   const maybeTriggerDependents = vi.fn();
   const mainCaptured = {
+    enqueueSession: vi.fn(),
     podRepo: f.podRepo,
     resolveApprovalReadiness: context.resolveApprovalReadiness,
     assertApprovalCurrent: context.assertApprovalCurrent,

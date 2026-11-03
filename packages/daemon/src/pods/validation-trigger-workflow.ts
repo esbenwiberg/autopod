@@ -817,7 +817,9 @@ export function createValidationTriggerWorkflow(
       result = effectiveResult;
 
       // Skip-validation may have been toggled while this run was in flight — bypass result.
-      const skipValidatedPod = applySkipValidationDecision(s2, result);
+      const skipValidatedPod = podRepo.approvalRewrites?.latest(s2)
+        ? null
+        : applySkipValidationDecision(s2, result);
       if (skipValidatedPod) {
         maybeTriggerDependents(skipValidatedPod);
         return;

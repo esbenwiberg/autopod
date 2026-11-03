@@ -24,6 +24,8 @@ RUN mkdir -p /etc/apt/keyrings \
     && rm -rf /var/lib/apt/lists/*
 
 ENV LANG=en_US.UTF-8
+# Extend Node's bundled roots with the operator-managed system trust store.
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
 # Create non-root user — remove the default node user (uid 1000) first
 RUN userdel --remove node 2>/dev/null; groupdel node 2>/dev/null; \

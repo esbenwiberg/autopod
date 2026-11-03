@@ -37,6 +37,48 @@ describe('GhPrManager', () => {
     execCalls.length = 0;
   });
 
+  it('proves merged descendant inclusion through authenticated exact-SHA gh reads only', async () => {
+    const manager = new GhPrManager({ logger, githubAuth });
+    const publishedHeadSha = 'a'.repeat(40);
+    const mergedHeadSha = 'b'.repeat(40);
+    const target = {
+      repository: 'https://github.com/org/repo',
+      branch: 'feature',
+      baseBranch: 'main',
+    };
+    vi.spyOn(manager, 'getPrStatus').mockResolvedValue({
+      merged: true,
+      open: false,
+      headSha: mergedHeadSha,
+      sourceTarget: target,
+      blockReason: null,
+      ciFailures: [],
+      reviewComments: [],
+    });
+    execResponses.push({
+      stdout: JSON.stringify({
+        status: 'ahead',
+        behind_by: 0,
+        base_commit: { sha: publishedHeadSha },
+        merge_base_commit: { sha: publishedHeadSha },
+      }),
+      stderr: '',
+    });
+    expect(
+      await manager.verifyMergedSourceAncestry({
+        prUrl: 'https://github.com/org/repo/pull/113',
+        publishedHeadSha,
+        mergedHeadSha,
+        expectedTarget: target,
+      }),
+    ).toMatchObject({ publishedHeadSha, mergedHeadSha, target });
+    expect(execCalls[0]?.[1]).toEqual([
+      'api',
+      `repos/org/repo/compare/${publishedHeadSha}...${mergedHeadSha}?per_page=1`,
+    ]);
+    expect(githubAuth.resolveCredential).toHaveBeenCalledOnce();
+  });
+
   it('pins an expected source commit without scheduling a later merge or deleting the branch', async () => {
     const sha = 'a'.repeat(40);
     execResponses.push(

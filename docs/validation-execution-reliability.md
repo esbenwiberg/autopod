@@ -1,5 +1,9 @@
 # Validation execution reliability
 
+For effective launch selection, resource limits and system certificate trust, see
+[worker profile reliability](worker-profile-reliability.md). Profile changes do not
+deploy this executor or alter frozen launches.
+
 Sandbox self-validation (`validate_locally` setup/build/test/lint) and final validation
 share the same command executor. Sandbox commands stream stdout and stderr, retaining
 at most 50,000 characters per stream, and await the native exit result. Local Docker

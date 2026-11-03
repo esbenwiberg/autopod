@@ -40,6 +40,8 @@ export interface MergeJournalEntry {
   prDisposition?: 'open' | 'closed';
 }
 export interface MergeJournal {
+  /** Read-only cross-lifecycle fence before any source publication for a PR. */
+  assertPublicationAllowed?(prUrl: string): void;
   plan(
     pod: Pod,
     publicationPod: Pod,
@@ -252,6 +254,29 @@ export function createMergeJournal(db: Database.Database): MergeJournal {
     return { id, publicationId, request: JSON.stringify(request) };
   }
   return {
+    assertPublicationAllowed(prUrl) {
+      const resource = prIdentity(prUrl);
+      if (
+        db.prepare('SELECT 1 FROM canonical_merge_intents WHERE pr_identity IS NULL LIMIT 1').get()
+      )
+        mergeReconciliation(
+          'A retained merge identity is unavailable; source publication is held.',
+        );
+      const uncertain = db
+        .prepare(`SELECT 1 FROM merge_attempts a JOIN canonical_merge_intents i ON i.id=a.intent_id
+        WHERE i.pr_identity=? AND NOT EXISTS(SELECT 1 FROM merge_observations o WHERE o.attempt_id=a.id)
+        AND NOT EXISTS(SELECT 1 FROM merge_operator_recoveries r WHERE r.attempt_id=a.id AND r.intent_id=i.id) LIMIT 1`)
+        .get(resource);
+      const scheduled = db
+        .prepare(`SELECT 1 FROM canonical_merge_intents i JOIN merge_observations o ON o.intent_id=i.id
+        WHERE i.pr_identity=? AND o.disposition='pending' AND json_extract(o.result,'$.autoMergeScheduled')=1
+        AND NOT EXISTS(SELECT 1 FROM merge_observations done WHERE done.intent_id=i.id AND done.disposition='merged') LIMIT 1`)
+        .get(resource);
+      if (uncertain || scheduled)
+        mergeReconciliation(
+          'An earlier merge request is ambiguous or scheduled; source publication cannot replace it.',
+        );
+    },
     plan(pod, publicationPod, publicationId, config) {
       if (db.inTransaction)
         return mergeReconciliation('Merge planning cannot share an uncommitted transaction.');

@@ -11,6 +11,15 @@ export interface ExternalDeliveryReceipt {
   baseBranch: string;
   headSha: string;
   treeSha: string;
+  /** Actual merged PR source, distinct from retained headSha/treeSha. Absent on legacy exact receipts. */
+  mergedHeadSha?: string;
+  /** Provider-proven inclusion, not validation or approval of the additional commits. */
+  ancestry?: {
+    publishedHeadSha: string;
+    mergedHeadSha: string;
+    target: { repository: string; branch: string; baseBranch: string };
+    observedAt: string;
+  };
   validationTimestamp: string;
   observedAt: string;
   recordedAt: string;

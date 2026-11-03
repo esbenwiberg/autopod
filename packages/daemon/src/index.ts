@@ -289,6 +289,12 @@ const podsitterRepo = createPodsitterRepository(db);
 // the same live provider-account credentials the agent authenticates with.
 const llmDeps = { profileStore, providerAccountStore };
 const podRepo = createPodRepository(db);
+// Before controls/polling are exposed: only interrupted isolated preparation
+// may return to approval. Execution and merge uncertainty remain retained.
+const { reconcileApprovalRewritesOnStartup } = await import(
+  './pods/approval-rewrite-reconciliation.js'
+);
+reconcileApprovalRewritesOnStartup(podRepo);
 podRepo.taskRetries?.recoverInterrupted();
 podRepo.sandboxStartupRetries?.recoverInterrupted();
 podRepo.codexInterruptionRetries?.recoverInterrupted();
@@ -485,7 +491,12 @@ if (MOCK_DOCKER) {
     const { AcrClient } = await import('./images/acr-client.js');
     acr = new AcrClient({ registryUrl: ACR_REGISTRY_URL }, d);
   }
-  containerManager = new DockerContainerManager({ docker: d, logger, imagePuller: acr });
+  containerManager = new DockerContainerManager({
+    docker: d,
+    logger,
+    imagePuller: acr,
+    managedDatabase: db,
+  });
   networkManager = new DockerNetworkManager({ docker: d, logger });
   sidecarManager = new DockerSidecarManager({ docker: d, logger });
 }
