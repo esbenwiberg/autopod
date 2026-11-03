@@ -173,6 +173,7 @@ export async function blockedCheckpointOutcomeFixture(
 export async function retainedCheckpointFixture(
   kind: 'validation' | 'wakeup' = 'validation',
   native = false,
+  independentReview = false,
 ) {
   const ctx = createTestContext();
   vi.mocked(ctx.profileStore.get).mockReturnValue({
@@ -206,6 +207,16 @@ export async function retainedCheckpointFixture(
     ? createLaunchSnapshotRepository(ctx.db, nativeConfiguration.store)
     : null;
   if (nativeConfiguration && snapshots) {
+    if (independentReview) {
+      const flow = nativeConfiguration.store.get('workflow', 'flow');
+      nativeConfiguration.store.write({
+        id: flow.id,
+        kind: 'workflow',
+        name: flow.name,
+        expectedRevision: flow.revision,
+        payload: { ...flow.payload, validationPhases: ['build', 'test', 'review'] },
+      });
+    }
     vi.mocked(nativeConfiguration.services.executionCapabilities).mockResolvedValue({
       ...testExecutionCapabilities,
       target: 'sandbox',

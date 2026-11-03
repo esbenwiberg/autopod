@@ -237,6 +237,18 @@ export interface PrepareSourceAdoption {
 
 export interface WorktreeManager {
   prepareApprovalRebase?(config: ApprovalRebaseConfig): Promise<ApprovalRebaseResult>;
+  /** Only a newly-created independent continuation checkout; never the retained original. */
+  selectRetainedContinuationSource?(config: {
+    worktreePath: string;
+    originalWorktreePath: string;
+    repository: string;
+    branch: string;
+    head: string;
+    remoteHead?: string;
+    baseBranch: string;
+    assertCurrent(): void;
+  }): Promise<{ head: string; tree: string; baseCommitSha: string }>;
+  assertSourceDescendsFrom?(worktreePath: string, head: string): Promise<void>;
   /** Strict clean identity, refusing hidden indexes, executable filters and submodules before status. */
   inspectSourceAdoption?(
     worktreePath: string,

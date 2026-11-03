@@ -530,6 +530,25 @@ export class AutopodClient {
   ): Promise<unknown> {
     return this.request('POST', `/pods/${id}/checkpoint-recovery`, input);
   }
+  async previewRetainedExecution(id: string, profileId: string): Promise<unknown> {
+    return this.request(
+      'GET',
+      `/pods/${id}/retained-continuation/execution?profileId=${encodeURIComponent(profileId)}`,
+    );
+  }
+  async continueRetained(
+    id: string,
+    input: import('@autopod/shared').RetainedContinuationRequest,
+  ): Promise<unknown> {
+    return this.request('POST', `/pods/${id}/retained-continuation`, input);
+  }
+  async checkRetainedCandidate(
+    id: string,
+    recoveryId: string,
+    input: import('@autopod/shared').RetainedContinuationCheckRequest,
+  ): Promise<unknown> {
+    return this.request('POST', `/pods/${id}/retained-continuation/${recoveryId}/check`, input);
+  }
   async authorizeValidationRecoveryBudget(
     id: string,
     input: import('@autopod/shared').ValidationExecutionRecoveryRequest & {

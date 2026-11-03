@@ -1,6 +1,9 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type Database from 'better-sqlite3';
-import { createRetainedCheckpointRepository } from './retained-checkpoint-repository.js';
+import {
+  checkpointHash,
+  createRetainedCheckpointRepository,
+} from './retained-checkpoint-repository.js';
 import { sourceAdoptionError } from './source-adoption-identity.js';
 import { assertValidationResourceReleasable } from './validation-execution-evidence.js';
 
@@ -68,6 +71,31 @@ export function assertSourceAvailable(
 /** Delivery/release is NEVER implied by the private mutation capability or passing checks. */
 export function assertSourceDeliveryAllowed(db: Database.Database, podId: string): void {
   const recovery = createRetainedCheckpointRepository(db).latest(podId);
+  if (recovery?.binding.continuation) {
+    const current = db
+      .prepare(
+        'SELECT lifecycle_generation,status,worktree_path,last_validation_result,skip_validation,validation_waiver,validation_overrides FROM pods WHERE id=?',
+      )
+      .get(podId) as Record<string, unknown> | undefined;
+    const result = current?.last_validation_result
+      ? JSON.parse(String(current.last_validation_result))
+      : null;
+    if (
+      !recovery.checked ||
+      recovery.checked.result.overall !== 'pass' ||
+      result?.taskReview?.status !== 'pass' ||
+      recovery.checked.resultHash !== checkpointHash(result) ||
+      current?.lifecycle_generation !== recovery.activated?.generation ||
+      current?.worktree_path !== recovery.prepared?.worktree ||
+      current?.skip_validation ||
+      current?.validation_waiver ||
+      (current?.validation_overrides && JSON.parse(String(current.validation_overrides)).length)
+    )
+      sourceAdoptionError(
+        'Retained continuation requires current exact-source checks and independent review; no waiver or historical pass authorizes delivery.',
+        'CONTINUATION_DELIVERY_HELD',
+      );
+  }
   if (recovery && !recovery.checked)
     sourceAdoptionError(
       'Checkpoint recovery grants checks only; no source publication or delivery is admitted.',
