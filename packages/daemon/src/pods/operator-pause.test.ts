@@ -27,6 +27,23 @@ describe('pause settlement ownership', () => {
     expect(f.pod()).toMatchObject({ status: 'awaiting_input', pendingEscalation: question });
     expect(f.state.pauseIntents.size).toBe(0);
   });
+  it('retains running ownership when native termination is unknown and never repeats its stop', async () => {
+    const f = createOperatorFixture();
+    const ledger = f.podRepo.taskExecutions;
+    if (!ledger) throw new Error('Missing task execution ledger');
+    vi.spyOn(ledger, 'hasUnverifiedTermination').mockReturnValueOnce(false).mockReturnValue(true);
+    const run = f.activeRun();
+    const stopping = f.pause().pauseSession('prepare');
+    run.settle();
+    await expect(stopping).rejects.toMatchObject({ code: 'TASK_EXECUTION_TERMINATION_UNVERIFIED' });
+    expect(f.pod().status).toBe('running');
+    expect(f.state.pauseIntents.size).toBe(0);
+    await expect(f.pause().pauseSession('prepare')).rejects.toMatchObject({
+      code: 'TASK_EXECUTION_TERMINATION_UNVERIFIED',
+    });
+    expect(f.ctx.runtime.suspend).toHaveBeenCalledTimes(1);
+    expect(f.calls.triggerValidation).not.toHaveBeenCalled();
+  });
   it('blocks duplicate pause and message admission while settlement is outstanding', async () => {
     vi.useFakeTimers();
     const f = createOperatorFixture();

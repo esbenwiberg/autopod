@@ -32,9 +32,15 @@ it.each([
         }),
       }),
     });
-    ctx.profileStore.update('test-profile', {
-      escalation: { ...ctx.profileStore.get('test-profile').escalation, autoPauseAfter: threshold },
-    });
+    ctx.db
+      .prepare('UPDATE profiles SET escalation_config = ? WHERE name = ?')
+      .run(
+        JSON.stringify({
+          ...ctx.profileStore.get('test-profile').escalation,
+          autoPauseAfter: threshold,
+        }),
+        'test-profile',
+      );
     const waiters = new Map<string, PendingRequests>();
     ctx.deps.pendingRequestsByPod = waiters;
     const manager = createPodManager(ctx.deps);

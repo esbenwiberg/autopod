@@ -2,6 +2,7 @@ import { AutopodError } from '@autopod/shared';
 import type { OperatorPauseCaptured, OperatorPauseLiveDependencies } from './operator-contracts.js';
 import { PAUSE_QUIESCENCE_TIMEOUT_MS } from './operator-state.js';
 import { canPause } from './state-machine.js';
+import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
 export function createOperatorPause(
   deps: OperatorPauseLiveDependencies,
   captured: OperatorPauseCaptured,
@@ -28,6 +29,7 @@ export function createOperatorPause(
       );
     }
 
+    assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
     emitActivityStatus(podId, 'Pausing pod…');
     const pauseToken = Symbol(podId);
     pauseIntents.set(podId, pauseToken);
@@ -95,6 +97,17 @@ export function createOperatorPause(
         'Execution settled; retaining the current lifecycle or pending decision instead of replacing it with a pause.',
       );
       return;
+    }
+    try {
+      assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
+      podRepo.validationExecutions?.assertTaskSettled(podId);
+    } catch (error) {
+      if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);
+      emitActivityStatus(
+        podId,
+        'Execution stop remains unverified; retain source and resources for the Autopod execution owner. No automatic retry is authorized.',
+      );
+      throw error;
     }
     transition(settledPod, 'paused', { pauseReason: 'manual' });
     if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);

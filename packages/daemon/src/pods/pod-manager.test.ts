@@ -29071,6 +29071,9 @@ describe('validation infrastructure compatibility', () => {
       manager,
       pod,
       result,
+      parkedReason: kind.startsWith('typed')
+        ? 'Validation infrastructure failure during test: Azure Sandboxes returned an empty 403. Responsible system: Autopod validation. Checks remain incomplete; inspect execution evidence before supported recovery.'
+        : 'Review infrastructure unavailable. Responsible system: Autopod review. Review remains incomplete; no reviewer approval or coding correction is implied. Inspect review diagnostics before supported recovery.',
       run: () =>
         entry === 'trigger'
           ? manager.triggerValidation(pod.id)
@@ -29104,7 +29107,7 @@ describe('validation infrastructure compatibility', () => {
           status: 'review_required',
           validationAttempts: kind.startsWith('typed') ? 0 : 1,
           lastCorrectionMessage: kind.startsWith('typed') ? null : 'Retained correction',
-          failureReason: entry === 'trigger' ? 'Retained failure' : null,
+          failureReason: entry === 'trigger' ? 'Retained failure' : f.parkedReason,
           lastValidationResult: f.result,
         });
         expect(order).toEqual(['published', 'parked', 'stopped']);
@@ -29217,7 +29220,7 @@ describe('validation infrastructure compatibility', () => {
             stage === 'refund'
               ? entry === 'trigger'
                 ? 'Retained failure'
-                : null
+                : f.parkedReason
               : expect.stringContaining(error.message),
         });
         expect(f.ctx.validationRepo.getForSession(f.pod.id)).toHaveLength(1);
