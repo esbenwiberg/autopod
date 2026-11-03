@@ -112,40 +112,50 @@ describe('validation successful delivery lifetime', () => {
     expect(f.advisoryCurrent).toHaveBeenCalledOnce();
     expect(f.cm.stop).toHaveBeenCalledWith('container-123');
   });
-  it('pushes an existing PR without recreating it and routes a fix before auto-approval or stop', async () => {
-    const f = createDeliveryFixture();
-    const seed = f.pod();
-    f.podRepo.insert({
-      id: 'fix',
-      profileName: seed.profileName,
-      task: 'Repair original task',
-      status: 'validating',
-      runtime: seed.runtime,
-      model: seed.model,
-      executionTarget: seed.executionTarget,
-      branch: seed.branch,
-      userId: seed.userId,
-      maxValidationAttempts: 3,
-      skipValidation: false,
-      outputMode: 'pr',
-      linkedPodId: 'prepare',
-      prUrl: 'https://github.com/org/repo/pull/27',
-    });
-    f.podRepo.update('fix', {
-      containerId: 'container-fix',
-      worktreePath: f.directory,
-      autoApprove: true,
-    });
-    const fix = f.podRepo.getOrThrow('fix');
-    const context = { ...f.passContext(), podId: 'fix', pod: fix, s2: fix };
-    context.result = { ...context.result, podId: 'fix' };
-    await f.pass().completeValidationPass.call(f.calls, context);
-    expect(f.worktreeManager.mergeBranch).toHaveBeenCalled();
-    expect(f.provider.createPr).not.toHaveBeenCalled();
-    expect(f.passCaptured.completeFixPodAfterPush).toHaveBeenCalledOnce();
-    expect(f.cm.stop).not.toHaveBeenCalled();
-    expect(f.calls.approveSession).not.toHaveBeenCalled();
-  });
+  it.each(['local', 'sandbox'] as const)(
+    'pushes an existing PR and routes a %s fix before auto-approval or stop',
+    async (executionTarget) => {
+      const f = createDeliveryFixture();
+      const seed = f.pod();
+      f.podRepo.insert({
+        id: 'fix',
+        profileName: seed.profileName,
+        task: 'Repair original task',
+        status: 'validating',
+        runtime: seed.runtime,
+        model: seed.model,
+        executionTarget,
+        branch: seed.branch,
+        userId: seed.userId,
+        maxValidationAttempts: 3,
+        skipValidation: false,
+        outputMode: 'pr',
+        linkedPodId: 'prepare',
+        prUrl: 'https://github.com/org/repo/pull/27',
+      });
+      f.podRepo.update('fix', {
+        containerId: 'container-fix',
+        worktreePath: f.directory,
+        autoApprove: true,
+      });
+      const fix = f.podRepo.getOrThrow('fix');
+      const context = { ...f.passContext(), podId: 'fix', pod: fix, s2: fix };
+      context.result = { ...context.result, podId: 'fix' };
+      f.podRepo.update('fix', { lastValidationResult: context.result });
+      await f.pass().completeValidationPass.call(f.calls, context);
+      expect(f.worktreeManager.mergeBranch).toHaveBeenCalled();
+      expect(f.provider.createPr).not.toHaveBeenCalled();
+      expect(f.passCaptured.completeFixPodAfterPush).toHaveBeenCalledOnce();
+      if (executionTarget === 'sandbox') {
+        expect(f.podRepo.getOrThrow('fix').artifactsPath).toBeTruthy();
+        expect(
+          vi.mocked(f.cm.extractDirectoryFromContainer).mock.invocationCallOrder[0],
+        ).toBeLessThan(f.passCaptured.completeFixPodAfterPush.mock.invocationCallOrder[0] ?? 0);
+      }
+      expect(f.cm.stop).not.toHaveBeenCalled();
+      expect(f.calls.approveSession).not.toHaveBeenCalled();
+    },
+  );
   it('parks credential failure and halts before validated/readiness effects', async () => {
     const f = createDeliveryFixture();
     f.validating();
