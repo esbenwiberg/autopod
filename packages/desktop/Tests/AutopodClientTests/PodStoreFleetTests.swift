@@ -7,6 +7,59 @@ import AutopodUI
 @Suite(.serialized)
 struct PodStoreFleetTests {
 @MainActor
+@Test func findingsReceiptSurvivesEqualCompactRefreshAndRehydratesAfterAcceptanceEvent() async throws {
+  let mode = FleetMode()
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [FleetURLProtocol.self]
+  let evidenceHash = String(repeating: "a", count: 64)
+  FleetURLProtocol.handler = { request in
+    if request.url?.path == "/pods/scores" { return SelfResponse.json("[]", for: request) }
+    let accepted = await mode.isNewer
+    let stamp = accepted ? "2026-07-01T00:20:00Z" : "2026-07-01T00:10:00Z"
+    let status = accepted ? "complete" : "research_ready"
+    if request.url?.path == "/pods/findings-pod" {
+      var body = try #require(JSONSerialization.jsonObject(with: Data(fullPod(id: "findings-pod").utf8)) as? [String: Any])
+      body["status"] = status
+      body["updatedAt"] = stamp
+      body["completionPolicy"] = "accept-findings"
+      body["options"] = ["agentMode": "auto", "output": "none", "validate": false]
+      body["researchFindings"] = [
+        "generation": 2, "cycle": 3, "configDigest": String(repeating: "b", count: 64),
+        "evidenceHash": evidenceHash, "readyAt": "2026-07-01T00:10:00Z",
+        "summary": ["actualSummary": "Diagnostic failed; still unresolved", "deviations": []],
+        "acceptance": accepted ? ["actor": ["type": "human", "userId": "reviewer"], "acceptedAt": stamp] : NSNull()
+      ] as [String: Any]
+      return SelfResponse.json(String(decoding: try JSONSerialization.data(withJSONObject: body), as: UTF8.self), for: request)
+    }
+    let page = compactPage(id: "findings-pod", hasNext: false, status: status, updatedAt: stamp)
+      .replacingOccurrences(of: "\"profileName\":", with: "\"completionPolicy\":\"accept-findings\",\"profileName\":")
+    return SelfResponse.json(page, for: request)
+  }
+  defer { FleetURLProtocol.handler = nil }
+  let store = PodStore()
+  store.configure(api: DaemonAPI(baseURL: URL(string: "https://daemon.example.com")!, token: "test", session: URLSession(configuration: configuration)))
+  await store.loadSessions()
+  store.selectedSessionId = "findings-pod"
+  await store.hydrateSessionIfNeeded("findings-pod")
+  #expect(store.attentionSessions.count == 1)
+  let ready = try #require(store.pods.first?.researchFindings)
+  #expect(ready.evidenceHash == evidenceHash)
+  #expect(ready.summary.actualSummary.contains("unresolved"))
+  #expect(ready.acceptance == nil)
+  await store.loadSessions() // equal compact timestamp must keep hydrated receipt
+  #expect(store.pods.first?.researchFindings?.evidenceHash == evidenceHash)
+  await mode.advance()
+  store.updateStatus("findings-pod", to: .complete)
+  await store.loadSessions() // newer compact discovery forces selected detail hydration
+  let accepted = try #require(store.pods.first?.researchFindings)
+  #expect(accepted.evidenceHash == ready.evidenceHash)
+  #expect(accepted.generation == ready.generation && accepted.cycle == ready.cycle)
+  #expect(accepted.acceptance?.acceptedAt == "2026-07-01T00:20:00Z")
+  #expect(store.attentionSessions.isEmpty)
+  #expect(store.pods.first?.completionPolicy == "accept-findings")
+}
+
+@MainActor
 @Test func podStoreLoadsEveryCompactPageAndRemovesPodsMissingFromTheFleet() async throws {
   let recorder = FleetRequestRecorder()
   let mode = FleetMode()

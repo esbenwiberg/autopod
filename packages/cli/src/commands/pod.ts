@@ -725,6 +725,20 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
         console.log(
           `Fleet archived: ${s.fleetArchivedAt}. Resources retained; execution unchanged.`,
         );
+      if (s.completionPolicy === 'accept-findings') {
+        console.log('Native validation: Not required for this research task');
+        console.log('Acceptance acknowledges findings, not a fix or implementation permission.');
+        if (s.researchFindings) {
+          const evidence = s.researchFindings;
+          console.log(evidence.summary.actualSummary);
+          console.log(`Reports: ap files ${s.id}`);
+          console.log(
+            evidence.acceptance
+              ? `Accepted at ${evidence.acceptance.acceptedAt}`
+              : `Accept: ap accept-findings ${s.id} --generation ${evidence.generation} --cycle ${evidence.cycle} --evidence-hash ${evidence.evidenceHash}`,
+          );
+        }
+      }
       if (s.failureReason) console.log(`${chalk.bold('Failure:')} ${s.failureReason}`);
       if (s.lastRecoveryTrigger && s.lastCorrectionMessage)
         console.log(`${chalk.bold('Recovery note:')} ${s.lastCorrectionMessage}`);

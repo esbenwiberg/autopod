@@ -100,7 +100,9 @@ describe('shared launch request CLI', () => {
   it('resolves research through the same configuration preview with artifact output', async () => {
     const client = {
       listConfigurations: lookup,
-      resolveLaunch: vi.fn(async () => ({ workflow: { output: 'artifact' } })),
+      resolveLaunch: vi.fn(async () => ({
+        workflow: { output: 'artifact', completion: 'accept-findings' },
+      })),
       launchPod: vi.fn(),
     };
     const program = new Command().exitOverride();
@@ -123,7 +125,7 @@ describe('shared launch request CLI', () => {
     expect(client.resolveLaunch).toHaveBeenCalledWith(
       expect.objectContaining({
         repositoryId: 'repo',
-        overrides: { workflow: { output: 'artifact' } },
+        overrides: { workflow: { output: 'artifact', completion: 'accept-findings' } },
       }),
     );
     expect(client.launchPod).not.toHaveBeenCalled();

@@ -138,6 +138,12 @@ export function createApprovalControls(captured: ApprovalControlsCaptured) {
     // A fresh human override is required; a cached waiver is never itself a reply.
     const repairingDecision =
       pod.status === 'validated' && Boolean(pendingDecisionId) && pod.validationWaiver != null;
+    if (pod.completionPolicy === 'accept-findings')
+      throw new AutopodError(
+        'Findings require evidence retention and human acceptance, not validation waiver',
+        'FINDINGS_ACCEPTANCE_REQUIRED',
+        409,
+      );
     const allowed =
       repairingDecision ||
       pod.status === 'failed' ||

@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3';
 import { createScanReportRepository } from '../scheduled-jobs/scan-report-repository.js';
 import { type ConfigurationStore, configurationError } from './configuration-store.js';
 import { deriveLaunch } from './derive-launch.js';
-import { configurationDigest } from './launch-resolver.js';
+import { assertFindingsWorkflow, configurationDigest } from './launch-resolver.js';
 import { deriveScanRepair, readScanConfiguration } from './scan-repair-config.js';
 
 export interface LaunchSnapshotRepository {
@@ -270,6 +270,7 @@ export function createLaunchSnapshotRepository(
           const previous = findRequest(input.requestId, input.requestDigest);
           if (previous) return { podId: previous, created: false };
         }
+        assertFindingsWorkflow(input.config.workflow, input.config.intent);
         const { digest, ...body } = input.config;
         if (digest !== configurationDigest(body))
           configurationError(
@@ -335,9 +336,13 @@ export function createLaunchSnapshotRepository(
         );
         const marked = db
           .prepare(
-            'UPDATE pods SET launch_config_digest=? WHERE id=? AND launch_config_digest IS NULL',
+            'UPDATE pods SET launch_config_digest=?, completion_policy=? WHERE id=? AND launch_config_digest IS NULL',
           )
-          .run(digest, podId).changes;
+          .run(
+            digest,
+            input.config.workflow.completion === 'accept-findings' ? 'accept-findings' : null,
+            podId,
+          ).changes;
         if (marked !== 1)
           configurationError(
             'Pod already has a different launch identity',

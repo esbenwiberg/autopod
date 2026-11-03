@@ -48,6 +48,12 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
         ? { type: 'automation' as const, id: 'auto-approve' }
         : { type: 'automation' as const, id: 'direct-pod-manager' });
     const pod = podRepo.getOrThrow(podId);
+    if (pod.completionPolicy === 'accept-findings')
+      throw new AutopodError(
+        'Use exact-evidence findings acceptance after research is ready',
+        'FINDINGS_ACCEPTANCE_REQUIRED',
+        409,
+      );
     validateTransition(pod.id, pod.status, 'approved');
     emitActivityStatus(podId, 'Preparing approval…');
     const readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });

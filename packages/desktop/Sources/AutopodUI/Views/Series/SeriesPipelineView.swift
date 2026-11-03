@@ -301,6 +301,7 @@ public struct SeriesPipelineView: View {
                 footerChip("\(pods.filter { $0.status.needsAttention }.count) need attention", color: .orange)
                 footerChip("\(counts.queued) queued", color: .secondary)
             } else {
+            if counts.researchReady > 0 { footerChip("\(counts.researchReady) research ready", color: .orange) }
             footerChip("\(counts.validated) validated", color: .secondary)
             footerChip("\(counts.running) running", color: .blue)
             footerChip("\(counts.queued) queued", color: .gray)
@@ -334,6 +335,7 @@ public struct SeriesPipelineView: View {
     }
 
     private struct Counts {
+        var researchReady = 0
         var validated = 0
         var running = 0
         var queued = 0
@@ -344,6 +346,8 @@ public struct SeriesPipelineView: View {
         var c = Counts()
         for pod in pods {
             switch pod.status {
+            case .researchReady:
+                c.researchReady += 1
             case .validated, .approved, .merging, .mergePending, .complete:
                 c.validated += 1
             case .provisioning, .running, .validating, .handoff, .awaitingInput:

@@ -45,6 +45,17 @@ struct OverviewTab: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                if pod.completionPolicy == "accept-findings" {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(pod.status == .complete ? "Accepted findings" : "Research findings").font(.headline)
+                        Text("Acceptance acknowledges receipt, not a fix or permission to implement or publish.")
+                        Text(pod.researchFindings?.summary.actualSummary ?? pod.taskSummary?.actualSummary ?? "Summary is not yet available.")
+                            .textSelection(.enabled)
+                        if let accepted = pod.researchFindings?.acceptance {
+                            Text("Accepted by \(accepted.actor["displayName"]?.string ?? accepted.actor["userId"]?.string ?? "human") at \(accepted.acceptedAt)").font(.caption)
+                        }
+                    }
+                }
                 overviewStatusStrip
 
                 readinessCompactCard

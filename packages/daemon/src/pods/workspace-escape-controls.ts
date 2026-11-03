@@ -23,6 +23,12 @@ export function createWorkspaceEscapeControls(captured: WorkspaceEscapeCaptured)
   ): Promise<void> {
     podRepo.deletionOwnership?.assertTaskAvailable(podId);
     const pod = podRepo.getOrThrow(podId);
+    if (pod.completionPolicy === 'accept-findings')
+      throw new AutopodError(
+        'Use exact-evidence findings acceptance after research is ready',
+        'FINDINGS_ACCEPTANCE_REQUIRED',
+        409,
+      );
     if (pod.status === 'complete') {
       throw new AutopodError(`Pod ${podId} is already complete`, 'INVALID_STATE', 409);
     }

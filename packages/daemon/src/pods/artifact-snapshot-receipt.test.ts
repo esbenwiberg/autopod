@@ -6,6 +6,7 @@ import { createMockContainerManager } from '../test-utils/mock-helpers.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import {
   readArtifactSnapshotFile,
+  verifiedArtifactSnapshotHash,
   verifyApprovalSnapshotBinding,
   verifyArtifactSnapshot,
 } from './artifact-snapshot-receipt.js';
@@ -18,7 +19,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function collect() {
+async function collect(approvalBinding?: string) {
   const containerManager = createMockContainerManager();
   vi.mocked(containerManager.extractDirectoryFromContainer).mockImplementation(
     async (_id, _source, target) => {
@@ -32,6 +33,7 @@ async function collect() {
     containerId: 'source',
     artifactRoot: root,
     generation: 3,
+    approvalBinding,
     isCurrent: () => true,
   });
 }
@@ -74,6 +76,24 @@ describe('artifact snapshot integrity receipts', () => {
     await expect(verifyApprovalSnapshotBinding(snapshot, root, 3, 0, 'a'.repeat(64))).resolves.toBe(
       false,
     );
+  });
+
+  it('retains pinned findings hashes and approval bindings on the same verified inventory', async () => {
+    const binding = 'a'.repeat(64);
+    const snapshot = await collect(binding);
+    const pinned = await verifiedArtifactSnapshotHash(snapshot, root, 3, 0);
+    await expect(verifyApprovalSnapshotBinding(snapshot, root, 3, 0, binding)).resolves.toBe(true);
+    await expect(verifyArtifactSnapshot(snapshot, root, 3, 0, pinned)).resolves.toBeUndefined();
+    expect(
+      (await readArtifactSnapshotFile(snapshot, root, 3, 0, 'report.md', pinned)).toString(),
+    ).toBe('saved report');
+    const wrong = pinned === 'b'.repeat(64) ? 'c'.repeat(64) : 'b'.repeat(64);
+    await expect(verifyArtifactSnapshot(snapshot, root, 3, 0, wrong)).rejects.toMatchObject({
+      code: 'ARTIFACT_SNAPSHOT_UNVERIFIED',
+    });
+    await expect(
+      readArtifactSnapshotFile(snapshot, root, 3, 0, 'report.md', wrong),
+    ).rejects.toMatchObject({ code: 'ARTIFACT_SNAPSHOT_UNVERIFIED' });
   });
 
   it('rejects wrong generation, wrong root and missing or oversized receipts', async () => {

@@ -622,7 +622,9 @@ public struct ValidationTab: View {
 
   public var body: some View {
     Group {
-      if redesign {
+      if pod.completionPolicy == "accept-findings" {
+        Text("Not required for this research task").padding()
+      } else if redesign {
         VStack(spacing: 0) {
             ViewThatFits(in: .horizontal) {
               HStack {

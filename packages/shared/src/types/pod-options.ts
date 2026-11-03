@@ -18,7 +18,8 @@ export type AgentMode = 'auto' | 'interactive';
  * - `pr`       — push the branch and open a pull request. Requires `repoUrl`.
  * - `branch`   — push the branch to origin only, no PR.
  * - `artifact` — extract `/workspace` from the container to the data dir.
- * - `none`     — ephemeral; nothing leaves the container.
+ * - `none`     — no source publication. Normally ephemeral; explicit accept-findings
+ *                workflows retain their summary and report evidence.
  */
 export type OutputTarget = 'pr' | 'branch' | 'artifact' | 'none';
 

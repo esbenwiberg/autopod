@@ -85,3 +85,15 @@ private func presentationPod(_ id: String, status: PodStatus = .complete,
     #expect(DesktopRepository.resolve(pod, profiles: [edited]) == nil)
     #expect(pod.desktopRepositoryPlaceholder == "Repository unavailable")
 }
+
+@Test func researchReadyRemainsInAttentionWithoutMergeStages() {
+    #expect(PodStatus(rawValue: "research_ready") == .researchReady)
+    #expect(PodStatus.researchReady.needsAttention)
+    #expect(!PodStatus.researchReady.isActive)
+    #expect(!PodStatus.researchReady.isTerminal)
+    var pod = presentationPod("findings", status: .researchReady)
+    pod.completionPolicy = "accept-findings"
+    #expect(pod.desktopLifecycleStage == .researchReady)
+    #expect(pod.desktopLifecycleStages == [.queued, .provisioning, .running, .researchReady, .complete])
+    #expect(DetailPanelView.defaultTab(for: pod) == .overview)
+}
