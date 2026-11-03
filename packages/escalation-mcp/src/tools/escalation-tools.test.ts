@@ -199,7 +199,7 @@ describe('askHuman', () => {
 
     const result = await promise;
     expect(result).toContain('No response received');
-    expect(result).toContain('best judgement');
+    expect(result).toContain('decision remains unanswered');
   });
 
   it('falls back to ask_ai on timeout when configured on the profile', async () => {
@@ -319,7 +319,30 @@ describe('reportBlocker', () => {
     );
 
     expect(result).toContain('Cannot connect to DB');
-    expect(result).toContain('Continuing');
+    expect(result).toContain('No human answer');
+  });
+
+  it('does not route explicit owner decisions to AI when disabled or timed out', async () => {
+    const bridge = makeBridge({
+      isAskHumanDisabled: vi.fn().mockReturnValue(true),
+      getHumanResponseOnTimeout: vi.fn().mockReturnValue('ask_ai'),
+      getHumanResponseTimeout: vi.fn().mockReturnValue(0.01),
+    });
+    const response = askHuman(
+      'sess-1',
+      {
+        kind: 'decision',
+        question: 'Change scope?',
+        recommendation: 'Keep scope',
+        options: ['Keep scope', 'Expand scope'],
+      },
+      bridge,
+      pendingRequests,
+    );
+    await vi.advanceTimersByTimeAsync(20);
+    expect(await response).toContain('decision remains unanswered');
+    expect(bridge.callReviewerModel).not.toHaveBeenCalled();
+    expect(bridge.resolveEscalation).not.toHaveBeenCalled();
   });
 
   it('creates an escalation record', async () => {
@@ -344,47 +367,26 @@ describe('reportBlocker', () => {
     );
   });
 
-  it('blocks and waits for human response when autopause threshold is reached', async () => {
-    const bridge = makeBridge({
-      getAutoPauseCount: vi.fn().mockReturnValue(2),
-      getAutoPauseThreshold: vi.fn().mockReturnValue(3), // 2 + 1 = 3 >= threshold
-      getHumanResponseTimeout: vi.fn().mockReturnValue(10),
-    });
-
-    const promise = reportBlocker(
+  it.each([2, 3, 100])('never manufactures a question at count %s', async (count) => {
+    const bridge = makeBridge({ getAutoPauseCount: vi.fn().mockReturnValue(count) });
+    const result = await reportBlocker(
       'sess-1',
-      { description: 'Blocked again', attempted: [], needs: 'human help' },
+      { description: 'Runner missing', attempted: [], needs: 'Autopod repair' },
       bridge,
       pendingRequests,
     );
-
-    const createCall = (bridge.createEscalation as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
-    pendingRequests.resolve(createCall.id, 'Try a different approach');
-
-    const result = await promise;
-    expect(result).toBe('Try a different approach');
-  });
-
-  it('returns a tool result instead of throwing when human response times out', async () => {
-    const bridge = makeBridge({
-      getAutoPauseCount: vi.fn().mockReturnValue(2),
-      getAutoPauseThreshold: vi.fn().mockReturnValue(3),
-      getHumanResponseTimeout: vi.fn().mockReturnValue(0.05),
-    });
-
-    const promise = reportBlocker(
-      'sess-1',
-      { description: 'Blocked again', attempted: [], needs: 'human help' },
-      bridge,
-      pendingRequests,
+    expect(result).toContain('No human answer');
+    expect(bridge.createEscalation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          kind: 'infrastructure',
+          requiresResponse: false,
+          owner: 'autopod',
+        }),
+      }),
     );
-
-    await vi.advanceTimersByTimeAsync(60);
-
-    const result = await promise;
-    expect(result).toContain('no human response');
-    expect(result).toContain('timeout');
-    expect(result).toContain('remains awaiting input');
+    expect(bridge.getAutoPauseCount).not.toHaveBeenCalled();
+    expect(bridge.callReviewerModel).not.toHaveBeenCalled();
   });
 
   it('increments escalation count', async () => {

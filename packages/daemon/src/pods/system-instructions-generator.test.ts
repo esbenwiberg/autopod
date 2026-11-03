@@ -198,6 +198,11 @@ describe('generateSystemInstructions', () => {
 
     expect(md).toContain('http://localhost:8080/mcp/abc12345');
     expect(md).toContain('ask_human');
+    expect(md).toContain('existing locked repository dependencies are already authorized');
+    expect(md).toContain('a genuinely new product library outside the authorized brief');
+    expect(md).toContain('TLS bypass');
+    expect(md).toContain('Linux cannot run Xcode');
+    expect(md).not.toContain('You face a meaningful decision with multiple reasonable paths');
     expect(md).toContain('ask_ai');
     expect(md).toContain('report_blocker');
   });

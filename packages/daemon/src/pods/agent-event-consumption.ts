@@ -15,6 +15,7 @@ import {
   hasAlreadyCountedCompleteEvent,
   persistedAgentCompleteEventKeys,
 } from './agent-execution-policy.js';
+import { isBlockingEscalation } from './escalation-coordinator.js';
 import type { PodUpdates } from './pod-repository.js';
 import { nativeSessionId } from './provider-attempt-policy.js';
 import { ProviderAttemptSupersededError } from './provider-attempt-repository.js';
@@ -276,7 +277,7 @@ export function createAgentEventConsumption(
 
         if (event.type === 'escalation') {
           const pod = podRepo.getOrThrow(podId);
-          if (pod.status === 'running') {
+          if (pod.status === 'running' && isBlockingEscalation(event.payload)) {
             const escalationPayload = event.payload.payload;
             const escalationSummary =
               'question' in escalationPayload

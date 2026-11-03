@@ -12,93 +12,111 @@ import { isBlockingEscalation } from './escalation-coordinator.js';
 import { createSessionBridge } from './pod-bridge-impl.js';
 import { createPodManager } from './pod-manager.js';
 
-it('keeps advisory blockers running, then durably pauses and resumes at the configured threshold', async () => {
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const ctx = createTestContext({
-    runtime: createMockRuntime({
-      spawn: vi.fn(async function* () {
-        yield statusEvent('Working');
-        await gate;
-        yield completeEvent('Finished');
+it.each([false, true])(
+  'holds infrastructure after settlement without displacing a question (pending=%s)',
+  async (hasQuestion) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const ctx = createTestContext({
+      runtime: createMockRuntime({
+        spawn: vi.fn(async function* () {
+          yield statusEvent('Working');
+          await gate;
+          yield completeEvent('Finished');
+        }),
       }),
-    }),
-  });
-  const waiters = new Map<string, PendingRequests>();
-  ctx.deps.pendingRequestsByPod = waiters;
-  const manager = createPodManager(ctx.deps);
-  const pod = manager.createSession(
-    { profileName: 'test-profile', task: 'Check blocker lifecycle' },
-    'operator',
-  );
-  const pending = new PendingRequests();
-  waiters.set(pod.id, pending);
-  const bridge = createSessionBridge({
-    ...ctx.deps,
-    podManager: manager,
-    pendingRequestsByPod: waiters,
-  });
-  const { server } = createEscalationMcpServer({ podId: pod.id, bridge, pendingRequests: pending });
-  const client = new Client({ name: 'blocker-threshold-fixture', version: '1' });
-  const [ct, st] = InMemoryTransport.createLinkedPair();
-  await server.connect(st);
-  await client.connect(ct);
-  const process = manager.processPod(pod.id);
-  const report = () =>
-    client.callTool({
-      name: 'report_blocker',
-      arguments: {
-        description: 'Optional source unavailable',
-        attempted: ['Bounded request'],
-        needs: 'Can proceed with remaining evidence',
-      },
     });
-  try {
-    await vi.waitFor(() => expect(manager.getSession(pod.id).status).toBe('running'));
-    for (let count = 1; count <= 2; count++) {
-      const result = await report();
-      expect(JSON.stringify(result)).toContain('Continuing with reduced confidence');
-      expect(manager.getSession(pod.id).status).toBe('running');
-      expect(manager.getSession(pod.id).pendingEscalation).toBeNull();
-      expect(bridge.getAutoPauseCount(pod.id)).toBe(count);
-      // Recreated bridges use durable records, not a process-local or AI-only counter.
-      const reopened = createSessionBridge({
-        ...ctx.deps,
-        podManager: manager,
-        pendingRequestsByPod: waiters,
-      });
-      expect(reopened.getAutoPauseCount(pod.id)).toBe(count);
-      expect(bridge.getAiEscalationCount(pod.id)).toBe(0);
-      bridge.reportProgress(pod.id, 'research', 'Continuing available work', 1, 2);
-    }
-    const blocked = report();
-    await vi.waitFor(() => expect(manager.getSession(pod.id).status).toBe('awaiting_input'));
-    const decisionId = manager.getSession(pod.id).pendingEscalation?.id;
-    if (!decisionId) throw new Error('Missing threshold decision');
-    expect(pending.hasPending(decisionId)).toBe(true);
-    expect(bridge.getAutoPauseCount(pod.id)).toBe(3);
-    await manager.sendMessage(pod.id, 'Use the available evidence', {
-      type: 'human',
-      id: 'fixture-operator',
-    });
-    expect(JSON.stringify(await blocked)).toContain('Use the available evidence');
-    expect(manager.getSession(pod.id).status).toBe('running');
-    expect(ctx.escalationRepo.getOrThrow(decisionId).response?.response).toBe(
-      'Use the available evidence',
+    const waiters = new Map<string, PendingRequests>();
+    ctx.deps.pendingRequestsByPod = waiters;
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Check blocker lifecycle' },
+      'operator',
     );
-    const guidance = bridge.readOperatorGuidance(pod.id);
-    if (guidance) bridge.acknowledgeOperatorGuidance(pod.id, guidance.deliveryId);
-  } finally {
-    pending.cancelAll();
-    release();
-    await process;
-    await client.close();
-    await server.close();
-    ctx.db.close();
-  }
-});
+    const pending = new PendingRequests();
+    waiters.set(pod.id, pending);
+    const bridge = createSessionBridge({
+      ...ctx.deps,
+      podManager: manager,
+      pendingRequestsByPod: waiters,
+    });
+    const { server } = createEscalationMcpServer({
+      podId: pod.id,
+      bridge,
+      pendingRequests: pending,
+    });
+    const client = new Client({ name: 'blocker-threshold-fixture', version: '1' });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await server.connect(st);
+    await client.connect(ct);
+    const process = manager.processPod(pod.id);
+    const report = () =>
+      client.callTool({
+        name: 'report_blocker',
+        arguments: {
+          description: 'Optional source unavailable',
+          attempted: ['Bounded request'],
+          needs: 'Can proceed with remaining evidence',
+        },
+      });
+    try {
+      await vi.waitFor(() => expect(manager.getSession(pod.id).status).toBe('running'));
+      for (let index = 0; index < 2; index++)
+        bridge.createEscalation({
+          id: `ai-${index}`,
+          podId: pod.id,
+          type: 'ask_ai',
+          timestamp: new Date().toISOString(),
+          payload: { question: 'Technical advice' },
+          response: { respondedBy: 'ai', response: 'Advice only' },
+        });
+      if (hasQuestion)
+        bridge.createEscalation({
+          id: 'real-question',
+          podId: pod.id,
+          type: 'ask_human',
+          timestamp: new Date().toISOString(),
+          payload: { question: 'Choose product scope?' },
+          response: null,
+        });
+      for (let count = 1; count <= 4; count++) {
+        const result = await report();
+        expect(JSON.stringify(result)).toContain('No human answer');
+        expect(manager.getSession(pod.id).status).toBe(hasQuestion ? 'awaiting_input' : 'running');
+        expect(manager.getSession(pod.id).pendingEscalation?.id ?? null).toBe(
+          hasQuestion ? 'real-question' : null,
+        );
+        expect(bridge.getAutoPauseCount(pod.id)).toBe(count + 2);
+        // Recreated bridges use durable records, not a process-local or AI-only counter.
+        const reopened = createSessionBridge({
+          ...ctx.deps,
+          podManager: manager,
+          pendingRequestsByPod: waiters,
+        });
+        expect(reopened.getAutoPauseCount(pod.id)).toBe(count + 2);
+        expect(bridge.getAiEscalationCount(pod.id)).toBe(2);
+        if (!hasQuestion)
+          bridge.reportProgress(pod.id, 'research', 'Preserving available work', 1, 2);
+      }
+      expect(ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+    } finally {
+      pending.cancelAll();
+      release();
+      await process;
+      expect(manager.getSession(pod.id)).toMatchObject({
+        status: hasQuestion ? 'awaiting_input' : 'failed',
+        pendingEscalation: hasQuestion ? expect.objectContaining({ id: 'real-question' }) : null,
+        failureReason: hasQuestion ? null : expect.stringContaining('Infrastructure blocked:'),
+      });
+      expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
+      await client.close();
+      await server.close();
+      ctx.db.close();
+    }
+  },
+);
 
 it('keeps legacy blockers and explicit human questions blocking', () => {
   const base = { id: 'legacy', podId: 'pod', timestamp: new Date().toISOString(), response: null };

@@ -54,6 +54,7 @@ export interface CompletionDiagnosticsCaptured {
 }
 
 export interface CompletionOwnersCaptured {
+  escalationRepo: import('./escalation-repository.js').EscalationRepository;
   podRepo: Pick<PodRepository, 'getOrThrow' | 'update' | 'completionJournal' | 'atomically'>;
   nudgeRepo: Pick<NudgeRepository, 'hasPending'>;
   preservePodWorkspace: ReturnType<typeof createWorkspacePreservation>['preservePodWorkspace'];

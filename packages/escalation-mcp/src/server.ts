@@ -75,14 +75,18 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
 
   server.tool(
     'ask_human',
-    'Ask a human for help, clarification, or a decision. Use when you are uncertain or blocked.',
+    'Request an actionable owner decision about scope, product choices or authority. Give a concise question, recommendation with reason, and choices with consequences. Use report_blocker for infrastructure or missing capabilities; a reply is not an execution receipt or gate waiver.',
     {
-      question: z.string().describe('The question to ask the human'),
+      kind: z.literal('decision').default('decision'),
+      question: z.string().trim().min(1).describe('Concise question the owner can actually answer'),
+      recommendation: z.string().trim().min(1).describe('Recommended choice and reason'),
       context: z.string().optional().describe('Additional context to help the human understand'),
       options: z
-        .array(z.string())
-        .optional()
-        .describe('Suggested options for the human to choose from'),
+        .array(z.string().trim().min(1))
+        .min(2)
+        .describe(
+          'Useful choices with consequences; labels are not evidence actions were executed',
+        ),
     },
     async (input) => {
       const response = await askHuman(podId, input, bridge, pendingRequests);
@@ -112,11 +116,15 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
 
   server.tool(
     'report_blocker',
-    'Report a blocking issue that prevents progress. If too many blockers, the pod will pause for human review.',
+    'Report infrastructure or missing capabilities without requesting a human answer. Stop blocked attempts, preserve work, summarize incomplete checks and finish; Autopod holds completion after execution settles.',
     {
       description: z.string().describe('Description of the blocking issue'),
       attempted: z.array(z.string()).describe('List of approaches already attempted'),
-      needs: z.string().describe('What is needed to unblock'),
+      needs: z
+        .string()
+        .describe('Required repair or missing input; say when no supported recovery exists'),
+      owner: z.enum(['autopod', 'parent', 'validation']).default('autopod'),
+      phase: z.string().optional().describe('Failing execution or validation phase'),
     },
     async (input) => {
       const response = await reportBlocker(podId, input, bridge, pendingRequests);

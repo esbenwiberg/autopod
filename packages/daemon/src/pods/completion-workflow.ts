@@ -16,6 +16,7 @@ export function createCompletionOwners(captured: CompletionOwnersCaptured) {
   const {
     podRepo,
     nudgeRepo,
+    escalationRepo,
     preservePodWorkspace,
     ownsArtifactCompletion,
     transition,
@@ -39,6 +40,7 @@ export function createCompletionOwners(captured: CompletionOwnersCaptured) {
   const { holdCompletionForHumanWork } = createCompletionHumanGate({
     podRepo,
     nudgeRepo,
+    escalationRepo,
     preservePodWorkspace,
     ownsArtifactCompletion,
     transition,

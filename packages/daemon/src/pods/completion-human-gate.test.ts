@@ -314,6 +314,63 @@ describe('completion human gate persistence', () => {
     }
   });
 
+  it('preserves a typed infrastructure report across restart and holds only settled completion', async () => {
+    const f = fixture();
+    const held = deferred();
+    let operation: Promise<void> | undefined;
+    try {
+      const escalationRepo = createEscalationRepository(f.db);
+      const pod = f.repo.getOrThrow('worker');
+      escalationRepo.insert({
+        id: 'infra',
+        podId: pod.id,
+        type: 'report_blocker',
+        timestamp: new Date().toISOString(),
+        response: null,
+        payload: {
+          kind: 'infrastructure',
+          lifecycleGeneration: pod.lifecycleGeneration,
+          requiresResponse: false,
+          owner: 'validation',
+          description: 'Runner unavailable',
+          attempted: [],
+          needs: 'Repair runner',
+        },
+      });
+      expect(f.repo.getOrThrow('worker').status).toBe('running');
+      const reopened = f.reopen();
+      const gate = createCompletionHumanGate({
+        ...f.dependencies,
+        podRepo: reopened.repo,
+        nudgeRepo: reopened.nudges,
+        escalationRepo: createEscalationRepository(reopened.db),
+      });
+      f.preserve.mockImplementationOnce(() => held.promise);
+      operation = gate.holdCompletionForHumanWork(reopened.repo.getOrThrow('worker'));
+      expect(reopened.repo.getOrThrow('worker').status).toBe('running');
+      expect(f.transition).not.toHaveBeenCalled();
+      // Rebind transition after reopening the underlying database.
+      f.transition.mockImplementationOnce((current, status, updates) => {
+        reopened.repo.update(current.id, { status, ...updates });
+        return reopened.repo.getOrThrow(current.id);
+      });
+      held.resolve();
+      await operation;
+      expect(reopened.repo.getOrThrow('worker')).toMatchObject({
+        status: 'failed',
+        pendingEscalation: null,
+        failureReason: expect.stringContaining('Infrastructure blocked: Runner unavailable'),
+      });
+      expect(reopened.repo.getOrThrow('worker').finalization?.sourcePreservedAt).toEqual(
+        expect.any(String),
+      );
+    } finally {
+      held.resolve();
+      await operation;
+      f.close();
+    }
+  });
+
   it('returns undefined synchronously for the empty path without mutation or an async dispatch window', () => {
     const f = fixture();
     try {

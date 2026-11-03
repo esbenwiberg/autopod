@@ -177,8 +177,23 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       if (!pod.launchConfigDigest) return undefined;
       return deps.scopedTools?.(podId);
     },
-    createEscalation(escalation: EscalationRequest): void {
+    createEscalation(request: EscalationRequest): void {
+      let escalation = request;
       podManager.touchHeartbeat(escalation.podId);
+      if (
+        escalation.type === 'report_blocker' &&
+        'kind' in escalation.payload &&
+        escalation.payload.kind === 'infrastructure'
+      ) {
+        escalation = {
+          ...escalation,
+          payload: {
+            ...escalation.payload,
+            requiresResponse: false,
+            lifecycleGeneration: podRepo.getOrThrow(escalation.podId).lifecycleGeneration,
+          },
+        };
+      }
       persistEscalation(podRepo, escalationRepo, escalation, () => {
         logger.info(
           { escalationId: escalation.id, podId: escalation.podId, type: escalation.type },

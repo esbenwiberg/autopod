@@ -706,6 +706,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   const { holdCompletionForHumanWork, prepareSourceForCompletion, applyCompletionDecision } =
     createCompletionOwners({
       podRepo,
+      escalationRepo,
       nudgeRepo,
       preservePodWorkspace,
       ownsArtifactCompletion,
