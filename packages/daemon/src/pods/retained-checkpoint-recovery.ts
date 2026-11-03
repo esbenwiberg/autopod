@@ -59,6 +59,10 @@ export function createRetainedCheckpointRecovery(deps: {
       deps.executionForPod(pod),
     ]);
   function policy(pod: Pod) {
+    if (deps.podRepo.approvalRewrites?.latest(pod))
+      checkpointError(
+        'Approval rewrite owns this source; a competing checkpoint recovery is not authorized',
+      );
     if (
       pod.executionTarget !== 'sandbox' ||
       deps.isGoal(pod.id) ||

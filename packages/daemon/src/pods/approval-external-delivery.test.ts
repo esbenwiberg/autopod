@@ -55,6 +55,60 @@ describe('source-verified external delivery before sandbox preservation', () => 
     expect(f.db.prepare('SELECT count(*) AS n FROM merge_intents').get()).toEqual({ n: 0 });
     noMutation(f);
   });
+  it('records descendant delivery separately from retained source without waking or publishing', async () => {
+    const f = fixture(true);
+    const mergedHeadSha = 'c'.repeat(40);
+    const proof = {
+      publishedHeadSha: f.source.commitSha,
+      mergedHeadSha,
+      target: f.target,
+      observedAt: new Date().toISOString(),
+    };
+    f.provider.getPrStatus.mockResolvedValue({ ...f.status, headSha: mergedHeadSha });
+    f.provider.verifyMergedSourceAncestry.mockResolvedValue(proof);
+    await f.approve();
+    expect(f.pod().status).toBe('complete');
+    expect(createExternalDeliveryRepository(f.db).get('prepare')).toMatchObject({
+      headSha: f.source.commitSha,
+      treeSha: f.source.treeSha,
+      mergedHeadSha,
+      ancestry: proof,
+      reports: 'pending',
+    });
+    const changes = f.db.prepare('SELECT total_changes() AS n').get();
+    await f.approve(); // A lost response must not create a second observation or delivery.
+    expect(f.db.prepare('SELECT total_changes() AS n').get()).toEqual(changes);
+    expect(f.provider.verifyMergedSourceAncestry).toHaveBeenCalledOnce();
+    noMutation(f);
+  });
+  it.each([
+    'wrong-ancestor',
+    'wrong-descendant',
+    'wrong-target',
+    'stale-source',
+    'stale-lifecycle',
+  ])('does not record %s descendant proof', async (kind) => {
+    const f = fixture();
+    const mergedHeadSha = 'c'.repeat(40);
+    f.provider.getPrStatus.mockResolvedValue({ ...f.status, headSha: mergedHeadSha });
+    f.provider.verifyMergedSourceAncestry.mockImplementation(async () => {
+      const proof = {
+        publishedHeadSha: f.source.commitSha,
+        mergedHeadSha,
+        target: f.target,
+        observedAt: new Date().toISOString(),
+      };
+      if (kind === 'wrong-ancestor') proof.publishedHeadSha = 'd'.repeat(40);
+      if (kind === 'wrong-descendant') proof.mergedHeadSha = 'd'.repeat(40);
+      if (kind === 'wrong-target') proof.target = { ...f.target, baseBranch: 'other' };
+      if (kind === 'stale-source') f.source.treeSha = 'd'.repeat(40);
+      if (kind === 'stale-lifecycle') f.podRepo.incrementLifecycleGeneration('prepare');
+      return proof;
+    });
+    await expect(f.approve()).rejects.toThrow();
+    expect(f.podRepo.externalDeliveries?.get('prepare')).toBeNull();
+    noMutation(f);
+  });
   it('keeps observations immutable and retains the resource across repository reconstruction', async () => {
     const f = fixture(true);
     await f.approve();

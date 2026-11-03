@@ -48,6 +48,15 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
         ? { type: 'automation' as const, id: 'auto-approve' }
         : { type: 'automation' as const, id: 'direct-pod-manager' });
     const pod = podRepo.getOrThrow(podId);
+    const external = pod.status === 'complete' ? podRepo.externalDeliveries?.get(podId) : null;
+    if (
+      external &&
+      external.generation === pod.lifecycleGeneration &&
+      external.prUrl === pod.prUrl &&
+      external.retainedSandboxId === pod.containerId &&
+      external.worktreePath === pod.worktreePath
+    )
+      return; // Lost completion replies observe the immutable receipt, never repeat delivery.
     if (pod.completionPolicy === 'accept-findings')
       throw new AutopodError(
         'Use exact-evidence findings acceptance after research is ready',

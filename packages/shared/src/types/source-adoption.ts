@@ -31,4 +31,15 @@ export interface SourceAdoptionState {
 }
 export interface SourceAdoptionList {
   operations: SourceAdoptionState[];
+  /** Read-only approval rebase custody, separate from explicit source adoption. */
+  approvalRewrite?: {
+    id: string;
+    generation: number;
+    phase: 'preparing' | 'prepared' | 'checking' | 'checks-held' | 'checked';
+    predecessorHeadSha: string;
+    candidateHeadSha?: string;
+    checks: 'pending' | 'pass' | 'stale';
+    originalResources: 'retained';
+    requiresHumanApproval: true;
+  };
 }

@@ -78,6 +78,7 @@ export function createSandboxRecovery(deps: {
     deps.podRepo.taskExecutions.assertCanDelete(podId);
     deps.podRepo.sourceAdoptions.assertDeletable(podId);
     deps.podRepo.externalDeliveries.assertDeletable(podId);
+    deps.podRepo.approvalRewrites?.assertDeletable(podId);
     // Post-404 cleanup resumes through deleteSession's exact durable cleanup
     // claim. That claim, not a blanket availability check, fences active attempts.
     if (

@@ -99,6 +99,8 @@ export interface ApprovalWorkflowCaptured {
   emitActivityStatus: ReturnType<typeof createCompletionEvents>['emitActivityStatus'];
   failBranchPreservation: (pod: Pod) => never;
   forceWithLeaseAllowances: Set<string>;
+  enqueueSession: (podId: string) => void;
+  isGoal?: (podId: string) => boolean;
   transition: ReturnType<typeof createCompletionEvents>['transition'];
   persistReadinessApproval: ReturnType<typeof createApprovalReadiness>['persistReadinessApproval'];
   cleanupContainerAfterAdvisorySettles: (
@@ -172,6 +174,8 @@ export type ApprovalDeliveryExecutionCaptured = Pick<
   | 'resolveGitCredential'
   | 'mergeQueue'
   | 'formatRebaseConflictReason'
+  | 'enqueueSession'
+  | 'isGoal'
   | 'startMergePolling'
   | 'resolvePrBaseBranch'
   | 'ensurePrBaseBranchOnOrigin'

@@ -35,6 +35,21 @@ For older or otherwise unpreserved executions, approval preserves ignored worksp
 reports before its publication, merge and cleanup steps. Readiness is a separate
 verdict: a ready pod can still encounter a delivery failure.
 
+A provider-confirmed already-merged PR may instead be reconciled before any
+wakeup. Exact retained source or provider-proven merged-source ancestry records
+external delivery without another push/merge. Additional commits are not certified
+by historical validation. Reports can remain pending: the original sandbox and
+unknown wakeup intent stay retained, and no deletion or resume replay follows.
+See [merge recovery](merge-operator-recovery.md#already-merged-prs-normal-polling).
+
+If approval discovers a newer base requiring rebase, the daemon preserves the
+original and queues an isolated candidate through validation-only provisioning.
+No coding agent starts, budgets are not reset, and passing checks/review return
+the task for a new human approval rather than publishing automatically. Inspect
+`ap source-recovery POD --json`; do not manually reset source, force-push or detach
+resources to bypass its durable rewrite binding. See
+[approval source leases](merge-operator-recovery.md#approval-rebase-candidates-and-exact-publication-leases).
+
 One approval runs per pod in the daemon. Overlapping API, automation, bulk, or
 manager requests receive HTTP 409 `APPROVAL_IN_PROGRESS`; they do not join or
 change the active request's options. Wait for activity/status before retrying.

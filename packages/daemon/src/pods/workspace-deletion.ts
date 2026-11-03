@@ -29,6 +29,7 @@ export function createWorkspaceDeletion(captured: WorkspaceDeletionCaptured) {
     podRepo.taskExecutions?.assertCanDelete(podId);
     podRepo.sourceAdoptions?.assertDeletable(podId);
     podRepo.externalDeliveries?.assertDeletable(podId);
+    podRepo.approvalRewrites?.assertDeletable(podId);
     podRepo.sandboxWakeups?.assertPodReleasable(podId);
     const pod = podRepo.getOrThrow(podId);
     if (pod.containerId) {
@@ -69,6 +70,7 @@ export function createWorkspaceDeletion(captured: WorkspaceDeletionCaptured) {
       podRepo.taskExecutions?.assertCanDelete(podId);
       podRepo.sourceAdoptions?.assertDeletable(podId);
       podRepo.externalDeliveries?.assertDeletable(podId);
+      podRepo.approvalRewrites?.assertDeletable(podId);
       podRepo.sandboxWakeups?.assertPodReleasable(podId);
       if (current.containerId) {
         podRepo.sandboxWakeups?.assertReleasable(current.containerId);

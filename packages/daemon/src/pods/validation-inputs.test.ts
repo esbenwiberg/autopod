@@ -584,6 +584,51 @@ describe('validation inputs persisted effects', () => {
     },
   );
 
+  it('does not reuse pre-rebase review or override evidence for a selected rewrite', async () => {
+    const f = fixture();
+    try {
+      const rewrites = f.repo.approvalRewrites;
+      if (!rewrites) throw new Error('Missing rewrite ledger');
+      vi.spyOn(rewrites, 'latest').mockReturnValue({
+        id: 'selected-rewrite',
+        podId: f.pod.id,
+        generation: f.pod.lifecycleGeneration,
+        binding: {
+          predecessor: {
+            branch: f.pod.branch,
+            repository: 'https://github.com/org/repo',
+            commitSha: 'a'.repeat(40),
+            treeSha: 'b'.repeat(40),
+            remoteRef: `refs/heads/${f.pod.branch}`,
+            worktreeClean: true,
+            observedRemoteCommitSha: 'a'.repeat(40),
+            observedAt: new Date().toISOString(),
+          },
+          publicationId: 'publication',
+          baseBranch: 'main',
+          baseCommitSha: 'c'.repeat(40),
+          prUrl: 'https://github.com/org/repo/pull/42',
+          worktreePath: '/original',
+          containerId: 'original',
+          configurationHash: 'd'.repeat(64),
+          validationHash: 'e'.repeat(64),
+          root: '/candidate',
+        },
+      });
+      f.pod.validationOverrides = [];
+      f.history.insert('worker', 1, validation(1, reviewBatch('old-source')));
+      const result = await f.run();
+      expect(result.previousValidation).toBeNull();
+      expect(result.validationConfig.priorReviewBatch).toBeUndefined();
+      expect(result.validationConfig.preSubmitReview).toBeUndefined();
+      expect(f.batch).not.toHaveBeenCalled();
+      f.queue();
+      await expect(f.run()).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+    } finally {
+      f.close();
+    }
+  });
+
   it('preserves chronological history and returned record identity across attempt resets', async () => {
     const f = fixture();
     try {

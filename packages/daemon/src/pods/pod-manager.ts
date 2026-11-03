@@ -82,6 +82,7 @@ import { createApprovalDeliveryExecution } from './approval-delivery-execution.j
 import { createApprovalDeliveryPreparation } from './approval-delivery-preparation.js';
 import { actorLabel, buildValidationWaiver, legacyRespondedBy } from './approval-policy.js';
 import { createApprovalReadiness, createReadinessRefresh } from './approval-readiness.js';
+import { rewriteError } from './approval-source-rewrite-repository.js';
 import { createApprovalWorkflow } from './approval-workflow.js';
 import {
   formatElapsedDuration,
@@ -1117,6 +1118,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     maybeTriggerDependents,
   });
   const { executeApprovalDelivery } = createApprovalDeliveryExecution({
+    isGoal: (id) =>
+      deps.launchConfiguration?.read(id)?.intent === 'goal' ||
+      Boolean(deps.launchConfiguration?.goals?.get(id)),
+    enqueueSession,
     podRepo,
     assertApprovalCurrent,
     executionForPod,
@@ -1421,6 +1426,28 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       'refreshNetworkPolicy',
       'deleteSeriesWithCascade',
     ]);
+    // Some registry calls take a profile name, not a pod ID. Query custody
+    // first rather than resolving an unrelated first string as a pod.
+    const rewritePod = podRepo.approvalRewrites?.has(podId) ? podRepo.getOrThrow(podId) : undefined;
+    const rewrite = rewritePod ? podRepo.approvalRewrites?.latest(rewritePod) : null;
+    if (
+      rewrite &&
+      ![
+        'approveSession',
+        'processPod',
+        'interruptValidation',
+        'notifyEscalation',
+        'nudgeSession',
+        'refreshReadinessAfterQualityScore',
+        'authorizeValidationRecoveryBudget',
+        ...(rewrite.activated && !rewrite.checked && rewritePod?.status === 'running'
+          ? ['triggerValidation']
+          : []),
+      ].includes(operation)
+    )
+      rewriteError(
+        `Rewrite ${rewrite.id} owns candidate checks/publication. Competing source mutation is not authorized.`,
+      );
     sandboxRecovery.assertAvailable(podId, operation);
     if (operation !== 'processPod') podRepo.retainedCheckpoints?.assertAvailable(podId);
     if (!metadataOnly.has(operation)) assertValidationMutationSettled(podRepo, podId);

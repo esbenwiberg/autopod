@@ -1,6 +1,7 @@
 import { rm } from 'node:fs/promises';
+import type { SourceAdoptionList } from '@autopod/shared';
 import Fastify from 'fastify';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSourceControllerFixture } from '../../test-utils/source-controller-helpers.js';
 import { terminationAuth } from '../../test-utils/termination-reconciliation-helpers.js';
 import { errorHandler } from '../error-handler.js';
@@ -11,7 +12,9 @@ describe('authenticated durable source recovery API', () => {
   let s: Awaited<ReturnType<typeof createSourceControllerFixture>>;
   let app: ReturnType<typeof Fastify>;
   const headers = { authorization: 'Bearer human-token' };
+  const inspectRewrite = vi.fn<() => SourceAdoptionList['approvalRewrite']>();
   beforeEach(async () => {
+    inspectRewrite.mockReset();
     s = await createSourceControllerFixture();
     app = Fastify();
     app.setErrorHandler(errorHandler);
@@ -19,6 +22,7 @@ describe('authenticated durable source recovery API', () => {
     sourceAdoptionRoutes(app, {
       adoptSource: s.controller.submit,
       getSourceAdoptions: s.controller.list,
+      getApprovalSourceRewrite: inspectRewrite,
     });
     await app.ready();
   });
@@ -48,6 +52,26 @@ describe('authenticated durable source recovery API', () => {
     expect(state.json()).toMatchObject({ operations: [{ stage: 'checked', validation: 'pass' }] });
     expect(state.body).not.toContain(s.host);
     expect(state.body).not.toContain(s.root);
+  });
+  it('includes bounded read-only approval rewrite state without resource mutation', async () => {
+    const state: NonNullable<SourceAdoptionList['approvalRewrite']> = {
+      id: 'rewrite-once',
+      generation: 3,
+      phase: 'prepared',
+      predecessorHeadSha: 'a'.repeat(40),
+      candidateHeadSha: 'b'.repeat(40),
+      checks: 'pending',
+      originalResources: 'retained',
+      requiresHumanApproval: true,
+    };
+    inspectRewrite.mockReturnValue(state);
+    const before = s.f.db.prepare('SELECT total_changes() AS n').get();
+    const response = await app.inject({ method: 'GET', url: url(), headers });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ operations: [], approvalRewrite: state });
+    expect(s.cm.execStreaming).not.toHaveBeenCalled();
+    expect(s.cm.getResourceKey).not.toHaveBeenCalled();
+    expect(s.f.db.prepare('SELECT total_changes() AS n').get()).toEqual(before);
   });
   it.each([undefined, 'Bearer worker-hmac-token'])(
     'refuses missing or worker credentials before any source read/mutation (%s)',
