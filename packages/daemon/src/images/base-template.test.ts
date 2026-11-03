@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,6 +55,20 @@ async function readScript(filename: string): Promise<string> {
 }
 
 describe('Trusted Pi worker base image prerequisites', () => {
+  it.each(workerBaseTemplates)(
+    '%s extends Node trust with system-managed roots',
+    async (filename) => {
+      const dockerfile = await readBaseTemplate(filename);
+      const trustIndex = dockerfile.indexOf(
+        'ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt',
+      );
+      expect(trustIndex).toBeGreaterThan(dockerfile.indexOf('ca-certificates'));
+      expect(trustIndex).toBeLessThan(dockerfile.indexOf('npm install'));
+      expect(dockerfile).not.toContain('NODE_TLS_REJECT_UNAUTHORIZED=0');
+      expect(dockerfile).not.toContain('strict-ssl=false');
+    },
+  );
+
   it.each(workerBaseTemplates)('%s installs pinned pnpm before using it', async (filename) => {
     const dockerfile = await readBaseTemplate(filename);
     const installIndex = dockerfile.indexOf('npm install -g pnpm@9');
@@ -69,6 +83,16 @@ describe('Trusted Pi worker base image prerequisites', () => {
 });
 
 describe('Playwright base image templates', () => {
+  it('covers every template that installs Playwright browsers', async () => {
+    const files = await readdir(path.join(repoRoot, 'templates/base'));
+    const discovered = [];
+    for (const file of files.filter((name) => name.startsWith('Dockerfile.'))) {
+      if ((await readBaseTemplate(file)).includes('playwright install --with-deps'))
+        discovered.push(file);
+    }
+    expect(discovered.sort()).toEqual([...playwrightBaseTemplates].sort());
+  });
+
   it.each(playwrightBaseTemplates)(
     '%s exports the browser cache path and verifies Chromium launch',
     async (filename) => {
@@ -79,6 +103,27 @@ describe('Playwright base image templates', () => {
       expect(dockerfile).toContain('chromium.launch()');
       expect(dockerfile).toContain('await browser.close()');
       expect(dockerfile).toContain('cannot launch as the runtime user');
+      const ownership = dockerfile.indexOf('chown -R autopod:autopod /opt/pw-browsers');
+      const probe = dockerfile.indexOf('RUN node -e "const fs');
+      const launch = dockerfile.indexOf('RUN node -e "const { chromium }');
+      expect(ownership).toBeGreaterThan(dockerfile.indexOf('playwright install --with-deps'));
+      expect(probe).toBeGreaterThan(ownership);
+      expect(launch).toBeGreaterThan(probe);
+      for (const position of [probe, launch]) {
+        expect(
+          dockerfile
+            .slice(0, position)
+            .match(/^USER .+$/gm)
+            ?.at(-1),
+        ).toBe('USER autopod');
+      }
+      expect(dockerfile).toContain(
+        "for (const dir of ['/opt/pw-browsers', '/opt/pw-browsers/.links'])",
+      );
+      expect(dockerfile).toContain("const probe = dir + '/browser-cache-write-check'");
+      expect(dockerfile).toContain('fs.mkdirSync(probe); fs.rmdirSync(probe);');
+      expect(dockerfile).toContain('process.exit(1)');
+      expect(dockerfile).not.toContain('--no-sandbox');
     },
   );
 });

@@ -5,6 +5,7 @@ import {
   materializeCheckpointFixture,
   retainedCheckpointFixture,
 } from '../test-utils/retained-checkpoint-helpers.js';
+import { inspectCheckpointSource } from '../worktrees/checkpoint-source-identity.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
 import { verifiedCheckpointApprovalSnapshot } from './checkpoint-approval-snapshot.js';
 
@@ -19,6 +20,38 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+// Check the receipt and real imported lineage, rather than trusting mock flags.
+async function assertTransportedCheckpoint(
+  f: Awaited<ReturnType<typeof retainedCheckpointFixture>>,
+) {
+  const calls = vi.mocked(f.ctx.deps.sandboxWorkspaceCheckpoint!).mock;
+  expect(calls.results.length).toBeGreaterThan(0);
+  for (let index = 0; index < calls.results.length; index++) {
+    const args = calls.calls[index]![0];
+    const receipt = await calls.results[index]!.value;
+    expect(receipt).toMatchObject({
+      sourceTree: receipt.snapshotTree,
+      transferVerified: true,
+      bundleVerified: true,
+      hostImported: true,
+      lineageVerified: true,
+      promoted: true,
+      materialized: true,
+    });
+    expect(receipt.snapshotCommit).not.toBe(receipt.sourceHead);
+    const source = await inspectCheckpointSource({
+      podId: args.podId,
+      worktreePath: args.worktreePath,
+      branch: f.pod().branch,
+      head: receipt.sourceHead,
+      tree: receipt.sourceTree,
+      worktreeManager: f.worktrees,
+      assertCurrent: () => {},
+    });
+    expect(source.checkpoints).toContain(receipt.snapshotCommit);
+  }
+}
+
 describe('retained checkpoint through the real manager workflow (provider and checks mocked)', () => {
   it.each([false, true])(
     'a later explicit approval (frozen launch=%s) reaches delivery preparation without waking either sandbox or recollecting reports',
@@ -31,6 +64,7 @@ describe('retained checkpoint through the real manager workflow (provider and ch
       await f.recovery.wait(f.input.id);
       await f.manager.processPod(f.podId);
       expect(f.pod().status).toBe('validated');
+      await assertTransportedCheckpoint(f);
       const snapshot = f.pod().artifactsPath;
       const extractionCount = vi.mocked(f.cm.extractDirectoryFromContainer).mock.calls.length;
       f.ctx.worktreeManager.inspectSource = f.worktrees.inspectSourceAdoption;
@@ -104,6 +138,7 @@ describe('retained checkpoint through the real manager workflow (provider and ch
         'validated',
       );
       expect(operation.blocked).toBeNull();
+      await assertTransportedCheckpoint(f);
       expect(operation.checked?.result.overall).toBe('pass');
       const capturedSource = await f.worktrees.inspectSourceAdoption(
         current.worktreePath!,

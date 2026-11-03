@@ -6,9 +6,34 @@ human-selected source workflow retains the original, runs fresh checks without
 publishing, and preserves new reports before suspension. Later approval may reuse
 only the exact verified new-execution report receipt; the old intent stays unresolved.
 
-Approval of a validated sandbox PR or branch preserves ignored workspace reports
-before publishing source, merging, or removing the original sandbox. Readiness
-is a separate verdict: a ready pod can still encounter a delivery failure.
+Successful ordinary sandbox PR/branch validation and revalidation preserve ignored
+workspace reports **after advisory QA and before stopping the sandbox**. Approval
+verifies and reuses that private snapshot instead of cold-resuming the sandbox just
+to read reports. Its receipt binds the pod, generation/cycle, original resource,
+execution settings, exact final validation result (including advisory evidence),
+clean host commit/tree and collected file inventory. Receipt reuse survives daemon
+restart and grants no independent validation, source publication or merge authority.
+Linked fix delivery also captures reports before its cleanup; source-adoption and
+checks-only checkpoint workflows retain their separate custody protocols.
+
+An approval overlapping pre-stop preservation waits for that collection rather than
+starting another export. A failed pre-stop capture leaves the pod validated with a
+delivery failure, retains the original sandbox without intentionally stopping it,
+and does not auto-approve. Platform idle suspension and storage charges can still
+apply. Repair the reported failure before retrying ordinary approval; an uncertain
+resume still requires provider evidence, not another resume POST.
+
+A missing saved path or intact receipt with a legacy/stale approval binding uses
+the existing guarded fresh-collection path. A missing/corrupt snapshot or receipt,
+or a mismatched generation/cycle, fails closed without publishing, deleting, or
+blindly waking a replacement. Restore the snapshot/receipt or use the existing
+explicit source/recovery workflow; do not edit receipts or clear custody records.
+A later unresolved wakeup is not settled by saved reports: approval uses normal
+provider observation/reconciliation instead of bypassing that hold.
+
+For older or otherwise unpreserved executions, approval preserves ignored workspace
+reports before its publication, merge and cleanup steps. Readiness is a separate
+verdict: a ready pod can still encounter a delivery failure.
 
 One approval runs per pod in the daemon. Overlapping API, automation, bulk, or
 manager requests receive HTTP 409 `APPROVAL_IN_PROGRESS`; they do not join or
@@ -34,9 +59,9 @@ Auth, missing resources, terminal states, and unrelated conflicts fail.
 HTTP calls have bounded fetch deadlines and the entire reconciliation (including
 authentication and response bodies) has a deadline. No generic write retry is added.
 
-A later approval first observes the provider. Running settles a retained wakeup
-and permits export. If it is still stopped with an existing request, approval
-returns HTTP 409 `SANDBOX_WAKEUP_RECONCILIATION_REQUIRED` with the retained request
+When fresh collection is required, a later approval first observes the provider.
+Running settles a retained wakeup and permits export. If it is still stopped with
+an existing request, approval returns HTTP 409 `SANDBOX_WAKEUP_RECONCILIATION_REQUIRED` with the retained request
 ID immediately instead of repeating the full polling budget. This response does
 not cancel the original request or authorize another resume.
 
