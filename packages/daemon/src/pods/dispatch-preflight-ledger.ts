@@ -402,6 +402,8 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             if (
               parent.fixPodId !== pod.id ||
               parent.taskId !== pod.taskId ||
+              (pod.seriesId !== null && pod.seriesId !== parent.seriesId) ||
+              (pod.prMode !== null && pod.prMode !== parent.prMode) ||
               owner.branch !== pod.branch ||
               owner.baseBranch !== baseBranch ||
               (owner.requestedBaseBranch !== null && owner.requestedBaseBranch !== baseBranch) ||
@@ -438,6 +440,8 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
               !owner?.prUrl ||
               parent.fixPodId !== prior.id ||
               parent.taskId !== prior.taskId ||
+              (prior.seriesId !== null && prior.seriesId !== parent.seriesId) ||
+              (prior.prMode !== null && prior.prMode !== parent.prMode) ||
               owner.branch !== prior.branch ||
               owner.prMode !== parent.prMode ||
               owner.seriesId !== parent.seriesId ||

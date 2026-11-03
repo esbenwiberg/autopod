@@ -506,3 +506,58 @@ it('bounds active receipt candidates while leaving large deleted history untouch
     f.db.close();
   }
 });
+
+it.each(['series_id', 'pr_mode'] as const)(
+  'refuses contradictory current child %s metadata',
+  (column) => {
+    const f = fixture();
+    try {
+      addRepair(f, 'parent', 'fix', 11);
+      f.db.prepare(`UPDATE pods SET ${column}='foreign' WHERE id='fix'`).run();
+      expect(() => f.ledger.inspect('fix', 1, repository, 'main', base)).toThrow(
+        'repair identity',
+      );
+      expect(f.ledger.latest('fix')).toBeNull();
+    } finally {
+      f.db.close();
+    }
+  },
+);
+
+it.each(['series_id', 'pr_mode'] as const)(
+  'keeps a generic receipt with contradictory child %s metadata blocking',
+  (column) => {
+    const f = fixture();
+    try {
+      addRepair(f, 'old-parent', 'old-fix', 11);
+      recordLegacyRepair(f, 'old-fix');
+      const receipt = f.db.prepare('SELECT * FROM execution_dispatch_preflights').all();
+      f.db.prepare(`UPDATE pods SET ${column}='foreign' WHERE id='old-fix'`).run();
+      f.repo.delete('old-parent');
+      addRepair(f, 'new-parent', 'new-fix', 12);
+      expect(f.ledger.inspect('new-fix', 1, repository, 'main', base).status).toBe(
+        'review_required',
+      );
+      expect(
+        f.db.prepare("SELECT * FROM execution_dispatch_preflights WHERE id='legacy-old-fix'").all(),
+      ).toEqual(receipt);
+    } finally {
+      f.db.close();
+    }
+  },
+);
+
+it('accepts matching explicit child series metadata and preserves nullable legacy metadata', () => {
+  const f = fixture();
+  try {
+    addRepair(f, 'parent', 'fix', 11);
+    f.db
+      .prepare("UPDATE pods SET series_id='series', pr_mode='single' WHERE id IN ('parent','fix')")
+      .run();
+    expect(f.ledger.inspect('fix', 1, repository, 'main', base).status).toBe('admitted');
+    f.db.prepare("UPDATE pods SET series_id=NULL, pr_mode=NULL WHERE id='fix'").run();
+    expect(f.ledger.inspect('fix', 1, repository, 'main', base).status).toBe('admitted');
+  } finally {
+    f.db.close();
+  }
+});

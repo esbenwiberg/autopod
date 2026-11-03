@@ -9,8 +9,8 @@ Finished pods (`complete`, `failed`, `killed`, or `rejected`) and deleted pods d
 history remain intact. There is no seven-day blocking window.
 
 Nonterminal work still counts: queued, provisioning, running, waiting for input,
-paused, research-ready (active human decision), validating, validated, review-required, approved, merging, merge-pending
-and killing pods. Active work never expires out of this check. A blocked request
+paused, research-ready (active human decision), validating, validated, review-required,
+approved, merging, merge-pending and killing pods. Active work never expires out of this check. A blocked request
 which was never admitted is not an admitted execution.
 
 This policy is not execution reconciliation or cleanup authorization. It does not
@@ -25,7 +25,9 @@ unrelated repairs. Its task/contract hash is scoped to the canonical PR address
 in the execution's bound repository. Dispatch verifies immutable task parent
 membership, the parent's current canonical child, the shared single-PR series
 owner selected by fix admission, PR URL, branch, base and frozen repository.
-Missing, foreign, stale or contradictory current ownership refuses dispatch.
+Explicit child series/mode metadata must agree with its parent; absent legacy
+metadata remains supported. Missing, foreign, stale or contradictory current
+ownership refuses dispatch.
 GitHub case/trailing-slash and supported ADO legacy/canonical URL equivalence use
 the existing delivery identity parsers; no provider calls are made.
 
