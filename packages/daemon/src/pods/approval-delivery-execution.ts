@@ -5,22 +5,20 @@ import { mergePublishedSource } from '../worktrees/durable-merge.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
 import { mergeReconciliation } from '../worktrees/merge-source-identity.js';
 import type { ApprovalDeliveryExecutionCaptured } from './approval-contracts.js';
+import { activateApprovalRewrite, prepareApprovalRewrite } from './approval-source-rewrite.js';
 import type { ApprovalExecutionContext, DeliveryStageResult } from './delivery-contracts.js';
 export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecutionCaptured) {
   const {
     podRepo,
     assertApprovalCurrent,
     executionForPod,
-    worktreeManager,
     emitActivityError,
     logger,
     prManagerFactory,
     emitActivityStatus,
-    forceWithLeaseAllowances,
     transition,
     resolveGitCredential,
     mergeQueue,
-    formatRebaseConflictReason,
     startMergePolling,
     resolvePrBaseBranch,
     ensurePrBaseBranchOnOrigin,
@@ -50,7 +48,10 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
     const failDelivery = (detail: string, cause?: unknown): never => {
       assertApprovalCurrent(mergingAnchor);
       const reconciliation =
-        cause instanceof AutopodError && cause.code === 'DELIVERY_RECONCILIATION_REQUIRED';
+        cause instanceof AutopodError &&
+        ['DELIVERY_RECONCILIATION_REQUIRED', 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED'].includes(
+          cause.code,
+        );
       const advice = reconciliation
         ? 'reconcile delivery before retrying approval'
         : 'repair delivery and retry approval';
@@ -131,6 +132,7 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
       // the queue so the lock is released as quickly as possible.
       type MergeOutcome =
         | { kind: 'merged' }
+        | { kind: 'revalidate'; rewriteId: string }
         | { kind: 'merge_pending'; blockReason: string }
         | { kind: 'merge_failed'; reason: string; cause?: unknown };
 
@@ -144,15 +146,12 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
           // evicted whenever any sibling worktree on the same bare repo is
           // cleaned up (local-worktree-manager.ts cleanup()).
           let publishedSource: Awaited<ReturnType<typeof publishApprovalBranch>>;
-          const useForce = forceWithLeaseAllowances.has(podId);
           try {
             publishedSource = await deliveryOperation(async () =>
               publishApprovalBranch(mergingAnchor, {
                 pat: await deliveryCredential(approveProfile),
-                ...(useForce ? { force: true } : {}),
               }),
             );
-            forceWithLeaseAllowances.delete(podId);
             emitActivityStatus(podId, 'Branch pushed');
           } catch (pushErr) {
             assertApprovalCurrent(mergingAnchor);
@@ -162,61 +161,21 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
               { err: pushErr, podId },
               'Pre-merge push failed — retaining source for explicit approval retry',
             );
-            return { kind: 'merge_failed', reason: blockReason };
+            return { kind: 'merge_failed', reason: blockReason, cause: pushErr };
           }
 
-          // Pre-merge rebase onto latest origin/<base>. Catches conflicts
-          // *before* the PR merge attempt so an agent (or fix pod) gets to
-          // resolve them while it still has full task context, instead of
-          // discovering the conflict via GitHub's merge gate after the fact.
-          // Runs inside the merge queue so the rebase always sees the freshly
-          // merged state of any preceding pod on the same base.
-          emitActivityStatus(podId, `Rebasing onto origin/${mergeBaseBranch}…`);
-          const rebaseResult = await deliveryOperation(async () =>
-            worktreeManager.rebaseOntoBase({
-              worktreePath,
-              baseBranch: mergeBaseBranch,
-              pat: await deliveryCredential(approveProfile),
-            }),
+          // Never rewrite the approved worktree or publish untested rebased code.
+          // The isolated candidate is durably selected for checks-only provisioning;
+          // successful checks require a new approval before its exact leased push.
+          emitActivityStatus(podId, `Checking latest origin/${mergeBaseBranch}…`);
+          const rewriteId = await prepareApprovalRewrite(
+            captured,
+            mergingAnchor,
+            publishedSource,
+            mergeBaseBranch,
+            await deliveryCredential(approveProfile),
           );
-
-          if (!rebaseResult.rebased) {
-            const blockReason = formatRebaseConflictReason(mergeBaseBranch, rebaseResult.conflicts);
-            logger.info(
-              {
-                podId,
-                prUrl,
-                baseBranch: mergeBaseBranch,
-                conflicts: rebaseResult.conflicts,
-              },
-              'Pre-merge rebase produced conflicts — retaining source for manual resolution',
-            );
-            return { kind: 'merge_failed', reason: blockReason };
-          }
-
-          // Rebase rewrote history → force-push so origin/<branch> matches our
-          // new HEAD. Skip the push when the rebase was a no-op (already up to
-          // date) since we already pushed above.
-          if (!rebaseResult.alreadyUpToDate) {
-            try {
-              publishedSource = await deliveryOperation(async () =>
-                publishApprovalBranch(mergingAnchor, {
-                  force: true,
-                  pat: await deliveryCredential(approveProfile),
-                }),
-              );
-              emitActivityStatus(podId, 'Rebased branch pushed');
-            } catch (pushErr) {
-              assertApprovalCurrent(mergingAnchor);
-              const reason = pushErr instanceof Error ? pushErr.message : String(pushErr);
-              const blockReason = `Force-push after rebase failed: ${reason}`;
-              logger.warn(
-                { err: pushErr, podId },
-                'Force-push after rebase failed — retaining source for explicit approval retry',
-              );
-              return { kind: 'merge_failed', reason: blockReason };
-            }
-          }
+          if (rewriteId) return { kind: 'revalidate', rewriteId };
 
           // Daemon-side approval gate: check the PR's review decision before attempting
           // to merge. If the platform reports that a review is still required or changes
@@ -317,10 +276,21 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
         .catch((err): MergeOutcome => {
           assertApprovalCurrent(mergingAnchor);
           logger.error({ err, podId }, 'Approval delivery operation failed; retaining resources');
-          return { kind: 'merge_failed', reason: 'PR preparation did not complete.', cause: err };
+          return {
+            kind: 'merge_failed',
+            reason:
+              err instanceof AutopodError && err.code === 'DELIVERY_RECONCILIATION_REQUIRED'
+                ? err.message
+                : 'PR preparation did not complete.',
+            cause: err,
+          };
         });
 
       assertApprovalCurrent(mergingAnchor);
+      if (outcome.kind === 'revalidate') {
+        activateApprovalRewrite(captured, mergingAnchor, outcome.rewriteId);
+        return { kind: 'halted' };
+      }
       if (outcome.kind === 'merged') {
         emitActivityStatus(podId, 'PR merged successfully');
       } else if (outcome.kind === 'merge_pending') {

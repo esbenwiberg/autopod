@@ -9,6 +9,12 @@ import { runMigrations } from './migrate.js';
 const migrations = new URL('./migrations', import.meta.url).pathname;
 const logger = pino({ level: 'silent' });
 const findingsFile = '233_research_findings.sql';
+const currentVersion = Math.max(
+  ...fs
+    .readdirSync(migrations)
+    .filter((file) => /^\d+_.*\.sql$/.test(file))
+    .map((file) => Number.parseInt(file, 10)),
+);
 
 // Deliberately use the production runner, never createTestDb's SQL-file loop.
 describe('research findings production upgrade from main schema 232', () => {
@@ -106,7 +112,9 @@ describe('research findings production upgrade from main schema 232', () => {
     ).not.toContain('completion_policy');
     fs.unlinkSync(path.join(root, '225_research_findings.sql'));
     runMigrations(db, migrations, logger);
-    expect(version()).toBe(233);
+    expect(version()).toBe(currentVersion);
+    expect(db.prepare('SELECT * FROM approval_source_rewrites').all()).toEqual([]);
+    expect(db.prepare('SELECT * FROM approval_source_rewrite_events').all()).toEqual([]);
     assertFindingsSchema();
     assertPreserved(before);
     const current = originalRows();
@@ -115,7 +123,7 @@ describe('research findings production upgrade from main schema 232', () => {
   });
   it('builds the complete schema from empty using production version selection', () => {
     runMigrations(db, migrations, logger);
-    expect(version()).toBe(233);
+    expect(version()).toBe(currentVersion);
     expect(db.prepare('SELECT * FROM research_findings_receipts').all()).toEqual([]);
     expect(db.prepare('SELECT completion_policy, research_findings FROM pods').all()).toEqual([]);
     expect(db.pragma('foreign_key_check')).toEqual([]);

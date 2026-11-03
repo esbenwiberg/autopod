@@ -8,6 +8,15 @@ export function retainUnresolvedReconciliation(
   trigger: 'restart' | 'wake' = 'restart',
 ): boolean {
   try {
+    const pod = podRepo.getOrThrow(podId);
+    const rewrite = podRepo.approvalRewrites?.latest(pod);
+    if (rewrite?.activated && pod.status !== 'queued') {
+      podRepo.update(podId, {
+        lastRecoveryTrigger: trigger,
+        lastCorrectionMessage: `Approval rewrite ${rewrite.id} retains this exact checks invocation. Inspect source-recovery and execution/retry evidence; restart does not authorize a coding agent or another validation dispatch.`,
+      });
+      return true;
+    }
     if (!podRepo.taskExecutions || !podRepo.deletionOwnership)
       throw new Error('Ownership evidence unavailable');
     assertValidationMutationSettled(podRepo, podId);

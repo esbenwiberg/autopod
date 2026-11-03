@@ -319,6 +319,10 @@ export function createMockWorktreeManager(): WorktreeManager {
     pushBranch: vi.fn(mockBranchPublication),
     ensureRemoteBranch: vi.fn(async ({ branch }) => ({ branch, created: false })),
     pullBranch: vi.fn(async () => ({ newCommits: false })),
+    prepareApprovalRebase: vi.fn(async () => ({
+      kind: 'unchanged' as const,
+      baseCommitSha: 'b'.repeat(40),
+    })),
     rebaseOntoBase: vi.fn(async () => ({ alreadyUpToDate: false, rebased: true, conflicts: [] })),
     getCommitLog: vi.fn(async () => 'abc1234 feat: implement feature\ndef5678 fix: edge case'),
     readBranchFolder: vi.fn(async ({ relPath }) => ({

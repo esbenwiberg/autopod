@@ -40,6 +40,10 @@ import {
 import { type UnitOfWork, createUnitOfWork } from '../db/unit-of-work.js';
 import { extractFindings } from '../validation/finding-fingerprint.js';
 import {
+  type ApprovalSourceRewriteRepository,
+  createApprovalSourceRewriteRepository,
+} from './approval-source-rewrite-repository.js';
+import {
   COMPACT_JSON_FIELDS,
   COMPACT_POD_COLUMNS,
   type CompactPodSource,
@@ -308,6 +312,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   /** Defer external publication while an enclosing SQLite transaction is pending. */
   afterInsertCommitted?(id: string, effect: () => void): void;
   deliveryLedger?: DeliveryLedger;
+  approvalRewrites?: ApprovalSourceRewriteRepository;
   sourcePublications?: SourcePublicationLedger;
   externalDeliveries?: ExternalDeliveryRepository;
   sandboxWakeups?: SandboxWakeupJournal;
@@ -853,6 +858,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     completionJournal,
     hasUnansweredDecision: (podId) => hasUnansweredDecision(db, podId),
     deliveryLedger: createDeliveryLedger(db),
+    approvalRewrites: createApprovalSourceRewriteRepository(db),
     sourcePublications: createSourcePublicationLedger(db),
     externalDeliveries,
     sandboxWakeups,
@@ -1641,6 +1647,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
       sourceAdoptions.assertDeletable(id);
       taskExecutions.assertCanDelete(id);
       externalDeliveries.assertDeletable(id);
+      createApprovalSourceRewriteRepository(db).assertDeletable(id);
       sandboxWakeups.assertPodReleasable(id);
       archiveTaskHistory(id);
       // Null out self-referential FKs from other pods before deleting.

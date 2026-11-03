@@ -47,6 +47,11 @@ export function createSourceAdoptionController(deps: SourceAdoptionControllerDep
     );
   }
   function policy(pod: Pod) {
+    if (podRepo.approvalRewrites?.latest(pod))
+      sourceAdoptionError(
+        'Approval rewrite owns this source; inspect source-recovery before another adoption',
+        'SOURCE_CUSTODY_HELD',
+      );
     if (deps.isNativeGoal(pod.id))
       sourceAdoptionError(
         'Native Goals require their reviewed revision workflow',

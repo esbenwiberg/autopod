@@ -84,8 +84,21 @@ export function registerSourceRecoveryCommand(
       if (!apply) {
         const list = await client.getSourceAdoptions(podId);
         withJsonOutput(opts, list, (value) => {
-          if (!value.operations.length) console.log('No source adoption operations.');
+          if (!value.operations.length && !value.approvalRewrite)
+            console.log('No source adoption operations.');
           for (const state of value.operations) print(state);
+          if (value.approvalRewrite) {
+            const rewrite = value.approvalRewrite;
+            console.log(
+              `Approval rebase ${rewrite.id}: ${rewrite.phase}; checks ${rewrite.checks}`,
+            );
+            console.log(
+              `${rewrite.predecessorHeadSha} → ${rewrite.candidateHeadSha ?? 'candidate not yet certified'}; generation ${rewrite.generation}`,
+            );
+            console.log(
+              'Original resources retained. Passing candidate checks require a new human approval; no force/retry authority is granted by this inspection.',
+            );
+          }
         });
         return;
       }

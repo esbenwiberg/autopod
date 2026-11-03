@@ -20,6 +20,7 @@ import {
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { AgentRunOutcome } from './agent-execution-contracts.js';
 import type { ApproveAllSkippedPod, ApproveSessionOptions } from './approval-contracts.js';
+import { rewriteConfiguration } from './approval-source-rewrite.js';
 import type { ArtifactResumeObservation } from './artifact-resume-observation.js';
 import { createValidationTriggerCalls } from './pod-facade-calls.js';
 import type { PodFacadeOwners } from './pod-facade-ports.js';
@@ -121,6 +122,46 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
         input,
         actor,
       );
+    },
+    getApprovalSourceRewrite(
+      podId: string,
+    ): import('@autopod/shared').SourceAdoptionList['approvalRewrite'] {
+      const pod = podRepo.getOrThrow(podId);
+      const record = podRepo.approvalRewrites?.latest(pod);
+      if (!record) return undefined;
+      let checks: 'pending' | 'pass' | 'stale' = 'pending';
+      if (record.checked) {
+        try {
+          const current = podRepo.approvalRewrites?.assertDelivery(pod);
+          checks =
+            current?.binding.configurationHash === rewriteConfiguration(pod, executionForPod(pod))
+              ? 'pass'
+              : 'stale';
+        } catch {
+          checks = 'stale';
+        }
+      }
+      const held =
+        ['failed', 'review_required'].includes(pod.status) ||
+        Boolean(pod.lastRecoveryTrigger && pod.lastCorrectionMessage?.includes(record.id));
+      return {
+        id: record.id,
+        generation: record.activated?.generation ?? record.generation,
+        phase: record.checked
+          ? 'checked'
+          : record.activated
+            ? held
+              ? 'checks-held'
+              : 'checking'
+            : record.prepared
+              ? 'prepared'
+              : 'preparing',
+        predecessorHeadSha: record.binding.predecessor.commitSha,
+        candidateHeadSha: record.checked?.head ?? record.prepared?.head,
+        checks,
+        originalResources: 'retained',
+        requiresHumanApproval: true,
+      };
     },
     getSourceAdoptions(podId: string) {
       podRepo.getOrThrow(podId);

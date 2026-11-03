@@ -7,6 +7,7 @@ import type {
   CreatePrConfig,
   CreatePrResult,
   FoundPr,
+  MergeAncestryRequest,
   MergePrConfig,
   MergePrResult,
   MergePrTarget,
@@ -17,6 +18,7 @@ import type {
   ReviewFeedbackReplyResult,
 } from '../interfaces/pr-manager.js';
 import type { ProfileLlmClientDeps } from '../providers/llm-client.js';
+import { verifyGitHubMergedSourceAncestry } from './github-merge-ancestry.js';
 import { parseGitHubRepoUrl, parseGitHubPrUrl as parsePrUrl } from './github-url-identity.js';
 import {
   assertMergeRepository,
@@ -524,6 +526,21 @@ export class GhPrManager implements PrManager {
         : 'Auto-merge requested — PR not yet mergeable',
     );
     return { merged: false, autoMergeScheduled: expectedHeadSha === undefined };
+  }
+
+  async verifyMergedSourceAncestry(config: MergeAncestryRequest) {
+    const { owner, repo } = parsePrUrl(config.prUrl);
+    return verifyGitHubMergedSourceAncestry(
+      config,
+      () => this.getPrStatus({ prUrl: config.prUrl }),
+      async (base, head) => {
+        const result = await this.execGh(
+          ['api', `repos/${owner}/${repo}/compare/${base}...${head}?per_page=1`],
+          { timeout: 30_000 },
+        );
+        return JSON.parse(result.stdout) as unknown;
+      },
+    );
   }
 
   async getPrStatus(config: { prUrl: string; worktreePath?: string }): Promise<PrMergeStatus> {
@@ -1050,11 +1067,38 @@ export class GitHubApiPrManager implements PrManager {
     return confirmedMergeResult(config, true, false);
   }
 
-  async getPrStatus(config: { prUrl: string }): Promise<PrMergeStatus> {
+  async verifyMergedSourceAncestry(config: MergeAncestryRequest) {
+    const { owner, repo } = parsePrUrl(config.prUrl);
+    return verifyGitHubMergedSourceAncestry(
+      config,
+      () =>
+        this.getPrStatus({
+          prUrl: config.prUrl,
+          observationOnly: true,
+          signal: AbortSignal.timeout(30_000),
+        }),
+      async (base, head) => {
+        const response = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/compare/${base}...${head}?per_page=1`,
+          { headers: this.headers, signal: AbortSignal.timeout(30_000) },
+        );
+        if (!response.ok)
+          throw new Error(`GitHub ancestry lookup failed (HTTP ${response.status})`);
+        return response.json();
+      },
+    );
+  }
+
+  async getPrStatus(config: {
+    prUrl: string;
+    observationOnly?: boolean;
+    signal?: AbortSignal;
+  }): Promise<PrMergeStatus> {
     const { owner, repo, number } = parsePrUrl(config.prUrl);
 
     const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${number}`, {
       headers: this.headers,
+      ...(config.signal ? { signal: config.signal } : {}),
     });
     if (!response.ok) {
       const text = await response.text();
@@ -1106,6 +1150,17 @@ export class GitHubApiPrManager implements PrManager {
         reviewComments: [],
       };
     }
+
+    if (config.observationOnly)
+      return {
+        headSha: sourceCommit(pr.head?.sha),
+        sourceTarget,
+        merged: false,
+        open: pr.state === 'open',
+        blockReason: null,
+        ciFailures: [],
+        reviewComments: [],
+      };
 
     // Check status of the head commit
     const statusResponse = await fetch(

@@ -25,6 +25,8 @@ export interface FixSourceRecovery {
   evidence: string;
 }
 export interface SourcePublicationLedger {
+  /** Exact earlier publication for legacy explicitly requested update-from-base; never a tracking ref. */
+  latestConfirmed?(pod: Pod): BranchPublicationReceipt | null;
   admit(pod: Pod, source: PublicationSource): string;
   admitFix(
     parent: Pod,
@@ -140,6 +142,18 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
       .digest('hex');
   }
   const ledger: SourcePublicationLedger = {
+    latestConfirmed(pod) {
+      assertCurrent(pod);
+      const row = db
+        .prepare(`SELECT i.identity,r.receipt FROM source_publication_intents i
+        JOIN source_publication_receipts r ON r.intent_id=i.id
+        WHERE i.pod_id=? AND i.generation=? ORDER BY r.rowid DESC LIMIT 1`)
+        .get(pod.id, pod.lifecycleGeneration) as { identity: string; receipt: string } | undefined;
+      if (!row) return null;
+      const receipt = JSON.parse(row.receipt) as BranchPublicationReceipt;
+      requireEvidence(row.identity === identity(pod, receipt));
+      return receipt;
+    },
     admitFix(parent, fix, source, priorMergeIntentId, recovery) {
       requireEvidence(!db.inTransaction);
       const check = () => {

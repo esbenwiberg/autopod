@@ -1,4 +1,8 @@
-import type { SourceAdoptionRequest, SourceAdoptionState } from '@autopod/shared';
+import type {
+  SourceAdoptionList,
+  SourceAdoptionRequest,
+  SourceAdoptionState,
+} from '@autopod/shared';
 import { Command } from 'commander';
 import { afterEach, expect, it, vi } from 'vitest';
 import { type AutopodClient, DaemonUnreachableError } from '../api/client.js';
@@ -28,7 +32,9 @@ const state: SourceAdoptionState = {
 function setup() {
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   const client = {
-    getSourceAdoptions: vi.fn(async () => ({ operations: [state] })),
+    getSourceAdoptions: vi.fn<() => Promise<SourceAdoptionList>>(async () => ({
+      operations: [state],
+    })),
     adoptSource: vi.fn(async (_id: string, _request: SourceAdoptionRequest) => state),
   };
   const program = new Command().exitOverride();
@@ -57,6 +63,26 @@ it('inspects by default without a source mutation or automatic retry', async () 
   expect(s.client.getSourceAdoptions).toHaveBeenCalledExactlyOnceWith('12345678');
   expect(s.client.adoptSource).not.toHaveBeenCalled();
   expect(s.log.mock.calls.flat().join('\n')).toContain('Delivery NOT authorized');
+});
+it('shows read-only approval rewrite custody without authorizing adoption or delivery', async () => {
+  const s = setup();
+  s.client.getSourceAdoptions.mockResolvedValue({
+    operations: [],
+    approvalRewrite: {
+      id: 'rewrite-once',
+      generation: 4,
+      phase: 'checking',
+      predecessorHeadSha: request.oldHeadSha,
+      candidateHeadSha: request.targetHeadSha,
+      checks: 'pending',
+      originalResources: 'retained',
+      requiresHumanApproval: true,
+    },
+  });
+  await s.parse();
+  expect(s.log.mock.calls.flat().join('\n')).toContain('Approval rebase rewrite-once: checking');
+  expect(s.log.mock.calls.flat().join('\n')).toContain('new human approval');
+  expect(s.client.adoptSource).not.toHaveBeenCalled();
 });
 it('submits only the exact explicit typed source request and emits one JSON result', async () => {
   const s = setup();
