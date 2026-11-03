@@ -20,42 +20,36 @@ custody and budget checks remain in force.
 
 ## Queued PR repair identity
 
-The queued `[PR FIX] Awaiting queued feedback.` task is a placeholder, shared by
-unrelated repairs. Its task/contract hash is scoped to the canonical PR address
-in the execution's bound repository. Dispatch verifies immutable task parent
-membership, the parent's current canonical child, the shared single-PR series
-owner selected by fix admission, PR URL, branch, base and frozen repository.
-Explicit child series/mode metadata must agree with its parent; absent legacy
-metadata remains supported. Missing, foreign, stale or contradictory current
-ownership refuses dispatch.
-GitHub case/trailing-slash and supported ADO legacy/canonical URL equivalence use
-the existing delivery identity parsers; no provider calls are made.
+`[PR FIX] Awaiting queued feedback.` is a shared placeholder. Its task/contract
+hash is scoped to the canonical PR in its repository. Dispatch verifies
+immutable parent/task membership, the parent's canonical child, the shared single-PR
+owner, PR URL, branch, base and frozen repository.
+Child series/mode metadata must match its parent when present. Missing, foreign, stale or contradictory ownership
+refuses dispatch. Existing parsers handle GitHub case/trailing-slash and ADO
+legacy/canonical URL equivalence offline.
 
-Older generic receipts remain immutable. An active generic receipt or queued
-placeholder stops conflicting only when independent retained child and parent
-lineage proves a different canonical PR with matching repository, branch, base
-and child ownership. After parent-first deletion clears the live child pointer,
-immutable execution ancestry and the archived parent remain the witness. Unknown
-or contradictory lineage still blocks. Deleted/terminal executions remain
-nonblocking under the active-only policy, regardless of receipt identity.
+Generic historical receipts stay immutable. Only independently retained
+child/parent lineage proving a different canonical PR matching repository,
+branch, base and ownership excludes an active generic conflict. On normal
+parent-first deletion, the archived parent retains its child claim; immutable
+execution ancestry survives clearing the live child's parent pointer. Unknown
+or contradictory evidence blocks. Terminal/deleted work remains nonblocking.
 
-Receipt candidates use the existing repository/base/work-hash index, capped at
-101 (more than 100 requires reconciliation), before indexed live/archive point
-lookups. Deleted history does not consume this active bound. No receipts are
-rewritten and no parallel identity ledger or schema migration is introduced.
+Candidates use the existing repository/base/work-hash index, capped at 101;
+more than 100 requires reconciliation before live/archive point lookups.
+Deleted history does not consume this active bound. No new ledger or migration
+is introduced.
 
 ## Exact intentional reruns
 
-An authenticated rerun may authorize exactly its named direct conflict, or the
-exact execution set recorded on the displayed blocked request. A second active
-execution or any changed displayed conflict set requires a new decision. Linked
-repair/rework stays in its logical task; an unrelated rerun naming only the root
-does not authorize additional linked executions.
+A human rerun authorizes one exact named direct conflict or the exact execution
+set displayed on its blocked source request. Any changed set requires a new
+decision. Linked rework stays in its logical task; naming its root alone does
+not authorize additional linked executions.
 
-Placeholder equality is not an executable feedback handoff. New and historical
-unlinked intentional placeholder reruns refuse dispatch without rewriting their
-audit records. Continue the canonical repair, or supply meaningful executable
-work through the authorized workflow. Ordinary executable reruns retain their
-audited identity and idempotency behavior. None of these decisions resets or
-waives task token budgets, retry admissions, unknown termination reconciliation,
+Placeholder equality is not executable feedback. New and historical unlinked
+placeholder reruns fail closed without rewriting intents. Continue the canonical
+repair or supply meaningful executable work. Executable
+ordinary reruns retain audited identity and idempotency. They never
+reset or waive token budgets, retry admissions, unknown-termination reconciliation,
 frozen-source custody or validation gates.

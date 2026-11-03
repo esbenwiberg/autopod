@@ -438,6 +438,8 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             if (
               !parent ||
               !owner?.prUrl ||
+              // Deletion archives the parent before clearing live FKs. A null
+              // archived reverse claim is not evidence of normal parent cleanup.
               parent.fixPodId !== prior.id ||
               parent.taskId !== prior.taskId ||
               (prior.seriesId !== null && prior.seriesId !== parent.seriesId) ||
