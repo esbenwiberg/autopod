@@ -28,6 +28,8 @@ only infrastructure reports from the current lifecycle count, and the pause wait
 for the active run to settle before changing status. It retains the infrastructure
 reason without manufacturing a question. A pending real question prevents this
 automatic pause. AI advice cannot consume this report stop threshold.
+Stream closure alone is not native termination proof: an unverified execution
+retains its active ownership and resources without another stop or retry.
 A report is a worker claim requiring diagnosis, not authoritative proof of an
 external validation failure. Optional diagnostic gaps belong in task-summary limits,
 not a blocking report. Explicit recovery must inspect actual execution evidence;
