@@ -203,6 +203,49 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         if (isBlockingEscalation(escalation)) {
           podManager.notifyEscalation(escalation.podId, escalation);
         }
+        if (
+          escalation.type === 'report_blocker' &&
+          'kind' in escalation.payload &&
+          escalation.payload.kind === 'infrastructure'
+        ) {
+          const pod = podRepo.getOrThrow(escalation.podId);
+          if (!['running', 'awaiting_input'].includes(pod.status))
+            throw new AutopodError(
+              'Infrastructure reporting requires the current active worker or its pending decision; retain settled evidence instead of changing another lifecycle.',
+              'ESCALATION_STATE_CONFLICT',
+              409,
+            );
+          const report = escalation.payload;
+          const reason = `Infrastructure blocked${report.phase ? ` during ${report.phase}` : ''}: ${report.description}. Checks remain incomplete. Responsible system: ${report.owner ?? 'autopod'}. Inspect the recorded report before supported recovery; no answer, receipt or waiver is requested.`;
+          podRepo.update(pod.id, { failureReason: reason });
+          const reports = escalationRepo
+            .listBySession(pod.id)
+            .filter(
+              (entry) =>
+                entry.type === 'report_blocker' &&
+                'kind' in entry.payload &&
+                entry.payload.kind === 'infrastructure' &&
+                entry.payload.lifecycleGeneration === pod.lifecycleGeneration,
+            );
+          // Infrastructure reports alone consume this stop boundary. AI advice and
+          // true questions must neither trigger it nor be displaced by it.
+          if (
+            pod.status === 'running' &&
+            !pod.pendingEscalation &&
+            reports.length >= (escalationForPod(pod)?.autoPauseAfter ?? 3) &&
+            podManager.pauseSession
+          ) {
+            podRepo.afterCommit?.(() => {
+              void podManager.pauseSession?.(pod.id).catch((error: unknown) => {
+                if (error instanceof AutopodError && error.code === 'PAUSE_SETTLING') return;
+                logger.warn(
+                  { error, podId: pod.id },
+                  'Infrastructure stop did not settle; retain execution ownership and reports',
+                );
+              });
+            });
+          }
+        }
       });
     },
 

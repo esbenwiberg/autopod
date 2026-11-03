@@ -14,6 +14,8 @@ export interface SessionBridgeManagerPort {
     credentials: ProviderCredentials | null;
   };
   touchHeartbeat(podId: string): void;
+  /** Existing owned pause waits for active execution settlement before transition. */
+  pauseSession?(podId: string): Promise<void>;
   notifyEscalation(podId: string, escalation: EscalationRequest): void;
   getSession(podId: string): Pod;
   getReviewerExecEnv(pod: Pod): Promise<Record<string, string> | undefined>;

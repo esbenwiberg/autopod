@@ -12,9 +12,13 @@ import { isBlockingEscalation } from './escalation-coordinator.js';
 import { createSessionBridge } from './pod-bridge-impl.js';
 import { createPodManager } from './pod-manager.js';
 
-it.each([false, true])(
-  'holds infrastructure after settlement without displacing a question (pending=%s)',
-  async (hasQuestion) => {
+it.each([
+  { hasQuestion: false, threshold: 3 },
+  { hasQuestion: false, threshold: 10 },
+  { hasQuestion: true, threshold: 3 },
+])(
+  'holds infrastructure after settlement without displacing a question (%s)',
+  async ({ hasQuestion, threshold }) => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -27,6 +31,9 @@ it.each([false, true])(
           yield completeEvent('Finished');
         }),
       }),
+    });
+    ctx.profileStore.update('test-profile', {
+      escalation: { ...ctx.profileStore.get('test-profile').escalation, autoPauseAfter: threshold },
     });
     const waiters = new Map<string, PendingRequests>();
     ctx.deps.pendingRequestsByPod = waiters;
@@ -81,6 +88,39 @@ it.each([false, true])(
           payload: { question: 'Choose product scope?' },
           response: null,
         });
+      const update = ctx.podRepo.update;
+      const fault = vi.spyOn(ctx.podRepo, 'update').mockImplementation((id, changes) => {
+        if (changes.failureReason?.startsWith('Infrastructure blocked'))
+          throw new Error('injected report write fault');
+        return update(id, changes);
+      });
+      try {
+        expect(() =>
+          bridge.createEscalation({
+            id: 'rolled-back-report',
+            podId: pod.id,
+            type: 'report_blocker',
+            timestamp: new Date().toISOString(),
+            payload: {
+              kind: 'infrastructure',
+              requiresResponse: false,
+              description: 'Runner unavailable',
+              attempted: [],
+              needs: 'Repair',
+            },
+            response: null,
+          }),
+        ).toThrow('injected report write fault');
+        expect(bridge.getAutoPauseCount(pod.id)).toBe(2);
+        expect(
+          ctx.escalationRepo
+            .listBySession(pod.id)
+            .some((entry) => entry.id === 'rolled-back-report'),
+        ).toBe(false);
+        expect(ctx.runtime.suspend).not.toHaveBeenCalled();
+      } finally {
+        fault.mockRestore();
+      }
       for (let count = 1; count <= 4; count++) {
         const result = await report();
         expect(JSON.stringify(result)).toContain('No human answer');
@@ -101,14 +141,17 @@ it.each([false, true])(
           bridge.reportProgress(pod.id, 'research', 'Preserving available work', 1, 2);
       }
       expect(ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+      expect(ctx.runtime.suspend).toHaveBeenCalledTimes(!hasQuestion && threshold === 3 ? 1 : 0);
     } finally {
       pending.cancelAll();
       release();
       await process;
+      if (!hasQuestion && threshold === 3)
+        await vi.waitFor(() => expect(manager.getSession(pod.id).status).toBe('paused'));
       expect(manager.getSession(pod.id)).toMatchObject({
-        status: hasQuestion ? 'awaiting_input' : 'failed',
+        status: hasQuestion ? 'awaiting_input' : threshold === 3 ? 'paused' : 'failed',
         pendingEscalation: hasQuestion ? expect.objectContaining({ id: 'real-question' }) : null,
-        failureReason: hasQuestion ? null : expect.stringContaining('Infrastructure blocked:'),
+        failureReason: expect.stringContaining('Infrastructure blocked:'),
       });
       expect(ctx.validationEngine.validate).not.toHaveBeenCalled();
       await client.close();

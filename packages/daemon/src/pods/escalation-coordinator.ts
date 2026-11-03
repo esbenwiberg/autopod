@@ -11,7 +11,9 @@ import type { EscalationRepository } from './escalation-repository.js';
 import type { PodRepository } from './pod-repository.js';
 
 /** An advisory blocker must not publish a question that its tool will not wait for. */
-export function isBlockingEscalation(request: EscalationRequest): boolean {
+export function isBlockingEscalation(
+  request: Pick<EscalationRequest, 'type' | 'payload'>,
+): boolean {
   if (
     request.type === 'report_blocker' &&
     'kind' in request.payload &&

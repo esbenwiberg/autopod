@@ -23,6 +23,11 @@ the current lifecycle holds the pod as failed with an infrastructure reason, no
 pending question and no automatic coding or validation dispatch. Workspace capture
 is attempted before the transition; capture failures retain original resources and
 are explicit. An existing unanswered question takes priority and is never displaced.
+At the configured report threshold, Autopod also requests the existing owned pause:
+only infrastructure reports from the current lifecycle count, and the pause waits
+for the active run to settle before changing status. It retains the infrastructure
+reason without manufacturing a question. A pending real question prevents this
+automatic pause. AI advice cannot consume this report stop threshold.
 A report is a worker claim requiring diagnosis, not authoritative proof of an
 external validation failure. Optional diagnostic gaps belong in task-summary limits,
 not a blocking report. Explicit recovery must inspect actual execution evidence;

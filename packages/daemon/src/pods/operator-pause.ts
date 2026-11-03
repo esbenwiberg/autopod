@@ -82,7 +82,21 @@ export function createOperatorPause(
       activeRun = nextRun?.token === activeRun.token ? undefined : nextRun;
     }
 
-    transition(pod, 'paused', { pauseReason: 'manual' });
+    const settledPod = podRepo.getOrThrow(podId);
+    if (
+      settledPod.lifecycleGeneration !== pod.lifecycleGeneration ||
+      settledPod.containerId !== pod.containerId ||
+      settledPod.pendingEscalation ||
+      settledPod.status !== 'running'
+    ) {
+      if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);
+      emitActivityStatus(
+        podId,
+        'Execution settled; retaining the current lifecycle or pending decision instead of replacing it with a pause.',
+      );
+      return;
+    }
+    transition(settledPod, 'paused', { pauseReason: 'manual' });
     if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);
     emitActivityStatus(podId, 'Pod paused — use [t] tell or [u] nudge to resume');
     logger.info({ podId }, 'Pod paused');

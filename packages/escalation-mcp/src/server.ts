@@ -118,10 +118,16 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     'report_blocker',
     'Report infrastructure or missing capabilities without requesting a human answer. Stop blocked attempts, preserve work, summarize incomplete checks and finish; Autopod holds completion after execution settles.',
     {
-      description: z.string().describe('Description of the blocking issue'),
+      description: z
+        .string()
+        .trim()
+        .min(1)
+        .describe('Plain-language description of the blocking issue'),
       attempted: z.array(z.string()).describe('List of approaches already attempted'),
       needs: z
         .string()
+        .trim()
+        .min(1)
         .describe('Required repair or missing input; say when no supported recovery exists'),
       owner: z.enum(['autopod', 'parent', 'validation']).default('autopod'),
       phase: z.string().optional().describe('Failing execution or validation phase'),

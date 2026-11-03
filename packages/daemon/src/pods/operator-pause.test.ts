@@ -16,6 +16,17 @@ describe('pause settlement ownership', () => {
     expect(f.state.pauseIntents.size).toBe(0);
     expect(vi.getTimerCount()).toBe(0);
   });
+  it('retains a real question that arrives while the stop is settling', async () => {
+    const f = createOperatorFixture();
+    const run = f.activeRun();
+    const stopping = f.pause().pauseSession('prepare');
+    const question = f.awaiting();
+    expect(f.pod().status).toBe('awaiting_input');
+    run.settle();
+    await stopping;
+    expect(f.pod()).toMatchObject({ status: 'awaiting_input', pendingEscalation: question });
+    expect(f.state.pauseIntents.size).toBe(0);
+  });
   it('blocks duplicate pause and message admission while settlement is outstanding', async () => {
     vi.useFakeTimers();
     const f = createOperatorFixture();
