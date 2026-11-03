@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
+import Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
 import pino from 'pino';
 import tar from 'tar-stream';
@@ -25,6 +26,16 @@ import {
 // ─── Mock helpers ────────────────────────────────────────────
 
 const logger = pino({ level: 'silent' });
+const custodyDatabases: Database.Database[] = [];
+function emptyCustodyDatabase() {
+  const db = new Database(':memory:');
+  db.exec('CREATE TABLE retained_checkpoint_recoveries(container_id TEXT, binding TEXT)');
+  custodyDatabases.push(db);
+  return db;
+}
+afterEach(() => {
+  for (const db of custodyDatabases.splice(0)) db.close();
+});
 
 /** Create a fake Docker container with controllable methods. */
 function createMockContainer(overrides: Record<string, unknown> = {}) {
@@ -570,8 +581,15 @@ describe('DockerContainerManager', () => {
     });
 
     it('removes stale container on 409 and retries', async () => {
+      manager = new DockerContainerManager({
+        docker,
+        logger,
+        managedDatabase: emptyCustodyDatabase(),
+      });
       const freshContainer = createMockContainer({ id: 'fresh123' });
-      const staleContainer = createMockContainer();
+      const staleContainer = createMockContainer({
+        inspect: vi.fn().mockResolvedValue({ Id: 'a'.repeat(64) }),
+      });
 
       // First createContainer → 409, second → success
       docker.createContainer
@@ -588,8 +606,14 @@ describe('DockerContainerManager', () => {
     });
 
     it('removes stale container on 409 even if stop fails', async () => {
+      manager = new DockerContainerManager({
+        docker,
+        logger,
+        managedDatabase: emptyCustodyDatabase(),
+      });
       const freshContainer = createMockContainer({ id: 'fresh123' });
       const staleContainer = createMockContainer({
+        inspect: vi.fn().mockResolvedValue({ Id: 'a'.repeat(64) }),
         stop: vi
           .fn()
           .mockRejectedValue(Object.assign(new Error('not running'), { statusCode: 304 })),
