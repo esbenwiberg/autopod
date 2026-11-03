@@ -69,9 +69,18 @@ export function checkpointRecoveryRoutes(
         expectedGeneration: z.number().int().min(1),
         expectedResultHash: z.string().regex(/^[a-f0-9]{64}$/),
         candidateHead: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
+        executionProfileId: z.string().trim().min(1).max(128).optional(),
+        expectedExecutionDigest: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
         reason: z.string().trim().min(10).max(4000),
       })
       .strict()
+      .refine(
+        (value) => Boolean(value.executionProfileId) === Boolean(value.expectedExecutionDigest),
+        'Execution profile and digest must be paired',
+      )
       .parse(request.body);
     const operation = await manager.checkRetainedCandidate(podId, recoveryId, input, {
       type: 'human',

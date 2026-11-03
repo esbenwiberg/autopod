@@ -1086,15 +1086,28 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   // ap approve
   program
     .command('approve [id]')
-    .description('Approve a validated pod for merge')
+    .description(
+      'Approve a validated pod for merge, or publish checked retained source for PR review only',
+    )
+    .option(
+      '--publish-only',
+      'Publish/update a checked retained-continuation PR without merging; requires --reason',
+    )
     .option('--squash', 'Squash commits on merge')
     .option('--reason <reason>', 'Reason for approving readiness that needs review')
     .option('--all-validated', 'Approve all validated pods')
     .action(
       async (
         id: string | undefined,
-        opts: { squash?: boolean; reason?: string; allValidated?: boolean },
+        opts: { squash?: boolean; reason?: string; allValidated?: boolean; publishOnly?: boolean },
       ) => {
+        if (
+          opts.publishOnly &&
+          (opts.allValidated || opts.squash || !opts.reason || opts.reason.trim().length < 10)
+        )
+          throw new Error(
+            '--publish-only requires one pod and --reason; omit --all-validated and --squash.',
+          );
         const client = getClient();
 
         if (opts.allValidated) {
@@ -1115,10 +1128,19 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           ...(opts.squash !== undefined ? { squash: opts.squash } : {}),
           ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
         };
-        await withSpinner('Approving pod...', () =>
-          client.approveSession(resolvedId, approvalOptions),
-        );
-        console.log(chalk.green(`Pod ${resolvedId} approved.`));
+        if (opts.publishOnly) {
+          await withSpinner('Publishing PR only...', () =>
+            client.publishSessionPr(resolvedId, opts.reason!),
+          );
+          console.log(
+            chalk.green(`PR published for ${resolvedId}; merge remains a separate approval.`),
+          );
+        } else {
+          await withSpinner('Approving pod...', () =>
+            client.approveSession(resolvedId, approvalOptions),
+          );
+          console.log(chalk.green(`Pod ${resolvedId} approved.`));
+        }
       },
     );
 

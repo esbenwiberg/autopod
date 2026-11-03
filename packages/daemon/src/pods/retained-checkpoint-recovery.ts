@@ -220,7 +220,7 @@ export function createRetainedCheckpointRecovery(deps: {
       const pod = original(record);
       if (selection) repo.select(record.id, selection);
       const generation = deps.podRepo.incrementLifecycleGeneration(record.podId);
-      const execution = record.binding.continuation?.execution;
+      const execution = selection?.execution ?? record.binding.continuation?.execution;
       // Detach only after the durable original-resource hold exists; never stop/delete it.
       if (execution) deps.podRepo.update(record.podId, { containerId: null });
       deps.podRepo.update(record.podId, {
@@ -326,25 +326,7 @@ export function createRetainedCheckpointRecovery(deps: {
     let execution: RetainedExecutionSelection | undefined;
     const selection = input as RetainedContinuationRequest;
     if (continuation && selection.executionProfileId) {
-      execution = await previewExecution(podId, selection.executionProfileId);
-      assertCurrent();
-      if (execution.digest !== selection.expectedExecutionDigest)
-        checkpointError(
-          'Replacement execution preview changed; inspect it again',
-          'CONTINUATION_EXECUTION_CHANGED',
-        );
-      const parent = deps.readLaunch?.(podId) ?? checkpointError('Original launch unavailable');
-      const next = retainedContinuationLaunch(parent, podId, execution);
-      const settings =
-        deps.executionSettings?.(next) ??
-        checkpointError('Replacement execution settings unavailable');
-      execution = {
-        ...execution,
-        configurationHash: configuration(
-          { ...pod, executionTarget: execution.target, launchConfigDigest: execution.digest },
-          settings,
-        ),
-      };
+      execution = await resolveExecutionSelection(pod, selection, assertCurrent);
     }
     const claimed = repo.claim({
       pod,
@@ -408,13 +390,9 @@ export function createRetainedCheckpointRecovery(deps: {
       deps.previewExecution ?? checkpointError('Explicit execution selection is unavailable');
     return preview(podId, profileId);
   }
-  async function continueRetained(
-    podId: string,
-    input: RetainedContinuationRequest,
-    actor: OperatorActor,
+  function validateExecutionSelection(
+    input: Pick<RetainedContinuationRequest, 'executionProfileId' | 'expectedExecutionDigest'>,
   ) {
-    if (input.remoteHead !== undefined && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(input.remoteHead))
-      checkpointError('Exact published source head required');
     if (
       Boolean(input.executionProfileId) !== Boolean(input.expectedExecutionDigest) ||
       (input.expectedExecutionDigest !== undefined &&
@@ -423,6 +401,40 @@ export function createRetainedCheckpointRecovery(deps: {
       checkpointError(
         'Replacement execution requires an explicit profile and its exact preview digest',
       );
+  }
+  async function resolveExecutionSelection(
+    pod: Pod,
+    input: Pick<RetainedContinuationRequest, 'executionProfileId' | 'expectedExecutionDigest'>,
+    assertCurrent: () => void,
+  ): Promise<RetainedExecutionSelection> {
+    const execution = await previewExecution(pod.id, input.executionProfileId!);
+    assertCurrent();
+    if (execution.digest !== input.expectedExecutionDigest)
+      checkpointError(
+        'Replacement execution preview changed; inspect it again',
+        'CONTINUATION_EXECUTION_CHANGED',
+      );
+    const parent = deps.readLaunch?.(pod.id) ?? checkpointError('Original launch unavailable');
+    const next = retainedContinuationLaunch(parent, pod.id, execution);
+    const settings =
+      deps.executionSettings?.(next) ??
+      checkpointError('Replacement execution settings unavailable');
+    return {
+      ...execution,
+      configurationHash: configuration(
+        { ...pod, executionTarget: execution.target, launchConfigDigest: execution.digest },
+        settings,
+      ),
+    };
+  }
+  async function continueRetained(
+    podId: string,
+    input: RetainedContinuationRequest,
+    actor: OperatorActor,
+  ) {
+    if (input.remoteHead !== undefined && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(input.remoteHead))
+      checkpointError('Exact published source head required');
+    validateExecutionSelection(input);
     return submit(podId, { ...input, prepareOnly: input.prepareOnly ?? false }, actor, true);
   }
   async function checkCandidate(
@@ -439,6 +451,7 @@ export function createRetainedCheckpointRecovery(deps: {
       !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(input.candidateHead)
     )
       checkpointError('Authenticated human and exact candidate selection with reason required');
+    validateExecutionSelection(input);
     const record = repo.get(recoveryId) ?? checkpointError('Recovery unavailable');
     const requestHash = checkpointHash([podId, recoveryId, input, actor]);
     if (record.podId !== podId || !record.binding.continuation?.prepareOnly)
@@ -459,10 +472,16 @@ export function createRetainedCheckpointRecovery(deps: {
       record.binding.resultHash !== input.expectedResultHash
     )
       checkpointError('Original continuation changed', 'STALE_CHECKPOINT_RECOVERY');
+    if (input.executionProfileId && record.binding.continuation.execution)
+      checkpointError('Execution was already selected at preparation; it cannot be replaced');
     return repo.owned(recoveryId, async () => {
       const assertCurrent = () => {
         original(record);
       };
+      assertCurrent();
+      const execution = input.executionProfileId
+        ? await resolveExecutionSelection(original(record), input, assertCurrent)
+        : undefined;
       assertCurrent();
       const inspect =
         deps.worktreeManager.inspectSourceAdoption ??
@@ -497,6 +516,7 @@ export function createRetainedCheckpointRecovery(deps: {
       activate(record, {
         head: source.commitSha,
         tree: source.treeSha,
+        ...(execution ? { execution } : {}),
         actor,
         reason: input.reason.trim(),
         requestHash,
@@ -740,7 +760,8 @@ export function createRetainedCheckpointRecovery(deps: {
         current.lifecycleGeneration !== record.activated?.generation ||
         current.worktreePath !== record.prepared?.worktree ||
         configuration(current) !==
-          (record.binding.continuation?.execution?.configurationHash ??
+          (record.selected?.execution?.configurationHash ??
+            record.binding.continuation?.execution?.configurationHash ??
             record.binding.configurationHash)
       )
         checkpointError(

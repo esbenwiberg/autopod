@@ -22,5 +22,8 @@ export interface RetainedContinuationCheckRequest {
   expectedGeneration: number;
   expectedResultHash: string;
   candidateHead: string;
+  /** One explicit software/resource selection, only if preparation did not select it. */
+  executionProfileId?: string;
+  expectedExecutionDigest?: string;
   reason: string;
 }

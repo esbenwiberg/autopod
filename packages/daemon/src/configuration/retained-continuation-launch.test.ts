@@ -126,6 +126,128 @@ describe('retained execution selection', () => {
     expect(f.cm.start).not.toHaveBeenCalled();
   });
 
+  it('selects execution once at check time after source-only preparation, retaining custody and original launch history', async () => {
+    const { f, parent, selection, launch } = await fixture();
+    const before = f.pod();
+    const task = f.ctx.podRepo.taskExecutions!.snapshot(f.podId);
+    const retries = f.ctx.podRepo.taskRetries!.state(f.podId);
+    await f.recovery.continueRetained(f.podId, { ...f.input, prepareOnly: true }, f.actor);
+    await f.recovery.wait(f.input.id);
+    const binding = structuredClone(f.recovery.list(f.podId)[0]!.binding);
+    expect(binding.continuation?.execution).toBeUndefined();
+    expect(f.pod()).toEqual(before);
+    expect(launch.read(f.podId)?.digest).toBe(parent.digest);
+    const input = {
+      expectedGeneration: before.lifecycleGeneration,
+      expectedResultHash: f.input.expectedResultHash,
+      candidateHead: f.prepared.head,
+      executionProfileId: selection.profileId,
+      expectedExecutionDigest: selection.digest,
+      reason:
+        'Select qualified replacement software and resources with this exact source for fresh checks',
+    };
+    const record = await f.recovery.checkCandidate(f.podId, f.input.id, input, f.actor);
+    expect(record.binding).toEqual(binding);
+    expect(record.selected?.execution).toMatchObject({
+      digest: selection.digest,
+      parentDigest: parent.digest,
+    });
+    expect(f.pod()).toMatchObject({
+      executionTarget: 'local',
+      launchConfigDigest: selection.digest,
+      lifecycleGeneration: before.lifecycleGeneration + 1,
+      skipAgent: true,
+      validationAttempts: before.validationAttempts,
+      maxValidationAttempts: before.maxValidationAttempts,
+    });
+    expect(launch.read(f.podId)?.digest).toBe(selection.digest);
+    expect(launch.read(f.podId)?.workflow).toEqual(parent.workflow);
+    expect(f.ctx.podRepo.taskExecutions!.snapshot(f.podId).taskId).toBe(task.taskId);
+    expect(f.ctx.podRepo.taskRetries!.state(f.podId)).toEqual(retries);
+    expect(record.containerId).toBe(before.containerId);
+    expect(f.cm.kill).not.toHaveBeenCalled();
+    expect(f.cm.start).not.toHaveBeenCalled();
+    expect(await f.recovery.checkCandidate(f.podId, f.input.id, input, f.actor)).toEqual(record);
+    expect(f.deps.enqueue).toHaveBeenCalledTimes(1);
+    await expect(
+      f.recovery.checkCandidate(
+        f.podId,
+        f.input.id,
+        { ...input, executionProfileId: 'another-profile' },
+        f.actor,
+      ),
+    ).rejects.toThrow('differs');
+  });
+
+  it('rejects a stale late preview without selecting source, activating or releasing the held original', async () => {
+    const { f, selection } = await fixture();
+    await f.recovery.continueRetained(f.podId, { ...f.input, prepareOnly: true }, f.actor);
+    await f.recovery.wait(f.input.id);
+    const before = f.pod();
+    await expect(
+      f.recovery.checkCandidate(
+        f.podId,
+        f.input.id,
+        {
+          expectedGeneration: before.lifecycleGeneration,
+          expectedResultHash: f.input.expectedResultHash,
+          candidateHead: f.prepared.head,
+          executionProfileId: selection.profileId,
+          expectedExecutionDigest: 'f'.repeat(64),
+          reason: 'Select an explicit qualified execution environment for this source',
+        },
+        f.actor,
+      ),
+    ).rejects.toThrow('preview changed');
+    expect(f.pod()).toEqual(before);
+    expect(f.recovery.list(f.podId)[0]).toMatchObject({
+      selected: null,
+      activated: null,
+      blocked: null,
+    });
+    expect(f.deps.enqueue).not.toHaveBeenCalled();
+    expect(f.cm.kill).not.toHaveBeenCalled();
+  });
+
+  it('does not replace execution already selected at preparation', async () => {
+    const { f, selection } = await fixture();
+    await f.recovery.continueRetained(
+      f.podId,
+      {
+        ...f.input,
+        prepareOnly: true,
+        executionProfileId: selection.profileId,
+        expectedExecutionDigest: selection.digest,
+      },
+      f.actor,
+    );
+    await f.recovery.wait(f.input.id);
+    const before = f.pod();
+    const input = {
+      expectedGeneration: before.lifecycleGeneration,
+      expectedResultHash: f.input.expectedResultHash,
+      candidateHead: f.prepared.head,
+      reason: 'Select this exact source while retaining the previously chosen environment',
+    };
+    await expect(
+      f.recovery.checkCandidate(
+        f.podId,
+        f.input.id,
+        {
+          ...input,
+          executionProfileId: selection.profileId,
+          expectedExecutionDigest: selection.digest,
+        },
+        f.actor,
+      ),
+    ).rejects.toThrow('already selected at preparation');
+    expect(f.pod()).toEqual(before);
+    expect(f.deps.enqueue).not.toHaveBeenCalled();
+    const record = await f.recovery.checkCandidate(f.podId, f.input.id, input, f.actor);
+    expect(record.selected?.execution).toBeUndefined();
+    expect(f.pod().launchConfigDigest).toBe(selection.digest);
+  });
+
   it('rejects stale execution previews before claiming or detaching the original', async () => {
     const { f, selection } = await fixture();
     const original = f.pod();

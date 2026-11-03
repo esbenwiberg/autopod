@@ -48,6 +48,22 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
         ? { type: 'automation' as const, id: 'auto-approve' }
         : { type: 'automation' as const, id: 'direct-pod-manager' });
     const pod = podRepo.getOrThrow(podId);
+    if (options.publishOnly) {
+      const continuation = podRepo.retainedCheckpoints?.latest(podId);
+      if (
+        actor.type !== 'human' ||
+        !actor.userId?.trim() ||
+        !continuation?.binding.continuation ||
+        continuation.checked?.result.overall !== 'pass' ||
+        (pod.options.output ?? 'pr') !== 'pr' ||
+        (options.reason?.trim().length ?? 0) < 10
+      )
+        throw new AutopodError(
+          'PR-only publication requires fresh human approval of checked retained source with a reason',
+          'PR_PUBLICATION_APPROVAL_REQUIRED',
+          409,
+        );
+    }
     const external = pod.status === 'complete' ? podRepo.externalDeliveries?.get(podId) : null;
     if (
       external &&
@@ -79,6 +95,35 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
     if (prepared.kind === 'halted') return;
 
     assertApprovalCurrent(pod);
+    if (options.publishOnly) {
+      if (prepared.recoveredMerge)
+        throw new AutopodError(
+          'An earlier merge needs its own reconciliation; publication-only does not adopt it',
+          'DELIVERY_RECONCILIATION_REQUIRED',
+          409,
+        );
+      // Remain validated throughout, including across a crash. Publication approval
+      // must never leave a merging state that startup/polling could interpret as merge authority.
+      persistReadinessApproval(
+        podId,
+        readiness,
+        actor,
+        `PR publication only. ${approvalReason ?? options.reason}`,
+      );
+      emitActivityStatus(
+        podId,
+        'Approved for PR publication only; merge remains a separate human action',
+      );
+      await executeApprovalDelivery({
+        podId,
+        options,
+        pod,
+        mergingAnchor: pod,
+        s2: pod,
+        ...prepared,
+      });
+      return;
+    }
     emitActivityStatus(podId, 'Approved — merging changes…');
     assertApprovalCurrent(pod);
     const approvedAnchor: Pod = { ...pod, status: 'approved' };
