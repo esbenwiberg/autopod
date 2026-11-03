@@ -497,7 +497,7 @@ if (MOCK_DOCKER) {
     imagePuller: acr,
     managedDatabase: db,
   });
-  networkManager = new DockerNetworkManager({ docker: d, logger });
+  networkManager = new DockerNetworkManager({ docker: d, logger, managedDatabase: db });
   sidecarManager = new DockerSidecarManager({ docker: d, logger });
 }
 

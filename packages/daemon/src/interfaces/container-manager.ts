@@ -19,6 +19,8 @@ export interface ContainerSpawnConfig {
   image: string;
   managedSpecDigest?: string;
   podId: string;
+  /** Host-owned provider namespace for retained replacements; logical identity stays podId. */
+  resourceIdentity?: string;
   env: Record<string, string>;
   /** Initial working directory for the container process. Defaults to /workspace. */
   workingDir?: string;

@@ -26,12 +26,14 @@ export function alignMemoryToPageSize(bytes: number): number {
 /**
  * Create a container, handling the case where a container with the same name
  * already exists (409) — typically a stale container from a crashed daemon
- * leaving debris. Force-remove and retry once.
+ * leaving debris. Cleanup requires explicit custody authority; never remove by name.
+ * A caller without authority must reconcile the conflict, not discard the resource.
  */
 export async function createContainerWithStaleRetry(
   docker: Dockerode,
   opts: Dockerode.ContainerCreateOptions,
   logger: Logger,
+  assertMutable?: (containerId: string) => void,
 ): Promise<Dockerode.Container> {
   try {
     return await boundedDockerCall(docker.createContainer(opts), {
@@ -42,11 +44,19 @@ export async function createContainerWithStaleRetry(
   } catch (err: unknown) {
     if (!isExpectedDockerError(err, [409])) throw err;
     if (!opts.name) throw err;
+    if (!assertMutable) throw err;
+    const observed = await boundedDockerCall(docker.getContainer(opts.name).inspect(), {
+      label: 'container.inspect (conflict custody)',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.inspect,
+      logger,
+    });
+    if (!/^[a-f0-9]{64}$/.test(observed.Id)) throw err;
+    const stale = docker.getContainer(observed.Id);
+    assertMutable(observed.Id);
     logger.warn(
-      { name: opts.name },
-      'Stale container with same name exists — removing and retrying',
+      { name: opts.name, containerId: observed.Id },
+      'Removing custody-checked stale container',
     );
-    const stale = docker.getContainer(opts.name);
     try {
       await boundedDockerCall(stale.stop({ t: 5 }), {
         label: 'container.stop (stale-cleanup)',
@@ -57,6 +67,8 @@ export async function createContainerWithStaleRetry(
       // Already stopped, daemon wedged, or expected error — continue to remove
       // anyway. force-remove is what actually clears the name conflict.
     }
+    // A hold may have been recorded while stop was awaiting its reply.
+    assertMutable(observed.Id);
     await boundedDockerCall(stale.remove({ force: true }), {
       label: 'container.remove (stale-cleanup)',
       timeoutMs: DOCKER_CALL_TIMEOUTS.remove,

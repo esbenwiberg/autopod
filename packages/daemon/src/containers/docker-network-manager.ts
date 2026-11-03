@@ -4,8 +4,14 @@ import type {
   NetworkPolicyMode,
   PrivateRegistry,
 } from '@autopod/shared';
+import type Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
+import {
+  assertCheckpointResourceNotRetained,
+  checkpointError,
+  retainedCheckpointNetworkIdentities,
+} from '../pods/retained-checkpoint-repository.js';
 import { DOCKER_CALL_TIMEOUTS, boundedDockerCall } from './docker-bounds.js';
 import { HAPROXY_LISTEN_PORT, generateHaproxyConfig } from './haproxy-config.js';
 
@@ -153,6 +159,7 @@ export function computeNetworkPolicyAllowlist(
 interface DockerNetworkManagerOptions {
   docker: Dockerode;
   logger: Logger;
+  managedDatabase?: Database.Database;
 }
 
 export interface NetworkConfig {
@@ -163,10 +170,37 @@ export interface NetworkConfig {
 export class DockerNetworkManager {
   private docker: Dockerode;
   private logger: Logger;
+  private managedDatabase?: Database.Database;
 
-  constructor({ docker, logger }: DockerNetworkManagerOptions) {
+  constructor({ docker, logger, managedDatabase }: DockerNetworkManagerOptions) {
     this.docker = docker;
+    this.managedDatabase = managedDatabase;
     this.logger = logger.child({ component: 'docker-network-manager' });
+  }
+
+  private assertNetworkMutable(name: string, containerIds: string[] = []) {
+    if (!this.managedDatabase) return;
+    const held = retainedCheckpointNetworkIdentities(this.managedDatabase);
+    if ([...held].some((id) => networkNameForPod(id) === name))
+      checkpointError(
+        'Retained source owns this Docker network; no teardown is authorized',
+        'CHECKPOINT_NETWORK_RETAINED',
+      );
+    for (const id of containerIds) assertCheckpointResourceNotRetained(this.managedDatabase, id);
+  }
+
+  private async inspectNetworkCustody(network: ReturnType<Dockerode['getNetwork']>, name: string) {
+    this.assertNetworkMutable(name);
+    if (!this.managedDatabase) return;
+    // Never infer permission from stale list data or an inspection failure.
+    const live = await boundedDockerCall(network.inspect(), {
+      label: 'network.inspect (custody)',
+      timeoutMs: DOCKER_CALL_TIMEOUTS.inspectNetwork,
+      logger: this.logger,
+    });
+    if (!live?.Name) throw new Error('Docker network identity unavailable');
+    this.assertNetworkMutable(live.Name, Object.keys(live.Containers ?? {}));
+    return live;
   }
 
   /**
@@ -234,7 +268,11 @@ export class DockerNetworkManager {
             .filter((n) => !n.Containers || Object.keys(n.Containers).length === 0)
             .map(async (n) => {
               try {
-                await boundedDockerCall(this.docker.getNetwork(n.Id).remove(), {
+                const network = this.docker.getNetwork(n.Id);
+                const live = await this.inspectNetworkCustody(network, n.Name);
+                if (live && Object.keys(live.Containers ?? {}).length > 0) return;
+                this.assertNetworkMutable(n.Name, Object.keys(live?.Containers ?? {}));
+                await boundedDockerCall(network.remove(), {
                   label: 'network.remove',
                   timeoutMs: DOCKER_CALL_TIMEOUTS.removeNetwork,
                   logger: this.logger,
@@ -258,8 +296,12 @@ export class DockerNetworkManager {
 
   /** Remove one per-run network after its container has been destroyed. */
   async removeNetworkForPod(podId: string): Promise<void> {
-    const network = this.docker.getNetwork(networkNameForPod(podId));
+    const name = networkNameForPod(podId);
+    this.assertNetworkMutable(name);
+    const network = this.docker.getNetwork(name);
     try {
+      const live = await this.inspectNetworkCustody(network, name);
+      this.assertNetworkMutable(name, Object.keys(live?.Containers ?? {}));
       await boundedDockerCall(network.remove(), {
         label: 'network.remove',
         timeoutMs: DOCKER_CALL_TIMEOUTS.removeNetwork,
@@ -299,7 +341,10 @@ export class DockerNetworkManager {
           // Docker rejects `network rm` with 403 ("has active endpoints") until
           // every endpoint is detached, so force-disconnect each one first. The
           // containers themselves get reaped by the sidecar/local reconcilers.
+          await this.inspectNetworkCustody(network, net.Name);
           await this.detachEndpoints(network, net);
+          const live = await this.inspectNetworkCustody(network, net.Name);
+          this.assertNetworkMutable(net.Name, Object.keys(live?.Containers ?? {}));
           await boundedDockerCall(network.remove(), {
             label: 'network.remove',
             timeoutMs: DOCKER_CALL_TIMEOUTS.removeNetwork,
@@ -324,6 +369,7 @@ export class DockerNetworkManager {
     network: ReturnType<Dockerode['getNetwork']>,
     listEntry: Dockerode.NetworkInspectInfo,
   ): Promise<void> {
+    this.assertNetworkMutable(listEntry.Name);
     // Prefer the live inspection — `listNetworks` returns containers only when
     // the network is on the same node as the daemon, and the data can lag.
     let containerIds: string[] = [];
@@ -334,13 +380,16 @@ export class DockerNetworkManager {
         logger: this.logger,
       })) as { Containers?: Record<string, unknown> } | undefined;
       containerIds = Object.keys(info?.Containers ?? {});
-    } catch {
+    } catch (error) {
+      if (this.managedDatabase) throw error;
       containerIds = Object.keys(listEntry.Containers ?? {});
     }
+    this.assertNetworkMutable(listEntry.Name, containerIds);
     if (containerIds.length === 0) return;
     await Promise.all(
       containerIds.map(async (containerId) => {
         try {
+          this.assertNetworkMutable(listEntry.Name, [containerId]);
           await boundedDockerCall(network.disconnect({ Container: containerId, Force: true }), {
             label: 'network.disconnect',
             timeoutMs: DOCKER_CALL_TIMEOUTS.disconnectNetwork,
@@ -366,8 +415,11 @@ export class DockerNetworkManager {
    */
   async destroyNetworkForPod(podId: string): Promise<void> {
     const name = networkNameForPod(podId);
+    this.assertNetworkMutable(name);
     try {
       const network = this.docker.getNetwork(name);
+      const live = await this.inspectNetworkCustody(network, name);
+      this.assertNetworkMutable(name, Object.keys(live?.Containers ?? {}));
       await boundedDockerCall(network.remove(), {
         label: 'network.remove',
         timeoutMs: DOCKER_CALL_TIMEOUTS.removeNetwork,
@@ -384,6 +436,7 @@ export class DockerNetworkManager {
       // still attached. Log and continue — the orphan reconciler will sweep
       // them on next startup.
       this.logger.warn({ err, network: name, podId }, 'Failed to remove pod network');
+      if (this.managedDatabase) throw err;
     }
   }
 

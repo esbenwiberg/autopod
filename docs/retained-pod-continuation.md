@@ -174,6 +174,39 @@ and cleanup. Docker also enforces retired-resource holds at the backend boundary
 Unknown original wakeups/executions remain unchanged. This version does not
 implement release/deletion of retained originals.
 
+### Docker provider custody
+
+Retained Docker replacements use a deterministic, versioned recovery/generation
+namespace for the container and bridge, not a new logical pod, task or request ID.
+The original name is never freed or renamed. A conflict on the replacement name
+is an uncertain allocation to inspect, never permission to remove it and replay.
+Ordinary constructor cleanup requires a custody database and an inspected full
+container ID, with holds checked before stop and again before removal. Managed
+reuse and constructor failure cleanup also respect holds. Missing identity or
+custody authority fails closed.
+
+Original and replacement bridges stay retained, even when empty. Startup orphan
+reconciliation and subnet-pool pruning cannot remove them or detach retained
+endpoints. Do not manually prune them to recover address space.
+
+For disposable native Docker qualification, select an **already present exact**
+image ID with the `autopod` user and `sleep`; no pull or substitution occurs:
+
+```sh
+npx pnpm --filter @autopod/daemon exec esbuild \
+  src/containers/retained-docker-custody.native.ts --bundle --platform=node \
+  --format=esm --packages=external \
+  --outfile=node_modules/.cache/custody-native/check.mjs
+AUTOPOD_SOURCE_ROOT="$PWD" AUTOPOD_DOCKER_CUSTODY_IMAGE=EXACT_LOCAL_IMAGE_ID \
+  node packages/daemon/node_modules/.cache/custody-native/check.mjs
+```
+
+The fixture uses its own in-memory SQLite custody and unique containers/internal
+bridges. Network enumeration is fixture-label-scoped, and cleanup touches only
+IDs created by that invocation. Require both native custody and owned-cleanup
+success markers. This tests actual Docker constructor/network behavior, not a
+hosted image's toolchain, live task checks, model review or Azure capabilities.
+
 **Do not downgrade to a binary unaware of these continuation facts after use.**
 Prefer a retention-aware roll-forward. Older binaries cannot interpret a selected
 replacement launch or enforce the added Docker holds.

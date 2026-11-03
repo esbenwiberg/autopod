@@ -275,13 +275,17 @@ export class DockerContainerManager implements ContainerManager {
 
   async ensureManagedContainer(config: ContainerSpawnConfig): Promise<string> {
     if (!config.managedSpecDigest) throw new Error('managed-spec-required');
-    const container = this.docker.getContainer(`autopod-${config.podId}`);
+    const container = this.docker.getContainer(
+      `autopod-${config.resourceIdentity ?? config.podId}`,
+    );
     try {
       const observed = await container.inspect();
       if (observed.Config.Labels?.['dispatcher.spec-digest'] !== config.managedSpecDigest) {
         throw new Error('managed-container-binding-conflict');
       }
+      this.assertNotRetained(observed.Id);
       config.onCreated?.(observed.Id);
+      this.assertNotRetained(observed.Id);
       if (!observed.State.Running) await container.start();
       if (!config.firewallScript) throw new Error('managed-firewall-required');
       await this.refreshFirewall(observed.Id, config.firewallScript);
@@ -299,7 +303,10 @@ export class DockerContainerManager implements ContainerManager {
   }
 
   async spawn(config: ContainerSpawnConfig): Promise<string> {
-    const containerName = `autopod-${config.podId}`;
+    const identity = config.resourceIdentity ?? config.podId;
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,180}$/.test(identity))
+      throw new Error('Invalid Docker provider identity');
+    const containerName = `autopod-${identity}`;
     const env = Object.entries(config.env).map(([k, v]) => `${k}=${v}`);
 
     await this.ensureImagePresent(config.image);
@@ -384,16 +391,37 @@ export class DockerContainerManager implements ContainerManager {
       }
     }
 
-    const create = config.managedSpecDigest
-      ? (_docker: Dockerode, options: Dockerode.ContainerCreateOptions) =>
-          this.docker.createContainer(options)
-      : createContainerWithStaleRetry;
+    // A retained replacement name is an observation identity, not authority to
+    // discard a previous/uncertain allocation after a lost create reply.
+    const create =
+      config.managedSpecDigest || config.resourceIdentity
+        ? (_docker: Dockerode, options: Dockerode.ContainerCreateOptions) =>
+            this.docker.createContainer(options)
+        : (docker: Dockerode, options: Dockerode.ContainerCreateOptions, logger: Logger) =>
+            createContainerWithStaleRetry(
+              docker,
+              options,
+              logger,
+              this.managedDatabase ? (id) => this.assertNotRetained(id) : undefined,
+            );
     const container = await create(
       this.docker,
       {
         Image: config.image,
-        ...(config.managedSpecDigest
-          ? { Labels: { 'dispatcher.spec-digest': config.managedSpecDigest } }
+        ...(config.managedSpecDigest || config.resourceIdentity
+          ? {
+              Labels: {
+                ...(config.managedSpecDigest
+                  ? { 'dispatcher.spec-digest': config.managedSpecDigest }
+                  : {}),
+                ...(config.resourceIdentity
+                  ? {
+                      'com.autopod.pod-id': config.podId,
+                      'com.autopod.resource-identity': config.resourceIdentity,
+                    }
+                  : {}),
+              },
+            }
           : {}),
         name: containerName,
         Env: env,
@@ -408,6 +436,7 @@ export class DockerContainerManager implements ContainerManager {
 
     try {
       config.onCreated?.(container.id);
+      this.assertNotRetained(container.id);
       await boundedDockerCall(container.start(), {
         label: 'container.start (spawn)',
         timeoutMs: DOCKER_CALL_TIMEOUTS.start,
@@ -415,6 +444,7 @@ export class DockerContainerManager implements ContainerManager {
         containerId: container.id,
       });
     } catch (err) {
+      this.assertNotRetained(container.id);
       await boundedDockerCall(container.remove({ force: true }), {
         label: 'container.remove (start-failed cleanup)',
         timeoutMs: DOCKER_CALL_TIMEOUTS.remove,
@@ -458,7 +488,8 @@ export class DockerContainerManager implements ContainerManager {
             },
             'Firewall setup failed for isolated pod — aborting spawn (fail-closed)',
           );
-          // Tear down the container before surfacing the error so it doesn't leak.
+          // Cleanup cannot supersede a custody hold recorded during setup.
+          this.assertNotRetained(container.id);
           await boundedDockerCall(this.docker.getContainer(container.id).remove({ force: true }), {
             label: 'container.remove (firewall-fail cleanup)',
             timeoutMs: DOCKER_CALL_TIMEOUTS.remove,
