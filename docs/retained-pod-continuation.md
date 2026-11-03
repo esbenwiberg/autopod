@@ -114,6 +114,15 @@ push around its custody. Read the selected repository's instructions, integrate
 against the recorded base, perform the authorized targeted repair and commit it.
 The repair must descend from the explicitly selected prepared source.
 
+If preparation did not select replacement execution, it can be selected once at
+`--check` with the paired `--execution-profile` and `--execution-digest` from a fresh
+preview. This supports qualifying infrastructure after source preparation without
+replacing the operation or its original custody. An execution choice already made
+at preparation cannot be replaced; omit these flags to retain that choice. The
+candidate and any late execution choice share one immutable, atomic selection.
+Image qualification is still separate, and no permissions, workflow or budgets
+are changed by selecting software/resources.
+
 Then select the exact final committed candidate:
 
 ```sh
@@ -139,6 +148,24 @@ fresh base scopes review without rewriting the task's historical starting SHA.
 
 No PR creation/push, dependents, automatic approval or merge follows this check
 invocation. Passing checks stop at validated for a separate fresh human approval.
+
+After inspecting the exact selected source and its current checks/review, a human
+can approve **PR publication only**:
+
+```sh
+ap approve POD --publish-only --reason 'Approve this checked source for PR review only; do not merge'
+```
+
+This updates or creates the PR and leaves the pod validated. It does not rebase,
+plan/request/poll a merge, complete the task, trigger dependents or clean up its
+resources. The pod remains validated even while publication is in flight, so a
+restart cannot reinterpret it as merge authority. Bulk and squash flags are
+refused. A no-change candidate without a PR needs separate reconciliation, not
+completion through this action. Ordinary `ap approve` still authorizes merging;
+**do not substitute it** if the deployed daemon lacks publication-only support.
+The separate `POST /pods/:podId/publish-pr` endpoint requires a human, a reason
+and checked retained source; an older daemon fails closed rather than ignoring
+an unknown approval flag.
 Failed/missing review, source drift or incomplete report capture holds delivery;
 a later waiver or unrelated historical pass cannot certify this selection.
 
@@ -161,7 +188,8 @@ paths, actors, configs, results, force flags and proof are refused:
 - `POST /pods/:podId/retained-continuation`: exact original selection, optional
   `remoteHead`, `prepareOnly`, and paired `executionProfileId`/`expectedExecutionDigest`.
 - `POST /pods/:podId/retained-continuation/:recoveryId/check`: exact original
-  generation/result, `candidateHead`, and meaningful reason.
+  generation/result, `candidateHead`, meaningful reason, and optionally paired execution profile/digest
+  only when preparation did not select replacement execution.
 
 Related: [legacy checkpoint recovery](retained-checkpoint-recovery.md),
 [source adoption](source-adoption-recovery.md),

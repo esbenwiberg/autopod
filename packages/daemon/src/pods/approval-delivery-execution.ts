@@ -3,7 +3,7 @@ import type { PrManager } from '../interfaces/index.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import { mergePublishedSource } from '../worktrees/durable-merge.js';
 import { MergeQueue } from '../worktrees/merge-queue.js';
-import { mergeReconciliation } from '../worktrees/merge-source-identity.js';
+import { assertMergeRepository, mergeReconciliation } from '../worktrees/merge-source-identity.js';
 import type { ApprovalDeliveryExecutionCaptured } from './approval-contracts.js';
 import { activateApprovalRewrite, prepareApprovalRewrite } from './approval-source-rewrite.js';
 import type { ApprovalExecutionContext, DeliveryStageResult } from './delivery-contracts.js';
@@ -56,7 +56,8 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
         ? 'reconcile delivery before retrying approval'
         : 'repair delivery and retry approval';
       const reason = `Approval delivery failed. ${detail} Original resources retained; ${advice}.`;
-      transition(mergingAnchor, 'validated', { failureReason: reason });
+      if (options.publishOnly) podRepo.update(podId, { failureReason: reason });
+      else transition(mergingAnchor, 'validated', { failureReason: reason });
       assertApprovalCurrent({ ...pod, status: 'validated' });
       emitActivityError(podId, reason, false);
       if (reconciliation) throw new AutopodError(reason, 'DELIVERY_RECONCILIATION_REQUIRED', 409);
@@ -66,6 +67,32 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
     // Merge the PR if one was created, otherwise fall back to branch push
     const approveProfile = executionForPod(pod);
     const prManager = prManagerFactory ? prManagerFactory(approveProfile) : null;
+    if (options.publishOnly && !prManager)
+      failDelivery('PR-only publication requires a configured PR provider.');
+    const assertPublishedPr = (
+      status: Awaited<ReturnType<PrManager['getPrStatus']>>,
+      baseBranch: string,
+      expectedHead?: string,
+    ) => {
+      const target = status.sourceTarget;
+      if (
+        !status.open ||
+        status.merged ||
+        !target ||
+        target.branch !== pod.branch ||
+        target.baseBranch !== baseBranch ||
+        (expectedHead !== undefined && status.headSha !== expectedHead)
+      )
+        throw new AutopodError(
+          'Current PR source/target does not confirm this publication; retain resources and reconcile',
+          'DELIVERY_RECONCILIATION_REQUIRED',
+          409,
+        );
+      assertMergeRepository(
+        { repository: approveProfile.repoUrl ?? '', branch: pod.branch, baseBranch },
+        target.repository,
+      );
+    };
     const mergeApprovalSource = (
       publication: Awaited<ReturnType<typeof publishApprovalBranch>>,
       provider: PrManager,
@@ -117,6 +144,7 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
         const initialStatus = await deliveryOperation(() =>
           prManager.getPrStatus({ prUrl, worktreePath }),
         );
+        if (options.publishOnly) assertPublishedPr(initialStatus, mergeBaseBranch);
         if (initialStatus.merged || !initialStatus.open)
           failDelivery(
             'The PR has an external disposition without a confirmed daemon merge. Reconcile it before publishing retained source.',
@@ -125,13 +153,14 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
         // failDelivery already moved the original lifecycle back to validated.
         if (error instanceof AutopodError && error.code === 'APPROVAL_DELIVERY_FAILED') throw error;
         assertApprovalCurrent(mergingAnchor);
-        failDelivery('The current PR disposition is unavailable.');
+        failDelivery('The current PR disposition or source binding is unavailable.', error);
       }
 
       // Outcome of the queued critical section. We do state transitions outside
       // the queue so the lock is released as quickly as possible.
       type MergeOutcome =
         | { kind: 'merged' }
+        | { kind: 'published' }
         | { kind: 'revalidate'; rewriteId: string }
         | { kind: 'merge_pending'; blockReason: string }
         | { kind: 'merge_failed'; reason: string; cause?: unknown };
@@ -162,6 +191,14 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
               'Pre-merge push failed — retaining source for explicit approval retry',
             );
             return { kind: 'merge_failed', reason: blockReason, cause: pushErr };
+          }
+
+          if (options.publishOnly) {
+            const status = await deliveryOperation(() =>
+              prManager.getPrStatus({ prUrl, worktreePath }),
+            );
+            assertPublishedPr(status, mergeBaseBranch, publishedSource.commitSha);
+            return { kind: 'published' };
           }
 
           // Never rewrite the approved worktree or publish untested rebased code.
@@ -287,6 +324,13 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
         });
 
       assertApprovalCurrent(mergingAnchor);
+      if (outcome.kind === 'published') {
+        emitActivityStatus(
+          podId,
+          'PR source updated for review; no merge, polling, completion or cleanup authorized',
+        );
+        return { kind: 'halted' };
+      }
       if (outcome.kind === 'revalidate') {
         activateApprovalRewrite(captured, mergingAnchor, outcome.rewriteId);
         return { kind: 'halted' };
@@ -305,27 +349,34 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
       }
     } else if (!pod.prUrl && prManager && pod.worktreePath && pod.options.output === 'pr') {
       // PR creation failed during validation — retry it now
-      emitActivityStatus(podId, 'No PR found — creating PR before merging…');
+      emitActivityStatus(
+        podId,
+        options.publishOnly
+          ? 'Publishing a PR for review only…'
+          : 'No PR found — creating PR before merging…',
+      );
       let retryPrUrl: string | null = null;
       const retryWorktreePath = pod.worktreePath;
       try {
         const retryProfile = executionForPod(pod);
         const publishedSource = await deliveryOperation(async () =>
-          commitAndPublishApprovalBranch(mergingAnchor, {
-            worktreePath: retryWorktreePath,
-            // Push the feature branch up so the PR can be opened against the resolved base.
-            targetBranch: pod.branch,
-            // Pass the PAT explicitly — approval retry runs post-container, so the
-            // in-memory PAT cache may be cold after a daemon restart.
-            pat: await deliveryCredential(retryProfile),
-            // Post-container retry: sync-back already happened (or failed silently) upstream;
-            // belt-and-suspenders autocommit here must not commit a phantom mass-deletion.
-            maxDeletions: 0,
-            // Provide pod task as context for any auto-generated commit message.
-            podTask: pod.task,
-            profile: retryProfile,
-            podModel: pod.model,
-          }),
+          options.publishOnly
+            ? publishApprovalBranch(mergingAnchor, { pat: await deliveryCredential(retryProfile) })
+            : commitAndPublishApprovalBranch(mergingAnchor, {
+                worktreePath: retryWorktreePath,
+                // Push the feature branch up so the PR can be opened against the resolved base.
+                targetBranch: pod.branch,
+                // Pass the PAT explicitly — approval retry runs post-container, so the
+                // in-memory PAT cache may be cold after a daemon restart.
+                pat: await deliveryCredential(retryProfile),
+                // Post-container retry: sync-back already happened (or failed silently) upstream;
+                // belt-and-suspenders autocommit here must not commit a phantom mass-deletion.
+                maxDeletions: 0,
+                // Provide pod task as context for any auto-generated commit message.
+                podTask: pod.task,
+                profile: retryProfile,
+                podModel: pod.model,
+              }),
         );
         const baseBranch = resolvePrBaseBranch(pod, retryProfile);
         await deliveryOperation(async () =>
@@ -344,7 +395,7 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
             profile: retryProfile,
             podModel: pod.model,
             handoffInstructions: pod.handoffInstructions ?? undefined,
-            validationResult: null,
+            validationResult: options.publishOnly ? pod.lastValidationResult : null,
             validationWaiver: pod.validationWaiver,
             filesChanged: pod.filesChanged,
             linesAdded: pod.linesAdded,
@@ -388,6 +439,14 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
           mergeReconciliation(
             'The PR has an external disposition without a recorded daemon merge.',
           );
+        if (options.publishOnly) {
+          assertPublishedPr(reviewStatus, baseBranch, publishedSource.commitSha);
+          emitActivityStatus(
+            podId,
+            'PR published for review; no merge, polling, completion or cleanup authorized',
+          );
+          return { kind: 'halted' };
+        }
         if (reviewStatus.squashRequired && mergeSquash === undefined) mergeSquash = true;
         planApprovalSource(publishedSource, newPrUrl, baseBranch);
         if (
@@ -444,7 +503,10 @@ export function createApprovalDeliveryExecution(captured: ApprovalDeliveryExecut
         }
         const message = err instanceof Error ? err.message : String(err);
         if (retryPrUrl)
-          failDelivery(`Merge after PR creation could not be confirmed: ${message}`, err);
+          failDelivery(
+            `${options.publishOnly ? 'PR publication' : 'Merge after PR creation'} could not be confirmed: ${message}`,
+            err,
+          );
         emitActivityStatus(podId, `PR creation failed: ${message} — pod returned to validated`);
         failDelivery('PR creation did not complete.');
       }

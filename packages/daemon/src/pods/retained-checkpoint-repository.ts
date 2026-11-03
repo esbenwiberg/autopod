@@ -69,6 +69,7 @@ export interface CheckpointRecoveryRecord {
   selected: {
     head: string;
     tree: string;
+    execution?: RetainedExecutionSelection;
     actor: OperatorActor;
     reason: string;
     requestHash: string;
@@ -264,7 +265,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
     append,
     activateExecution(id: string) {
       const record = get(id) ?? checkpointError('Recovery unavailable');
-      const execution = record.binding.continuation?.execution;
+      const execution = record.selected?.execution ?? record.binding.continuation?.execution;
       if (
         !execution ||
         !record.prepared ||

@@ -4140,6 +4140,42 @@ describe('POST /pods approve routes', () => {
     });
   });
 
+  it('uses a separate human publication-only route without authorizing a merge', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/pods/pod-ready/publish-pr',
+      headers: authHeaders,
+      payload: { reason: 'Approve this exact checked source for PR review only' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(podManager.approveSession).toHaveBeenCalledWith('pod-ready', {
+      publishOnly: true,
+      reason: 'Approve this exact checked source for PR review only',
+      actor: { type: 'human', userId: testUser.oid, displayName: testUser.name },
+    });
+    expect(podManager.approveAllValidated).not.toHaveBeenCalled();
+  });
+  it('refuses missing or forged publication-only approval before controller dispatch', async () => {
+    for (const payload of [
+      {},
+      { reason: 'short' },
+      { reason: 'An explicit publication approval', force: true },
+      { reason: 'An explicit publication approval', actor: { type: 'human', userId: 'other' } },
+      { reason: 'An explicit publication approval', publishOnly: false },
+    ]) {
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/pods/pod-ready/publish-pr',
+            headers: authHeaders,
+            payload,
+          })
+        ).statusCode,
+      ).toBe(400);
+    }
+    expect(podManager.approveSession).not.toHaveBeenCalled();
+  });
   it('approve rejects invalid approval metadata', async () => {
     const res = await app.inject({
       method: 'POST',

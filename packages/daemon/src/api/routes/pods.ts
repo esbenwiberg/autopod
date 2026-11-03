@@ -1606,6 +1606,24 @@ export function podRoutes(
     return podManager.acceptFindings(podId, body, humanActor(request));
   });
 
+  // A separate path is intentional: older daemons must 404 rather than ignore
+  // an unknown approval option and accidentally merge a publication-only request.
+  app.post('/pods/:podId/publish-pr', async (request) => {
+    if (!request.user?.oid)
+      throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
+    const { podId } = request.params as { podId: string };
+    const body = z
+      .object({ reason: z.string().trim().min(10).max(2000) })
+      .strict()
+      .parse(request.body);
+    await podManager.approveSession(podId, {
+      publishOnly: true,
+      reason: body.reason,
+      actor: humanActor(request),
+    });
+    return { ok: true };
+  });
+
   // POST /pods/:podId/approve — approve pod
   app.post('/pods/:podId/approve', async (request) => {
     const { podId } = request.params as { podId: string };

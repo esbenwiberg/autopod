@@ -30,6 +30,8 @@ import type { createReadinessService } from './readiness-review.js';
 import type { ValidationRepository } from './validation-repository.js';
 
 export interface ApproveSessionOptions {
+  /** Explicit human publication of checked retained source; no merge or completion. */
+  publishOnly?: boolean;
   squash?: boolean;
   reason?: string;
   automation?: boolean;

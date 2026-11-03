@@ -140,7 +140,9 @@ export async function unusedLocalPreviewUrl(): Promise<string> {
   const server = createServer();
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => resolve());
+    // Match the real proxy's wildcard bind: loopback-only availability can
+    // overlap an outbound socket on another local interface (notably on macOS).
+    server.listen(0, '0.0.0.0', () => resolve());
   });
   const port = (server.address() as AddressInfo).port;
   await new Promise<void>((resolve, reject) =>

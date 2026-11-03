@@ -165,14 +165,15 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
     // A factual, exact-source external merge is observed before any sandbox
     // wakeup. Its durable receipt pins unpreserved reports against all cleanup.
     if (
-      await reconcileExternalApproval(captured, {
+      !options.publishOnly &&
+      (await reconcileExternalApproval(captured, {
         podId,
         options,
         pod,
         readiness,
         actor,
         approvalReason,
-      })
+      }))
     )
       return { kind: 'halted' };
 
@@ -373,6 +374,12 @@ export function createApprovalDeliveryPreparation(captured: ApprovalDeliveryPrep
 
       assertApprovalCurrent(pod);
       if (trulyNoChanges) {
+        if (options.publishOnly)
+          throw new AutopodError(
+            'There are no PR changes to publish; source/resources remain retained for separate reconciliation',
+            'PR_PUBLICATION_NO_CHANGES',
+            409,
+          );
         const shouldPushBranch = branchHasAccumulatedChanges !== false;
         emitActivityStatus(
           podId,
