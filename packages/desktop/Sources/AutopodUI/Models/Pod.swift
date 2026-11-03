@@ -19,7 +19,7 @@ public enum OutputMode: String, CaseIterable, Sendable {
 
 // MARK: - Status
 
-public enum PodStatus: String, Sendable {
+public enum PodStatus: String, CaseIterable, Sendable {
     case queued, provisioning, running
     case awaitingInput = "awaiting_input"
     case researchReady = "research_ready"

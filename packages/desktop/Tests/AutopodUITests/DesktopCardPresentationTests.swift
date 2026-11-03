@@ -97,15 +97,18 @@ private func cardPod(status: PodStatus = .mergePending) -> Pod {
         let appearance = try #require(NSAppearance(named: name))
         appearance.performAsCurrentDrawingAppearance {
             let surface = luminance(NSColor(DesktopTheme.surface))
-            for status in [PodStatus.running, .mergePending, .researchReady, .complete, .failed, .queued] {
+            for status in PodStatus.allCases {
                 let foreground = luminance(NSColor(DesktopTheme.statusColor(status)))
                 let ratio = (max(surface, foreground) + 0.05) / (min(surface, foreground) + 0.05)
                 #expect(ratio >= 4.5)
             }
-            #expect(NSColor(DesktopTheme.statusColor(.mergePending)) != NSColor(DesktopTheme.statusColor(.complete)))
-            let research = NSColor(DesktopTheme.statusColor(.researchReady)).usingColorSpace(.sRGB)
-            #expect(research == NSColor(DesktopTheme.statusColor(.reviewRequired)).usingColorSpace(.sRGB))
-            #expect(research != NSColor(DesktopTheme.statusColor(.complete)).usingColorSpace(.sRGB))
+            let complete = NSColor(DesktopTheme.statusColor(.complete)).usingColorSpace(.sRGB)
+            let findings = NSColor(DesktopTheme.statusColor(.researchReady)).usingColorSpace(.sRGB)
+            let attention = NSColor(DesktopTheme.statusColor(.reviewRequired)).usingColorSpace(.sRGB)
+            #expect(complete != nil && findings != nil && attention != nil)
+            #expect(NSColor(DesktopTheme.statusColor(.mergePending)).usingColorSpace(.sRGB) != complete)
+            #expect(findings == attention)
+            #expect(findings != complete)
         }
     }
 }
