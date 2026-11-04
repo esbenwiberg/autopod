@@ -22,23 +22,38 @@ separate from the worker's final prose or terminal pod status.
 - Serialize setup/build/test/typecheck; overlapping installs can race native addon
   compilation, and overlapping checks multiply memory pressure. More container RAM
   alone does not establish adequate declaration-worker heap or passing tests.
-- The extended daemon declaration typecheck defaults to a bounded 4 GiB V8 heap
-  only for that command. It still checks the full declaration surface. Caller
-  `NODE_OPTIONS` are preserved verbatim: if set, include the required heap setting
-  there yourself. This is not a global agent/build/test heap override or permission
-  to exceed the worker's admitted memory allocation.
+- The daemon's normal build and extended declaration typecheck each default to
+  a bounded 4 GiB V8 heap when `NODE_OPTIONS` is absent or empty. Both retain their
+  full declaration scope; the build's tsup declaration worker inherits the bound.
+  Nonempty caller `NODE_OPTIONS` are preserved verbatim: include the required heap
+  setting there yourself. This is not a global workspace/agent/test heap override
+  or permission to exceed the worker's admitted memory allocation.
 - Keep setup, lint, build, test and independent review enabled in the effective
   workflow. Clone a repository-specific workflow rather than changing a shared
   preset to accommodate one repository.
 - Native desktop source still needs macOS verification; Linux/Docker unit tests
   cannot establish Swift compilation or desktop rendering.
 
-An isolated Linux Node22 check at 8 GiB reproduced `ERR_WORKER_OUT_OF_MEMORY`
-with the default roughly 2 GiB V8 heap, without a cgroup OOM. The unchanged full
-command passed with a 4 GiB heap, using about 4.4 GiB container peak memory. This
-is a targeted compiler proof, not full profile or provider acceptance; preserve
-8 GiB allocation and serialize expensive checks rather than treating heap size
-as a memory reservation or removing declaration scope to make a check pass.
+The earlier isolated Linux Node22 extended-typecheck qualification at 8 GiB
+reproduced `ERR_WORKER_OUT_OF_MEMORY` with the default roughly 2 GiB V8 heap,
+without a cgroup OOM. The unchanged full command passed with a 4 GiB heap, using
+about 4.4 GiB container peak memory. That was targeted compiler proof, not full
+profile or provider acceptance.
+
+The later retained-pod investigation in issue #509 found the same worker-heap
+error in the normal declaration build, which still lacked that default. The
+retained container had an 8 GiB limit and no recorded cgroup OOM/limit hits. A
+Linux Node22.23.3 probe measured a roughly 2 GiB default worker heap; an explicit
+4 GiB setting increases the actual V8 limit independently of container RAM.
+Local exact-source builds passed both with and without the setting, so they do
+not reproduce or settle that historical failure. The normal-build default closes
+this resource-policy gap; fresh native checks and independent review still gate
+any retained-source delivery. Preserve 8 GiB allocation and serialize expensive
+checks rather than treating heap size as a reservation or removing declarations.
+
+This source-level default reaches new pods only when their checkout contains the
+change. Existing retained source needs an independent next-generation repair and
+its own checks; changing a preset or relabeling an old result does not apply it.
 
 The streaming self-validation repair is already present in PR #496. See
 [validation execution reliability](validation-execution-reliability.md). A daemon
