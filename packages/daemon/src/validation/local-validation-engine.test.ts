@@ -157,6 +157,54 @@ index 0000000..3333333
 });
 
 describe('required fact execution', () => {
+  it('uses a separate outer test bound without extending required-fact commands', async () => {
+    const cm = {
+      execInContainer: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+    } as unknown as ContainerManager;
+    const engine = createLocalValidationEngine(cm);
+    const result = await engine.validate({
+      podId: 'outer-test-only',
+      containerId: 'fixture',
+      previewUrl: '',
+      buildCommand: '',
+      startCommand: '',
+      healthPath: '/',
+      healthTimeout: 1,
+      smokePages: [],
+      attempt: 1,
+      task: 'Check test and fact deadlines separately',
+      hasWebUi: false,
+      diff: '',
+      testCommand: 'test-only-budget-probe',
+      testTimeout: 900000,
+      outerTestTimeout: 1800000,
+      skipPhases: ['setup', 'lint', 'sast', 'build', 'health', 'pages', 'review'],
+      contract: {
+        contractVersion: 1,
+        title: 'Deadline separation',
+        dependsOn: [],
+        scenarios: [],
+        humanReview: [],
+        requiredFacts: [
+          {
+            id: 'fact-deadline',
+            proves: [],
+            kind: 'custom-command',
+            artifact: { path: 'fact.ts', change: 'touch' },
+            command: 'node fact-budget-probe.mjs',
+          },
+        ],
+      },
+    });
+    expect(result.test?.status).toBe('pass');
+    expect(result.factValidation?.status).toBe('pass');
+    const calls = vi.mocked(cm.execInContainer).mock.calls;
+    const test = calls.find((call) => call[1].join(' ').includes('test-only-budget-probe'));
+    const fact = calls.find((call) => call[1].join(' ').includes('node fact-budget-probe.mjs'));
+    expect(test?.[2]?.timeout).toBe(1800000);
+    expect(fact?.[2]?.timeout).toBe(900000);
+  });
+
   it.each([
     { presenceExit: 1, commandExit: 0, passed: true },
     { presenceExit: 0, commandExit: 0, passed: false },

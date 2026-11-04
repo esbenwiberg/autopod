@@ -138,6 +138,33 @@ source-selection receipt, then queues checks-only provisioning. Replaying with a
 changed actor, source or request conflicts. Repeating the exact accepted request observes its
 receipt; it does not allocate another resource or rerun checks.
 
+### One finite Docker outer-test allowance
+
+A measured suite overrun can require more outer command time without rewriting
+its frozen workflow. At final `--check` only, an authenticated human can pair:
+
+```sh
+--test-budget-seconds 1800 \
+--test-budget-reason 'Measured full suite exceeded its frozen fifteen minute outer limit'
+```
+
+This must extend the original test timeout, is capped at3600 seconds, and is
+immutable with the exact source/actor/generation selection. It changes only the
+outer test command bound, not individual test deadlines, commands, phase selection,
+review, tokens, task authority or attempt counters. No original resource is used.
+It is Docker-only; ordinary sandbox recovery budgets remain a separate operation.
+The distinct `/check-budgeted` endpoint fails closed on old daemons; the CLI never
+falls back to an ordinary check that would ignore the requested bound.
+
+**Retry permission is separate.** Inspect `ap retry-state`; when needed, record
+one explicitly approved `ap authorize-retry` with a stable request key. A larger
+bound is not changed conditions for retry admission: that identity still uses the
+frozen timeout. The first started validation admission in the selected generation
+is the durable one-shot use receipt. Repeated selection observes its receipt,
+not another execution. Automatic full-validation infrastructure retries cannot
+reuse this allowance. Source/custody, active-execution and remaining task-budget
+fences still apply; no reset or unknown-execution settlement follows.
+
 ## Outcome and later delivery
 
 Follow `ap retained-continuation POD --json`, pod activity and status. A current
@@ -207,6 +234,16 @@ IDs created by that invocation. Require both native custody and owned-cleanup
 success markers. This tests actual Docker constructor/network behavior, not a
 hosted image's toolchain, live task checks, model review or Azure capabilities.
 
+The separate `src/containers/retained-check-test-budget.native.ts` fixture uses
+that same compile/environment pattern. It runs an actual1400ms Node command in
+its disposable Docker replacement: the frozen1000ms control times out, while the
+selected3000ms bound succeeds. Real SQLite admission records refuse a second
+execution and the original stays stopped/unchanged. Require
+`NATIVE_RETAINED_TEST_BUDGET_PASSED` and `OWNED_BUDGET_FIXTURE_CLEANUP_PASSED`.
+Its engine/reviewer scaffolding is synthetic; this proves timing/one-shot protocol,
+not real task checks or model review. A timed-out disposable control is not
+termination evidence; only fixture-owned containers are force-removed on cleanup.
+
 **Do not downgrade to a binary unaware of these continuation facts after use.**
 Prefer a retention-aware roll-forward. Older binaries cannot interpret a selected
 replacement launch or enforce the added Docker holds.
@@ -223,6 +260,10 @@ paths, actors, configs, results, force flags and proof are refused:
 - `POST /pods/:podId/retained-continuation/:recoveryId/check`: exact original
   generation/result, `candidateHead`, meaningful reason, and optionally paired execution profile/digest
   only when preparation did not select replacement execution.
+- `POST /pods/:podId/retained-continuation/:recoveryId/check-budgeted`: the same
+  exact-source selection plus required `testBudget: {seconds, reason}`; one finite
+  Docker outer-test allowance, never retry permission. Ordinary `/check` refuses
+  this field rather than silently ignoring it.
 
 Related: [legacy checkpoint recovery](retained-checkpoint-recovery.md),
 [source adoption](source-adoption-recovery.md),

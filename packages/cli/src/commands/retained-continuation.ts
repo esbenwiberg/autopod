@@ -38,6 +38,11 @@ export function registerRetainedContinuationCommand(
       'Explicit execution selection at preparation or, if not selected yet, --check',
     )
     .option('--execution-digest <sha256>', 'Exact replacement execution preview digest')
+    .option(
+      '--test-budget-seconds <seconds>',
+      'One finite outer-test allowance at --check only (1–3600); not retry permission',
+    )
+    .option('--test-budget-reason <text>', 'Separate human reason for the one-shot test allowance')
     .option('--json', 'Output JSON')
     .action(
       async (
@@ -57,6 +62,8 @@ export function registerRetainedContinuationCommand(
           previewExecution?: string;
           executionProfile?: string;
           executionDigest?: string;
+          testBudgetSeconds?: string;
+          testBudgetReason?: string;
         },
       ) => {
         const mutation =
@@ -69,6 +76,8 @@ export function registerRetainedContinuationCommand(
           opts.candidateHead ||
           opts.executionProfile ||
           opts.executionDigest ||
+          opts.testBudgetSeconds ||
+          opts.testBudgetReason ||
           opts.reason;
         if (opts.previewExecution && (mutation || opts.apply || opts.check))
           throw new Error('Execution preview is read-only; omit mutation flags.');
@@ -109,6 +118,20 @@ export function registerRetainedContinuationCommand(
               'Invalid recovery ID, generation, exact SHA/hash or meaningful reason.',
             );
         }
+        if (opts.testBudgetSeconds !== undefined || opts.testBudgetReason !== undefined) {
+          if (
+            !opts.check ||
+            !opts.testBudgetSeconds ||
+            !opts.testBudgetReason ||
+            !/^[1-9][0-9]*$/.test(opts.testBudgetSeconds) ||
+            Number(opts.testBudgetSeconds) > 3600 ||
+            opts.testBudgetReason.trim().length < 10 ||
+            opts.testBudgetReason.length > 4000
+          )
+            throw new Error(
+              'A --check test allowance requires finite --test-budget-seconds (1–3600) and separate --test-budget-reason; retry authorization remains separate.',
+            );
+        }
         const client = getClient();
         const podId = await resolvePodId(client, id);
         const result = opts.previewExecution
@@ -118,6 +141,14 @@ export function registerRetainedContinuationCommand(
                 expectedGeneration: Number(opts.generation),
                 expectedResultHash: opts.resultHash as string,
                 candidateHead: opts.candidateHead as string,
+                ...(opts.testBudgetSeconds
+                  ? {
+                      testBudget: {
+                        seconds: Number(opts.testBudgetSeconds),
+                        reason: opts.testBudgetReason!.trim(),
+                      },
+                    }
+                  : {}),
                 ...(opts.executionProfile
                   ? {
                       executionProfileId: opts.executionProfile,

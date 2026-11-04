@@ -452,6 +452,17 @@ export function createRetainedCheckpointRecovery(deps: {
     )
       checkpointError('Authenticated human and exact candidate selection with reason required');
     validateExecutionSelection(input);
+    if (
+      input.testBudget &&
+      (!Number.isInteger(input.testBudget.seconds) ||
+        input.testBudget.seconds < 1 ||
+        input.testBudget.seconds > 3600 ||
+        input.testBudget.reason.trim().length < 10 ||
+        input.testBudget.reason.length > 4000)
+    )
+      checkpointError(
+        'A finite test allowance of 1–3600 seconds and separate human reason are required',
+      );
     const record = repo.get(recoveryId) ?? checkpointError('Recovery unavailable');
     const requestHash = checkpointHash([podId, recoveryId, input, actor]);
     if (record.podId !== podId || !record.binding.continuation?.prepareOnly)
@@ -483,6 +494,19 @@ export function createRetainedCheckpointRecovery(deps: {
         ? await resolveExecutionSelection(original(record), input, assertCurrent)
         : undefined;
       assertCurrent();
+      const frozenTimeoutSeconds = deps.executionForPod(original(record)).testTimeout ?? 600;
+      if (
+        input.testBudget &&
+        (!Number.isInteger(frozenTimeoutSeconds) ||
+          frozenTimeoutSeconds < 1 ||
+          (execution?.target ??
+            record.binding.continuation?.execution?.target ??
+            original(record).executionTarget) !== 'local' ||
+          input.testBudget.seconds <= frozenTimeoutSeconds)
+      )
+        checkpointError(
+          'A retained Docker test allowance must exceed its unchanged frozen test timeout',
+        );
       const inspect =
         deps.worktreeManager.inspectSourceAdoption ??
         checkpointError('Source inspection unavailable');
@@ -517,6 +541,15 @@ export function createRetainedCheckpointRecovery(deps: {
         head: source.commitSha,
         tree: source.treeSha,
         ...(execution ? { execution } : {}),
+        ...(input.testBudget
+          ? {
+              testBudget: {
+                seconds: input.testBudget.seconds,
+                reason: input.testBudget.reason.trim(),
+                frozenTimeoutSeconds,
+              },
+            }
+          : {}),
         actor,
         reason: input.reason.trim(),
         requestHash,
