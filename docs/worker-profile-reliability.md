@@ -51,6 +51,15 @@ this resource-policy gap; fresh native checks and independent review still gate
 any retained-source delivery. Preserve 8 GiB allocation and serialize expensive
 checks rather than treating heap size as a reservation or removing declarations.
 
+Disk-reopen fixtures should use the production `createDatabase` connection
+policy, including WAL and `synchronous=NORMAL`, rather than paying a separate
+full-sync rollback-journal transaction for every schema version. The retained
+merge and schema181 deletion-ownership regressions retain real on-disk migration,
+cutover backups, close/reopen, integrity and ownership checks with unchanged
+individual deadlines. These are restart/persistence checks, not power-loss
+simulation. Disk headroom and contention still need operational qualification;
+fixture efficiency does not make a nearly full hosted disk safe.
+
 This source-level default reaches new pods only when their checkout contains the
 change. Existing retained source needs an independent next-generation repair and
 its own checks; changing a preset or relabeling an old result does not apply it.
