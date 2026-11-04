@@ -48,6 +48,26 @@ describe('AutopodClient', () => {
     client = new AutopodClient({ baseUrl: 'http://localhost:3100', getToken });
   });
 
+  it('fails closed on an old daemon instead of falling back from budgeted checks to ordinary checks', async () => {
+    mockFetch.mockResolvedValueOnce(errorResponse(404, { error: 'Not Found' }));
+    await expect(
+      client.checkRetainedCandidate('pod', 'request', {
+        expectedGeneration: 2,
+        expectedResultHash: 'a'.repeat(64),
+        candidateHead: 'b'.repeat(40),
+        reason: 'Select exact source for independent checks',
+        testBudget: {
+          seconds: 1800,
+          reason: 'One finite extension to the outer test command timeout',
+        },
+      }),
+    ).rejects.toThrow();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0]?.[0]).toBe(
+      'http://localhost:3100/pods/pod/retained-continuation/request/check-budgeted',
+    );
+  });
+
   describe('createSession', () => {
     it('sends POST to /pods', async () => {
       const pod = { id: 'abc12345', profileName: 'test', task: 'do stuff', status: 'queued' };

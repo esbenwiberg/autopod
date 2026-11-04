@@ -26,7 +26,12 @@ interface ValidationExecutionDependencies {
   };
   podRepo: Pick<
     PodRepository,
-    'getOrThrow' | 'update' | 'taskRetries' | 'validationExecutions' | 'atomically'
+    | 'getOrThrow'
+    | 'update'
+    | 'taskRetries'
+    | 'validationExecutions'
+    | 'retainedCheckpoints'
+    | 'atomically'
   >;
   validationEngine: Pick<ValidationEngine, 'validate'>;
   retrySource: {
@@ -100,6 +105,7 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
   ): Promise<ValidationResult> {
     const { podId, attempt } = validationConfig;
     const originalTestTimeout = validationConfig.testTimeout;
+    const originalOuterTestTimeout = validationConfig.outerTestTimeout;
     ownership.assertCurrent();
     const cm = containerManagerFactory.get(
       validationConfig.executionTarget ?? podRepo.getOrThrow(podId).executionTarget,
@@ -113,13 +119,29 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
       1_000, 5_000,
     ];
     const retryLedger = podRepo.taskRetries;
+    let retainedBudgetWasSelected = false;
     const runValidation = async (): Promise<ValidationResult> => {
       try {
         const pod = ownership.assertCurrent();
         podRepo.validationExecutions?.assertTaskSettled(podId);
         if (validationConfig.containerId !== pod.containerId)
           throw new TaskRetryBlockedError('Validation resource differs from current lifecycle');
+        const retainedBudget = podRepo.retainedCheckpoints?.testBudget(pod, originalTestTimeout);
+        retainedBudgetWasSelected = Boolean(retainedBudget);
+        if (
+          retainedBudget &&
+          (!retryLedger ||
+            retainedBudget.used ||
+            (validationConfig.executionTarget ?? pod.executionTarget) !== 'local')
+        )
+          throw new TaskRetryBlockedError(
+            'Retained test allowance requires its first owned Docker validation admission; no replay is authorized',
+          );
         const recoveryBudget = podRepo.validationExecutions?.budget(pod);
+        if (retainedBudget && recoveryBudget)
+          throw new TaskRetryBlockedError(
+            'Competing test allowances cannot share a validation dispatch',
+          );
         if (
           recoveryBudget &&
           (!cm.executionResourceScope ||
@@ -130,6 +152,11 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
           throw new TaskRetryBlockedError(
             'Recovery budget cannot be consumed without an exact sandbox dispatch',
           );
+        // Keep facts and browser-fact preparation on their frozen deadline.
+        // Only the test command reads this retained-check-specific bound.
+        validationConfig.outerTestTimeout = retainedBudget
+          ? retainedBudget.seconds * 1000
+          : originalOuterTestTimeout;
         validationConfig.testTimeout = recoveryBudget
           ? recoveryBudget.seconds * 1000
           : originalTestTimeout;
@@ -137,9 +164,14 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
         // A one-shot execution budget is not changed source/commands and cannot
         // authorize repeating a nonretryable attempt. Record/execute the selected
         // timeout above, but evaluate retry permission against the frozen timeout.
-        const permissionConfig = recoveryBudget
-          ? { ...validationConfig, testTimeout: originalTestTimeout }
-          : validationConfig;
+        const permissionConfig =
+          recoveryBudget || retainedBudget
+            ? {
+                ...validationConfig,
+                testTimeout: originalTestTimeout,
+                outerTestTimeout: originalOuterTestTimeout,
+              }
+            : validationConfig;
         const identity = retryLedger
           ? await (retrySource.captureRetryIdentity?.(permissionConfig) ??
               captureValidationRetryIdentity(cm, permissionConfig))
@@ -183,6 +215,21 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
                 throw new TaskRetryBlockedError(
                   'Selected recovery test budget expired or changed before dispatch; inspect recovery evidence before retrying',
                 );
+              if (retainedBudget) {
+                const currentBudget = podRepo.retainedCheckpoints?.testBudget(
+                  ownership.assertCurrent(),
+                  originalTestTimeout,
+                );
+                if (
+                  !currentBudget ||
+                  currentBudget.used ||
+                  currentBudget.recoveryId !== retainedBudget.recoveryId
+                )
+                  throw new TaskRetryBlockedError(
+                    'Retained test allowance changed or was already used before dispatch',
+                  );
+              }
+              // This started admission is also the durable one-shot retained-budget use receipt.
               retryLedger.start(admission.id);
               dispatchId = podRepo.validationExecutions?.dispatch(
                 ownership.assertCurrent(),
@@ -262,6 +309,7 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
       let result = await runValidation();
       for (const [index, waitMs] of infrastructureBackoffs.entries()) {
         if (
+          retainedBudgetWasSelected ||
           requiresValidationSettlement({ lastValidationResult: result }) ||
           !result.infrastructureFailure?.retryable ||
           validationController.signal.aborted
@@ -302,6 +350,7 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
       return result;
     } finally {
       validationConfig.testTimeout = originalTestTimeout;
+      validationConfig.outerTestTimeout = originalOuterTestTimeout;
     }
   }
 
