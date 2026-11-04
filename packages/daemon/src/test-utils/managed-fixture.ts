@@ -2,7 +2,9 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ManagedPodRequest } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
+import pino from 'pino';
+import { createDatabase } from '../db/connection.js';
 import { ArtifactExports } from '../managed/artifact-exports.js';
 import { ManagedArtifactPipeline } from '../managed/artifact-pipeline.js';
 import { MemoryArtifactStore } from '../managed/artifact-store.js';
@@ -10,6 +12,8 @@ import { digest } from '../managed/canonical.js';
 import { type ManagedAdmission, REQUIRED_ENFORCEMENT } from '../managed/grants.js';
 import { ManagedControls } from '../managed/managed-controls.js';
 import { ManagedPodService, type ManagedRuntimePort } from '../managed/managed-service.js';
+
+const logger = pino({ level: 'silent' });
 
 export function resign(request: ManagedPodRequest): ManagedPodRequest {
   request.effectiveGrant.digest = digest(
@@ -40,7 +44,7 @@ export function fixture(): ManagedFixture {
   ).ManagedPodRequest;
   const directory = mkdtempSync(path.join(tmpdir(), 'managed-start-'));
   const database = path.join(directory, 'state.db');
-  let db = new Database(database);
+  let db = createDatabase(database, logger);
   for (const migration of [
     '142_managed_artifact_exports.sql',
     '143_managed_pods.sql',
@@ -113,7 +117,7 @@ export function fixture(): ManagedFixture {
     },
     restart: () => {
       db.close();
-      db = new Database(database);
+      db = createDatabase(database, logger);
     },
     close: () => {
       db.close();

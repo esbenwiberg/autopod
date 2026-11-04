@@ -57,8 +57,36 @@ full-sync rollback-journal transaction for every schema version. The retained
 merge and schema181 deletion-ownership regressions retain real on-disk migration,
 cutover backups, close/reopen, integrity and ownership checks with unchanged
 individual deadlines. These are restart/persistence checks, not power-loss
-simulation. Disk headroom and contention still need operational qualification;
-fixture efficiency does not make a nearly full hosted disk safe.
+simulation. Managed artifact tests and the shared managed-service fixture likewise
+use the production factory on both initial and reopened connections, including
+foreign-key enforcement. They retain their actual disk files, existing schema
+statements, frozen receipts and restart/no-duplicate-operation assertions. A
+connection-policy regression checks WAL/NORMAL/foreign keys and persisted managed
+state after closing and reopening the real database. The same policy applies to
+completion/merge/retry journals, dispatch preflight, operator guidance, validation
+evidence, and the shared provisioning and sandbox-wakeup disk fixtures, including
+legacy-schema upgrades and every reopened writer. Shared-fixture regressions also
+check the busy timeout and preserved pod/wakeup evidence across real reopen.
+Keep intentional read-only, journal-mode and historical-checkpoint compatibility
+fixtures distinct; do not blindly replace every native SQLite constructor. The
+legacy checkpoint reconciliation fixture uses WAL only during input construction,
+then explicitly seals it back to DELETE and verifies no sidecars remain before
+capturing the immutable input bytes. The actual conversion, backups, packaged CLI,
+negative cases and 30-second deadline remain unchanged.
+
+Disposable qualification must give tests their own writable dependency caches;
+a read-only dependency mount can break Playwright/Vite fixture setup independently
+of application behavior. Never make production dependencies writable to repair a
+diagnostic harness. Preserve failed reports and distinguish harness failures from
+real assertion failures before spending another live validation attempt.
+
+Disk headroom and contention still need operational qualification; fixture
+efficiency does not make a nearly full hosted disk safe. The expanded hosted disk
+still reached its bandwidth limit during a full-suite run. Scoped native tests
+passed even before this broader fixture repair, so neither that pass nor observed
+backup overlap proves the cause of the historical five-second timeouts. Qualify
+the full configured workload; do not hide contention by extending individual
+test deadlines, skipping persistence checks or disabling backups.
 
 This source-level default reaches new pods only when their checkout contains the
 change. Existing retained source needs an independent next-generation repair and
