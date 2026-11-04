@@ -67,6 +67,13 @@ completion/merge/retry journals, dispatch preflight, operator guidance, validati
 evidence, and the shared provisioning and sandbox-wakeup disk fixtures, including
 legacy-schema upgrades and every reopened writer. Shared-fixture regressions also
 check the busy timeout and preserved pod/wakeup evidence across real reopen.
+Serialized current-schema fixtures are not historical checkpoints: after writing
+an in-memory seed to disk, open both the initial writer and reopened connections
+with the production factory. This includes reviewer/worker credentials,
+continuation, completion, and validation-owner fixtures. The reviewer regression
+checks all four connection settings and actual persisted pod, account and closed
+attempt rows on initial open and after close/reopen. Keep SQL-abort/identity,
+preceding-effect, ownership and no-duplicate-operation assertions unchanged.
 Keep intentional read-only, journal-mode and historical-checkpoint compatibility
 fixtures distinct; do not blindly replace every native SQLite constructor. The
 legacy checkpoint reconciliation fixture uses WAL only during input construction,

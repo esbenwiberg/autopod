@@ -2,9 +2,10 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { EffectiveLaunchConfig, McpServerConfig } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveLaunch } from '../configuration/launch-resolver.js';
+import { createDatabase } from '../db/connection.js';
 import { createProfileStore } from '../profiles/index.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
 import { createPassingValidationResult, createTestContext } from '../test-utils/mock-helpers.js';
@@ -346,8 +347,7 @@ describe('continuation context', () => {
     const dir = mkdtempSync(join(tmpdir(), 'goal-task-rework-'));
     const filename = join(dir, 'state.db');
     writeFileSync(filename, f.ctx.db.serialize());
-    let db = new Database(filename);
-    db.pragma('foreign_keys=ON');
+    let db = createDatabase(filename, pino({ level: 'silent' }));
     cleanups.push(() => {
       db.close();
       rmSync(dir, { recursive: true, force: true });
@@ -389,8 +389,7 @@ describe('continuation context', () => {
     });
     expect(repo.get('context')).toEqual(before);
     db.close();
-    db = new Database(filename);
-    db.pragma('foreign_keys=ON');
+    db = createDatabase(filename, pino({ level: 'silent' }));
     expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
     expect(db.pragma('foreign_key_check')).toEqual([]);
     expect(createGoalRepository(db).get('context')).toEqual(before);

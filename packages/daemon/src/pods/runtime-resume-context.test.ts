@@ -11,7 +11,7 @@ import type {
   SpawnConfig,
   StdioInjectedMcpServer,
 } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveLaunchCredentialReferences } from '../configuration/credential-references.js';
 import { createConfigurationCredentialStore } from '../configuration/credential-store.js';
@@ -23,6 +23,7 @@ import { resolveLaunch } from '../configuration/launch-resolver.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
 import { loadOrCreateKey } from '../crypto/credentials-cipher.js';
 import { createPodTokenIssuer } from '../crypto/pod-tokens.js';
+import { createDatabase } from '../db/connection.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
 import {
@@ -636,8 +637,7 @@ async function persistedFixture() {
   } finally {
     seed.close();
   }
-  let db = new Database(file);
-  db.pragma('foreign_keys = ON');
+  let db = createDatabase(file, pino({ level: 'silent' }));
   cleanup.push(() => {
     db.close();
     fs.rmSync(root, { recursive: true, force: true });
@@ -757,8 +757,7 @@ async function persistedFixture() {
     run: () => op.primeRuntimeForResume(pod, runtime, 'container', { WORKER: 'retained' }),
     reopen() {
       db.close();
-      db = new Database(file);
-      db.pragma('foreign_keys = ON');
+      db = createDatabase(file, pino({ level: 'silent' }));
       expect(db.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
       expect(db.pragma('foreign_key_check')).toEqual([]);
       return rows();

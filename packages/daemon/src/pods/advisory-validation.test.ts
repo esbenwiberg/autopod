@@ -2,9 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ValidationResult } from '@autopod/shared';
-import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import type { ValidationEngine } from '../interfaces/validation-engine.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { createAdvisoryValidation } from './advisory-validation.js';
@@ -766,8 +766,7 @@ function persistedFixture() {
   } finally {
     seed.close();
   }
-  let db = new Database(file);
-  db.pragma('foreign_keys = ON');
+  let db = createDatabase(file, pino({ level: 'silent' }));
   cleanups.push(() => {
     db.close();
     fs.rmSync(root, { recursive: true, force: true });
@@ -835,8 +834,7 @@ function persistedFixture() {
     reopen() {
       const before = rows();
       db.close();
-      db = new Database(file);
-      db.pragma('foreign_keys = ON');
+      db = createDatabase(file, pino({ level: 'silent' }));
       expect(db.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
       expect(db.pragma('foreign_key_check')).toEqual([]);
       expect(rows()).toEqual(before);

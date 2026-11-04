@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Pod } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import pino from 'pino';
 import { afterAll, describe, expect, it, vi } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import {
   createMockContainerManager,
   createMockProfileStore,
@@ -73,8 +74,7 @@ async function fixture(executionTarget: Pod['executionTarget'] = 'local') {
   } finally {
     seed.close();
   }
-  let db = new Database(databaseFile);
-  db.pragma('foreign_keys = ON');
+  let db = createDatabase(databaseFile, pino({ level: 'silent' }));
   const repo = createPodRepository(db);
   repo.insert({
     id: 'worker',
@@ -174,8 +174,7 @@ async function fixture(executionTarget: Pod['executionTarget'] = 'local') {
     },
     reopen() {
       db.close();
-      db = new Database(databaseFile);
-      db.pragma('foreign_keys = ON');
+      db = createDatabase(databaseFile, pino({ level: 'silent' }));
       expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
       expect(db.pragma('foreign_key_check')).toEqual([]);
       return createPodRepository(db);
