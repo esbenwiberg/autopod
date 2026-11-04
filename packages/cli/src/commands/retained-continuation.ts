@@ -33,7 +33,10 @@ export function registerRetainedContinuationCommand(
       '--preview-execution <profile>',
       'Preview replacement software/resources without changing task authority',
     )
-    .option('--execution-profile <profile>', 'Explicit replacement execution profile')
+    .option(
+      '--execution-profile <profile>',
+      'Explicit execution selection at preparation or, if not selected yet, --check',
+    )
     .option('--execution-digest <sha256>', 'Exact replacement execution preview digest')
     .option('--json', 'Output JSON')
     .action(
@@ -79,10 +82,7 @@ export function registerRetainedContinuationCommand(
         if (!opts.apply && !opts.check && mutation)
           throw new Error('Mutation fields require --apply or --check.');
         if (opts.apply && opts.check) throw new Error('Choose --apply or --check, not both.');
-        if (
-          opts.check &&
-          (opts.head || opts.remoteHead || opts.prepareOnly || opts.executionProfile)
-        )
+        if (opts.check && (opts.head || opts.remoteHead || opts.prepareOnly))
           throw new Error('--check selects an existing candidate, not another source.');
         if (opts.apply || opts.check) {
           if (
@@ -118,6 +118,12 @@ export function registerRetainedContinuationCommand(
                 expectedGeneration: Number(opts.generation),
                 expectedResultHash: opts.resultHash as string,
                 candidateHead: opts.candidateHead as string,
+                ...(opts.executionProfile
+                  ? {
+                      executionProfileId: opts.executionProfile,
+                      expectedExecutionDigest: opts.executionDigest,
+                    }
+                  : {}),
                 reason: opts.reason as string,
               })
             : opts.apply

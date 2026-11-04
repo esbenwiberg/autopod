@@ -12,6 +12,31 @@ afterEach(() => {
 });
 
 describe('provisioning container', () => {
+  it('uses one retained provider namespace for the container and bridge, not task identity', async () => {
+    const f = fixture();
+    const repo = f.podRepo.retainedCheckpoints;
+    if (!repo) throw new Error('Missing custody repository');
+    vi.spyOn(repo, 'providerIdentity').mockReturnValue('prepare-retained-fixture');
+    f.profiles.update('test-profile', {
+      networkPolicy: { enabled: true, mode: 'allow-all', allowedHosts: [] },
+    });
+    const gateway = vi.fn(async () => '172.18.0.1');
+    const build = vi.fn<NonNullable<typeof f.captured.networkManager>['buildNetworkConfig']>(
+      async () => ({ networkName: 'autopod-prepare-retained-fixture', firewallScript: 'fixture' }),
+    );
+    f.captured.networkManager = { getGatewayIp: gateway, buildNetworkConfig: build };
+    await f.container();
+    expect(gateway).toHaveBeenCalledWith('prepare-retained-fixture');
+    expect(build.mock.calls[0]?.[4]).toBe('prepare-retained-fixture');
+    expect(f.cm.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        podId: 'prepare',
+        resourceIdentity: 'prepare-retained-fixture',
+        networkName: 'autopod-prepare-retained-fixture',
+        env: expect.objectContaining({ POD_ID: 'prepare' }),
+      }),
+    );
+  });
   it('mounts private runtime state and preserves preview ports without agent credentials in spawn env', async () => {
     const f = fixture();
     const result = await f.container();

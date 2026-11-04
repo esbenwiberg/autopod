@@ -83,6 +83,27 @@ describe('retained continuation CLI', () => {
     });
     expect(client.continueRetained).not.toHaveBeenCalled();
   });
+  it('pairs a late execution preview with the exact candidate without repeating preparation', async () => {
+    await run(
+      '--check',
+      ...fields,
+      '--candidate-head',
+      'e'.repeat(40),
+      '--execution-profile',
+      'qualified-profile',
+      '--execution-digest',
+      'd'.repeat(64),
+    );
+    expect(client.checkRetainedCandidate).toHaveBeenCalledWith('retained-pod', 'stable-id', {
+      expectedGeneration: 2,
+      expectedResultHash: 'a'.repeat(64),
+      candidateHead: 'e'.repeat(40),
+      executionProfileId: 'qualified-profile',
+      expectedExecutionDigest: 'd'.repeat(64),
+      reason: fields.at(-1),
+    });
+    expect(client.continueRetained).not.toHaveBeenCalled();
+  });
   it.each([
     ['--head', 'b'.repeat(40)],
     ['--apply'],
@@ -91,6 +112,15 @@ describe('retained continuation CLI', () => {
     ['--apply', ...fields, '--head', 'b'.repeat(40), '--generation', 'NaN'],
     ['--apply', ...fields, '--head', 'b'.repeat(40), '--execution-profile', 'qualified'],
     ['--preview-execution', 'qualified', '--apply'],
+    ['--check', ...fields, '--candidate-head', 'e'.repeat(40), '--execution-profile', 'qualified'],
+    [
+      '--check',
+      ...fields,
+      '--candidate-head',
+      'e'.repeat(40),
+      '--execution-digest',
+      'd'.repeat(64),
+    ],
     ['--check', ...fields, '--candidate-head', 'e'.repeat(40), '--remote-head', 'c'.repeat(40)],
   ])('rejects invalid or ambiguous selection before network access: %j', async (...args) => {
     await expect(run(...args)).rejects.toThrow();

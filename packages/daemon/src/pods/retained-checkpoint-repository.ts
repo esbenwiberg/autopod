@@ -14,6 +14,28 @@ import type { prepareRetainedCheckpointWorkspace } from '../worktrees/retained-c
 
 export const checkpointHash = (value: unknown) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
+/** Versioned provider namespace, never a new logical pod/task/request identity. */
+export function checkpointResourceIdentity(podId: string, recoveryId: string, generation: number) {
+  return `${podId}-retained-${checkpointHash(['docker-v1', recoveryId, generation]).slice(0, 24)}`;
+}
+
+/** Original and replacement bridges remain held until an explicit release protocol exists. */
+export function retainedCheckpointNetworkIdentities(db: Database.Database): Set<string> {
+  const rows = db
+    .prepare(`SELECT r.id,r.pod_id AS podId,e.evidence FROM retained_checkpoint_recoveries r
+    LEFT JOIN retained_checkpoint_recovery_events e ON e.recovery_id=r.id AND e.kind='activated'`)
+    .all() as { id: string; podId: string; evidence: string | null }[];
+  const identities = new Set<string>();
+  for (const row of rows) {
+    identities.add(row.podId);
+    if (row.evidence)
+      identities.add(
+        checkpointResourceIdentity(row.podId, row.id, JSON.parse(row.evidence).generation),
+      );
+  }
+  return identities;
+}
+
 export function checkpointError(message: string, code = 'CHECKPOINT_RECOVERY_BLOCKED'): never {
   throw new AutopodError(message, code, 409);
 }
@@ -69,6 +91,7 @@ export interface CheckpointRecoveryRecord {
   selected: {
     head: string;
     tree: string;
+    execution?: RetainedExecutionSelection;
     actor: OperatorActor;
     reason: string;
     requestHash: string;
@@ -261,10 +284,16 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
   return {
     get,
     latest,
+    providerIdentity(podId: string, generation: number): string {
+      const record = latest(podId);
+      return record?.binding.continuation && record.activated?.generation === generation
+        ? checkpointResourceIdentity(podId, record.id, generation)
+        : podId;
+    },
     append,
     activateExecution(id: string) {
       const record = get(id) ?? checkpointError('Recovery unavailable');
-      const execution = record.binding.continuation?.execution;
+      const execution = record.selected?.execution ?? record.binding.continuation?.execution;
       if (
         !execution ||
         !record.prepared ||

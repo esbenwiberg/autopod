@@ -3,7 +3,11 @@ import { type EnvironmentBuildInputs, environmentImageKey } from './environment-
 /** Software-only build context: no checkout, repository scripts or credential build arguments. */
 export function generateEnvironmentDockerfile(input: EnvironmentBuildInputs): string {
   const key = environmentImageKey(input);
-  const commands = [...input.toolInstallCommands, ...input.environment.prepareCommands];
+  const commands = [
+    ...input.toolInstallCommands,
+    ...input.environment.prepareCommands,
+    ...(input.cliInstallCommands ?? []),
+  ];
   return [
     `FROM ${input.pinnedBase}`,
     `LABEL com.autopod.environment-key="${key}"`,

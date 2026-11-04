@@ -80,6 +80,10 @@ export function createProvisioningContainer(
     const { pod, launchConfig, profile, providerPreflight, podId, worktreePath, bareRepoPath } =
       input;
     const { emitStatus, stagedReferenceArchivePaths } = input.run;
+    const resourceIdentity =
+      pod.executionTarget === 'local'
+        ? (podRepo.retainedCheckpoints?.providerIdentity?.(podId, pod.lifecycleGeneration) ?? podId)
+        : podId;
     // Select container manager based on execution target
     const containerManager = containerManagerFactory.get(pod.executionTarget);
 
@@ -121,13 +125,13 @@ export function createProvisioningContainer(
         injectionsForPod(pod).mcpServers,
         profile.mcpServers,
       );
-      daemonGatewayIp = await networkManager.getGatewayIp(podId);
+      daemonGatewayIp = await networkManager.getGatewayIp(resourceIdentity);
       const netConfig = await networkManager.buildNetworkConfig(
         runtimeNetworkPolicy,
         initialMergedMcpServers,
         daemonGatewayIp,
         profile.privateRegistries,
-        podId,
+        resourceIdentity,
         [],
         [hostnameFromUrl(mcpBaseUrl)],
         portFromUrl(mcpBaseUrl),
@@ -250,7 +254,7 @@ export function createProvisioningContainer(
         initialMergedMcpServers,
         daemonGatewayIp,
         profile.privateRegistries,
-        podId,
+        resourceIdentity,
         sidecarIps,
         [hostnameFromUrl(mcpBaseUrl)],
         portFromUrl(mcpBaseUrl),
@@ -404,6 +408,7 @@ export function createProvisioningContainer(
       containerId = await containerManager.spawn({
         image: spawnImage,
         podId,
+        ...(resourceIdentity !== podId ? { resourceIdentity } : {}),
         env: containerEnv,
         ports: [{ container: CONTAINER_APP_PORT, host: hostPort }],
         volumes: [

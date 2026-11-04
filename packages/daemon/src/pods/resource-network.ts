@@ -34,7 +34,13 @@ export function createResourceNetwork(
   async function destroyPodNetwork(podId: string, strict = false): Promise<void> {
     if (!networkManager?.destroyNetworkForPod) return;
     try {
-      await networkManager.destroyNetworkForPod(podId);
+      const pod = podRepo.getOrThrow(podId);
+      const identity =
+        pod?.executionTarget === 'local'
+          ? (podRepo.retainedCheckpoints?.providerIdentity?.(podId, pod.lifecycleGeneration) ??
+            podId)
+          : podId;
+      await networkManager.destroyNetworkForPod(identity);
     } catch (err) {
       logger.warn({ err, podId }, 'Failed to destroy pod network');
       if (strict) throw err;
