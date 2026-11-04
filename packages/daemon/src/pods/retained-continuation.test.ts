@@ -1,4 +1,5 @@
 import { rm } from 'node:fs/promises';
+import Database from 'better-sqlite3';
 import type Dockerode from 'dockerode';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DockerContainerManager } from '../containers/docker-container-manager.js';
@@ -172,6 +173,162 @@ describe('explicit retention-safe continuation', () => {
     expect(() => f.ctx.db.prepare('DELETE FROM retained_continuation_sources').run()).toThrow(
       'cannot be deleted',
     );
+  });
+
+  it('pins a human Docker test allowance and uses the existing started admission as its one-shot receipt', async () => {
+    const f = await fixture(true);
+    const profile = f.deps.executionForPod(f.pod());
+    f.deps.executionForPod = () => ({ ...profile, testTimeout: 900 });
+    await f.recovery.continueRetained(f.podId, { ...f.input, prepareOnly: true }, f.actor);
+    await f.recovery.wait(f.input.id);
+    const input = {
+      expectedGeneration: f.input.expectedGeneration,
+      expectedResultHash: f.input.expectedResultHash,
+      candidateHead: f.prepared.head,
+      reason: 'Select this exact retained source for one independent check',
+      testBudget: {
+        seconds: 1800,
+        reason: 'Measured full suite exceeded the frozen fifteen minute outer limit',
+      },
+    };
+    const before = f.pod();
+    const selected = await f.recovery.checkCandidate(f.podId, f.input.id, input, f.actor);
+    expect(selected.selected?.testBudget).toEqual({
+      ...input.testBudget,
+      frozenTimeoutSeconds: 900,
+    });
+    expect(f.pod().validationAttempts).toBe(before.validationAttempts);
+    expect(f.ctx.podRepo.taskRetries!.state(f.podId).authorizations).toEqual([]);
+    const repo = f.ctx.podRepo.retainedCheckpoints!;
+    expect(() => repo.testBudget(f.pod(), 900000)).toThrow();
+    await f.recovery.process(f.podId, async () => {
+      for (const status of ['provisioning', 'running', 'validating'] as const)
+        f.deps.transition(f.pod(), status);
+      f.ctx.podRepo.update(f.podId, { containerId: 'replacement' });
+      expect(() => repo.testBudget(f.pod(), 600000)).toThrow('frozen timeout');
+      expect(repo.testBudget(f.pod(), 900000)).toMatchObject({ seconds: 1800, used: false });
+      for (const drift of [
+        { lifecycleGeneration: f.pod().lifecycleGeneration + 1 },
+        { worktreePath: '/other' },
+        { containerId: selected.containerId },
+        { executionTarget: 'sandbox' as const },
+      ])
+        expect(() => repo.testBudget({ ...f.pod(), ...drift }, 900000)).toThrow();
+      const ledger = f.ctx.podRepo.taskRetries!;
+      ledger.authorize(
+        f.podId,
+        'separate-budget-fixture-retry',
+        'One explicit retry, separate from the finite outer-test allowance',
+        f.actor,
+      );
+      const prior = f.ctx.db
+        .prepare(
+          'SELECT binding_hash AS hash FROM task_retry_attempts WHERE pod_id=? ORDER BY rowid DESC LIMIT 1',
+        )
+        .get(f.podId) as { hash: string };
+      const admission = ledger.admit(
+        f.podId,
+        f.pod().lifecycleGeneration,
+        {
+          source: 'a'.repeat(64),
+          contract: 'b'.repeat(64),
+          commands: 'c'.repeat(64),
+          environment: null,
+          implementation: null,
+        },
+        prior.hash,
+        [],
+      );
+      ledger.start(admission.id);
+      expect(repo.testBudget(f.pod(), 900000)?.used).toBe(true);
+      expect(createRetainedCheckpointRepository(f.ctx.db).testBudget(f.pod(), 900000)?.used).toBe(
+        true,
+      );
+      const reopenedDb = new Database(f.ctx.db.serialize());
+      try {
+        const reopened = createRetainedCheckpointRepository(reopenedDb);
+        expect(() => reopened.testBudget(f.pod(), 900000)).toThrow();
+        expect(reopened.owned(f.input.id, () => reopened.testBudget(f.pod(), 900000))?.used).toBe(
+          true,
+        );
+      } finally {
+        reopenedDb.close();
+      }
+      ledger.finish(admission.id, 'nonretryable', 10);
+      f.ctx.podRepo.update(f.podId, {
+        lastValidationResult: { ...f.result, overall: 'fail', infrastructureFailure: undefined },
+      });
+      f.deps.transition(f.pod(), 'review_required');
+    });
+    expect(() => repo.testBudget(f.pod(), 900000)).toThrow();
+    expect(
+      repo.testBudget({ ...f.pod(), lifecycleGeneration: f.pod().lifecycleGeneration + 1 }, 900000),
+    ).toBeNull();
+    expect((await f.recovery.checkCandidate(f.podId, f.input.id, input, f.actor)).selected).toEqual(
+      selected.selected,
+    );
+    await expect(
+      f.recovery.checkCandidate(
+        f.podId,
+        f.input.id,
+        {
+          ...input,
+          testBudget: { ...input.testBudget, seconds: 2000 },
+        },
+        f.actor,
+      ),
+    ).rejects.toThrow('differs');
+    expect(f.deps.enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([0, -1, 1.5, 3601, Number.POSITIVE_INFINITY, 900])(
+    'rejects invalid/non-extending test allowance %s before activation',
+    async (seconds) => {
+      const f = await fixture(true);
+      const profile = f.deps.executionForPod(f.pod());
+      f.deps.executionForPod = () => ({ ...profile, testTimeout: 900 });
+      await f.recovery.continueRetained(f.podId, { ...f.input, prepareOnly: true }, f.actor);
+      await f.recovery.wait(f.input.id);
+      await expect(
+        f.recovery.checkCandidate(
+          f.podId,
+          f.input.id,
+          {
+            expectedGeneration: f.input.expectedGeneration,
+            expectedResultHash: f.input.expectedResultHash,
+            candidateHead: f.prepared.head,
+            reason: 'Select exact source for independent validation',
+            testBudget: {
+              seconds,
+              reason: 'Finite one-shot test allowance with no workflow edits',
+            },
+          },
+          f.actor,
+        ),
+      ).rejects.toThrow();
+      expect(f.recovery.list(f.podId)[0]?.selected).toBeNull();
+      expect(f.deps.enqueue).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not extend sandbox budgets through the Docker-only candidate path', async () => {
+    const f = await fixture();
+    await f.recovery.continueRetained(f.podId, { ...f.input, prepareOnly: true }, f.actor);
+    await f.recovery.wait(f.input.id);
+    await expect(
+      f.recovery.checkCandidate(
+        f.podId,
+        f.input.id,
+        {
+          expectedGeneration: f.input.expectedGeneration,
+          expectedResultHash: f.input.expectedResultHash,
+          candidateHead: f.prepared.head,
+          reason: 'Select exact source for independent validation',
+          testBudget: { seconds: 1800, reason: 'Finite one-shot allowance with a separate reason' },
+        },
+        f.actor,
+      ),
+    ).rejects.toThrow('Docker');
   });
 
   it('selects divergent remote source only after preservation, without modifying the original', async () => {

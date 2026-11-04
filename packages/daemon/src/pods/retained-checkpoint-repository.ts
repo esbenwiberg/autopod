@@ -92,6 +92,7 @@ export interface CheckpointRecoveryRecord {
     head: string;
     tree: string;
     execution?: RetainedExecutionSelection;
+    testBudget?: { seconds: number; reason: string; frozenTimeoutSeconds: number };
     actor: OperatorActor;
     reason: string;
     requestHash: string;
@@ -284,6 +285,57 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
   return {
     get,
     latest,
+    /** Only the owned, once-entered checks invocation can consume this allowance.
+     * Existing started retry admissions are its durable one-shot use receipt.
+     */
+    testBudget(pod: Pod, frozenTimeoutMs: number | undefined) {
+      const record = latest(pod.id);
+      const budget = record?.selected?.testBudget;
+      if (!record || !budget) return null;
+      // A completed allowance must not contaminate later isolated approval rewrites.
+      // The selected generation still fails closed on any attempted replay below.
+      if (
+        record.checked &&
+        record.activated &&
+        pod.lifecycleGeneration > record.activated.generation
+      )
+        return null;
+      assertAvailable(pod.id);
+      const task = db
+        .prepare('SELECT task_id AS id FROM task_executions WHERE pod_id=?')
+        .get(pod.id) as { id: string } | undefined;
+      if (
+        task?.id !== record.taskId ||
+        scope(db).getStore() !== record.id ||
+        !record.binding.continuation ||
+        !record.checking ||
+        record.checked ||
+        record.blocked ||
+        record.generation + 1 !== pod.lifecycleGeneration ||
+        record.activated?.generation !== pod.lifecycleGeneration ||
+        record.checking.generation !== pod.lifecycleGeneration ||
+        record.prepared?.worktree !== pod.worktreePath ||
+        pod.executionTarget !== 'local' ||
+        pod.status !== 'validating' ||
+        !pod.containerId ||
+        pod.containerId === record.containerId ||
+        !Number.isInteger(budget.seconds) ||
+        !Number.isInteger(budget.frozenTimeoutSeconds) ||
+        budget.frozenTimeoutSeconds < 1 ||
+        budget.seconds > 3600 ||
+        budget.seconds <= budget.frozenTimeoutSeconds ||
+        budget.frozenTimeoutSeconds * 1000 !== frozenTimeoutMs ||
+        budget.reason.trim().length < 10
+      )
+        checkpointError(
+          'Retained test allowance no longer matches its owned source/generation/frozen timeout',
+        );
+      const used = db
+        .prepare(`SELECT 1 FROM task_retry_attempts
+        WHERE task_id=? AND pod_id=? AND generation=? AND stage='validation' AND started_at IS NOT NULL LIMIT 1`)
+        .get(record.taskId, pod.id, pod.lifecycleGeneration);
+      return { ...budget, recoveryId: record.id, used: Boolean(used) };
+    },
     providerIdentity(podId: string, generation: number): string {
       const record = latest(podId);
       return record?.binding.continuation && record.activated?.generation === generation

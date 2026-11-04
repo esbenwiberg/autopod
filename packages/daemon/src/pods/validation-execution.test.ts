@@ -296,6 +296,99 @@ function fixture(sandbox = false) {
 }
 
 describe('validation execution durable effects', () => {
+  it.each(['pass', 'infra'] as const)(
+    'uses a retained outer-test allowance once, preserving frozen retry identity and the %s result',
+    async (kind) => {
+      const f = fixture();
+      try {
+        f.config.testTimeout = 900000;
+        vi.spyOn(f.repo.retainedCheckpoints!, 'testBudget').mockImplementation(() => ({
+          seconds: 1800,
+          frozenTimeoutSeconds: 900,
+          reason: 'One separately approved finite test allowance',
+          recoveryId: 'recovery',
+          used: f.ledger.state('worker').executedCount > 0,
+        }));
+        const inputs: number[] = [];
+        f.engine.mockImplementation(async (config) => {
+          inputs.push(config.outerTestTimeout!);
+          expect(config.testTimeout).toBe(900000);
+          return result(kind);
+        });
+        const captured: (number | undefined)[] = [];
+        f.capture.mockImplementation(async (config) => {
+          captured.push(config.testTimeout);
+          expect(config.outerTestTimeout).toBeUndefined();
+          return identity;
+        });
+        const value = await f.run();
+        expect(value.overall).toBe(kind === 'pass' ? 'pass' : 'fail');
+        expect(inputs).toEqual([1800000]);
+        expect(captured).toEqual([900000]);
+        expect(f.config.testTimeout).toBe(900000);
+        expect(f.config.outerTestTimeout).toBeUndefined();
+        expect(f.ledger.state('worker').executedCount).toBe(1);
+        await expect(f.run()).rejects.toThrow('no replay');
+        expect(f.engine).toHaveBeenCalledTimes(1);
+      } finally {
+        f.close();
+      }
+    },
+  );
+
+  it('does not treat a larger retained timeout as permission to repeat a nonretryable validation', async () => {
+    const f = fixture();
+    try {
+      f.config.testTimeout = 900000;
+      const prior = f.ledger.admit(
+        'worker',
+        f.pod.lifecycleGeneration,
+        identity,
+        'd'.repeat(64),
+        [],
+      );
+      f.ledger.start(prior.id);
+      f.ledger.finish(prior.id, 'nonretryable', 10);
+      vi.spyOn(f.repo.retainedCheckpoints!, 'testBudget').mockReturnValue({
+        seconds: 1800,
+        frozenTimeoutSeconds: 900,
+        reason: 'One separately approved finite test allowance',
+        recoveryId: 'recovery',
+        used: false,
+      });
+      await expect(f.run()).rejects.toBeInstanceOf(TaskRetryBlockedError);
+      expect(f.capture).toHaveBeenCalledWith(expect.objectContaining({ testTimeout: 900000 }));
+      expect(f.engine).not.toHaveBeenCalled();
+      expect(f.ledger.state('worker').executedCount).toBe(1);
+      expect(f.config.testTimeout).toBe(900000);
+    } finally {
+      f.close();
+    }
+  });
+
+  it('refuses a consumed retained allowance discovered during preflight without starting the engine', async () => {
+    const f = fixture();
+    try {
+      f.config.testTimeout = 900000;
+      const budget = {
+        seconds: 1800,
+        frozenTimeoutSeconds: 900,
+        reason: 'A finite independently approved test allowance',
+        recoveryId: 'recovery',
+        used: false,
+      };
+      vi.spyOn(f.repo.retainedCheckpoints!, 'testBudget')
+        .mockReturnValueOnce(budget)
+        .mockReturnValue({ ...budget, used: true });
+      await expect(f.run()).rejects.toThrow('already used');
+      expect(f.engine).not.toHaveBeenCalled();
+      expect(f.ledger.state('worker').executedCount).toBe(0);
+      expect(f.config.testTimeout).toBe(900000);
+    } finally {
+      f.close();
+    }
+  });
+
   it('keeps real native unknown-exit evidence nonretryable when completion concurrently aborts', async () => {
     const f = fixture(true);
     try {

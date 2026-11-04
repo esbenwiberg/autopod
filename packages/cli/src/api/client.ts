@@ -547,7 +547,11 @@ export class AutopodClient {
     recoveryId: string,
     input: import('@autopod/shared').RetainedContinuationCheckRequest,
   ): Promise<unknown> {
-    return this.request('POST', `/pods/${id}/retained-continuation/${recoveryId}/check`, input);
+    return this.request(
+      'POST',
+      `/pods/${id}/retained-continuation/${recoveryId}/${input.testBudget ? 'check-budgeted' : 'check'}`,
+      input,
+    );
   }
   async authorizeValidationRecoveryBudget(
     id: string,

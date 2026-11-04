@@ -1784,7 +1784,7 @@ async function runTests(
       wrapValidationExecCommand(config.testCommand, config.extraExecEnv, config.nonSecretExecEnv),
       {
         cwd: testCwd,
-        timeout: config.testTimeout ?? 600_000,
+        timeout: config.outerTestTimeout ?? config.testTimeout ?? 600_000,
         ...(config.extraExecEnv ? { env: config.extraExecEnv } : {}),
       },
     );
