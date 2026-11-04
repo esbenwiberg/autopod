@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { expect, it, vi } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestContext, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createPodManager } from './pod-manager.js';
@@ -177,7 +178,8 @@ it('upgrades schema 181 and keeps abandoned ownership fenced across disk reopen 
   const dir = mkdtempSync(join(tmpdir(), 'deletion-upgrade-'));
   const migrations = resolve(import.meta.dirname, '../db/migrations');
   const file = join(dir, 'state.db');
-  let db = new Database(file);
+  // Exercise real disk upgrades/backups with the production connection policy.
+  let db = createDatabase(file, logger);
   try {
     for (const name of readdirSync(migrations))
       if (Number.parseInt(name, 10) <= 181) copyFileSync(join(migrations, name), join(dir, name));
@@ -193,7 +195,9 @@ it('upgrades schema 181 and keeps abandoned ownership fenced across disk reopen 
     repo.taskExecutions?.register('old');
     repo.deletionOwnership?.acquire('old', 'null');
     db.close();
-    db = new Database(file);
+    db = createDatabase(file, logger);
+    expect(db.pragma('journal_mode', { simple: true })).toBe('wal');
+    expect(db.pragma('synchronous', { simple: true })).toBe(1);
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2030-01-01'));
     const next = createPodRepository(db);

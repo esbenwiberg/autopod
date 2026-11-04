@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import type { CreatePrConfig, PrManager } from '../interfaces/pr-manager.js';
 import { createDeliveryLedger } from '../pods/delivery-ledger.js';
@@ -181,7 +182,8 @@ describe('durable PR delivery boundary', () => {
   it('retains a confirmed merge across database close/reopen without another creation receipt', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'merge-disposition-restart-'));
     const databasePath = join(dir, 'test.db');
-    let db = new Database(databasePath);
+    // Match production WAL/checkpoint behavior instead of full-syncing every schema version.
+    let db = createDatabase(databasePath, logger);
     try {
       runMigrations(db, new URL('../db/migrations', import.meta.url).pathname, logger);
       const f = fixture(db);
@@ -189,7 +191,9 @@ describe('durable PR delivery boundary', () => {
       vi.mocked(f.provider.mergePr).mockResolvedValue({ merged: true, autoMergeScheduled: false });
       await f.manager.mergePr({ prUrl: created.url });
       db.close();
-      db = new Database(databasePath);
+      db = createDatabase(databasePath, logger);
+      expect(db.pragma('journal_mode', { simple: true })).toBe('wal');
+      expect(db.pragma('synchronous', { simple: true })).toBe(1);
       const restarted = requireValue(
         createDurablePrManagerFactory(createDeliveryLedger(db), () => f.provider)(f.config.profile),
       );
