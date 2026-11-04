@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3';
 import { vi } from 'vitest';
 import { createConfigurationStore } from '../configuration/configuration-store.js';
 import type { LaunchResolutionServices } from '../configuration/launch-resolver.js';
+import { cliToolInstallCommands } from '../images/cli-tools.js';
 import { environmentImageKey } from '../images/environment-image-key.js';
 import { insertTestProfile } from './mock-helpers.js';
 
@@ -86,12 +87,14 @@ export function createTestConfiguration(db: Database.Database) {
   ]);
   const services: LaunchResolutionServices = {
     store,
-    resolveEnvironment: vi.fn(async (environment) => {
+    resolveEnvironment: vi.fn(async (environment, _target, clis = []) => {
+      const cliInstallCommands = cliToolInstallCommands(clis, 'linux/amd64');
       const binding = {
         pinnedBase: `base@sha256:${'a'.repeat(64)}`,
         platform: 'linux/amd64' as const,
         agentToolingDigest: 'b'.repeat(64),
         toolInstallCommands: [],
+        ...(cliInstallCommands.length ? { cliInstallCommands } : {}),
       };
       return { ...binding, imageKey: environmentImageKey({ environment, ...binding }) };
     }),

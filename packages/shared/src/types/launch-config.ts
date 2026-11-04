@@ -79,6 +79,8 @@ export interface ResolvedEnvironment {
   platform: 'linux/amd64' | 'linux/arm64';
   agentToolingDigest: string;
   toolInstallCommands: string[];
+  /** Selected tool-pack software; absent on launches predating CLI support. */
+  cliInstallCommands?: string[];
   imageKey: string;
 }
 export interface ResolvedAgentAccount {

@@ -34,7 +34,7 @@ enum ConfigurationEditorArea: String, Identifiable, CaseIterable {
         case .workflow: [.run, .validation, .security, .budgets, .escalation, .delivery, .advanced]
         case .environment: [.runtime, .software, .sidecars, .capabilities, .advanced]
         case .githubAccess: [.rules, .advanced]
-        case .toolPack: [.instructions, .integrations, .capabilities, .advanced]
+        case .toolPack: [.software, .instructions, .integrations, .capabilities, .advanced]
         case .repository: [.overview, .setups, .trust, .advanced]
         case .packageFeed: [.overview, .advanced]
         }

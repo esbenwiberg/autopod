@@ -537,7 +537,9 @@ public struct ConfigurationLibraryView: View {
       return "\(rules) access \(rules == 1 ? "rule" : "rules")"
     case .toolPack:
       let capabilities = document.payload["requiredCapabilities"]?.array?.compactMap(\.string) ?? []
-      return capabilities.isEmpty ? "Agent capabilities and integrations" : capabilities.joined(separator: " · ")
+      let cliCount = document.payload["clis"]?.array?.count ?? 0
+      let details = (cliCount > 0 ? ["\(cliCount) CLI \(cliCount == 1 ? "tool" : "tools")"] : []) + capabilities
+      return details.isEmpty ? "Agent capabilities and integrations" : details.joined(separator: " · ")
     case .packageFeed:
       let details = "\(document.payload["type"]?.string ?? "") · \(document.payload["url"]?.string ?? "")"
       return [details, PackageFeedEditor.expiryWarning(document.payload["expiresAt"]?.string)].compactMap { $0 }.joined(separator: " · ")
@@ -579,7 +581,7 @@ public struct ConfigurationLibraryView: View {
     case .ai: "Models, reasoning, failover, and review behavior."
     case .workflow: "Validation, review, and daemon-owned delivery behavior."
     case .githubAccess: "Reusable repository permission scopes."
-    case .toolPack: "Named skills and capabilities available to the agent."
+    case .toolPack: "Installed CLI tools, skills, MCP servers and usage guidance for the agent."
     case .packageFeed: "Configure npm/NuGet access once and select it in repository setups."
     default: ""
     }
@@ -1557,6 +1559,17 @@ struct ConfigurationEditorSheet: View {
   }
   private var toolPackForm: some View {
     VStack(alignment: .leading, spacing: 12) {
+      if visible(.software) {
+        ConfigurationObjectListEditor(
+          title: "CLI tools", values: arrayBinding("clis"),
+          initial: { [
+            "name": .string(""), "description": .string(""), "instructions": .string(""),
+            "usage": .string("instructed"), "verifyArgs": .array([.string("--help")]),
+            "requiredCapabilities": .array([]),
+            "source": .object(["type": .string("npm"), "package": .string(""), "version": .string(""), "executable": .string("")]),
+          ] }
+        ) { ConfigurationCliToolEditor(fields: $0) }
+      }
       if visible(.instructions) {
         ConfigurationObjectListEditor(
           title: "Instructions", values: arrayBinding("instructions"),
@@ -1592,7 +1605,7 @@ struct ConfigurationEditorSheet: View {
           }
         )
       }
-      Text("Tool packs provide tools and instructions. Access is selected separately.").font(.caption).foregroundStyle(.secondary)
+      Text("Tool packs provide CLI tools, skills, MCP servers and instructions. Selected CLIs are installed automatically; access is selected separately.").font(.caption).foregroundStyle(.secondary)
     }
   }
   private func arrayBinding(_ key: String) -> Binding<[ConfigurationJSON]> { Binding(get: { payload[key]?.array ?? [] }, set: { payload[key] = .array($0) }) }
@@ -1673,7 +1686,7 @@ struct ConfigurationEditorSheet: View {
     case .workflow: ["agentMode": .string("auto"), "intent": .string("task"), "output": .string("pr"), "completion": .string("approval"), "validationPhases": .array(["setup", "build", "test", "review"].map(ConfigurationJSON.string)), "tokenBudget": .null, "reviewerTokenBudget": .null]
     case .repository: ["provider": .string("github"), "remote": .string(""), "providerRepositoryId": .null, "usualProfileId": .null, "setups": .array([.object(["id": .string("default"), "name": .string("Default"), "defaultBranch": .string("main"), "buildCommand": .null, "testCommand": .null])]), "defaultSetupId": .string("default"), "trustedSetupIds": .array([])]
     case .environment: ["template": .string("node24"), "baseImage": .null, "tools": .array([]), "prepareCommands": .array([]), "capabilities": .array([]), "sidecars": .array([])]
-    case .toolPack: ["instructions": .array([]), "skills": .array([]), "mcpServers": .array([]), "requiredCapabilities": .array([])]
+    case .toolPack: ["clis": .array([]), "instructions": .array([]), "skills": .array([]), "mcpServers": .array([]), "requiredCapabilities": .array([])]
     case .packageFeed: ["type": .string("npm"), "url": .string(""), "credential": .null, "expiresAt": .null]
     }
   }

@@ -27,6 +27,10 @@ if [ -f ${AGENT_ENV_PATH} ]; then
   . ${AGENT_ENV_PATH}
 fi
 
+# Privileged sandbox supervisors intentionally start with a system-only PATH.
+# Restore selected user-installed CLIs only in this unprivileged worker shim.
+export PATH="${CONTAINER_HOME_DIR}/.local/bin:\${PATH:-/usr/local/bin:/usr/bin:/bin}"
+
 # Persist the worker PID so daemon restart recovery can terminate the orphaned
 # streaming process before resuming the durable CLI session in this sandbox.
 # Provisioning creates this one user-owned control file. Failure means restart
