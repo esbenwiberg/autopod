@@ -35,10 +35,19 @@ parent-first deletion, the archived parent retains its child claim; immutable
 execution ancestry survives clearing the live child's parent pointer. Unknown
 or contradictory evidence blocks. Terminal/deleted work remains nonblocking.
 
-Candidates use the existing repository/base/work-hash index, capped at 101;
-more than 100 requires reconciliation before live/archive point lookups.
-Deleted history does not consume this active bound. No new ledger or migration
-is introduced.
+Verified PR requests use the existing repository/base/work-hash index, capped
+at 101; more than 100 requires reconciliation before live/archive point lookups.
+An unlinked literal placeholder cannot derive a PR-scoped hash. It additionally
+probes live child executions through the execution-receipt index, capped at 101
+distinct admitted execution/hash pairs before reconstructing bounded request
+identity. This makes duplicate detection independent of admission order. Earlier
+scoped receipts still count after executable feedback changes the task or adds
+another receipt; changed or missing ownership is not proof of unrelated work.
+Only exact hash reconstruction proving different ordinary work or a different
+contract excludes a candidate. Unknown hashes remain blocking. More than 100
+active candidate hashes requires ownership reconciliation rather than guessing.
+Finished/deleted history does not consume these active bounds. Receipts stay
+immutable; no new ledger, migration, dispatch permission or retry is introduced.
 
 ## Exact intentional reruns
 

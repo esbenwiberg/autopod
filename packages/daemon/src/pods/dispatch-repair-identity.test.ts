@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
-import { DISPATCH_CANDIDATES_SQL } from './dispatch-preflight-ledger.js';
+import {
+  DISPATCH_CANDIDATES_SQL,
+  GENERIC_REPAIR_CANDIDATES_SQL,
+} from './dispatch-preflight-ledger.js';
 import { type NewPod, createPodRepository } from './pod-repository.js';
 
 const base = 'a'.repeat(40);
@@ -57,6 +60,169 @@ function recordLegacyRepair(f: ReturnType<typeof fixture>, child: string) {
 }
 
 describe('canonical PR repair dispatch and exact rerun authorization', () => {
+  it('bounds ambiguous active hashes without imposing the reverse probe on verified PRs or finished history', () => {
+    const f = fixture();
+    try {
+      for (let i = 0; i < 101; i++) {
+        addRepair(f, `parent-${i}`, `fix-${i}`, i + 1);
+        expect(f.inspect(`fix-${i}`).status).toBe('admitted');
+      }
+      f.repo.insert(request('literal', { task: repairPlaceholder }));
+      expect(() => f.inspect('literal')).toThrow('100 active receipts');
+      expect(f.ledger.latest('literal')).toBeNull();
+      // Terminal and deleted receipts remain immutable, but cannot consume the
+      // live ambiguity bound or veto this ordinary request.
+      f.db.prepare("UPDATE pods SET status='complete' WHERE id LIKE 'fix-%'").run();
+      f.repo.delete('fix-0');
+      expect(f.inspect('literal')).toMatchObject({ status: 'admitted', conflicts: [] });
+      expect(
+        f.db.prepare('SELECT COUNT(*) AS count FROM execution_dispatch_preflights').get(),
+      ).toEqual({ count: 102 });
+    } finally {
+      f.db.close();
+    }
+  });
+  it('uses live execution-index receipt lookups for unknown placeholder scope', () => {
+    const f = fixture();
+    try {
+      const plan = f.db
+        .prepare(`EXPLAIN QUERY PLAN ${GENERIC_REPAIR_CANDIDATES_SQL}`)
+        .all('github.com/org/repo', 'main', 'task') as Array<{ detail: string }>;
+      const detail = plan.map((row) => row.detail).join('\n');
+      expect(detail).toContain('execution_preflight_execution (execution_id=?)');
+      expect(detail).not.toMatch(/SCAN d\b|task_history|MATERIALIZE/i);
+    } finally {
+      f.db.close();
+    }
+  });
+  it.each(['generic-first', 'repair-first'])(
+    'blocks unknown placeholder ownership in %s admission order',
+    (order) => {
+      const f = fixture();
+      try {
+        const generic = () => f.repo.insert(request('literal', { task: repairPlaceholder }));
+        const repair = () => addRepair(f, 'parent', 'fix', 11);
+        (order === 'generic-first' ? generic : repair)();
+        const first = order === 'generic-first' ? 'literal' : 'fix';
+        const second = order === 'generic-first' ? 'fix' : 'literal';
+        const receipt = f.inspect(first);
+        expect(receipt.status).toBe('admitted');
+        const original = f.db
+          .prepare('SELECT * FROM execution_dispatch_preflights WHERE id=?')
+          .get(receipt.id);
+        (order === 'generic-first' ? repair : generic)();
+        expect(f.inspect(second)).toMatchObject({
+          status: 'review_required',
+          conflicts: [{ podId: first, evidence: 'dispatch_receipt' }],
+        });
+        expect(
+          f.db.prepare('SELECT * FROM execution_dispatch_preflights WHERE id=?').get(receipt.id),
+        ).toEqual(original);
+      } finally {
+        f.db.close();
+      }
+    },
+  );
+  it.each(['expanded-and-readmitted', 'missing-pr', 'deleted-parent', 'changed-contract'])(
+    'retains scoped evidence after %s',
+    (change) => {
+      const f = fixture();
+      try {
+        addRepair(f, 'parent', 'fix', 11);
+        expect(f.inspect('fix').status).toBe('admitted');
+        if (change === 'expanded-and-readmitted') {
+          f.repo.update('fix', { task: '[PR FIX] Actual executable feedback' });
+          expect(f.inspect('fix').status).toBe('admitted');
+        }
+        if (change === 'missing-pr') f.repo.update('fix', { prUrl: null });
+        if (change === 'deleted-parent') f.repo.delete('parent');
+        if (change === 'changed-contract')
+          f.repo.update('fix', {
+            contract: {
+              contractVersion: 1,
+              title: 'Changed',
+              dependsOn: [],
+              scenarios: [],
+              requiredFacts: [],
+              humanReview: [],
+            },
+          });
+        f.repo.insert(request('literal', { task: repairPlaceholder }));
+        expect(f.inspect('literal')).toMatchObject({
+          status: 'review_required',
+          conflicts: [{ podId: 'fix', evidence: 'dispatch_receipt' }],
+        });
+      } finally {
+        f.db.close();
+      }
+    },
+  );
+  it.each(['complete', 'failed', 'killed', 'rejected', 'deleted'])(
+    'does not block a generic placeholder with %s scoped work',
+    (status) => {
+      const f = fixture();
+      try {
+        addRepair(f, 'parent', 'fix', 11);
+        const receipt = f.inspect('fix');
+        if (status === 'deleted') f.repo.delete('fix');
+        else f.db.prepare("UPDATE pods SET status=? WHERE id='fix'").run(status);
+        f.repo.insert(request('literal', { task: repairPlaceholder }));
+        expect(f.inspect('literal')).toMatchObject({ status: 'admitted', conflicts: [] });
+        expect(
+          f.db
+            .prepare('SELECT work_hash FROM execution_dispatch_preflights WHERE id=?')
+            .get(receipt.id),
+        ).toEqual({ work_hash: receipt.workHash });
+      } finally {
+        f.db.close();
+      }
+    },
+  );
+  it.each(['ordinary', 'different-contract', 'different-base', 'different-repository'])(
+    'excludes positively distinct %s work from the reverse probe',
+    (kind) => {
+      const f = fixture();
+      try {
+        addRepair(f, 'parent', 'fix', 11);
+        if (kind === 'ordinary') f.repo.update('fix', { task: 'Unrelated executable work' });
+        if (kind === 'different-contract')
+          f.repo.update('fix', {
+            contract: {
+              contractVersion: 1,
+              title: 'Distinct contract',
+              dependsOn: [],
+              scenarios: [],
+              requiredFacts: [],
+              humanReview: [],
+            },
+          });
+        expect(f.inspect('fix').status).toBe('admitted');
+        if (kind === 'different-repository')
+          f.db
+            .prepare(
+              "UPDATE profiles SET repo_url='https://github.com/org/other' WHERE name='test-profile'",
+            )
+            .run();
+        f.repo.insert(
+          request('literal', {
+            task: repairPlaceholder,
+            ...(kind === 'different-base' ? { baseBranch: 'release' } : {}),
+          }),
+        );
+        expect(
+          f.ledger.inspect(
+            'literal',
+            1,
+            kind === 'different-repository' ? 'https://github.com/org/other' : repository,
+            kind === 'different-base' ? 'release' : 'main',
+            base,
+          ),
+        ).toMatchObject({ status: 'admitted', conflicts: [] });
+      } finally {
+        f.db.close();
+      }
+    },
+  );
   it('rejects placeholder reruns atomically without an executable handoff', () => {
     const f = fixture();
     try {

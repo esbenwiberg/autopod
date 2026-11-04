@@ -3,12 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { EffectiveLaunchConfig, Pod, ProviderFailoverTarget } from '@autopod/shared';
 import { PROVIDER_CATALOG, PROVIDER_FAILOVER_HANDOFF_PATH } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveLaunchAgentRoute } from '../configuration/agent-route-resolution.js';
 import { resolveLaunch } from '../configuration/launch-resolver.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
 import { loadOrCreateKey } from '../crypto/credentials-cipher.js';
+import { createDatabase } from '../db/connection.js';
 import { createProfileStore } from '../profiles/index.js';
 import { createProviderAccountStore } from '../provider-accounts/index.js';
 import type { MaxCredentialLineage, ProviderEnvResult } from '../providers/types.js';
@@ -38,7 +39,7 @@ function fixture(onDisk = false) {
     filename = join(directory, 'state.db');
     writeFileSync(filename, db.serialize());
     db.close();
-    db = new Database(filename);
+    db = createDatabase(filename, pino({ level: 'silent' }));
   }
   db.pragma('foreign_keys = ON');
   cleanups.push(() => {
@@ -107,8 +108,7 @@ function fixture(onDisk = false) {
     reopen() {
       if (!filename) throw new Error('Expected private file fixture');
       db.close();
-      db = new Database(filename);
-      db.pragma('foreign_keys = ON');
+      db = createDatabase(filename, pino({ level: 'silent' }));
       expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
       expect(db.pragma('foreign_key_check')).toEqual([]);
       return {

@@ -2,8 +2,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Pod, PodOptions } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import {
   createMockProfileStore,
   createTestDb,
@@ -35,8 +36,7 @@ function fixture(target: Pod['executionTarget'] = 'local', scheduled = false, li
   } finally {
     seed.close();
   }
-  let db = new Database(file);
-  db.pragma('foreign_keys = ON');
+  let db = createDatabase(file, pino({ level: 'silent' }));
   const repo = createPodRepository(db);
   if (scheduled) {
     db.prepare(
@@ -165,8 +165,7 @@ function fixture(target: Pod['executionTarget'] = 'local', scheduled = false, li
     run: (pod = repo.getOrThrow('worker')) => module.applyCompletionDecision(pod, source, validate),
     reopen() {
       db.close();
-      db = new Database(file);
-      db.pragma('foreign_keys = ON');
+      db = createDatabase(file, pino({ level: 'silent' }));
       expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
       expect(db.pragma('foreign_key_check')).toEqual([]);
       return createPodRepository(db).getOrThrow('worker');

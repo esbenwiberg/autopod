@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProviderFailureClassification } from '@autopod/shared';
 import { PROVIDER_FAILOVER_HANDOFF_PATH } from '@autopod/shared';
-import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import { createProfileStore } from '../profiles/index.js';
 import { createProviderAccountStore } from '../provider-accounts/index.js';
 import {
@@ -43,8 +43,7 @@ function fixture(disk = false) {
   if (disk) {
     writeFileSync(filename, db.serialize());
     db.close();
-    db = new Database(filename);
-    db.pragma('foreign_keys=ON');
+    db = createDatabase(filename, pino({ level: 'silent' }));
   }
   cleanups.push(() => {
     db.close();
@@ -175,8 +174,7 @@ function fixture(disk = false) {
     pod: () => podRepo.getOrThrow('continuation'),
     reopen() {
       db.close();
-      db = new Database(filename);
-      db.pragma('foreign_keys=ON');
+      db = createDatabase(filename, pino({ level: 'silent' }));
       return {
         pods: createPodRepository(db),
         repo: createProviderAttemptRepository(db),

@@ -8,7 +8,7 @@ import {
 import type Database from 'better-sqlite3';
 import { canonicalMergePrIdentity } from '../worktrees/merge-pr-identity.js';
 import { assertMergeRepository } from '../worktrees/merge-source-identity.js';
-import { selectSinglePrOwner } from './workspace-branch-source.js';
+import { selectSinglePrOwner } from './single-pr-owner.js';
 
 export interface DispatchPreflightLedger {
   registerRequest(podId: string, repository?: string | null): void;
@@ -151,6 +151,20 @@ export const DISPATCH_CANDIDATES_SQL = `SELECT d.pod_id AS podId,d.execution_id 
         JOIN pods p ON p.id=e.pod_id
         WHERE d.repository = ? AND d.base_branch = ? AND d.work_hash IN (?,?) AND d.task_id <> ? AND d.status = 'admitted'
         AND p.status NOT IN ('complete','failed','killed','rejected') GROUP BY d.execution_id ORDER BY MAX(d.checked_at) DESC LIMIT 101`;
+
+// An unlinked placeholder has no PR with which to derive a scoped hash. Start
+// from live children and point-read their receipts, not the archived history.
+// Keep every admitted hash: a later executable-feedback receipt must not hide
+// the earlier scoped admission for the same still-active execution.
+export const GENERIC_REPAIR_CANDIDATES_SQL = `SELECT d.pod_id AS podId,d.execution_id AS executionId,
+        d.task_id AS taskId,d.work_hash AS workHash,p.status
+      FROM pods p CROSS JOIN task_executions e ON e.pod_id=p.id
+      CROSS JOIN execution_dispatch_preflights d INDEXED BY execution_preflight_execution
+        ON d.execution_id=e.execution_id AND d.pod_id=p.id
+      WHERE e.parent_pod_id IS NOT NULL AND d.repository=? AND d.base_branch=?
+      AND d.task_id<>? AND d.status='admitted'
+      AND p.status NOT IN ('complete','failed','killed','rejected')
+      GROUP BY d.execution_id,d.work_hash ORDER BY MAX(d.checked_at) DESC LIMIT 101`;
 
 export function createDispatchPreflightLedger(db: Database.Database): DispatchPreflightLedger {
   const get = (id: string): RequestRow => {
@@ -492,6 +506,55 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
             status: prior.status ?? 'deleted',
             evidence: 'dispatch_receipt',
           });
+        }
+        if (!repairPr && pod.task === '[PR FIX] Awaiting queued feedback.') {
+          // Every verified scoped admission has immutable execution parentage.
+          // Its opaque hash cannot be found by the generic hash index alone.
+          const repairs = db
+            .prepare(GENERIC_REPAIR_CANDIDATES_SQL)
+            .all(repository, baseBranch, pod.taskId) as Array<{
+            podId: string;
+            executionId: string;
+            taskId: string;
+            workHash: string;
+            status: string;
+          }>;
+          if (repairs.length > 100)
+            throw new AutopodError(
+              'Unknown repair scope exceeds 100 active receipts; reconcile ownership',
+              'DISPATCH_SCOPE_TOO_LARGE',
+              409,
+            );
+          for (const prior of repairs) {
+            if (conflicts.has(prior.executionId)) continue;
+            const current = get(prior.podId);
+            if (current.executionId === prior.executionId && current.taskId === prior.taskId) {
+              // Positive hash equality proves an ordinary unrelated receipt;
+              // changed task text alone does not prove old repair work finished.
+              const ordinary = hash(current);
+              if (prior.workHash === ordinary && ordinary !== legacyWorkHash) continue;
+              try {
+                const repairWork = hash({
+                  task: '[PR FIX] Awaiting queued feedback.',
+                  contract: current.contract,
+                });
+                if (
+                  current.prUrl &&
+                  repairWork !== legacyWorkHash &&
+                  scopedRepairHash(repairWork, repairIdentity(current.prUrl)) === prior.workHash
+                )
+                  continue;
+              } catch {
+                /* Unreadable or contradictory scope remains blocking. */
+              }
+            }
+            conflicts.set(prior.executionId, {
+              podId: prior.podId,
+              executionId: prior.executionId,
+              status: prior.status,
+              evidence: 'dispatch_receipt',
+            });
+          }
         }
         // Only active requests can veto a launch. Finished/deleted history remains
         // immutable evidence, not a duplicate-work veto. Execution and budget fences

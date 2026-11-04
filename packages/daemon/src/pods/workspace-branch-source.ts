@@ -1,14 +1,9 @@
 import type { Pod } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
+import { selectSinglePrOwner } from './single-pr-owner.js';
 import type { WorkspaceBranchSourceCaptured } from './workspace-contracts.js';
 
-/** Shared by fix admission and dispatch; callers supply creation-ordered owners. */
-export function selectSinglePrOwner<T extends { prUrl?: string | null }>(
-  parent: T,
-  owners: readonly T[],
-): T | undefined {
-  return (parent.prUrl ? owners.find((p) => p.prUrl === parent.prUrl) : undefined) ?? owners[0];
-}
+export { selectSinglePrOwner } from './single-pr-owner.js';
 
 export function createWorkspaceBranchSource(captured: WorkspaceBranchSourceCaptured) {
   const { podRepo, logger } = captured;

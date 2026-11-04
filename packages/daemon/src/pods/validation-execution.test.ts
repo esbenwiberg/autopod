@@ -5,8 +5,9 @@ import { Readable } from 'node:stream';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { AutopodError } from '@autopod/shared';
 import type { TaskRetryIdentity, ValidationResult } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import type {
   ValidationEngine,
   ValidationEngineConfig,
@@ -83,8 +84,7 @@ function fixture(sandbox = false) {
   } finally {
     seed.close();
   }
-  let db = new Database(file);
-  db.pragma('foreign_keys = ON');
+  let db = createDatabase(file, pino({ level: 'silent' }));
   const repo = createPodRepository(db);
   repo.insert({
     id: 'worker',
@@ -269,8 +269,7 @@ function fixture(sandbox = false) {
     },
     reopen() {
       db.close();
-      db = new Database(file);
-      db.pragma('foreign_keys = ON');
+      db = createDatabase(file, pino({ level: 'silent' }));
       expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
       expect(db.pragma('foreign_key_check')).toEqual([]);
       const reopened = createPodRepository(db);
