@@ -547,7 +547,11 @@ export class AutopodClient {
     recoveryId: string,
     input: import('@autopod/shared').RetainedContinuationCheckRequest,
   ): Promise<unknown> {
-    return this.request('POST', `/pods/${id}/retained-continuation/${recoveryId}/check`, input);
+    return this.request(
+      'POST',
+      `/pods/${id}/retained-continuation/${recoveryId}/${input.testBudget ? 'check-budgeted' : 'check'}`,
+      input,
+    );
   }
   async authorizeValidationRecoveryBudget(
     id: string,
@@ -594,6 +598,21 @@ export class AutopodClient {
 
   async triggerValidation(id: string): Promise<void> {
     await this.request<void>('POST', `/pods/${id}/validate`);
+  }
+
+  async publishSessionPr(id: string, reason: string): Promise<void> {
+    // Never fall back to /approve: old daemons must refuse rather than merge.
+    try {
+      await this.request<void>('POST', `/pods/${encodeURIComponent(id)}/publish-pr`, { reason });
+    } catch (error) {
+      if (error instanceof AutopodError && error.statusCode === 404)
+        throw new AutopodError(
+          'PR-only publication is unavailable for this pod or daemon. Verify the pod and deployed support; no merge was requested.',
+          'PR_PUBLICATION_UNAVAILABLE',
+          404,
+        );
+      throw error;
+    }
   }
 
   async approveSession(id: string, opts?: { squash?: boolean; reason?: string }): Promise<void> {

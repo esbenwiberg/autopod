@@ -1,4 +1,5 @@
 import { rm } from 'node:fs/promises';
+import { AutopodError } from '@autopod/shared';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -25,7 +26,8 @@ describe('human-only retained checkpoint selection', () => {
       getCheckpointRecoveries: f.recovery.list,
       reconcileCheckpointOutcome: f.recovery.reconcileOutcome,
       continueRetained: f.recovery.continueRetained,
-      checkRetainedCandidate: f.recovery.checkCandidate,
+      checkRetainedCandidate: (...args: Parameters<typeof f.recovery.checkCandidate>) =>
+        f.recovery.checkCandidate(...args),
       previewRetainedExecution: f.recovery.previewExecution,
     });
     await app.ready();
@@ -90,6 +92,114 @@ describe('human-only retained checkpoint selection', () => {
     expect(check.json().operation.selected.head).toBe(f.prepared.head);
     expect(f.deps.enqueue).toHaveBeenCalledTimes(1);
   });
+  it('transports paired late execution selection to the human controller and refuses incomplete or caller-authored evidence', async () => {
+    const input = {
+      expectedGeneration: f.input.expectedGeneration,
+      expectedResultHash: f.input.expectedResultHash,
+      candidateHead: f.prepared.head,
+      reason: 'Select this exact candidate with a qualified execution preview',
+    };
+    const url = `/pods/${f.podId}/retained-continuation/${f.input.id}/check`;
+    const controller = vi
+      .spyOn(f.recovery, 'checkCandidate')
+      .mockRejectedValue(
+        new AutopodError('Transport probe; no source selection performed', 'TRANSPORT_PROBE', 409),
+      );
+    for (const extra of [
+      { executionProfileId: 'qualified' },
+      { expectedExecutionDigest: 'a'.repeat(64) },
+      { executionProfileId: 'qualified', expectedExecutionDigest: 'invalid' },
+      { execution: {} },
+      { force: true },
+      { actor: f.actor },
+    ])
+      expect(
+        (await app.inject({ method: 'POST', url, headers, payload: { ...input, ...extra } }))
+          .statusCode,
+      ).toBe(400);
+    expect(controller).not.toHaveBeenCalled();
+    const selected = {
+      ...input,
+      executionProfileId: 'qualified',
+      expectedExecutionDigest: 'a'.repeat(64),
+    };
+    expect((await app.inject({ method: 'POST', url, headers, payload: selected })).statusCode).toBe(
+      409,
+    );
+    expect(controller).toHaveBeenCalledWith(f.podId, f.input.id, selected, {
+      type: 'human',
+      userId: expect.any(String),
+    });
+    expect(f.cm.getStatus).not.toHaveBeenCalled();
+  });
+  it('requires a separate human budgeted transport and rejects ignored or caller-authored budget proof', async () => {
+    const plain = `/pods/${f.podId}/retained-continuation/${f.input.id}/check`;
+    const url = `${plain}-budgeted`;
+    const input = {
+      expectedGeneration: f.input.expectedGeneration,
+      expectedResultHash: f.input.expectedResultHash,
+      candidateHead: f.prepared.head,
+      reason: 'Select exact source for one fresh independent validation',
+    };
+    const budget = {
+      seconds: 1800,
+      reason: 'Measured full suite needs a finite larger outer timeout',
+    };
+    const controller = vi
+      .spyOn(f.recovery, 'checkCandidate')
+      .mockRejectedValue(new AutopodError('Probe only', 'PROBE', 409));
+    for (const authorization of [undefined, 'Bearer pod-token'])
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url,
+            payload: { ...input, testBudget: budget },
+            headers: authorization ? { authorization } : {},
+          })
+        ).statusCode,
+      ).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: plain,
+          headers,
+          payload: { ...input, testBudget: budget },
+        })
+      ).statusCode,
+    ).toBe(400);
+    for (const extra of [
+      {},
+      { testBudget: { ...budget, seconds: 3601 } },
+      { testBudget: { ...budget, seconds: 1.5 } },
+      { testBudget: { ...budget, reason: 'short' } },
+      { testBudget: { ...budget, frozenTimeoutSeconds: 900 } },
+      { testBudget: budget, force: true },
+    ])
+      expect(
+        (await app.inject({ method: 'POST', url, headers, payload: { ...input, ...extra } }))
+          .statusCode,
+      ).toBe(400);
+    expect(controller).not.toHaveBeenCalled();
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url,
+          headers,
+          payload: { ...input, testBudget: budget },
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(controller).toHaveBeenCalledWith(
+      f.podId,
+      f.input.id,
+      { ...input, testBudget: budget },
+      { type: 'human', userId: expect.any(String) },
+    );
+  });
+
   it('inspects without any provider observation, credential rotation or queue dispatch', async () => {
     const result = await app.inject({ url: endpoint(), headers });
     expect(result.statusCode).toBe(200);

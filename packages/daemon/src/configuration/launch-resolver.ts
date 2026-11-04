@@ -1,5 +1,6 @@
 import {
   type AgentRoute,
+  type CliTool,
   type ConfigurationEntity,
   type ConfigurationKind,
   type ConfigurationRevision,
@@ -28,6 +29,7 @@ import { deriveLaunch } from './derive-launch.js';
 import { resolveExecution } from './resolve-execution.js';
 
 export { canonicalConfiguration, configurationDigest } from './configuration-digest.js';
+import { cliToolInstallCommands, selectCliTools } from '../images/cli-tools.js';
 import { environmentImageKey } from '../images/environment-image-key.js';
 import { configurationDigest } from './configuration-digest.js';
 export interface LaunchResolutionServices {
@@ -37,6 +39,7 @@ export interface LaunchResolutionServices {
   resolveEnvironment(
     environment: EnvironmentPreset,
     target: EffectiveLaunchConfig['execution']['target'],
+    clis?: CliTool[],
   ): Promise<ResolvedEnvironment>;
   // All services are read-only. Unavailable discovery/preflight rejects, never grants a fallback.
   githubRepositories(
@@ -337,6 +340,8 @@ async function resolve(
   }
   if (request.intent) provenance.intent = { source: 'override' };
   else provenance.intent = provenance['workflow.intent'] ?? { source: 'default' };
+  const effectiveToolPacks = overrides?.toolPacks ?? packs.map((p) => p.payload);
+  const clis = selectCliTools(effectiveToolPacks, effectiveEnvironment);
   const config: EffectiveLaunchConfig = {
     schemaVersion: 1,
     repository:
@@ -349,6 +354,7 @@ async function resolve(
     resolvedEnvironment: await services.resolveEnvironment(
       effectiveEnvironment,
       effectiveExecution.target,
+      clis,
     ),
     ai: effectiveAi,
     agentAccounts: {},
@@ -368,7 +374,7 @@ async function resolve(
       capabilities: await services.executionCapabilities(effectiveExecution.target),
     }),
     pim: overrides?.pim ?? profile.payload.pim,
-    toolPacks: overrides?.toolPacks ?? packs.map((p) => p.payload),
+    toolPacks: effectiveToolPacks,
     toolContents: {},
     githubAccess: [],
     references: [],
@@ -388,15 +394,16 @@ async function resolve(
       'Resolved software image identity is inconsistent',
       'ENVIRONMENT_IDENTITY_MISMATCH',
     );
+  if (
+    configurationDigest(config.resolvedEnvironment.cliInstallCommands ?? []) !==
+    configurationDigest(cliToolInstallCommands(clis, config.resolvedEnvironment.platform))
+  )
+    configurationError(
+      'Resolved image is missing the selected CLI installation',
+      'CLI_IMAGE_MISMATCH',
+    );
   const toolNames = new Map<string, { digest: string; source: number }>();
   for (const [index, pack] of config.toolPacks.entries()) {
-    for (const capability of pack.requiredCapabilities) {
-      if (!config.environment.capabilities.includes(capability))
-        configurationError(
-          `Tool pack requires environment capability ${capability}`,
-          'TOOL_CAPABILITY_MISSING',
-        );
-    }
     for (const [kind, definitions] of [
       ['skill', pack.skills],
       ['mcp', pack.mcpServers],

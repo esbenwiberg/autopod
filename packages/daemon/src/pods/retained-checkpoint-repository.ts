@@ -14,6 +14,28 @@ import type { prepareRetainedCheckpointWorkspace } from '../worktrees/retained-c
 
 export const checkpointHash = (value: unknown) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
+/** Versioned provider namespace, never a new logical pod/task/request identity. */
+export function checkpointResourceIdentity(podId: string, recoveryId: string, generation: number) {
+  return `${podId}-retained-${checkpointHash(['docker-v1', recoveryId, generation]).slice(0, 24)}`;
+}
+
+/** Original and replacement bridges remain held until an explicit release protocol exists. */
+export function retainedCheckpointNetworkIdentities(db: Database.Database): Set<string> {
+  const rows = db
+    .prepare(`SELECT r.id,r.pod_id AS podId,e.evidence FROM retained_checkpoint_recoveries r
+    LEFT JOIN retained_checkpoint_recovery_events e ON e.recovery_id=r.id AND e.kind='activated'`)
+    .all() as { id: string; podId: string; evidence: string | null }[];
+  const identities = new Set<string>();
+  for (const row of rows) {
+    identities.add(row.podId);
+    if (row.evidence)
+      identities.add(
+        checkpointResourceIdentity(row.podId, row.id, JSON.parse(row.evidence).generation),
+      );
+  }
+  return identities;
+}
+
 export function checkpointError(message: string, code = 'CHECKPOINT_RECOVERY_BLOCKED'): never {
   throw new AutopodError(message, code, 409);
 }
@@ -69,6 +91,8 @@ export interface CheckpointRecoveryRecord {
   selected: {
     head: string;
     tree: string;
+    execution?: RetainedExecutionSelection;
+    testBudget?: { seconds: number; reason: string; frozenTimeoutSeconds: number };
     actor: OperatorActor;
     reason: string;
     requestHash: string;
@@ -261,10 +285,67 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
   return {
     get,
     latest,
+    /** Only the owned, once-entered checks invocation can consume this allowance.
+     * Existing started retry admissions are its durable one-shot use receipt.
+     */
+    testBudget(pod: Pod, frozenTimeoutMs: number | undefined) {
+      const record = latest(pod.id);
+      const budget = record?.selected?.testBudget;
+      if (!record || !budget) return null;
+      // A completed allowance must not contaminate later isolated approval rewrites.
+      // The selected generation still fails closed on any attempted replay below.
+      if (
+        record.checked &&
+        record.activated &&
+        pod.lifecycleGeneration > record.activated.generation
+      )
+        return null;
+      assertAvailable(pod.id);
+      const task = db
+        .prepare('SELECT task_id AS id FROM task_executions WHERE pod_id=?')
+        .get(pod.id) as { id: string } | undefined;
+      if (
+        task?.id !== record.taskId ||
+        scope(db).getStore() !== record.id ||
+        !record.binding.continuation ||
+        !record.checking ||
+        record.checked ||
+        record.blocked ||
+        record.generation + 1 !== pod.lifecycleGeneration ||
+        record.activated?.generation !== pod.lifecycleGeneration ||
+        record.checking.generation !== pod.lifecycleGeneration ||
+        record.prepared?.worktree !== pod.worktreePath ||
+        pod.executionTarget !== 'local' ||
+        pod.status !== 'validating' ||
+        !pod.containerId ||
+        pod.containerId === record.containerId ||
+        !Number.isInteger(budget.seconds) ||
+        !Number.isInteger(budget.frozenTimeoutSeconds) ||
+        budget.frozenTimeoutSeconds < 1 ||
+        budget.seconds > 3600 ||
+        budget.seconds <= budget.frozenTimeoutSeconds ||
+        budget.frozenTimeoutSeconds * 1000 !== frozenTimeoutMs ||
+        budget.reason.trim().length < 10
+      )
+        checkpointError(
+          'Retained test allowance no longer matches its owned source/generation/frozen timeout',
+        );
+      const used = db
+        .prepare(`SELECT 1 FROM task_retry_attempts
+        WHERE task_id=? AND pod_id=? AND generation=? AND stage='validation' AND started_at IS NOT NULL LIMIT 1`)
+        .get(record.taskId, pod.id, pod.lifecycleGeneration);
+      return { ...budget, recoveryId: record.id, used: Boolean(used) };
+    },
+    providerIdentity(podId: string, generation: number): string {
+      const record = latest(podId);
+      return record?.binding.continuation && record.activated?.generation === generation
+        ? checkpointResourceIdentity(podId, record.id, generation)
+        : podId;
+    },
     append,
     activateExecution(id: string) {
       const record = get(id) ?? checkpointError('Recovery unavailable');
-      const execution = record.binding.continuation?.execution;
+      const execution = record.selected?.execution ?? record.binding.continuation?.execution;
       if (
         !execution ||
         !record.prepared ||

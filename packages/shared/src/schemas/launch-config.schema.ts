@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { cliToolSchema } from './cli-tool.schema.js';
 import { launchWorkSchema } from './launch-work.schema.js';
 import { partialWithoutDefaults } from './partial-without-defaults.js';
 import { reasoningEffortSchema, updateProfileSchema } from './profile.schema.js';
@@ -338,6 +339,8 @@ export const githubAccessPresetSchema = z
 
 export const toolPackSchema = z
   .object({
+    // Optional, not defaulted: existing frozen tool packs retain their exact JSON identity.
+    clis: z.array(cliToolSchema).max(32).optional(),
     instructions: z.array(z.object({ heading: name, content: text }).strict()).default([]),
     skills: z
       .array(

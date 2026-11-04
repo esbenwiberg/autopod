@@ -82,11 +82,18 @@ export function createLaunchSnapshotRepository(
       .all(podId) as Array<{ digest: string; parent_digest: string; payload: string }>;
     const continuations = (
       db
-        .prepare(`SELECT r.binding FROM retained_checkpoint_recoveries r
+        .prepare(`SELECT r.binding,s.evidence AS selection FROM retained_checkpoint_recoveries r
+      LEFT JOIN retained_continuation_sources s ON s.recovery_id=r.id
       WHERE r.pod_id=? AND EXISTS(SELECT 1 FROM retained_checkpoint_recovery_events e WHERE e.recovery_id=r.id AND e.kind='activated')
-      AND json_extract(r.binding,'$.continuation.execution') IS NOT NULL`)
-        .all(podId) as { binding: string }[]
-    ).map((row) => JSON.parse(row.binding).continuation.execution as RetainedExecutionSelection);
+      AND (json_extract(r.binding,'$.continuation.execution') IS NOT NULL OR json_extract(s.evidence,'$.execution') IS NOT NULL)`)
+        .all(podId) as { binding: string; selection: string | null }[]
+    ).map((row) => {
+      const prepared = JSON.parse(row.binding).continuation?.execution;
+      const selected = row.selection ? JSON.parse(row.selection).execution : undefined;
+      if (prepared && selected)
+        configurationError('Continuation execution was selected twice', 'SNAPSHOT_CORRUPT', 500);
+      return (selected ?? prepared) as RetainedExecutionSelection;
+    });
     let current = result;
     const visited = new Set([current.digest]);
     // Worker promotion is a bounded continuation of the original admitted template.

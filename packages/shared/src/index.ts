@@ -703,6 +703,7 @@ export * from './types/launch-config.js';
 export * from './types/github-access.js';
 export * from './schemas/github-operation.schema.js';
 export * from './schemas/launch-config.schema.js';
+export * from './schemas/cli-tool.schema.js';
 export * from './schemas/service-access.schema.js';
 export * from './types/goal.js';
 export * from './types/pim.js';

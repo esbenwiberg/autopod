@@ -58,28 +58,54 @@ export function checkpointRecoveryRoutes(
     reply.header('Cache-Control', 'no-store');
     return reply.code(202).send({ operation });
   });
-  app.post('/pods/:podId/retained-continuation/:recoveryId/check', async (request, reply) => {
-    if (!request.user?.oid)
-      throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
-    const { podId, recoveryId } = params
-      .extend({ recoveryId: z.string().regex(/^[a-zA-Z0-9-]{1,64}$/) })
-      .parse(request.params);
-    const input = z
-      .object({
-        expectedGeneration: z.number().int().min(1),
-        expectedResultHash: z.string().regex(/^[a-f0-9]{64}$/),
-        candidateHead: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
-        reason: z.string().trim().min(10).max(4000),
-      })
-      .strict()
-      .parse(request.body);
-    const operation = await manager.checkRetainedCandidate(podId, recoveryId, input, {
-      type: 'human',
-      userId: request.user.oid,
-    });
-    reply.header('Cache-Control', 'no-store');
-    return reply.code(202).send({ operation });
-  });
+  // Separate transport: an old daemon must 404, never ignore a requested allowance.
+  for (const budgeted of [false, true]) {
+    app.post(
+      `/pods/:podId/retained-continuation/:recoveryId/${budgeted ? 'check-budgeted' : 'check'}`,
+      async (request, reply) => {
+        if (!request.user?.oid)
+          throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
+        const { podId, recoveryId } = params
+          .extend({ recoveryId: z.string().regex(/^[a-zA-Z0-9-]{1,64}$/) })
+          .parse(request.params);
+        const input = z
+          .object({
+            expectedGeneration: z.number().int().min(1),
+            expectedResultHash: z.string().regex(/^[a-f0-9]{64}$/),
+            candidateHead: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
+            testBudget: z
+              .object({
+                seconds: z.number().int().min(1).max(3600),
+                reason: z.string().trim().min(10).max(4000),
+              })
+              .strict()
+              .optional(),
+            executionProfileId: z.string().trim().min(1).max(128).optional(),
+            expectedExecutionDigest: z
+              .string()
+              .regex(/^[a-f0-9]{64}$/)
+              .optional(),
+            reason: z.string().trim().min(10).max(4000),
+          })
+          .strict()
+          .refine(
+            (value) => (budgeted ? Boolean(value.testBudget) : value.testBudget === undefined),
+            'A test allowance is required on check-budgeted and refused on ordinary check',
+          )
+          .refine(
+            (value) => Boolean(value.executionProfileId) === Boolean(value.expectedExecutionDigest),
+            'Execution profile and digest must be paired',
+          )
+          .parse(request.body);
+        const operation = await manager.checkRetainedCandidate(podId, recoveryId, input, {
+          type: 'human',
+          userId: request.user.oid,
+        });
+        reply.header('Cache-Control', 'no-store');
+        return reply.code(202).send({ operation });
+      },
+    );
+  }
   app.get('/pods/:podId/checkpoint-recovery', async (request, reply) => {
     if (!request.user?.oid)
       throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);

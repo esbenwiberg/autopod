@@ -7,6 +7,7 @@ export interface EnvironmentBuildInputs {
   platform: 'linux/amd64' | 'linux/arm64';
   agentToolingDigest: string;
   toolInstallCommands: string[];
+  cliInstallCommands?: string[];
 }
 export function environmentImageKey(input: EnvironmentBuildInputs): string {
   const environment = environmentPresetSchema.parse(input.environment);
@@ -25,5 +26,6 @@ export function environmentImageKey(input: EnvironmentBuildInputs): string {
     prepareCommands: environment.prepareCommands,
     capabilities: [...environment.capabilities].sort(),
     toolInstallCommands: input.toolInstallCommands,
+    ...(input.cliInstallCommands?.length ? { cliInstallCommands: input.cliInstallCommands } : {}),
   });
 }

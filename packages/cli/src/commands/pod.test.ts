@@ -1077,6 +1077,70 @@ it.each(['Branch preservation', 'Approval delivery', 'Source reconciliation'])(
   },
 );
 
+it.each([200, 404])(
+  'PR-only publication uses only its dedicated endpoint, status=%s',
+  async (status) => {
+    const requests: string[] = [];
+    const pod = await createMockClient().getSession('abcd1234');
+    const server = createServer((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      if (req.method === 'GET' && req.url === '/pods/abcd1234') {
+        res.end(JSON.stringify(pod));
+        return;
+      }
+      requests.push(req.url ?? '');
+      res.statusCode = status;
+      res.end(
+        JSON.stringify(
+          status === 200
+            ? { ok: true }
+            : { error: 'NOT_FOUND', message: 'Publication-only endpoint unavailable' },
+        ),
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('No fixture address');
+    const client = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'local-fixture-only',
+    });
+    const program = new Command().exitOverride();
+    registerPodCommands(program, () => client);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const request = program.parseAsync([
+        'node',
+        'ap',
+        'approve',
+        'abcd1234',
+        '--publish-only',
+        '--reason',
+        'Publish checked source for PR review only',
+      ]);
+      if (status === 200) await request;
+      else await expect(request).rejects.toThrow('unavailable');
+      expect(requests).toEqual(['/pods/abcd1234/publish-pr']);
+      expect(log.mock.calls.flat().join(' ')).not.toContain('Pod abcd1234 approved.');
+    } finally {
+      log.mockRestore();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);
+it.each([{ flags: ['--all-validated'] }, { flags: ['--squash'] }, { flags: [] }])(
+  'rejects ambiguous or unreasoned PR-only approval: $flags',
+  async ({ flags }) => {
+    const getClient = vi.fn(createMockClient);
+    const program = new Command().exitOverride();
+    registerPodCommands(program, getClient);
+    const args = ['node', 'ap', 'approve', 'abcd1234', '--publish-only', ...flags];
+    if (flags.length) args.push('--reason', 'Approve only this source publication');
+    await expect(program.parseAsync(args)).rejects.toThrow('--publish-only requires');
+    expect(getClient).not.toHaveBeenCalled();
+  },
+);
+
 it('shows the unavailable-review reason through real status HTTP and preserves findings in JSON', async () => {
   const reason =
     'Review failed: Foundry tool review unavailable on the selected provider binding; reconcile it before retry.';

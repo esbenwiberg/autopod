@@ -80,6 +80,8 @@ export interface ValidationEngineConfig {
   buildTimeout?: number;
   /** Test phase timeout in ms. Default 600_000 (10 min). */
   testTimeout?: number;
+  /** Trusted source-bound outer-test allowance only; never used by fact/browser/review phases. */
+  outerTestTimeout?: number;
   /** Optional lint command (e.g. 'biome lint .'). Phase is skipped when absent. */
   lintCommand?: string | null;
   /** Lint phase timeout in ms. Default 120_000 (2 min). */

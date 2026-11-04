@@ -353,6 +353,21 @@ network policy, validation setup/lint/SAST/build/test commands, advisory
 browser QA defaults, agent completion prompts, MCP servers, skills, sidecars,
 private registries, and action policy are all profile fields.
 
+## Tool-pack CLI software
+
+Composable tool packs may declare optional `clis` (shared `cli-tool.schema.ts`).
+`images/cli-tools.ts` selects/deduplicates definitions, checks capabilities and reserved
+names, generates public pinned installation/probe commands, and renders agent guidance.
+The launch resolver passes selected CLIs through `ImageBuilder.resolveEnvironment()`;
+`resolvedEnvironment.cliInstallCommands` participates in software-image identity and
+runs after foundation preparation as the worker user. Keep usage text out of image
+identity while retaining it in the frozen launch digest. Do not default new fields
+into historical tool-pack snapshots or replace existing environment/runtime binaries.
+
+See `docs/tool-pack-clis.md` at the repository root for supported public sources,
+private-source limitations and the opt-in Docker fixture. Hindsight's nested model
+execution is not accepted simply because its executable can be installed.
+
 ## Actions System (`src/actions/`)
 
 Agents call `execute_action` via the escalation MCP server. The daemon:

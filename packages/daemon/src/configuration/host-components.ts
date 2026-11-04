@@ -204,8 +204,8 @@ export function createHostConfigurationComponents(
     }),
     github,
     images: {
-      resolveEnvironment: (environment, target) =>
-        requireImages().resolveEnvironment(environment, target),
+      resolveEnvironment: (environment, target, clis) =>
+        requireImages().resolveEnvironment(environment, target, clis),
       buildEnvironmentImage: (input, buildOptions) =>
         requireImages().buildEnvironmentImage(input, buildOptions),
     },

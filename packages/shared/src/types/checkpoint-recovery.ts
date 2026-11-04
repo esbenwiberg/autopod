@@ -19,8 +19,13 @@ export interface RetainedContinuationRequest extends CheckpointRecoveryRequest {
 }
 
 export interface RetainedContinuationCheckRequest {
+  /** One source-bound outer-test allowance; never retry permission or a workflow edit. */
+  testBudget?: { seconds: number; reason: string };
   expectedGeneration: number;
   expectedResultHash: string;
   candidateHead: string;
+  /** One explicit software/resource selection, only if preparation did not select it. */
+  executionProfileId?: string;
+  expectedExecutionDigest?: string;
   reason: string;
 }
