@@ -10,6 +10,7 @@ import type { CompletionOwnersCaptured } from './completion-ports.js';
 import { createCompletionSource } from './completion-source.js';
 import { REWORK_IN_PROGRESS_PREFIX } from './continuation-policy.js';
 import { isTerminalState } from './state-machine.js';
+import { assertValidationMutationSettled } from './validation-recovery-policy.js';
 import { getPodValidationSuite, isPodValidationDisabled } from './validation-workflow-policy.js';
 
 export function createCompletionOwners(captured: CompletionOwnersCaptured) {
@@ -160,5 +161,24 @@ export function createCompletionWorkflow(
     if (!preparedSource) return;
     await applyCompletionDecision(pod, preparedSource, (id) => this.triggerValidation(id));
   }
-  return { handleCompletion };
+  /** Restart can finish an already-settled block, never manufacture termination or dispatch. */
+  async function reconcileInfrastructureBlocker(podId: string): Promise<void> {
+    const pod = podRepo.getOrThrow(podId);
+    const cycle = pod.finalization?.cycle;
+    if (
+      pod.status !== 'running' ||
+      !podRepo.hasInfrastructureBlocker?.(podId) ||
+      cycle === undefined ||
+      !podRepo.taskExecutions?.hasSettledRun?.(pod, cycle)
+    )
+      return;
+    assertValidationMutationSettled(podRepo, podId);
+    podRepo.taskExecutions.assertCanDelete(podId);
+    if (!podRepo.deletionOwnership) throw new Error('Cleanup ownership evidence unavailable');
+    podRepo.deletionOwnership.assertTaskAvailable(podId);
+    // Deliberately avoid general completion: this can only preserve/park existing
+    // human or infrastructure work, not validate, publish or collect artifacts.
+    await holdCompletionForHumanWork(pod);
+  }
+  return { handleCompletion, reconcileInfrastructureBlocker };
 }

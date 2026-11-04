@@ -19,6 +19,7 @@ export interface ReconcilerDependencies {
   quiesceSandboxAgent: (podId: string) => Promise<void>;
   suspendSandbox: (podId: string) => Promise<void>;
   enqueueSession: (podId: string) => void;
+  reconcileInfrastructureBlocker?(podId: string): Promise<void>;
   logger: Logger;
 }
 
@@ -81,6 +82,15 @@ async function reconcileSession(pod: Pod, deps: ReconcilerDependencies): Promise
       lastCorrectionMessage:
         'Infrastructure remains blocked. Original execution, source and reports retained; no automatic retry or chat recovery is supported.',
     });
+    try {
+      await deps.reconcileInfrastructureBlocker?.(pod.id);
+    } catch (err) {
+      // An unavailable settlement read is not permission to park or release ownership.
+      logger.error(
+        { err, podId: pod.id },
+        'Infrastructure reconciliation retained original ownership',
+      );
+    }
     return;
   }
   if (hasInterruptedArtifactCollection(pod)) {

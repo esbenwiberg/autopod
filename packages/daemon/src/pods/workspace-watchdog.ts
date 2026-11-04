@@ -134,6 +134,7 @@ export function createWorkspaceWatchdog(
             podRepo,
             readNativeGoal: deps.launchConfiguration?.goals?.get,
             finishCancelledGoal: (id) => this.killSession(id),
+            reconcileInfrastructureBlocker: (id) => this.reconcileInfrastructureBlocker(id),
             eventBus,
             containerManager: containerManagerFactory.get('local'),
             enqueueSession,

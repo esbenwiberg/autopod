@@ -29,9 +29,14 @@ for the active run to settle before parking as failed. It retains the infrastruc
 reason without manufacturing a question. Ordinary Resume, Rework, tell and nudge
 cannot clear the recorded infrastructure need or dispatch the same lifecycle. No
 in-place chat recovery is supported: Autopod must diagnose the needs and provision
-a qualified execution. Restart retains the block rather than inventing artifact
-collection recovery. A pending real question prevents this
-automatic pause. AI advice cannot consume this report stop threshold.
+a qualified execution. Restart and host wake finish source preservation and park an
+already-settled blocked worker through the existing completion gate. This requires
+positive execution-ledger settlement for the same lifecycle, completion cycle and
+recorded container/backend, with no outstanding task execution or cleanup ownership.
+A complete event, an empty active-run set, an old cycle or a container-status lookup
+alone is not termination proof. Missing evidence and failed reconciliation reads
+retain the block and original resources without dispatch or artifact collection.
+A pending real question prevents this automatic pause. AI advice cannot consume this report stop threshold.
 Stream closure alone is not native termination proof: an unverified execution
 retains its active ownership and resources without another stop or retry.
 A report is a worker claim requiring diagnosis, not authoritative proof of an

@@ -26,6 +26,8 @@ export interface LocalReconcilerDependencies {
   trigger?: ReconcileTrigger;
   readNativeGoal?(podId: string): PodGoal | null;
   finishCancelledGoal?(podId: string): Promise<void>;
+  /** Preserve and park only a positively settled infrastructure-blocked worker. */
+  reconcileInfrastructureBlocker?(podId: string): Promise<void>;
 }
 
 export interface ReconcileResult {
@@ -149,6 +151,15 @@ async function reconcileSession(
       lastCorrectionMessage:
         'Infrastructure remains blocked. Original execution, source and reports retained; no automatic retry or chat recovery is supported.',
     });
+    try {
+      await deps.reconcileInfrastructureBlocker?.(pod.id);
+    } catch (err) {
+      // Failed reads/preservation must not reach the generic mark-killed fallback.
+      logger.error(
+        { err, podId: pod.id },
+        'Infrastructure reconciliation retained original ownership',
+      );
+    }
     result.skipped.push(pod.id);
     return;
   }

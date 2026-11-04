@@ -97,7 +97,14 @@ export interface CompletionOwnersCaptured {
 }
 
 export interface CompletionWorkflowCaptured {
-  podRepo: Pick<PodRepository, 'getOrThrow'>;
+  podRepo: Pick<
+    PodRepository,
+    | 'getOrThrow'
+    | 'hasInfrastructureBlocker'
+    | 'taskExecutions'
+    | 'deletionOwnership'
+    | 'validationExecutions'
+  >;
   holdCompletionForHumanWork: ReturnType<
     typeof createCompletionHumanGate
   >['holdCompletionForHumanWork'];
