@@ -14,10 +14,12 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ArtifactManifest, ArtifactOutput } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import Fastify from 'fastify';
+import pino from 'pino';
 import { afterEach, describe, expect, it } from 'vitest';
 import { managedArtifactRoutes } from '../api/routes/managed-artifacts.js';
+import { createDatabase } from '../db/connection.js';
 import { collectOutput } from './artifact-collector.js';
 import { ArtifactExports } from './artifact-exports.js';
 import {
@@ -42,6 +44,7 @@ const binding = {
   dispatcherAttemptId: 'attempt-one',
   executionSpecDigest: `sha256:${'0'.repeat(64)}`,
 };
+const logger = pino({ level: 'silent' });
 const roots: string[] = [];
 const databases: Database.Database[] = [];
 afterEach(async () => {
@@ -58,7 +61,7 @@ async function setup() {
   await mkdir(directory);
   await writeFile(path.join(directory, 'research.md'), '# Research\n');
   const database = path.join(root, 'state.db');
-  const db = new Database(database);
+  const db = createDatabase(database, logger);
   databases.push(db);
   db.exec(
     readFileSync(
@@ -72,6 +75,9 @@ async function setup() {
 describe('managed artifacts', () => {
   it('normalizes bundles across attempts and freezes provenance across restart', async () => {
     const { directory, db, database } = await setup();
+    expect(db.pragma('journal_mode', { simple: true })).toBe('wal');
+    expect(db.pragma('synchronous', { simple: true })).toBe(1);
+    expect(db.pragma('foreign_keys', { simple: true })).toBe(1);
     const store = new MemoryArtifactStore();
     const exports = new ArtifactExports(db, store, () => 100);
     const receipt = await exports.export(binding, directory, output, true);
@@ -84,8 +90,11 @@ describe('managed artifacts', () => {
     expect(second?.bundleSha256).toBe(receipt?.bundleSha256);
     expect(second?.manifestSha256).not.toBe(receipt?.manifestSha256);
     db.close();
-    const restarted = new Database(database);
+    const restarted = createDatabase(database, logger);
     databases.push(restarted);
+    expect(restarted.pragma('journal_mode', { simple: true })).toBe('wal');
+    expect(restarted.pragma('synchronous', { simple: true })).toBe(1);
+    expect(restarted.pragma('foreign_keys', { simple: true })).toBe(1);
     await rm(directory, { recursive: true });
     expect(
       await new ArtifactExports(restarted, store, () => 200).export(
@@ -109,7 +118,7 @@ describe('managed artifacts', () => {
         .prepare('SELECT artifact_id,manifest_sha256,bundle_sha256 FROM artifact_exports')
         .get() as { artifact_id: string; manifest_sha256: string; bundle_sha256: string };
       db.close();
-      const restarted = new Database(database);
+      const restarted = createDatabase(database, logger);
       databases.push(restarted);
       await rm(directory, { recursive: true });
       const receipt = await new ArtifactExports(restarted, store, () => 900).export(

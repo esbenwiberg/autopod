@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createPodRepository } from './pod-repository.js';
@@ -71,7 +72,7 @@ describe('durable completion journal', () => {
     const filename = path.join(dir, 'restored.db');
     writeFileSync(filename, source.serialize());
     source.close();
-    const reopened = new Database(filename);
+    const reopened = createDatabase(filename, logger);
     try {
       const restarted = createPodRepository(reopened);
       const restored = restarted.getOrThrow('settled');
@@ -136,7 +137,7 @@ describe('durable completion journal', () => {
         copyFileSync(path.join(migrations, file), path.join(dir, file));
     }
     const filename = path.join(dir, 'legacy.db');
-    let db = new Database(filename);
+    let db = createDatabase(filename, logger);
     try {
       runMigrations(db, dir, logger);
       insertPod(db);
@@ -146,7 +147,7 @@ describe('durable completion journal', () => {
       const watermark = (db.prepare('SELECT MAX(id) AS id FROM events').get() as { id: number }).id;
       await runMigrationsWithBackups(db, migrations, logger);
       db.close();
-      db = new Database(filename);
+      db = createDatabase(filename, logger);
       const repo = createPodRepository(db);
       expect(repo.completionJournal?.replyWatermark('settled')).toBe(watermark);
       expect(repo.completionJournal?.recoveryContext(repo.getOrThrow('settled'))).toContain(
