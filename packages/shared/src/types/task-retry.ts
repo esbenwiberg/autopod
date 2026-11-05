@@ -65,3 +65,27 @@ export interface TaskRetryState {
   retryFailure?: 'auth' | 'transient' | 'unknown' | null;
   telemetry: 'partial';
 }
+
+/** Read-only projection. Final Rework admission always rechecks current facts. */
+export interface ReworkEligibility {
+  eligible: boolean;
+  status: 'eligible' | 'grant_recorded' | 'authorization_needed' | 'cooldown' | 'blocked';
+  reason: string;
+  generation: number;
+  failureId: string | null;
+  notBefore?: string;
+}
+
+export interface ReworkRequestInput {
+  requestKey: string;
+  generation: number;
+  guidance: string;
+}
+export interface ReworkRequestReceipt extends ReworkRequestInput {
+  taskId: string;
+  podId: string;
+  actor: OperatorActor;
+  createdAt: string;
+  settledAt: string | null;
+  error: string | null;
+}

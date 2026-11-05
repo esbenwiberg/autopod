@@ -12,6 +12,7 @@ import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-help
 import { createNudgeRepository } from './nudge-repository.js';
 import { type SessionBridgeDependencies, createSessionBridge } from './pod-bridge-impl.js';
 import { createPodRepository } from './pod-repository.js';
+import { createReworkRequestRepository } from './rework-request-repository.js';
 
 function seed(db: Database.Database) {
   insertTestProfile(db);
@@ -359,6 +360,60 @@ it('upgrades schema 179 without inventing acknowledgment of consumed legacy rows
     expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
     expect(db.pragma('foreign_key_check')).toEqual([]);
   } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it('delivers Rework guidance through the replacement worker MCP receipt after SQLite reopen', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rework-mcp-'));
+  const file = join(dir, 'state.db');
+  let db = createTestDb();
+  const original = seed(db);
+  original.repo.taskExecutions?.finishRun(original.runId, 'failed', 'unknown');
+  const requests = createReworkRequestRepository(db);
+  const input = {
+    requestKey: 'fixture-request',
+    generation: 1,
+    guidance: 'Retain previous edits and inspect the remaining test failure.',
+  };
+  requests.accept('worker', input, { type: 'human', userId: 'operator' }, () => {});
+  original.repo.incrementLifecycleGeneration('worker');
+  original.repo.taskExecutions?.beginRun('worker', 2, 2, {
+    runtime: 'codex',
+    model: 'model',
+    providerAccountId: null,
+  });
+  writeFileSync(file, db.serialize());
+  db.close();
+  db = createDatabase(file, logger);
+  const channel = await connect(db);
+  try {
+    const receipt = decode(
+      await channel.client.callTool({ name: 'check_messages', arguments: {} }),
+    );
+    expect(receipt.operatorMessages).toEqual([input.guidance]);
+    expect(createNudgeRepository(db).hasPending('worker')).toBe(true);
+    expect(
+      decode(await channel.client.callTool({ name: 'check_messages', arguments: {} })).deliveryId,
+    ).toBe(receipt.deliveryId);
+    await channel.client.callTool({
+      name: 'acknowledge_messages',
+      arguments: { deliveryId: receipt.deliveryId },
+    });
+    expect(createNudgeRepository(db).hasPending('worker')).toBe(false);
+    expect(
+      createReworkRequestRepository(db).accept(
+        'worker',
+        input,
+        { type: 'human', userId: 'operator' },
+        () => {
+          throw new Error('Must not dispatch');
+        },
+      ).fresh,
+    ).toBe(false);
+  } finally {
+    await channel.close();
     db.close();
     rmSync(dir, { recursive: true, force: true });
   }

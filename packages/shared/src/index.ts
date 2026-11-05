@@ -679,6 +679,9 @@ export type {
 } from './types/scheduled-scan.js';
 
 export type {
+  ReworkEligibility,
+  ReworkRequestInput,
+  ReworkRequestReceipt,
   TaskRetryIdentity,
   TaskRetryOutcome,
   TaskRetryAttempt,

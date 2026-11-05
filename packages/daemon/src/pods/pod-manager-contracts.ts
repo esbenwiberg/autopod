@@ -306,7 +306,7 @@ export interface PodManager {
     options?: { instructions?: string; skipAgent?: boolean },
   ): Promise<void>;
   /** Check worker retry permission before Rework can tear down or enqueue resources. */
-  assertCanRework(podId: string): void;
+  assertCanRework(podId: string): { notBefore?: string; authorizationAvailable?: boolean };
   assertCanRetryValidation(podId: string): void;
   triggerValidation(
     podId: string,

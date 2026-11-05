@@ -216,7 +216,7 @@ export interface ValidationWorkflowCalls {
     podId: string,
     options?: { force?: boolean; validationOnly?: boolean },
   ): Promise<void>;
-  assertCanRework(podId: string): void;
+  assertCanRework(podId: string): { notBefore?: string; authorizationAvailable?: boolean };
   approveSession(
     podId: string,
     options?: { squash?: boolean; reason?: string; automation?: boolean; actor?: OperatorActor },
