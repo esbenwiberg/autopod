@@ -201,6 +201,28 @@ describe('EscalationCard', () => {
     expectMessage(spy, 'pat updated');
   });
 
+  it('renders infrastructure evidence without answer or retry controls', async () => {
+    const spy = mockOk();
+    await renderCard(
+      escalation({
+        type: 'report_blocker',
+        payload: {
+          kind: 'infrastructure',
+          requiresResponse: false,
+          owner: 'validation',
+          description: 'Runner unavailable',
+          attempted: ['Configured setup'],
+          needs: 'Validation owner repair',
+        },
+      }),
+    );
+    expect(container.textContent).toContain('Infrastructure blocked');
+    expect(container.textContent).toContain('Validation owner repair');
+    expect(container.querySelector('textarea')).toBeNull();
+    expect(container.querySelector('button')).toBeNull();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it('lets report_blocker prompts post guidance from mobile', async () => {
     const spy = mockOk();
     await renderCard(

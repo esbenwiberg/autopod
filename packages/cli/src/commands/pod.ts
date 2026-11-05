@@ -916,12 +916,25 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           console.log(chalk.dim(`  ap tell ${s.id} dismiss 1     — dismiss finding #1`));
           console.log(chalk.dim(`  ap tell ${s.id} "fix: ..."    — provide guidance`));
         } else {
-          console.log(chalk.yellow.bold('\nPending escalation:'));
+          const payload = s.pendingEscalation.payload;
+          const infrastructure =
+            s.pendingEscalation.type === 'report_blocker' &&
+            (('kind' in payload && payload.kind === 'infrastructure') ||
+              ('requiresResponse' in payload && payload.requiresResponse === false));
+          console.log(
+            chalk.yellow.bold(
+              infrastructure
+                ? '\nInfrastructure blocked (no answer requested):'
+                : '\nPending escalation:',
+            ),
+          );
           console.log(`  Type: ${s.pendingEscalation.type}`);
           const p = s.pendingEscalation.payload;
           console.log(
             `  Message: ${'question' in p ? p.question : 'description' in p ? p.description : ''}`,
           );
+          if ('recommendation' in p && p.recommendation)
+            console.log(`  Recommendation: ${p.recommendation}`);
         }
       }
       if (s.lastValidationResult) {

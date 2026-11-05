@@ -1,8 +1,10 @@
 import type { Pod, ValidationResult } from '@autopod/shared';
-import { MAX_DIFF_LENGTH } from '@autopod/shared';
+import { AutopodError, MAX_DIFF_LENGTH } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/index.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import { formatFeedback } from './feedback-formatter.js';
+import { isReviewInfrastructureOnlyFailure } from './validation-infrastructure.js';
+import { requiresValidationSettlement } from './validation-recovery-policy.js';
 
 export interface CorrectionContext {
   task: string;
@@ -30,6 +32,17 @@ export async function buildCorrectionContext(
   validationResult: ValidationResult,
   containerManager: ContainerManager,
 ): Promise<CorrectionContext> {
+  if (
+    validationResult.infrastructureFailure ||
+    requiresValidationSettlement({ lastValidationResult: validationResult }) ||
+    isReviewInfrastructureOnlyFailure(validationResult)
+  ) {
+    throw new AutopodError(
+      'Infrastructure or unverified execution must be parked by its execution owner, not sent as coding correction.',
+      'INFRASTRUCTURE_CORRECTION_FORBIDDEN',
+      409,
+    );
+  }
   // 1. Get the diff from the container's worktree
   let previousDiff = '';
   if (pod.containerId && pod.worktreePath) {

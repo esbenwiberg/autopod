@@ -292,6 +292,10 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
       return completionWorkflow.handleCompletion.call(this, podId);
     },
 
+    reconcileInfrastructureBlocker(podId: string): Promise<void> {
+      return completionWorkflow.reconcileInfrastructureBlocker(podId);
+    },
+
     sendMessage(
       podId: string,
       message: string,

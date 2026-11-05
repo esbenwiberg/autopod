@@ -112,7 +112,11 @@ export function createValidationInfrastructure(deps: ValidationInfrastructureDep
         ? `${label} — termination proof required; inspect ap reconcile-validation ${pod.id} --json before retry or repair`
         : `${label} — parked for explicit Resume`,
     );
-    transition(pod, 'review_required');
+    if (pod.failureReason) transition(pod, 'review_required');
+    else
+      transition(pod, 'review_required', {
+        failureReason: `${label}: ${result.infrastructureFailure?.message ?? 'Execution unavailable'}. Responsible system: Autopod validation. Checks remain incomplete; inspect execution evidence before supported recovery.`,
+      });
     podRepo.update(pod.id, {
       validationAttempts: Math.max(0, pod.validationAttempts - 1),
       lastCorrectionMessage: null,
@@ -140,7 +144,10 @@ export function createValidationInfrastructure(deps: ValidationInfrastructureDep
   }
 
   async function parkOnReviewInfrastructureFailure(pod: Pod): Promise<void> {
-    transition(pod, 'review_required');
+    const reason =
+      'Review infrastructure unavailable. Responsible system: Autopod review. Review remains incomplete; no reviewer approval or coding correction is implied. Inspect review diagnostics before supported recovery.';
+    if (pod.failureReason) transition(pod, 'review_required');
+    else transition(pod, 'review_required', { failureReason: reason });
 
     if (pod.containerId) {
       try {

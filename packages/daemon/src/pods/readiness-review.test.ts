@@ -689,7 +689,15 @@ describe('createReadinessService', () => {
             })),
     } as unknown as EventRepository;
     const escalationRepo = {
-      countBySessionAndTypes: () => 3,
+      listBySession: () =>
+        Array.from({ length: 3 }, (_, index) => ({
+          id: `question-${index}`,
+          podId: currentPod.id,
+          type: 'ask_human',
+          timestamp: NOW,
+          payload: { question: 'Choose the product scope' },
+          response: null,
+        })),
     } as unknown as EscalationRepository;
     const insert = vi.fn();
     const qualityScoreRepo = {
@@ -758,7 +766,7 @@ describe('createReadinessService', () => {
             ],
     } as unknown as EventRepository;
     const escalationRepo = {
-      countBySessionAndTypes: () => 0,
+      listBySession: () => [],
     } as unknown as EscalationRepository;
 
     const result = createReadinessService({

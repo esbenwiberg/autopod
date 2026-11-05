@@ -1,12 +1,13 @@
 import type { Pod, PodOptions } from '@autopod/shared';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
+import { assertNoInfrastructureBlocker } from './escalation-coordinator.js';
 import type { EventBus } from './event-bus.js';
 import type { PodRepository } from './pod-repository.js';
 
 interface ValidationAttemptStartDependencies {
   assertGuidanceCollected(podId: string): void;
   runPushCheckpointScan(pod: Pod, profile: PodExecutionSettings): Promise<void>;
-  podRepo: Pick<PodRepository, 'update'>;
+  podRepo: Pick<PodRepository, 'update' | 'hasInfrastructureBlocker'>;
   transition(pod: Pod, to: 'validating'): Pod;
   eventBus: Pick<EventBus, 'emit'>;
   getPodValidationSuite(pod: Pod): NonNullable<PodOptions['validationSuite']>;
@@ -43,6 +44,7 @@ export function createValidationAttemptStart(deps: ValidationAttemptStartDepende
     fromTerminal: boolean,
   ): Promise<ValidationAttemptStart> {
     const podId = pod.id;
+    assertNoInfrastructureBlocker(podRepo, podId);
     assertGuidanceCollected(podId);
 
     // Pre-push security scan: inspect the diff for secrets / PII / injection
@@ -50,6 +52,7 @@ export function createValidationAttemptStart(deps: ValidationAttemptStartDepende
     // error handler transitions to failed; warn / escalate findings ride
     // along into the PR body via scanRepo lookup at PR creation time.
     await runPushCheckpointScan(pod, profile);
+    assertNoInfrastructureBlocker(podRepo, podId);
 
     // Reset attempt counter when re-validating from a terminal/failed/validated state
     if (fromTerminal) {

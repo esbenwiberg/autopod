@@ -160,12 +160,12 @@ public enum PodMapper {
     // Map escalation from pending escalation
     let escalationId: String? = {
       guard let escalation = response.pendingEscalation,
-            escalation.response == nil, !escalation.id.isEmpty else { return nil }
+            escalation.response == nil, escalation.requiresHumanResponse, !escalation.id.isEmpty else { return nil }
       return escalation.id
     }()
 
     let escalationQuestion: String? = {
-      guard let esc = response.pendingEscalation, esc.response == nil else { return nil }
+      guard let esc = response.pendingEscalation, esc.response == nil, esc.requiresHumanResponse else { return nil }
       if esc.type == "action_approval", let actionName = esc.payload.actionName {
         // Include params so the reviewer sees which resource is being accessed
         if let params = esc.payload.params, !params.isEmpty {
@@ -228,15 +228,18 @@ public enum PodMapper {
         }
         return "Credential update required for \(service). Update the profile PAT, then reply to retry."
       }
+      if let question = esc.payload.question, let recommendation = esc.payload.recommendation {
+        return question + "\n\nRecommendation: " + recommendation
+      }
       return esc.payload.question ?? esc.payload.description
     }()
     let escalationOptions: [String]? = {
-      guard let esc = response.pendingEscalation, esc.response == nil else { return nil }
+      guard let esc = response.pendingEscalation, esc.response == nil, esc.requiresHumanResponse else { return nil }
       guard let opts = esc.payload.options, !opts.isEmpty else { return nil }
       return opts
     }()
     let escalationType: String? = {
-      guard let esc = response.pendingEscalation, esc.response == nil else { return nil }
+      guard let esc = response.pendingEscalation, esc.response == nil, esc.requiresHumanResponse else { return nil }
       return esc.type
     }()
 
@@ -447,7 +450,7 @@ public enum PodMapper {
 
     // Error summary for failed pods
     let errorSummary: String? = {
-      guard status == .failed || status == .killed || status == .reviewRequired else { return nil }
+      guard status == .paused || status == .failed || status == .killed || status == .reviewRequired else { return nil }
       if let failureReason = response.failureReason, !failureReason.isEmpty {
         return failureReason
       }

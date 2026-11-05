@@ -22,6 +22,9 @@ export interface EscalationRequest {
 }
 
 export interface AskHumanPayload {
+  /** Omitted on legacy requests. Explicit decisions cannot be delegated to AI. */
+  kind?: 'decision';
+  recommendation?: string;
   question: string;
   context?: string;
   options?: string[];
@@ -34,7 +37,12 @@ export interface AskAiPayload {
 }
 
 export interface ReportBlockerPayload {
-  /** Set by the tool from the configured threshold; omitted legacy records block. */
+  /** New reports are noninteractive; omitted legacy records retain their reply flow. */
+  kind?: 'infrastructure';
+  owner?: 'autopod' | 'parent' | 'validation';
+  phase?: string;
+  /** Daemon stamps the owning lifecycle; workers cannot select another generation. */
+  lifecycleGeneration?: number;
   requiresResponse?: boolean;
   description: string;
   attempted: string[];

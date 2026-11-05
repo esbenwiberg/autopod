@@ -62,6 +62,9 @@ export function createWorkspaceFixture(disk = false) {
     providerAttemptRepo: f.repo,
   };
   const calls = {
+    reconcileInfrastructureBlocker: vi.fn<WorkspaceWatchdogCalls['reconcileInfrastructureBlocker']>(
+      async () => {},
+    ),
     promoteToAuto: vi.fn<WorkspaceCompletionCalls['promoteToAuto']>(async () => {}),
     revalidateSession: vi.fn<WorkspaceCompletionCalls['revalidateSession']>(async () => ({
       newCommits: false,

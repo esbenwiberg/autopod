@@ -84,6 +84,72 @@ function fixture() {
   };
 }
 describe('continuation context', () => {
+  it.each(['before', 'env', 'prime'] as const)(
+    'fences infrastructure arriving at %s before coding dispatch',
+    async (phase) => {
+      const f = fixture();
+      const report = () =>
+        f.ctx.escalationRepo.insert({
+          id: 'continuation-infrastructure',
+          podId: 'context',
+          type: 'report_blocker',
+          timestamp: new Date().toISOString(),
+          response: null,
+          payload: {
+            kind: 'infrastructure',
+            lifecycleGeneration: f.pod().lifecycleGeneration,
+            requiresResponse: false,
+            description: 'Configured runner unavailable',
+            attempted: [],
+            needs: 'Qualified execution',
+          },
+        });
+      if (phase === 'before') report();
+      else if (phase === 'env')
+        f.captured.getResumeEnv.mockImplementationOnce(async () => {
+          report();
+          return f.env;
+        });
+      else
+        f.captured.primeRuntimeForResume.mockImplementationOnce(async () => {
+          report();
+          return f.mcp;
+        });
+      await expect(f.c.taskFeedbackEvents('context', 'Go on', true)).rejects.toMatchObject({
+        code: 'INFRASTRUCTURE_BLOCKED',
+      });
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(f.ctx.containerManager.start).not.toHaveBeenCalled();
+      if (phase === 'before') {
+        expect(f.ctx.containerManager.getStatus).not.toHaveBeenCalled();
+        expect(f.captured.getResumeEnv).not.toHaveBeenCalled();
+      }
+      expect(f.ctx.escalationRepo.getOrThrow('continuation-infrastructure').response).toBeNull();
+    },
+  );
+  it('retains historical reports without treating them as current-lifecycle blockers', async () => {
+    const f = fixture();
+    f.ctx.escalationRepo.insert({
+      id: 'historical-infrastructure',
+      podId: 'context',
+      type: 'report_blocker',
+      timestamp: new Date().toISOString(),
+      response: null,
+      payload: {
+        kind: 'infrastructure',
+        lifecycleGeneration: f.pod().lifecycleGeneration,
+        requiresResponse: false,
+        description: 'Old execution unavailable',
+        attempted: [],
+        needs: 'Qualified execution',
+      },
+    });
+    f.ctx.podRepo.incrementLifecycleGeneration('context');
+    await f.c.taskFeedbackEvents('context', 'Newly selected execution', true);
+    expect(f.ctx.runtime.spawn).toHaveBeenCalledOnce();
+    expect(f.ctx.escalationRepo.getOrThrow('historical-infrastructure').response).toBeNull();
+  });
   it('constructs inertly and appends journal and pending guidance to task wrappers', async () => {
     const f = fixture();
     expect(f.captured.getResumeEnv).not.toHaveBeenCalled();

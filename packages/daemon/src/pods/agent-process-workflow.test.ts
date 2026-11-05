@@ -6,6 +6,8 @@ import {
   createAgentExecutionFixture,
   syntheticComplete,
 } from '../test-utils/agent-execution-helpers.js';
+import { createSessionBridge } from './pod-bridge-impl.js';
+import { createPodManager } from './pod-manager.js';
 const fixtures: ReturnType<typeof createAgentExecutionFixture>[] = [];
 function fixture(disk = false) {
   const f = createAgentExecutionFixture(disk);
@@ -19,6 +21,39 @@ afterEach(() => {
 });
 
 describe('complete agent process owner', () => {
+  it('does not pull a coding iterator after an accepted report during recovery preparation', async () => {
+    const f = fixture();
+    f.podRepo.update('prepare', { recoveryWorktreePath: f.directory });
+    const bridge = createSessionBridge({ ...f.ctx.deps, podManager: createPodManager(f.ctx.deps) });
+    f.processCaptured.buildRecoveryTask.mockImplementationOnce(async () => {
+      expect(f.pod().status).toBe('running');
+      bridge.createEscalation({
+        id: 'late-report',
+        podId: 'prepare',
+        type: 'report_blocker',
+        timestamp: new Date().toISOString(),
+        response: null,
+        payload: {
+          kind: 'infrastructure',
+          requiresResponse: false,
+          description: 'Execution remains blocked',
+          attempted: [],
+          needs: 'Qualified execution',
+        },
+      });
+      expect(f.podRepo.hasInfrastructureBlocker?.('prepare')).toBe(true);
+      return 'Preserve work';
+    });
+    let pulled = false;
+    vi.mocked(f.ctx.runtime.spawn).mockImplementationOnce(async function* () {
+      pulled = true;
+      yield syntheticComplete;
+    });
+    await f.process().processPod.call(f.calls, 'prepare');
+    expect(f.processCaptured.buildRecoveryTask).toHaveBeenCalledOnce();
+    expect(pulled).toBe(false);
+    expect(f.podRepo.taskExecutions?.snapshot('prepare').agentRunCount).toBe(0);
+  });
   it('dispatches the prepared context through the invocation receiver and completes once', async () => {
     const f = fixture();
     vi.mocked(f.ctx.runtime.spawn).mockReturnValueOnce(agentEvents(syntheticComplete));

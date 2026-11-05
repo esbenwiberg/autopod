@@ -6,6 +6,7 @@ import type {
 } from '@autopod/shared';
 import { AutopodError, PROVIDER_FAILOVER_HANDOFF_PATH } from '@autopod/shared';
 import type { ContinuationCaptured, ContinuationLiveDependencies } from './continuation-ports.js';
+import { assertNoInfrastructureBlocker } from './escalation-coordinator.js';
 import { writeProviderFailoverHandoff } from './recovery-context.js';
 import { workerBindingHash } from './worker-retry-history.js';
 
@@ -85,16 +86,19 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
     pod: Pod,
     classification: ProviderFailureClassification,
   ): Promise<void> {
+    assertNoInfrastructureBlocker(podRepo, pod.id);
     if (!pod.worktreePath || !worktreeManager.ensureExcludes) {
       throw new Error('Provider handoff exclusion protection is unavailable');
     }
     await worktreeManager.ensureExcludes(pod.worktreePath, [PROVIDER_FAILOVER_HANDOFF_PATH]);
+    assertNoInfrastructureBlocker(podRepo, pod.id);
     await writeProviderFailoverHandoff(
       pod,
       pod.worktreePath,
       classification,
       visibleProviderHandoffActivity(pod.id),
     );
+    assertNoInfrastructureBlocker(podRepo, pod.id);
   }
 
   async function queueProviderContinuation(
@@ -104,9 +108,11 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
     deferUntilCurrentRunExits = false,
     handoffPrepared = false,
   ): Promise<void> {
+    assertNoInfrastructureBlocker(podRepo, pod.id);
     if (!handoffPrepared) {
       await prepareProviderContinuationHandoff(pod, classification);
     }
+    assertNoInfrastructureBlocker(podRepo, pod.id);
     const sourceAttempt = deps.providerAttemptRepo
       ?.list(pod.id)
       .findLast((attempt) => attempt.endedAt !== null);
@@ -164,8 +170,16 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
     classification: ProviderFailureClassification,
   ): Promise<void> {
     const source = podRepo.getOrThrow(podId);
+    if (podRepo.hasInfrastructureBlocker?.(podId)) {
+      emitActivityStatus(
+        podId,
+        'Infrastructure blocked — provider continuation cannot repair this execution',
+      );
+      return;
+    }
     try {
       await runtimeRegistry.get(source.runtime).abort(podId);
+      assertNoInfrastructureBlocker(podRepo, podId);
     } catch (err) {
       logger.warn({ err, podId }, 'Provider-limit runtime drain failed; pausing');
       return;
@@ -179,6 +193,7 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
           source.id,
           source.executionTarget,
         );
+        assertNoInfrastructureBlocker(podRepo, podId);
       } catch (err) {
         logger.warn({ err, podId }, 'Provider-limit worktree synchronization failed; pausing');
         return;
@@ -189,7 +204,9 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         await stopSandboxPreviewProxy(source.id);
+        assertNoInfrastructureBlocker(podRepo, podId);
         await stopHaproxyDenyReceiver(source.id);
+        assertNoInfrastructureBlocker(podRepo, podId);
         await Promise.race([
           cm.kill(source.containerId),
           new Promise<never>((_resolve, reject) => {
@@ -199,6 +216,7 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
             );
           }),
         ]);
+        assertNoInfrastructureBlocker(podRepo, podId);
       } catch (err) {
         logger.warn({ err, podId }, 'Provider-limit container teardown could not be proven');
         return;
@@ -232,6 +250,7 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
     actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
   ): Promise<{ action: 'same-provider' | 'alternate-provider' | 'primary-provider' }> {
     assertExecutionTerminationVerified(podId);
+    assertNoInfrastructureBlocker(podRepo, podId);
     const pod = podRepo.getOrThrow(podId);
     if (podRepo.taskExecutions?.hasActiveRun(podId))
       throw new AutopodError(
@@ -376,6 +395,7 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
         model: target.model,
         providerAccountId: target.providerAccountId,
       });
+      assertNoInfrastructureBlocker(podRepo, podId);
       podRepo.workerRetries?.authorize(
         podId,
         `provider-recovery:${podId}:${retryState.latest.id}:${targetBindingHash}`,
@@ -387,6 +407,7 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
     if (pod.containerId) {
       try {
         await runtimeRegistry.get(pod.runtime).abort(podId);
+        assertNoInfrastructureBlocker(podRepo, podId);
         await syncWorkspaceBack(
           pod.containerId,
           pod.worktreePath,
@@ -394,8 +415,11 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
           pod.id,
           pod.executionTarget,
         );
+        assertNoInfrastructureBlocker(podRepo, podId);
         await stopSandboxPreviewProxy(pod.id);
+        assertNoInfrastructureBlocker(podRepo, podId);
         await stopHaproxyDenyReceiver(pod.id);
+        assertNoInfrastructureBlocker(podRepo, podId);
         const cm = containerManagerFactory.get(pod.executionTarget);
         let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
         try {
@@ -411,9 +435,11 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
         } finally {
           if (cleanupTimer) clearTimeout(cleanupTimer);
         }
+        assertNoInfrastructureBlocker(podRepo, podId);
         forgetMaxCredentialLineage(pod.id);
         podRepo.update(podId, { containerId: null });
       } catch (err) {
+        if (err instanceof AutopodError && err.code === 'INFRASTRUCTURE_BLOCKED') throw err;
         throw new AutopodError(
           `Provider continuation could not safely drain the source runtime: ${operatorErrorMessage(err, 'agent')}`,
           'PROVIDER_CONTINUATION_UNSAFE',
@@ -431,6 +457,7 @@ export function createProviderContinuation(deps: ContinuationLiveDependencies, c
         },
       );
     } catch (err) {
+      if (err instanceof AutopodError && err.code === 'INFRASTRUCTURE_BLOCKED') throw err;
       throw new AutopodError(
         `Provider continuation could not safely prepare its handoff: ${operatorErrorMessage(err, 'agent')}`,
         'PROVIDER_CONTINUATION_UNSAFE',
