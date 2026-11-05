@@ -617,7 +617,7 @@ public enum FeatureCategory: String, CaseIterable, Identifiable {
                 "PR mode single: all pods share one branch, siblings serialized; only final pod creates PR",
                 "PR mode stacked: each pod gets its own PR; non-root pods wait for parent PR to merge",
                 "PR mode none: pods push branches only, no PRs created",
-                "autoApprove: skip human gate between pods; disableAskHuman: route escalations to AI reviewer",
+                "autoApprove: skip human gate between pods; disableAskHuman: route escalations to Advisor",
                 "Series preview: POST /pods/series/preview reads spec from daemon host; /preview-branch reads from git branch",
                 "Cost rollup: GET /pods/series/:id returns sum of all pod token usage and cost",
                 "DELETE /pods/series/:id kills all pods and cascade-deletes series metadata",

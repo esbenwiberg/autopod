@@ -259,7 +259,7 @@ export function createReviewerContext(
             model: profile.defaultModel ?? selected.model,
             reasoningEffort: profile.reasoningEffort ?? selected.reasoningEffort,
           };
-    return reviewer.executor(pod, launch, route, purpose);
+    return reviewer.executor(pod, launch, route, role === 'advisor' ? 'advisor' : purpose);
   }
 
   function selectedRoute(launch: EffectiveLaunchConfig, role: 'reviewer' | 'advisor') {

@@ -124,6 +124,67 @@ describe('composable daemon services', () => {
       const saved = components.snapshots.get(pod.id);
       if (!saved) throw new Error('Missing admitted snapshot');
       expect(saved.work).toEqual(work);
+      accounts.create({
+        id: 'advisor-only',
+        name: 'Advisor fallback',
+        provider: 'anthropic',
+        credentials: { provider: 'anthropic', apiKey: 'fixture-advisor' },
+      });
+      const advisorRequest = {
+        ...request,
+        requestId: undefined,
+        overrides: {
+          ai: {
+            advisor: {
+              mode: 'independent' as const,
+              route: {
+                ...saved.ai.main,
+                failover: [
+                  {
+                    providerAccountId: 'advisor-only',
+                    runtime: 'claude' as const,
+                    model: 'sonnet',
+                    reasoningEffort: 'auto' as const,
+                  },
+                ],
+                maxHops: 1,
+              },
+            },
+          },
+        },
+      };
+      const advisorConfig = await resolveLaunch(advisorRequest, components.resolution);
+      expect(advisorConfig.agentAccounts['advisor-only']).toBeTruthy();
+      await components.launchConfiguration.assertCurrentCapabilities(advisorConfig);
+      const frozen = advisorConfig.agentAccounts['advisor-only'];
+      if (!frozen) throw new Error('Advisor account not frozen');
+      advisorConfig.agentAccounts['advisor-only'] = { ...frozen, createdAt: 'replacement' };
+      await expect(
+        components.launchConfiguration.assertCurrentCapabilities(advisorConfig),
+      ).rejects.toMatchObject({ code: 'PROVIDER_BINDING_MISMATCH' });
+      advisorConfig.agentAccounts['advisor-only'] = frozen;
+      accounts.updateCredentials('advisor-only', null);
+      await expect(
+        components.launchConfiguration.assertCurrentCapabilities(advisorConfig),
+      ).rejects.toMatchObject({ code: 'PROVIDER_CREDENTIALS_MISSING' });
+      await expect(resolveLaunch(advisorRequest, components.resolution)).rejects.toMatchObject({
+        code: 'PROVIDER_CREDENTIALS_MISSING',
+      });
+      accounts.updateCredentials('advisor-only', {
+        provider: 'anthropic',
+        apiKey: 'fixture-advisor',
+      });
+      const beforePolicy = components.policy.get();
+      const blocked = components.policy.write(
+        { ...beforePolicy.payload, blockedProviderAccountIds: ['advisor-only'] },
+        beforePolicy.revision,
+        'user',
+      );
+      await expect(
+        components.launchConfiguration.assertCurrentCapabilities(advisorConfig),
+      ).rejects.toThrow('revoked');
+      components.policy.write(beforePolicy.payload, blocked.revision, 'user');
+
       expect(JSON.stringify(saved)).not.toContain('first-fixture-value');
       ctx.podRepo.update(pod.id, { containerId: 'pod-container' });
       const validationEnvironment = manager.getValidationEnvironment;

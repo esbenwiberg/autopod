@@ -272,7 +272,7 @@ async function launch(f: ReturnType<typeof fixture>, mode: 'independent' | 'foll
       _pod: Pod,
       _launch: EffectiveLaunchConfig,
       _route: EffectiveLaunchConfig['ai']['main'],
-      _purpose: 'review' | 'memory' = 'review',
+      _purpose: 'review' | 'memory' | 'advisor' = 'review',
     ) => executor,
   );
   const service = { executor: select };
@@ -323,6 +323,40 @@ describe('reviewer configuration and executor', () => {
       f.op.getReviewerExecutor(f.pod);
       expect(l.select.mock.calls.at(-1)?.[2].model).toBe('sonnet');
       expect(JSON.stringify(l.config)).toBe(before);
+      f.reopen();
+    },
+  );
+  it.each(['follow-main', 'follow-reviewer'] as const)(
+    'Advisor %s follows the effective main failover binding',
+    async (mode) => {
+      const f = fixture();
+      const l = await launch(f, 'follow-main');
+      const fallback = {
+        providerAccountId: 'other',
+        runtime: 'claude' as const,
+        model: 'effective-fallback',
+        reasoningEffort: 'medium' as const,
+      };
+      l.config.ai.main.failover = [fallback];
+      l.config.ai.main.maxHops = 1;
+      l.config.ai.advisor = { mode };
+      f.bound.mockReturnValue({
+        ...f.profile,
+        providerAccountId: 'other',
+        defaultModel: fallback.model,
+        defaultRuntime: fallback.runtime,
+        reasoningEffort: fallback.reasoningEffort,
+      });
+      expect(f.op.getEffectiveReviewerConfig(f.pod, 'advisor').credentials).toEqual(
+        f.other.credentials,
+      );
+      f.op.getReviewerExecutor(f.pod, 'review', 'advisor');
+      expect(l.select.mock.calls.at(-1)?.[2]).toMatchObject({
+        ...fallback,
+        failover: [fallback],
+        maxHops: 1,
+      });
+      expect(l.select.mock.calls.at(-1)?.[3]).toBe('advisor');
       f.reopen();
     },
   );

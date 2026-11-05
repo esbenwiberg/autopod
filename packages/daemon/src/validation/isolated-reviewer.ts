@@ -67,7 +67,7 @@ export class IsolatedReviewer {
     pod: Pod,
     config: EffectiveLaunchConfig,
     route: AgentRoute,
-    purpose: 'review' | 'memory' = 'review',
+    purpose: 'review' | 'memory' | 'advisor' = 'review',
   ): ReviewerExecutor {
     const execute: ReviewerExecutor = async (input) => {
       const requestId = randomUUID();
@@ -168,7 +168,7 @@ export class IsolatedReviewer {
     pod: Pod,
     config: EffectiveLaunchConfig,
     route: AgentRoute,
-    purpose: 'review' | 'memory',
+    purpose: 'review' | 'memory' | 'advisor',
     attempt: { requestId: string; ordinal: number; deadline: number },
   ): ReviewerExecutor {
     return async (input) => {
@@ -193,7 +193,7 @@ export class IsolatedReviewer {
         Buffer.byteLength(input.prompt) > MAX_ISOLATED_REVIEW_INPUT_BYTES
       )
         configurationError('Reviewer input exceeds the execution bounds', 'REVIEWER_INPUT_INVALID');
-      const id = `review-${randomUUID()}`;
+      const id = `${purpose === 'advisor' ? 'advisor' : 'review'}-${randomUUID()}`;
       const manager = deps.manager(config.execution.target);
       const image = await deps.image(config.execution.target);
       if (!/@sha256:[a-f0-9]{64}$/.test(image))
@@ -218,7 +218,9 @@ export class IsolatedReviewer {
                   'complete',
                   'killed',
                 ]
-              : ['running', 'validating']
+              : purpose === 'advisor'
+                ? ['running', 'validating', 'awaiting_input']
+                : ['running', 'validating']
           ).includes(current.status)
         )
           configurationError(

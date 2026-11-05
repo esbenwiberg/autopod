@@ -94,7 +94,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     'ask_ai',
     'Consult another AI model for a second opinion or domain expertise. Rate-limited.',
     {
-      question: z.string().describe('The question to ask the AI reviewer'),
+      question: z.string().describe('The question to ask Advisor'),
       context: z.string().optional().describe('Relevant code or context'),
       domain: z.string().optional().describe('Domain area (e.g., "security", "performance")'),
     },

@@ -114,7 +114,7 @@ async function fixture(failover = false, advisor = false) {
     runs,
     service,
     assertAllowed,
-    execute: service.executor(pod, config, selection.route),
+    execute: service.executor(pod, config, selection.route, advisor ? 'advisor' : 'review'),
     setPod: (patch: Partial<Pod>) => {
       pod = { ...pod, ...patch };
     },
@@ -229,6 +229,19 @@ describe('isolated reviewer execution', () => {
     f.config.workflow.reviewerTokenBudget = 12;
     await expect(f.execute({ prompt: 'Consult again', timeout: 5000 })).rejects.toMatchObject({
       code: 'REVIEWER_BUDGET_EXHAUSTED',
+    });
+  });
+
+  it('allows timeout-rerouted Advisor consultation while awaiting human input, with Advisor evidence', async () => {
+    const f = await fixture(false, true);
+    f.setPod({ status: 'awaiting_input' });
+    await expect(
+      f.execute({ prompt: 'Human timeout consultation', timeout: 5000 }),
+    ).resolves.toMatchObject({ stdout: 'Review complete' });
+    expect(f.runs.list('pod')[0]?.id).toMatch(/^advisor-/);
+    f.setPod({ status: 'paused' });
+    await expect(f.execute({ prompt: 'Superseded', timeout: 5000 })).rejects.toMatchObject({
+      code: 'REVIEWER_SUPERSEDED',
     });
   });
 

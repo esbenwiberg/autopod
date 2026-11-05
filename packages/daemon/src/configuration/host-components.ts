@@ -267,8 +267,19 @@ export function createHostConfigurationComponents(
             ? [config.ai.reviewer.route, ...config.ai.reviewer.route.failover]
             : []),
         ];
-        if (config.ai.advisor?.mode === 'independent') {
-          const advisorRoutes = [config.ai.advisor.route, ...config.ai.advisor.route.failover];
+        const escalation = config.workflow.escalation;
+        const consultationEnabled =
+          escalation &&
+          (escalation.askAi.enabled ||
+            escalation.advisor.enabled ||
+            !escalation.askHuman ||
+            escalation.askHumanOnTimeout === 'ask_ai');
+        if (config.ai.advisor?.mode === 'independent' || consultationEnabled) {
+          const advisor = config.ai.advisor;
+          const selection =
+            advisor && advisor.mode !== 'follow-reviewer' ? advisor : config.ai.reviewer;
+          const selected = selection.mode === 'independent' ? selection.route : config.ai.main;
+          const advisorRoutes = [selected, ...selected.failover];
           for (const route of advisorRoutes)
             if (!['claude', 'codex'].includes(route.runtime))
               configurationError(
@@ -276,7 +287,7 @@ export function createHostConfigurationComponents(
                 'ADVISOR_RUNTIME_UNAVAILABLE',
                 409,
               );
-          routes.push(...advisorRoutes);
+          if (advisor?.mode === 'independent') routes.push(...advisorRoutes);
           await image(config.execution.target);
         }
         for (const route of routes) {

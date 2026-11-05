@@ -315,12 +315,12 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
 
       try {
         if (!pod.containerId) {
-          return 'AI review failed: AI reviewer requires a live pod container';
+          return 'AI consultation failed: Advisor requires a live pod container';
         }
         const cm = containerManagerFactory.get(pod.executionTarget);
         const containerStatus = await cm.getStatus(pod.containerId);
         if (containerStatus !== 'running') {
-          return 'AI review failed: AI reviewer requires a live pod container';
+          return 'AI consultation failed: Advisor requires a live pod container';
         }
         const reviewerExecEnv = pod.launchConfigDigest
           ? undefined
@@ -344,7 +344,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         return stdout.trim();
       } catch (err) {
         logger.error({ err, podId }, 'Advisor model call failed');
-        return `AI review failed: ${err instanceof Error ? err.message : String(err)}`;
+        return `AI consultation failed: ${err instanceof Error ? err.message : String(err)}`;
       }
     },
 

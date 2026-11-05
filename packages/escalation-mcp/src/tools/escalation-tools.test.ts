@@ -208,13 +208,13 @@ describe('askHuman', () => {
       getHumanResponseOnTimeout: vi.fn().mockReturnValue('ask_ai'),
       callAdvisorModel: vi
         .fn()
-        .mockResolvedValue('AI review failed: AI reviewer requires a live pod container'),
+        .mockResolvedValue('AI consultation failed: Advisor requires a live pod container'),
     });
     const promise = askHuman('sess-1', { question: 'Slow?' }, bridge, pendingRequests);
     vi.advanceTimersByTime(1_500);
     const result = await promise;
     expect(result).toContain('[Auto-routed to AI after ask_human timeout]');
-    expect(result).toContain('AI review failed: AI reviewer requires a live pod container');
+    expect(result).toContain('AI consultation failed: Advisor requires a live pod container');
   });
 
   it('routes to AI immediately when ask_human is disabled for a series', async () => {
@@ -222,7 +222,7 @@ describe('askHuman', () => {
       isAskHumanDisabled: vi.fn().mockReturnValue(true),
       callAdvisorModel: vi
         .fn()
-        .mockResolvedValue('AI review failed: AI reviewer requires a live pod container'),
+        .mockResolvedValue('AI consultation failed: Advisor requires a live pod container'),
     });
 
     const result = await askHuman(
@@ -233,7 +233,7 @@ describe('askHuman', () => {
     );
 
     expect(result).toContain('[Auto-routed to AI — ask_human is disabled for this series]');
-    expect(result).toContain('AI review failed: AI reviewer requires a live pod container');
+    expect(result).toContain('AI consultation failed: Advisor requires a live pod container');
     expect(bridge.callAdvisorModel).toHaveBeenCalledWith('sess-1', 'What next?', 'series context');
     expect(bridge.createEscalation).not.toHaveBeenCalled();
   });
