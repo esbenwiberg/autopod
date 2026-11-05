@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type Database from 'better-sqlite3';
+import { createApprovalSourceRewriteRepository } from './approval-source-rewrite-repository.js';
 import {
   checkpointHash,
   createRetainedCheckpointRepository,
@@ -80,13 +81,25 @@ export function assertSourceDeliveryAllowed(db: Database.Database, podId: string
     const result = current?.last_validation_result
       ? JSON.parse(String(current.last_validation_result))
       : null;
+    // A later ordinary approval may prepare another isolated base rewrite. It
+    // inherits the checked repair as predecessor; only its own fresh checked
+    // selection can supersede CURRENT delivery proof. Historical repair holds stay.
+    const successor =
+      recovery.binding.approvalRewrite &&
+      current &&
+      createApprovalSourceRewriteRepository(db).isRepairSuccessor(
+        { id: podId, lifecycleGeneration: Number(current.lifecycle_generation) },
+        checkpointHash(result),
+      );
+
     if (
       !recovery.checked ||
       recovery.checked.result.overall !== 'pass' ||
       result?.taskReview?.status !== 'pass' ||
-      recovery.checked.resultHash !== checkpointHash(result) ||
-      current?.lifecycle_generation !== recovery.activated?.generation ||
-      current?.worktree_path !== recovery.prepared?.worktree ||
+      (!successor &&
+        (recovery.checked.resultHash !== checkpointHash(result) ||
+          current?.lifecycle_generation !== recovery.activated?.generation ||
+          current?.worktree_path !== recovery.prepared?.worktree)) ||
       current?.skip_validation ||
       current?.validation_waiver ||
       (current?.validation_overrides && JSON.parse(String(current.validation_overrides)).length)

@@ -26,6 +26,11 @@ export interface TaskRetryAttempt {
   outcome: TaskRetryOutcome | null;
   measuredDurationMs: number | null;
 }
+export interface RewriteRepairRetryTarget {
+  recoveryId: string;
+  candidateHead: string;
+  candidateTree: string;
+}
 export interface TaskRetryAuthorization {
   id: string;
   requestKey: string;
@@ -39,6 +44,13 @@ export interface TaskRetryAuthorization {
   usedByAttemptId: string | null;
   /** Exact worker provider binding explicitly selected during operator recovery. */
   targetBindingHash?: string;
+  rewriteRepair?: RewriteRepairRetryTarget & {
+    generation: number;
+    requestHash: string;
+    configurationHash: string;
+    rewriteId: string;
+    failedDispatchId: string;
+  };
 }
 export interface TaskRetryState {
   taskId: string;

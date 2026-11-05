@@ -792,6 +792,7 @@ it('upgrades schema 177 without broadening an existing worker permission', async
     expect(db.prepare('SELECT * FROM task_retry_authorizations').get()).toEqual({
       ...(before as object),
       target_binding_hash: null,
+      rewrite_repair: null,
     });
     expect(db.prepare('SELECT * FROM task_retry_attempts').all()).toEqual(
       failures.map((row) => ({ ...row, provider_retry_not_before: null })),
