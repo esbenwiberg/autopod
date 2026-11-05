@@ -103,7 +103,7 @@ export function configurationRoutes(
       const { podId, runId } = z
         .object({
           podId: configurationIdSchema,
-          runId: z.string().regex(/^review-[0-9a-f-]{36}$/),
+          runId: z.string().regex(/^(?:review|advisor)-[0-9a-f-]{36}$/),
         })
         .parse(request.params);
       const tokens = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);

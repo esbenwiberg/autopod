@@ -87,20 +87,25 @@ public struct TerminalEmulatorView: NSViewRepresentable {
 
   /// Called when the terminal view resizes — send resize control frame.
   public let onResize: (Int, Int) -> Void
+  public let palette: DesktopPaletteColors
 
   public init(
     dataPipe: TerminalDataPipe,
     onSendData: @escaping ([UInt8]) -> Void,
-    onResize: @escaping (Int, Int) -> Void
+    onResize: @escaping (Int, Int) -> Void,
+    palette: DesktopPaletteColors = DesktopThemeChoice.rex.colors(dark: true)
   ) {
     self.dataPipe = dataPipe
     self.onSendData = onSendData
     self.onResize = onResize
+    self.palette = palette
   }
 
   public func makeNSView(context: Context) -> TerminalScrollInterceptor {
     let tv = TerminalView(frame: .zero)
-    Self.applyTheme(tv)
+    Self.applyTheme(tv, palette: palette)
+    context.coordinator.appliedPalette = palette
+    tv.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
     tv.terminalDelegate = context.coordinator
 
     // Disable SwiftTerm's built-in mouse reporting so click/drag events
@@ -123,47 +128,27 @@ public struct TerminalEmulatorView: NSViewRepresentable {
 
   // MARK: - Theme
 
-  /// Convert 8-bit RGB to SwiftTerm's 16-bit Color.
-  private static func c(_ r: UInt16, _ g: UInt16, _ b: UInt16) -> SwiftTerm.Color {
-    SwiftTerm.Color(red: r * 257, green: g * 257, blue: b * 257)
-  }
-
-  private static func applyTheme(_ tv: TerminalView) {
-    // Dark terminal with warm tones (Catppuccin Mocha)
-    tv.nativeBackgroundColor = NSColor(red: 0.12, green: 0.12, blue: 0.18, alpha: 1) // #1e1e2e
-    tv.nativeForegroundColor = NSColor(red: 0.80, green: 0.81, blue: 0.89, alpha: 1) // #cdd6f4
-    tv.caretColor = NSColor(red: 0.95, green: 0.55, blue: 0.66, alpha: 1)            // #f38ba8
-    tv.caretTextColor = NSColor(red: 0.12, green: 0.12, blue: 0.18, alpha: 1)        // match bg
-
-    // Install Catppuccin Mocha ANSI palette — without this, shells using ANSI color
-    // codes (prompts, ls, tmux) hit SwiftTerm's default VGA palette where dark colors
-    // are invisible against our dark background.
-    tv.installColors([
-      c(0x45, 0x47, 0x5A), // 0  black   (surface1 — visible on #1e1e2e)
-      c(0xF3, 0x8B, 0xA8), // 1  red
-      c(0xA6, 0xE3, 0xA1), // 2  green
-      c(0xF9, 0xE2, 0xAF), // 3  yellow
-      c(0x89, 0xB4, 0xFA), // 4  blue
-      c(0xF5, 0xC2, 0xE7), // 5  magenta  (pink)
-      c(0x94, 0xE2, 0xD5), // 6  cyan     (teal)
-      c(0xBA, 0xC2, 0xDE), // 7  white    (subtext1)
-      c(0x58, 0x5B, 0x70), // 8  bright black  (surface2)
-      c(0xF3, 0x8B, 0xA8), // 9  bright red
-      c(0xA6, 0xE3, 0xA1), // 10 bright green
-      c(0xF9, 0xE2, 0xAF), // 11 bright yellow
-      c(0x89, 0xB4, 0xFA), // 12 bright blue
-      c(0xF5, 0xC2, 0xE7), // 13 bright magenta
-      c(0x94, 0xE2, 0xD5), // 14 bright cyan
-      c(0xCD, 0xD6, 0xF4), // 15 bright white  (text)
-    ])
-
-    // Font — SF Mono at a comfortable size with relaxed line spacing
-    tv.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+  static func applyTheme(_ tv: TerminalView, palette: DesktopPaletteColors) {
+    tv.nativeBackgroundColor = DesktopPaletteColors.native(palette.canvas)
+    tv.nativeForegroundColor = DesktopPaletteColors.native(palette.text)
+    tv.caretColor = DesktopPaletteColors.native(palette.accent)
+    tv.caretTextColor = DesktopPaletteColors.native(palette.canvas)
+    tv.selectedTextBackgroundColor = DesktopPaletteColors.native(palette.selection)
+    tv.installColors(palette.ansi.map { hex in
+      SwiftTerm.Color(red: UInt16((hex >> 16) & 255) * 257,
+                      green: UInt16((hex >> 8) & 255) * 257,
+                      blue: UInt16(hex & 255) * 257)
+    })
+    tv.needsDisplay = true
   }
 
   public func updateNSView(_ wrapper: TerminalScrollInterceptor, context: Context) {
     context.coordinator.onSendData = onSendData
     context.coordinator.onResize = onResize
+    if context.coordinator.appliedPalette != palette {
+      Self.applyTheme(wrapper.terminalView, palette: palette)
+      context.coordinator.appliedPalette = palette
+    }
   }
 
   public static func dismantleNSView(_ wrapper: TerminalScrollInterceptor, coordinator: Coordinator) {
@@ -178,6 +163,7 @@ public struct TerminalEmulatorView: NSViewRepresentable {
 
   public final class Coordinator: NSObject, TerminalViewDelegate {
     let dataPipe: TerminalDataPipe
+    var appliedPalette: DesktopPaletteColors?
     var onSendData: ([UInt8]) -> Void
     var onResize: (Int, Int) -> Void
 

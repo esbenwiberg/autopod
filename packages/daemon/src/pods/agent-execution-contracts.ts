@@ -106,6 +106,7 @@ export interface AgentProcessCaptured {
 }
 
 export interface AgentConsumerCaptured {
+  containerManagerFactory: { get(target: ExecutionTarget): ContainerManager };
   podRepo: PodRepository;
   activeAgentRunResolvers: Map<string, { token: symbol; resolve: () => void }>;
   activeAgentRuns: Map<
