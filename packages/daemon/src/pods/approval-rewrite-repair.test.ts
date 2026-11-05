@@ -280,78 +280,110 @@ it.each([true, false])(
   15_000,
 );
 
-it.each([
-  'dirty',
-  'branch',
-  'unrelated',
-  'grafts',
-  'alternates',
-  'remote',
-  'filter',
-  'alias',
-] as const)('rejects tampered prepared candidate: %s', async (kind) => {
+it('rejects each tampered prepared candidate without changing retained custody', async () => {
   const f = await fixture();
   await f.recovery.prepareRewriteRepair(f.podId, f.request, f.actor);
   await f.recovery.wait(f.request.id);
   const op = f.recovery.list(f.podId)[0]!;
   const prepared = op.prepared!;
-  if (kind === 'dirty') await writeFile(path.join(prepared.worktree, 'source.ts'), 'dirty');
-  if (kind === 'branch') await repairGit(prepared.worktree, 'checkout', '-b', 'other');
-  if (kind === 'unrelated') {
-    await repairGit(prepared.worktree, 'checkout', '--orphan', 'orphan');
-    await repairGit(
-      prepared.worktree,
-      '-c',
-      'user.name=Fixture',
-      '-c',
-      'user.email=fixture@example.invalid',
-      'commit',
-      '-m',
-      'unrelated',
-    );
-    await repairGit(prepared.worktree, 'branch', '-M', f.pod().branch);
+  const before = f.pod();
+  const retries = f.ctx.podRepo.taskRetries!.state(f.podId);
+  const original = await readFile(path.join(prepared.worktree, 'source.ts'));
+  const remote = await repairGit(prepared.worktree, 'remote', 'get-url', 'origin');
+  for (const kind of [
+    'dirty',
+    'branch',
+    'unrelated',
+    'grafts',
+    'alternates',
+    'remote',
+    'filter',
+    'alias',
+  ] as const) {
+    try {
+      if (kind === 'dirty') await writeFile(path.join(prepared.worktree, 'source.ts'), 'dirty');
+      if (kind === 'branch') await repairGit(prepared.worktree, 'checkout', '-b', 'other');
+      if (kind === 'unrelated') {
+        await repairGit(prepared.worktree, 'checkout', '--orphan', 'orphan');
+        await repairGit(
+          prepared.worktree,
+          '-c',
+          'user.name=Fixture',
+          '-c',
+          'user.email=fixture@example.invalid',
+          'commit',
+          '-m',
+          'unrelated',
+        );
+        await repairGit(prepared.worktree, 'branch', '-M', f.pod().branch);
+      }
+      if (kind === 'grafts')
+        await writeFile(path.join(prepared.bare, 'info', 'grafts'), `${prepared.head}\n`);
+      if (kind === 'alternates')
+        await writeFile(
+          path.join(prepared.bare, 'objects', 'info', 'alternates'),
+          '/tmp/foreign-objects\n',
+        );
+      if (kind === 'remote')
+        await repairGit(
+          prepared.worktree,
+          'remote',
+          'set-url',
+          'origin',
+          'https://github.com/foreign/repository',
+        );
+      if (kind === 'filter')
+        await repairGit(prepared.worktree, 'config', 'filter.bad.clean', 'false');
+      if (kind === 'alias') {
+        const { rename, symlink } = await import('node:fs/promises');
+        await rename(prepared.worktree, `${prepared.worktree}-other`);
+        await symlink(`${prepared.worktree}-other`, prepared.worktree);
+      }
+      const head =
+        kind === 'unrelated'
+          ? await repairGit(prepared.worktree, 'rev-parse', 'HEAD')
+          : prepared.head;
+      await expect(
+        f.recovery.checkRewriteRepair(
+          f.podId,
+          op.id,
+          {
+            rewriteId: f.rewriteId,
+            failedDispatchId: f.dispatchId,
+            expectedGeneration: f.request.expectedGeneration,
+            expectedResultHash: f.request.expectedResultHash,
+            candidateHead: head,
+            reason: 'Select committed repair source without expanding task authority',
+          },
+          f.actor,
+        ),
+      ).rejects.toThrow();
+      expect(f.recovery.list(f.podId)[0]!.activated).toBeNull();
+      expect(f.deps.enqueue).not.toHaveBeenCalled();
+    } finally {
+      if (kind === 'alias') {
+        const { rename } = await import('node:fs/promises');
+        await rm(prepared.worktree);
+        await rename(`${prepared.worktree}-other`, prepared.worktree);
+      }
+      if (kind === 'grafts') await rm(path.join(prepared.bare, 'info', 'grafts'));
+      if (kind === 'alternates')
+        await rm(path.join(prepared.bare, 'objects', 'info', 'alternates'));
+      if (kind === 'remote')
+        await repairGit(prepared.worktree, 'remote', 'set-url', 'origin', remote);
+      if (kind === 'filter')
+        await repairGit(prepared.worktree, 'config', '--unset', 'filter.bad.clean');
+      if (kind === 'branch') await repairGit(prepared.worktree, 'checkout', f.pod().branch);
+      if (kind === 'unrelated')
+        await repairGit(prepared.worktree, 'reset', '--hard', prepared.head);
+      await writeFile(path.join(prepared.worktree, 'source.ts'), original);
+    }
   }
-  if (kind === 'grafts')
-    await writeFile(path.join(prepared.bare, 'info', 'grafts'), `${prepared.head}\n`);
-  if (kind === 'alternates')
-    await writeFile(
-      path.join(prepared.bare, 'objects', 'info', 'alternates'),
-      '/tmp/foreign-objects\n',
-    );
-  if (kind === 'remote')
-    await repairGit(
-      prepared.worktree,
-      'remote',
-      'set-url',
-      'origin',
-      'https://github.com/foreign/repository',
-    );
-  if (kind === 'filter') await repairGit(prepared.worktree, 'config', 'filter.bad.clean', 'false');
-  if (kind === 'alias') {
-    const { rename, symlink } = await import('node:fs/promises');
-    await rename(prepared.worktree, `${prepared.worktree}-other`);
-    await symlink(`${prepared.worktree}-other`, prepared.worktree);
-  }
-  const head =
-    kind === 'unrelated' ? await repairGit(prepared.worktree, 'rev-parse', 'HEAD') : prepared.head;
-  await expect(
-    f.recovery.checkRewriteRepair(
-      f.podId,
-      op.id,
-      {
-        rewriteId: f.rewriteId,
-        failedDispatchId: f.dispatchId,
-        expectedGeneration: f.request.expectedGeneration,
-        expectedResultHash: f.request.expectedResultHash,
-        candidateHead: head,
-        reason: 'Select committed repair source without expanding task authority',
-      },
-      f.actor,
-    ),
-  ).rejects.toThrow();
-  expect(f.recovery.list(f.podId)[0]!.activated).toBeNull();
-  expect(f.deps.enqueue).not.toHaveBeenCalled();
-});
+  expect(f.pod()).toEqual(before);
+  expect(f.ctx.podRepo.taskRetries!.state(f.podId)).toEqual(retries);
+  expect(f.recovery.list(f.podId)[0]!.selected).toBeNull();
+// Eight native Git scenarios retain their original aggregate 8 × 5s budget.
+}, 40_000);
 
 it('retains crashed preparation as a non-replayable claim across database reopen', async () => {
   const f = await fixture();
