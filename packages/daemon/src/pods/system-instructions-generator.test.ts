@@ -695,9 +695,16 @@ human_review: []
 
   it.each([
     {},
+    { lintCommand: 'npm run lint', buildCommand: 'npm run build', testCommand: 'npm test' },
     { buildCommand: null, testCommand: null, lintCommand: null },
     { buildWorkDir: 'apps/web' },
     { outputMode: 'artifact' as const },
+    {
+      outputMode: 'artifact' as const,
+      buildCommand: null,
+      testCommand: null,
+      lintCommand: null,
+    },
   ])('keeps affected-work verification consistent for %j', (overrides) => {
     const md = generateSystemInstructions(
       makeProfile(overrides),
