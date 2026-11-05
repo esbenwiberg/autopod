@@ -84,7 +84,7 @@ On a Mac run:
 ```sh
 cd packages/desktop
 swift build
-swift test --filter 'ReworkTransportTests|versionedRework|TaskRetryClientTests|retryClient|PodRepairReworkTests|PodRepairResumeTests|FollowUpTests'
+swift test --filter 'ReworkTransportTests|versionedRework|TaskRetryClientTests|retryClient|PodRepairReworkTests|PodRepairResumeTests|FollowUpTests|TaskBudgetTests'
 swift test
 xcodebuild -project Autopod.xcodeproj -scheme Autopod -configuration Debug -destination 'platform=macOS' build
 ```
