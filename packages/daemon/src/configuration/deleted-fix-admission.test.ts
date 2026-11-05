@@ -104,10 +104,10 @@ async function fixture() {
     await app.close();
     ctx.db.close();
   });
-  const request = () =>
+  const request = (podId = 'root') =>
     app.inject({
       method: 'POST',
-      url: '/pods/root/spawn-fix',
+      url: `/pods/${podId}/spawn-fix`,
       payload: { message: 'Synthetic review feedback' },
     });
   const child = () => {
@@ -176,6 +176,45 @@ describe('deleted canonical fix admission composition', () => {
     expect(f.snapshots.get(first.id)).toEqual(snapshot);
     expect(f.snapshots.get(second.id)).toEqual(snapshot);
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
+  });
+
+  it('dispatches unrelated native queued repairs without changing derived admission receipts', async () => {
+    const f = await fixture();
+    const other = await admitLaunch({
+      request: {
+        repositoryId: 'repo-a',
+        task: 'An independent original task',
+        selections: { githubAccessId: null },
+        work: { branch: 'fixture/other', baseBranch: 'main' },
+      },
+      actorId: 'operator',
+      services: f.resolution,
+      snapshots: f.snapshots,
+      createPod: (config) => f.insert('other-root', config),
+    });
+    f.podRepo.update(other.podId, {
+      status: 'merge_pending',
+      prUrl: 'https://github.com/org/repo-a/pull/2',
+    });
+    expect((await f.request()).statusCode).toBe(202);
+    expect((await f.request('other-root')).statusCode).toBe(202);
+    const first = f.child();
+    const secondId = f.podRepo.getOrThrow('other-root').fixPodId;
+    if (!secondId) throw new Error('Missing other repair');
+    const receipts = f.receipts();
+    const dispatch = f.podRepo.dispatchPreflight;
+    expect(
+      dispatch?.inspect(first.id, 1, 'https://github.com/org/repo-a', 'main', 'a'.repeat(40))
+        .status,
+    ).toBe('admitted');
+    expect(
+      dispatch?.inspect(secondId, 1, 'https://github.com/org/repo-a', 'main', 'a'.repeat(40))
+        .status,
+    ).toBe('admitted');
+    expect(f.receipts()).toEqual(receipts);
+    expect(f.podRepo.getOrThrow('root').prFixAttempts).toBe(1);
+    expect(f.podRepo.getOrThrow('other-root').prFixAttempts).toBe(1);
+    expect(f.snapshots.get(secondId)?.repository).toEqual(other.config.repository);
   });
 
   it('rejects the retained deleted admission readably before queue/event effects and preserves its audit', async () => {
@@ -488,7 +527,29 @@ describe('deleted canonical fix admission composition', () => {
       model: first.model,
       providerAccountId: first.providerAccountIdSnapshot ?? null,
     };
+    expect(
+      f.podRepo.dispatchPreflight?.inspect(
+        first.id,
+        first.lifecycleGeneration,
+        'https://github.com/org/repo-a',
+        'main',
+        'a'.repeat(40),
+      ).status,
+    ).toBe('admitted');
     const run = ledger.beginRun(first.id, first.lifecycleGeneration, 1, binding);
+    expect(
+      f.podRepo.dispatchPreflight?.inspect(
+        first.id,
+        first.lifecycleGeneration,
+        'https://github.com/org/repo-a',
+        'main',
+        'a'.repeat(40),
+      ).status,
+    ).toBe('admitted');
+    expect(() => ledger.beginRun(first.id, first.lifecycleGeneration, 2, binding)).toThrow(
+      /still active/,
+    );
+
     retries.admit(
       first.id,
       first.lifecycleGeneration,
@@ -519,6 +580,15 @@ describe('deleted canonical fix admission composition', () => {
     });
     expect((await f.request()).statusCode).toBe(202);
     const second = f.child();
+    expect(
+      f.podRepo.dispatchPreflight?.inspect(
+        second.id,
+        second.lifecycleGeneration,
+        'https://github.com/org/repo-a',
+        'main',
+        'a'.repeat(40),
+      ).status,
+    ).toBe('admitted');
     expect(second).toMatchObject({
       providerAccountIdSnapshot: first.providerAccountIdSnapshot,
       providerIdSnapshot: first.providerIdSnapshot,

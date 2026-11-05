@@ -11,6 +11,7 @@ import type { ReviewerExecutor } from '../interfaces/reviewer-executor.js';
 import type { ValidationEngineConfig } from '../interfaces/validation-engine.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import { parseDiffFilePaths } from '../validation/review-context-builder.js';
+import { isolatedReviewDiffLimit } from '../validation/reviewer-input-bounds.js';
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
 import { rewriteError } from './approval-source-rewrite-repository.js';
 import type { PendingOverrideRepository } from './pending-override-repository.js';
@@ -113,7 +114,7 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
           worktreeManager.getDiff(
             pod.worktreePath,
             validationDefaultBranch,
-            undefined,
+            isolatedReviewDiffLimit(pod.launchConfigDigest),
             diffSinceCommit,
           ),
           worktreeManager.getCommitLog(

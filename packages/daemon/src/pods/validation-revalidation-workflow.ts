@@ -1,6 +1,7 @@
 import { AutopodError } from '@autopod/shared';
 import { isExpectedDockerError } from '../containers/docker-helpers.js';
 import { parseDiffFilePaths } from '../validation/review-context-builder.js';
+import { isolatedReviewDiffLimit } from '../validation/reviewer-input-bounds.js';
 import { buildValidationContextEnv } from '../validation/validation-context-env.js';
 import {
   type AdoptedSourceValidationRequest,
@@ -380,7 +381,7 @@ export function createValidationRevalidationWorkflow(
               worktreeManager.getDiff(
                 revalidationWorktreePath,
                 revalDefaultBranch,
-                undefined,
+                isolatedReviewDiffLimit(pod.launchConfigDigest),
                 pod.startCommitSha ?? undefined,
               ),
               worktreeManager.getCommitLog(

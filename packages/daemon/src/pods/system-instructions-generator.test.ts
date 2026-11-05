@@ -84,6 +84,43 @@ function makeSession(overrides?: Partial<Pod>): Pod {
 }
 
 describe('generateSystemInstructions', () => {
+  it.each([
+    ['claude', 'Prefer built-in `Edit`'],
+    ['codex', 'native `apply_patch`'],
+    ['pi', 'native `edit`'],
+    ['copilot', 'native file-editing tools exposed by your runtime'],
+  ] as const)(
+    'gives %s editing guidance with and without code-intel MCPs',
+    (runtime, preferred) => {
+      for (const withMcp of [false, true]) {
+        const md = generateSystemInstructions(
+          makeProfile(),
+          makeSession({ runtime }),
+          'http://localhost:8080/mcp/x',
+          {
+            injectedMcpServers: withMcp
+              ? [{ type: 'stdio', name: 'serena', command: 'serena' }]
+              : [],
+          },
+        );
+        expect(md).toContain('## File Editing');
+        expect(md).toContain(preferred);
+        expect(md).toContain('Use only tools actually exposed in your session');
+        expect(md).toContain('Shell/script edits remain appropriate');
+        if (runtime !== 'claude') expect(md).not.toContain('`MultiEdit`');
+        if (runtime !== 'codex') expect(md).not.toContain('`apply_patch`');
+      }
+    },
+  );
+
+  it('does not add coding-edit guidance to research/artifact workflows', () => {
+    const md = generateSystemInstructions(
+      makeProfile({ outputMode: 'artifact' }),
+      makeSession({ outputMode: 'artifact' }),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).not.toContain('## File Editing');
+  });
   it('allows normal read tools for supplied references while restricting other repositories', () => {
     const md = generateSystemInstructions(
       makeProfile(),
@@ -404,7 +441,8 @@ human_review: []
     expect(md).toContain(
       'Use them for symbol navigation, references, implementations, type hierarchy, and code exploration.',
     );
-    expect(md).toContain('use built-in `Edit`, `MultiEdit`, or `Write` for simple literal changes');
+    expect(md).toContain('prefer the native editing tools actually exposed by your runtime');
+    expect(md).toContain('Prefer built-in `Edit`, `MultiEdit` (when available), or `Write`');
     expect(md).toContain(
       'Use a semantic MCP refactor or rename tool only when the loaded schema explicitly offers one',
     );

@@ -76,12 +76,15 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
   let browserTotalChecks = 0;
   let browserPassedChecks = 0;
   let ambiguousInspectionCount = 0;
+  let hasWorkspaceObservation = false;
 
   for (const stored of events) {
     if (stored.type !== 'pod.agent_activity') continue;
     const activity = stored.payload as AgentActivityEvent;
     const event = activity.event;
 
+    if (event.type === 'file_change' && event.source === 'workspace')
+      hasWorkspaceObservation = true;
     const activityEvidence = normalizeQualityActivityEvidence(event);
     qualityActivities.push(...activityEvidence.activities);
     if (activityEvidence.ambiguousInspection) ambiguousInspectionCount += 1;
@@ -115,7 +118,9 @@ export function computeQualitySignals(podId: string, deps: QualitySignalsDeps): 
 
   let readCount = 0;
   let editCount = 0;
-  let inspectionEvidenceComplete = true;
+  // Even with some native activity, snapshots leave mutation timing/counts
+  // unknown. Do not give a misleading process-health score for partial evidence.
+  let inspectionEvidenceComplete = !hasWorkspaceObservation;
   const readPaths = new Set<string>();
   const blindPaths = new Set<string>();
   const fileModifyCounts = new Map<string, number>();

@@ -179,6 +179,7 @@ export function generateSystemInstructions(
   // Placed before Operating Environment so the agent sees it immediately after
   // the task, not buried in the MCP server catalogue.
   generateCodeNavigationRules(lines, options?.injectedMcpServers ?? []);
+  if (profile.outputMode !== 'artifact') generateFileEditingRules(lines, pod.runtime);
 
   // Operating Environment section (adapts to profile config)
   generateOperatingEnvironment(
@@ -1104,6 +1105,36 @@ const CODE_INTEL_TOOL_ROWS: Array<{ task: string; tool: string; server: string }
   },
 ];
 
+function generateFileEditingRules(lines: string[], runtime: Pod['runtime']): void {
+  lines.push('## File Editing');
+  lines.push('');
+  switch (runtime) {
+    case 'claude':
+      lines.push(
+        'Prefer built-in `Edit`, `MultiEdit` (when available), or `Write` for file changes.',
+      );
+      break;
+    case 'codex':
+      lines.push('Prefer the native `apply_patch` tool for file changes when it is available.');
+      break;
+    case 'pi':
+      lines.push(
+        'Prefer native `edit` for targeted changes and `write` for new files or rewrites.',
+      );
+      break;
+    case 'copilot':
+      lines.push('Prefer the native file-editing tools exposed by your runtime, when available.');
+      break;
+  }
+  lines.push(
+    'Use only tools actually exposed in your session. For ordinary edits, prefer those tools over ' +
+      'Python, shell redirection, or scripted text replacement. Shell/script edits remain appropriate ' +
+      'for generators, justified bulk transformations, or when no suitable native tool is available. ' +
+      'Inspect the resulting diff and run relevant checks whichever editing path you use.',
+  );
+  lines.push('');
+}
+
 function generateCodeNavigationRules(
   lines: string[],
   injectedMcpServers: InjectedMcpServer[],
@@ -1121,8 +1152,8 @@ function generateCodeNavigationRules(
       'the semantic tools are faster and more accurate.',
   );
   lines.push(
-    'For file edits, use built-in `Edit`, `MultiEdit`, or `Write` for simple literal changes, ' +
-      'local replacements, and new files. Use a semantic MCP refactor or rename tool only when ' +
+    'For file edits, prefer the native editing tools actually exposed by your runtime. ' +
+      'Use a semantic MCP refactor or rename tool only when ' +
       'the loaded schema explicitly offers one for a reference-aware rename/refactor. ' +
       'Do not use Serena `replace_content` for routine text edits unless semantic lookup context ' +
       'is needed or no built-in edit path is suitable.',

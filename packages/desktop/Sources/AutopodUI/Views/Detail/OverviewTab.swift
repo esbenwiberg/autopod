@@ -153,7 +153,7 @@ struct OverviewTab: View {
     // MARK: - Overview summary
 
     private var overviewStatusStrip: some View {
-        let accent = redesign && !pod.status.needsAttention ? DesktopTheme.accent : pod.status.color
+        let accent = redesign ? DesktopTheme.statusColor(pod.status) : pod.status.color
         return HStack(alignment: .top, spacing: 12) {
             Image(systemName: overviewStatusIcon)
                 .font(.system(size: 18, weight: .semibold))

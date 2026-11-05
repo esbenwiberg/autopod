@@ -7,6 +7,7 @@ import type { AutopodClient } from '../api/client.js';
 import { saveLaunchReceipt } from '../config/launch-store.js';
 import { parseTokenBudget } from './budget.js';
 import { type LaunchFlags, buildLaunchRequest } from './launch-request.js';
+import { validateEffectiveLaunchSources, validateLaunchSources } from './launch-sources.js';
 import { type LaunchTaskFlags, readLaunchTask } from './launch-task.js';
 
 function positive(value: string): number {
@@ -53,9 +54,9 @@ export function registerLaunchCommand(
     .option('--spec <folder>', 'Read a brief and contract, with runtime context files')
     .option('--include-specs', 'Commit the spec files on the new pod branch')
     .option('--no-spec-context', 'Omit spec files from runtime context')
-    .option('--branch <name>', 'Explicit branch name for this work')
-    .option('--start-branch <ref>', 'Start from this branch or revision')
-    .option('--base-branch <ref>', 'Target this base branch')
+    .option('--branch <name>', 'Output branch name for this work')
+    .option('--start-branch <name>', 'Start from a published remote branch name')
+    .option('--base-branch <name>', 'Published remote base branch name')
     .option('--completion <policy>', 'Completion: approval, deliver, merge, accept-findings')
     .option('--output <target>', 'Output: pr, branch, artifact, none')
     .option('--goal <objective>', 'Use a supported native Goal workflow')
@@ -136,6 +137,12 @@ export function registerLaunchCommand(
             configuration: opts.sourceConfig,
           },
         };
+      }
+      if (opts.preview || !(file as LaunchRequest | undefined)?.expectedDigest) {
+        validateLaunchSources({
+          ...(file as LaunchRequest | undefined)?.work,
+          ...taskInput.work,
+        });
       }
       const flags =
         mode.analysis && !file && !opts.task && !opts.goal
@@ -240,9 +247,11 @@ export function registerLaunchCommand(
           },
         };
       }
+      if (opts.preview || !request.expectedDigest) validateLaunchSources(request.work);
       // An exact saved retry reaches admission before mutable preset/discovery reads.
       const effective =
         opts.preview || !request.expectedDigest ? await client.resolveLaunch(request) : undefined;
+      if (effective) validateEffectiveLaunchSources(effective);
       if (
         mode.output &&
         effective &&

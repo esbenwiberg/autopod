@@ -4290,9 +4290,11 @@ describe('PodManager', () => {
         .prepare("UPDATE pods SET status = 'running', container_id = 'container-123' WHERE id = ?")
         .run(pod.id);
 
+      const enteredStream = deferred<void>();
       const consuming = manager.consumeAgentEvents(
         pod.id,
         (async function* () {
+          enteredStream.resolve();
           await releaseStream.promise;
           yield {
             type: 'status',
@@ -4301,6 +4303,9 @@ describe('PodManager', () => {
           } as const;
         })(),
       );
+      // Pause a worker that has actually started, not the new asynchronous
+      // pre-agent file-observation baseline (which can settle without a worker).
+      await enteredStream.promise;
       const pausing = manager.pauseSession(pod.id);
       const pauseFailure = expect(pausing).rejects.toMatchObject({
         code: 'PAUSE_QUIESCENCE_TIMEOUT',
@@ -30210,6 +30215,41 @@ describe('reviewer context compatibility', () => {
       service,
     };
   }
+
+  it('preserves complete bounded isolated review diff through real revalidation', async () => {
+    const f = await composed('independent');
+    try {
+      const { truncateDiffAtFileBoundary } = await import('../worktrees/diff-utils.js');
+      const full = ['implementation.ts', 'client.ts']
+        .map((name) => `diff --git a/${name} b/${name}\n${'+new line\n'.repeat(19_000)}`)
+        .join('');
+      vi.mocked(f.ctx.worktreeManager.getDiff).mockImplementation(
+        async (_path, _base, limit = 200_000) => truncateDiffAtFileBoundary(full, limit),
+      );
+      f.ctx.podRepo.update(f.pod.id, {
+        status: 'failed',
+        containerId: 'review-context-container',
+        worktreePath: '/tmp/review-context',
+        startCommitSha: 'a'.repeat(40),
+      });
+      await f.manager.revalidateSession(f.pod.id, { force: true, checksOnly: true });
+      expect(f.ctx.validationEngine.validate).toHaveBeenCalledOnce();
+      const config = vi.mocked(f.ctx.validationEngine.validate).mock.calls[0]?.[0];
+      expect(config?.diff?.length).toBe(full.length);
+      expect(config?.diff).toBe(full);
+      expect(config?.reviewerExecutor).toBe(f.executor);
+      expect(config?.startCommitSha).toBe('a'.repeat(40));
+      expect(f.ctx.worktreeManager.getDiff).toHaveBeenCalledWith(
+        '/tmp/review-context',
+        'main',
+        1_000_000,
+        'a'.repeat(40),
+      );
+      expect(f.ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+    } finally {
+      f.ctx.db.close();
+    }
+  });
 
   it.each(['independent', 'follow-main'] as const)(
     '%s preserves config, route selection, purpose and isolated env',

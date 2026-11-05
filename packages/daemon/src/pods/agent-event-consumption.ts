@@ -28,6 +28,7 @@ import {
   unavailableWorkerInputs,
   workerBindingHash,
 } from './worker-retry-history.js';
+import { createWorkspaceFileObserver } from './workspace-file-observer.js';
 
 export function createAgentEventConsumption(
   deps: Pick<
@@ -42,6 +43,7 @@ export function createAgentEventConsumption(
 ) {
   const {
     podRepo,
+    containerManagerFactory,
     activeAgentRunResolvers,
     activeAgentRuns,
     resolveEffectiveBoundProfile,
@@ -143,6 +145,7 @@ export function createAgentEventConsumption(
     let workerAdmissionId: string | undefined;
     let workerStartedAt: number | undefined;
     let workerNotBefore: string | undefined;
+    let fileObserver: ReturnType<typeof createWorkspaceFileObserver> | undefined;
     try {
       const initialized = atomicPodChange(podRepo, () => {
         assertNoInfrastructureBlocker(podRepo, podId);
@@ -240,6 +243,39 @@ export function createAgentEventConsumption(
       assertNoInfrastructureBlocker(podRepo, podId);
       if (workerAdmissionId) podRepo.workerRetries?.start(workerAdmissionId);
       workerStartedAt = performance.now();
+      if (initialPod.containerId) {
+        fileObserver = createWorkspaceFileObserver({
+          containerManager: containerManagerFactory.get(initialPod.executionTarget),
+          containerId: initialPod.containerId,
+          isCurrent: () => {
+            if (!ownsRun() || pauseIntents.has(podId)) return false;
+            const status = podRepo.getOrThrow(podId).status;
+            return status === 'running' || status === 'awaiting_input';
+          },
+          emit: (event) => {
+            eventBus.emit({ type: 'pod.agent_activity', timestamp: event.timestamp, podId, event });
+          },
+          unavailable: () => {
+            logger.warn({ podId }, 'Workspace file observation unavailable or incomplete');
+            emitActivityStatus(
+              podId,
+              'File tracking is incomplete: workspace observation failed; logs may omit edits.',
+            );
+          },
+        });
+        // Runtime streams are lazy: baseline after provisioning, before pulling
+        // the first event starts the coding worker. Resume establishes a new
+        // baseline rather than replaying old edits as new activity.
+        await fileObserver.start();
+        if (!ownsRun()) return 'stopped';
+        if (pauseIntents.has(podId)) {
+          outcome = 'paused';
+          return outcome;
+        }
+      }
+      // Baseline capture awaits native I/O. A current-lifecycle report may have
+      // arrived without changing status or reaching the automatic pause threshold.
+      assertNoInfrastructureBlocker(podRepo, podId);
       for await (const event of events) {
         workerEventObserved = true;
         // Negative termination evidence belongs to this immutable run, even
@@ -273,6 +309,22 @@ export function createAgentEventConsumption(
           seenCompleteEvents.add(completeKey);
         }
 
+        if (event.type === 'complete') {
+          await fileObserver?.finish();
+          if (!ownsRun()) return 'stopped';
+          if (pauseIntents.has(podId)) {
+            outcome = 'paused';
+            continue;
+          }
+        }
+        if (event.type === 'file_change' && fileObserver?.active) {
+          // One authoritative observed event per changed path per snapshot,
+          // regardless of runtime, avoids native/observer duplicate File rows
+          // and does not mistake an attempted native edit for a mutation.
+          bumpActivityTimestamp(podId);
+          touchHeartbeat(podId);
+          continue;
+        }
         eventBus.emit({
           type: 'pod.agent_activity',
           timestamp: event.timestamp,
@@ -611,6 +663,10 @@ export function createAgentEventConsumption(
       eventError = err;
       hasEventError = true;
     } finally {
+      // Also flush finite streams which synthesize completion outside the
+      // parser. Never observe after cancellation, failure or uncertain exit.
+      if (outcome === 'completed' && !executionTerminationUnverified) await fileObserver?.finish();
+      await fileObserver?.stop();
       if (!ownsRun()) {
         superseded = true;
         // No terminal event was accepted for this run after it lost ownership.

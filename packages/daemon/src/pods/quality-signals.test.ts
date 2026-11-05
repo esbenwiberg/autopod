@@ -178,6 +178,29 @@ describe('computeQualitySignals', () => {
     deps = { podRepo, eventRepo, escalationRepo };
   });
 
+  it('does not count snapshots as edit operations or infer read-before-write and churn from them', () => {
+    podRepo.insert(basePod());
+    eventRepo.insert(toolUse('edit', { path: 'src/native.ts' }));
+    // A read observed before the snapshot might actually have followed the
+    // shell edit. Do not use delayed snapshot ordering to credit it.
+    eventRepo.insert(readTool('src/shell.ts'));
+    for (let i = 0; i < 4; i++) {
+      const activity = fileChange('src/shell.ts', 'modify');
+      (activity.event as AgentFileChangeEvent).source = 'workspace';
+      eventRepo.insert(activity);
+    }
+    const signals = computeQualitySignals(POD_ID, deps);
+    expect(signals).toMatchObject({
+      inspectionAvailability: 'unavailable',
+      inspectionUnavailableReason: 'unresolved_write',
+      editCount: 1,
+      editChurnCount: 0,
+      readCount: null,
+      readEditRatio: null,
+      editsWithoutPriorRead: null,
+    });
+  });
+
   it('returns green with zero edits (research-only pod)', () => {
     podRepo.insert(basePod());
     eventRepo.insert(readTool('src/a.ts'));

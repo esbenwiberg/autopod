@@ -26,6 +26,7 @@ export function createAgentExecutionFixture(disk = false) {
     activeAgentRuns: registry.activeAgentRuns,
   });
   const consumerCaptured = {
+    containerManagerFactory: f.deps.containerManagerFactory,
     ...registry,
     ...activity,
     ...attempts,
