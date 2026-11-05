@@ -4,6 +4,7 @@ import SwiftUI
 /// Sidebar with smart groups, profiles, and connection status.
 public struct SidebarView: View {
     public let pods: [Pod]
+    public let configurationDocuments: [ConfigurationDocument]
     @Binding public var selection: SidebarItem
     @Binding public var showCreateSheet: Bool
     @Binding public var showCreateSeriesSheet: Bool
@@ -17,6 +18,7 @@ public struct SidebarView: View {
 
     public init(
         pods: [Pod],
+        configurationDocuments: [ConfigurationDocument] = [],
         selection: Binding<SidebarItem>,
         showCreateSheet: Binding<Bool>,
         showCreateSeriesSheet: Binding<Bool> = .constant(false),
@@ -29,6 +31,7 @@ public struct SidebarView: View {
         onShowSettings: (() -> Void)? = nil
     ) {
         self.pods = pods.filter { $0.fleetArchivedAt == nil }
+        self.configurationDocuments = configurationDocuments
         self._selection = selection
         self._showCreateSheet = showCreateSheet
         self._showCreateSeriesSheet = showCreateSeriesSheet
@@ -56,7 +59,9 @@ public struct SidebarView: View {
         }
         return activeSeries.count
     }
-    private var profiles: [String] { Array(Set(pods.map(\.profileName))).sorted() }
+    private var profiles: [DesktopProfileFilter] {
+        DesktopProfileFilter.rows(pods: pods, documents: configurationDocuments)
+    }
 
     @Environment(\.desktopRedesign) private var redesign
     public var body: some View {
@@ -120,8 +125,9 @@ public struct SidebarView: View {
                 }
 
                 Section("Profiles") {
-                    ForEach(profiles, id: \.self) { profile in
-                        sidebarRow(.profile(profile), icon: "folder.fill", color: .secondary, badge: pods.filter { $0.profileName == profile }.count)
+                    ForEach(profiles) { profile in
+                        sidebarRow(.profile(profile.id), icon: "folder.fill", color: .secondary, badge: profile.count, title: profile.label)
+                            .help(profile.label)
                     }
                 }
             }
@@ -206,8 +212,9 @@ public struct SidebarView: View {
                     redesignedRow(.managedPods, "shippingbox", "Managed pods", managedPodCount)
                     if !profiles.isEmpty {
                         DisclosureGroup("Filter by profile") {
-                            ForEach(profiles, id: \.self) { name in
-                                redesignedRow(.profile(name), "folder", name, pods.filter { $0.profileName == name }.count)
+                            ForEach(profiles) { profile in
+                                redesignedRow(.profile(profile.id), "folder", profile.label, profile.count)
+                                    .help(profile.label)
                             }
                         }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.top, 12)
                     }
@@ -309,10 +316,10 @@ public struct SidebarView: View {
         .buttonStyle(.plain)
     }
 
-    private func sidebarRow(_ item: SidebarItem, icon: String, color: Color, badge: Int) -> some View {
+    private func sidebarRow(_ item: SidebarItem, icon: String, color: Color, badge: Int, title: String? = nil) -> some View {
         Label {
             HStack {
-                Text(item.label)
+                Text(title ?? item.label)
                 Spacer()
                 if badge > 0 {
                     Text("\(badge)")

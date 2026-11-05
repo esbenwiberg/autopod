@@ -569,9 +569,17 @@ public struct MainView: View {
         }
     }
 
+    private var sidebarSelectionLabel: String {
+        if case .profile(let id) = sidebarSelection {
+            return DesktopProfileFilter.label(for: id, documents: configurationActions?.documents ?? [])
+        }
+        return sidebarSelection.label
+    }
+
     private var workspaceSidebar: some View {
         SidebarView(
-            pods: pods, selection: sidebarBinding, showCreateSheet: $showCreateSheet,
+            pods: pods, configurationDocuments: configurationActions?.documents ?? [],
+            selection: sidebarBinding, showCreateSheet: $showCreateSheet,
             showCreateSeriesSheet: $showCreateSeriesSheet, isConnected: isConnected,
             connectionLabel: connectionLabel, pendingMemoryCount: pendingMemoryCount,
             scheduledJobCount: scheduledJobs.count,
@@ -924,6 +932,7 @@ public struct MainView: View {
         NavigationSplitView {
             SidebarView(
                 pods: pods,
+                configurationDocuments: configurationActions?.documents ?? [],
                 selection: sidebarBinding,
                 showCreateSheet: $showCreateSheet,
                 showCreateSeriesSheet: $showCreateSeriesSheet,
@@ -1146,7 +1155,7 @@ public struct MainView: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(sidebarSelection == .all ? "All pods" : sidebarSelection.label)
+                    Text(sidebarSelection == .all ? "All pods" : sidebarSelectionLabel)
                         .font(.system(size: 26, weight: .semibold)).tracking(-0.7)
                     Text("\(fleet.visible.count) \(fleet.visible.count == 1 ? "pod" : "pods") · \(repositoryIndex.repositories.first { $0.id == repositoryID }?.label ?? "All repositories")")
                         .font(.caption).foregroundStyle(.secondary)
@@ -1218,7 +1227,7 @@ public struct MainView: View {
 
     private func toolbarTitle(fleet: DesktopFleetPresentation) -> some View {
         HStack(spacing: 8) {
-            Text(sidebarSelection.label)
+            Text(sidebarSelectionLabel)
                 .font(.headline)
                 .lineLimit(1)
                 .fixedSize()
