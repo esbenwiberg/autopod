@@ -144,13 +144,25 @@ let browser;
   await page.evaluate(async (allowedOrigin) => {
     const local = [...document.images].filter((image) => {
       const source = image.currentSrc || image.src;
+      const bounds = image.getBoundingClientRect();
+      const inView =
+        bounds.top < innerHeight &&
+        bounds.bottom >= 0 &&
+        bounds.left < innerWidth &&
+        bounds.right >= 0;
       return (
-        source.startsWith(`${allowedOrigin}/`) ||
-        source.startsWith('data:') ||
-        source.startsWith('blob:')
+        inView &&
+        (source.startsWith(`${allowedOrigin}/`) ||
+          source.startsWith('data:') ||
+          source.startsWith('blob:'))
       );
     });
-    await Promise.all(local.map((image) => image.decode()));
+    await Promise.all(
+      local.map((image) => {
+        image.loading = 'eager';
+        return image.decode();
+      }),
+    );
   }, origin);
   stage = 'screenshot';
   const bytes = await page.screenshot({

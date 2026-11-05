@@ -22,7 +22,7 @@ describe.skipIf(!image)('real isolated reference renderer', () => {
         path: 'design/index.html',
         mediaType: 'text/html' as const,
         bytes: Buffer.from(
-          `<!doctype html><link rel="stylesheet" href="assets/style.css"><div id="red"></div><div id="blue"></div><div id="green"></div><img src="assets/pixel.png" style="position:absolute;left:1200px;top:800px"><img src="http://169.254.169.254/metadata"><img src="file:///etc/passwd"><iframe src="http://127.0.0.1:1"></iframe><script>document.querySelector('#green').style.background='rgb(0,180,0)';fetch('http://169.254.169.254/metadata').catch(()=>{});fetch('http://127.0.0.1:1').catch(()=>{});try { new WebSocket('ws://reference.invalid/no-socket'); } catch {} throw new Error('fixture script failure');</script>`,
+          `<!doctype html><link rel="stylesheet" href="assets/style.css"><div id="red"></div><div id="blue"></div><div id="green"></div><img src="assets/pixel.png" style="position:absolute;left:1200px;top:800px"><img src="http://169.254.169.254/metadata"><img src="file:///etc/passwd"><iframe src="http://127.0.0.1:1"></iframe><img loading="lazy" src="assets/offscreen.svg" style="position:absolute;top:50000px;width:100px;height:100px"><script>document.querySelector('#green').style.background='rgb(0,180,0)';fetch('http://169.254.169.254/metadata').catch(()=>{});fetch('http://127.0.0.1:1').catch(()=>{});try { new WebSocket('ws://reference.invalid/no-socket'); } catch {} throw new Error('fixture script failure');</script>`,
         ),
       },
       {
@@ -30,6 +30,13 @@ describe.skipIf(!image)('real isolated reference renderer', () => {
         mediaType: 'text/css' as const,
         bytes: Buffer.from(
           'html,body{margin:0}div{position:absolute;top:0;height:900px;width:400px}#red{left:0;background:rgb(255,0,0)}#blue{left:400px;background:rgb(0,0,255)}#green{left:800px;background:white}',
+        ),
+      },
+      {
+        path: 'design/assets/offscreen.svg',
+        mediaType: 'image/svg+xml' as const,
+        bytes: Buffer.from(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="red"/></svg>',
         ),
       },
       {
@@ -69,7 +76,10 @@ describe.skipIf(!image)('real isolated reference renderer', () => {
         bundleDigest: ref.digest,
       });
       expect(preview.receipt.resourceSha256s.sort()).toEqual(
-        ref.files.map((file) => file.sha256).sort(),
+        ref.files
+          .filter((file) => file.path !== 'design/assets/offscreen.svg')
+          .map((file) => file.sha256)
+          .sort(),
       );
       expect(preview.receipt.blockedRequests).toBeGreaterThan(0);
       expect(preview.receipt.scriptErrors).toBeGreaterThan(0);
