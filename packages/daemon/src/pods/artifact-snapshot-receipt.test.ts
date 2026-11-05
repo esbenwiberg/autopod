@@ -49,26 +49,30 @@ describe('artifact snapshot integrity receipts', () => {
     await writeFile(path.join(snapshot, 'report.md'), 'changed');
     await expect(readArtifactSnapshotFile(snapshot, root, 3, 0, 'report.md')).rejects.toThrow();
   });
-  it.each(['bytes', 'path', 'mode', 'link', 'missing-file', 'added-file'] as const)(
-    'rejects changed %s after publication',
-    async (change) => {
-      const snapshot = await collect();
-      await expect(verifyArtifactSnapshot(snapshot, root, 3)).resolves.toBeUndefined();
-      const report = path.join(snapshot, 'report.md');
-      if (change === 'bytes') await writeFile(report, 'changed report');
-      if (change === 'path') await rename(report, path.join(snapshot, 'renamed.md'));
-      if (change === 'mode') await chmod(report, 0o700);
-      if (change === 'missing-file') await rm(report);
-      if (change === 'added-file') await writeFile(path.join(snapshot, 'new.md'), 'new');
-      if (change === 'link') {
-        await rm(path.join(snapshot, 'reference'));
-        await symlink('/different/target', path.join(snapshot, 'reference'));
-      }
-      await expect(verifyArtifactSnapshot(snapshot, root, 3)).rejects.toMatchObject({
-        code: 'ARTIFACT_SNAPSHOT_UNVERIFIED',
-      });
-    },
-  );
+  it.each([
+    'bytes',
+    'path',
+    'mode',
+    'link',
+    'missing-file',
+    'added-file',
+  ] as const)('rejects changed %s after publication', async (change) => {
+    const snapshot = await collect();
+    await expect(verifyArtifactSnapshot(snapshot, root, 3)).resolves.toBeUndefined();
+    const report = path.join(snapshot, 'report.md');
+    if (change === 'bytes') await writeFile(report, 'changed report');
+    if (change === 'path') await rename(report, path.join(snapshot, 'renamed.md'));
+    if (change === 'mode') await chmod(report, 0o700);
+    if (change === 'missing-file') await rm(report);
+    if (change === 'added-file') await writeFile(path.join(snapshot, 'new.md'), 'new');
+    if (change === 'link') {
+      await rm(path.join(snapshot, 'reference'));
+      await symlink('/different/target', path.join(snapshot, 'reference'));
+    }
+    await expect(verifyArtifactSnapshot(snapshot, root, 3)).rejects.toMatchObject({
+      code: 'ARTIFACT_SNAPSHOT_UNVERIFIED',
+    });
+  });
 
   it('legacy receipts remain readable but do not authorize approval reuse', async () => {
     const snapshot = await collect();

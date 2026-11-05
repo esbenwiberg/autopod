@@ -1,4 +1,4 @@
-import { type RequestListener, createServer } from 'node:http';
+import { createServer, type RequestListener } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPinnedHttpTransport } from '../pinned-http-transport.js';
@@ -38,31 +38,32 @@ describe.each(['fetch', 'pinned'] as const)('action HTTP transport resource boun
       init,
       kind === 'pinned' ? (u, i) => pinned(u, i, ['127.0.0.1']) : undefined,
     );
-  it.each(['delayed headers', 'stalled body', 'slow chunks'])(
-    'enforces the complete deadline and closes the socket: %s',
-    async (mode) => {
-      let socketClosed = false;
-      const url = await serve((_req, res) => {
-        if (mode !== 'delayed headers') {
-          res.writeHead(200);
-          res.write('[');
-        }
-        const interval = mode === 'slow chunks' ? setInterval(() => res.write(' '), 10) : undefined;
-        const safetyCutoff = setTimeout(() => res.end(']'), 1_200);
-        res.on('close', () => {
-          socketClosed = true;
-          clearTimeout(safetyCutoff);
-          clearInterval(interval);
-        });
+  it.each([
+    'delayed headers',
+    'stalled body',
+    'slow chunks',
+  ])('enforces the complete deadline and closes the socket: %s', async (mode) => {
+    let socketClosed = false;
+    const url = await serve((_req, res) => {
+      if (mode !== 'delayed headers') {
+        res.writeHead(200);
+        res.write('[');
+      }
+      const interval = mode === 'slow chunks' ? setInterval(() => res.write(' '), 10) : undefined;
+      const safetyCutoff = setTimeout(() => res.end(']'), 1_200);
+      res.on('close', () => {
+        socketClosed = true;
+        clearTimeout(safetyCutoff);
+        clearInterval(interval);
       });
-      const started = performance.now();
-      await expect(
-        request(url, { timeout: 60 }).then((response) => response.text()),
-      ).rejects.toThrow();
-      expect(performance.now() - started).toBeLessThan(1_000);
-      await vi.waitFor(() => expect(socketClosed).toBe(true));
-    },
-  );
+    });
+    const started = performance.now();
+    await expect(
+      request(url, { timeout: 60 }).then((response) => response.text()),
+    ).rejects.toThrow();
+    expect(performance.now() - started).toBeLessThan(1_000);
+    await vi.waitFor(() => expect(socketClosed).toBe(true));
+  });
 
   it('preserves caller cancellation during body consumption', async () => {
     const controller = new AbortController();
@@ -107,29 +108,31 @@ describe.each(['fetch', 'pinned'] as const)('action HTTP transport resource boun
     await expect(readSafeJson(response)).rejects.toThrow(/too large/i);
   });
 
-  it.each([undefined, '1', 'invalid', String(LIMIT + 1)])(
-    'stops and cancels oversized streams despite Content-Length %s',
-    async (length) => {
-      let pulls = 0;
-      let cancelled = false;
-      const response = new Response(
-        new ReadableStream<Uint8Array>({
-          pull(controller) {
-            pulls += 1;
-            controller.enqueue(new Uint8Array(64 * 1024));
-            if (pulls === 100) controller.close();
-          },
-          cancel() {
-            cancelled = true;
-          },
-        }),
-        { headers: length === undefined ? {} : { 'Content-Length': length } },
-      );
-      await expect(readSafeJson(response)).rejects.toThrow(/too large/i);
-      expect(pulls).toBeLessThan(40);
-      expect(cancelled).toBe(true);
-    },
-  );
+  it.each([
+    undefined,
+    '1',
+    'invalid',
+    String(LIMIT + 1),
+  ])('stops and cancels oversized streams despite Content-Length %s', async (length) => {
+    let pulls = 0;
+    let cancelled = false;
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulls += 1;
+          controller.enqueue(new Uint8Array(64 * 1024));
+          if (pulls === 100) controller.close();
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+      { headers: length === undefined ? {} : { 'Content-Length': length } },
+    );
+    await expect(readSafeJson(response)).rejects.toThrow(/too large/i);
+    expect(pulls).toBeLessThan(40);
+    expect(cancelled).toBe(true);
+  });
 
   it('retains valid JSON and empty 204 response semantics', async () => {
     const url = await serve((req, res) => {

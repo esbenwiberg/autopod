@@ -13,7 +13,7 @@ import type { ContainerManager } from '../interfaces/container-manager.js';
 import { inspectNativeGoal } from '../runtimes/inspect-native-goal.js';
 import { nativeGoalCapability } from '../runtimes/native-goal-capability.js';
 import { GoalController } from './goal-controller.js';
-import { type GoalProcessOwner, createGoalProcessRepository } from './goal-process-repository.js';
+import { createGoalProcessRepository, type GoalProcessOwner } from './goal-process-repository.js';
 import { createGoalRepository } from './goal-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import { assertValidationMutationSettled } from './validation-recovery-policy.js';

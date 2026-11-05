@@ -55,48 +55,46 @@ describe('bounded report judgment without worker authority', () => {
     expect(create).not.toHaveBeenCalled();
     expect(createProviderAnthropicClient).toHaveBeenCalledOnce();
   });
-  it.each(['truncated', 'oversized', 'empty', 'late'] as const)(
-    'retains measured usage when judgment output is %s',
-    async (mode) => {
-      let now = 0;
-      vi.spyOn(performance, 'now').mockImplementation(() => now);
-      const create = vi.fn().mockImplementation(async () => {
-        now = mode === 'late' ? 15001 : 14500;
-        return {
-          content: [
-            {
-              type: 'text',
-              text:
-                mode === 'oversized'
-                  ? 'x'.repeat(16001)
-                  : mode === 'empty'
-                    ? ' '
-                    : 'Observed output',
-            },
-          ],
-          stop_reason: mode === 'truncated' ? 'max_tokens' : 'end_turn',
-          usage: { input_tokens: 10, output_tokens: 5 },
-        };
-      });
-      vi.mocked(createProviderAnthropicClient).mockImplementation(async () => {
-        now = 14000;
-        return { ok: true, client: { messages: { create } }, model: 'bound-model' } as never;
-      });
-      const result = await createBoundedScanJudge(profile, {}, logger)('evidence');
-      expect(result.status).toBe('unavailable');
-      expect(result.usage).toMatchObject({
-        inputTokens: 10,
-        outputTokens: 5,
-        costUsd: null,
-        durationMs: now,
-        model: 'bound-model',
-        provider: 'max',
-      });
-      expect(create.mock.calls[0]?.[1]).toMatchObject({ timeout: 1000, maxRetries: 0 });
-      expect(create).toHaveBeenCalledOnce();
-      expect(result.text).not.toContain('Observed output');
-    },
-  );
+  it.each([
+    'truncated',
+    'oversized',
+    'empty',
+    'late',
+  ] as const)('retains measured usage when judgment output is %s', async (mode) => {
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const create = vi.fn().mockImplementation(async () => {
+      now = mode === 'late' ? 15001 : 14500;
+      return {
+        content: [
+          {
+            type: 'text',
+            text:
+              mode === 'oversized' ? 'x'.repeat(16001) : mode === 'empty' ? ' ' : 'Observed output',
+          },
+        ],
+        stop_reason: mode === 'truncated' ? 'max_tokens' : 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 5 },
+      };
+    });
+    vi.mocked(createProviderAnthropicClient).mockImplementation(async () => {
+      now = 14000;
+      return { ok: true, client: { messages: { create } }, model: 'bound-model' } as never;
+    });
+    const result = await createBoundedScanJudge(profile, {}, logger)('evidence');
+    expect(result.status).toBe('unavailable');
+    expect(result.usage).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 5,
+      costUsd: null,
+      durationMs: now,
+      model: 'bound-model',
+      provider: 'max',
+    });
+    expect(create.mock.calls[0]?.[1]).toMatchObject({ timeout: 1000, maxRetries: 0 });
+    expect(create).toHaveBeenCalledOnce();
+    expect(result.text).not.toContain('Observed output');
+  });
   it('freezes the selected model and requests no tools, no retries, bounded output and timeout', async () => {
     const create = vi.fn(async () => ({
       content: [{ type: 'text', text: 'Review the finding.' }],

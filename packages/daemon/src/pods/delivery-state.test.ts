@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createDeliveryFixture } from '../test-utils/delivery-helpers.js';
 import { createDeliveryProvider } from './delivery-state.js';
+
 describe('single delivery state owners', () => {
   it('retains an unwrapped original factory when no ledger is wired and constructs lazily', () => {
     const f = createDeliveryFixture();

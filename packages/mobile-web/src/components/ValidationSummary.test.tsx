@@ -1,11 +1,11 @@
 import type { ValidationResult } from '@autopod/shared';
 import { act } from 'react';
-import { type Root, createRoot } from 'react-dom/client';
+import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  rowsFor,
   type StoredValidation,
   ValidationSummary,
-  rowsFor,
   validationItemsForDisplay,
 } from './ValidationSummary.js';
 

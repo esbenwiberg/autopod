@@ -9,9 +9,9 @@ import { configurationError } from '../configuration/configuration-store.js';
 import { authorizeGitHubOperation } from './access-policy.js';
 import type { GitHubDiscovery, GitHubReadClient } from './discovery.js';
 import type {
+  createGitHubOperationLedger,
   GitHubOperationReceipt,
   GitHubOperationRecord,
-  createGitHubOperationLedger,
 } from './operation-ledger.js';
 
 export interface GitHubMutationClient extends GitHubReadClient {

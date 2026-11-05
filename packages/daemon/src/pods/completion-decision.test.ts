@@ -13,7 +13,7 @@ import {
 } from '../test-utils/mock-helpers.js';
 import { createCompletionDecision } from './completion-decision.js';
 import type { CompletionSourcePreparation } from './completion-source.js';
-import { type PodUpdates, createPodRepository } from './pod-repository.js';
+import { createPodRepository, type PodUpdates } from './pod-repository.js';
 import { validateTransition } from './state-machine.js';
 
 afterEach(() => vi.restoreAllMocks());

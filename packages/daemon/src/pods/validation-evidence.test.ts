@@ -215,29 +215,31 @@ describe('createValidationEvidence', () => {
     );
   });
 
-  it.each(['no-worktree', 'no-container', 'no-store', 'no-evidence'] as const)(
-    'keeps gates for %s',
-    async (mode) => {
-      const f = fixture();
-      f.facts(fact('fact'));
-      f.write('fact.png');
-      f.result.smoke.pages = [page('page.png')];
-      f.write('page.png');
-      if (mode === 'no-worktree') f.pod.worktreePath = null;
-      if (mode === 'no-container') f.pod.containerId = null;
-      if (mode === 'no-store') f.deps.screenshotStore = undefined;
-      if (mode === 'no-evidence') {
-        f.result.factValidation = undefined;
-        f.result.smoke.pages = [page()];
-      }
-      expect(await f.run(false)).toBe(false);
-      expect(f.deps.syncWorkspaceBack).toHaveBeenCalledTimes(
-        mode === 'no-worktree' || mode === 'no-container' ? 0 : 1,
-      );
-      expect(await f.store.list('worker')).toHaveLength(mode === 'no-container' ? 2 : 0);
-      if (mode !== 'no-container') expect(f.deps.hostScreenshotDir).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'no-worktree',
+    'no-container',
+    'no-store',
+    'no-evidence',
+  ] as const)('keeps gates for %s', async (mode) => {
+    const f = fixture();
+    f.facts(fact('fact'));
+    f.write('fact.png');
+    f.result.smoke.pages = [page('page.png')];
+    f.write('page.png');
+    if (mode === 'no-worktree') f.pod.worktreePath = null;
+    if (mode === 'no-container') f.pod.containerId = null;
+    if (mode === 'no-store') f.deps.screenshotStore = undefined;
+    if (mode === 'no-evidence') {
+      f.result.factValidation = undefined;
+      f.result.smoke.pages = [page()];
+    }
+    expect(await f.run(false)).toBe(false);
+    expect(f.deps.syncWorkspaceBack).toHaveBeenCalledTimes(
+      mode === 'no-worktree' || mode === 'no-container' ? 0 : 1,
+    );
+    expect(await f.store.list('worker')).toHaveLength(mode === 'no-container' ? 2 : 0);
+    if (mode !== 'no-container') expect(f.deps.hostScreenshotDir).not.toHaveBeenCalled();
+  });
 
   it('protects all host fact bytes before sync removes files and reopens the store', async () => {
     const f = fixture();
@@ -377,32 +379,36 @@ describe('createValidationEvidence', () => {
     }
   });
 
-  it.each(['uppercase', 'absolute', 'non-png', 'symlink', 'parent', 'not-screenshot'] as const)(
-    'uses real fact gates and containment for %s',
-    async (mode) => {
-      const f = fixture();
-      f.write('fact.PNG', 'inside');
-      fs.writeFileSync(path.join(f.root, 'outside.png'), 'outside');
-      fs.symlinkSync(path.join(f.root, 'outside.png'), path.join(f.worktree, 'link.png'));
-      const values = {
-        uppercase: 'fact.PNG',
-        absolute: path.join(f.worktree, 'fact.PNG'),
-        'non-png': 'fact.jpg',
-        symlink: 'link.png',
-        parent: '../outside.png',
-        'not-screenshot': 'fact.PNG',
-      };
-      f.facts(fact('fact', 'browser-test', values[mode]));
-      if (mode === 'not-screenshot') f.attachment().kind = 'artifact';
-      await f.run();
-      expect(await f.store.list('worker')).toHaveLength(mode === 'uppercase' ? 1 : 0);
-      expect(f.messages.includes('Collecting host fact evidence…')).toBe(
-        ['uppercase', 'symlink', 'parent'].includes(mode),
-      );
-      if (mode === 'uppercase')
-        expect((await f.store.read(required(f.attachment().screenshot))).toString()).toBe('inside');
-    },
-  );
+  it.each([
+    'uppercase',
+    'absolute',
+    'non-png',
+    'symlink',
+    'parent',
+    'not-screenshot',
+  ] as const)('uses real fact gates and containment for %s', async (mode) => {
+    const f = fixture();
+    f.write('fact.PNG', 'inside');
+    fs.writeFileSync(path.join(f.root, 'outside.png'), 'outside');
+    fs.symlinkSync(path.join(f.root, 'outside.png'), path.join(f.worktree, 'link.png'));
+    const values = {
+      uppercase: 'fact.PNG',
+      absolute: path.join(f.worktree, 'fact.PNG'),
+      'non-png': 'fact.jpg',
+      symlink: 'link.png',
+      parent: '../outside.png',
+      'not-screenshot': 'fact.PNG',
+    };
+    f.facts(fact('fact', 'browser-test', values[mode]));
+    if (mode === 'not-screenshot') f.attachment().kind = 'artifact';
+    await f.run();
+    expect(await f.store.list('worker')).toHaveLength(mode === 'uppercase' ? 1 : 0);
+    expect(f.messages.includes('Collecting host fact evidence…')).toBe(
+      ['uppercase', 'symlink', 'parent'].includes(mode),
+    );
+    if (mode === 'uppercase')
+      expect((await f.store.read(required(f.attachment().screenshot))).toString()).toBe('inside');
+  });
 
   it('keeps first-page duplicate matching, ref identity and missing counts', async () => {
     const f = fixture();
@@ -440,55 +446,51 @@ describe('createValidationEvidence', () => {
       materialized: !!(i & 2),
       lineageVerified: !!(i & 4),
     })),
-  )(
-    'returns the exact sandbox receipt conjunction $promoted/$materialized/$lineageVerified',
-    async (flags) => {
-      const f = fixture('sandbox');
-      const original = required(
-        vi.mocked(f.deps.checkpointSandboxWorkspaceForPod).getMockImplementation(),
-      );
-      vi.mocked(f.deps.checkpointSandboxWorkspaceForPod).mockImplementation(async (pod) => ({
-        ...(await original(pod)),
-        ...flags,
-      }));
-      expect(await f.run(false)).toBe(
-        flags.promoted && flags.materialized && flags.lineageVerified,
-      );
-      expect(f.deps.checkpointSandboxWorkspaceForPod).toHaveBeenCalledExactlyOnceWith(f.pod);
-      expect(f.deps.containerManagerFactory.get).not.toHaveBeenCalled();
-      expect(f.deps.syncWorkspaceBack).not.toHaveBeenCalled();
-      expect(f.messages.some((m) => m.startsWith('Workspace sync complete'))).toBe(true);
-    },
-  );
+  )('returns the exact sandbox receipt conjunction $promoted/$materialized/$lineageVerified', async (flags) => {
+    const f = fixture('sandbox');
+    const original = required(
+      vi.mocked(f.deps.checkpointSandboxWorkspaceForPod).getMockImplementation(),
+    );
+    vi.mocked(f.deps.checkpointSandboxWorkspaceForPod).mockImplementation(async (pod) => ({
+      ...(await original(pod)),
+      ...flags,
+    }));
+    expect(await f.run(false)).toBe(flags.promoted && flags.materialized && flags.lineageVerified);
+    expect(f.deps.checkpointSandboxWorkspaceForPod).toHaveBeenCalledExactlyOnceWith(f.pod);
+    expect(f.deps.containerManagerFactory.get).not.toHaveBeenCalled();
+    expect(f.deps.syncWorkspaceBack).not.toHaveBeenCalled();
+    expect(f.messages.some((m) => m.startsWith('Workspace sync complete'))).toBe(true);
+  });
 
   it.each([true, false])('preserves incoming %s on non-sandbox successful transfer', async (ok) => {
     const f = fixture();
     expect(await f.run(ok)).toBe(ok);
   });
 
-  it.each(['factory', 'transfer', 'checkpoint'] as const)(
-    'degrades after thrown %s and still collects facts',
-    async (mode) => {
-      const f = fixture(mode === 'checkpoint' ? 'sandbox' : 'local');
-      const error = new Error(mode);
-      f.facts(fact('unit', 'unit-test'));
-      f.write('unit.png');
-      if (mode === 'factory')
-        vi.mocked(f.deps.containerManagerFactory.get).mockImplementation(() => {
-          throw error;
-        });
-      if (mode === 'transfer') vi.mocked(f.deps.syncWorkspaceBack).mockRejectedValue(error);
-      if (mode === 'checkpoint')
-        vi.mocked(f.deps.checkpointSandboxWorkspaceForPod).mockRejectedValue(error);
-      expect(await f.run()).toBe(false);
-      expect(f.messages).toContain('Collecting available fact evidence after degraded sync…');
-      expect(f.attachment().screenshot).toBeDefined();
-      expect(f.log.warn).toHaveBeenCalledWith(
-        { err: error, podId: 'activity-id' },
-        'Failed to sync workspace after validation',
-      );
-    },
-  );
+  it.each([
+    'factory',
+    'transfer',
+    'checkpoint',
+  ] as const)('degrades after thrown %s and still collects facts', async (mode) => {
+    const f = fixture(mode === 'checkpoint' ? 'sandbox' : 'local');
+    const error = new Error(mode);
+    f.facts(fact('unit', 'unit-test'));
+    f.write('unit.png');
+    if (mode === 'factory')
+      vi.mocked(f.deps.containerManagerFactory.get).mockImplementation(() => {
+        throw error;
+      });
+    if (mode === 'transfer') vi.mocked(f.deps.syncWorkspaceBack).mockRejectedValue(error);
+    if (mode === 'checkpoint')
+      vi.mocked(f.deps.checkpointSandboxWorkspaceForPod).mockRejectedValue(error);
+    expect(await f.run()).toBe(false);
+    expect(f.messages).toContain('Collecting available fact evidence after degraded sync…');
+    expect(f.attachment().screenshot).toBeDefined();
+    expect(f.log.warn).toHaveBeenCalledWith(
+      { err: error, podId: 'activity-id' },
+      'Failed to sync workspace after validation',
+    );
+  });
 
   it('formats measured duration at the current clock without sleeping', async () => {
     const f = fixture();
@@ -537,34 +539,34 @@ describe('createValidationEvidence', () => {
     );
   });
 
-  it.each(['host', 'smoke', 'fact'] as const)(
-    'catches a thrown %s collector with the original continuation',
-    async (stage) => {
-      const f = fixture();
-      f.facts(fact('browser'));
-      f.write('browser.png');
-      f.result.smoke.pages = [page('page.png')];
-      f.write('page.png');
-      const error = new Error(stage);
-      if (stage === 'smoke')
-        vi.spyOn(collectors, 'collectScreenshots').mockRejectedValueOnce(error);
-      else {
-        const original = collectors.collectFactScreenshots;
-        const spy = vi.spyOn(collectors, 'collectFactScreenshots');
-        if (stage === 'fact') spy.mockImplementationOnce(original);
-        spy.mockRejectedValueOnce(error);
-      }
-      expect(await f.run()).toBe(true);
-      const labels = {
-        host: 'Failed to collect host fact screenshots',
-        smoke: 'Failed to collect screenshots',
-        fact: 'Failed to collect fact screenshots',
-      };
-      expect(f.log.warn).toHaveBeenCalledWith({ err: error, podId: 'activity-id' }, labels[stage]);
-      expect(f.deps.syncWorkspaceBack).toHaveBeenCalledOnce();
-      expect(f.messages).toContain('Collecting synced fact evidence…');
-    },
-  );
+  it.each([
+    'host',
+    'smoke',
+    'fact',
+  ] as const)('catches a thrown %s collector with the original continuation', async (stage) => {
+    const f = fixture();
+    f.facts(fact('browser'));
+    f.write('browser.png');
+    f.result.smoke.pages = [page('page.png')];
+    f.write('page.png');
+    const error = new Error(stage);
+    if (stage === 'smoke') vi.spyOn(collectors, 'collectScreenshots').mockRejectedValueOnce(error);
+    else {
+      const original = collectors.collectFactScreenshots;
+      const spy = vi.spyOn(collectors, 'collectFactScreenshots');
+      if (stage === 'fact') spy.mockImplementationOnce(original);
+      spy.mockRejectedValueOnce(error);
+    }
+    expect(await f.run()).toBe(true);
+    const labels = {
+      host: 'Failed to collect host fact screenshots',
+      smoke: 'Failed to collect screenshots',
+      fact: 'Failed to collect fact screenshots',
+    };
+    expect(f.log.warn).toHaveBeenCalledWith({ err: error, podId: 'activity-id' }, labels[stage]);
+    expect(f.deps.syncWorkspaceBack).toHaveBeenCalledOnce();
+    expect(f.messages).toContain('Collecting synced fact evidence…');
+  });
 
   it('keeps successful partial refs and bytes when the real store fails for another page', async () => {
     const f = fixture();
@@ -609,109 +611,113 @@ describe('createValidationEvidence', () => {
     );
   });
 
-  it.each(['host', 'smoke', 'fact'] as const)(
-    'retains partial refs when %s success logging throws',
-    async (stage) => {
-      const f = fixture();
-      f.facts(fact('browser'));
-      f.write('browser.png');
-      f.result.smoke.pages = [page('page.png')];
-      f.write('page.png');
-      const labels = {
-        host: 'Collected host fact screenshots',
-        smoke: 'Collected validation screenshots',
-        fact: 'Collected fact screenshots',
-      };
-      const error = new Error(stage);
-      f.log.info.mockImplementation((_data, message) => {
-        if (message === labels[stage]) throw error;
-      });
-      expect(await f.run()).toBe(true);
-      expect(f.attachment().screenshot).toBeDefined();
-      expect(f.result.smoke.pages[0]?.screenshot).toBeDefined();
-      expect(f.log.warn.mock.calls.some((c) => c[0]?.err === error)).toBe(true);
-    },
-  );
+  it.each([
+    'host',
+    'smoke',
+    'fact',
+  ] as const)('retains partial refs when %s success logging throws', async (stage) => {
+    const f = fixture();
+    f.facts(fact('browser'));
+    f.write('browser.png');
+    f.result.smoke.pages = [page('page.png')];
+    f.write('page.png');
+    const labels = {
+      host: 'Collected host fact screenshots',
+      smoke: 'Collected validation screenshots',
+      fact: 'Collected fact screenshots',
+    };
+    const error = new Error(stage);
+    f.log.info.mockImplementation((_data, message) => {
+      if (message === labels[stage]) throw error;
+    });
+    expect(await f.run()).toBe(true);
+    expect(f.attachment().screenshot).toBeDefined();
+    expect(f.result.smoke.pages[0]?.screenshot).toBeDefined();
+    expect(f.log.warn.mock.calls.some((c) => c[0]?.err === error)).toBe(true);
+  });
 
-  it.each(['host', 'sync-start', 'smoke', 'fact'] as const)(
-    'propagates %s activity thrown outside its try',
-    async (stage) => {
-      const f = fixture();
-      f.facts(fact('browser'));
-      f.write('browser.png');
-      f.result.smoke.pages = [page('page.png')];
-      f.write('page.png');
-      const labels = {
-        host: 'Collecting host fact evidence…',
-        'sync-start': 'Syncing post-validation workspace…',
-        smoke: 'Collecting validation screenshots…',
-        fact: 'Collecting synced fact evidence…',
-      };
+  it.each([
+    'host',
+    'sync-start',
+    'smoke',
+    'fact',
+  ] as const)('propagates %s activity thrown outside its try', async (stage) => {
+    const f = fixture();
+    f.facts(fact('browser'));
+    f.write('browser.png');
+    f.result.smoke.pages = [page('page.png')];
+    f.write('page.png');
+    const labels = {
+      host: 'Collecting host fact evidence…',
+      'sync-start': 'Syncing post-validation workspace…',
+      smoke: 'Collecting validation screenshots…',
+      fact: 'Collecting synced fact evidence…',
+    };
+    const original = required(vi.mocked(f.deps.emitActivityStatus).getMockImplementation());
+    const error = new Error(stage);
+    vi.mocked(f.deps.emitActivityStatus).mockImplementation((id, message) => {
+      if (message === labels[stage]) throw error;
+      original(id, message);
+    });
+    await expect(f.run()).rejects.toBe(error);
+    expect(f.deps.syncWorkspaceBack).toHaveBeenCalledTimes(
+      stage === 'host' || stage === 'sync-start' ? 0 : 1,
+    );
+    if (stage === 'fact') expect(f.result.smoke.pages[0]?.screenshot).toBeDefined();
+  });
+
+  it.each([
+    'success-activity',
+    'success-format',
+  ] as const)('treats %s failure inside sync try as degraded', async (stage) => {
+    const f = fixture();
+    const error = new Error(stage);
+    if (stage === 'success-format')
+      vi.mocked(f.deps.formatElapsedDuration).mockImplementationOnce(() => {
+        throw error;
+      });
+    else {
       const original = required(vi.mocked(f.deps.emitActivityStatus).getMockImplementation());
-      const error = new Error(stage);
       vi.mocked(f.deps.emitActivityStatus).mockImplementation((id, message) => {
-        if (message === labels[stage]) throw error;
+        if (message.startsWith('Workspace sync complete')) throw error;
         original(id, message);
       });
-      await expect(f.run()).rejects.toBe(error);
-      expect(f.deps.syncWorkspaceBack).toHaveBeenCalledTimes(
-        stage === 'host' || stage === 'sync-start' ? 0 : 1,
-      );
-      if (stage === 'fact') expect(f.result.smoke.pages[0]?.screenshot).toBeDefined();
-    },
-  );
+    }
+    expect(await f.run()).toBe(false);
+    expect(f.log.warn).toHaveBeenCalledWith(
+      { err: error, podId: 'activity-id' },
+      'Failed to sync workspace after validation',
+    );
+    expect(f.messages.some((m) => m.includes('continuing with degraded safeguards'))).toBe(true);
+  });
 
-  it.each(['success-activity', 'success-format'] as const)(
-    'treats %s failure inside sync try as degraded',
-    async (stage) => {
-      const f = fixture();
-      const error = new Error(stage);
-      if (stage === 'success-format')
-        vi.mocked(f.deps.formatElapsedDuration).mockImplementationOnce(() => {
-          throw error;
-        });
-      else {
-        const original = required(vi.mocked(f.deps.emitActivityStatus).getMockImplementation());
-        vi.mocked(f.deps.emitActivityStatus).mockImplementation((id, message) => {
-          if (message.startsWith('Workspace sync complete')) throw error;
-          original(id, message);
-        });
-      }
-      expect(await f.run()).toBe(false);
-      expect(f.log.warn).toHaveBeenCalledWith(
-        { err: error, podId: 'activity-id' },
-        'Failed to sync workspace after validation',
-      );
-      expect(f.messages.some((m) => m.includes('continuing with degraded safeguards'))).toBe(true);
-    },
-  );
-
-  it.each(['warn', 'degraded-activity', 'degraded-format'] as const)(
-    'propagates %s failure from the sync catch',
-    async (stage) => {
-      const f = fixture();
-      f.facts(fact('unit', 'unit-test'));
-      const error = new Error(stage);
-      vi.mocked(f.deps.syncWorkspaceBack).mockRejectedValue(new Error('sync'));
-      if (stage === 'warn')
-        f.log.warn.mockImplementation(() => {
-          throw error;
-        });
-      if (stage === 'degraded-format')
-        vi.mocked(f.deps.formatElapsedDuration).mockImplementation(() => {
-          throw error;
-        });
-      if (stage === 'degraded-activity') {
-        const original = required(vi.mocked(f.deps.emitActivityStatus).getMockImplementation());
-        vi.mocked(f.deps.emitActivityStatus).mockImplementation((id, message) => {
-          if (message.startsWith('Workspace sync failed')) throw error;
-          original(id, message);
-        });
-      }
-      await expect(f.run()).rejects.toBe(error);
-      expect(f.messages).not.toContain('Collecting available fact evidence after degraded sync…');
-    },
-  );
+  it.each([
+    'warn',
+    'degraded-activity',
+    'degraded-format',
+  ] as const)('propagates %s failure from the sync catch', async (stage) => {
+    const f = fixture();
+    f.facts(fact('unit', 'unit-test'));
+    const error = new Error(stage);
+    vi.mocked(f.deps.syncWorkspaceBack).mockRejectedValue(new Error('sync'));
+    if (stage === 'warn')
+      f.log.warn.mockImplementation(() => {
+        throw error;
+      });
+    if (stage === 'degraded-format')
+      vi.mocked(f.deps.formatElapsedDuration).mockImplementation(() => {
+        throw error;
+      });
+    if (stage === 'degraded-activity') {
+      const original = required(vi.mocked(f.deps.emitActivityStatus).getMockImplementation());
+      vi.mocked(f.deps.emitActivityStatus).mockImplementation((id, message) => {
+        if (message.startsWith('Workspace sync failed')) throw error;
+        original(id, message);
+      });
+    }
+    await expect(f.run()).rejects.toBe(error);
+    expect(f.messages).not.toContain('Collecting available fact evidence after degraded sync…');
+  });
 
   it('catches a missing-count warning failure, retaining collected refs', async () => {
     const f = fixture();
@@ -729,25 +735,26 @@ describe('createValidationEvidence', () => {
     );
   });
 
-  it.each(['host', 'smoke', 'fact'] as const)(
-    'propagates %s catch logging failure after a thrown collector',
-    async (stage) => {
-      const f = fixture();
-      f.facts(fact('browser'));
-      f.result.smoke.pages = [page('page.png')];
-      const original = collectors.collectFactScreenshots;
-      if (stage === 'smoke')
-        vi.spyOn(collectors, 'collectScreenshots').mockRejectedValue(new Error('collector'));
-      else {
-        const spy = vi.spyOn(collectors, 'collectFactScreenshots');
-        if (stage === 'fact') spy.mockImplementationOnce(original);
-        spy.mockRejectedValueOnce(new Error('collector'));
-      }
-      const error = new Error('warning');
-      f.log.warn.mockImplementation((_data, message) => {
-        if (message !== 'Validation page screenshots were reported but not collected') throw error;
-      });
-      await expect(f.run()).rejects.toBe(error);
-    },
-  );
+  it.each([
+    'host',
+    'smoke',
+    'fact',
+  ] as const)('propagates %s catch logging failure after a thrown collector', async (stage) => {
+    const f = fixture();
+    f.facts(fact('browser'));
+    f.result.smoke.pages = [page('page.png')];
+    const original = collectors.collectFactScreenshots;
+    if (stage === 'smoke')
+      vi.spyOn(collectors, 'collectScreenshots').mockRejectedValue(new Error('collector'));
+    else {
+      const spy = vi.spyOn(collectors, 'collectFactScreenshots');
+      if (stage === 'fact') spy.mockImplementationOnce(original);
+      spy.mockRejectedValueOnce(new Error('collector'));
+    }
+    const error = new Error('warning');
+    f.log.warn.mockImplementation((_data, message) => {
+      if (message !== 'Validation page screenshots were reported but not collected') throw error;
+    });
+    await expect(f.run()).rejects.toBe(error);
+  });
 });

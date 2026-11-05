@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import {
+  parseBriefs,
   type SeriesLaunchRequest,
   type SpecFile,
-  parseBriefs,
   seriesLaunchRequestSchema,
 } from '@autopod/shared';
 import chalk from 'chalk';
@@ -13,7 +13,7 @@ import type { AutopodClient } from '../api/client.js';
 import { saveSeriesReceipt } from '../config/launch-store.js';
 import { formatStatus } from '../output/colors.js';
 import { withSpinner } from '../output/spinner.js';
-import { type LaunchFlags, buildLaunchRequest } from './launch-request.js';
+import { buildLaunchRequest, type LaunchFlags } from './launch-request.js';
 import { validateLaunchSources } from './launch-sources.js';
 import { preflightSeriesFolder } from './spec-preflight.js';
 

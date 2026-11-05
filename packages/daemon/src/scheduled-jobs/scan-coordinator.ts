@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AutopodError, type ScheduledJob, type ScheduledScanReport } from '@autopod/shared';
 import type { Logger } from 'pino';
-import { type ScheduledCollectorDeps, collectScheduledScan } from './scan-collector.js';
+import { collectScheduledScan, type ScheduledCollectorDeps } from './scan-collector.js';
 import type { ScanReportRepository } from './scan-report-repository.js';
 
 export interface ScanCoordinatorDeps {

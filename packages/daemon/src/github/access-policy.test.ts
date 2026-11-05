@@ -1,7 +1,7 @@
 import {
   type GitHubOperationResource,
-  type ResolvedGitHubRule,
   githubAccessRuleSchema,
+  type ResolvedGitHubRule,
 } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import { authorizeGitHubOperation } from './access-policy.js';

@@ -1,5 +1,4 @@
-import type { ArtifactOutput, NativeGoalProcessIdentity } from '@autopod/shared';
-import type { ExecutionTarget } from '@autopod/shared';
+import type { ArtifactOutput, ExecutionTarget, NativeGoalProcessIdentity } from '@autopod/shared';
 import type {
   ContainerManager,
   ContainerSpawnConfig,

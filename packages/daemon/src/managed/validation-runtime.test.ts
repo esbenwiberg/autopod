@@ -7,11 +7,11 @@ import { expect, it, vi } from 'vitest';
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
 import { fixture, resign } from '../test-utils/managed-fixture.js';
 import { digest } from './canonical.js';
+import type { ManagedValidationConfig } from './validation.js';
 import {
   ManagedSupervisedValidation,
   type ManagedValidationBoundary,
 } from './validation-runtime.js';
-import type { ManagedValidationConfig } from './validation.js';
 
 async function setup() {
   const f = fixture();

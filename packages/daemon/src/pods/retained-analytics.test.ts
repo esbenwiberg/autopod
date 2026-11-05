@@ -67,29 +67,29 @@ function seed() {
   return { ...ctx, exporter };
 }
 
-it.each(['reliability', 'throughput'] as const)(
-  'retains %s observations and denominator after actual pod deletion',
-  (metric) => {
-    const ctx = seed();
-    try {
-      const measure = () =>
-        metric === 'reliability'
-          ? computeReliabilityAnalytics(ctx.db, 1)
-          : computeThroughputAnalytics(ctx.db, 1);
-      const before = measure();
-      ctx.podRepo.delete('failure');
-      const after = measure();
-      const measurements = (value: unknown) =>
-        JSON.parse(
-          JSON.stringify(value, (key, item) => (key === 'historyArchived' ? undefined : item)),
-        );
-      expect(measurements(after)).toEqual(measurements(before));
-      expect(JSON.stringify(after)).toContain('"historyArchived":true');
-    } finally {
-      ctx.db.close();
-    }
-  },
-);
+it.each([
+  'reliability',
+  'throughput',
+] as const)('retains %s observations and denominator after actual pod deletion', (metric) => {
+  const ctx = seed();
+  try {
+    const measure = () =>
+      metric === 'reliability'
+        ? computeReliabilityAnalytics(ctx.db, 1)
+        : computeThroughputAnalytics(ctx.db, 1);
+    const before = measure();
+    ctx.podRepo.delete('failure');
+    const after = measure();
+    const measurements = (value: unknown) =>
+      JSON.parse(
+        JSON.stringify(value, (key, item) => (key === 'historyArchived' ? undefined : item)),
+      );
+    expect(measurements(after)).toEqual(measurements(before));
+    expect(JSON.stringify(after)).toContain('"historyArchived":true');
+  } finally {
+    ctx.db.close();
+  }
+});
 
 it('retains exported pod and validation observations after actual deletion', () => {
   const ctx = seed();
@@ -115,110 +115,106 @@ it('retains exported pod and validation observations after actual deletion', () 
   }
 });
 
-it.each(['{broken', 'null', '[]', '{}'])(
-  'exports healthy evidence with diagnostics for retained legacy JSON %s',
-  (malformed) => {
-    const ctx = seed();
+it.each([
+  '{broken',
+  'null',
+  '[]',
+  '{}',
+])('exports healthy evidence with diagnostics for retained legacy JSON %s', (malformed) => {
+  const ctx = seed();
+  try {
+    ctx.db
+      .prepare("UPDATE pods SET plan=?,task_summary=? WHERE id='failure'")
+      .run('{broken', JSON.stringify({ actualSummary: 'x'.repeat(70_000) }));
+    ctx.db
+      .prepare(
+        "INSERT INTO validations(id,pod_id,attempt,sequence,result) VALUES ('bad-validation','failure',2,2,?)",
+      )
+      .run(malformed);
+    ctx.db
+      .prepare("INSERT INTO events(pod_id,type,payload) VALUES ('failure','pod.agent_activity',?)")
+      .run(malformed);
+    ctx.podRepo.delete('failure');
+    const result = ctx.exporter.export({ limit: 10 });
+    expect(result.stats.totalSessions).toBe(2);
+    const exported = new Database(result.dbBuffer);
     try {
-      ctx.db
-        .prepare("UPDATE pods SET plan=?,task_summary=? WHERE id='failure'")
-        .run('{broken', JSON.stringify({ actualSummary: 'x'.repeat(70_000) }));
-      ctx.db
-        .prepare(
-          "INSERT INTO validations(id,pod_id,attempt,sequence,result) VALUES ('bad-validation','failure',2,2,?)",
-        )
-        .run(malformed);
-      ctx.db
-        .prepare(
-          "INSERT INTO events(pod_id,type,payload) VALUES ('failure','pod.agent_activity',?)",
-        )
-        .run(malformed);
-      ctx.podRepo.delete('failure');
-      const result = ctx.exporter.export({ limit: 10 });
-      expect(result.stats.totalSessions).toBe(2);
-      const exported = new Database(result.dbBuffer);
-      try {
-        expect(
-          exported.prepare("SELECT overall FROM validations WHERE pod_id='failure'").all(),
-        ).toContainEqual({ overall: 'fail' });
-        expect(
-          exported
-            .prepare('SELECT field,code FROM record_diagnostics WHERE pod_id=?')
-            .all('failure'),
-        ).toEqual(
-          expect.arrayContaining([
-            { field: 'plan', code: 'invalid_json' },
-            { field: 'task_summary', code: 'size_limit' },
-            {
-              field: 'validations:bad-validation',
-              code: malformed === '{broken' ? 'invalid_json' : 'invalid_shape',
-            },
-            { field: 'events', code: malformed === '{broken' ? 'invalid_json' : 'invalid_shape' },
-          ]),
-        );
-      } finally {
-        exported.close();
-      }
-    } finally {
-      ctx.db.close();
-    }
-  },
-);
-
-it.each(['bytes', 'rows'] as const)(
-  'bounds retained export event %s and reports unavailable evidence explicitly',
-  (bound) => {
-    const ctx = seed();
-    try {
-      const insert = ctx.db.prepare(
-        "INSERT INTO events(pod_id,type,payload) VALUES ('failure','pod.agent_activity',?)",
+      expect(
+        exported.prepare("SELECT overall FROM validations WHERE pod_id='failure'").all(),
+      ).toContainEqual({ overall: 'fail' });
+      expect(
+        exported.prepare('SELECT field,code FROM record_diagnostics WHERE pod_id=?').all('failure'),
+      ).toEqual(
+        expect.arrayContaining([
+          { field: 'plan', code: 'invalid_json' },
+          { field: 'task_summary', code: 'size_limit' },
+          {
+            field: 'validations:bad-validation',
+            code: malformed === '{broken' ? 'invalid_json' : 'invalid_shape',
+          },
+          { field: 'events', code: malformed === '{broken' ? 'invalid_json' : 'invalid_shape' },
+        ]),
       );
-      if (bound === 'bytes')
-        insert.run(
-          JSON.stringify({
-            event: {
-              type: 'error',
-              message: 'x'.repeat(2 * 1024 * 1024),
-              timestamp: '2026-09-08T00:00:00Z',
-            },
-          }),
-        );
-      else
-        ctx.db.transaction(() => {
-          for (let index = 0; index < 1001; index++)
-            insert.run(
-              JSON.stringify({
-                event: {
-                  type: 'error',
-                  message: 'Retained error',
-                  timestamp: '2026-09-08T00:00:00Z',
-                },
-              }),
-            );
-        })();
-      ctx.podRepo.delete('failure');
-      const result = ctx.exporter.export({ limit: 10 });
-      const exported = new Database(result.dbBuffer);
-      try {
-        expect(result.stats.totalSessions).toBe(2);
-        expect(result.summary).toContain('Evidence diagnostics: 1');
-        expect(
-          exported
-            .prepare("SELECT field,code FROM record_diagnostics WHERE pod_id='failure'")
-            .all(),
-        ).toContainEqual({ field: 'events', code: 'size_limit' });
-        expect(
-          exported.prepare("SELECT overall FROM validations WHERE pod_id='failure'").all(),
-        ).toEqual([{ overall: 'fail' }]);
-        expect(result.dbBuffer.byteLength).toBeLessThan(1024 * 1024);
-      } finally {
-        exported.close();
-      }
     } finally {
-      ctx.db.close();
+      exported.close();
     }
-  },
-);
+  } finally {
+    ctx.db.close();
+  }
+});
+
+it.each([
+  'bytes',
+  'rows',
+] as const)('bounds retained export event %s and reports unavailable evidence explicitly', (bound) => {
+  const ctx = seed();
+  try {
+    const insert = ctx.db.prepare(
+      "INSERT INTO events(pod_id,type,payload) VALUES ('failure','pod.agent_activity',?)",
+    );
+    if (bound === 'bytes')
+      insert.run(
+        JSON.stringify({
+          event: {
+            type: 'error',
+            message: 'x'.repeat(2 * 1024 * 1024),
+            timestamp: '2026-09-08T00:00:00Z',
+          },
+        }),
+      );
+    else
+      ctx.db.transaction(() => {
+        for (let index = 0; index < 1001; index++)
+          insert.run(
+            JSON.stringify({
+              event: {
+                type: 'error',
+                message: 'Retained error',
+                timestamp: '2026-09-08T00:00:00Z',
+              },
+            }),
+          );
+      })();
+    ctx.podRepo.delete('failure');
+    const result = ctx.exporter.export({ limit: 10 });
+    const exported = new Database(result.dbBuffer);
+    try {
+      expect(result.stats.totalSessions).toBe(2);
+      expect(result.summary).toContain('Evidence diagnostics: 1');
+      expect(
+        exported.prepare("SELECT field,code FROM record_diagnostics WHERE pod_id='failure'").all(),
+      ).toContainEqual({ field: 'events', code: 'size_limit' });
+      expect(
+        exported.prepare("SELECT overall FROM validations WHERE pod_id='failure'").all(),
+      ).toEqual([{ overall: 'fail' }]);
+      expect(result.dbBuffer.byteLength).toBeLessThan(1024 * 1024);
+    } finally {
+      exported.close();
+    }
+  } finally {
+    ctx.db.close();
+  }
+});
 
 it('pins the export snapshot when a second SQLite connection changes evidence after its size check', () => {
   const ctx = seed();

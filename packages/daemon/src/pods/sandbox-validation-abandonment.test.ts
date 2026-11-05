@@ -98,48 +98,48 @@ describe('explicit destruction of validation-held sandboxes', () => {
     expect(f.cm.kill).toHaveBeenCalledTimes(1);
   });
 
-  it.each([false, true])(
-    'runs full workspace cleanup and can resume a settled failed cleanup attempt (interrupted=%s)',
-    async (interrupted) => {
-      const f = sandboxValidationAbandonmentFixture();
-      const cleanup = vi.fn(async () => {});
-      const deletion = createWorkspaceDeletion({
-        podRepo: f.podRepo,
-        executionForPod: f.captured.resolveEffectiveBoundProfile,
-        clearPreviewTimer: vi.fn(),
-        stopSandboxPreviewProxy: cleanup,
-        killSidecarsForPod: cleanup,
-        containerManagerFactory: { get: () => f.cm },
-        destroyPodNetwork: cleanup,
-        cleanupTestRunBranches: cleanup,
-        worktreeManager: f.worktreeManager,
-        pendingUpdateFromBaseIntents: new Set(),
-        forceWithLeaseAllowances: new Set(),
-        logger,
-      });
-      await expect(deletion.deleteSession('prepare')).rejects.toThrow('unverified');
-      f.deleteSession.mockImplementation(deletion.deleteSession);
-      if (interrupted) {
-        vi.mocked(f.worktreeManager.cleanup).mockRejectedValueOnce(
-          new Error('temporary worktree cleanup error'),
-        );
-        const first = await f.recovery.submit('prepare', f.input, f.actor);
-        expect(first.podDeleted).toBe(false);
-        expect(first.cleanupError).toContain('worktree');
-        const inspected = await f.recovery.inspect('prepare');
-        expect(inspected.resources[0]?.abandonBlocked).toBeNull();
-        expect(inspected.resources[0]?.abandonment?.id).toBe(f.input.id);
-      }
-      const result = await f.recovery.submit('prepare', f.input, f.actor);
-      expect(result).toMatchObject({ podDeleted: true, cleanupError: null });
-      expect(f.worktreeManager.cleanup).toHaveBeenCalled();
-      expect(
-        f.db
-          .prepare('SELECT completed_at FROM deletion_cleanup_intents WHERE pod_id=?')
-          .get('prepare'),
-      ).toMatchObject({ completed_at: expect.any(String) });
-    },
-  );
+  it.each([
+    false,
+    true,
+  ])('runs full workspace cleanup and can resume a settled failed cleanup attempt (interrupted=%s)', async (interrupted) => {
+    const f = sandboxValidationAbandonmentFixture();
+    const cleanup = vi.fn(async () => {});
+    const deletion = createWorkspaceDeletion({
+      podRepo: f.podRepo,
+      executionForPod: f.captured.resolveEffectiveBoundProfile,
+      clearPreviewTimer: vi.fn(),
+      stopSandboxPreviewProxy: cleanup,
+      killSidecarsForPod: cleanup,
+      containerManagerFactory: { get: () => f.cm },
+      destroyPodNetwork: cleanup,
+      cleanupTestRunBranches: cleanup,
+      worktreeManager: f.worktreeManager,
+      pendingUpdateFromBaseIntents: new Set(),
+      forceWithLeaseAllowances: new Set(),
+      logger,
+    });
+    await expect(deletion.deleteSession('prepare')).rejects.toThrow('unverified');
+    f.deleteSession.mockImplementation(deletion.deleteSession);
+    if (interrupted) {
+      vi.mocked(f.worktreeManager.cleanup).mockRejectedValueOnce(
+        new Error('temporary worktree cleanup error'),
+      );
+      const first = await f.recovery.submit('prepare', f.input, f.actor);
+      expect(first.podDeleted).toBe(false);
+      expect(first.cleanupError).toContain('worktree');
+      const inspected = await f.recovery.inspect('prepare');
+      expect(inspected.resources[0]?.abandonBlocked).toBeNull();
+      expect(inspected.resources[0]?.abandonment?.id).toBe(f.input.id);
+    }
+    const result = await f.recovery.submit('prepare', f.input, f.actor);
+    expect(result).toMatchObject({ podDeleted: true, cleanupError: null });
+    expect(f.worktreeManager.cleanup).toHaveBeenCalled();
+    expect(
+      f.db
+        .prepare('SELECT completed_at FROM deletion_cleanup_intents WHERE pod_id=?')
+        .get('prepare'),
+    ).toMatchObject({ completed_at: expect.any(String) });
+  });
 
   it('does not release pod deletion for a missing or unconfirmed provider deletion', async () => {
     const f = sandboxValidationAbandonmentFixture();
@@ -177,28 +177,29 @@ describe('explicit destruction of validation-held sandboxes', () => {
     expect(reopened.pods.validationExecutions?.intent(f.dispatch)).toBeNull();
   });
 
-  it.each(['generation', 'dispatch', 'namespace'] as const)(
-    'rechecks %s after provider/auth work, before the transport fence',
-    async (change) => {
-      const f = sandboxValidationAbandonmentFixture();
-      let passed = false;
-      let added: string | undefined;
-      f.cm.kill.mockImplementation(async () => {
-        await Promise.resolve();
-        if (change === 'generation') f.podRepo.incrementLifecycleGeneration('prepare');
-        if (change === 'dispatch') added = appendDispatch(f);
-        if (change === 'namespace') f.cm.executionResourceScope = 'other-provider-namespace';
-        assertSourceResourceReleasable(f.db, f.sandboxId);
-        passed = true;
-        f.setState('deleted');
-      });
-      await expect(f.recovery.submit('prepare', f.input, f.actor)).rejects.toThrow();
-      expect(passed).toBe(false);
-      if (change === 'dispatch') expect(added).toEqual(expect.any(String));
-      expect(f.deleteSession).not.toHaveBeenCalled();
-      expect(f.journal.recovery.get(f.input.id)?.completedAt).toBeNull();
-    },
-  );
+  it.each([
+    'generation',
+    'dispatch',
+    'namespace',
+  ] as const)('rechecks %s after provider/auth work, before the transport fence', async (change) => {
+    const f = sandboxValidationAbandonmentFixture();
+    let passed = false;
+    let added: string | undefined;
+    f.cm.kill.mockImplementation(async () => {
+      await Promise.resolve();
+      if (change === 'generation') f.podRepo.incrementLifecycleGeneration('prepare');
+      if (change === 'dispatch') added = appendDispatch(f);
+      if (change === 'namespace') f.cm.executionResourceScope = 'other-provider-namespace';
+      assertSourceResourceReleasable(f.db, f.sandboxId);
+      passed = true;
+      f.setState('deleted');
+    });
+    await expect(f.recovery.submit('prepare', f.input, f.actor)).rejects.toThrow();
+    expect(passed).toBe(false);
+    if (change === 'dispatch') expect(added).toEqual(expect.any(String));
+    expect(f.deleteSession).not.toHaveBeenCalled();
+    expect(f.journal.recovery.get(f.input.id)?.completedAt).toBeNull();
+  });
 
   it('requires fresh confirmation for newly retained dispatch evidence, not permanent orphaning', async () => {
     const f = sandboxValidationAbandonmentFixture();
@@ -261,24 +262,24 @@ describe('explicit destruction of validation-held sandboxes', () => {
     expect(f.cm.kill).not.toHaveBeenCalled();
   });
 
-  it.each(['shared-resource', 'other-task-owner'] as const)(
-    'does not discard %s custody',
-    async (kind) => {
-      const f = sandboxValidationAbandonmentFixture();
-      const child = f.insertFix('failed');
-      if (kind === 'shared-resource') {
-        f.podRepo.update(child.id, { containerId: null });
-        f.podRepo.update(child.id, { executionTarget: 'sandbox', containerId: f.sandboxId });
-      } else {
-        f.podRepo.update(child.id, { lastValidationResult: { ...f.result, podId: child.id } });
-      }
-      const inspected = await f.recovery.inspect('prepare');
-      expect(inspected.resources[0]?.abandonBlocked).toContain(
-        kind === 'shared-resource' ? 'another pod' : 'Another task owner',
-      );
-      expect(f.cm.kill).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'shared-resource',
+    'other-task-owner',
+  ] as const)('does not discard %s custody', async (kind) => {
+    const f = sandboxValidationAbandonmentFixture();
+    const child = f.insertFix('failed');
+    if (kind === 'shared-resource') {
+      f.podRepo.update(child.id, { containerId: null });
+      f.podRepo.update(child.id, { executionTarget: 'sandbox', containerId: f.sandboxId });
+    } else {
+      f.podRepo.update(child.id, { lastValidationResult: { ...f.result, podId: child.id } });
+    }
+    const inspected = await f.recovery.inspect('prepare');
+    expect(inspected.resources[0]?.abandonBlocked).toContain(
+      kind === 'shared-resource' ? 'another pod' : 'Another task owner',
+    );
+    expect(f.cm.kill).not.toHaveBeenCalled();
+  });
 
   it('still blocks legacy ownership, other provider namespaces, active work and independent custody', async () => {
     const legacy = sandboxRecoveryFixture(false);

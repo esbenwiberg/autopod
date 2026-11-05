@@ -97,24 +97,24 @@ describe('validation override decision consistency', () => {
     expect(f.podRepo.hasUnansweredDecision?.('prepare')).toBe(true);
   });
 
-  it.each(['automation', 'missing-reason'] as const)(
-    'does not discharge a decision for %s',
-    async (kind) => {
-      const f = fixture();
-      const before = f.pod();
-      await expect(
-        f
-          .controls()
-          .forceApprove(
-            'prepare',
-            kind === 'missing-reason' ? undefined : reason,
-            kind === 'automation' ? { type: 'automation', id: 'test' } : actor,
-          ),
-      ).rejects.toThrow('explicit human override');
-      expect(f.pod()).toEqual(before);
-      expect(f.db.prepare('SELECT * FROM completion_decisions').all()).toEqual([]);
-    },
-  );
+  it.each([
+    'automation',
+    'missing-reason',
+  ] as const)('does not discharge a decision for %s', async (kind) => {
+    const f = fixture();
+    const before = f.pod();
+    await expect(
+      f
+        .controls()
+        .forceApprove(
+          'prepare',
+          kind === 'missing-reason' ? undefined : reason,
+          kind === 'automation' ? { type: 'automation', id: 'test' } : actor,
+        ),
+    ).rejects.toThrow('explicit human override');
+    expect(f.pod()).toEqual(before);
+    expect(f.db.prepare('SELECT * FROM completion_decisions').all()).toEqual([]);
+  });
 
   it.each([
     'missing',

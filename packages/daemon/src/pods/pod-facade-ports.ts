@@ -1,10 +1,3 @@
-import type { createContinuationControls } from './continuation-controls.js';
-import type { createProviderContinuation } from './provider-continuation.js';
-import type { createValidationExecutionRecovery } from './validation-execution-recovery.js';
-import type { createValidationRevalidationWorkflow } from './validation-revalidation-workflow.js';
-import type { createValidationTriggerWorkflow } from './validation-trigger-workflow.js';
-import type { createValidationWorkflowControls } from './validation-workflow-controls.js';
-
 import type { createAdmissionAnalysisWorkspaces } from './admission-analysis-workspaces.js';
 import type { createAdmissionDependents } from './admission-dependents.js';
 import type { createAdmissionExecutionContext } from './admission-execution-context.js';
@@ -19,6 +12,7 @@ import type { createAgentProcessWorkflow } from './agent-process-workflow.js';
 import type { createApprovalControls } from './approval-controls.js';
 import type { createApprovalWorkflow } from './approval-workflow.js';
 import type { createCompletionWorkflow } from './completion-workflow.js';
+import type { createContinuationControls } from './continuation-controls.js';
 import type { createDeliveryPr } from './delivery-pr.js';
 import type { createFixControls } from './fix-controls.js';
 import type { createOperatorControls } from './operator-controls.js';
@@ -28,12 +22,17 @@ import type { createOperatorPause } from './operator-pause.js';
 import type { createOperatorRejection } from './operator-rejection.js';
 import type { createOperatorTools } from './operator-tools.js';
 import type { PodRepository } from './pod-repository.js';
+import type { createProviderContinuation } from './provider-continuation.js';
 import type { createResourceNetwork } from './resource-network.js';
 import type { createResourcePreviewControls } from './resource-preview-controls.js';
 import type { createReviewerContext } from './reviewer-context.js';
 import type { createSourceAdoptionController } from './source-adoption-controller.js';
 import type { createTerminationReconciliation } from './termination-reconciliation.js';
 import type { createValidationEnvironment } from './validation-environment.js';
+import type { createValidationExecutionRecovery } from './validation-execution-recovery.js';
+import type { createValidationRevalidationWorkflow } from './validation-revalidation-workflow.js';
+import type { createValidationTriggerWorkflow } from './validation-trigger-workflow.js';
+import type { createValidationWorkflowControls } from './validation-workflow-controls.js';
 import type { createWorkspaceArtifactObservation } from './workspace-artifact-observation.js';
 import type { createWorkspaceBranchSync } from './workspace-branch-sync.js';
 import type { createWorkspaceCompletion } from './workspace-completion.js';
@@ -79,7 +78,10 @@ export interface PodFacadeOwners {
   >;
   processWorkflow: Pick<ReturnType<typeof createAgentProcessWorkflow>, 'processPod'>;
   agentEventConsumption: Pick<ReturnType<typeof createAgentEventConsumption>, 'consumeAgentEvents'>;
-  completionWorkflow: Pick<ReturnType<typeof createCompletionWorkflow>, 'handleCompletion'>;
+  completionWorkflow: Pick<
+    ReturnType<typeof createCompletionWorkflow>,
+    'handleCompletion' | 'reconcileInfrastructureBlocker'
+  >;
   operatorMessages: Pick<ReturnType<typeof createOperatorMessages>, 'sendMessage'>;
   approvalWorkflow: Pick<ReturnType<typeof createApprovalWorkflow>, 'approveSession'>;
   operatorRejection: Pick<ReturnType<typeof createOperatorRejection>, 'rejectSession'>;

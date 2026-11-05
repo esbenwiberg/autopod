@@ -96,7 +96,9 @@ export function escalationViewModel(escalation: EscalationRequest): EscalationVi
     return {
       title: 'Agent needs input',
       body: escalation.payload.question,
-      context: escalation.payload.context,
+      context: [escalation.payload.recommendation, escalation.payload.context]
+        .filter(Boolean)
+        .join('\n\n'),
       options: escalation.payload.options ?? [],
       buttons: [],
       allowFreeText: true,
@@ -165,12 +167,18 @@ export function escalationViewModel(escalation: EscalationRequest): EscalationVi
         : undefined;
     const needs = `Needs:\n${escalation.payload.needs}`;
     return {
-      title: 'Agent needs input',
+      title:
+        escalation.payload.kind === 'infrastructure' ||
+        escalation.payload.requiresResponse === false
+          ? 'Infrastructure blocked'
+          : 'Agent needs input',
       body: escalation.payload.description,
       context: [attempted, needs].filter(Boolean).join('\n\n'),
       options: [],
       buttons: [],
-      allowFreeText: true,
+      allowFreeText:
+        escalation.payload.kind !== 'infrastructure' &&
+        escalation.payload.requiresResponse !== false,
       placeholder: 'Type your reply…',
     };
   }
@@ -234,7 +242,13 @@ export function EscalationCard({ podId, escalation }: Props): JSX.Element {
   return (
     <section className="escalation-card">
       <header className="escalation-header">
-        <span className="chip chip-warn">awaiting input</span>
+        <span className="chip chip-warn">
+          {isReportBlocker(escalation) &&
+          (escalation.payload.kind === 'infrastructure' ||
+            escalation.payload.requiresResponse === false)
+            ? 'infrastructure blocked'
+            : 'awaiting input'}
+        </span>
         <span className="muted">{model.title}</span>
       </header>
       <div className="escalation-question">{model.body}</div>

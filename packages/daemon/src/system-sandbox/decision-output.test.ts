@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DecisionOutputError, parseSystemDecisionOutput } from './decision-output.js';
 import {
+  buildSystemRuntimeInvocation,
   SYSTEM_CREDENTIAL_SHIM,
   SYSTEM_CREDENTIAL_SHIM_PATH,
-  buildSystemRuntimeInvocation,
 } from './runtime-adapters.js';
 
 const valid = {

@@ -1,5 +1,7 @@
 import type { OperatorFailurePhase } from './completion-diagnostics.js';
+
 export type { OperatorFailurePhase } from './completion-diagnostics.js';
+
 import type {
   AgentEvent,
   EffectiveLaunchConfig,
@@ -33,6 +35,7 @@ export interface AgentProcessCalls {
     options?: { force?: boolean; validationOnly?: boolean },
   ): Promise<void>;
   handleCompletion(podId: string): Promise<void>;
+  reconcileInfrastructureBlocker(podId: string): Promise<void>;
   consumeAgentEvents(
     podId: string,
     events: AsyncIterable<AgentEvent>,
@@ -108,6 +111,7 @@ export interface AgentProcessCaptured {
 export interface AgentConsumerCaptured {
   containerManagerFactory: { get(target: ExecutionTarget): ContainerManager };
   podRepo: PodRepository;
+  reconcileInfrastructureBlocker(podId: string): Promise<void>;
   activeAgentRunResolvers: Map<string, { token: symbol; resolve: () => void }>;
   activeAgentRuns: Map<
     string,

@@ -52,45 +52,45 @@ describe('finite CLI exit evidence', () => {
     (['claude-spawn', 'claude-resume', 'copilot'] as const).flatMap((kind) =>
       [false, true].map((rejected) => ({ kind, rejected })),
     ),
-  )(
-    'retains output but rejects unverified $kind exit (rejected: $rejected)',
-    async ({ kind, rejected }) => {
-      const { stdout, stderr, events } = fixture(kind, rejected);
-      const retained: AgentEvent[] = [];
-      const consume = (async () => {
-        for await (const event of events) retained.push(event);
-      })();
-      stdout.end(
-        kind === 'copilot'
-          ? 'Retain this output\n'
-          : `${JSON.stringify({ type: 'result', subtype: 'success', result: 'Retain this output' })}\n`,
-      );
-      stderr.end();
-      await expect(consume).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
-      expect(JSON.stringify(retained)).toContain('Retain this output');
-      if (kind === 'copilot')
-        expect(retained.some((event) => event.type === 'complete')).toBe(false);
-    },
-  );
+  )('retains output but rejects unverified $kind exit (rejected: $rejected)', async ({
+    kind,
+    rejected,
+  }) => {
+    const { stdout, stderr, events } = fixture(kind, rejected);
+    const retained: AgentEvent[] = [];
+    const consume = (async () => {
+      for await (const event of events) retained.push(event);
+    })();
+    stdout.end(
+      kind === 'copilot'
+        ? 'Retain this output\n'
+        : `${JSON.stringify({ type: 'result', subtype: 'success', result: 'Retain this output' })}\n`,
+    );
+    stderr.end();
+    await expect(consume).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
+    expect(JSON.stringify(retained)).toContain('Retain this output');
+    if (kind === 'copilot') expect(retained.some((event) => event.type === 'complete')).toBe(false);
+  });
 
-  it.each(['claude-spawn', 'claude-resume', 'copilot'] as const)(
-    'consumer return cannot release an unverified %s process',
-    async (kind) => {
-      const { stdout, stderr, events } = fixture(kind);
-      const iterator = events[Symbol.asyncIterator]();
-      const next = iterator.next();
-      stdout.write(
-        kind === 'copilot'
-          ? 'Retain first output\n'
-          : `${JSON.stringify({ type: 'result', subtype: 'success', result: 'Retain first output' })}\n`,
-      );
-      const first = await next;
-      expect(first.done).toBe(false);
-      await expect(iterator.return?.()).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
-      stdout.destroy();
-      stderr.destroy();
-    },
-  );
+  it.each([
+    'claude-spawn',
+    'claude-resume',
+    'copilot',
+  ] as const)('consumer return cannot release an unverified %s process', async (kind) => {
+    const { stdout, stderr, events } = fixture(kind);
+    const iterator = events[Symbol.asyncIterator]();
+    const next = iterator.next();
+    stdout.write(
+      kind === 'copilot'
+        ? 'Retain first output\n'
+        : `${JSON.stringify({ type: 'result', subtype: 'success', result: 'Retain first output' })}\n`,
+    );
+    const first = await next;
+    expect(first.done).toBe(false);
+    await expect(iterator.return?.()).rejects.toMatchObject({ code: 'EXEC_EXIT_UNVERIFIED' });
+    stdout.destroy();
+    stderr.destroy();
+  });
 
   it('does not authorize missing-session fallback before observing Claude Resume exit', async () => {
     const { stdout, stderr, runtime, events } = fixture('claude-resume');

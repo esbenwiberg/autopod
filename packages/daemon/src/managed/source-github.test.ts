@@ -34,7 +34,7 @@ it('keeps credentials daemon-side, verifies body digest, creates only a draft, a
     const url = String(input);
     calls.push({
       url,
-      method: init?.method!,
+      method: init!.method!,
       body: init?.body ? JSON.parse(String(init.body)) : null,
     });
     return new Response(JSON.stringify(url.includes('?') ? [record()] : record()), {

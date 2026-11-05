@@ -79,40 +79,43 @@ it('tears down an exited sandbox after its execution profile is retired without 
   expect(f.ensure).not.toHaveBeenCalled();
 });
 
-it.each(['unbound', 'exit-unobserved', 'local', 'ambiguous-manager', 'network-cleanup'])(
-  'refuses retired-profile teardown when %s',
-  async (failure) => {
-    const f = fixture();
-    f.request.route.executionTarget = failure === 'local' ? 'local' : 'sandbox';
-    const kill = vi.fn(async () => {});
-    f.binding.manager.kill = kill;
-    const replacement = {
-      ...f.binding,
-      route: { ...f.request.route, model: 'replacement' },
-      ...(failure === 'network-cleanup' ? { cleanupNetwork: async () => {} } : {}),
-    };
-    const runtime = new ManagedContainerRuntime(
-      failure === 'ambiguous-manager'
-        ? [replacement, { ...replacement, manager: { ...f.binding.manager } }]
-        : [replacement],
-      () =>
-        failure === 'unbound'
-          ? null
-          : {
-              request: f.request,
-              podId: 'pod-one',
-              createdAt: 100,
-              observedExit: failure !== 'exit-unobserved',
-            },
-      'fixture-supervisor',
-    );
-    await expect(runtime.cleanup('owned-sandbox')).rejects.toThrow(
-      failure === 'unbound' ? 'managed-runtime-unbound' : 'managed-route-unavailable',
-    );
-    expect(kill).not.toHaveBeenCalled();
-    expect(f.exec).not.toHaveBeenCalled();
-  },
-);
+it.each([
+  'unbound',
+  'exit-unobserved',
+  'local',
+  'ambiguous-manager',
+  'network-cleanup',
+])('refuses retired-profile teardown when %s', async (failure) => {
+  const f = fixture();
+  f.request.route.executionTarget = failure === 'local' ? 'local' : 'sandbox';
+  const kill = vi.fn(async () => {});
+  f.binding.manager.kill = kill;
+  const replacement = {
+    ...f.binding,
+    route: { ...f.request.route, model: 'replacement' },
+    ...(failure === 'network-cleanup' ? { cleanupNetwork: async () => {} } : {}),
+  };
+  const runtime = new ManagedContainerRuntime(
+    failure === 'ambiguous-manager'
+      ? [replacement, { ...replacement, manager: { ...f.binding.manager } }]
+      : [replacement],
+    () =>
+      failure === 'unbound'
+        ? null
+        : {
+            request: f.request,
+            podId: 'pod-one',
+            createdAt: 100,
+            observedExit: failure !== 'exit-unobserved',
+          },
+    'fixture-supervisor',
+  );
+  await expect(runtime.cleanup('owned-sandbox')).rejects.toThrow(
+    failure === 'unbound' ? 'managed-runtime-unbound' : 'managed-route-unavailable',
+  );
+  expect(kill).not.toHaveBeenCalled();
+  expect(f.exec).not.toHaveBeenCalled();
+});
 it('read-only/no-web mounts and exact routes reach the trusted guard with no worker credential', async () => {
   const f = fixture();
   await f.runtime.ensure('pod-one', f.request, () => {});
@@ -174,24 +177,26 @@ it('enables the nested worker network only when the effective grant has destinat
   const launch = JSON.parse(launchCall[1][4]!);
   expect(launch.argv.slice(-3)).toEqual(['--network-enabled', '--', f.request.task.objective]);
 });
-it.each(['write', 'host', 'network', 'route', 'quota'] as const)(
-  'rejects %s expansion before allocation',
-  async (kind) => {
-    const f = fixture();
-    if (kind === 'write') {
-      const volume = f.config.volumes?.[0];
-      if (!volume) throw new Error('fixture-volume-required');
-      volume.readOnly = false;
-    }
-    if (kind === 'host') f.config.volumes?.push({ host: '/', container: '/host' });
-    if (kind === 'network') f.config.allowedHosts = ['other.test'];
-    if (kind === 'route')
-      f.request = { ...f.request, route: { ...f.request.route, model: 'other' } };
-    if (kind === 'quota') f.binding.quotaReady = async () => false;
-    await expect(f.runtime.ensure('pod-one', f.request, () => {})).rejects.toThrow();
-    expect(f.ensure).not.toHaveBeenCalled();
-  },
-);
+it.each([
+  'write',
+  'host',
+  'network',
+  'route',
+  'quota',
+] as const)('rejects %s expansion before allocation', async (kind) => {
+  const f = fixture();
+  if (kind === 'write') {
+    const volume = f.config.volumes?.[0];
+    if (!volume) throw new Error('fixture-volume-required');
+    volume.readOnly = false;
+  }
+  if (kind === 'host') f.config.volumes?.push({ host: '/', container: '/host' });
+  if (kind === 'network') f.config.allowedHosts = ['other.test'];
+  if (kind === 'route') f.request = { ...f.request, route: { ...f.request.route, model: 'other' } };
+  if (kind === 'quota') f.binding.quotaReady = async () => false;
+  await expect(f.runtime.ensure('pod-one', f.request, () => {})).rejects.toThrow();
+  expect(f.ensure).not.toHaveBeenCalled();
+});
 
 it('writable preparation excludes read-only mounts and occurs before worker attachment', async () => {
   const f = fixture();
@@ -261,53 +266,53 @@ it('does not export artifacts after a nonzero managed agent exit', async () => {
   expect(f.binding.manager.extractManagedOutput).not.toHaveBeenCalled();
 });
 
-it.each(['local', 'sandbox'] as const)(
-  'prepares stopped %s source without overwriting local Git metadata',
-  async (target) => {
-    const f = fixture();
-    f.request.route.executionTarget = target;
-    f.request.profileSnapshot.route.executionTarget = target;
-    f.request.effectiveGrant.route.executionTarget = target;
-    const repository = f.request.effectiveGrant.scope.repositories[0];
-    const volume = f.config.volumes?.[0];
-    if (!repository || !volume) throw new Error('fixture-source-binding-missing');
-    repository.access = 'write';
-    f.request.outputs.source = {
-      mode: 'draft-pr',
-      repository: 'fixture-repo',
-      remote: 'fixture-remote',
-      head: 'worker/fixture',
-      base: 'main',
-    };
-    volume.readOnly = false;
-    await f.runtime.ensure('pod-one', f.request, () => {});
-    f.exec.mockResolvedValueOnce({
+it.each([
+  'local',
+  'sandbox',
+] as const)('prepares stopped %s source without overwriting local Git metadata', async (target) => {
+  const f = fixture();
+  f.request.route.executionTarget = target;
+  f.request.profileSnapshot.route.executionTarget = target;
+  f.request.effectiveGrant.route.executionTarget = target;
+  const repository = f.request.effectiveGrant.scope.repositories[0];
+  const volume = f.config.volumes?.[0];
+  if (!repository || !volume) throw new Error('fixture-source-binding-missing');
+  repository.access = 'write';
+  f.request.outputs.source = {
+    mode: 'draft-pr',
+    repository: 'fixture-repo',
+    remote: 'fixture-remote',
+    head: 'worker/fixture',
+    base: 'main',
+  };
+  volume.readOnly = false;
+  await f.runtime.ensure('pod-one', f.request, () => {});
+  f.exec.mockResolvedValueOnce({
+    exitCode: 0,
+    stdout: JSON.stringify({
+      observedExit: true,
+      state: 'exited',
+      consumedTokens: 12,
+      specDigest: f.request.executionSpecDigest,
       exitCode: 0,
-      stdout: JSON.stringify({
-        observedExit: true,
-        state: 'exited',
-        consumedTokens: 12,
-        specDigest: f.request.executionSpecDigest,
-        exitCode: 0,
-      }),
-      stderr: '',
-    });
+    }),
+    stderr: '',
+  });
 
-    await f.runtime.extractSource('container-one', 'fixture-repo');
+  await f.runtime.extractSource('container-one', 'fixture-repo');
 
-    if (target === 'local') {
-      expect(f.binding.manager.extractDirectoryFromContainer).not.toHaveBeenCalled();
-      return;
-    }
-    expect(f.binding.manager.extractDirectoryFromContainer).toHaveBeenCalledWith(
-      'container-one',
-      '/repositories/fixture-repo',
-      '/fixture/repo',
-      ['.git', 'node_modules'],
-      expect.objectContaining({ assertCurrent: expect.any(Function) }),
-    );
-  },
-);
+  if (target === 'local') {
+    expect(f.binding.manager.extractDirectoryFromContainer).not.toHaveBeenCalled();
+    return;
+  }
+  expect(f.binding.manager.extractDirectoryFromContainer).toHaveBeenCalledWith(
+    'container-one',
+    '/repositories/fixture-repo',
+    '/fixture/repo',
+    ['.git', 'node_modules'],
+    expect.objectContaining({ assertCurrent: expect.any(Function) }),
+  );
+});
 
 it('projects only an allowlisted channel request-limit diagnostic after exit', async () => {
   const f = fixture();
@@ -434,18 +439,19 @@ it.each([
   });
 });
 
-it.each(['deleted', 'running', 'unknown'] as const)(
-  'exec failure falls back to authoritative %s state without inventing success',
-  async (state) => {
-    const f = fixture();
-    f.exec.mockRejectedValueOnce(new Error('sandbox exec unavailable'));
-    f.binding.manager.getStatus = vi.fn(async () => state);
-    await expect(f.runtime.observe('container-one')).resolves.toEqual({
-      state: state === 'deleted' ? 'stopped' : 'unknown',
-      consumedTokens: 0,
-    });
-  },
-);
+it.each([
+  'deleted',
+  'running',
+  'unknown',
+] as const)('exec failure falls back to authoritative %s state without inventing success', async (state) => {
+  const f = fixture();
+  f.exec.mockRejectedValueOnce(new Error('sandbox exec unavailable'));
+  f.binding.manager.getStatus = vi.fn(async () => state);
+  await expect(f.runtime.observe('container-one')).resolves.toEqual({
+    state: state === 'deleted' ? 'stopped' : 'unknown',
+    consumedTokens: 0,
+  });
+});
 
 it('pre-start cancellation creates a bound tombstone and prevents a delayed real supervisor launch', () => {
   const root = mkdtempSync(join(tmpdir(), 'managed-stop-'));

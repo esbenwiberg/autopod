@@ -8,7 +8,7 @@ import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveLaunch } from '../configuration/launch-resolver.js';
 import type { ValidationEngineConfig } from '../interfaces/validation-engine.js';
-import { type SessionBridgeDependencies, createSessionBridge } from '../pods/pod-bridge-impl.js';
+import { createSessionBridge, type SessionBridgeDependencies } from '../pods/pod-bridge-impl.js';
 import { assertSourceResourceReleasable } from '../pods/source-custody-guards.js';
 import { assertValidationResourceSettled } from '../pods/validation-execution-evidence.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
@@ -134,35 +134,35 @@ describe('source resource release custody', () => {
     }
   });
 
-  it.each(['destroy', 'suspend'] as const)(
-    'rechecks custody after delayed auth before %s dispatch',
-    async (action) => {
-      let release = () => {};
-      const gate = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      let held = false;
-      const { client, requests } = makeClient(
-        action === 'suspend' ? [{ status: 200, body: { id: 'original', state: 'Running' } }] : [],
-        {
-          credential: {
-            async getToken() {
-              await gate;
-              return { token: 'fixture-token', expiresOnTimestamp: Date.now() + 60_000 };
-            },
-          },
-          assertReleaseAllowed() {
-            if (held) throw new Error('SOURCE_CUSTODY_HELD');
+  it.each([
+    'destroy',
+    'suspend',
+  ] as const)('rechecks custody after delayed auth before %s dispatch', async (action) => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    const { client, requests } = makeClient(
+      action === 'suspend' ? [{ status: 200, body: { id: 'original', state: 'Running' } }] : [],
+      {
+        credential: {
+          async getToken() {
+            await gate;
+            return { token: 'fixture-token', expiresOnTimestamp: Date.now() + 60_000 };
           },
         },
-      );
-      const pending = client[action]('original');
-      held = true;
-      release();
-      await expect(pending).rejects.toThrow('SOURCE_CUSTODY_HELD');
-      expect(requests.filter((request) => request.init?.method !== 'GET')).toHaveLength(0);
-    },
-  );
+        assertReleaseAllowed() {
+          if (held) throw new Error('SOURCE_CUSTODY_HELD');
+        },
+      },
+    );
+    const pending = client[action]('original');
+    held = true;
+    release();
+    await expect(pending).rejects.toThrow('SOURCE_CUSTODY_HELD');
+    expect(requests.filter((request) => request.init?.method !== 'GET')).toHaveLength(0);
+  });
 });
 
 describe('sandbox resource namespaces', () => {
@@ -1361,81 +1361,82 @@ describe('AzureSandboxApiClient', () => {
     expect(killBody).toContain('kill -KILL');
   });
 
-  it.each([409, 429])(
-    'reports timeout cleanup refusal %s without retry or observed exit',
-    async (status) => {
-      const { client, requests } = makeStreamingClient(
-        (socket) => socket.onopen?.({}),
-        [...STREAM_SETUP_RESPONSES, { status, body: { message: 'Concurrent exec unsupported' } }],
-      );
-      const chunks: SandboxExecChunk[] = [];
-      await expect(
-        (async () => {
-          for await (const chunk of client.execStream('sbx-1', ['test'], { timeoutMs: 1 }))
-            chunks.push(chunk);
-        })(),
-      ).rejects.toMatchObject({
-        code: 'AZURE_SANDBOX_TIMEOUT',
-        execution: { cause: 'timeout', cleanup: 'failed' },
-      });
-      expect(chunks.some((chunk) => chunk.exitCode !== undefined)).toBe(false);
-      expect(requests).toHaveLength(3);
-    },
-  );
+  it.each([
+    409, 429,
+  ])('reports timeout cleanup refusal %s without retry or observed exit', async (status) => {
+    const { client, requests } = makeStreamingClient(
+      (socket) => socket.onopen?.({}),
+      [...STREAM_SETUP_RESPONSES, { status, body: { message: 'Concurrent exec unsupported' } }],
+    );
+    const chunks: SandboxExecChunk[] = [];
+    await expect(
+      (async () => {
+        for await (const chunk of client.execStream('sbx-1', ['test'], { timeoutMs: 1 }))
+          chunks.push(chunk);
+      })(),
+    ).rejects.toMatchObject({
+      code: 'AZURE_SANDBOX_TIMEOUT',
+      execution: { cause: 'timeout', cleanup: 'failed' },
+    });
+    expect(chunks.some((chunk) => chunk.exitCode !== undefined)).toBe(false);
+    expect(requests).toHaveLength(3);
+  });
 
-  it.each([undefined, 0, 143, 137])(
-    'waits for cleanup and preserves output/observed exit %s',
-    async (observedExitCode) => {
-      const { client, sockets } = makeStreamingClient((socket) => socket.onopen?.({}));
-      const originalExec = client.exec.bind(client);
-      let releaseCleanup: (() => void) | undefined;
-      const gate = new Promise<void>((resolve) => {
-        releaseCleanup = resolve;
-      });
-      let cleanupStarted: (() => void) | undefined;
-      const started = new Promise<void>((resolve) => {
-        cleanupStarted = resolve;
-      });
-      vi.spyOn(client, 'exec').mockImplementation(async (id, command, options) => {
-        if (command[2]?.includes('pid_file=')) {
-          cleanupStarted?.();
-          await gate;
-          sockets[0]?.emit({
-            type: 'stdout',
-            data: Buffer.from('FAIL during cleanup\n').toString('base64'),
-          });
-          if (observedExitCode !== undefined)
-            sockets[0]?.emit({ type: 'exit_code', exitCode: observedExitCode });
-          return { stdout: '', stderr: '', exitCode: 0 };
+  it.each([
+    undefined,
+    0,
+    143,
+    137,
+  ])('waits for cleanup and preserves output/observed exit %s', async (observedExitCode) => {
+    const { client, sockets } = makeStreamingClient((socket) => socket.onopen?.({}));
+    const originalExec = client.exec.bind(client);
+    let releaseCleanup: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    let cleanupStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      cleanupStarted = resolve;
+    });
+    vi.spyOn(client, 'exec').mockImplementation(async (id, command, options) => {
+      if (command[2]?.includes('pid_file=')) {
+        cleanupStarted?.();
+        await gate;
+        sockets[0]?.emit({
+          type: 'stdout',
+          data: Buffer.from('FAIL during cleanup\n').toString('base64'),
+        });
+        if (observedExitCode !== undefined)
+          sockets[0]?.emit({ type: 'exit_code', exitCode: observedExitCode });
+        return { stdout: '', stderr: '', exitCode: 0 };
+      }
+      return originalExec(id, command, options);
+    });
+    let settled = false;
+    const chunks: SandboxExecChunk[] = [];
+    const pending = (async () => {
+      try {
+        for await (const _chunk of client.execStream('sbx-1', ['test'], { timeoutMs: 1 })) {
+          chunks.push(_chunk);
         }
-        return originalExec(id, command, options);
-      });
-      let settled = false;
-      const chunks: SandboxExecChunk[] = [];
-      const pending = (async () => {
-        try {
-          for await (const _chunk of client.execStream('sbx-1', ['test'], { timeoutMs: 1 })) {
-            chunks.push(_chunk);
-          }
-        } finally {
-          settled = true;
-        }
-      })();
-      const rejection = expect(pending).rejects.toMatchObject({
-        execution: {
-          cause: 'timeout',
-          cleanup: 'confirmed',
-          ...(observedExitCode !== undefined ? { observedExitCode } : {}),
-        },
-      });
-      await started;
-      expect(settled).toBe(false);
-      releaseCleanup?.();
-      await rejection;
-      expect(chunks.map((chunk) => chunk.stdout ?? '').join('')).toContain('FAIL during cleanup');
-      expect(chunks.some((chunk) => chunk.exitCode !== undefined)).toBe(false);
-    },
-  );
+      } finally {
+        settled = true;
+      }
+    })();
+    const rejection = expect(pending).rejects.toMatchObject({
+      execution: {
+        cause: 'timeout',
+        cleanup: 'confirmed',
+        ...(observedExitCode !== undefined ? { observedExitCode } : {}),
+      },
+    });
+    await started;
+    expect(settled).toBe(false);
+    releaseCleanup?.();
+    await rejection;
+    expect(chunks.map((chunk) => chunk.stdout ?? '').join('')).toContain('FAIL during cleanup');
+    expect(chunks.some((chunk) => chunk.exitCode !== undefined)).toBe(false);
+  });
 
   it('does not accept an exit frame with a missing exit code as success', async () => {
     const { client } = makeStreamingClient((socket) => {
@@ -2069,22 +2070,23 @@ function testHash(value: string, length: number): string {
   return createHash('sha256').update(value).digest('hex').slice(0, length);
 }
 
-it.each(['array', 'value', 'items'])(
-  'managed discovery supports %s without duplicating identity',
-  async (shape) => {
-    const row = {
-      id: 'sandbox-one',
-      labels: { podId: 'managed-one', executionSpecDigest: `sha256:${'a'.repeat(64)}` },
-    };
-    const body = shape === 'array' ? [row] : { [shape]: [row] };
-    const { client, requests } = makeClient([{ status: 200, body }]);
-    expect(await client.findManagedSandbox('managed-one', `sha256:${'a'.repeat(64)}`)).toBe(
-      'sandbox-one',
-    );
-    expect(requests).toHaveLength(1);
-    expect(requests[0]?.init?.method).toBe('GET');
-  },
-);
+it.each([
+  'array',
+  'value',
+  'items',
+])('managed discovery supports %s without duplicating identity', async (shape) => {
+  const row = {
+    id: 'sandbox-one',
+    labels: { podId: 'managed-one', executionSpecDigest: `sha256:${'a'.repeat(64)}` },
+  };
+  const body = shape === 'array' ? [row] : { [shape]: [row] };
+  const { client, requests } = makeClient([{ status: 200, body }]);
+  expect(await client.findManagedSandbox('managed-one', `sha256:${'a'.repeat(64)}`)).toBe(
+    'sandbox-one',
+  );
+  expect(requests).toHaveLength(1);
+  expect(requests[0]?.init?.method).toBe('GET');
+});
 it.each([
   null,
   {},
@@ -2101,15 +2103,12 @@ it.each([
       labels: { podId: 'managed-one', executionSpecDigest: `sha256:${'a'.repeat(64)}` },
     },
   ],
-])(
-  'managed discovery fails closed on unknown, truncated or conflicting responses',
-  async (body) => {
-    const { client } = makeClient([{ status: 200, body }]);
-    await expect(
-      client.findManagedSandbox('managed-one', `sha256:${'a'.repeat(64)}`),
-    ).rejects.toThrow();
-  },
-);
+])('managed discovery fails closed on unknown, truncated or conflicting responses', async (body) => {
+  const { client } = makeClient([{ status: 200, body }]);
+  await expect(
+    client.findManagedSandbox('managed-one', `sha256:${'a'.repeat(64)}`),
+  ).rejects.toThrow();
+});
 
 it('managed image staging refuses a mutable tag before any credential or network effects', async () => {
   const { client, requests } = makeClient([]);
@@ -2213,27 +2212,24 @@ describe('observed sandbox allocation', () => {
     ['0', '0Gi', null, null],
     ['Infinity', '9007199254740992Gi', null, null],
     ['-2', '4GB', null, null],
-  ])(
-    'decodes provider quantities %s / %s without guessing',
-    async (cpu, memory, cpuLimit, memoryLimitBytes) => {
-      const { client, requests } = makeClient([
-        {
-          status: 200,
-          body: {
-            id: 'observed',
-            state: 'Running',
-            resources: { cpu, memory },
-          },
+  ])('decodes provider quantities %s / %s without guessing', async (cpu, memory, cpuLimit, memoryLimitBytes) => {
+    const { client, requests } = makeClient([
+      {
+        status: 200,
+        body: {
+          id: 'observed',
+          state: 'Running',
+          resources: { cpu, memory },
         },
-      ]);
-      expect(await client.getResourceAllocation('observed')).toEqual({
-        cpuLimit,
-        memoryLimitBytes,
-      });
-      expect(requests).toHaveLength(1);
-      expect(requests[0]?.init?.method).toBe('GET');
-    },
-  );
+      },
+    ]);
+    expect(await client.getResourceAllocation('observed')).toEqual({
+      cpuLimit,
+      memoryLimitBytes,
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.init?.method).toBe('GET');
+  });
 
   it.each([
     { id: 'other', state: 'Running', resources: { cpu: '2', memory: '4Gi' } },
@@ -2405,35 +2401,36 @@ describe('bounded retained sandbox resume', () => {
     { states: ['Stopped', 'Stopped', 'Running'], locked: false, posts: 1 },
     { states: ['Resuming', 'Running'], locked: false, posts: 0 },
     { states: ['Running'], locked: false, posts: 0 },
-  ])(
-    'observes Running without duplicate accepted operations: $states',
-    async ({ states, locked, posts }) => {
-      vi.useFakeTimers();
-      try {
-        const responses: MockHttpResponse[] = [];
-        let submitted = false;
-        for (const state of states) {
-          responses.push({ status: 200, body: { state } });
-          if (state === 'Stopped' && !submitted) {
-            responses.push(
-              locked ? { status: 409, body: { title: 'ResourceLocked' } } : { status: 202 },
-            );
-            if (!locked) submitted = true;
-          }
+  ])('observes Running without duplicate accepted operations: $states', async ({
+    states,
+    locked,
+    posts,
+  }) => {
+    vi.useFakeTimers();
+    try {
+      const responses: MockHttpResponse[] = [];
+      let submitted = false;
+      for (const state of states) {
+        responses.push({ status: 200, body: { state } });
+        if (state === 'Stopped' && !submitted) {
+          responses.push(
+            locked ? { status: 409, body: { title: 'ResourceLocked' } } : { status: 202 },
+          );
+          if (!locked) submitted = true;
         }
-        const { client, requests } = makeClient(responses, { pollIntervalMs: 10 });
-        const attempts = Promise.all([
-          client.resume('synthetic-worker'),
-          client.resume('synthetic-worker'),
-        ]);
-        await vi.runAllTimersAsync();
-        await attempts;
-        expect(requests.filter((r) => r.init?.method === 'POST')).toHaveLength(posts);
-      } finally {
-        vi.useRealTimers();
       }
-    },
-  );
+      const { client, requests } = makeClient(responses, { pollIntervalMs: 10 });
+      const attempts = Promise.all([
+        client.resume('synthetic-worker'),
+        client.resume('synthetic-worker'),
+      ]);
+      await vi.runAllTimersAsync();
+      await attempts;
+      expect(requests.filter((r) => r.init?.method === 'POST')).toHaveLength(posts);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it.each([
     { status: 409, body: { title: 'OtherConflict' } },
@@ -2448,16 +2445,18 @@ describe('bounded retained sandbox resume', () => {
     expect(requests).toHaveLength(2);
   });
 
-  it.each(['Failed', 'Deleted', 'Deleting', 'Terminated'])(
-    'rejects terminal %s without a POST',
-    async (state) => {
-      const { client, requests } = makeClient([{ status: 200, body: { state } }]);
-      await expect(client.resume('synthetic-worker')).rejects.toMatchObject({
-        code: 'SANDBOX_WAKEUP_FAILED',
-      });
-      expect(requests).toHaveLength(1);
-    },
-  );
+  it.each([
+    'Failed',
+    'Deleted',
+    'Deleting',
+    'Terminated',
+  ])('rejects terminal %s without a POST', async (state) => {
+    const { client, requests } = makeClient([{ status: 200, body: { state } }]);
+    await expect(client.resume('synthetic-worker')).rejects.toMatchObject({
+      code: 'SANDBOX_WAKEUP_FAILED',
+    });
+    expect(requests).toHaveLength(1);
+  });
 
   it('retries a rejected lock only after observing stopped, then observes an accepted resume', async () => {
     vi.useFakeTimers();

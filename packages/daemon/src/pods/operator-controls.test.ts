@@ -1,6 +1,7 @@
 import type { EscalationRequest } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { createOperatorFixture } from '../test-utils/operator-helpers.js';
+
 describe('operator nudge, escalation and bulk controls', () => {
   it('queues the exact nudge only for eligible state', () => {
     const f = createOperatorFixture();

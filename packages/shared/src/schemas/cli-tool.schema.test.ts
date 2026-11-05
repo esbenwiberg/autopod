@@ -38,31 +38,37 @@ describe('tool-pack CLI schema', () => {
       }).source.type,
     ).toBe('npm');
   });
-  it.each(['main', 'v1.0.0', 'a'.repeat(39), `${'a'.repeat(40)};echo nope`])(
-    'rejects mutable or malformed source revision %s',
-    (commit) => {
-      expect(() => cliToolSchema.parse({ ...cli, source: { ...cli.source, commit } })).toThrow();
-    },
-  );
-  it.each(['latest', '^1.2.3', '1.2', '1.2.3;echo nope'])(
-    'rejects non-exact package version %s',
-    (version) => {
-      expect(() =>
-        cliToolSchema.parse({
-          ...cli,
-          source: { type: 'npm', package: 'tool', version, executable: 'tool' },
-        }),
-      ).toThrow();
-    },
-  );
-  it.each(['../bin/tool', '/bin/tool', 'bin/../../tool', 'bin/$(whoami)', '-tool', 'bin//tool'])(
-    'rejects executable path %s',
-    (executable) => {
-      expect(() =>
-        cliToolSchema.parse({ ...cli, source: { ...cli.source, executable } }),
-      ).toThrow();
-    },
-  );
+  it.each([
+    'main',
+    'v1.0.0',
+    'a'.repeat(39),
+    `${'a'.repeat(40)};echo nope`,
+  ])('rejects mutable or malformed source revision %s', (commit) => {
+    expect(() => cliToolSchema.parse({ ...cli, source: { ...cli.source, commit } })).toThrow();
+  });
+  it.each([
+    'latest',
+    '^1.2.3',
+    '1.2',
+    '1.2.3;echo nope',
+  ])('rejects non-exact package version %s', (version) => {
+    expect(() =>
+      cliToolSchema.parse({
+        ...cli,
+        source: { type: 'npm', package: 'tool', version, executable: 'tool' },
+      }),
+    ).toThrow();
+  });
+  it.each([
+    '../bin/tool',
+    '/bin/tool',
+    'bin/../../tool',
+    'bin/$(whoami)',
+    '-tool',
+    'bin//tool',
+  ])('rejects executable path %s', (executable) => {
+    expect(() => cliToolSchema.parse({ ...cli, source: { ...cli.source, executable } })).toThrow();
+  });
   it('rejects credentials, extra keys, arbitrary URLs and missing offline verification', () => {
     for (const source of [
       { ...cli.source, token: 'secret' },

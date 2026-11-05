@@ -7,10 +7,7 @@ export interface IssueWatcherRepository {
   updateStatus(id: number, status: WatchedIssueStatus): void;
   updatePod(id: number, podId: string, phase: WatchedIssue['phase']): void;
   findBySessionId(podId: string): WatchedIssue | null;
-  list(filters?: {
-    profileName?: string;
-    status?: WatchedIssueStatus;
-  }): WatchedIssue[];
+  list(filters?: { profileName?: string; status?: WatchedIssueStatus }): WatchedIssue[];
 }
 
 function rowToWatchedIssue(row: Record<string, unknown>): WatchedIssue {

@@ -1,18 +1,18 @@
-import {
-  AutopodError,
-  ProfileNotFoundError,
-  createProfileSchema,
-  updateProfileSchema,
-} from '@autopod/shared';
 import type {
   ProfileEditorPayload,
   ProviderAuthSource,
   ProviderFailoverPolicy,
 } from '@autopod/shared';
+import {
+  AutopodError,
+  createProfileSchema,
+  ProfileNotFoundError,
+  updateProfileSchema,
+} from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { DaemonGitHubAuth } from '../../github/daemon-github-auth.js';
 import type { ImageBuilder } from '../../images/index.js';
-import { type ProfileStore, buildSourceMap } from '../../profiles/index.js';
+import { buildSourceMap, type ProfileStore } from '../../profiles/index.js';
 import type { ProviderAccountStore } from '../../provider-accounts/index.js';
 import type { AzureDevOpsAuth } from '../../providers/azure-devops-auth.js';
 import { redactProfileSecrets } from '../profile-redaction.js';

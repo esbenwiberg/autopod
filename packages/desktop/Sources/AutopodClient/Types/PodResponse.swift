@@ -462,6 +462,9 @@ public struct ProgressResponse: Codable, Sendable {
 }
 
 public struct EscalationResponse: Codable, Sendable {
+  public var requiresHumanResponse: Bool {
+    type != "report_blocker" || (payload.kind != "infrastructure" && payload.requiresResponse != false)
+  }
   public let id: String
   public let podId: String
   public let type: String
@@ -471,6 +474,9 @@ public struct EscalationResponse: Codable, Sendable {
 }
 
 public struct EscalationPayload: Codable, Sendable {
+  public let kind: String?
+  public let requiresResponse: Bool?
+  public let recommendation: String?
   // Union type — fields from all payload variants, all optional
   public let question: String?
   public let context: String?

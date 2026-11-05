@@ -2,8 +2,8 @@ import type { Logger } from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import {
-  SCREENSHOT_ARTIFACT_PATH,
   publishScreenshotArtifacts,
+  SCREENSHOT_ARTIFACT_PATH,
   screenshotArtifactBranch,
 } from './screenshot-artifacts.js';
 

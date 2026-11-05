@@ -38,37 +38,37 @@ function createHarness(
 }
 
 describe('runCodexReview', () => {
-  it.each(['probe-rejected', 'ownership-lost'] as const)(
-    'does not launch Codex after %s',
-    async (failure) => {
-      const harness = createHarness();
-      const beforeLaunch = vi.fn(async () => {
-        expect(harness.writes).toHaveLength(1);
-        if (failure === 'probe-rejected') throw new Error('review probe rejected');
-        return () => {
-          throw new Error('review ownership lost');
-        };
-      });
-      await expect(
-        runCodexReview({
-          podId: 'pod',
-          containerId: 'container',
-          containerManager: harness.manager,
-          model: 'review-model',
-          prompt: 'review',
-          timeout: 1000,
-          beforeLaunch,
-        }),
-      ).rejects.toThrow(/review probe rejected|review ownership lost/);
-      expect(beforeLaunch).toHaveBeenCalledWith({
+  it.each([
+    'probe-rejected',
+    'ownership-lost',
+  ] as const)('does not launch Codex after %s', async (failure) => {
+    const harness = createHarness();
+    const beforeLaunch = vi.fn(async () => {
+      expect(harness.writes).toHaveLength(1);
+      if (failure === 'probe-rejected') throw new Error('review probe rejected');
+      return () => {
+        throw new Error('review ownership lost');
+      };
+    });
+    await expect(
+      runCodexReview({
         podId: 'pod',
         containerId: 'container',
-        runtime: 'codex',
+        containerManager: harness.manager,
         model: 'review-model',
-      });
-      expect(harness.execs.every((exec) => exec.command[0] === 'rm')).toBe(true);
-    },
-  );
+        prompt: 'review',
+        timeout: 1000,
+        beforeLaunch,
+      }),
+    ).rejects.toThrow(/review probe rejected|review ownership lost/);
+    expect(beforeLaunch).toHaveBeenCalledWith({
+      podId: 'pod',
+      containerId: 'container',
+      runtime: 'codex',
+      model: 'review-model',
+    });
+    expect(harness.execs.every((exec) => exec.command[0] === 'rm')).toBe(true);
+  });
 
   it('rechecks ownership before buffered fallback after unsupported streaming', async () => {
     const harness = createHarness();
@@ -396,62 +396,61 @@ describe('runCodexReview', () => {
     expect(result.stdout).toBe('{"status":"pass"}');
   });
 
-  it.each([0, 30, 120])(
-    'waits for process exit within the deadline after %sms streaming launch',
-    async (launchDelay) => {
-      vi.useFakeTimers({ toFake: ['performance', 'setTimeout', 'clearTimeout'] });
-      try {
-        let confirmExit: ((code: number) => void) | undefined;
-        const exitCode = new Promise<number>((resolve) => {
-          confirmExit = resolve;
-        });
-        const kill = vi.fn().mockResolvedValue(undefined);
-        const manager = {
-          supportsStreamingExec: true,
-          writeFile: async () => {},
-          readFile: async () => '',
-          execInContainer: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
-          execStreaming: async () => {
-            if (launchDelay) await new Promise<void>((resolve) => setTimeout(resolve, launchDelay));
-            return {
-              stdout: Readable.from([]),
-              stderr: Readable.from([]),
-              exitCode,
-              kill,
-            };
-          },
-        } as unknown as ContainerManager;
+  it.each([
+    0, 30, 120,
+  ])('waits for process exit within the deadline after %sms streaming launch', async (launchDelay) => {
+    vi.useFakeTimers({ toFake: ['performance', 'setTimeout', 'clearTimeout'] });
+    try {
+      let confirmExit: ((code: number) => void) | undefined;
+      const exitCode = new Promise<number>((resolve) => {
+        confirmExit = resolve;
+      });
+      const kill = vi.fn().mockResolvedValue(undefined);
+      const manager = {
+        supportsStreamingExec: true,
+        writeFile: async () => {},
+        readFile: async () => '',
+        execInContainer: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
+        execStreaming: async () => {
+          if (launchDelay) await new Promise<void>((resolve) => setTimeout(resolve, launchDelay));
+          return {
+            stdout: Readable.from([]),
+            stderr: Readable.from([]),
+            exitCode,
+            kill,
+          };
+        },
+      } as unknown as ContainerManager;
 
-        const review = runCodexReview({
-          podId: 'sandbox-pod',
-          containerId: 'sandbox-1',
-          containerManager: manager,
-          model: 'gpt-5',
-          prompt: 'review prompt',
-          timeout: 100,
-          beforeLaunch: async () => () => {},
-        });
-        await vi.advanceTimersByTimeAsync(Math.max(100, launchDelay) + 1);
-        expect(kill).toHaveBeenCalledOnce();
-        let settled = false;
-        void review.then(
-          () => {
-            settled = true;
-          },
-          () => {
-            settled = true;
-          },
-        );
-        await Promise.resolve();
-        expect(settled).toBe(false);
+      const review = runCodexReview({
+        podId: 'sandbox-pod',
+        containerId: 'sandbox-1',
+        containerManager: manager,
+        model: 'gpt-5',
+        prompt: 'review prompt',
+        timeout: 100,
+        beforeLaunch: async () => () => {},
+      });
+      await vi.advanceTimersByTimeAsync(Math.max(100, launchDelay) + 1);
+      expect(kill).toHaveBeenCalledOnce();
+      let settled = false;
+      void review.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      await Promise.resolve();
+      expect(settled).toBe(false);
 
-        confirmExit?.(137);
-        await expect(review).rejects.toMatchObject({ kind: 'timeout' });
-      } finally {
-        vi.useRealTimers();
-      }
-    },
-  );
+      confirmExit?.(137);
+      await expect(review).rejects.toMatchObject({ kind: 'timeout' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('throws a CodexReviewError when the in-container review command fails', async () => {
     const harness = createHarness({

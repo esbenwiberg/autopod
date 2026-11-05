@@ -22,8 +22,8 @@ import type { createProviderAttemptContext } from './provider-attempt-context.js
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import type { createResourceAuxiliary } from './resource-auxiliary.js';
 import type { createResourceCleanup } from './resource-cleanup.js';
-import type { createResourcePreviewTimers } from './resource-preview-timers.js';
 import type { createResourcePreview } from './resource-preview.js';
+import type { createResourcePreviewTimers } from './resource-preview-timers.js';
 import type { ValidationRepository } from './validation-repository.js';
 import type { createValidationWorkflowState } from './validation-workflow-state.js';
 import type { createWorkspacePreservation } from './workspace-preservation.js';
@@ -60,6 +60,7 @@ export interface WorkspaceManualFixCalls {
   ): Pod;
 }
 export interface WorkspaceWatchdogCalls {
+  reconcileInfrastructureBlocker(podId: string): Promise<void>;
   killSession(podId: string): Promise<void>;
   cleanupPodResourcesForRecovery(podId: string): Promise<void>;
 }

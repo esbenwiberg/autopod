@@ -155,95 +155,88 @@ describe('completion human gate persistence', () => {
     'missing-container',
     'missing-worktree',
     'existing-proof',
-  ] as const)(
-    'retains exact unconsumed guidance and durable capture result for %s',
-    async (mode) => {
-      const f = fixture();
-      try {
-        f.nudges.queue('worker', 'First answer');
-        f.nudges.queue('worker', 'Second answer');
-        const pending = f.nudges.listPending('worker');
-        if (mode === 'error') f.preserve.mockRejectedValueOnce(new Error('capture fault'));
-        if (mode === 'non-error') f.preserve.mockRejectedValueOnce('capture fault');
-        if (mode === 'missing-container') f.repo.update('worker', { containerId: null });
-        if (mode === 'missing-worktree') f.repo.update('worker', { worktreePath: null });
-        const pod = f.repo.getOrThrow('worker');
-        if (mode === 'existing-proof') {
-          f.repo.completionJournal?.settle(pod);
-          f.repo.completionJournal?.mark(pod, 'awaiting_human', true);
-          // Failed recapture must not erase the pre-existing proof.
-          f.preserve.mockRejectedValueOnce(new Error('capture fault'));
-        }
-        const priorProof = f.repo.getOrThrow('worker').finalization?.sourcePreservedAt;
-        await f.holdCompletionForHumanWork(pod);
-        const failure = ['error', 'non-error', 'existing-proof'].includes(mode);
-        const missing = mode.startsWith('missing');
-        expect(f.preserve).toHaveBeenCalledTimes(missing ? 0 : 1);
-        if (!missing)
-          expect(f.preserve).toHaveBeenCalledWith(
-            pod,
-            'uncollected human guidance after agent settlement',
-          );
-        const expectedReason = `${guidanceReason}${failure ? ' Workspace preservation failed: capture fault.' : ''} Original resources and guidance retained.`;
-        expect(f.owns).toHaveBeenCalledWith(pod, false, true);
-        const restored = f.reopen();
-        expect(restored.repo.getOrThrow('worker')).toMatchObject({
-          status: 'failed',
-          failureReason: expectedReason,
-          containerId: pod.containerId,
-          worktreePath: pod.worktreePath,
-          finalization: {
-            phase: 'awaiting_human',
-            pendingDecisionId: null,
-            sourcePreservedAt:
-              mode === 'existing-proof'
-                ? priorProof
-                : failure || missing
-                  ? null
-                  : expect.any(String),
-          },
-        });
-        expect(restored.nudges.listPending('worker')).toEqual(pending);
-        expect(restored.db.prepare('SELECT * FROM completion_decisions').all()).toEqual([]);
-        expect(
-          restored.db.prepare('SELECT * FROM operator_guidance_acknowledgments').all(),
-        ).toEqual([]);
-        expect(f.activity).toHaveBeenCalledWith('worker', expectedReason);
-        expect(f.published).toEqual(['failed']);
-      } finally {
-        f.close();
+  ] as const)('retains exact unconsumed guidance and durable capture result for %s', async (mode) => {
+    const f = fixture();
+    try {
+      f.nudges.queue('worker', 'First answer');
+      f.nudges.queue('worker', 'Second answer');
+      const pending = f.nudges.listPending('worker');
+      if (mode === 'error') f.preserve.mockRejectedValueOnce(new Error('capture fault'));
+      if (mode === 'non-error') f.preserve.mockRejectedValueOnce('capture fault');
+      if (mode === 'missing-container') f.repo.update('worker', { containerId: null });
+      if (mode === 'missing-worktree') f.repo.update('worker', { worktreePath: null });
+      const pod = f.repo.getOrThrow('worker');
+      if (mode === 'existing-proof') {
+        f.repo.completionJournal?.settle(pod);
+        f.repo.completionJournal?.mark(pod, 'awaiting_human', true);
+        // Failed recapture must not erase the pre-existing proof.
+        f.preserve.mockRejectedValueOnce(new Error('capture fault'));
       }
-    },
-  );
-
-  it.each(['question', 'guidance'] as const)(
-    'does not mark %s source before the held preserver succeeds',
-    async (kind) => {
-      const f = fixture();
-      const held = deferred();
-      let operation: Promise<void> | undefined;
-      try {
-        if (kind === 'question') f.ask();
-        else f.nudges.queue('worker', 'Retain answer');
-        f.preserve.mockImplementationOnce(() => held.promise);
-        operation = f.holdCompletionForHumanWork(f.repo.getOrThrow('worker'));
-        expect(operation).toBeInstanceOf(Promise);
-        expect(f.repo.getOrThrow('worker').finalization?.sourcePreservedAt).toBeNull();
-        expect(f.transition).not.toHaveBeenCalled();
-        expect(f.activity).not.toHaveBeenCalled();
-        held.resolve();
-        await operation;
-        const restored = f.reopen();
-        expect(restored.repo.getOrThrow('worker').finalization?.sourcePreservedAt).toEqual(
-          expect.any(String),
+      const priorProof = f.repo.getOrThrow('worker').finalization?.sourcePreservedAt;
+      await f.holdCompletionForHumanWork(pod);
+      const failure = ['error', 'non-error', 'existing-proof'].includes(mode);
+      const missing = mode.startsWith('missing');
+      expect(f.preserve).toHaveBeenCalledTimes(missing ? 0 : 1);
+      if (!missing)
+        expect(f.preserve).toHaveBeenCalledWith(
+          pod,
+          'uncollected human guidance after agent settlement',
         );
-      } finally {
-        held.resolve();
-        await operation;
-        f.close();
-      }
-    },
-  );
+      const expectedReason = `${guidanceReason}${failure ? ' Workspace preservation failed: capture fault.' : ''} Original resources and guidance retained.`;
+      expect(f.owns).toHaveBeenCalledWith(pod, false, true);
+      const restored = f.reopen();
+      expect(restored.repo.getOrThrow('worker')).toMatchObject({
+        status: 'failed',
+        failureReason: expectedReason,
+        containerId: pod.containerId,
+        worktreePath: pod.worktreePath,
+        finalization: {
+          phase: 'awaiting_human',
+          pendingDecisionId: null,
+          sourcePreservedAt:
+            mode === 'existing-proof' ? priorProof : failure || missing ? null : expect.any(String),
+        },
+      });
+      expect(restored.nudges.listPending('worker')).toEqual(pending);
+      expect(restored.db.prepare('SELECT * FROM completion_decisions').all()).toEqual([]);
+      expect(restored.db.prepare('SELECT * FROM operator_guidance_acknowledgments').all()).toEqual(
+        [],
+      );
+      expect(f.activity).toHaveBeenCalledWith('worker', expectedReason);
+      expect(f.published).toEqual(['failed']);
+    } finally {
+      f.close();
+    }
+  });
+
+  it.each([
+    'question',
+    'guidance',
+  ] as const)('does not mark %s source before the held preserver succeeds', async (kind) => {
+    const f = fixture();
+    const held = deferred();
+    let operation: Promise<void> | undefined;
+    try {
+      if (kind === 'question') f.ask();
+      else f.nudges.queue('worker', 'Retain answer');
+      f.preserve.mockImplementationOnce(() => held.promise);
+      operation = f.holdCompletionForHumanWork(f.repo.getOrThrow('worker'));
+      expect(operation).toBeInstanceOf(Promise);
+      expect(f.repo.getOrThrow('worker').finalization?.sourcePreservedAt).toBeNull();
+      expect(f.transition).not.toHaveBeenCalled();
+      expect(f.activity).not.toHaveBeenCalled();
+      held.resolve();
+      await operation;
+      const restored = f.reopen();
+      expect(restored.repo.getOrThrow('worker').finalization?.sourcePreservedAt).toEqual(
+        expect.any(String),
+      );
+    } finally {
+      held.resolve();
+      await operation;
+      f.close();
+    }
+  });
 
   it('rolls back actual journal/state writes and queued publication, retaining earlier settlement on disk', async () => {
     const f = fixture();
@@ -313,6 +306,64 @@ describe('completion human gate persistence', () => {
     }
   });
 
+  it('preserves a typed infrastructure report across restart and holds only settled completion', async () => {
+    const f = fixture();
+    const held = deferred();
+    let operation: Promise<void> | undefined;
+    try {
+      const escalationRepo = createEscalationRepository(f.db);
+      const pod = f.repo.getOrThrow('worker');
+      escalationRepo.insert({
+        id: 'infra',
+        podId: pod.id,
+        type: 'report_blocker',
+        timestamp: new Date().toISOString(),
+        response: null,
+        payload: {
+          kind: 'infrastructure',
+          lifecycleGeneration: pod.lifecycleGeneration,
+          requiresResponse: false,
+          owner: 'validation',
+          description: 'Runner unavailable',
+          attempted: [],
+          needs: 'Repair runner',
+        },
+      });
+      expect(f.repo.getOrThrow('worker').status).toBe('running');
+      const reopened = f.reopen();
+      expect(reopened.repo.hasInfrastructureBlocker?.('worker')).toBe(true);
+      const gate = createCompletionHumanGate({
+        ...f.dependencies,
+        podRepo: reopened.repo,
+        nudgeRepo: reopened.nudges,
+        escalationRepo: createEscalationRepository(reopened.db),
+      });
+      f.preserve.mockImplementationOnce(() => held.promise);
+      operation = gate.holdCompletionForHumanWork(reopened.repo.getOrThrow('worker'));
+      expect(reopened.repo.getOrThrow('worker').status).toBe('running');
+      expect(f.transition).not.toHaveBeenCalled();
+      // Rebind transition after reopening the underlying database.
+      f.transition.mockImplementationOnce((current, status, updates) => {
+        reopened.repo.update(current.id, { status, ...updates });
+        return reopened.repo.getOrThrow(current.id);
+      });
+      held.resolve();
+      await operation;
+      expect(reopened.repo.getOrThrow('worker')).toMatchObject({
+        status: 'failed',
+        pendingEscalation: null,
+        failureReason: expect.stringContaining('Infrastructure blocked: Runner unavailable'),
+      });
+      expect(reopened.repo.getOrThrow('worker').finalization?.sourcePreservedAt).toEqual(
+        expect.any(String),
+      );
+    } finally {
+      held.resolve();
+      await operation;
+      f.close();
+    }
+  });
+
   it('returns undefined synchronously for the empty path without mutation or an async dispatch window', () => {
     const f = fixture();
     try {
@@ -328,28 +379,28 @@ describe('completion human gate persistence', () => {
     }
   });
 
-  it.each(['question', 'guidance'] as const)(
-    'retains legacy %s behavior without journal or transaction support',
-    async (kind) => {
-      const f = fixture();
-      try {
-        if (kind === 'question') f.ask();
-        else f.nudges.queue('worker', 'Retain answer');
-        const legacy = createCompletionHumanGate({
-          ...f.dependencies,
-          podRepo: { getOrThrow: f.repo.getOrThrow },
-        });
-        await legacy.holdCompletionForHumanWork(f.repo.getOrThrow('worker'));
-        expect(f.preserve).toHaveBeenCalledOnce();
-        const restored = f.reopen();
-        expect(restored.repo.getOrThrow('worker').status).toBe(
-          kind === 'question' ? 'awaiting_input' : 'failed',
-        );
-        expect(restored.repo.getOrThrow('worker').finalization).toBeNull();
-        if (kind === 'guidance') expect(restored.nudges.hasPending('worker')).toBe(true);
-      } finally {
-        f.close();
-      }
-    },
-  );
+  it.each([
+    'question',
+    'guidance',
+  ] as const)('retains legacy %s behavior without journal or transaction support', async (kind) => {
+    const f = fixture();
+    try {
+      if (kind === 'question') f.ask();
+      else f.nudges.queue('worker', 'Retain answer');
+      const legacy = createCompletionHumanGate({
+        ...f.dependencies,
+        podRepo: { getOrThrow: f.repo.getOrThrow },
+      });
+      await legacy.holdCompletionForHumanWork(f.repo.getOrThrow('worker'));
+      expect(f.preserve).toHaveBeenCalledOnce();
+      const restored = f.reopen();
+      expect(restored.repo.getOrThrow('worker').status).toBe(
+        kind === 'question' ? 'awaiting_input' : 'failed',
+      );
+      expect(restored.repo.getOrThrow('worker').finalization).toBeNull();
+      if (kind === 'guidance') expect(restored.nudges.hasPending('worker')).toBe(true);
+    } finally {
+      f.close();
+    }
+  });
 });

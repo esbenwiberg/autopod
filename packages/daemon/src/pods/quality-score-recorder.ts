@@ -5,9 +5,9 @@ import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
+import { computeScore, isQualityScoreEligible } from './quality-score.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import { QUALITY_SCORE_ALGORITHM_VERSION } from './quality-score-repository.js';
-import { computeScore, isQualityScoreEligible } from './quality-score.js';
 import { computeQualitySignals } from './quality-signals.js';
 import type { ValidationRepository } from './validation-repository.js';
 

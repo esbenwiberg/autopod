@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto';
 import {
   AutopodError,
   type OperatorActor,
+  operatorActorSchema,
   type Pod,
   type PodsitterAction,
   type PodsitterDecision,
-  operatorActorSchema,
   podsitterDecisionSchema,
 } from '@autopod/shared';
 import type { PodManager } from '../pods/pod-manager.js';

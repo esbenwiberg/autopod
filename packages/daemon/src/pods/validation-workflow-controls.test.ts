@@ -26,6 +26,7 @@ import type {
   ValidationWorkflowLiveDependencies,
 } from './validation-workflow-ports.js';
 import { createValidationWorkflowState } from './validation-workflow-state.js';
+
 const logger = pino({ level: 'silent' });
 const cleanup: Array<() => void> = [];
 afterEach(() => {
@@ -181,6 +182,90 @@ function fixture(status: Pod['status'] = 'validating', persistent = false) {
   };
 }
 describe('validation workflow controls', () => {
+  it.each([
+    'before',
+    'credential',
+    'rebase',
+  ])('holds update-from-base before reset or validation after %s report', async (stage) => {
+    const f = fixture('failed');
+    f.podRepo.update('controls', { validationAttempts: 2 });
+    const before = f.pod();
+    const report = () =>
+      f.escalationRepo.insert({
+        id: 'infra',
+        podId: 'controls',
+        type: 'report_blocker',
+        timestamp: new Date().toISOString(),
+        response: null,
+        payload: {
+          kind: 'infrastructure',
+          requiresResponse: false,
+          lifecycleGeneration: before.lifecycleGeneration,
+          description: 'Runner unavailable',
+          attempted: [],
+          needs: 'Qualified execution',
+        },
+      });
+    const triggerValidation = vi.fn(async () => {});
+    const owner = createValidationWorkflowControls(f.deps, {
+      ...f.captured,
+      resolveGitCredential: async () => {
+        if (stage === 'credential') report();
+        return 'synthetic';
+      },
+    });
+    vi.mocked(f.worktree.rebaseOntoBase).mockImplementationOnce(async () => {
+      if (stage === 'rebase') report();
+      return { rebased: true, alreadyUpToDate: false, conflicts: [] };
+    });
+    if (stage === 'before') report();
+    await expect(
+      owner.updateFromBase.call({ triggerValidation }, 'controls'),
+    ).rejects.toMatchObject({ code: 'INFRASTRUCTURE_BLOCKED' });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(f.pod()).toEqual(before);
+    expect(triggerValidation).not.toHaveBeenCalled();
+    expect(f.captured.forceWithLeaseAllowances.size).toBe(0);
+    expect(f.worktree.rebaseOntoBase).toHaveBeenCalledTimes(stage === 'rebase' ? 1 : 0);
+    expect(f.escalationRepo.getOrThrow('infra').response).toBeNull();
+  });
+  it('retains infrastructure across direct waiver, budget, override and validation claim controls', async () => {
+    const f = fixture('failed');
+    const before = f.pod();
+    f.escalationRepo.insert({
+      id: 'infra',
+      podId: 'controls',
+      type: 'report_blocker',
+      timestamp: new Date().toISOString(),
+      response: null,
+      payload: {
+        kind: 'infrastructure',
+        requiresResponse: false,
+        lifecycleGeneration: before.lifecycleGeneration,
+        description: 'Runner unavailable',
+        attempted: [],
+        needs: 'Qualified execution',
+      },
+    });
+    expect(() => f.owner.setSkipValidation('controls', true)).toThrowError(
+      expect.objectContaining({ code: 'INFRASTRUCTURE_BLOCKED' }),
+    );
+    expect(() => f.owner.claimValidation(before, new AbortController())).toThrowError(
+      expect.objectContaining({ code: 'INFRASTRUCTURE_BLOCKED' }),
+    );
+    expect(f.pod()).toEqual(before);
+    expect(f.state.validationAbortControllers.size).toBe(0);
+    expect(f.dependent).not.toHaveBeenCalled();
+    await expect(f.owner.applyOverridesInstant('controls')).rejects.toMatchObject({
+      code: 'INFRASTRUCTURE_BLOCKED',
+    });
+    const triggerValidation = vi.fn(async () => {});
+    await expect(
+      f.owner.extendAttempts.call({ triggerValidation }, 'controls', 1),
+    ).rejects.toMatchObject({ code: 'INFRASTRUCTURE_BLOCKED' });
+    expect(f.pod()).toEqual(before);
+    expect(triggerValidation).not.toHaveBeenCalled();
+  });
   it('constructs inertly and shares its abort registry with the existing consumers', () => {
     const f = fixture();
     expect(f.assertStopped).not.toHaveBeenCalled();
@@ -312,22 +397,23 @@ describe('validation workflow controls', () => {
     expect(f.worktree.rebaseOntoBase).not.toHaveBeenCalled();
     expect(trigger).not.toHaveBeenCalled();
   });
-  it.each(['clean', 'unchanged', 'conflict'] as const)(
-    'unwinds a queued rebase after abort (%s)',
-    async (kind) => {
-      const f = fixture();
-      vi.mocked(f.worktree.rebaseOntoBase).mockResolvedValueOnce({
-        rebased: kind === 'clean',
-        alreadyUpToDate: kind === 'unchanged',
-        conflicts: kind === 'conflict' ? ['file.ts'] : [],
-      });
-      const follow = vi.fn();
-      await f.owner.runUpdateFromBaseAfterAbort('controls', follow);
-      expect(f.pod().status).toBe(kind === 'conflict' ? 'review_required' : 'failed');
-      expect(follow).toHaveBeenCalledTimes(kind === 'clean' ? 1 : 0);
-      expect(f.captured.forceWithLeaseAllowances.has('controls')).toBe(kind === 'clean');
-    },
-  );
+  it.each([
+    'clean',
+    'unchanged',
+    'conflict',
+  ] as const)('unwinds a queued rebase after abort (%s)', async (kind) => {
+    const f = fixture();
+    vi.mocked(f.worktree.rebaseOntoBase).mockResolvedValueOnce({
+      rebased: kind === 'clean',
+      alreadyUpToDate: kind === 'unchanged',
+      conflicts: kind === 'conflict' ? ['file.ts'] : [],
+    });
+    const follow = vi.fn();
+    await f.owner.runUpdateFromBaseAfterAbort('controls', follow);
+    expect(f.pod().status).toBe(kind === 'conflict' ? 'review_required' : 'failed');
+    expect(follow).toHaveBeenCalledTimes(kind === 'clean' ? 1 : 0);
+    expect(f.captured.forceWithLeaseAllowances.has('controls')).toBe(kind === 'clean');
+  });
   it('keeps an accepted extension coalesced until its current receiver finishes', async () => {
     const f = fixture('review_required');
     let release!: () => void;

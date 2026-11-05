@@ -147,37 +147,38 @@ describe('durable PR delivery boundary', () => {
     }
   });
 
-  it.each(['merged', 'pending', 'rejected'] as const)(
-    'records only confirmed merge responses as durable disposition: %s',
-    async (outcome) => {
-      const f = fixture();
-      try {
-        const created = await f.manager.createPr(f.config);
-        if (outcome === 'rejected')
-          vi.mocked(f.provider.mergePr).mockRejectedValue(new Error('ambiguous merge request'));
-        else
-          vi.mocked(f.provider.mergePr).mockResolvedValue({
-            merged: outcome === 'merged',
-            autoMergeScheduled: outcome === 'pending',
-          });
-        const call = () => f.manager.mergePr({ prUrl: created.url });
-        if (outcome === 'rejected') await expect(call()).rejects.toThrow('ambiguous merge request');
-        else {
-          await call();
-          await call();
-        }
-        expect(f.db.prepare('SELECT disposition FROM delivery_observations').all()).toEqual(
-          outcome === 'merged' ? [{ disposition: 'merged' }] : [],
-        );
-        expect(f.db.prepare('SELECT disposition FROM delivery_receipts').get()).toEqual({
-          disposition: 'open',
+  it.each([
+    'merged',
+    'pending',
+    'rejected',
+  ] as const)('records only confirmed merge responses as durable disposition: %s', async (outcome) => {
+    const f = fixture();
+    try {
+      const created = await f.manager.createPr(f.config);
+      if (outcome === 'rejected')
+        vi.mocked(f.provider.mergePr).mockRejectedValue(new Error('ambiguous merge request'));
+      else
+        vi.mocked(f.provider.mergePr).mockResolvedValue({
+          merged: outcome === 'merged',
+          autoMergeScheduled: outcome === 'pending',
         });
-        expect(f.repo.taskExecutions?.snapshot('pod').delivery?.receiptCount).toBe(1);
-      } finally {
-        f.db.close();
+      const call = () => f.manager.mergePr({ prUrl: created.url });
+      if (outcome === 'rejected') await expect(call()).rejects.toThrow('ambiguous merge request');
+      else {
+        await call();
+        await call();
       }
-    },
-  );
+      expect(f.db.prepare('SELECT disposition FROM delivery_observations').all()).toEqual(
+        outcome === 'merged' ? [{ disposition: 'merged' }] : [],
+      );
+      expect(f.db.prepare('SELECT disposition FROM delivery_receipts').get()).toEqual({
+        disposition: 'open',
+      });
+      expect(f.repo.taskExecutions?.snapshot('pod').delivery?.receiptCount).toBe(1);
+    } finally {
+      f.db.close();
+    }
+  });
   it('retains a confirmed merge across database close/reopen without another creation receipt', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'merge-disposition-restart-'));
     const databasePath = join(dir, 'test.db');
@@ -322,45 +323,43 @@ describe('durable PR delivery boundary', () => {
   });
 
   // Full on-disk schema replay includes fsyncs; these are functional, not latency tests.
-  it.each([139, 153])(
-    'upgrades schema %s and reconciles in-flight delivery after actual close/reopen',
-    async (version) => {
-      const dir = mkdtempSync(join(tmpdir(), 'delivery-restart-'));
-      const migrations = new URL('../db/migrations', import.meta.url).pathname;
-      for (const file of readdirSync(migrations))
-        if (Number.parseInt(file, 10) <= version)
-          copyFileSync(join(migrations, file), join(dir, file));
-      let db = createDatabase(join(dir, 'test.db'), logger);
-      try {
-        runMigrations(db, dir, logger);
-        await runMigrationsWithBackups(db, migrations, logger);
-        const f = fixture(db);
-        const intent = f.ledger.reserve(f.config);
-        expect(f.ledger.claim(intent)).toBe(true);
-        db.close();
-        db = createDatabase(join(dir, 'test.db'), logger);
-        const ledger = createDeliveryLedger(db);
-        const provider = f.provider;
-        vi.mocked(requireValue(provider.findPr)).mockResolvedValue({
-          url: 'https://github.com/org/repo/pull/1',
-          disposition: 'merged',
-        });
-        const restarted = requireValue(
-          createDurablePrManagerFactory(ledger, () => provider)(f.config.profile),
-        );
-        expect((await restarted.createPr(f.config)).url).toContain('/pull/1');
-        expect(provider.createPr).not.toHaveBeenCalled();
-        expect(db.prepare('SELECT evidence, disposition FROM delivery_receipts').get()).toEqual({
-          evidence: 'provider_lookup',
-          disposition: 'merged',
-        });
-        expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
-        expect(db.pragma('foreign_key_check')).toEqual([]);
-      } finally {
-        db.close();
-        rmSync(dir, { recursive: true, force: true });
-      }
-    },
-    30_000,
-  );
+  it.each([
+    139, 153,
+  ])('upgrades schema %s and reconciles in-flight delivery after actual close/reopen', async (version) => {
+    const dir = mkdtempSync(join(tmpdir(), 'delivery-restart-'));
+    const migrations = new URL('../db/migrations', import.meta.url).pathname;
+    for (const file of readdirSync(migrations))
+      if (Number.parseInt(file, 10) <= version)
+        copyFileSync(join(migrations, file), join(dir, file));
+    let db = createDatabase(join(dir, 'test.db'), logger);
+    try {
+      runMigrations(db, dir, logger);
+      await runMigrationsWithBackups(db, migrations, logger);
+      const f = fixture(db);
+      const intent = f.ledger.reserve(f.config);
+      expect(f.ledger.claim(intent)).toBe(true);
+      db.close();
+      db = createDatabase(join(dir, 'test.db'), logger);
+      const ledger = createDeliveryLedger(db);
+      const provider = f.provider;
+      vi.mocked(requireValue(provider.findPr)).mockResolvedValue({
+        url: 'https://github.com/org/repo/pull/1',
+        disposition: 'merged',
+      });
+      const restarted = requireValue(
+        createDurablePrManagerFactory(ledger, () => provider)(f.config.profile),
+      );
+      expect((await restarted.createPr(f.config)).url).toContain('/pull/1');
+      expect(provider.createPr).not.toHaveBeenCalled();
+      expect(db.prepare('SELECT evidence, disposition FROM delivery_receipts').get()).toEqual({
+        evidence: 'provider_lookup',
+        disposition: 'merged',
+      });
+      expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
+      expect(db.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

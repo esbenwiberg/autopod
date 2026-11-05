@@ -3,12 +3,12 @@ import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import {
+  classifyGitError,
   DeletionGuardError,
   GitCredentialError,
   GitMissingRemoteBranchError,
   GitTransientFetchError,
   LocalWorktreeManager,
-  classifyGitError,
   truncateDiffAtFileBoundary,
 } from './local-worktree-manager.js';
 
@@ -1327,58 +1327,55 @@ describe('LocalWorktreeManager', () => {
       'duplicate-ref',
       'head-moved',
       'dirty-source',
-    ] as const)(
-      'binds source publication to exact committed source and remote evidence (%s)',
-      async (scenario) => {
-        const source = 'a'.repeat(40);
-        const other = 'b'.repeat(40);
-        const tree = 'c'.repeat(40);
-        const calls: string[][] = [];
-        let pushed = false;
-        execFileMock.mockImplementation(
-          (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
-            calls.push(args);
-            const cb = resolveCallback(arg3, arg4);
-            const cmd = args.join(' ');
-            let stdout = '';
-            if (cmd.includes('remote get-url origin')) stdout = 'https://github.com/org/repo.git';
-            else if (cmd.includes('rev-parse --git-common-dir')) stdout = '.git';
-            else if (cmd.includes('rev-parse --abbrev-ref HEAD')) stdout = 'feature';
-            else if (cmd.includes('^{tree}')) stdout = tree;
-            else if (cmd.includes('rev-parse HEAD'))
-              stdout = pushed && scenario === 'head-moved' ? other : source;
-            else if (args.includes('status'))
-              stdout = scenario === 'dirty-source' ? ' M source.ts\0' : '';
-            else if (args.includes('push')) pushed = true;
-            else if (args.includes('ls-remote'))
-              stdout =
-                scenario === 'remote-absent'
-                  ? ''
-                  : scenario === 'duplicate-ref'
-                    ? `${source}\trefs/heads/feature\n${other}\trefs/heads/feature`
-                    : `${scenario === 'remote-moved' ? other : source}\trefs/heads/feature`;
-            cb(null, { stdout, stderr: '' });
-            return {} as ChildProcess;
-          },
-        );
-        if (scenario === 'verified') {
-          await expect(manager.pushBranch('/tmp/source', 'feature')).resolves.toMatchObject({
-            commitSha: source,
-            treeSha: tree,
-            remoteRef: 'refs/heads/feature',
-            observedRemoteCommitSha: source,
-            worktreeClean: true,
-            observedAt: expect.any(String),
-          });
-        } else
-          await expect(manager.pushBranch('/tmp/source', 'feature')).rejects.toMatchObject({
-            code: 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
-          });
-        const push = calls.find((args) => args.includes('push'));
-        if (scenario === 'dirty-source') expect(push).toBeUndefined();
-        else expect(push).toContain(`${source}:refs/heads/feature`);
-      },
-    );
+    ] as const)('binds source publication to exact committed source and remote evidence (%s)', async (scenario) => {
+      const source = 'a'.repeat(40);
+      const other = 'b'.repeat(40);
+      const tree = 'c'.repeat(40);
+      const calls: string[][] = [];
+      let pushed = false;
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          calls.push(args);
+          const cb = resolveCallback(arg3, arg4);
+          const cmd = args.join(' ');
+          let stdout = '';
+          if (cmd.includes('remote get-url origin')) stdout = 'https://github.com/org/repo.git';
+          else if (cmd.includes('rev-parse --git-common-dir')) stdout = '.git';
+          else if (cmd.includes('rev-parse --abbrev-ref HEAD')) stdout = 'feature';
+          else if (cmd.includes('^{tree}')) stdout = tree;
+          else if (cmd.includes('rev-parse HEAD'))
+            stdout = pushed && scenario === 'head-moved' ? other : source;
+          else if (args.includes('status'))
+            stdout = scenario === 'dirty-source' ? ' M source.ts\0' : '';
+          else if (args.includes('push')) pushed = true;
+          else if (args.includes('ls-remote'))
+            stdout =
+              scenario === 'remote-absent'
+                ? ''
+                : scenario === 'duplicate-ref'
+                  ? `${source}\trefs/heads/feature\n${other}\trefs/heads/feature`
+                  : `${scenario === 'remote-moved' ? other : source}\trefs/heads/feature`;
+          cb(null, { stdout, stderr: '' });
+          return {} as ChildProcess;
+        },
+      );
+      if (scenario === 'verified') {
+        await expect(manager.pushBranch('/tmp/source', 'feature')).resolves.toMatchObject({
+          commitSha: source,
+          treeSha: tree,
+          remoteRef: 'refs/heads/feature',
+          observedRemoteCommitSha: source,
+          worktreeClean: true,
+          observedAt: expect.any(String),
+        });
+      } else
+        await expect(manager.pushBranch('/tmp/source', 'feature')).rejects.toMatchObject({
+          code: 'SOURCE_PUBLICATION_RECONCILIATION_REQUIRED',
+        });
+      const push = calls.find((args) => args.includes('push'));
+      if (scenario === 'dirty-source') expect(push).toBeUndefined();
+      else expect(push).toContain(`${source}:refs/heads/feature`);
+    });
 
     it('rejects when HEAD is on a different branch than expectedBranch', async () => {
       execFileMock.mockImplementation(
@@ -1961,28 +1958,27 @@ describe('LocalWorktreeManager', () => {
       })(),
     ];
 
-    it.each(credentialUrls)(
-      'rejects credential-bearing remote %s before any side effect',
-      async (repoUrl) => {
-        const githubAuth = fakeGitHubAuth();
-        const resolveCredential = vi.spyOn(githubAuth, 'resolveCredential');
-        manager = new LocalWorktreeManager({ cacheDir, worktreeDir, logger, githubAuth });
+    it.each(
+      credentialUrls,
+    )('rejects credential-bearing remote %s before any side effect', async (repoUrl) => {
+      const githubAuth = fakeGitHubAuth();
+      const resolveCredential = vi.spyOn(githubAuth, 'resolveCredential');
+      manager = new LocalWorktreeManager({ cacheDir, worktreeDir, logger, githubAuth });
 
-        await expect(
-          manager.create({
-            repoUrl,
-            branch: 'feat/no-url-credentials',
-            baseBranch: 'main',
-          }),
-        ).rejects.toThrow(
-          'Refusing Git remote URL containing credentials; configure authentication through the daemon credential provider',
-        );
+      await expect(
+        manager.create({
+          repoUrl,
+          branch: 'feat/no-url-credentials',
+          baseBranch: 'main',
+        }),
+      ).rejects.toThrow(
+        'Refusing Git remote URL containing credentials; configure authentication through the daemon credential provider',
+      );
 
-        expect(resolveCredential).not.toHaveBeenCalled();
-        expect(execFileMock).not.toHaveBeenCalled();
-        expect(fsMkdirMock).not.toHaveBeenCalled();
-      },
-    );
+      expect(resolveCredential).not.toHaveBeenCalled();
+      expect(execFileMock).not.toHaveBeenCalled();
+      expect(fsMkdirMock).not.toHaveBeenCalled();
+    });
 
     it('rejects a GitHub lookalike host before resolving or attaching credentials', async () => {
       const githubAuth = fakeGitHubAuth();

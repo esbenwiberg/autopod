@@ -10,18 +10,18 @@ import type {
 } from '@autopod/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
-import { createEscalationRepository } from './escalation-repository.js';
 import type { EscalationRepository } from './escalation-repository.js';
-import { createEventRepository } from './event-repository.js';
+import { createEscalationRepository } from './escalation-repository.js';
 import type { EventRepository } from './event-repository.js';
-import { type NewPod, createPodRepository } from './pod-repository.js';
+import { createEventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
+import { createPodRepository, type NewPod } from './pod-repository.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
-import { createQualityScoreRepository } from './quality-score-repository.js';
 import { isQualityScoreEligible } from './quality-score.js';
+import { createQualityScoreRepository } from './quality-score-repository.js';
 import { computeQualitySignals } from './quality-signals.js';
-import { createValidationRepository } from './validation-repository.js';
 import type { ValidationRepository } from './validation-repository.js';
+import { createValidationRepository } from './validation-repository.js';
 
 const POD_ID = 'pod-quality-01';
 
@@ -575,6 +575,24 @@ describe('computeQualitySignals', () => {
 
     expect(signals.editCount).toBe(2);
     expect(signals.editsWithoutPriorRead).toBe(0);
+  });
+
+  it('excludes infrastructure reports while retaining legacy blocker interruptions', () => {
+    podRepo.insert(basePod());
+    for (const [id, kind] of [
+      ['infra', 'infrastructure'],
+      ['legacy', undefined],
+    ] as const) {
+      escalationRepo.insert({
+        id,
+        podId: POD_ID,
+        type: 'report_blocker',
+        timestamp: new Date().toISOString(),
+        payload: { kind, description: 'Blocked', attempted: [], needs: 'Repair' },
+        response: null,
+      });
+    }
+    expect(computeQualitySignals(POD_ID, deps).userInterrupts).toBe(1);
   });
 
   it('counts ask_human escalations toward user interrupts', () => {

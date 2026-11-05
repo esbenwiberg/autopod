@@ -288,19 +288,20 @@ describe('createValidationPublication', () => {
       costUsd: 0.25,
       expected: { cachedInputTokens: 3, costUsd: 0.5 },
     },
-  ])(
-    'preserves strict positive optional-field inclusion for $name',
-    ({ cachedInputTokens, costUsd, expected }) => {
-      const f = fixture();
-      f.result.reviewTokenUsage = { inputTokens: 1, outputTokens: 2, cachedInputTokens, costUsd };
-      f.run();
-      expect(f.reopen().pod.phaseTokenUsage?.review).toEqual({
-        inputTokens: 6,
-        outputTokens: 9,
-        ...expected,
-      });
-    },
-  );
+  ])('preserves strict positive optional-field inclusion for $name', ({
+    cachedInputTokens,
+    costUsd,
+    expected,
+  }) => {
+    const f = fixture();
+    f.result.reviewTokenUsage = { inputTokens: 1, outputTokens: 2, cachedInputTokens, costUsd };
+    f.run();
+    expect(f.reopen().pod.phaseTokenUsage?.review).toEqual({
+      inputTokens: 6,
+      outputTokens: 9,
+      ...expected,
+    });
+  });
 
   it('keeps raw input/output sums and rebuilds rather than spreads the review bucket', () => {
     const f = fixture();
@@ -487,75 +488,78 @@ describe('createValidationPublication', () => {
     expect(f.reopen().events).toHaveLength(1);
   });
 
-  it.each(['result', 'usage', 'history', 'event'] as const)(
-    'proves earlier durable effects after real SQL %s failure',
-    (stage) => {
-      const f = fixture();
-      f.result.reviewTokenUsage = metered;
-      const clauses = {
-        result: "BEFORE UPDATE OF last_validation_result ON pods WHEN NEW.id='worker'",
-        usage: "AFTER UPDATE OF phase_token_usage ON pods WHEN NEW.id='worker'",
-        history: "AFTER INSERT ON validations WHEN NEW.pod_id='worker'",
-        event: "BEFORE INSERT ON events WHEN NEW.type='pod.validation_completed'",
-      };
-      f.db().exec(
-        `CREATE TRIGGER fail_publication ${clauses[stage]} BEGIN SELECT RAISE(ABORT, 'publication-${stage}-failed'); END`,
-      );
-      let received = 0;
-      f.bus.subscribe(() => {
-        received++;
-      });
-      try {
-        expect(() => f.run()).toThrow(`publication-${stage}-failed`);
-      } finally {
-        f.db().exec('DROP TRIGGER fail_publication');
-      }
-      const saved = f.reopen();
-      expect(received).toBe(0);
-      expect(saved.pod.lastValidationResult).toEqual(stage === 'result' ? null : f.result);
-      expect(saved.pod.phaseTokenUsage).toEqual(
-        stage === 'result' || stage === 'usage'
-          ? f.prior
-          : {
-              ...f.prior,
-              review: { inputTokens: 15, outputTokens: 27, cachedInputTokens: 5, costUsd: 0.75 },
-            },
-      );
-      expect(saved.history).toHaveLength(stage === 'event' ? 1 : 0);
-      expect(saved.events).toEqual([]);
-    },
-  );
+  it.each([
+    'result',
+    'usage',
+    'history',
+    'event',
+  ] as const)('proves earlier durable effects after real SQL %s failure', (stage) => {
+    const f = fixture();
+    f.result.reviewTokenUsage = metered;
+    const clauses = {
+      result: "BEFORE UPDATE OF last_validation_result ON pods WHEN NEW.id='worker'",
+      usage: "AFTER UPDATE OF phase_token_usage ON pods WHEN NEW.id='worker'",
+      history: "AFTER INSERT ON validations WHEN NEW.pod_id='worker'",
+      event: "BEFORE INSERT ON events WHEN NEW.type='pod.validation_completed'",
+    };
+    f.db().exec(
+      `CREATE TRIGGER fail_publication ${clauses[stage]} BEGIN SELECT RAISE(ABORT, 'publication-${stage}-failed'); END`,
+    );
+    let received = 0;
+    f.bus.subscribe(() => {
+      received++;
+    });
+    try {
+      expect(() => f.run()).toThrow(`publication-${stage}-failed`);
+    } finally {
+      f.db().exec('DROP TRIGGER fail_publication');
+    }
+    const saved = f.reopen();
+    expect(received).toBe(0);
+    expect(saved.pod.lastValidationResult).toEqual(stage === 'result' ? null : f.result);
+    expect(saved.pod.phaseTokenUsage).toEqual(
+      stage === 'result' || stage === 'usage'
+        ? f.prior
+        : {
+            ...f.prior,
+            review: { inputTokens: 15, outputTokens: 27, cachedInputTokens: 5, costUsd: 0.75 },
+          },
+    );
+    expect(saved.history).toHaveLength(stage === 'event' ? 1 : 0);
+    expect(saved.events).toEqual([]);
+  });
 
-  it.each(['read', 'insert', 'emit'] as const)(
-    'retains original controlled %s error and partial effects',
-    (stage) => {
-      const f = fixture();
-      f.result.reviewTokenUsage = metered;
-      const error = new Error(`contract-${stage}`);
-      if (stage === 'read')
-        vi.spyOn(f.podRepo, 'getOrThrow').mockImplementation(() => {
-          throw error;
-        });
-      if (stage === 'insert')
-        vi.spyOn(f.history, 'insert').mockImplementation(() => {
-          throw error;
-        });
-      if (stage === 'emit')
-        vi.spyOn(f.bus, 'emit').mockImplementation(() => {
-          throw error;
-        });
-      let caught: unknown;
-      try {
-        f.run();
-      } catch (err) {
-        caught = err;
-      }
-      expect(caught).toBe(error);
-      const saved = f.reopen();
-      expect(saved.pod.lastValidationResult).toEqual(f.result);
-      expect(saved.history).toHaveLength(stage === 'emit' ? 1 : 0);
-      expect(saved.events).toEqual([]);
-      expect(saved.pod.phaseTokenUsage?.review?.inputTokens).toBe(stage === 'read' ? 5 : 15);
-    },
-  );
+  it.each([
+    'read',
+    'insert',
+    'emit',
+  ] as const)('retains original controlled %s error and partial effects', (stage) => {
+    const f = fixture();
+    f.result.reviewTokenUsage = metered;
+    const error = new Error(`contract-${stage}`);
+    if (stage === 'read')
+      vi.spyOn(f.podRepo, 'getOrThrow').mockImplementation(() => {
+        throw error;
+      });
+    if (stage === 'insert')
+      vi.spyOn(f.history, 'insert').mockImplementation(() => {
+        throw error;
+      });
+    if (stage === 'emit')
+      vi.spyOn(f.bus, 'emit').mockImplementation(() => {
+        throw error;
+      });
+    let caught: unknown;
+    try {
+      f.run();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBe(error);
+    const saved = f.reopen();
+    expect(saved.pod.lastValidationResult).toEqual(f.result);
+    expect(saved.history).toHaveLength(stage === 'emit' ? 1 : 0);
+    expect(saved.events).toEqual([]);
+    expect(saved.pod.phaseTokenUsage?.review?.inputTokens).toBe(stage === 'read' ? 5 : 15);
+  });
 });

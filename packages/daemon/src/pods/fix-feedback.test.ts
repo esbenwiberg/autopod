@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createFixCycleFixture } from '../test-utils/fix-cycle-helpers.js';
 import { createFixFeedback } from './fix-feedback.js';
+
 describe('host fix feedback replies', () => {
   it('filters empty ids/text and sends bounded outcome-aware replies through the original provider', async () => {
     const f = createFixCycleFixture();

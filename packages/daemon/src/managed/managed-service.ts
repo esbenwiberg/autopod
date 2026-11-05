@@ -12,7 +12,7 @@ import type Database from 'better-sqlite3';
 import type { ManagedArtifactInputs } from './artifact-inputs.js';
 import type { ManagedArtifactPipeline } from './artifact-pipeline.js';
 import { canonical } from './canonical.js';
-import { type ManagedAdmission, admitManagedRequest, validateManagedRequest } from './grants.js';
+import { admitManagedRequest, type ManagedAdmission, validateManagedRequest } from './grants.js';
 import type { ManagedSourceDelivery } from './source-delivery.js';
 import type { ManagedValidationRunner } from './validation.js';
 

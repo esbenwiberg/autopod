@@ -160,35 +160,36 @@ describe('validation progress event contracts', () => {
         status,
       })),
     ),
-  )(
-    '$phase forwards $status independently of its payload with invocation-time envelopes',
-    ({ phase, key, status }) => {
-      vi.useFakeTimers();
-      vi.setSystemTime(epoch);
-      const f = memoryFixture();
-      const callbacks = f.op.buildPhaseEventCallbacks('captured');
-      vi.setSystemTime(later);
-      expect(callbacks.onPhaseStarted(phase)).toBeUndefined();
-      expect(callbacks.onPhaseCompleted(phase, status, payloads[phase])).toBeUndefined();
-      expect(f.events).toEqual([
-        { type: 'pod.validation_phase_started', timestamp: later, podId: 'captured', phase },
-        {
-          type: 'pod.validation_phase_completed',
-          timestamp: later,
-          podId: 'captured',
-          phase,
-          phaseStatus: status,
-          [key]: payloads[phase],
-        },
-      ]);
-      const completed = f.events[1];
-      if (!completed) throw new Error('Missing completion');
-      expect(Reflect.get(completed, key)).toBe(payloads[phase]);
-      callbacks.onPhaseCompleted(phase, status, payloads[phase]);
-      expect(f.events[2]).not.toBe(completed);
-      expect(f.events[2]).toEqual(completed);
-    },
-  );
+  )('$phase forwards $status independently of its payload with invocation-time envelopes', ({
+    phase,
+    key,
+    status,
+  }) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(epoch);
+    const f = memoryFixture();
+    const callbacks = f.op.buildPhaseEventCallbacks('captured');
+    vi.setSystemTime(later);
+    expect(callbacks.onPhaseStarted(phase)).toBeUndefined();
+    expect(callbacks.onPhaseCompleted(phase, status, payloads[phase])).toBeUndefined();
+    expect(f.events).toEqual([
+      { type: 'pod.validation_phase_started', timestamp: later, podId: 'captured', phase },
+      {
+        type: 'pod.validation_phase_completed',
+        timestamp: later,
+        podId: 'captured',
+        phase,
+        phaseStatus: status,
+        [key]: payloads[phase],
+      },
+    ]);
+    const completed = f.events[1];
+    if (!completed) throw new Error('Missing completion');
+    expect(Reflect.get(completed, key)).toBe(payloads[phase]);
+    callbacks.onPhaseCompleted(phase, status, payloads[phase]);
+    expect(f.events[2]).not.toBe(completed);
+    expect(f.events[2]).toEqual(completed);
+  });
   it('isolates captured pod IDs and forwards the same review snapshot using updatedAt', () => {
     vi.useFakeTimers();
     vi.setSystemTime(epoch);
@@ -215,14 +216,13 @@ describe('validation progress event contracts', () => {
     expect(Object.hasOwn(event, key)).toBe(true);
     expect(Reflect.get(event, key)).toBeUndefined();
   });
-  it.each(mappings.filter(([phase]) => ['facts', 'review', 'advisory'].includes(phase)))(
-    '%s retains null under %s',
-    (phase, key) => {
-      const f = memoryFixture();
-      f.op.buildPhaseEventCallbacks('worker').onPhaseCompleted(phase, 'skip', null);
-      expect(f.events).toEqual([expect.objectContaining({ [key]: null })]);
-    },
-  );
+  it.each(
+    mappings.filter(([phase]) => ['facts', 'review', 'advisory'].includes(phase)),
+  )('%s retains null under %s', (phase, key) => {
+    const f = memoryFixture();
+    f.op.buildPhaseEventCallbacks('worker').onPhaseCompleted(phase, 'skip', null);
+    expect(f.events).toEqual([expect.objectContaining({ [key]: null })]);
+  });
   it('forwards arbitrary unknown payloads without normalization and keeps empty pages', () => {
     const f = memoryFixture();
     const c = f.op.buildPhaseEventCallbacks('worker');
@@ -264,97 +264,97 @@ describe('validation progress event contracts', () => {
 });
 
 describe('owned validation callback forwarding', () => {
-  it.each(kinds)(
-    '%s checks current ownership each time, preserves arguments and method receiver',
-    (kind) => {
-      const f = memoryFixture();
-      const owner = ownership();
-      const receivers: unknown[] = [];
-      const args: unknown[][] = [];
-      const handler = vi.fn(function (this: ValidationPhaseCallbacks, ...values: unknown[]) {
-        receivers.push(this);
-        args.push(values);
-        return 99;
-      });
-      const callbacks = {
-        onPhaseStarted: handler,
-        onPhaseCompleted: handler,
-        onReviewProgress: handler,
-      };
-      const wrapped = f.op.ownedValidationCallbacks(owner, callbacks);
+  it.each(
+    kinds,
+  )('%s checks current ownership each time, preserves arguments and method receiver', (kind) => {
+    const f = memoryFixture();
+    const owner = ownership();
+    const receivers: unknown[] = [];
+    const args: unknown[][] = [];
+    const handler = vi.fn(function (this: ValidationPhaseCallbacks, ...values: unknown[]) {
+      receivers.push(this);
+      args.push(values);
+      return 99;
+    });
+    const callbacks = {
+      onPhaseStarted: handler,
+      onPhaseCompleted: handler,
+      onReviewProgress: handler,
+    };
+    const wrapped = f.op.ownedValidationCallbacks(owner, callbacks);
+    expect(invoke(wrapped, kind)).toBeUndefined();
+    owner.isCurrent.mockReturnValue(false);
+    invoke(wrapped, kind);
+    owner.isCurrent.mockReturnValue(true);
+    invoke(wrapped, kind);
+    expect(owner.isCurrent).toHaveBeenCalledTimes(3);
+    expect(owner.assertCurrent).not.toHaveBeenCalled();
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(receivers).toEqual([callbacks, callbacks]);
+    const expected =
+      kind === 'start'
+        ? ['test']
+        : kind === 'complete'
+          ? ['test', 'pending_human', payloads.test]
+          : [progress];
+    expect(args).toEqual([expected, expected]);
+    if (kind !== 'start')
+      expect(args[0]?.[kind === 'complete' ? 2 : 0]).toBe(
+        kind === 'complete' ? payloads.test : progress,
+      );
+  });
+  it.each([
+    undefined,
+    {},
+  ])('checks ownership even when the captured callbacks are %s', (callbacks) => {
+    const f = memoryFixture();
+    const owner = ownership();
+    const wrapped = f.op.ownedValidationCallbacks(owner, callbacks);
+    kinds.forEach((kind) => {
       expect(invoke(wrapped, kind)).toBeUndefined();
-      owner.isCurrent.mockReturnValue(false);
-      invoke(wrapped, kind);
-      owner.isCurrent.mockReturnValue(true);
-      invoke(wrapped, kind);
-      expect(owner.isCurrent).toHaveBeenCalledTimes(3);
-      expect(owner.assertCurrent).not.toHaveBeenCalled();
-      expect(handler).toHaveBeenCalledTimes(2);
-      expect(receivers).toEqual([callbacks, callbacks]);
-      const expected =
-        kind === 'start'
-          ? ['test']
-          : kind === 'complete'
-            ? ['test', 'pending_human', payloads.test]
-            : [progress];
-      expect(args).toEqual([expected, expected]);
-      if (kind !== 'start')
-        expect(args[0]?.[kind === 'complete' ? 2 : 0]).toBe(
-          kind === 'complete' ? payloads.test : progress,
-        );
-    },
-  );
-  it.each([undefined, {}])(
-    'checks ownership even when the captured callbacks are %s',
-    (callbacks) => {
-      const f = memoryFixture();
-      const owner = ownership();
-      const wrapped = f.op.ownedValidationCallbacks(owner, callbacks);
-      kinds.forEach((kind) => expect(invoke(wrapped, kind)).toBeUndefined());
-      expect(owner.isCurrent).toHaveBeenCalledTimes(3);
-    },
-  );
-  it.each(kinds)(
-    '%s checks ownership before optional member lookup and observes changed methods',
-    (kind) => {
-      const f = memoryFixture();
-      const owner = ownership();
-      const order: string[] = [];
-      const original = vi.fn();
-      const replacement = vi.fn();
-      const callbacks: ValidationPhaseCallbacks = {};
-      const member =
-        kind === 'start'
-          ? 'onPhaseStarted'
-          : kind === 'complete'
-            ? 'onPhaseCompleted'
-            : 'onReviewProgress';
-      Object.defineProperty(callbacks, member, {
-        configurable: true,
-        get: () => {
-          order.push('lookup');
-          return original;
-        },
-      });
-      const wrapped = f.op.ownedValidationCallbacks(owner, callbacks);
-      owner.isCurrent.mockImplementation(() => {
-        order.push('ownership');
-        return false;
-      });
-      invoke(wrapped, kind);
-      expect(order).toEqual(['ownership']);
-      owner.isCurrent.mockImplementation(() => {
-        order.push('ownership');
-        return true;
-      });
-      invoke(wrapped, kind);
-      expect(order).toEqual(['ownership', 'ownership', 'lookup']);
-      Object.defineProperty(callbacks, member, { value: replacement });
-      invoke(wrapped, kind);
-      expect(original).toHaveBeenCalledOnce();
-      expect(replacement).toHaveBeenCalledOnce();
-    },
-  );
+    });
+    expect(owner.isCurrent).toHaveBeenCalledTimes(3);
+  });
+  it.each(
+    kinds,
+  )('%s checks ownership before optional member lookup and observes changed methods', (kind) => {
+    const f = memoryFixture();
+    const owner = ownership();
+    const order: string[] = [];
+    const original = vi.fn();
+    const replacement = vi.fn();
+    const callbacks: ValidationPhaseCallbacks = {};
+    const member =
+      kind === 'start'
+        ? 'onPhaseStarted'
+        : kind === 'complete'
+          ? 'onPhaseCompleted'
+          : 'onReviewProgress';
+    Object.defineProperty(callbacks, member, {
+      configurable: true,
+      get: () => {
+        order.push('lookup');
+        return original;
+      },
+    });
+    const wrapped = f.op.ownedValidationCallbacks(owner, callbacks);
+    owner.isCurrent.mockImplementation(() => {
+      order.push('ownership');
+      return false;
+    });
+    invoke(wrapped, kind);
+    expect(order).toEqual(['ownership']);
+    owner.isCurrent.mockImplementation(() => {
+      order.push('ownership');
+      return true;
+    });
+    invoke(wrapped, kind);
+    expect(order).toEqual(['ownership', 'ownership', 'lookup']);
+    Object.defineProperty(callbacks, member, { value: replacement });
+    invoke(wrapped, kind);
+    expect(original).toHaveBeenCalledOnce();
+    expect(replacement).toHaveBeenCalledOnce();
+  });
   it('keeps captured ownership/callback objects and observes late isCurrent replacement with its receiver', () => {
     const f = memoryFixture();
     let owner = ownership();
@@ -534,58 +534,55 @@ describe('real SQLite, event bus and validation ownership', () => {
     'invocation',
     'missing-row',
     'read-error',
-  ])(
-    'real ownership suppresses all three callbacks after %s without losing the event prefix',
-    (change) => {
-      const f = diskFixture();
-      const notified: SystemEvent[] = [];
-      const unsubscribe = f.bus.subscribe((event) => notified.push(event));
-      try {
-        f.wrapped.onPhaseStarted?.('setup');
-        if (change === 'generation') f.repo.incrementLifecycleGeneration('worker');
-        if (change === 'container') f.repo.update('worker', { containerId: 'replacement' });
-        // These fields are immutable/guarded through update(); simulate persisted drift directly.
-        if (change === 'branch') {
-          f.db()
-            .prepare('UPDATE pods SET branch = ? WHERE id = ?')
-            .run('feature/replacement', 'worker');
-          expect(f.repo.getOrThrow('worker').branch).toBe('feature/replacement');
-        }
-        if (change === 'model') f.repo.update('worker', { model: 'other-model' });
-        if (change === 'target') {
-          f.db()
-            .prepare('UPDATE pods SET execution_target = ? WHERE id = ?')
-            .run('sandbox', 'worker');
-          expect(f.repo.getOrThrow('worker')).toMatchObject({
-            executionTarget: 'sandbox',
-            containerId: 'container',
-          });
-        }
-        if (change === 'status') f.repo.update('worker', { status: 'running' });
-        if (change === 'decision') f.nudges.queue('worker', 'New decision');
-        if (change === 'invocation') f.loseInvocation();
-        if (change === 'missing-row')
-          vi.spyOn(f.repo, 'getOrThrow').mockImplementation(() => {
-            throw new Error('Pod missing');
-          });
-        if (change === 'read-error')
-          vi.spyOn(f.repo, 'getOrThrow').mockImplementation(() => {
-            throw new Database.SqliteError('Read failed', 'SQLITE_IOERR');
-          });
-        for (const kind of kinds) invoke(f.wrapped, kind);
-        expect(notified).toHaveLength(1);
-        expect(f.owner.isCurrent()).toBe(false);
-        const saved = f.reopen();
-        expect(saved.events).toHaveLength(1);
-        expect(saved.events[0]?.payload).toMatchObject({
-          type: 'pod.validation_phase_started',
-          phase: 'setup',
-        });
-      } finally {
-        unsubscribe();
+  ])('real ownership suppresses all three callbacks after %s without losing the event prefix', (change) => {
+    const f = diskFixture();
+    const notified: SystemEvent[] = [];
+    const unsubscribe = f.bus.subscribe((event) => notified.push(event));
+    try {
+      f.wrapped.onPhaseStarted?.('setup');
+      if (change === 'generation') f.repo.incrementLifecycleGeneration('worker');
+      if (change === 'container') f.repo.update('worker', { containerId: 'replacement' });
+      // These fields are immutable/guarded through update(); simulate persisted drift directly.
+      if (change === 'branch') {
+        f.db()
+          .prepare('UPDATE pods SET branch = ? WHERE id = ?')
+          .run('feature/replacement', 'worker');
+        expect(f.repo.getOrThrow('worker').branch).toBe('feature/replacement');
       }
-    },
-  );
+      if (change === 'model') f.repo.update('worker', { model: 'other-model' });
+      if (change === 'target') {
+        f.db()
+          .prepare('UPDATE pods SET execution_target = ? WHERE id = ?')
+          .run('sandbox', 'worker');
+        expect(f.repo.getOrThrow('worker')).toMatchObject({
+          executionTarget: 'sandbox',
+          containerId: 'container',
+        });
+      }
+      if (change === 'status') f.repo.update('worker', { status: 'running' });
+      if (change === 'decision') f.nudges.queue('worker', 'New decision');
+      if (change === 'invocation') f.loseInvocation();
+      if (change === 'missing-row')
+        vi.spyOn(f.repo, 'getOrThrow').mockImplementation(() => {
+          throw new Error('Pod missing');
+        });
+      if (change === 'read-error')
+        vi.spyOn(f.repo, 'getOrThrow').mockImplementation(() => {
+          throw new Database.SqliteError('Read failed', 'SQLITE_IOERR');
+        });
+      for (const kind of kinds) invoke(f.wrapped, kind);
+      expect(notified).toHaveLength(1);
+      expect(f.owner.isCurrent()).toBe(false);
+      const saved = f.reopen();
+      expect(saved.events).toHaveLength(1);
+      expect(saved.events[0]?.payload).toMatchObject({
+        type: 'pod.validation_phase_started',
+        phase: 'setup',
+      });
+    } finally {
+      unsubscribe();
+    }
+  });
   it('retains a durable prefix and no failed-event notification after real SQL insert abort', () => {
     const f = diskFixture();
     const notified: SystemEvent[] = [];

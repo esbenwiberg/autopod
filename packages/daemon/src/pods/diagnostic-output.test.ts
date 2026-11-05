@@ -20,12 +20,11 @@ describe('actionable bounded diagnostics', () => {
     expect(feedback).toContain('d6bae2a35390fb489c199a639898883a8757563f');
     expect(boundedDiagnosticOutput(output).length).toBeLessThanOrEqual(10_000);
   });
-  it.each([0, 1, 20, 100, 1000])(
-    'honors small bounds (%s) without slice(-0) returning the whole log',
-    (limit) => {
-      expect(boundedDiagnosticOutput('x'.repeat(2000), limit).length).toBeLessThanOrEqual(limit);
-    },
-  );
+  it.each([
+    0, 1, 20, 100, 1000,
+  ])('honors small bounds (%s) without slice(-0) returning the whole log', (limit) => {
+    expect(boundedDiagnosticOutput('x'.repeat(2000), limit).length).toBeLessThanOrEqual(limit);
+  });
   it('preserves small output and removes terminal color escapes', () => {
     expect(boundedDiagnosticOutput('\u001b[31mERROR: failure\u001b[0m\r\n')).toBe(
       'ERROR: failure\n',

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  type ProviderErrorEvidence,
   classifyProviderError,
   classifySettledPiProviderError,
+  type ProviderErrorEvidence,
 } from './provider-error-classifier.js';
 
 const quotaFixtures = [
@@ -62,26 +62,30 @@ describe('classifyProviderError', () => {
       'auth',
     );
   });
-  it.each(quotaFixtures)(
-    'classifies fixture-backed terminal $runtime quota evidence as definitive',
-    ({ runtime, evidence }) => {
-      expect(classifyProviderError(runtime, evidence)).toEqual({
-        category: 'quota_exhausted',
-        definitive: true,
-        sanitizedMessage: evidence.message,
-        retryAfter: 'retryAfter' in evidence ? (evidence.retryAfter ?? null) : null,
-      });
-    },
-  );
+  it.each(
+    quotaFixtures,
+  )('classifies fixture-backed terminal $runtime quota evidence as definitive', ({
+    runtime,
+    evidence,
+  }) => {
+    expect(classifyProviderError(runtime, evidence)).toEqual({
+      category: 'quota_exhausted',
+      definitive: true,
+      sanitizedMessage: evidence.message,
+      retryAfter: 'retryAfter' in evidence ? (evidence.retryAfter ?? null) : null,
+    });
+  });
 
-  it.each(['claude', 'codex', 'copilot', 'pi'] as const)(
-    'treats a bare HTTP 429 from %s as transient',
-    (runtime) => {
-      expect(
-        classifyProviderError(runtime, { status: 429, message: 'Unexpected HTTP response' }),
-      ).toMatchObject({ category: 'transient', definitive: false });
-    },
-  );
+  it.each([
+    'claude',
+    'codex',
+    'copilot',
+    'pi',
+  ] as const)('treats a bare HTTP 429 from %s as transient', (runtime) => {
+    expect(
+      classifyProviderError(runtime, { status: 429, message: 'Unexpected HTTP response' }),
+    ).toMatchObject({ category: 'transient', definitive: false });
+  });
 
   it.each([
     { code: 'invalid_api_key', message: 'Invalid API key.', category: 'auth' },
@@ -97,17 +101,18 @@ describe('classifyProviderError', () => {
     });
   });
 
-  it.each(['claude', 'codex', 'pi'] as const)(
-    'fails closed when %s emits a known quota code with drifted text',
-    (runtime) => {
-      expect(
-        classifyProviderError(runtime, {
-          code: 'usage_limit_reached',
-          message: 'A newly formatted upstream failure',
-        }),
-      ).toMatchObject({ category: 'unknown', definitive: false });
-    },
-  );
+  it.each([
+    'claude',
+    'codex',
+    'pi',
+  ] as const)('fails closed when %s emits a known quota code with drifted text', (runtime) => {
+    expect(
+      classifyProviderError(runtime, {
+        code: 'usage_limit_reached',
+        message: 'A newly formatted upstream failure',
+      }),
+    ).toMatchObject({ category: 'unknown', definitive: false });
+  });
 
   it.each([
     "You've hit your session limit · resets soon (UTC)",
@@ -138,17 +143,17 @@ describe('classifyProviderError', () => {
     { code: 'authentication_error', category: 'auth' },
     { code: 'service_unavailable', category: 'provider_unavailable' },
     { code: 'rate_limit_exceeded', category: 'transient' },
-  ])(
-    'does not let code-free Claude quota text override $category evidence',
-    ({ code, category }) => {
-      expect(
-        classifyProviderError('claude', {
-          code,
-          message: "You've hit your session limit · resets 12:30pm (UTC)",
-        }),
-      ).toMatchObject({ category, definitive: false });
-    },
-  );
+  ])('does not let code-free Claude quota text override $category evidence', ({
+    code,
+    category,
+  }) => {
+    expect(
+      classifyProviderError('claude', {
+        code,
+        message: "You've hit your session limit · resets 12:30pm (UTC)",
+      }),
+    ).toMatchObject({ category, definitive: false });
+  });
 
   it.each([
     {
@@ -166,73 +171,82 @@ describe('classifyProviderError', () => {
       code: 'usage_limit_reached',
       message: 'Provider quota exhausted',
     },
-  ])(
-    'fails closed for mismatched $runtime quota signature halves',
-    ({ runtime, code, message }) => {
-      const classify =
-        runtime === 'pi'
-          ? classifySettledPiProviderError
-          : (evidence: ProviderErrorEvidence) => classifyProviderError(runtime, evidence);
-      expect(classify({ code, message })).toMatchObject({
-        definitive: false,
-      });
-    },
-  );
+  ])('fails closed for mismatched $runtime quota signature halves', ({
+    runtime,
+    code,
+    message,
+  }) => {
+    const classify =
+      runtime === 'pi'
+        ? classifySettledPiProviderError
+        : (evidence: ProviderErrorEvidence) => classifyProviderError(runtime, evidence);
+    expect(classify({ code, message })).toMatchObject({
+      definitive: false,
+    });
+  });
 
-  it.each(['claude', 'codex', 'copilot', 'pi'] as const)(
-    'classifies recognized %s authentication failures without quota definitiveness',
-    (runtime) => {
-      expect(
-        classifyProviderError(runtime, {
-          code: 'invalid_api_key',
-          message: 'Invalid API key: token=secret-value',
-        }),
-      ).toMatchObject({
-        category: 'auth',
-        definitive: false,
-        sanitizedMessage: 'Invalid API key: [REDACTED]',
-      });
-    },
-  );
+  it.each([
+    'claude',
+    'codex',
+    'copilot',
+    'pi',
+  ] as const)('classifies recognized %s authentication failures without quota definitiveness', (runtime) => {
+    expect(
+      classifyProviderError(runtime, {
+        code: 'invalid_api_key',
+        message: 'Invalid API key: token=secret-value',
+      }),
+    ).toMatchObject({
+      category: 'auth',
+      definitive: false,
+      sanitizedMessage: 'Invalid API key: [REDACTED]',
+    });
+  });
 
-  it.each(['claude', 'codex', 'copilot', 'pi'] as const)(
-    'classifies recognized %s provider outages without quota definitiveness',
-    (runtime) => {
-      expect(
-        classifyProviderError(runtime, {
-          code: 'service_unavailable',
-          message: 'Service temporarily unavailable.',
-        }),
-      ).toMatchObject({ category: 'provider_unavailable', definitive: false });
-    },
-  );
+  it.each([
+    'claude',
+    'codex',
+    'copilot',
+    'pi',
+  ] as const)('classifies recognized %s provider outages without quota definitiveness', (runtime) => {
+    expect(
+      classifyProviderError(runtime, {
+        code: 'service_unavailable',
+        message: 'Service temporarily unavailable.',
+      }),
+    ).toMatchObject({ category: 'provider_unavailable', definitive: false });
+  });
 
-  it.each(['claude', 'codex', 'copilot', 'pi'] as const)(
-    'fails closed for malformed %s evidence',
-    (runtime) => {
-      expect(
-        classifyProviderError(runtime, {
-          code: { nested: 'usage_limit_reached' },
-          message: { private: 'payload' },
-          retryAfter: { seconds: 30 },
-        }),
-      ).toEqual({
-        category: 'unknown',
-        definitive: false,
-        sanitizedMessage: `${runtime} provider error`,
-        retryAfter: null,
-      });
-    },
-  );
+  it.each([
+    'claude',
+    'codex',
+    'copilot',
+    'pi',
+  ] as const)('fails closed for malformed %s evidence', (runtime) => {
+    expect(
+      classifyProviderError(runtime, {
+        code: { nested: 'usage_limit_reached' },
+        message: { private: 'payload' },
+        retryAfter: { seconds: 30 },
+      }),
+    ).toEqual({
+      category: 'unknown',
+      definitive: false,
+      sanitizedMessage: `${runtime} provider error`,
+      retryAfter: null,
+    });
+  });
 
-  it.each(['claude', 'codex', 'copilot', 'pi'] as const)(
-    'fails closed for unknown %s upstream text',
-    (runtime) => {
-      expect(
-        classifyProviderError(runtime, { message: 'Vendor changed this terminal error shape' }),
-      ).toMatchObject({ category: 'unknown', definitive: false });
-    },
-  );
+  it.each([
+    'claude',
+    'codex',
+    'copilot',
+    'pi',
+  ] as const)('fails closed for unknown %s upstream text', (runtime) => {
+    expect(
+      classifyProviderError(runtime, { message: 'Vendor changed this terminal error shape' }),
+    ).toMatchObject({ category: 'unknown', definitive: false });
+  });
 
   it('keeps Pi quota-shaped evidence transient until native retries settle', () => {
     const evidence: ProviderErrorEvidence = {

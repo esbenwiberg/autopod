@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
 import { saveSeriesReceipt } from '../config/launch-store.js';
 import { registerSeriesCommands } from './series.js';
+
 vi.mock('../config/launch-store.js', () => ({
   saveSeriesReceipt: vi.fn(() => '/tmp/series-receipt.json'),
 }));

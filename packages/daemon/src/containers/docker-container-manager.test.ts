@@ -4,8 +4,8 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   readlinkSync,
   rmSync,
   writeFileSync,
@@ -948,35 +948,35 @@ describe('DockerContainerManager', () => {
       rmSync(hostPath, { recursive: true, force: true });
     });
 
-    it.each(['abort', 'supersede'] as const)(
-      'keeps current files if a Docker archive loses ownership by %s',
-      async (reason) => {
-        writeFileSync(join(hostPath, 'file.txt'), 'current history');
-        const archive = new PassThrough();
-        container.getArchive.mockResolvedValue(archive);
-        const controller = new AbortController();
-        let current = true;
-        const extraction = manager.extractDirectoryFromContainer(
-          'abc123',
-          '/workspace',
-          hostPath,
-          undefined,
-          {
-            signal: controller.signal,
-            assertCurrent() {
-              if (!current) throw new Error('superseded extraction');
-            },
+    it.each([
+      'abort',
+      'supersede',
+    ] as const)('keeps current files if a Docker archive loses ownership by %s', async (reason) => {
+      writeFileSync(join(hostPath, 'file.txt'), 'current history');
+      const archive = new PassThrough();
+      container.getArchive.mockResolvedValue(archive);
+      const controller = new AbortController();
+      let current = true;
+      const extraction = manager.extractDirectoryFromContainer(
+        'abc123',
+        '/workspace',
+        hostPath,
+        undefined,
+        {
+          signal: controller.signal,
+          assertCurrent() {
+            if (!current) throw new Error('superseded extraction');
           },
-        );
-        await vi.waitFor(() => expect(archive.listenerCount('data')).toBeGreaterThan(0));
-        if (reason === 'abort') controller.abort(new Error('aborted extraction'));
-        else current = false;
-        const contents = await createTarStreamFromEntries([['workspace/file.txt', 'late history']]);
-        contents.pipe(archive);
-        await expect(extraction).rejects.toThrow(/aborted extraction|superseded extraction/);
-        expect(readFileSync(join(hostPath, 'file.txt'), 'utf-8')).toBe('current history');
-      },
-    );
+        },
+      );
+      await vi.waitFor(() => expect(archive.listenerCount('data')).toBeGreaterThan(0));
+      if (reason === 'abort') controller.abort(new Error('aborted extraction'));
+      else current = false;
+      const contents = await createTarStreamFromEntries([['workspace/file.txt', 'late history']]);
+      contents.pipe(archive);
+      await expect(extraction).rejects.toThrow(/aborted extraction|superseded extraction/);
+      expect(readFileSync(join(hostPath, 'file.txt'), 'utf-8')).toBe('current history');
+    });
 
     it('extracts through a staging directory, preserves excludes, and deletes stale files after extraction', async () => {
       mkdirSync(join(hostPath, '.git'), { recursive: true });
@@ -1053,55 +1053,55 @@ describe('DockerContainerManager', () => {
   // ─── execInContainer() ──────────────────────────────────
 
   describe('execInContainer()', () => {
-    it.each(['execInContainer', 'execStreaming'] as const)(
-      'refuses %s start when authority is revoked during delayed exec creation',
-      async (method) => {
-        let release = () => {};
-        let current = true;
-        const mockExec = {
-          id: 'synthetic-exec',
-          start: vi.fn(),
-          inspect: vi.fn(),
-        };
-        container.exec.mockImplementationOnce(async () => {
-          await new Promise<void>((resolve) => {
-            release = resolve;
-          });
-          return mockExec;
+    it.each([
+      'execInContainer',
+      'execStreaming',
+    ] as const)('refuses %s start when authority is revoked during delayed exec creation', async (method) => {
+      let release = () => {};
+      let current = true;
+      const mockExec = {
+        id: 'synthetic-exec',
+        start: vi.fn(),
+        inspect: vi.fn(),
+      };
+      container.exec.mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
         });
-        const assertCurrent = vi.fn(() => {
-          if (!current) throw new Error('Synthetic authority revoked');
-        });
-        const created = vi.fn();
-        const pending = manager[method]('synthetic-container', ['true'], {
-          assertCurrent,
-          onProcessCreated: created,
-        });
-        const rejected = expect(pending).rejects.toThrow('Synthetic authority revoked');
-        expect(container.exec).toHaveBeenCalledTimes(1);
-        expect(assertCurrent).toHaveBeenCalledTimes(1);
-        current = false;
-        release();
-        await rejected;
-        expect(assertCurrent).toHaveBeenCalledTimes(2);
-        expect(mockExec.start).not.toHaveBeenCalled();
-        expect(mockExec.inspect).not.toHaveBeenCalled();
-      },
-    );
+        return mockExec;
+      });
+      const assertCurrent = vi.fn(() => {
+        if (!current) throw new Error('Synthetic authority revoked');
+      });
+      const created = vi.fn();
+      const pending = manager[method]('synthetic-container', ['true'], {
+        assertCurrent,
+        onProcessCreated: created,
+      });
+      const rejected = expect(pending).rejects.toThrow('Synthetic authority revoked');
+      expect(container.exec).toHaveBeenCalledTimes(1);
+      expect(assertCurrent).toHaveBeenCalledTimes(1);
+      current = false;
+      release();
+      await rejected;
+      expect(assertCurrent).toHaveBeenCalledTimes(2);
+      expect(mockExec.start).not.toHaveBeenCalled();
+      expect(mockExec.inspect).not.toHaveBeenCalled();
+    });
 
-    it.each(['execInContainer', 'execStreaming'] as const)(
-      'refuses stale %s authority before exec creation',
-      async (method) => {
-        await expect(
-          manager[method]('synthetic-container', ['true'], {
-            assertCurrent: () => {
-              throw new Error('Synthetic authority revoked');
-            },
-          }),
-        ).rejects.toThrow('Synthetic authority revoked');
-        expect(container.exec).not.toHaveBeenCalled();
-      },
-    );
+    it.each([
+      'execInContainer',
+      'execStreaming',
+    ] as const)('refuses stale %s authority before exec creation', async (method) => {
+      await expect(
+        manager[method]('synthetic-container', ['true'], {
+          assertCurrent: () => {
+            throw new Error('Synthetic authority revoked');
+          },
+        }),
+      ).rejects.toThrow('Synthetic authority revoked');
+      expect(container.exec).not.toHaveBeenCalled();
+    });
 
     it('retains normal buffered dispatch and observed exit with unchanged authority', async () => {
       const { exec } = createMockExec(0);
@@ -1247,29 +1247,30 @@ describe('DockerContainerManager', () => {
   // ─── execStreaming() ────────────────────────────────────
 
   describe('execStreaming()', () => {
-    it.each(['inspection-failed', 'still-running', 'missing-code'] as const)(
-      'does not fabricate an observed streaming exit when %s',
-      async (failure) => {
-        const muxStream = new PassThrough();
-        const inspect = vi.fn();
-        if (failure === 'inspection-failed')
-          inspect.mockRejectedValue(new Error('transport unavailable'));
-        else
-          inspect.mockResolvedValue(
-            failure === 'still-running'
-              ? { Running: true, ExitCode: 0 }
-              : { Running: false, ExitCode: null },
-          );
-        container.exec.mockResolvedValue({ start: vi.fn().mockResolvedValue(muxStream), inspect });
-        const result = await manager.execStreaming('abc123', ['cmd']);
-        const observed = expect(result.exitCode).rejects.toMatchObject({
-          code: 'EXEC_EXIT_UNVERIFIED',
-        });
-        muxStream.resume();
-        muxStream.end();
-        await observed;
-      },
-    );
+    it.each([
+      'inspection-failed',
+      'still-running',
+      'missing-code',
+    ] as const)('does not fabricate an observed streaming exit when %s', async (failure) => {
+      const muxStream = new PassThrough();
+      const inspect = vi.fn();
+      if (failure === 'inspection-failed')
+        inspect.mockRejectedValue(new Error('transport unavailable'));
+      else
+        inspect.mockResolvedValue(
+          failure === 'still-running'
+            ? { Running: true, ExitCode: 0 }
+            : { Running: false, ExitCode: null },
+        );
+      container.exec.mockResolvedValue({ start: vi.fn().mockResolvedValue(muxStream), inspect });
+      const result = await manager.execStreaming('abc123', ['cmd']);
+      const observed = expect(result.exitCode).rejects.toMatchObject({
+        code: 'EXEC_EXIT_UNVERIFIED',
+      });
+      muxStream.resume();
+      muxStream.end();
+      await observed;
+    });
 
     it('returns stdout/stderr streams and exit code promise', async () => {
       const muxStream = new PassThrough();

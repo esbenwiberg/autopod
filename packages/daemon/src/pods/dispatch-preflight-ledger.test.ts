@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { createDatabase } from '../db/connection.js';
 import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
-import { type NewPod, createPodRepository } from './pod-repository.js';
+import { createPodRepository, type NewPod } from './pod-repository.js';
 
 const base = 'a'.repeat(40);
 const repository = 'https://github.com/org/repo';

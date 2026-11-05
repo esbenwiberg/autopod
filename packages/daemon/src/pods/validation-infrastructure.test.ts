@@ -75,21 +75,21 @@ function infrastructure(r: ValidationResult, retryable = true) {
 }
 
 describe('infrastructure classifiers and labels', () => {
-  it.each([true, false])(
-    'classifies typed infrastructure with retryable=%s, even alongside failed checks',
-    (retryable) => {
-      const r = result();
-      infrastructure(r, retryable);
-      r.smoke.build.status = 'fail';
-      r.test = { status: 'fail', duration: 1 };
-      expect(isValidationInfrastructureOnlyFailure(r)).toBe(true);
-      expect(validationInfrastructureFailureLabel(r)).toBe(
-        'Validation infrastructure failure during test',
-      );
-      r.overall = 'pass';
-      expect(isValidationInfrastructureOnlyFailure(r)).toBe(false);
-    },
-  );
+  it.each([
+    true,
+    false,
+  ])('classifies typed infrastructure with retryable=%s, even alongside failed checks', (retryable) => {
+    const r = result();
+    infrastructure(r, retryable);
+    r.smoke.build.status = 'fail';
+    r.test = { status: 'fail', duration: 1 };
+    expect(isValidationInfrastructureOnlyFailure(r)).toBe(true);
+    expect(validationInfrastructureFailureLabel(r)).toBe(
+      'Validation infrastructure failure during test',
+    );
+    r.overall = 'pass';
+    expect(isValidationInfrastructureOnlyFailure(r)).toBe(false);
+  });
   it('labels explicit timeout and cleanup without claiming tests never ran', () => {
     const r = result();
     r.infrastructureFailure = {
@@ -474,57 +474,57 @@ describe('createValidationInfrastructure parking contracts', () => {
   });
   it.each(
     paths.flatMap((kind) => (['local', 'sandbox'] as const).map((target) => ({ kind, target }))),
-  )(
-    '$kind uses snapshot arguments and ordered $target shutdown with durable results',
-    async ({ kind, target }) => {
-      const f = fixture(true, target);
-      await f.run(kind);
-      expect(f.order).toEqual([
-        ...expectedPrefix(kind),
-        'preview',
-        'get',
-        'stop',
-        ...(kind === 'admission' ? [] : ['info']),
+  )('$kind uses snapshot arguments and ordered $target shutdown with durable results', async ({
+    kind,
+    target,
+  }) => {
+    const f = fixture(true, target);
+    await f.run(kind);
+    expect(f.order).toEqual([
+      ...expectedPrefix(kind),
+      'preview',
+      'get',
+      'stop',
+      ...(kind === 'admission' ? [] : ['info']),
+    ]);
+    expect(f.transition.mock.calls[0]?.[0]).toBe(f.pod);
+    expect(f.transition.mock.calls[0]?.slice(1)).toEqual(
+      kind === 'admission'
+        ? ['review_required', { failureReason: f.blocked.message }]
+        : ['review_required'],
+    );
+    expect(f.preview).toHaveBeenCalledExactlyOnceWith('worker');
+    expect(f.get).toHaveBeenCalledExactlyOnceWith(target);
+    expect(f.stop).toHaveBeenCalledExactlyOnceWith('container');
+    if (kind === 'admission')
+      expect(f.activity).toHaveBeenCalledExactlyOnceWith('worker', f.blocked.message);
+    if (kind === 'validation')
+      expect(f.activity.mock.calls).toEqual([
+        ['worker', 'Validation infrastructure failure during test — parked for explicit Resume'],
+        ['worker', 'Stopping post-validation container…'],
       ]);
-      expect(f.transition.mock.calls[0]?.[0]).toBe(f.pod);
-      expect(f.transition.mock.calls[0]?.slice(1)).toEqual(
-        kind === 'admission'
-          ? ['review_required', { failureReason: f.blocked.message }]
-          : ['review_required'],
+    if (kind === 'review')
+      expect(f.activity).toHaveBeenCalledExactlyOnceWith(
+        'worker',
+        'Stopping post-validation container…',
       );
-      expect(f.preview).toHaveBeenCalledExactlyOnceWith('worker');
-      expect(f.get).toHaveBeenCalledExactlyOnceWith(target);
-      expect(f.stop).toHaveBeenCalledExactlyOnceWith('container');
-      if (kind === 'admission')
-        expect(f.activity).toHaveBeenCalledExactlyOnceWith('worker', f.blocked.message);
-      if (kind === 'validation')
-        expect(f.activity.mock.calls).toEqual([
-          ['worker', 'Validation infrastructure failure during test — parked for explicit Resume'],
-          ['worker', 'Stopping post-validation container…'],
-        ]);
-      if (kind === 'review')
-        expect(f.activity).toHaveBeenCalledExactlyOnceWith(
-          'worker',
-          'Stopping post-validation container…',
-        );
-      if (kind === 'admission') expect(f.log.info).not.toHaveBeenCalled();
-      else
-        expect(f.log.info).toHaveBeenCalledExactlyOnceWith(
-          kind === 'validation'
-            ? { podId: 'worker', infrastructureFailure: f.r.infrastructureFailure }
-            : { podId: 'worker' },
-          `Container stopped after ${kind} infrastructure failure`,
-        );
-      const saved = f.reopen();
-      expect(saved.pod).toMatchObject({
-        status: 'review_required',
-        validationAttempts: kind === 'review' ? 3 : 2,
-        lastCorrectionMessage: kind === 'validation' ? null : 'Retained correction',
-        failureReason: kind === 'admission' ? f.blocked.message : 'Retained reason',
-      });
-      expect(saved.events).toHaveLength(1);
-    },
-  );
+    if (kind === 'admission') expect(f.log.info).not.toHaveBeenCalled();
+    else
+      expect(f.log.info).toHaveBeenCalledExactlyOnceWith(
+        kind === 'validation'
+          ? { podId: 'worker', infrastructureFailure: f.r.infrastructureFailure }
+          : { podId: 'worker' },
+        `Container stopped after ${kind} infrastructure failure`,
+      );
+    const saved = f.reopen();
+    expect(saved.pod).toMatchObject({
+      status: 'review_required',
+      validationAttempts: kind === 'review' ? 3 : 2,
+      lastCorrectionMessage: kind === 'validation' ? null : 'Retained correction',
+      failureReason: kind === 'admission' ? f.blocked.message : 'Retained reason',
+    });
+    expect(saved.events).toHaveLength(1);
+  });
   it.each(paths)('%s has no teardown/activity/logging when container is absent', async (kind) => {
     const f = fixture(false);
     await f.run(kind);
@@ -534,58 +534,58 @@ describe('createValidationInfrastructure parking contracts', () => {
     expect(f.log.info).not.toHaveBeenCalled();
     expect(f.reopen().pod.status).toBe('review_required');
   });
-  it.each(['running', 'review_required', 'killed'] as const)(
-    'denied admission is a snapshot no-op in %s',
-    async (status) => {
-      const f = fixture();
-      await f.run('admission', { ...f.pod, status });
-      expect(f.order).toEqual([]);
-      expect(f.reopen().pod).toMatchObject({ status: 'validating', validationAttempts: 3 });
-    },
-  );
+  it.each([
+    'running',
+    'review_required',
+    'killed',
+  ] as const)('denied admission is a snapshot no-op in %s', async (status) => {
+    const f = fixture();
+    await f.run('admission', { ...f.pod, status });
+    expect(f.order).toEqual([]);
+    expect(f.reopen().pod).toMatchObject({ status: 'validating', validationAttempts: 3 });
+  });
   it.each(
     (['admission', 'validation'] as const).flatMap((kind) =>
       [0, -2, 1, 7].map((count) => ({ kind, count })),
     ),
-  )(
-    '$kind clamps a passed count of $count independently of current storage',
-    async ({ kind, count }) => {
-      const f = fixture(false);
-      await f.run(kind, { ...f.pod, validationAttempts: count });
-      expect(f.reopen().pod.validationAttempts).toBe(Math.max(0, count - 1));
-    },
-  );
-  it.each(paths)(
-    '%s keeps the passed snapshot despite synchronous subscriber and transition return changes',
-    async (kind) => {
-      const f = fixture();
-      const transition = f.transition.getMockImplementation();
-      if (!transition) throw new Error('Missing transition fixture');
-      const unsubscribe = f.bus.subscribe(() =>
-        f.repo.update('worker', {
-          validationAttempts: 80,
-          lastCorrectionMessage: 'Subscriber correction',
-        }),
-      );
-      f.transition.mockImplementation((...args) => ({
-        ...transition(...args),
-        validationAttempts: 99,
-        containerId: 'different',
-        executionTarget: 'sandbox',
-      }));
-      try {
-        await f.run(kind);
-        expect(f.stop).toHaveBeenCalledExactlyOnceWith('container');
-        expect(f.get).toHaveBeenCalledExactlyOnceWith('local');
-        expect(f.reopen().pod).toMatchObject({
-          validationAttempts: kind === 'review' ? 80 : 2,
-          lastCorrectionMessage: kind === 'validation' ? null : 'Subscriber correction',
-        });
-      } finally {
-        unsubscribe();
-      }
-    },
-  );
+  )('$kind clamps a passed count of $count independently of current storage', async ({
+    kind,
+    count,
+  }) => {
+    const f = fixture(false);
+    await f.run(kind, { ...f.pod, validationAttempts: count });
+    expect(f.reopen().pod.validationAttempts).toBe(Math.max(0, count - 1));
+  });
+  it.each(
+    paths,
+  )('%s keeps the passed snapshot despite synchronous subscriber and transition return changes', async (kind) => {
+    const f = fixture();
+    const transition = f.transition.getMockImplementation();
+    if (!transition) throw new Error('Missing transition fixture');
+    const unsubscribe = f.bus.subscribe(() =>
+      f.repo.update('worker', {
+        validationAttempts: 80,
+        lastCorrectionMessage: 'Subscriber correction',
+      }),
+    );
+    f.transition.mockImplementation((...args) => ({
+      ...transition(...args),
+      validationAttempts: 99,
+      containerId: 'different',
+      executionTarget: 'sandbox',
+    }));
+    try {
+      await f.run(kind);
+      expect(f.stop).toHaveBeenCalledExactlyOnceWith('container');
+      expect(f.get).toHaveBeenCalledExactlyOnceWith('local');
+      expect(f.reopen().pod).toMatchObject({
+        validationAttempts: kind === 'review' ? 80 : 2,
+        lastCorrectionMessage: kind === 'validation' ? null : 'Subscriber correction',
+      });
+    } finally {
+      unsubscribe();
+    }
+  });
   it('captures dependency objects/functions while retaining late method lookup', async () => {
     const f = fixture();
     const op = f.make();
@@ -629,36 +629,35 @@ describe('createValidationInfrastructure parking contracts', () => {
     expect(f.deps.logger.info).not.toHaveBeenCalled();
     expect(f.reopen().pod.status).toBe('review_required');
   });
-  it.each(paths)(
-    '%s awaits preview completion before looking up and stopping the container',
-    async (kind) => {
-      const f = fixture();
-      let release = () => {};
-      const gate = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      f.preview.mockImplementation(async () => {
-        f.order.push('preview-held');
-        await gate;
-        f.order.push('preview-done');
-      });
-      const running = f.run(kind);
-      try {
-        expect(f.get).not.toHaveBeenCalled();
-        expect(f.stop).not.toHaveBeenCalled();
-        expect(f.repo.getOrThrow('worker').status).toBe('review_required');
-      } finally {
-        release();
-        await running;
-      }
-      expect(f.order.slice(-4)).toEqual(
-        kind === 'admission'
-          ? ['preview-held', 'preview-done', 'get', 'stop']
-          : ['preview-done', 'get', 'stop', 'info'],
-      );
-      expect(f.reopen().pod.status).toBe('review_required');
-    },
-  );
+  it.each(
+    paths,
+  )('%s awaits preview completion before looking up and stopping the container', async (kind) => {
+    const f = fixture();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.preview.mockImplementation(async () => {
+      f.order.push('preview-held');
+      await gate;
+      f.order.push('preview-done');
+    });
+    const running = f.run(kind);
+    try {
+      expect(f.get).not.toHaveBeenCalled();
+      expect(f.stop).not.toHaveBeenCalled();
+      expect(f.repo.getOrThrow('worker').status).toBe('review_required');
+    } finally {
+      release();
+      await running;
+    }
+    expect(f.order.slice(-4)).toEqual(
+      kind === 'admission'
+        ? ['preview-held', 'preview-done', 'get', 'stop']
+        : ['preview-done', 'get', 'stop', 'info'],
+    );
+    expect(f.reopen().pod.status).toBe('review_required');
+  });
   it.each(
     paths.flatMap((kind) =>
       [
@@ -707,101 +706,99 @@ describe('createValidationInfrastructure parking contracts', () => {
     expect(f.stop).not.toHaveBeenCalled();
     expect(f.reopen().pod.status).toBe('review_required');
   });
-  it.each(paths)(
-    '%s propagates injected transition failure by identity before any writes/stop',
-    async (kind) => {
-      const f = fixture();
-      const error = new Error('Transition failed');
-      f.transition.mockImplementation(() => {
-        throw error;
-      });
-      await expect(f.run(kind)).rejects.toBe(error);
-      expect(f.writes).not.toHaveBeenCalled();
-      expect(f.preview).not.toHaveBeenCalled();
-      expect(f.stop).not.toHaveBeenCalled();
-      expect(f.reopen().pod).toMatchObject({ status: 'validating', validationAttempts: 3 });
-    },
-  );
-  it.each(['admission', 'validation'] as const)(
-    '%s propagates initial activity failure without entering transition',
-    async (kind) => {
-      const f = fixture();
-      const error = new Error('Activity failed');
-      f.activity.mockImplementation(() => {
-        throw error;
-      });
-      await expect(f.run(kind)).rejects.toBe(error);
-      expect(f.transition).not.toHaveBeenCalled();
-      expect(f.preview).not.toHaveBeenCalled();
-      expect(f.reopen().pod.status).toBe('validating');
-    },
-  );
-  it.each(['validation', 'review'] as const)(
-    '%s retains real state-machine rejection for an invalid snapshot',
-    async (kind) => {
-      const f = fixture();
-      await expect(f.run(kind, { ...f.pod, status: 'killed' })).rejects.toThrow(
-        'from killed to review_required',
-      );
-      expect(f.writes).not.toHaveBeenCalled();
-      expect(f.stop).not.toHaveBeenCalled();
-      expect(f.reopen().pod.status).toBe('validating');
-    },
-  );
-  it.each(paths)(
-    '%s preserves SQLite transition failure with no later effects after reopen',
-    async (kind) => {
-      const f = fixture();
-      f.db().exec(
-        "CREATE TRIGGER reject_parking BEFORE UPDATE OF status ON pods WHEN NEW.status = 'review_required' BEGIN SELECT RAISE(ABORT, 'transition rejected'); END",
-      );
-      await expect(f.run(kind)).rejects.toThrow('transition rejected');
-      expect(f.preview).not.toHaveBeenCalled();
-      expect(f.stop).not.toHaveBeenCalled();
-      const saved = f.reopen();
-      expect(saved.pod).toMatchObject({
-        status: 'validating',
-        validationAttempts: 3,
-        lastCorrectionMessage: 'Retained correction',
-        failureReason: 'Retained reason',
-      });
-      expect(saved.events).toHaveLength(0);
-    },
-  );
-  it.each(['admission', 'validation'] as const)(
-    '%s leaves the real parked prefix durable when the refund SQL aborts',
-    async (kind) => {
-      const f = fixture();
-      f.db().exec(
-        "CREATE TRIGGER reject_refund BEFORE UPDATE OF validation_attempts ON pods WHEN NEW.validation_attempts = 2 BEGIN SELECT RAISE(ABORT, 'refund rejected'); END",
-      );
-      await expect(f.run(kind)).rejects.toThrow('refund rejected');
-      expect(f.preview).not.toHaveBeenCalled();
-      expect(f.stop).not.toHaveBeenCalled();
-      const saved = f.reopen();
-      expect(saved.pod).toMatchObject({
-        status: 'review_required',
-        validationAttempts: 3,
-        lastCorrectionMessage: 'Retained correction',
-        failureReason: kind === 'admission' ? f.blocked.message : 'Retained reason',
-      });
-      expect(saved.events).toHaveLength(1);
-    },
-  );
-  it.each(['admission', 'validation'] as const)(
-    '%s propagates injected refund failure by identity after durable transition',
-    async (kind) => {
-      const f = fixture();
-      const error = new Error('Refund failed');
-      const update = f.writes.getMockImplementation();
-      if (!update) throw new Error('Missing update fixture');
-      f.writes.mockImplementation((id, changes) => {
-        if (changes.validationAttempts === 2) throw error;
-        update(id, changes);
-      });
-      await expect(f.run(kind)).rejects.toBe(error);
-      expect(f.preview).not.toHaveBeenCalled();
-      expect(f.reopen().pod).toMatchObject({ status: 'review_required', validationAttempts: 3 });
-    },
-  );
+  it.each(
+    paths,
+  )('%s propagates injected transition failure by identity before any writes/stop', async (kind) => {
+    const f = fixture();
+    const error = new Error('Transition failed');
+    f.transition.mockImplementation(() => {
+      throw error;
+    });
+    await expect(f.run(kind)).rejects.toBe(error);
+    expect(f.writes).not.toHaveBeenCalled();
+    expect(f.preview).not.toHaveBeenCalled();
+    expect(f.stop).not.toHaveBeenCalled();
+    expect(f.reopen().pod).toMatchObject({ status: 'validating', validationAttempts: 3 });
+  });
+  it.each([
+    'admission',
+    'validation',
+  ] as const)('%s propagates initial activity failure without entering transition', async (kind) => {
+    const f = fixture();
+    const error = new Error('Activity failed');
+    f.activity.mockImplementation(() => {
+      throw error;
+    });
+    await expect(f.run(kind)).rejects.toBe(error);
+    expect(f.transition).not.toHaveBeenCalled();
+    expect(f.preview).not.toHaveBeenCalled();
+    expect(f.reopen().pod.status).toBe('validating');
+  });
+  it.each([
+    'validation',
+    'review',
+  ] as const)('%s retains real state-machine rejection for an invalid snapshot', async (kind) => {
+    const f = fixture();
+    await expect(f.run(kind, { ...f.pod, status: 'killed' })).rejects.toThrow(
+      'from killed to review_required',
+    );
+    expect(f.writes).not.toHaveBeenCalled();
+    expect(f.stop).not.toHaveBeenCalled();
+    expect(f.reopen().pod.status).toBe('validating');
+  });
+  it.each(
+    paths,
+  )('%s preserves SQLite transition failure with no later effects after reopen', async (kind) => {
+    const f = fixture();
+    f.db().exec(
+      "CREATE TRIGGER reject_parking BEFORE UPDATE OF status ON pods WHEN NEW.status = 'review_required' BEGIN SELECT RAISE(ABORT, 'transition rejected'); END",
+    );
+    await expect(f.run(kind)).rejects.toThrow('transition rejected');
+    expect(f.preview).not.toHaveBeenCalled();
+    expect(f.stop).not.toHaveBeenCalled();
+    const saved = f.reopen();
+    expect(saved.pod).toMatchObject({
+      status: 'validating',
+      validationAttempts: 3,
+      lastCorrectionMessage: 'Retained correction',
+      failureReason: 'Retained reason',
+    });
+    expect(saved.events).toHaveLength(0);
+  });
+  it.each([
+    'admission',
+    'validation',
+  ] as const)('%s leaves the real parked prefix durable when the refund SQL aborts', async (kind) => {
+    const f = fixture();
+    f.db().exec(
+      "CREATE TRIGGER reject_refund BEFORE UPDATE OF validation_attempts ON pods WHEN NEW.validation_attempts = 2 BEGIN SELECT RAISE(ABORT, 'refund rejected'); END",
+    );
+    await expect(f.run(kind)).rejects.toThrow('refund rejected');
+    expect(f.preview).not.toHaveBeenCalled();
+    expect(f.stop).not.toHaveBeenCalled();
+    const saved = f.reopen();
+    expect(saved.pod).toMatchObject({
+      status: 'review_required',
+      validationAttempts: 3,
+      lastCorrectionMessage: 'Retained correction',
+      failureReason: kind === 'admission' ? f.blocked.message : 'Retained reason',
+    });
+    expect(saved.events).toHaveLength(1);
+  });
+  it.each([
+    'admission',
+    'validation',
+  ] as const)('%s propagates injected refund failure by identity after durable transition', async (kind) => {
+    const f = fixture();
+    const error = new Error('Refund failed');
+    const update = f.writes.getMockImplementation();
+    if (!update) throw new Error('Missing update fixture');
+    f.writes.mockImplementation((id, changes) => {
+      if (changes.validationAttempts === 2) throw error;
+      update(id, changes);
+    });
+    await expect(f.run(kind)).rejects.toBe(error);
+    expect(f.preview).not.toHaveBeenCalled();
+    expect(f.reopen().pod).toMatchObject({ status: 'review_required', validationAttempts: 3 });
+  });
 });

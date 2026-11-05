@@ -22,12 +22,12 @@ import {
   logger,
 } from '../test-utils/mock-helpers.js';
 import { truncateDiffAtFileBoundary } from '../worktrees/diff-utils.js';
-import { createPendingOverrideRepository } from './pending-override-repository.js';
 import type { PendingOverrideRepository } from './pending-override-repository.js';
+import { createPendingOverrideRepository } from './pending-override-repository.js';
 import { createPodRepository } from './pod-repository.js';
 import { createValidationInputs } from './validation-inputs.js';
-import { createValidationRepository } from './validation-repository.js';
 import type { ValidationRepository } from './validation-repository.js';
+import { createValidationRepository } from './validation-repository.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -469,39 +469,39 @@ describe('validation inputs persisted effects', () => {
     }
   });
 
-  it.each([null, ''])(
-    'preserves nullish versus empty command and health fields: %s',
-    async (value) => {
-      const f = fixture();
-      try {
-        Object.assign(f.profile, {
-          buildCommand: value,
-          startCommand: value,
-          buildWorkDir: value,
-          healthPath: value,
-          validationSetupCommand: value,
-          lintCommand: value,
-          sastCommand: value,
-          testCommand: value,
-          hasWebUi: false,
-        });
-        const config = (await f.run()).validationConfig;
-        expect(config).toMatchObject({
-          buildCommand: value ?? '',
-          startCommand: value ?? '',
-          buildWorkDir: value ?? undefined,
-          healthPath: value ?? '/',
-          validationSetupCommand: value ?? undefined,
-          lintCommand: value ?? undefined,
-          sastCommand: value ?? undefined,
-          testCommand: value,
-          hasWebUi: false,
-        });
-      } finally {
-        f.close();
-      }
-    },
-  );
+  it.each([
+    null,
+    '',
+  ])('preserves nullish versus empty command and health fields: %s', async (value) => {
+    const f = fixture();
+    try {
+      Object.assign(f.profile, {
+        buildCommand: value,
+        startCommand: value,
+        buildWorkDir: value,
+        healthPath: value,
+        validationSetupCommand: value,
+        lintCommand: value,
+        sastCommand: value,
+        testCommand: value,
+        hasWebUi: false,
+      });
+      const config = (await f.run()).validationConfig;
+      expect(config).toMatchObject({
+        buildCommand: value ?? '',
+        startCommand: value ?? '',
+        buildWorkDir: value ?? undefined,
+        healthPath: value ?? '/',
+        validationSetupCommand: value ?? undefined,
+        lintCommand: value ?? undefined,
+        sastCommand: value ?? undefined,
+        testCommand: value,
+        hasWebUi: false,
+      });
+    } finally {
+      f.close();
+    }
+  });
 
   it.each([
     { podBase: 'release/pod', profileBase: 'release/profile', base: 'release/pod' },
@@ -523,28 +523,27 @@ describe('validation inputs persisted effects', () => {
     }
   });
 
-  it.each([null, '', '  scoped-sha  '])(
-    'retains raw Git start scope and normalized env for %s',
-    async (start) => {
-      const f = fixture();
-      try {
-        f.pod.startCommitSha = start;
-        const config = (await f.run()).validationConfig;
-        expect(f.diff).toHaveBeenCalledWith(
-          '/private/input-tree',
-          'main',
-          undefined,
-          start ?? undefined,
-        );
-        expect(config.startCommitSha).toBe(start ?? undefined);
-        expect(config.extraExecEnv?.AUTOPOD_VALIDATION_BASE_REF).toBe(
-          start?.trim() || 'origin/main',
-        );
-      } finally {
-        f.close();
-      }
-    },
-  );
+  it.each([
+    null,
+    '',
+    '  scoped-sha  ',
+  ])('retains raw Git start scope and normalized env for %s', async (start) => {
+    const f = fixture();
+    try {
+      f.pod.startCommitSha = start;
+      const config = (await f.run()).validationConfig;
+      expect(f.diff).toHaveBeenCalledWith(
+        '/private/input-tree',
+        'main',
+        undefined,
+        start ?? undefined,
+      );
+      expect(config.startCommitSha).toBe(start ?? undefined);
+      expect(config.extraExecEnv?.AUTOPOD_VALIDATION_BASE_REF).toBe(start?.trim() || 'origin/main');
+    } finally {
+      f.close();
+    }
+  });
 
   it('falls back to parsed paths only when the optional base-path operation is absent', async () => {
     const f = fixture();
@@ -588,28 +587,25 @@ describe('validation inputs persisted effects', () => {
     }
   });
 
-  it.each([false, true])(
-    'keeps legacy API-key and scoped-launch rule (scoped=%s)',
-    async (scoped) => {
-      const f = fixture();
-      try {
-        vi.stubEnv('ANTHROPIC_API_KEY', 'synthetic-legacy-only');
-        f.pod.launchConfigDigest = scoped ? 'digest' : null;
-        f.reviewerEnv.mockResolvedValue(undefined);
-        f.environment.mockResolvedValue(undefined);
-        const config = (await f.run()).validationConfig;
-        expect(config).toHaveProperty(
-          'reviewerApiKey',
-          scoped ? undefined : 'synthetic-legacy-only',
-        );
-        expect(config).not.toHaveProperty('reviewerExecEnv');
-        expect(config.extraExecEnv?.AUTOPOD_POD_ID).toBe('worker');
-      } finally {
-        vi.unstubAllEnvs();
-        f.close();
-      }
-    },
-  );
+  it.each([
+    false,
+    true,
+  ])('keeps legacy API-key and scoped-launch rule (scoped=%s)', async (scoped) => {
+    const f = fixture();
+    try {
+      vi.stubEnv('ANTHROPIC_API_KEY', 'synthetic-legacy-only');
+      f.pod.launchConfigDigest = scoped ? 'digest' : null;
+      f.reviewerEnv.mockResolvedValue(undefined);
+      f.environment.mockResolvedValue(undefined);
+      const config = (await f.run()).validationConfig;
+      expect(config).toHaveProperty('reviewerApiKey', scoped ? undefined : 'synthetic-legacy-only');
+      expect(config).not.toHaveProperty('reviewerExecEnv');
+      expect(config.extraExecEnv?.AUTOPOD_POD_ID).toBe('worker');
+    } finally {
+      vi.unstubAllEnvs();
+      f.close();
+    }
+  });
 
   it('does not reuse pre-rebase review or override evidence for a selected rewrite', async () => {
     const f = fixture();

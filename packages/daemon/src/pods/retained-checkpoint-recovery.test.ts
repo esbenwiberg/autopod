@@ -33,66 +33,66 @@ afterEach(async () => {
 });
 
 describe('explicit retained-checkpoint recovery', () => {
-  it.each(['validation', 'wakeup'] as const)(
-    'prepares the real legacy %s shape without claiming historical settlement or touching the original',
-    async (kind) => {
-      const f = await fixture(kind);
-      const before = f.ctx.podRepo.taskExecutions!.snapshot(f.podId);
-      await f.submit();
-      await f.recovery.wait(f.input.id);
-      const op = f.recovery.list(f.podId)[0]!;
-      expect(
-        op.blocked,
-        String(
-          (vi.mocked(f.deps.logger.error).mock.calls[0]?.[0] as { err?: unknown } | undefined)?.err,
-        ),
-      ).toBeNull();
-      expect(op.activated).toEqual({ generation: 2 });
-      expect(op.originalEvidence.result).toEqual(f.result);
-      expect(op.containerId).toBe(f.containerId);
-      expect(f.pod()).toMatchObject({
-        lifecycleGeneration: 2,
-        status: 'queued',
-        containerId: null,
-        worktreePath: f.prepared.worktree,
-        recoveryWorktreePath: f.prepared.worktree,
-        skipAgent: true,
-        autoApprove: false,
-        lastValidationResult: null,
+  it.each([
+    'validation',
+    'wakeup',
+  ] as const)('prepares the real legacy %s shape without claiming historical settlement or touching the original', async (kind) => {
+    const f = await fixture(kind);
+    const before = f.ctx.podRepo.taskExecutions!.snapshot(f.podId);
+    await f.submit();
+    await f.recovery.wait(f.input.id);
+    const op = f.recovery.list(f.podId)[0]!;
+    expect(
+      op.blocked,
+      String(
+        (vi.mocked(f.deps.logger.error).mock.calls[0]?.[0] as { err?: unknown } | undefined)?.err,
+      ),
+    ).toBeNull();
+    expect(op.activated).toEqual({ generation: 2 });
+    expect(op.originalEvidence.result).toEqual(f.result);
+    expect(op.containerId).toBe(f.containerId);
+    expect(f.pod()).toMatchObject({
+      lifecycleGeneration: 2,
+      status: 'queued',
+      containerId: null,
+      worktreePath: f.prepared.worktree,
+      recoveryWorktreePath: f.prepared.worktree,
+      skipAgent: true,
+      autoApprove: false,
+      lastValidationResult: null,
+    });
+    expect(f.pod().options.validationSuite).toBe('custom');
+    expect(f.deps.enqueue).toHaveBeenCalledExactlyOnceWith(f.podId);
+    expect(f.cm.start).not.toHaveBeenCalled();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.cm.kill).not.toHaveBeenCalled();
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+    expect(f.cm.execInContainer).not.toHaveBeenCalled();
+    expect(f.cm.extractDirectoryFromContainer).not.toHaveBeenCalled();
+    expect(f.ctx.podRepo.listReferencedContainerIds()).toContain(f.containerId);
+    expect(f.ctx.podRepo.taskExecutions!.snapshot(f.podId).taskId).toBe(before.taskId);
+    expect(f.ctx.podRepo.taskExecutions!.snapshot(f.podId).agentRunCount).toBe(
+      before.agentRunCount,
+    );
+    expect(() => assertValidationResourceSettled(f.ctx.db, f.containerId)).toThrow(
+      'retains unknown',
+    );
+    expect(() => assertSourceResourceReleasable(f.ctx.db, f.containerId)).toThrow(
+      'retains unknown',
+    );
+    expect(() => f.ctx.podRepo.delete(f.podId)).toThrow('remain retained');
+    if (kind === 'wakeup') {
+      expect(f.ctx.podRepo.sandboxWakeups!.listForPod(f.podId)[0]).toMatchObject({
+        endedAt: null,
+        settledBy: null,
+        evidence: [],
       });
-      expect(f.pod().options.validationSuite).toBe('custom');
-      expect(f.deps.enqueue).toHaveBeenCalledExactlyOnceWith(f.podId);
-      expect(f.cm.start).not.toHaveBeenCalled();
-      expect(f.cm.stop).not.toHaveBeenCalled();
-      expect(f.cm.kill).not.toHaveBeenCalled();
-      expect(f.cm.spawn).not.toHaveBeenCalled();
-      expect(f.cm.execInContainer).not.toHaveBeenCalled();
-      expect(f.cm.extractDirectoryFromContainer).not.toHaveBeenCalled();
-      expect(f.ctx.podRepo.listReferencedContainerIds()).toContain(f.containerId);
-      expect(f.ctx.podRepo.taskExecutions!.snapshot(f.podId).taskId).toBe(before.taskId);
-      expect(f.ctx.podRepo.taskExecutions!.snapshot(f.podId).agentRunCount).toBe(
-        before.agentRunCount,
+      expect(() => f.ctx.podRepo.sandboxWakeups!.assertReleasable(f.containerId)).toThrow(
+        'outcome-unknown',
       );
-      expect(() => assertValidationResourceSettled(f.ctx.db, f.containerId)).toThrow(
-        'retains unknown',
-      );
-      expect(() => assertSourceResourceReleasable(f.ctx.db, f.containerId)).toThrow(
-        'retains unknown',
-      );
-      expect(() => f.ctx.podRepo.delete(f.podId)).toThrow('remain retained');
-      if (kind === 'wakeup') {
-        expect(f.ctx.podRepo.sandboxWakeups!.listForPod(f.podId)[0]).toMatchObject({
-          endedAt: null,
-          settledBy: null,
-          evidence: [],
-        });
-        expect(() => f.ctx.podRepo.sandboxWakeups!.assertReleasable(f.containerId)).toThrow(
-          'outcome-unknown',
-        );
-        expect(() => f.ctx.podRepo.sandboxWakeups!.assertPodReleasable(f.podId)).not.toThrow();
-      }
-    },
-  );
+      expect(() => f.ctx.podRepo.sandboxWakeups!.assertPodReleasable(f.podId)).not.toThrow();
+    }
+  });
 
   it('revokes old credentials at claim and keeps the new epoch across repository reconstruction', async () => {
     const f = await fixture();
@@ -145,17 +145,18 @@ describe('explicit retained-checkpoint recovery', () => {
     expect(() => f.ctx.podRepo.update(f.podId, { skipAgent: false })).toThrow('owns this task');
   });
 
-  it.each(['running', 'deleted', 'unknown'] as const)(
-    'rejects provider %s without mutation',
-    async (status) => {
-      const f = await fixture();
-      vi.mocked(f.cm.getStatus).mockResolvedValue(status);
-      await expect(f.submit()).rejects.toThrow('retained stopped');
-      expect(f.recovery.list(f.podId)).toEqual([]);
-      expect(f.deps.prepare).not.toHaveBeenCalled();
-      expect(f.cm.start).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'running',
+    'deleted',
+    'unknown',
+  ] as const)('rejects provider %s without mutation', async (status) => {
+    const f = await fixture();
+    vi.mocked(f.cm.getStatus).mockResolvedValue(status);
+    await expect(f.submit()).rejects.toThrow('retained stopped');
+    expect(f.recovery.list(f.podId)).toEqual([]);
+    expect(f.deps.prepare).not.toHaveBeenCalled();
+    expect(f.cm.start).not.toHaveBeenCalled();
+  });
 
   it('refuses stale generation/result/head and nonhuman claims', async () => {
     const f = await fixture();

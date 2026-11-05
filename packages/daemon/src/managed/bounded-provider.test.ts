@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { fixture } from '../test-utils/managed-fixture.js';
 import { BoundedResponsesTransport } from './bounded-provider.js';
+
 function setup(mode: 'api-key' | 'chatgpt' = 'api-key') {
   const f = fixture();
   const route = f.request.route;
@@ -71,38 +72,41 @@ it('rejects another route and another credential account', async () => {
   await expect(f.generate()).rejects.toThrow('request-unavailable');
   expect(f.fetcher).not.toHaveBeenCalled();
 });
-it.each(['model', 'usage', 'incomplete', 'tool', 'output-limit'])(
-  'refuses invalid %s evidence',
-  async (kind) => {
-    const f = setup();
-    if (kind === 'model') f.response.model = 'other';
-    if (kind === 'usage') f.response.usage.total_tokens = 101;
-    if (kind === 'incomplete') f.response.status = 'incomplete';
-    if (kind === 'tool')
-      f.response.output = [{ type: 'function_call' }] as typeof f.response.output;
-    if (kind === 'output-limit')
-      f.response.output = [
-        {
-          type: 'message',
-          role: 'assistant',
-          content: [{ type: 'output_text', text: 'x'.repeat(65537) }],
-        },
-      ];
-    await expect(f.generate()).rejects.toThrow('request-unavailable');
-    expect(f.fetcher).toHaveBeenCalledTimes(2);
-  },
-);
-it.each([85, -1, Number.MAX_SAFE_INTEGER + 1])(
-  'rejects input count %s before generation',
-  async (input_tokens) => {
-    const f = setup();
-    f.fetcher
-      .mockReset()
-      .mockResolvedValueOnce(Response.json({ object: 'response.input_tokens', input_tokens }));
-    await expect(f.generate()).rejects.toThrow('request-unavailable');
-    expect(f.fetcher).toHaveBeenCalledTimes(1);
-  },
-);
+it.each([
+  'model',
+  'usage',
+  'incomplete',
+  'tool',
+  'output-limit',
+])('refuses invalid %s evidence', async (kind) => {
+  const f = setup();
+  if (kind === 'model') f.response.model = 'other';
+  if (kind === 'usage') f.response.usage.total_tokens = 101;
+  if (kind === 'incomplete') f.response.status = 'incomplete';
+  if (kind === 'tool') f.response.output = [{ type: 'function_call' }] as typeof f.response.output;
+  if (kind === 'output-limit')
+    f.response.output = [
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'x'.repeat(65537) }],
+      },
+    ];
+  await expect(f.generate()).rejects.toThrow('request-unavailable');
+  expect(f.fetcher).toHaveBeenCalledTimes(2);
+});
+it.each([
+  85,
+  -1,
+  Number.MAX_SAFE_INTEGER + 1,
+])('rejects input count %s before generation', async (input_tokens) => {
+  const f = setup();
+  f.fetcher
+    .mockReset()
+    .mockResolvedValueOnce(Response.json({ object: 'response.input_tokens', input_tokens }));
+  await expect(f.generate()).rejects.toThrow('request-unavailable');
+  expect(f.fetcher).toHaveBeenCalledTimes(1);
+});
 it('revocation after counting prevents generation', async () => {
   const f = setup();
   f.fetcher.mockReset().mockImplementationOnce(async () => {

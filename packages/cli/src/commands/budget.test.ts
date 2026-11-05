@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
 import { parseTokenBudget, registerBudgetCommand } from './budget.js';
 import { buildLaunchRequest } from './launch-request.js';
+
 afterEach(() => vi.restoreAllMocks());
 it('keeps budgets absent by default and honors an explicit off override', async () => {
   const lookup = async () => [];

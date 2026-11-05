@@ -1,5 +1,5 @@
-import { AUTOPOD_INSTRUCTIONS_PATH, CONTAINER_HOME_DIR } from '@autopod/shared';
 import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
+import { AUTOPOD_INSTRUCTIONS_PATH, CONTAINER_HOME_DIR } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { PiRpcParser, type PiRpcStats } from './pi-rpc-parser.js';

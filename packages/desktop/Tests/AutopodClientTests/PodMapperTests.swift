@@ -1479,7 +1479,7 @@ private let minimalSessionJson = """
   #expect(workers.interrupted == 1)
 }
 
-@Test(arguments: ["Agent failed: Codex CLI 0.144.3 is incompatible", "Codex execution termination is unverified; retain completion and source before another execution."])
+@Test(arguments: ["Infrastructure blocked: Runner unavailable. Checks remain incomplete.", "Agent failed: Codex CLI 0.144.3 is incompatible", "Codex execution termination is unverified; retain completion and source before another execution."])
 func mapsPersistedFailureReasonAfterRefreshWithoutValidation(reason: String) throws {
   let json = (minimalSessionJson
     .replacingOccurrences(of: #""status": "running""#, with: #""status": "failed""#)
@@ -1730,4 +1730,15 @@ func mapsPersistedFailureReasonAfterRefreshWithoutValidation(reason: String) thr
   #expect(pod.status.needsAttention)
   #expect(pod.completionPolicy == "accept-findings")
   #expect(!pod.status.isActive)
+}
+
+@Test func infrastructureReportsDoNotProjectHumanInputButLegacyBlockersDo() throws {
+  for (metadata, expected) in [("\"kind\":\"infrastructure\",\"requiresResponse\":false,", false), ("", true)] {
+    let json = """
+    {"id":"report","podId":"husky-booby","type":"report_blocker","timestamp":"2026-11-03T00:00:00Z",
+     "payload":{\(metadata)"description":"Runner unavailable","attempted":[],"needs":"Autopod repair"},"response":null}
+    """.data(using: .utf8)!
+    let report = try JSONDecoder().decode(EscalationResponse.self, from: json)
+    #expect(report.requiresHumanResponse == expected)
+  }
 }

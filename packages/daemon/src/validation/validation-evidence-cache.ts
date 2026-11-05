@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { ReusedValidationEvidence, ValidationInputIdentity } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+
 export type { ValidationInputIdentity } from '@autopod/shared';
 
 export type ReusableValidationStage = 'lint' | 'test';

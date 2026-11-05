@@ -11,8 +11,8 @@ import type { Logger } from 'pino';
 import type { ActionAuditRepository } from '../actions/audit-repository.js';
 import { createDeploymentRunRepository } from '../actions/deployment-run-repository.js';
 import {
-  type DeploymentServiceOptions,
   createDeploymentService,
+  type DeploymentServiceOptions,
 } from '../actions/deployment-service.js';
 import type { ServiceReadTransport } from '../actions/service-read-broker.js';
 import type { ConfigurationRouteDependencies } from '../api/routes/configuration.js';
@@ -43,8 +43,8 @@ import { createLaunchExecutionCredentials } from './execution-credentials.js';
 import { admitLaunch } from './launch-admission.js';
 import { resolveLaunchExecutionSettings } from './launch-execution-settings.js';
 import {
-  type LaunchResolutionServices,
   configurationDigest,
+  type LaunchResolutionServices,
   resolveLaunch,
 } from './launch-resolver.js';
 import { createLaunchSnapshotRepository } from './launch-snapshot.js';

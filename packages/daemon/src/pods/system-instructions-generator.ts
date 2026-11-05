@@ -498,14 +498,16 @@ export function generateSystemInstructions(
     '- The task is ambiguous or underspecified and assumptions could lead you in the wrong direction',
   );
   lines.push(
-    '- You face a meaningful decision with multiple reasonable paths (architecture, approach, scope)',
+    '- An owner must choose a product/scope tradeoff or grant missing authority. Investigate and make bounded local implementation choices within the authorized brief.',
   );
   lines.push('- You discover something unexpected that changes the nature or scope of the task');
-  lines.push('- You are blocked and cannot make progress without more information');
+  lines.push(
+    '- Required product intent is missing and the owner can actually supply it. Infrastructure, runner prerequisites, missing parent inputs and unavailable platform checks belong in report_blocker.',
+  );
   lines.push('- The task explicitly asks you to check in before acting');
   lines.push(
     '- You are about to install or add a **new dependency** ' +
-      '(npm install, pip install, dotnet add package, cargo add, etc.) — ' +
+      '(a genuinely new product library outside the authorized brief) — ' +
       'call `ask_human` first, describe the package and why it is needed, and wait for approval. ' +
       'Do not proceed with the install until approved.',
   );
@@ -516,6 +518,16 @@ export function generateSystemInstructions(
   );
   lines.push('');
 
+  lines.push(
+    'Configured setup and installing existing locked repository dependencies are already authorized; run the configured frozen setup without asking again. This does not authorize arbitrary libraries, system upgrades, TLS bypass, credentials, destructive changes or changing repository gates.',
+  );
+  lines.push(
+    'For an owner decision, give a short question, recommendation/reason and useful choices with consequences. Keep technical evidence in context. Generic ok/go on/skip and choice labels are not execution receipts, validation overrides or permission for another action.',
+  );
+  lines.push(
+    'Report infrastructure/capability blockers with phase, responsible system, evidence and supported recovery (or say none exists). Stop repeated blocked attempts, preserve work and incomplete checks, summarize and finish for owned finalization. Do not ask chat to repair validator PATH or settle unknown exits. Linux cannot run Xcode: defer Mac validation to its owner. Never fabricate missing parent inputs or reviewer approval.',
+  );
+  lines.push('');
   lines.push('## Workflow Requirements');
   lines.push('');
   const activeCodeIntelNames = new Set((options?.injectedMcpServers ?? []).map((s) => s.name));
@@ -763,7 +775,9 @@ export function generateSystemInstructions(
         'If you use the shell, keep each read a simple standalone command on a repository path (`sed -n 1,200p src/file.ts`, `cat src/file.ts | head -80`). ' +
         'Process-health telemetry only credits reads it can attribute to a specific file; reads hidden in recursive greps, subshells, or command substitution look like blind edits.',
     );
-    lines.push('- Use ask_human when uncertain rather than guessing');
+    lines.push(
+      '- Use ask_human for actionable scope, product or authority decisions after bounded investigation. Use report_blocker for infrastructure; make reasonable local implementation choices within the brief.',
+    );
     lines.push('- Do NOT modify configuration files unless required by the task');
   }
   lines.push('');

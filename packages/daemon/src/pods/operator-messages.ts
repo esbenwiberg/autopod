@@ -1,5 +1,6 @@
 import type {
   OperatorActor,
+  Pod,
   RequestCredentialPayload,
   ValidationOverridePayload,
 } from '@autopod/shared';
@@ -13,7 +14,7 @@ import {
   prepareRetainedAgentContinuation,
 } from './continuation-preflight.js';
 import { resolvePrBaseBranch } from './delivery-policy.js';
-import { persistCompletionReply } from './escalation-coordinator.js';
+import { assertNoInfrastructureBlocker, persistCompletionReply } from './escalation-coordinator.js';
 import type {
   OperatorMessageCalls,
   OperatorMessageLiveDependencies,
@@ -22,6 +23,8 @@ import type {
 import { buildDetachedMcpFallbackMessage } from './operator-policy.js';
 import { resolvedReasoningEffort } from './provider-attempt-policy.js';
 import { canReceiveMessage, isTerminalState } from './state-machine.js';
+import { captureValidationOwnership, ValidationSupersededError } from './validation-ownership.js';
+import { captureValidationDispatchGuard } from './validation-recovery-policy.js';
 export function createOperatorMessages(
   deps: OperatorMessageLiveDependencies,
   captured: OperatorMessagesCaptured,
@@ -58,6 +61,22 @@ export function createOperatorMessages(
     buildRecoveryTask,
     resolveEffectiveBoundProfile,
   } = captured;
+  async function retainReportedFailure(pod: Pod): Promise<void> {
+    try {
+      const current = podRepo.getOrThrow(pod.id);
+      if (
+        current.lifecycleGeneration !== pod.lifecycleGeneration ||
+        current.containerId !== pod.containerId ||
+        current.executionTarget !== pod.executionTarget ||
+        current.worktreePath !== pod.worktreePath
+      )
+        return;
+      await captured.reconcileInfrastructureBlocker(pod.id);
+    } catch (err) {
+      // Preserve the original error and uncertainty even if capture cannot run.
+      logger.warn({ err, podId: pod.id }, 'Reported execution remains held after reply failure');
+    }
+  }
   async function sendMessage(
     this: OperatorMessageCalls,
     podId: string,
@@ -72,6 +91,8 @@ export function createOperatorMessages(
       );
     }
     const pod = podRepo.getOrThrow(podId);
+    if (pod.status === 'paused' || pod.status === 'failed')
+      assertNoInfrastructureBlocker(podRepo, podId);
     if (deps.launchConfiguration?.read(podId)?.intent === 'goal') {
       const goal = deps.launchConfiguration.goals?.get(podId);
       const escalation = pod.pendingEscalation;
@@ -109,6 +130,7 @@ export function createOperatorMessages(
 
     // ── Budget pause approval ──────────────────────────────────────────
     if (pod.pauseReason === 'budget') {
+      assertNoInfrastructureBlocker(podRepo, podId);
       const profile = executionForPod(pod);
       const maxExtensions = profile.maxBudgetExtensions;
       const newExtensionsUsed = pod.budgetExtensionsUsed + 1;
@@ -136,7 +158,16 @@ export function createOperatorMessages(
       try {
         await this.handleCompletion(podId);
       } catch (err) {
+        if (
+          err instanceof AgentContinuationSupersededError ||
+          err instanceof ValidationSupersededError
+        )
+          throw err;
         logger.error({ err, podId }, 'Failed to handle completion after budget approval');
+        if (podRepo.hasInfrastructureBlocker?.(podId)) {
+          await retainReportedFailure(pod);
+          throw err;
+        }
         const s = podRepo.getOrThrow(podId);
         if (!isTerminalState(s.status)) {
           transition(s, 'failed');
@@ -149,6 +180,26 @@ export function createOperatorMessages(
     // ── Credential injection ──────────────────────────────────────────
     if (pod.pendingEscalation?.type === 'request_credential') {
       const payload = pod.pendingEscalation.payload as RequestCredentialPayload;
+      const replyOwner = captureValidationOwnership(pod, {
+        statuses: [pod.status],
+        readCurrent: () => podRepo.getOrThrow(podId),
+        isCurrentInvocation: () =>
+          podRepo.getOrThrow(podId).pendingEscalation?.id === pod.pendingEscalation?.id,
+        hasPendingDecision: () => false,
+      });
+      const recordHostRepair = (response: string, target: 'queued' | 'validating') => {
+        replyOwner.assertCurrent();
+        if (!podRepo.hasInfrastructureBlocker?.(podId))
+          captureValidationDispatchGuard(podRepo, pod)();
+        persistCompletionReply(podRepo, pod, response, actor, () => {
+          // Resolve the question and its disposition atomically. Running under
+          // a report is custody-only: no worker is queued or delivery admitted.
+          transition(pod, podRepo.hasInfrastructureBlocker?.(podId) ? 'running' : target, {
+            pendingEscalation: null,
+          });
+        });
+        emitActivityStatus(podId, 'Daemon credential repair reply recorded.');
+      };
 
       // Pre-provision host fetch failure: re-resolve the daemon-side credential
       // and queue the same pod. The next queue pass begins with a fresh remote
@@ -156,6 +207,7 @@ export function createOperatorMessages(
       if (payload.source === 'host_fetch') {
         const profile = executionForPod(pod);
         const credential = await resolveGitCredential(profile);
+        replyOwner.assertCurrent();
         if (!credential) {
           throw new AutopodError(
             payload.service === 'github'
@@ -165,13 +217,16 @@ export function createOperatorMessages(
             400,
           );
         }
-        escalationRepo.update(pod.pendingEscalation.id, {
-          respondedAt: new Date().toISOString(),
-          respondedBy: legacyRespondedBy(actor),
-          actor,
-          response: 'credential_repaired',
-        });
-        transition(pod, 'queued', { pendingEscalation: null });
+        recordHostRepair('credential_repaired', 'queued');
+        if (podRepo.hasInfrastructureBlocker?.(podId)) {
+          await retainReportedFailure(pod);
+          return;
+        }
+        captureValidationDispatchGuard(podRepo, {
+          ...pod,
+          status: 'queued',
+          pendingEscalation: null,
+        })();
         emitActivityStatus(
           podId,
           'Host credentials updated — fetching required remote refs again…',
@@ -186,6 +241,7 @@ export function createOperatorMessages(
       if (payload.source === 'host_push') {
         const profile = executionForPod(pod);
         const pat = await resolveGitCredential(profile);
+        replyOwner.assertCurrent();
         if (!pat) {
           throw new AutopodError(
             payload.service === 'github'
@@ -204,15 +260,19 @@ export function createOperatorMessages(
           );
         }
 
-        escalationRepo.update(pod.pendingEscalation.id, {
-          respondedAt: new Date().toISOString(),
-          respondedBy: legacyRespondedBy(actor),
-          actor,
-          response: 'daemon_auth_repaired',
-        });
-        // awaiting_input → validating: park-then-retry without re-running the
-        // agent. The validation result we already passed is still authoritative.
-        const validatingPod = transition(pod, 'validating', { pendingEscalation: null });
+        recordHostRepair('daemon_auth_repaired', 'validating');
+        if (podRepo.hasInfrastructureBlocker?.(podId)) {
+          await retainReportedFailure(pod);
+          return;
+        }
+        // The reply transaction already entered delivery, without re-running
+        // the agent. Retain the original source identity across that transition.
+        const validatingPod = captureValidationDispatchGuard(podRepo, {
+          ...pod,
+          status: 'validating',
+          pendingEscalation: null,
+        })();
+        const assertDelivery = captureValidationDispatchGuard(podRepo, validatingPod);
         const carryForwardPrUrl = validatingPod.prUrl;
         emitActivityStatus(
           podId,
@@ -225,6 +285,7 @@ export function createOperatorMessages(
           // Always push first — same shape as the original post-validation
           // path. maxDeletions=0 mirrors `pushAndCreatePr`: the container is
           // already stopped/gone so a phantom mass-delete must not slip in.
+          assertDelivery();
           await worktreeManager.mergeBranch({
             worktreePath: validatingPod.worktreePath ?? '',
             targetBranch: validatingPod.branch,
@@ -235,15 +296,17 @@ export function createOperatorMessages(
             podModel: validatingPod.model,
           });
 
+          assertDelivery();
           // Only open a new PR if this isn't a fix pod carrying one forward.
           let newPrUrl = carryForwardPrUrl;
           if (!newPrUrl) {
             const prManager = prManagerFactory ? prManagerFactory(profile) : null;
             if (prManager) {
               emitActivityStatus(podId, 'Creating PR…');
-              const refreshed = podRepo.getOrThrow(podId);
+              const refreshed = assertDelivery();
               const baseBranch = resolvePrBaseBranch(refreshed, profile);
               await ensurePrBaseBranchOnOrigin(refreshed, profile, baseBranch, 'host_push_retry');
+              assertDelivery();
               const createResult = await prManager.createPr({
                 // biome-ignore lint/style/noNonNullAssertion: validated above
                 worktreePath: refreshed.worktreePath!,
@@ -268,6 +331,7 @@ export function createOperatorMessages(
                 seriesName: refreshed.seriesName ?? undefined,
                 securityFindings: getLatestPushFindings(podId),
               });
+              assertDelivery();
               newPrUrl = createResult.url ?? null;
               if (newPrUrl) {
                 emitActivityStatus(podId, `PR created: ${newPrUrl}`);
@@ -277,11 +341,12 @@ export function createOperatorMessages(
             emitActivityStatus(podId, `Carrying forward existing PR: ${carryForwardPrUrl}`);
           }
 
-          const validatedPod = transition(podRepo.getOrThrow(podId), 'validated', {
+          const validatedPod = transition(assertDelivery(), 'validated', {
             prUrl: newPrUrl,
             lastCorrectionMessage: null,
           });
 
+          const assertValidated = captureValidationDispatchGuard(podRepo, validatedPod);
           if (validatedPod.linkedPodId) {
             await completeFixPodAfterPush(validatedPod);
             return;
@@ -294,8 +359,10 @@ export function createOperatorMessages(
             try {
               emitActivityStatus(podId, 'Stopping post-validation container…');
               await stopSandboxPreviewProxy(podId);
+              assertValidated();
               const cm = containerManagerFactory.get(validatedPod.executionTarget);
               await cm.stop(validatedPod.containerId);
+              assertValidated();
             } catch (stopErr) {
               logger.warn(
                 { err: stopErr, podId },
@@ -304,16 +371,29 @@ export function createOperatorMessages(
             }
           }
 
+          assertValidated();
           if (validatedPod.autoApprove) {
             emitActivityStatus(podId, 'Auto-approving…');
             logger.info({ podId }, 'Auto-approving pod after host_push retry');
             setImmediate(() => {
-              this.approveSession(podId, { automation: true }).catch((err) =>
+              (async () => {
+                assertValidated();
+                await this.approveSession(podId, { automation: true });
+              })().catch((err) =>
                 logger.warn({ err, podId }, 'Auto-approve after host_push retry failed'),
               );
             });
           }
         } catch (err) {
+          if (
+            err instanceof AgentContinuationSupersededError ||
+            err instanceof ValidationSupersededError
+          )
+            throw err;
+          if (podRepo.hasInfrastructureBlocker?.(podId)) {
+            await retainReportedFailure(pod);
+            throw err;
+          }
           // Fresh PAT is still bad — re-park rather than fail terminally.
           if (err instanceof GitCredentialError) {
             parkOnCredentialFailure(podId, err);
@@ -351,11 +431,65 @@ export function createOperatorMessages(
 
     // ── Validation override responses ─────────────────────────────────
     if (pod.pendingEscalation?.type === 'validation_override') {
-      const payload = pod.pendingEscalation.payload as ValidationOverridePayload;
+      const request = pod.pendingEscalation;
+      const recordHeldAnswer = async () => {
+        // Information custody, not permission to waive findings or execute. A
+        // Goal preparation may change its profile, but must still own this
+        // exact question, resource, generation and completion cycle.
+        const assertReplyOwner = () => {
+          const current = podRepo.getOrThrow(podId);
+          if (
+            current.status !== pod.status ||
+            current.lifecycleGeneration !== pod.lifecycleGeneration ||
+            current.containerId !== pod.containerId ||
+            current.executionTarget !== pod.executionTarget ||
+            current.worktreePath !== pod.worktreePath ||
+            current.finalization?.cycle !== pod.finalization?.cycle ||
+            current.pendingEscalation?.id !== request.id ||
+            current.pendingEscalation?.type !== 'validation_override' ||
+            JSON.stringify(current.pendingEscalation.payload) !== JSON.stringify(request.payload)
+          )
+            throw new ValidationSupersededError();
+          return current;
+        };
+        const current = assertReplyOwner();
+        persistCompletionReply(podRepo, current, message, actor, () => {
+          transition(assertReplyOwner(), 'running', { pendingEscalation: null });
+        });
+        emitActivityStatus(
+          podId,
+          'Validation answer recorded; infrastructure remains held. No waiver or execution authorized.',
+        );
+        await retainReportedFailure(current);
+      };
+      if (podRepo.hasInfrastructureBlocker?.(podId)) {
+        await recordHeldAnswer();
+        return;
+      }
+      const payload = request.payload as ValidationOverridePayload;
       const overrides = parseValidationOverrideResponse(message, payload.findings);
-      const goalRework = overrides.some((item) => item.action === 'guidance')
-        ? await beginGoalTaskRework(pod, `Apply reviewed validation guidance: ${message}`)
-        : false;
+      let goalRework = false;
+      try {
+        goalRework = overrides.some((item) => item.action === 'guidance')
+          ? await beginGoalTaskRework(pod, `Apply reviewed validation guidance: ${message}`)
+          : false;
+      } catch (err) {
+        if (podRepo.hasInfrastructureBlocker?.(podId)) {
+          try {
+            await recordHeldAnswer();
+          } catch (recordError) {
+            logger.warn(
+              { err: recordError, podId },
+              'Reply custody could not be recorded after preparation failure; ownership retained',
+            );
+          }
+        }
+        throw err;
+      }
+      if (podRepo.hasInfrastructureBlocker?.(podId)) {
+        await recordHeldAnswer();
+        return;
+      }
 
       // Resolve the escalation in the DB
       escalationRepo.update(pod.pendingEscalation.id, {
@@ -412,8 +546,16 @@ export function createOperatorMessages(
             await this.handleCompletion(podId);
           }
         } catch (err) {
-          if (err instanceof AgentContinuationSupersededError) throw err;
+          if (
+            err instanceof AgentContinuationSupersededError ||
+            err instanceof ValidationSupersededError
+          )
+            throw err;
           logger.error({ err, podId }, 'Failed to resume agent after override guidance');
+          if (podRepo.hasInfrastructureBlocker?.(podId)) {
+            await retainReportedFailure(pod);
+            throw err;
+          }
           const s = podRepo.getOrThrow(podId);
           if (!isTerminalState(s.status)) {
             transition(s, 'failed');
@@ -482,6 +624,13 @@ export function createOperatorMessages(
       return;
     }
 
+    if (podRepo.hasInfrastructureBlocker?.(podId)) {
+      // The real answer and delivery custody above remain valid. They do not
+      // authorize another coding turn on blocked infrastructure.
+      await captured.reconcileInfrastructureBlocker(podId);
+      return;
+    }
+
     const continuationMessage = [
       resumeMessage,
       '',
@@ -507,6 +656,7 @@ export function createOperatorMessages(
       const mcpServers = await primeRuntimeForResume(pod, runtime, pod.containerId, resumeEnv);
       let outcome: AgentRunOutcome;
       try {
+        assertNoInfrastructureBlocker(podRepo, podId);
         const events = runtime.resume(podId, continuationMessage, pod.containerId, resumeEnv);
         outcome = await this.consumeAgentEvents(podId, events, pod.validationAttempts);
       } catch (err) {
@@ -544,10 +694,18 @@ export function createOperatorMessages(
         await this.handleCompletion(podId);
       }
     } catch (err) {
-      if (err instanceof AgentContinuationSupersededError) throw err;
+      if (
+        err instanceof AgentContinuationSupersededError ||
+        err instanceof ValidationSupersededError
+      )
+        throw err;
       logger.error({ err, podId }, 'Failed to resume agent after message');
+      if (podRepo.hasInfrastructureBlocker?.(podId)) {
+        await retainReportedFailure(pod);
+        throw err;
+      }
       const s = podRepo.getOrThrow(podId);
-      if (!isTerminalState(s.status)) {
+      if (!isTerminalState(s.status) && !podRepo.hasInfrastructureBlocker?.(podId)) {
         transition(s, 'failed');
         emitActivityStatus(
           podId,

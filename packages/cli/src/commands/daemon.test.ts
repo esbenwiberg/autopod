@@ -5,6 +5,7 @@ import { expect, it, vi } from 'vitest';
 import { getToken } from '../auth/token-manager.js';
 import * as config from '../config/config-store.js';
 import { registerDaemonCommands } from './daemon.js';
+
 vi.mock('../auth/token-manager.js', () => ({
   getToken: vi.fn(async () => {
     throw new Error('login-required');

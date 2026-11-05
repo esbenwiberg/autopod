@@ -7,6 +7,7 @@ import type { Command } from 'commander';
 import { type AutopodClient, DaemonUnreachableError } from '../api/client.js';
 import { withJsonOutput } from '../output/json.js';
 import { resolvePodId } from '../utils/id-resolver.js';
+
 interface Options {
   requestId?: string;
   generation?: string;

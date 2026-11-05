@@ -9,7 +9,6 @@ import { DefaultAzureCredential } from '@azure/identity';
 import type { Logger } from 'pino';
 import type { ContainerStartOptions } from '../interfaces/container-manager.js';
 import { isObservedExitCode } from './exec-exit-evidence.js';
-import { SandboxInfrastructureError } from './sandbox-api-client.js';
 import type {
   CreateSandboxOptions,
   SandboxApiClient,
@@ -30,6 +29,7 @@ import type {
   SandboxTerminalOptions,
   SandboxTerminalSession,
 } from './sandbox-api-client.js';
+import { SandboxInfrastructureError } from './sandbox-api-client.js';
 import {
   SANDBOX_GOAL_SUPERVISOR_ENV,
   sandboxGoalExit,

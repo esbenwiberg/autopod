@@ -4,6 +4,7 @@ import { createApprovalDeliveryExecution } from './approval-delivery-execution.j
 import { createApprovalDeliveryPreparation } from './approval-delivery-preparation.js';
 import { createApprovalWorkflow } from './approval-workflow.js';
 import type { ApprovalPreparationContext } from './delivery-contracts.js';
+
 async function input(
   f: ReturnType<typeof createDeliveryFixture>,
 ): Promise<ApprovalPreparationContext> {
@@ -18,40 +19,40 @@ async function input(
   };
 }
 describe('approval delivery stages', () => {
-  it.each([false, true])(
-    'recognizes a source-bound external merge without republishing (admitted: %s)',
-    async (admitted) => {
-      const f = createDeliveryFixture();
-      const planned = await f.planMerge();
-      if (admitted)
-        f.podRepo.mergeJournal?.claim(
-          f.pod(),
-          f.pod(),
-          planned.publication.publicationId,
-          planned.entry.request.config,
-        );
-      f.podRepo.update('prepare', { status: 'validated' });
-      f.provider.getPrStatus.mockResolvedValue(
-        pendingStatus({
-          merged: true,
-          open: false,
-          headSha: planned.publication.commitSha,
-          sourceTarget: {
-            repository: planned.publication.repository,
-            branch: 'branch',
-            baseBranch: 'main',
-          },
-        }),
+  it.each([
+    false,
+    true,
+  ])('recognizes a source-bound external merge without republishing (admitted: %s)', async (admitted) => {
+    const f = createDeliveryFixture();
+    const planned = await f.planMerge();
+    if (admitted)
+      f.podRepo.mergeJournal?.claim(
+        f.pod(),
+        f.pod(),
+        planned.publication.publicationId,
+        planned.entry.request.config,
       );
-      const prepared = await createApprovalDeliveryPreparation({
-        ...f.mainCaptured,
-        prManagerFactory: () => f.provider,
-      }).prepareApprovalDelivery(await input(f));
-      expect(prepared).toMatchObject({ kind: 'ready', recoveredMerge: true });
-      expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
-      expect(f.worktreeManager.pushBranch).toHaveBeenCalledOnce();
-    },
-  );
+    f.podRepo.update('prepare', { status: 'validated' });
+    f.provider.getPrStatus.mockResolvedValue(
+      pendingStatus({
+        merged: true,
+        open: false,
+        headSha: planned.publication.commitSha,
+        sourceTarget: {
+          repository: planned.publication.repository,
+          branch: 'branch',
+          baseBranch: 'main',
+        },
+      }),
+    );
+    const prepared = await createApprovalDeliveryPreparation({
+      ...f.mainCaptured,
+      prManagerFactory: () => f.provider,
+    }).prepareApprovalDelivery(await input(f));
+    expect(prepared).toMatchObject({ kind: 'ready', recoveredMerge: true });
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.worktreeManager.pushBranch).toHaveBeenCalledOnce();
+  });
   it('preserves typed reconciliation on retry of an admitted unknown merge', async () => {
     const f = createDeliveryFixture();
     const { publication, entry } = await f.planMerge();
@@ -78,32 +79,32 @@ describe('approval delivery stages', () => {
     expect(f.mainCaptured.cleanupContainerAfterAdvisorySettles).not.toHaveBeenCalled();
   });
 
-  it.each([true, false])(
-    'preserves an unknown merge and its typed error (existing PR: %s)',
-    async (existingPr) => {
-      const f = createDeliveryFixture();
-      f.podRepo.update('prepare', {
-        prUrl: existingPr ? 'https://github.com/org/repo/pull/27' : null,
-        options: { ...f.pod().options, output: 'pr' },
-      });
-      f.provider.mergePr.mockImplementation(async (config) => {
-        config.onPrepared?.();
-        throw new Error('Connection lost after merge admission');
-      });
-      const captured = { ...f.mainCaptured, prManagerFactory: () => f.provider };
-      const preparation = createApprovalDeliveryPreparation(captured);
-      const execution = createApprovalDeliveryExecution(captured);
-      const workflow = createApprovalWorkflow({ ...captured, ...preparation, ...execution });
-      await expect(workflow.approveSession('prepare')).rejects.toMatchObject({
-        code: 'DELIVERY_RECONCILIATION_REQUIRED',
-        statusCode: 409,
-      });
-      expect(f.pod().status).toBe('validated');
-      expect(f.podRepo.mergeJournal?.find(f.pod())?.state).toBe('admitted');
-      expect(f.provider.mergePr).toHaveBeenCalledOnce();
-      expect(f.mainCaptured.cleanupContainerAfterAdvisorySettles).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    true,
+    false,
+  ])('preserves an unknown merge and its typed error (existing PR: %s)', async (existingPr) => {
+    const f = createDeliveryFixture();
+    f.podRepo.update('prepare', {
+      prUrl: existingPr ? 'https://github.com/org/repo/pull/27' : null,
+      options: { ...f.pod().options, output: 'pr' },
+    });
+    f.provider.mergePr.mockImplementation(async (config) => {
+      config.onPrepared?.();
+      throw new Error('Connection lost after merge admission');
+    });
+    const captured = { ...f.mainCaptured, prManagerFactory: () => f.provider };
+    const preparation = createApprovalDeliveryPreparation(captured);
+    const execution = createApprovalDeliveryExecution(captured);
+    const workflow = createApprovalWorkflow({ ...captured, ...preparation, ...execution });
+    await expect(workflow.approveSession('prepare')).rejects.toMatchObject({
+      code: 'DELIVERY_RECONCILIATION_REQUIRED',
+      statusCode: 409,
+    });
+    expect(f.pod().status).toBe('validated');
+    expect(f.podRepo.mergeJournal?.find(f.pod())?.state).toBe('admitted');
+    expect(f.provider.mergePr).toHaveBeenCalledOnce();
+    expect(f.mainCaptured.cleanupContainerAfterAdvisorySettles).not.toHaveBeenCalled();
+  });
 
   it('fences a replacement lifecycle after execution returns and before final cleanup', async () => {
     const f = createDeliveryFixture();
@@ -163,41 +164,41 @@ describe('approval delivery stages', () => {
         ciFailures: [{ name: 'Build', conclusion: 'failure', detailsUrl: null, annotations: [] }],
       }),
     ].flatMap((status) => [true, false].map((existingPr) => ({ status, existingPr }))),
-  )(
-    'defers blocked delivery without admitting a merge request (%j)',
-    async ({ status, existingPr }) => {
-      const f = createDeliveryFixture();
-      f.podRepo.update('prepare', {
-        prUrl: existingPr ? 'https://github.com/org/repo/pull/27' : null,
-        options: { ...f.pod().options, output: 'pr' },
-      });
-      f.provider.getPrStatus.mockResolvedValue(status);
-      const captured = { ...f.mainCaptured, prManagerFactory: () => f.provider };
-      const context = await input(f);
-      const prepared =
-        await createApprovalDeliveryPreparation(captured).prepareApprovalDelivery(context);
-      if (prepared.kind !== 'ready') throw new Error('Unexpected halt');
-      const approved = f.events.transition(context.pod, 'approved');
-      const merging = f.events.transition(approved, 'merging');
-      const output = await createApprovalDeliveryExecution(captured).executeApprovalDelivery({
-        podId: 'prepare',
-        pod: context.pod,
-        options: {},
-        mergingAnchor: { ...context.pod, status: 'merging' },
-        s2: merging,
-        ...prepared,
-      });
-      expect(output).toEqual({ kind: 'halted' });
-      expect(f.pod().status).toBe('merge_pending');
-      expect(f.podRepo.mergeJournal?.find(f.pod())?.state).toBe('planned');
-      expect(f.podRepo.mergeJournal?.find(f.pod())?.request.config.squash).toBe(
-        status.squashRequired === true,
-      );
-      expect(f.provider.mergePr).not.toHaveBeenCalled();
-      expect(f.mainCaptured.startMergePolling).toHaveBeenCalledWith('prepare');
-      expect(f.mainCaptured.cleanupContainerAfterAdvisorySettles).not.toHaveBeenCalled();
-    },
-  );
+  )('defers blocked delivery without admitting a merge request (%j)', async ({
+    status,
+    existingPr,
+  }) => {
+    const f = createDeliveryFixture();
+    f.podRepo.update('prepare', {
+      prUrl: existingPr ? 'https://github.com/org/repo/pull/27' : null,
+      options: { ...f.pod().options, output: 'pr' },
+    });
+    f.provider.getPrStatus.mockResolvedValue(status);
+    const captured = { ...f.mainCaptured, prManagerFactory: () => f.provider };
+    const context = await input(f);
+    const prepared =
+      await createApprovalDeliveryPreparation(captured).prepareApprovalDelivery(context);
+    if (prepared.kind !== 'ready') throw new Error('Unexpected halt');
+    const approved = f.events.transition(context.pod, 'approved');
+    const merging = f.events.transition(approved, 'merging');
+    const output = await createApprovalDeliveryExecution(captured).executeApprovalDelivery({
+      podId: 'prepare',
+      pod: context.pod,
+      options: {},
+      mergingAnchor: { ...context.pod, status: 'merging' },
+      s2: merging,
+      ...prepared,
+    });
+    expect(output).toEqual({ kind: 'halted' });
+    expect(f.pod().status).toBe('merge_pending');
+    expect(f.podRepo.mergeJournal?.find(f.pod())?.state).toBe('planned');
+    expect(f.podRepo.mergeJournal?.find(f.pod())?.request.config.squash).toBe(
+      status.squashRequired === true,
+    );
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+    expect(f.mainCaptured.startMergePolling).toHaveBeenCalledWith('prepare');
+    expect(f.mainCaptured.cleanupContainerAfterAdvisorySettles).not.toHaveBeenCalled();
+  });
   it('rejects a replacement lifecycle between prepared stage return and normal approval admission', async () => {
     const f = createDeliveryFixture();
     const preparation = createApprovalDeliveryPreparation(f.mainCaptured);

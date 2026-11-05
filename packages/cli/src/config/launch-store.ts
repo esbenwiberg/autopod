@@ -2,10 +2,10 @@ import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, writeFileSync 
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
-  type LaunchRequest,
-  type SeriesLaunchRequest,
   configurationIdSchema,
+  type LaunchRequest,
   launchRequestSchema,
+  type SeriesLaunchRequest,
   seriesLaunchRequestSchema,
 } from '@autopod/shared';
 import { getConfigDir } from './config-store.js';

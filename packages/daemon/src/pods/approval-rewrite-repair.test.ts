@@ -313,87 +313,86 @@ it.each([
   expect(f.deps.enqueue).not.toHaveBeenCalled();
 });
 
-it.each([true, false])(
-  'runs fresh checks/review only with a separate retry grant=%s, without publication or workers',
-  async (grant) => {
-    const f = await fixture();
-    vi.stubEnv('DATA_DIR', f.root);
-    f.ctx.podRepo.update(f.podId, { maxValidationAttempts: f.pod().validationAttempts });
-    const before = f.pod();
-    const previous = f.ctx.podRepo.taskRetries!.state(f.podId);
-    await f.recovery.prepareRewriteRepair(f.podId, f.request, f.actor);
-    await f.recovery.wait(f.request.id);
-    const op = f.recovery.list(f.podId)[0]!;
-    const input = {
-      rewriteId: f.rewriteId,
-      failedDispatchId: f.dispatchId,
-      expectedGeneration: before.lifecycleGeneration,
-      expectedResultHash: f.request.expectedResultHash,
-      candidateHead: op.prepared!.head,
-      reason: 'Check exactly the independently prepared source with frozen authority',
-    };
-    const permission = grant ? authorizeRepairCheck(f, op, 'separate-repair-retry') : null;
-    await f.recovery.checkRewriteRepair(f.podId, op.id, input, f.actor);
-    const validate = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
-    vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => ({
-      ...(await validate(config)),
-      taskReview: {
-        status: 'pass',
-        reasoning: 'Independent review fixture',
-        issues: [],
-        model: 'fixture',
-        screenshots: [],
-      },
-    }));
-    if (grant) await f.manager.processPod(f.podId);
-    else await expect(f.manager.processPod(f.podId)).rejects.toThrow('did not produce a result');
-    const current = f.pod();
-    const completed = f.recovery.list(f.podId)[0]!;
-    if (grant) {
-      expect(current.status, current.failureReason ?? JSON.stringify(completed)).toBe('validated');
-      expect(completed.checked?.result.overall, JSON.stringify(completed.blocked)).toBe('pass');
-      expect(completed.checked?.result.taskReview?.status).toBe('pass');
-      expect(completed.checked?.snapshot?.path).toBe(current.artifactsPath);
-      expect(f.ctx.podRepo.approvalRewrites!.assertDelivery(current)?.checked?.validationHash).toBe(
-        checkpointHash(current.lastValidationResult),
-      );
-      expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
-      const used = f.ctx.podRepo
-        .taskRetries!.state(f.podId)
-        .authorizations.find((item) => item.id === permission!.id)!;
-      expect(used.usedByAttemptId).toBeTruthy();
-      expect(used.rewriteRepair).toMatchObject({
-        recoveryId: op.id,
-        generation: current.lifecycleGeneration,
-        candidateHead: completed.selected!.head,
-        candidateTree: completed.selected!.tree,
-      });
-      expect(current.lastValidationResult!.executionDispatchId).not.toBe(f.dispatchId);
-      expect(() =>
-        f.ctx.db
-          .prepare('DELETE FROM task_retry_authorization_uses WHERE authorization_id=?')
-          .run(used.id),
-      ).toThrow('retained');
-      expect(f.ctx.podRepo.taskRetries!.state(f.podId).executedCount).toBe(
-        previous.executedCount + 1,
-      );
-    } else {
-      expect(current.status).toBe('review_required');
-      expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
-      expect(f.ctx.podRepo.taskRetries!.state(f.podId).executedCount).toBe(previous.executedCount);
-      expect(() => f.ctx.podRepo.approvalRewrites!.assertDelivery(current)).toThrow();
-    }
-    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
-    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
-    expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
-    expect(f.cm.kill).not.toHaveBeenCalled();
-    await expect(f.manager.triggerValidation(f.podId, { force: true })).rejects.toThrow();
-    if (grant) await f.manager.processPod(f.podId);
-    else await expect(f.manager.processPod(f.podId)).rejects.toThrow();
-    expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(grant ? 1 : 0);
-  },
-  15_000,
-);
+it.each([
+  true,
+  false,
+])('runs fresh checks/review only with a separate retry grant=%s, without publication or workers', async (grant) => {
+  const f = await fixture();
+  vi.stubEnv('DATA_DIR', f.root);
+  f.ctx.podRepo.update(f.podId, { maxValidationAttempts: f.pod().validationAttempts });
+  const before = f.pod();
+  const previous = f.ctx.podRepo.taskRetries!.state(f.podId);
+  await f.recovery.prepareRewriteRepair(f.podId, f.request, f.actor);
+  await f.recovery.wait(f.request.id);
+  const op = f.recovery.list(f.podId)[0]!;
+  const input = {
+    rewriteId: f.rewriteId,
+    failedDispatchId: f.dispatchId,
+    expectedGeneration: before.lifecycleGeneration,
+    expectedResultHash: f.request.expectedResultHash,
+    candidateHead: op.prepared!.head,
+    reason: 'Check exactly the independently prepared source with frozen authority',
+  };
+  const permission = grant ? authorizeRepairCheck(f, op, 'separate-repair-retry') : null;
+  await f.recovery.checkRewriteRepair(f.podId, op.id, input, f.actor);
+  const validate = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
+  vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => ({
+    ...(await validate(config)),
+    taskReview: {
+      status: 'pass',
+      reasoning: 'Independent review fixture',
+      issues: [],
+      model: 'fixture',
+      screenshots: [],
+    },
+  }));
+  if (grant) await f.manager.processPod(f.podId);
+  else await expect(f.manager.processPod(f.podId)).rejects.toThrow('did not produce a result');
+  const current = f.pod();
+  const completed = f.recovery.list(f.podId)[0]!;
+  if (grant) {
+    expect(current.status, current.failureReason ?? JSON.stringify(completed)).toBe('validated');
+    expect(completed.checked?.result.overall, JSON.stringify(completed.blocked)).toBe('pass');
+    expect(completed.checked?.result.taskReview?.status).toBe('pass');
+    expect(completed.checked?.snapshot?.path).toBe(current.artifactsPath);
+    expect(f.ctx.podRepo.approvalRewrites!.assertDelivery(current)?.checked?.validationHash).toBe(
+      checkpointHash(current.lastValidationResult),
+    );
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+    const used = f.ctx.podRepo
+      .taskRetries!.state(f.podId)
+      .authorizations.find((item) => item.id === permission!.id)!;
+    expect(used.usedByAttemptId).toBeTruthy();
+    expect(used.rewriteRepair).toMatchObject({
+      recoveryId: op.id,
+      generation: current.lifecycleGeneration,
+      candidateHead: completed.selected!.head,
+      candidateTree: completed.selected!.tree,
+    });
+    expect(current.lastValidationResult!.executionDispatchId).not.toBe(f.dispatchId);
+    expect(() =>
+      f.ctx.db
+        .prepare('DELETE FROM task_retry_authorization_uses WHERE authorization_id=?')
+        .run(used.id),
+    ).toThrow('retained');
+    expect(f.ctx.podRepo.taskRetries!.state(f.podId).executedCount).toBe(
+      previous.executedCount + 1,
+    );
+  } else {
+    expect(current.status).toBe('review_required');
+    expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+    expect(f.ctx.podRepo.taskRetries!.state(f.podId).executedCount).toBe(previous.executedCount);
+    expect(() => f.ctx.podRepo.approvalRewrites!.assertDelivery(current)).toThrow();
+  }
+  expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+  expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+  expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+  expect(f.cm.kill).not.toHaveBeenCalled();
+  await expect(f.manager.triggerValidation(f.podId, { force: true })).rejects.toThrow();
+  if (grant) await f.manager.processPod(f.podId);
+  else await expect(f.manager.processPod(f.podId)).rejects.toThrow();
+  expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(grant ? 1 : 0);
+}, 15_000);
 
 it('rejects each tampered prepared candidate without changing retained custody', async () => {
   const f = await fixture();
@@ -617,187 +616,176 @@ it('holds a completion crash after fresh result/report capture instead of certif
   expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
 }, 15_000);
 
-it.each([false, true])(
-  'delivers only the checked current candidate under fresh human approval and original Git lease; drift=%s',
-  async (drift) => {
-    const f = await fixture();
-    vi.stubEnv('DATA_DIR', f.root);
-    const originalRewrite = f.ctx.podRepo.approvalRewrites!.get(f.rewriteId)!;
-    await f.recovery.prepareRewriteRepair(f.podId, f.request, f.actor);
-    await f.recovery.wait(f.request.id);
-    const op = f.recovery.list(f.podId)[0]!;
-    const checkout = op.prepared!.worktree;
-    await writeFile(path.join(checkout, 'source.ts'), 'export const repaired = true;\n');
-    await repairGit(checkout, 'add', 'source.ts');
+it.each([
+  false,
+  true,
+])('delivers only the checked current candidate under fresh human approval and original Git lease; drift=%s', async (drift) => {
+  const f = await fixture();
+  vi.stubEnv('DATA_DIR', f.root);
+  const originalRewrite = f.ctx.podRepo.approvalRewrites!.get(f.rewriteId)!;
+  await f.recovery.prepareRewriteRepair(f.podId, f.request, f.actor);
+  await f.recovery.wait(f.request.id);
+  const op = f.recovery.list(f.podId)[0]!;
+  const checkout = op.prepared!.worktree;
+  await writeFile(path.join(checkout, 'source.ts'), 'export const repaired = true;\n');
+  await repairGit(checkout, 'add', 'source.ts');
+  await repairGit(
+    checkout,
+    '-c',
+    'user.name=Fixture',
+    '-c',
+    'user.email=fixture@example.invalid',
+    'commit',
+    '-m',
+    'repair',
+  );
+  const head = await repairGit(checkout, 'rev-parse', 'HEAD');
+  const tree = await repairGit(checkout, 'rev-parse', 'HEAD^{tree}');
+  authorizeRepairCheck(f, op, 'delivery-check', head, tree);
+  await f.recovery.checkRewriteRepair(
+    f.podId,
+    op.id,
+    {
+      rewriteId: f.rewriteId,
+      failedDispatchId: f.dispatchId,
+      expectedGeneration: f.request.expectedGeneration,
+      expectedResultHash: f.request.expectedResultHash,
+      candidateHead: head,
+      reason: 'Select targeted committed repair for fresh checks and review',
+    },
+    f.actor,
+  );
+  const validate = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
+  vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => ({
+    ...(await validate(config)),
+    taskReview: {
+      status: 'pass',
+      reasoning: 'Independent review fixture',
+      issues: [],
+      model: 'fixture',
+      screenshots: [],
+    },
+  }));
+  await f.manager.processPod(f.podId);
+  const checkedHead = f.ctx.podRepo.approvalRewrites!.latest(f.pod())!.checked!.head;
+  expect(await repairGit(checkout, 'rev-parse', 'HEAD')).toBe(checkedHead);
+  const remote = path.join(f.root, 'fixture-remote.git');
+  await repairGit(f.root, 'init', '--bare', remote);
+  await repairGit(f.original, 'push', remote, `HEAD:refs/heads/${f.pod().branch}`);
+  if (drift) {
+    await writeFile(path.join(f.original, 'external.txt'), 'external advance\n');
+    await repairGit(f.original, 'add', 'external.txt');
     await repairGit(
-      checkout,
+      f.original,
       '-c',
       'user.name=Fixture',
       '-c',
       'user.email=fixture@example.invalid',
       'commit',
       '-m',
-      'repair',
+      'external advance',
     );
-    const head = await repairGit(checkout, 'rev-parse', 'HEAD');
-    const tree = await repairGit(checkout, 'rev-parse', 'HEAD^{tree}');
-    authorizeRepairCheck(f, op, 'delivery-check', head, tree);
-    await f.recovery.checkRewriteRepair(
-      f.podId,
-      op.id,
-      {
-        rewriteId: f.rewriteId,
-        failedDispatchId: f.dispatchId,
-        expectedGeneration: f.request.expectedGeneration,
-        expectedResultHash: f.request.expectedResultHash,
-        candidateHead: head,
-        reason: 'Select targeted committed repair for fresh checks and review',
-      },
-      f.actor,
-    );
-    const validate = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
-    vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => ({
-      ...(await validate(config)),
-      taskReview: {
-        status: 'pass',
-        reasoning: 'Independent review fixture',
-        issues: [],
-        model: 'fixture',
-        screenshots: [],
-      },
-    }));
-    await f.manager.processPod(f.podId);
-    const checkedHead = f.ctx.podRepo.approvalRewrites!.latest(f.pod())!.checked!.head;
-    expect(await repairGit(checkout, 'rev-parse', 'HEAD')).toBe(checkedHead);
-    const remote = path.join(f.root, 'fixture-remote.git');
-    await repairGit(f.root, 'init', '--bare', remote);
     await repairGit(f.original, 'push', remote, `HEAD:refs/heads/${f.pod().branch}`);
-    if (drift) {
-      await writeFile(path.join(f.original, 'external.txt'), 'external advance\n');
-      await repairGit(f.original, 'add', 'external.txt');
-      await repairGit(
-        f.original,
-        '-c',
-        'user.name=Fixture',
-        '-c',
-        'user.email=fixture@example.invalid',
-        'commit',
-        '-m',
-        'external advance',
-      );
-      await repairGit(f.original, 'push', remote, `HEAD:refs/heads/${f.pod().branch}`);
-    }
-    const beforeRemote = await repairGit(remote, 'rev-parse', `refs/heads/${f.pod().branch}`);
-    const real = new LocalWorktreeManager({ logger: f.ctx.deps.logger });
-    (
-      real as unknown as { getAuthenticatedRemote(): Promise<{ url: string }> }
-    ).getAuthenticatedRemote = async () => ({ url: remote });
-    const repository = originalRewrite.binding.predecessor.repository;
-    // Substitute ONLY fixture provider transport. Native Git executes observation
-    // and exact lease push against a disposable local remote, never a real PR.
-    f.worktrees.pushBranch = vi.fn(async (cwd, branch, options) => {
-      const result = await real.pushBranch(cwd, branch, {
-        ...options,
-        onPrepared: (source) => options?.onPrepared?.({ ...source, repository }),
-      });
-      return { ...result, repository };
+  }
+  const beforeRemote = await repairGit(remote, 'rev-parse', `refs/heads/${f.pod().branch}`);
+  const real = new LocalWorktreeManager({ logger: f.ctx.deps.logger });
+  (
+    real as unknown as { getAuthenticatedRemote(): Promise<{ url: string }> }
+  ).getAuthenticatedRemote = async () => ({ url: remote });
+  const repository = originalRewrite.binding.predecessor.repository;
+  // Substitute ONLY fixture provider transport. Native Git executes observation
+  // and exact lease push against a disposable local remote, never a real PR.
+  f.worktrees.pushBranch = vi.fn(async (cwd, branch, options) => {
+    const result = await real.pushBranch(cwd, branch, {
+      ...options,
+      onPrepared: (source) => options?.onPrepared?.({ ...source, repository }),
     });
-    f.worktrees.inspectSource = f.worktrees.inspectSourceAdoption;
-    const provider = {
-      createPr: vi.fn(async () => ({ url: f.pod().prUrl!, usedFallback: false })),
-      mergePr: vi.fn(async () => ({ merged: false, autoMergeScheduled: false })),
-      getPrStatus: vi.fn(async () => ({
-        merged: false,
-        open: true,
-        blockReason: 'Waiting',
-        ciFailures: [],
-        reviewComments: [],
-        headSha: await repairGit(remote, 'rev-parse', `refs/heads/${f.pod().branch}`),
-        sourceTarget: { repository, branch: f.pod().branch, baseBranch: 'main' },
-      })),
-    };
-    const approval = createPodManager({ ...f.ctx.deps, prManagerFactory: () => provider });
-    await expect(approval.approveSession(f.podId, { automation: true })).rejects.toThrow();
-    expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
-    const approve = () =>
-      approval.approveSession(f.podId, {
-        publishOnly: true,
-        actor: f.actor,
-        reason: 'Fresh human approval to publish exactly this checked repair for PR review only',
-      });
-    if (drift) {
-      await expect(approve()).rejects.toThrow();
-      expect(await repairGit(remote, 'rev-parse', `refs/heads/${f.pod().branch}`)).toBe(
-        beforeRemote,
-      );
-    } else {
-      await approve();
-      expect(await repairGit(remote, 'rev-parse', `refs/heads/${f.pod().branch}`)).toBe(
-        checkedHead,
-      );
-    }
-    expect(f.worktrees.pushBranch).toHaveBeenCalledWith(
-      checkout,
-      f.pod().branch,
-      expect.objectContaining({
-        force: true,
-        expectedRemoteCommitSha: originalRewrite.binding.predecessor.commitSha,
-      }),
+    return { ...result, repository };
+  });
+  f.worktrees.inspectSource = f.worktrees.inspectSourceAdoption;
+  const provider = {
+    createPr: vi.fn(async () => ({ url: f.pod().prUrl!, usedFallback: false })),
+    mergePr: vi.fn(async () => ({ merged: false, autoMergeScheduled: false })),
+    getPrStatus: vi.fn(async () => ({
+      merged: false,
+      open: true,
+      blockReason: 'Waiting',
+      ciFailures: [],
+      reviewComments: [],
+      headSha: await repairGit(remote, 'rev-parse', `refs/heads/${f.pod().branch}`),
+      sourceTarget: { repository, branch: f.pod().branch, baseBranch: 'main' },
+    })),
+  };
+  const approval = createPodManager({ ...f.ctx.deps, prManagerFactory: () => provider });
+  await expect(approval.approveSession(f.podId, { automation: true })).rejects.toThrow();
+  expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
+  const approve = () =>
+    approval.approveSession(f.podId, {
+      publishOnly: true,
+      actor: f.actor,
+      reason: 'Fresh human approval to publish exactly this checked repair for PR review only',
+    });
+  if (drift) {
+    await expect(approve()).rejects.toThrow();
+    expect(await repairGit(remote, 'rev-parse', `refs/heads/${f.pod().branch}`)).toBe(beforeRemote);
+  } else {
+    await approve();
+    expect(await repairGit(remote, 'rev-parse', `refs/heads/${f.pod().branch}`)).toBe(checkedHead);
+  }
+  expect(f.worktrees.pushBranch).toHaveBeenCalledWith(
+    checkout,
+    f.pod().branch,
+    expect.objectContaining({
+      force: true,
+      expectedRemoteCommitSha: originalRewrite.binding.predecessor.commitSha,
+    }),
+  );
+  expect(f.pod().status).toBe('validated');
+  expect(provider.mergePr).not.toHaveBeenCalled();
+  expect(f.ctx.podRepo.approvalRewrites!.get(f.rewriteId)).toEqual(originalRewrite);
+  if (!drift) {
+    // Advance main in a third fixture checkout. Ordinary later approval must
+    // isolate/recheck this new base, never relabel the old repair pass.
+    const seed = path.join(f.root, 'new-main');
+    await repairGit(f.root, 'clone', '--no-checkout', remote, seed);
+    await repairGit(seed, 'checkout', '-b', 'main', originalRewrite.binding.predecessor.commitSha);
+    await writeFile(path.join(seed, 'main.txt'), 'new main base\n');
+    await repairGit(seed, 'add', 'main.txt');
+    await repairGit(
+      seed,
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      'commit',
+      '-m',
+      'advance main',
     );
-    expect(f.pod().status).toBe('validated');
+    const newBase = await repairGit(seed, 'rev-parse', 'HEAD');
+    await repairGit(seed, 'push', remote, 'HEAD:refs/heads/main');
+    f.worktrees.prepareApprovalRebase = real.prepareApprovalRebase.bind(real);
+    await approval.approveSession(f.podId, {
+      actor: f.actor,
+      reason: 'Fresh approval must independently recheck the newly advanced main base',
+    });
+    expect(f.pod().status).toBe('queued');
+    const next = f.ctx.podRepo.approvalRewrites!.latest(f.pod())!;
+    expect(next.id).not.toBe(f.rewriteId);
+    expect(next.binding.baseCommitSha).toBe(newBase);
+    expect(next.binding.predecessor.commitSha).toBe(checkedHead);
+    expect(next.checked).toBeUndefined();
+    const pushes = vi.mocked(f.worktrees.pushBranch).mock.calls.length;
+    vi.mocked(f.cm.spawn).mockResolvedValueOnce('33333333-3333-4333-8333-333333333333');
+    await approval.processPod(f.podId);
+    expect(f.pod().status, f.pod().failureReason ?? '').toBe('validated');
+    expect(f.ctx.podRepo.approvalRewrites!.latest(f.pod())?.checked).toBeDefined();
+    expect(() => assertSourceDeliveryAllowed(f.ctx.db, f.podId)).not.toThrow();
+    expect(f.worktrees.pushBranch).toHaveBeenCalledTimes(pushes);
     expect(provider.mergePr).not.toHaveBeenCalled();
+    expect(await repairGit(checkout, 'rev-parse', 'HEAD')).toBe(checkedHead);
     expect(f.ctx.podRepo.approvalRewrites!.get(f.rewriteId)).toEqual(originalRewrite);
-    if (!drift) {
-      // Advance main in a third fixture checkout. Ordinary later approval must
-      // isolate/recheck this new base, never relabel the old repair pass.
-      const seed = path.join(f.root, 'new-main');
-      await repairGit(f.root, 'clone', '--no-checkout', remote, seed);
-      await repairGit(
-        seed,
-        'checkout',
-        '-b',
-        'main',
-        originalRewrite.binding.predecessor.commitSha,
-      );
-      await writeFile(path.join(seed, 'main.txt'), 'new main base\n');
-      await repairGit(seed, 'add', 'main.txt');
-      await repairGit(
-        seed,
-        '-c',
-        'user.name=Fixture',
-        '-c',
-        'user.email=fixture@example.invalid',
-        'commit',
-        '-m',
-        'advance main',
-      );
-      const newBase = await repairGit(seed, 'rev-parse', 'HEAD');
-      await repairGit(seed, 'push', remote, 'HEAD:refs/heads/main');
-      f.worktrees.prepareApprovalRebase = real.prepareApprovalRebase.bind(real);
-      await approval.approveSession(f.podId, {
-        actor: f.actor,
-        reason: 'Fresh approval must independently recheck the newly advanced main base',
-      });
-      expect(f.pod().status).toBe('queued');
-      const next = f.ctx.podRepo.approvalRewrites!.latest(f.pod())!;
-      expect(next.id).not.toBe(f.rewriteId);
-      expect(next.binding.baseCommitSha).toBe(newBase);
-      expect(next.binding.predecessor.commitSha).toBe(checkedHead);
-      expect(next.checked).toBeUndefined();
-      const pushes = vi.mocked(f.worktrees.pushBranch).mock.calls.length;
-      vi.mocked(f.cm.spawn).mockResolvedValueOnce('33333333-3333-4333-8333-333333333333');
-      await approval.processPod(f.podId);
-      expect(f.pod().status, f.pod().failureReason ?? '').toBe('validated');
-      expect(f.ctx.podRepo.approvalRewrites!.latest(f.pod())?.checked).toBeDefined();
-      expect(() => assertSourceDeliveryAllowed(f.ctx.db, f.podId)).not.toThrow();
-      expect(f.worktrees.pushBranch).toHaveBeenCalledTimes(pushes);
-      expect(provider.mergePr).not.toHaveBeenCalled();
-      expect(await repairGit(checkout, 'rev-parse', 'HEAD')).toBe(checkedHead);
-      expect(f.ctx.podRepo.approvalRewrites!.get(f.rewriteId)).toEqual(originalRewrite);
-    }
-  },
-  15_000,
-);
+  }
+}, 15_000);
 
 it('reobserves source after asynchronous candidate inspection and leaves a changed checkout unselected', async () => {
   const f = await fixture();
@@ -833,46 +821,45 @@ it('reobserves source after asynchronous candidate inspection and leaves a chang
   expect(f.deps.enqueue).not.toHaveBeenCalled();
 });
 
-it.each(['generic', 'other-source'] as const)(
-  'does not consume %s retry permission for a repair selection',
-  async (kind) => {
-    const f = await fixture();
-    vi.stubEnv('DATA_DIR', f.root);
-    await f.recovery.prepareRewriteRepair(f.podId, f.request, f.actor);
-    await f.recovery.wait(f.request.id);
-    const op = f.recovery.list(f.podId)[0]!;
-    const permission =
-      kind === 'generic'
-        ? f.ctx.podRepo.taskRetries!.authorize(
-            f.podId,
-            'generic-permission',
-            'Generic retry does not authorize a rewrite repair source',
-            f.actor,
-          )
-        : authorizeRepairCheck(f, op, 'other-source-permission', 'f'.repeat(40), op.prepared!.tree);
-    await f.recovery.checkRewriteRepair(
-      f.podId,
-      op.id,
-      {
-        rewriteId: f.rewriteId,
-        failedDispatchId: f.dispatchId,
-        expectedGeneration: f.request.expectedGeneration,
-        expectedResultHash: f.request.expectedResultHash,
-        candidateHead: op.prepared!.head,
-        reason: 'Select an exact candidate without implicitly borrowing another grant',
-      },
-      f.actor,
-    );
-    await expect(f.manager.processPod(f.podId)).rejects.toThrow('did not produce a result');
-    expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
-    expect(
-      f.ctx.podRepo
-        .taskRetries!.state(f.podId)
-        .authorizations.find((item) => item.id === permission.id)?.usedByAttemptId,
-    ).toBeNull();
-  },
-  15_000,
-);
+it.each([
+  'generic',
+  'other-source',
+] as const)('does not consume %s retry permission for a repair selection', async (kind) => {
+  const f = await fixture();
+  vi.stubEnv('DATA_DIR', f.root);
+  await f.recovery.prepareRewriteRepair(f.podId, f.request, f.actor);
+  await f.recovery.wait(f.request.id);
+  const op = f.recovery.list(f.podId)[0]!;
+  const permission =
+    kind === 'generic'
+      ? f.ctx.podRepo.taskRetries!.authorize(
+          f.podId,
+          'generic-permission',
+          'Generic retry does not authorize a rewrite repair source',
+          f.actor,
+        )
+      : authorizeRepairCheck(f, op, 'other-source-permission', 'f'.repeat(40), op.prepared!.tree);
+  await f.recovery.checkRewriteRepair(
+    f.podId,
+    op.id,
+    {
+      rewriteId: f.rewriteId,
+      failedDispatchId: f.dispatchId,
+      expectedGeneration: f.request.expectedGeneration,
+      expectedResultHash: f.request.expectedResultHash,
+      candidateHead: op.prepared!.head,
+      reason: 'Select an exact candidate without implicitly borrowing another grant',
+    },
+    f.actor,
+  );
+  await expect(f.manager.processPod(f.podId)).rejects.toThrow('did not produce a result');
+  expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+  expect(
+    f.ctx.podRepo
+      .taskRetries!.state(f.podId)
+      .authorizations.find((item) => item.id === permission.id)?.usedByAttemptId,
+  ).toBeNull();
+}, 15_000);
 
 it('retains an exact repair retry target on reopen, refuses changed-key replay and cannot borrow it for another selection', async () => {
   const f = await fixture();

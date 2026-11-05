@@ -8,7 +8,7 @@ import {
 } from '@autopod/shared';
 import Dockerode from 'dockerode';
 import type { Logger } from 'pino';
-import { DOCKER_CALL_TIMEOUTS, boundedDockerCall } from './docker-bounds.js';
+import { boundedDockerCall, DOCKER_CALL_TIMEOUTS } from './docker-bounds.js';
 import {
   alignMemoryToPageSize,
   createContainerWithStaleRetry,

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createAdmissionFixture, deferred } from '../test-utils/admission-queries-helpers.js';
 import type { AdmissionSeriesCalls } from './admission-contracts.js';
+
 describe('series deletion lifetime', () => {
   it('refuses missing series without invoking controls', async () => {
     const f = createAdmissionFixture();

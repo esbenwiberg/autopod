@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  type ParsedReviewLike,
   applyDiffFilterToParsed,
   filterOutOfDiffFindings,
+  type ParsedReviewLike,
 } from './review-finding-filter.js';
 
 const DIFF_TWO_FILES = [

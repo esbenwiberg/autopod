@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { parse, stringify } from 'yaml';
-import { type CliConfig, DEFAULT_CONFIG, configSchema } from './schema.js';
+import { type CliConfig, configSchema, DEFAULT_CONFIG } from './schema.js';
 
 const CONFIG_DIR = path.join(os.homedir(), '.autopod');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.yaml');

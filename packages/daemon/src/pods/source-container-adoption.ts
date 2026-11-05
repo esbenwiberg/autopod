@@ -7,7 +7,7 @@ import type {
   SourceAdoptionRepository,
 } from './source-adoption-repository.js';
 import { runSourceCommand } from './source-command-runner.js';
-import { SOURCE_GIT_INSPECTION, parseInspectedSource } from './source-git-inspection.js';
+import { parseInspectedSource, SOURCE_GIT_INSPECTION } from './source-git-inspection.js';
 
 const GIT_COMMAND = String.raw`
 import os, sys

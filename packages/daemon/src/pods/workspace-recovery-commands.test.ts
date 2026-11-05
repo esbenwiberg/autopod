@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createWorkspaceFixture, result } from '../test-utils/workspace-recovery-helpers.js';
+
 describe('workspace recovery commands', () => {
   it('preserves with original default reason and strictly cleans sidecars before network', async () => {
     const f = createWorkspaceFixture();

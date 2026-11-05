@@ -1,5 +1,5 @@
-import { AutopodError } from '@autopod/shared';
 import type { Pod } from '@autopod/shared';
+import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -8,8 +8,8 @@ import {
   insertTestScheduledJob,
   logger,
 } from '../test-utils/mock-helpers.js';
-import { SCHEDULER_USER_ID, createScheduledJobManager } from './scheduled-job-manager.js';
 import type { ScheduledJobManagerDeps } from './scheduled-job-manager.js';
+import { createScheduledJobManager, SCHEDULER_USER_ID } from './scheduled-job-manager.js';
 import { createScheduledJobRepository } from './scheduled-job-repository.js';
 import { createScheduledJobTemplateRepository } from './scheduled-job-template-repository.js';
 

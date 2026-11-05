@@ -1,6 +1,6 @@
 import { parseDocument as parseYamlDocument } from 'yaml';
-import { parseSpecContract } from '../contract.js';
 import type { ContractDiagnostic } from '../contract.js';
+import { parseSpecContract } from '../contract.js';
 import { AutopodError } from '../errors.js';
 import type { SpecContract } from '../types/contract.js';
 

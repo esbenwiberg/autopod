@@ -6,9 +6,10 @@ import {
   deferred,
   flushAdmission,
 } from '../test-utils/admission-queries-helpers.js';
-import { createPodManagerFacade } from './pod-manager-facade.js';
 import { createPodManager } from './pod-manager.js';
+import { createPodManagerFacade } from './pod-manager-facade.js';
 import type { ValidationWorkflowCalls } from './validation-workflow-ports.js';
+
 vi.mock('./pod-manager-facade.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('./pod-manager-facade.js')>();
   return { ...original, createPodManagerFacade: vi.fn(original.createPodManagerFacade) };
@@ -30,11 +31,12 @@ function instance(disk = false) {
 describe('composed pod manager facade boundary', () => {
   it('adds no extra infrastructure construction effects and preserves actual shorthand function identities', () => {
     const f = instance();
-    expect(Object.keys(f.manager)).toHaveLength(96);
+    expect(Object.keys(f.manager)).toHaveLength(97);
     expect(f.manager.inspectRetainedFinalization).toBeTypeOf('function');
     expect(f.manager.finalizeRetained).toBeTypeOf('function');
     expect(f.manager.prepareRewriteRepair).toBeTypeOf('function');
     expect(f.manager.checkRewriteRepair).toBeTypeOf('function');
+    expect(f.manager.reconcileInfrastructureBlocker).toBeTypeOf('function');
     expect(f.manager.continueRetained).toBeTypeOf('function');
     expect(f.manager.checkRetainedCandidate).toBeTypeOf('function');
     expect(f.manager.previewRetainedExecution).toBeTypeOf('function');
@@ -61,7 +63,7 @@ describe('composed pod manager facade boundary', () => {
     expect(f.cm.spawn).not.toHaveBeenCalled();
     expect(f.cm.stop).not.toHaveBeenCalled();
     expect(f.cm.kill).not.toHaveBeenCalled();
-    expect(f.enqueueSession).not.toHaveBeenCalled();
+    expect(f.ctx.enqueuedSessions).toEqual([]);
   });
   it('preserves synchronous errors and direct returned promise identity at the API boundary', async () => {
     const f = instance();
@@ -76,6 +78,24 @@ describe('composed pod manager facade boundary', () => {
     expect(pending).toBe(gate.promise);
     gate.resolve({ pushError: 'Synthetic publication refusal' });
     await expect(pending).resolves.toEqual({ pushError: 'Synthetic publication refusal' });
+  });
+  it('forwards infrastructure reconciliation only to its narrow completion owner', async () => {
+    const f = instance();
+    const gate = deferred();
+    const reconcile = vi.fn(() => gate.promise);
+    f.owners.completionWorkflow.reconcileInfrastructureBlocker = reconcile;
+    const pending = f.manager.reconcileInfrastructureBlocker('prepare');
+    expect(pending).toBe(gate.promise);
+    expect(reconcile).toHaveBeenCalledExactlyOnceWith('prepare');
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+    expect(f.cm.kill).not.toHaveBeenCalled();
+    expect(f.ctx.enqueuedSessions).toEqual([]);
+    gate.resolve();
+    await pending;
+    await flushAdmission();
+    expect(f.ctx.enqueuedSessions).toEqual([]);
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+    expect(f.cm.kill).not.toHaveBeenCalled();
   });
   it('preserves the explicit async process wrapper rather than returning its owner promise directly', async () => {
     const f = instance();

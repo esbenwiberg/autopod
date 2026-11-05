@@ -8,6 +8,7 @@ import type {
   ContinuationLiveDependencies,
   ContinuationResumeCalls,
 } from './continuation-ports.js';
+import { assertNoInfrastructureBlocker } from './escalation-coordinator.js';
 import { sandboxStartupRetryInput } from './sandbox-startup-admission.js';
 import { isReviewInfrastructureOnlyFailure } from './validation-infrastructure.js';
 import {
@@ -15,8 +16,8 @@ import {
   assertValidationExecutionSettled,
 } from './validation-recovery-policy.js';
 import {
-  WORKER_RETRY_BACKOFFS_MS,
   unavailableWorkerInputs,
+  WORKER_RETRY_BACKOFFS_MS,
   workerBindingHash,
 } from './worker-retry-history.js';
 
@@ -63,6 +64,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
   } = captured;
 
   async function resumeNativeGoal(podId: string, revision: number): Promise<void> {
+    assertNoInfrastructureBlocker(podRepo, podId);
     assertExecutionTerminationVerified(podId);
     const config = deps.launchConfiguration?.read(podId);
     const goals = deps.launchConfiguration?.goals;
@@ -122,6 +124,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
   }
   function assertCanRetryValidation(podId: string): void {
     assertOrdinaryRecoveryAllowed(podId);
+    assertNoInfrastructureBlocker(podRepo, podId);
     assertExecutionTerminationVerified(podId);
     assertGuidanceCollected(podId);
     const pod = podRepo.getOrThrow(podId);
@@ -154,6 +157,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
     authorizationAvailable?: boolean;
   } {
     assertOrdinaryRecoveryAllowed(podId);
+    assertNoInfrastructureBlocker(podRepo, podId);
     assertExecutionTerminationVerified(podId);
     const pod = podRepo.getOrThrow(podId);
     assertValidationExecutionSettled(pod, podRepo.validationExecutions?.isSettled(pod));
@@ -202,6 +206,7 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
           409,
         );
     }
+    assertNoInfrastructureBlocker(podRepo, podId);
     assertExecutionTerminationVerified(podId);
     assertGuidanceCollected(podId);
     const pendingCollection = artifactResumeRuns.get(podId);

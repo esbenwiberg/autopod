@@ -1,9 +1,9 @@
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  boundedDockerCall,
   DOCKER_CALL_TIMEOUTS,
   DockerCallTimeoutError,
-  boundedDockerCall,
 } from './docker-bounds.js';
 
 const logger = pino({ level: 'silent' });

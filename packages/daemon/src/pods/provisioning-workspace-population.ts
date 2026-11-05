@@ -14,8 +14,8 @@ import type { ProvisioningCaptured, ProvisioningLiveDependencies } from './provi
 import { hasPendingProviderContinuation } from './recovery-context.js';
 import { installReferenceSnapshots } from './reference-snapshots.js';
 import {
-  WORKSPACE_RUNTIME_CACHE_EXCLUDES,
   buildWorkspaceMirrorCopyScript,
+  WORKSPACE_RUNTIME_CACHE_EXCLUDES,
 } from './workspace-mirror.js';
 
 type Captured = Pick<

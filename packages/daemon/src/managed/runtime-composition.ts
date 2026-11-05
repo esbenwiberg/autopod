@@ -11,8 +11,8 @@ import type { ManagedPodRow } from './managed-service.js';
 import { ManagedProviderGateway } from './provider-gateway.js';
 import { ManagedPublicReadGateway } from './public-read-gateway.js';
 import { ManagedQuotaFeed } from './quota-feed.js';
-import { ManagedSupervisedValidation } from './validation-runtime.js';
 import type { ManagedValidationConfig } from './validation.js';
+import { ManagedSupervisedValidation } from './validation-runtime.js';
 import { type ManagedRepositoryMirror, ManagedWorkspaces } from './workspaces.js';
 
 export interface ManagedWorkerProviderChannel {

@@ -13,7 +13,7 @@ import type {
   AdmissionLegacyLiveDependencies,
 } from './admission-contracts.js';
 import { dispatchRequestHash } from './dispatch-preflight-ledger.js';
-import { type PreflightConflict, findPreflightConflicts } from './preflight.js';
+import { findPreflightConflicts, type PreflightConflict } from './preflight.js';
 import { resolveProviderPreflight } from './provider-preflight.js';
 import { isAcrQualifiedImage } from './provisioning-image-policy.js';
 import { deriveReferenceRepos } from './reference-repos.js';

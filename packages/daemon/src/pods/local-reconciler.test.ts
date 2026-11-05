@@ -61,9 +61,7 @@ function makeSession(overrides: Partial<Pod> & { id: string; status: PodStatus }
   };
 }
 
-function createReconcilerDeps(overrides?: {
-  containerManager?: ContainerManager;
-}): {
+function createReconcilerDeps(overrides?: { containerManager?: ContainerManager }): {
   deps: LocalReconcilerDependencies;
   podRepo: PodRepository;
   eventBus: EventBus;
@@ -134,143 +132,143 @@ function makeFailingValidationResult(podId: string, attempt = 1): ValidationResu
 }
 
 describe('reconcileLocalSessions', () => {
-  it.each(['paused', 'achieved'] as const)(
-    'recovers native %s without restarting the agent',
-    async (state) => {
-      const { deps, podRepo, enqueuedSessions, containerManager } = createReconcilerDeps();
-      podRepo.insert({
-        id: 'goal',
-        profileName: 'test-profile',
-        task: 'Goal',
-        status: 'running',
-        runtime: 'codex',
-        model: 'model',
-        executionTarget: 'local',
-        branch: 'goal',
-        userId: 'operator',
-        maxValidationAttempts: 3,
-        skipValidation: false,
-        outputMode: 'pr',
-      });
-      podRepo.update('goal', { containerId: 'retained', worktreePath: '/tmp/worktree/goal' });
-      const goal: PodGoal = {
-        podId: 'goal',
-        objective: 'Goal',
-        state,
-        revision: 2,
-        runtime: 'codex',
-        fence: { generation: 1, attemptId: 'attempt' },
-        nativeSessionId: 'native',
-        nativeStatus: state === 'achieved' ? 'complete' : 'paused',
-        executionStopped: true,
-        controlIntent: null,
-        observedTokens: 5,
-        observedSeconds: 1,
-        reason: null,
-        createdAt: 'now',
-        updatedAt: 'now',
-      };
-      deps.readNativeGoal = () => goal;
-      mockedAccess.mockResolvedValue(undefined);
-      await reconcileLocalSessions(deps);
-      if (state === 'paused') {
-        expect(podRepo.getOrThrow('goal').status).toBe('paused');
-        expect(enqueuedSessions).toEqual([]);
-        expect(containerManager.kill).not.toHaveBeenCalled();
-      } else {
-        expect(podRepo.getOrThrow('goal')).toMatchObject({ status: 'queued', skipAgent: true });
-        expect(enqueuedSessions).toEqual(['goal']);
-      }
-    },
-  );
-  it.each(['worker', 'deletion'] as const)(
-    'retains unresolved %s ownership during actual restart reconciliation',
-    async (kind) => {
-      const { deps, podRepo, containerManager, cleanupPodResources, enqueuedSessions } =
-        createReconcilerDeps();
-      mockedAccess.mockResolvedValue(undefined);
-      podRepo.insert({
-        id: 'owned-restart',
-        profileName: 'test-profile',
-        task: 'Retain unresolved owner',
-        status: kind === 'deletion' ? 'killing' : 'running',
-        model: 'model',
+  it.each([
+    'paused',
+    'achieved',
+  ] as const)('recovers native %s without restarting the agent', async (state) => {
+    const { deps, podRepo, enqueuedSessions, containerManager } = createReconcilerDeps();
+    podRepo.insert({
+      id: 'goal',
+      profileName: 'test-profile',
+      task: 'Goal',
+      status: 'running',
+      runtime: 'codex',
+      model: 'model',
+      executionTarget: 'local',
+      branch: 'goal',
+      userId: 'operator',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      outputMode: 'pr',
+    });
+    podRepo.update('goal', { containerId: 'retained', worktreePath: '/tmp/worktree/goal' });
+    const goal: PodGoal = {
+      podId: 'goal',
+      objective: 'Goal',
+      state,
+      revision: 2,
+      runtime: 'codex',
+      fence: { generation: 1, attemptId: 'attempt' },
+      nativeSessionId: 'native',
+      nativeStatus: state === 'achieved' ? 'complete' : 'paused',
+      executionStopped: true,
+      controlIntent: null,
+      observedTokens: 5,
+      observedSeconds: 1,
+      reason: null,
+      createdAt: 'now',
+      updatedAt: 'now',
+    };
+    deps.readNativeGoal = () => goal;
+    mockedAccess.mockResolvedValue(undefined);
+    await reconcileLocalSessions(deps);
+    if (state === 'paused') {
+      expect(podRepo.getOrThrow('goal').status).toBe('paused');
+      expect(enqueuedSessions).toEqual([]);
+      expect(containerManager.kill).not.toHaveBeenCalled();
+    } else {
+      expect(podRepo.getOrThrow('goal')).toMatchObject({ status: 'queued', skipAgent: true });
+      expect(enqueuedSessions).toEqual(['goal']);
+    }
+  });
+  it.each([
+    'worker',
+    'deletion',
+  ] as const)('retains unresolved %s ownership during actual restart reconciliation', async (kind) => {
+    const { deps, podRepo, containerManager, cleanupPodResources, enqueuedSessions } =
+      createReconcilerDeps();
+    mockedAccess.mockResolvedValue(undefined);
+    podRepo.insert({
+      id: 'owned-restart',
+      profileName: 'test-profile',
+      task: 'Retain unresolved owner',
+      status: kind === 'deletion' ? 'killing' : 'running',
+      model: 'model',
+      runtime: 'copilot',
+      executionTarget: 'local',
+      branch: 'retained',
+      userId: 'operator',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      outputMode: 'pr',
+    });
+    podRepo.update('owned-restart', {
+      containerId: 'original-container',
+      worktreePath: '/tmp/retained-work',
+    });
+    if (kind === 'worker')
+      podRepo.taskExecutions?.beginRun('owned-restart', 1, 1, {
         runtime: 'copilot',
-        executionTarget: 'local',
-        branch: 'retained',
-        userId: 'operator',
-        maxValidationAttempts: 3,
-        skipValidation: false,
-        outputMode: 'pr',
+        model: 'model',
+        providerAccountId: null,
       });
-      podRepo.update('owned-restart', {
-        containerId: 'original-container',
-        worktreePath: '/tmp/retained-work',
-      });
-      if (kind === 'worker')
-        podRepo.taskExecutions?.beginRun('owned-restart', 1, 1, {
-          runtime: 'copilot',
-          model: 'model',
-          providerAccountId: null,
-        });
-      else podRepo.deletionOwnership?.acquire('owned-restart', 'configuration');
-      const before = podRepo.getOrThrow('owned-restart');
-      const result = await reconcileLocalSessions(deps);
-      expect(result).toEqual({ recovered: [], killed: [], skipped: ['owned-restart'] });
-      expect(containerManager.kill).not.toHaveBeenCalled();
-      expect(cleanupPodResources).not.toHaveBeenCalled();
-      expect(enqueuedSessions).toEqual([]);
-      const after = podRepo.getOrThrow('owned-restart');
-      expect(after).toMatchObject({
-        status: before.status,
-        containerId: before.containerId,
-        worktreePath: before.worktreePath,
-        lifecycleGeneration: before.lifecycleGeneration,
-      });
-      expect(after.lastCorrectionMessage).toContain('ownership remains unresolved');
-    },
-  );
+    else podRepo.deletionOwnership?.acquire('owned-restart', 'configuration');
+    const before = podRepo.getOrThrow('owned-restart');
+    const result = await reconcileLocalSessions(deps);
+    expect(result).toEqual({ recovered: [], killed: [], skipped: ['owned-restart'] });
+    expect(containerManager.kill).not.toHaveBeenCalled();
+    expect(cleanupPodResources).not.toHaveBeenCalled();
+    expect(enqueuedSessions).toEqual([]);
+    const after = podRepo.getOrThrow('owned-restart');
+    expect(after).toMatchObject({
+      status: before.status,
+      containerId: before.containerId,
+      worktreePath: before.worktreePath,
+      lifecycleGeneration: before.lifecycleGeneration,
+    });
+    expect(after.lastCorrectionMessage).toContain('ownership remains unresolved');
+  });
 
-  it.each([false, true])(
-    'retains interrupted artifact collection after restart (published=%s)',
-    async (published) => {
-      const { deps, podRepo, enqueuedSessions, containerManager } = createReconcilerDeps();
-      podRepo.insert({
-        id: 'artifact-restart',
-        profileName: 'test-profile',
-        task: 'Collect report',
-        status: 'running',
-        model: 'opus',
-        runtime: 'claude',
-        executionTarget: 'local',
-        branch: 'branch',
-        userId: 'user',
-        maxValidationAttempts: 3,
-        skipValidation: false,
-        outputMode: 'artifact',
-        baseBranch: null,
-        options: { agentMode: 'auto', output: 'artifact', validate: false },
-      });
-      podRepo.update('artifact-restart', {
-        worktreePath: null,
-        containerId: published ? null : 'saved-container',
-        artifactsPath: published ? '/saved/artifact-snapshot' : null,
-      });
-      const pod = podRepo.getOrThrow('artifact-restart');
-      podRepo.completionJournal?.settle(pod, 'Report complete');
-      podRepo.completionJournal?.mark(pod, 'preserving', published);
-      mockedAccess.mockRejectedValue(new Error('not available'));
-      await reconcileLocalSessions(deps);
-      expect(podRepo.getOrThrow(pod.id)).toMatchObject({
-        status: 'failed',
-        containerId: published ? null : 'saved-container',
-        artifactsPath: published ? '/saved/artifact-snapshot' : null,
-        finalization: { phase: 'preserving', result: 'Report complete' },
-      });
-      expect(enqueuedSessions).toEqual([]);
-      expect(containerManager.kill).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    false,
+    true,
+  ])('retains interrupted artifact collection after restart (published=%s)', async (published) => {
+    const { deps, podRepo, enqueuedSessions, containerManager } = createReconcilerDeps();
+    podRepo.insert({
+      id: 'artifact-restart',
+      profileName: 'test-profile',
+      task: 'Collect report',
+      status: 'running',
+      model: 'opus',
+      runtime: 'claude',
+      executionTarget: 'local',
+      branch: 'branch',
+      userId: 'user',
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      outputMode: 'artifact',
+      baseBranch: null,
+      options: { agentMode: 'auto', output: 'artifact', validate: false },
+    });
+    podRepo.update('artifact-restart', {
+      worktreePath: null,
+      containerId: published ? null : 'saved-container',
+      artifactsPath: published ? '/saved/artifact-snapshot' : null,
+    });
+    const pod = podRepo.getOrThrow('artifact-restart');
+    podRepo.completionJournal?.settle(pod, 'Report complete');
+    podRepo.completionJournal?.mark(pod, 'preserving', published);
+    mockedAccess.mockRejectedValue(new Error('not available'));
+    await reconcileLocalSessions(deps);
+    expect(podRepo.getOrThrow(pod.id)).toMatchObject({
+      status: 'failed',
+      containerId: published ? null : 'saved-container',
+      artifactsPath: published ? '/saved/artifact-snapshot' : null,
+      finalization: { phase: 'preserving', result: 'Report complete' },
+    });
+    expect(enqueuedSessions).toEqual([]);
+    expect(containerManager.kill).not.toHaveBeenCalled();
+  });
 
   it('does not turn an unanswered decision into restart work or kill it when its worktree is unavailable', async () => {
     const { deps, podRepo, enqueuedSessions, containerManager } = createReconcilerDeps();
@@ -1415,4 +1413,54 @@ describe('reconcileLocalSessions — trigger param', () => {
     // Verify the deps param was accepted (no TS error — this is a compile-time check)
     expect(deps).toBeDefined();
   });
+});
+
+it('retains typed infrastructure across restart without dispatching or inventing artifact recovery', async () => {
+  const ctx = createTestContext();
+  const enqueueSession = vi.fn();
+  const containerManager = createMockContainerManager();
+  try {
+    ctx.podRepo.insert(
+      makeSession({ id: 'infra-restart', status: 'running', completionPolicy: 'accept-findings' }),
+    );
+    const pod = ctx.podRepo.getOrThrow('infra-restart');
+    ctx.podRepo.update(pod.id, { failureReason: 'Infrastructure blocked: Runner unavailable' });
+    ctx.escalationRepo.insert({
+      id: 'infra-report',
+      podId: pod.id,
+      type: 'report_blocker',
+      timestamp: new Date().toISOString(),
+      payload: {
+        kind: 'infrastructure',
+        lifecycleGeneration: pod.lifecycleGeneration,
+        requiresResponse: false,
+        description: 'Runner unavailable',
+        attempted: [],
+        needs: 'Autopod repair',
+      },
+      response: null,
+    });
+    const result = await reconcileLocalSessions({
+      podRepo: ctx.podRepo,
+      eventBus: ctx.eventBus,
+      containerManager,
+      enqueueSession,
+      validationRepo: ctx.deps.validationRepo,
+      logger,
+    });
+    expect(result.skipped).toContain(pod.id);
+    expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+      status: 'running',
+      failureReason: 'Infrastructure blocked: Runner unavailable',
+      pendingEscalation: null,
+    });
+    expect(enqueueSession).not.toHaveBeenCalled();
+    expect(containerManager.kill).not.toHaveBeenCalled();
+    expect(ctx.podRepo.hasInfrastructureBlocker?.(pod.id)).toBe(true);
+    ctx.podRepo.incrementLifecycleGeneration(pod.id);
+    expect(ctx.podRepo.hasInfrastructureBlocker?.(pod.id)).toBe(false);
+    expect(ctx.escalationRepo.getOrThrow('infra-report').response).toBeNull();
+  } finally {
+    ctx.db.close();
+  }
 });

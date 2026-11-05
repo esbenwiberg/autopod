@@ -1,12 +1,12 @@
 import {
+  canonicalModelKey,
+  effectiveCostUsd,
   type FailureStageRow,
   type ModelsAnalyticsResponse,
   type PerModelAggregate,
   type PerRuntimeAggregate,
   type UnknownModelSample,
   type ValidationStage,
-  canonicalModelKey,
-  effectiveCostUsd,
 } from '@autopod/shared';
 /**
  * Models analytics aggregator.

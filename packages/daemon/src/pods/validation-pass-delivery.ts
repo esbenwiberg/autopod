@@ -9,15 +9,15 @@ import {
   needsApprovalReportSnapshot,
   preserveApprovalReportSnapshot,
 } from './approval-report-snapshot.js';
-import { rewriteError, rewriteHash } from './approval-source-rewrite-repository.js';
 import { verifyApprovalRewriteSource } from './approval-source-rewrite.js';
+import { rewriteError, rewriteHash } from './approval-source-rewrite-repository.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import { checkpointError } from './retained-checkpoint-repository.js';
 import { isTerminalState } from './state-machine.js';
 import { ValidationSupersededError } from './validation-ownership.js';
 import {
   assertValidationExecutionSettled,
-  captureValidationMutationGuard,
+  captureValidationDispatchGuard,
 } from './validation-recovery-policy.js';
 import type {
   ValidationPassCaptured,
@@ -64,7 +64,7 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
     }: ValidationPassContext,
   ): Promise<void> {
     assertValidationExecutionSettled({ ...s2, lastValidationResult: result });
-    const assertCurrent = captureValidationMutationGuard(podRepo, s2);
+    const assertCurrent = captureValidationDispatchGuard(podRepo, s2);
     emitActivityStatus(podId, `Validation passed (attempt ${attempt})`);
     const checkpoint = podRepo.retainedCheckpoints?.latest(podId);
     const checksOnly =

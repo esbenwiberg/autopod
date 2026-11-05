@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { type PollOwnership, createPollingCoordinator } from './polling-coordinator.js';
+import { createPollingCoordinator, type PollOwnership } from './polling-coordinator.js';
 
 afterEach(() => vi.useRealTimers());
 

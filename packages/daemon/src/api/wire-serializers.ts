@@ -93,9 +93,9 @@ export function serializeValidationResult(result: ValidationResult): unknown {
  * keeps its screenshots but exposes URL DTOs instead of internal refs.
  */
 export function serializePodForWire(pod: Pod): unknown {
-  const hasSpecFilesField = Object.prototype.hasOwnProperty.call(pod, 'specFiles');
-  const hasSpecContextFilesField = Object.prototype.hasOwnProperty.call(pod, 'specContextFiles');
-  const hasProfileSnapshotField = Object.prototype.hasOwnProperty.call(pod, 'profileSnapshot');
+  const hasSpecFilesField = Object.hasOwn(pod, 'specFiles');
+  const hasSpecContextFilesField = Object.hasOwn(pod, 'specContextFiles');
+  const hasProfileSnapshotField = Object.hasOwn(pod, 'profileSnapshot');
   const basePod = {
     ...pod,
     ...(hasProfileSnapshotField

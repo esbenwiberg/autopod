@@ -1,5 +1,7 @@
 import {
+  getPresetConfig,
   type OperatorActor,
+  operatorActorSchema,
   type PodsitterAction,
   type PodsitterAttention,
   type PodsitterAttentionState,
@@ -10,12 +12,10 @@ import {
   type PodsitterDecisionTarget,
   type PodsitterProviderCircuitStatus,
   type PodsitterProviderState,
-  type SystemSandboxRunOutcome,
-  getPresetConfig,
-  operatorActorSchema,
   podsitterActionArgumentsSchemas,
   podsitterConfigurationInputSchema,
   podsitterDecisionSchema,
+  type SystemSandboxRunOutcome,
   sanitizeDeep,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
@@ -148,11 +148,10 @@ export interface PodsitterRepository {
     target: PodsitterDecisionTarget;
     now?: string;
   }): PodsitterDecisionRecord;
-  listDecisions(input?: {
-    podId?: string;
-    limit?: number;
-    offset?: number;
-  }): { items: PodsitterDecisionRecord[]; total: number };
+  listDecisions(input?: { podId?: string; limit?: number; offset?: number }): {
+    items: PodsitterDecisionRecord[];
+    total: number;
+  };
   createDecision(input: {
     id: string;
     attentionId: string;

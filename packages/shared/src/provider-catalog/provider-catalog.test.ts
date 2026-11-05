@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PROVIDER_CATALOG, PROVIDER_MANIFEST_VERSION, createProviderCatalog } from '../index.js';
+import { createProviderCatalog, PROVIDER_CATALOG, PROVIDER_MANIFEST_VERSION } from '../index.js';
 import type { CompiledProviderManifest } from '../types/provider-catalog.js';
 
 function syntheticManifest(): CompiledProviderManifest {
@@ -101,17 +101,18 @@ describe('provider catalog validation', () => {
     );
   });
 
-  it.each(['127.0.0.1', 'metadata.googleapis.com', 'service.internal'])(
-    'rejects unsafe required host %s',
-    (host) => {
-      const manifest = syntheticManifest();
-      firstProvider(manifest).requiredHosts = [host];
+  it.each([
+    '127.0.0.1',
+    'metadata.googleapis.com',
+    'service.internal',
+  ])('rejects unsafe required host %s', (host) => {
+    const manifest = syntheticManifest();
+    firstProvider(manifest).requiredHosts = [host];
 
-      expect(() => createProviderCatalog(manifest)).toThrow(
-        `Invalid provider manifest: provider 'fixture-cloud' has unsafe required host '${host}'`,
-      );
-    },
-  );
+    expect(() => createProviderCatalog(manifest)).toThrow(
+      `Invalid provider manifest: provider 'fixture-cloud' has unsafe required host '${host}'`,
+    );
+  });
 
   it('rejects unknown model references', () => {
     const manifest = syntheticManifest();

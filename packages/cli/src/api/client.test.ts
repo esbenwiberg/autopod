@@ -103,6 +103,42 @@ describe('AutopodClient', () => {
     });
   });
 
+  it('keeps failure-bound retries separate from exact rewrite-repair authorization', async () => {
+    const rewriteRepair = {
+      recoveryId: 'repair-request',
+      candidateHead: 'a'.repeat(40),
+      candidateTree: 'b'.repeat(40),
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse({ id: 'ordinary-grant' }));
+    await client.authorizeRetry('pod', 'ordinary', 'Inspected failure', 'validation', 'failure-id');
+    expect(mockFetch.mock.calls[0]?.[0]).toBe(
+      'http://localhost:3100/pods/pod/retry-authorizations',
+    );
+    expect(JSON.parse(mockFetch.mock.calls[0]?.[1].body)).toEqual({
+      requestKey: 'ordinary',
+      reason: 'Inspected failure',
+      expectedFailureId: 'failure-id',
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({ stage: 'validation', rewriteRepair }));
+    await client.authorizeRetry('pod', 'repair', 'Inspected repair', 'validation', rewriteRepair);
+    expect(mockFetch.mock.calls[1]?.[0]).toBe(
+      'http://localhost:3100/pods/pod/retry-authorizations/rewrite-repair',
+    );
+    expect(JSON.parse(mockFetch.mock.calls[1]?.[1].body)).toEqual({
+      requestKey: 'repair',
+      reason: 'Inspected repair',
+      rewriteRepair,
+    });
+    mockFetch.mockResolvedValueOnce(jsonResponse({ stage: 'validation' }));
+    await expect(
+      client.authorizeRetry('pod', 'unconfirmed', 'Inspected repair', 'validation', rewriteRepair),
+    ).rejects.toThrow('Server did not confirm the exact rewrite repair retry target');
+    await expect(
+      client.authorizeRetry('pod', 'wrong-stage', 'Inspected repair', 'worker', rewriteRepair),
+    ).rejects.toThrow('Rewrite repair retry targets require validation stage');
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+
   describe('createSession', () => {
     it('sends POST to /pods', async () => {
       const pod = { id: 'abc12345', profileName: 'test', task: 'do stuff', status: 'queued' };

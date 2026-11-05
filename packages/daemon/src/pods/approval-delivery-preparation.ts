@@ -16,8 +16,8 @@ import {
   verifiedApprovalReportSnapshot,
   waitForApprovalReportSnapshot,
 } from './approval-report-snapshot.js';
-import { rewriteError } from './approval-source-rewrite-repository.js';
 import { rewriteConfiguration } from './approval-source-rewrite.js';
+import { rewriteError } from './approval-source-rewrite-repository.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import { verifiedCheckpointApprovalSnapshot } from './checkpoint-approval-snapshot.js';
 import type {

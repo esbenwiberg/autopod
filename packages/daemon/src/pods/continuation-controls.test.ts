@@ -18,6 +18,7 @@ import type { ContinuationCaptured, ContinuationLiveDependencies } from './conti
 import { createGoalRepository } from './goal-repository.js';
 import { createPodGoalService } from './pod-goal-service.js';
 import { createPodRepository } from './pod-repository.js';
+
 const cleanups: Array<() => void> = [];
 afterEach(() => {
   vi.restoreAllMocks();
@@ -241,41 +242,45 @@ describe('continuation controls', () => {
     await f.captured.validationResumeRuns.get('control');
     expect(f.calls.revalidateSession).toHaveBeenCalledTimes(2);
   });
-  it.each(['state', 'worktree', 'compromised', 'termination', 'guidance', 'validation'])(
-    'rejects %s admission before starting background validation',
-    async (block) => {
-      const f = fixture();
-      if (block === 'state') f.pods.update('control', { status: 'running' });
-      if (block === 'worktree') f.pods.update('control', { worktreePath: null });
-      if (block === 'compromised') f.pods.update('control', { worktreeCompromised: true });
-      if (block === 'termination')
-        f.captured.assertExecutionTerminationVerified.mockImplementation(() => {
-          throw new Error('Unsettled worker');
-        });
-      if (block === 'guidance')
-        f.captured.assertGuidanceCollected.mockImplementation(() => {
-          throw new Error('Uncollected guidance');
-        });
-      if (block === 'validation')
-        f.pods.update('control', {
-          lastValidationResult: {
-            ...validation(),
-            overall: 'fail',
-            infrastructureFailure: {
-              phase: 'test',
-              code: 'EXEC_EXIT_UNVERIFIED',
-              message: 'Unsettled validation',
-              retryable: false,
-            },
+  it.each([
+    'state',
+    'worktree',
+    'compromised',
+    'termination',
+    'guidance',
+    'validation',
+  ])('rejects %s admission before starting background validation', async (block) => {
+    const f = fixture();
+    if (block === 'state') f.pods.update('control', { status: 'running' });
+    if (block === 'worktree') f.pods.update('control', { worktreePath: null });
+    if (block === 'compromised') f.pods.update('control', { worktreeCompromised: true });
+    if (block === 'termination')
+      f.captured.assertExecutionTerminationVerified.mockImplementation(() => {
+        throw new Error('Unsettled worker');
+      });
+    if (block === 'guidance')
+      f.captured.assertGuidanceCollected.mockImplementation(() => {
+        throw new Error('Uncollected guidance');
+      });
+    if (block === 'validation')
+      f.pods.update('control', {
+        lastValidationResult: {
+          ...validation(),
+          overall: 'fail',
+          infrastructureFailure: {
+            phase: 'test',
+            code: 'EXEC_EXIT_UNVERIFIED',
+            message: 'Unsettled validation',
+            retryable: false,
           },
-        });
-      await expect(
-        f.c.resumePod.call(f.calls, 'control', { backgroundValidation: true }),
-      ).rejects.toThrow();
-      expect(f.calls.revalidateSession).not.toHaveBeenCalled();
-      expect(f.captured.validationResumeRuns.size).toBe(0);
-    },
-  );
+        },
+      });
+    await expect(
+      f.c.resumePod.call(f.calls, 'control', { backgroundValidation: true }),
+    ).rejects.toThrow();
+    expect(f.calls.revalidateSession).not.toHaveBeenCalled();
+    expect(f.captured.validationResumeRuns.size).toBe(0);
+  });
   it('retains termination/guidance errors before starting recovery', async () => {
     const f = fixture();
     const error = new Error('Human decision');
@@ -357,28 +362,28 @@ describe('continuation controls', () => {
     expect(f.captured.artifactResumeRuns.size).toBe(0);
     expect(f.calls.revalidateSession).not.toHaveBeenCalled();
   });
-  it.each(['ready', 'preserving'] as const)(
-    'resumes explicit settled findings from %s into research ready without a worker',
-    async (phase) => {
-      const f = fixture();
-      f.db.prepare("UPDATE pods SET completion_policy='accept-findings' WHERE id='control'").run();
-      f.pods.update('control', {
-        options: { ...f.pod().options, output: 'none', validate: false },
-      });
-      f.pods.completionJournal?.settle(f.pod(), 'Settled research');
-      f.pods.completionJournal?.mark(f.pod(), phase);
-      f.calls.handleCompletion.mockImplementation(async () => {
-        f.pods.update('control', { status: 'research_ready' });
-      });
-      await expect(f.c.resumePod.call(f.calls, 'control')).resolves.toEqual({
-        action: 'collect-artifacts',
-      });
-      expect(f.pod().status).toBe('research_ready');
-      expect(f.captured.enqueueSession).not.toHaveBeenCalled();
-      expect(f.calls.revalidateSession).not.toHaveBeenCalled();
-      expect(f.calls.approveSession).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'ready',
+    'preserving',
+  ] as const)('resumes explicit settled findings from %s into research ready without a worker', async (phase) => {
+    const f = fixture();
+    f.db.prepare("UPDATE pods SET completion_policy='accept-findings' WHERE id='control'").run();
+    f.pods.update('control', {
+      options: { ...f.pod().options, output: 'none', validate: false },
+    });
+    f.pods.completionJournal?.settle(f.pod(), 'Settled research');
+    f.pods.completionJournal?.mark(f.pod(), phase);
+    f.calls.handleCompletion.mockImplementation(async () => {
+      f.pods.update('control', { status: 'research_ready' });
+    });
+    await expect(f.c.resumePod.call(f.calls, 'control')).resolves.toEqual({
+      action: 'collect-artifacts',
+    });
+    expect(f.pod().status).toBe('research_ready');
+    expect(f.captured.enqueueSession).not.toHaveBeenCalled();
+    expect(f.calls.revalidateSession).not.toHaveBeenCalled();
+    expect(f.calls.approveSession).not.toHaveBeenCalled();
+  });
   it('retains a failed artifact collection error and cleans coalescing state', async () => {
     const f = fixture();
     f.pods.update('control', {

@@ -1,4 +1,4 @@
-import { type ResolvedGitHubRule, githubAccessRuleSchema } from '@autopod/shared';
+import { githubAccessRuleSchema, type ResolvedGitHubRule } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { DaemonGitHubAuth } from './daemon-github-auth.js';
 import { GitHubDiscovery } from './discovery.js';

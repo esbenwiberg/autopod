@@ -1,19 +1,21 @@
 import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import { savedLaunchSelectionSchema, scheduledScanPolicyInputSchema } from '@autopod/shared';
-import type { Pod, ScanTriageRequest, ScheduledScanReport } from '@autopod/shared';
 import type {
+  Pod,
+  ScanTriageRequest,
   ScheduledJob,
   ScheduledJobTemplate,
   ScheduledJobTemplateField,
+  ScheduledScanReport,
 } from '@autopod/shared';
+import { savedLaunchSelectionSchema, scheduledScanPolicyInputSchema } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { withJsonOutput } from '../output/json.js';
 import { type ColumnDef, renderTable } from '../output/table.js';
-import { type LaunchFlags, buildLaunchRequest } from './launch-request.js';
 import { addLaunchPresetOptions } from './launch.js';
+import { buildLaunchRequest, type LaunchFlags } from './launch-request.js';
 
 function printRun(result: Pod | ScheduledScanReport): void {
   if ('kind' in result && result.kind === 'scan_report') {

@@ -5,8 +5,8 @@ import { publishSource } from '../worktrees/durable-source-publication.js';
 import { createApprovalDeliveryExecution } from './approval-delivery-execution.js';
 import { createApprovalDeliveryPreparation } from './approval-delivery-preparation.js';
 import { reconcileApprovalRewritesOnStartup } from './approval-rewrite-reconciliation.js';
-import { createApprovalSourceRewriteRepository } from './approval-source-rewrite-repository.js';
 import { prepareApprovalRewrite } from './approval-source-rewrite.js';
+import { createApprovalSourceRewriteRepository } from './approval-source-rewrite-repository.js';
 import { createApprovalWorkflow } from './approval-workflow.js';
 import { retainUnresolvedReconciliation } from './reconciliation-ownership.js';
 
@@ -251,31 +251,31 @@ describe('approval source rewrite custody', () => {
     expect(f.cm.kill).not.toHaveBeenCalled();
   });
 
-  it.each([false, true])(
-    'does not publish over a prior-generation unknown/scheduled merge (scheduled: %s)',
-    async (scheduled) => {
-      const f = fixture();
-      const previous = await f.planMerge();
-      const journal = f.podRepo.mergeJournal;
-      if (!journal) throw new Error('Missing merge journal');
-      const attempt = journal.claim(
-        f.pod(),
-        f.pod(),
-        previous.publication.publicationId,
-        previous.entry.request.config,
-      );
-      if (scheduled)
-        journal.observe(attempt, { merged: false, autoMergeScheduled: true }, 'merge_response');
-      f.podRepo.incrementLifecycleGeneration('prepare');
-      f.podRepo.update('prepare', { status: 'validated' });
-      vi.mocked(f.worktreeManager.pushBranch).mockClear();
-      await expect(f.approve()).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
-      expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
-      expect(f.prepareRebase).not.toHaveBeenCalled();
-      expect(f.provider.mergePr).not.toHaveBeenCalled();
-      expect(f.pod().status).toBe('validated');
-    },
-  );
+  it.each([
+    false,
+    true,
+  ])('does not publish over a prior-generation unknown/scheduled merge (scheduled: %s)', async (scheduled) => {
+    const f = fixture();
+    const previous = await f.planMerge();
+    const journal = f.podRepo.mergeJournal;
+    if (!journal) throw new Error('Missing merge journal');
+    const attempt = journal.claim(
+      f.pod(),
+      f.pod(),
+      previous.publication.publicationId,
+      previous.entry.request.config,
+    );
+    if (scheduled)
+      journal.observe(attempt, { merged: false, autoMergeScheduled: true }, 'merge_response');
+    f.podRepo.incrementLifecycleGeneration('prepare');
+    f.podRepo.update('prepare', { status: 'validated' });
+    vi.mocked(f.worktreeManager.pushBranch).mockClear();
+    await expect(f.approve()).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+    expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
+    expect(f.prepareRebase).not.toHaveBeenCalled();
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+    expect(f.pod().status).toBe('validated');
+  });
 
   it('does not certify changed candidate bytes as a successful rewrite', async () => {
     const f = fixture();

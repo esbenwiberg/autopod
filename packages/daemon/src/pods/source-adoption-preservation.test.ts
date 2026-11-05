@@ -3,8 +3,8 @@ import {
   lstat,
   mkdir,
   mkdtemp,
-  readFile,
   readdir,
+  readFile,
   readlink,
   rm,
   symlink,
@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMockContainerManager } from '../test-utils/mock-helpers.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
 import { preserveSourceWorkspaces } from './source-adoption-preservation.js';
+
 const roots: string[] = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });

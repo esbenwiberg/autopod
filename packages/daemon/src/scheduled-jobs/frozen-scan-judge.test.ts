@@ -51,34 +51,34 @@ async function fixture(provider: 'anthropic' | 'max' = 'anthropic') {
   return { db, accounts, config };
 }
 
-it.each(['anthropic', 'max'] as const)(
-  'uses only the selected %s account and retains its usage identity',
-  async (provider) => {
-    const f = await fixture(provider);
-    try {
-      vi.stubEnv('ANTHROPIC_API_KEY', 'synthetic-ambient-key');
-      vi.stubEnv('ANTHROPIC_AUTH_TOKEN', 'synthetic-ambient-token');
-      vi.stubEnv('ANTHROPIC_BASE_URL', 'https://ambient.invalid');
-      const allowed = vi.fn(async () => {});
-      const result = await createFrozenScanJudge(f.config, f.accounts, logger, allowed)('Evidence');
-      expect(Anthropic).toHaveBeenCalledWith({
-        apiKey: provider === 'anthropic' ? 'synthetic-selected-key' : null,
-        authToken: provider === 'max' ? 'synthetic-selected-token' : null,
-        baseURL: 'https://api.anthropic.com',
-        ...(provider === 'max' ? { defaultHeaders: { 'anthropic-beta': 'oauth-2025-04-20' } } : {}),
-      });
-      expect(result).toMatchObject({
-        status: 'complete',
-        usage: { providerAccountId: 'account', provider, inputTokens: 10, outputTokens: 3 },
-      });
-      expect(request).toHaveBeenCalledOnce();
-      expect(request.mock.calls[0]?.[0]).not.toHaveProperty('tools');
-      expect(allowed).toHaveBeenCalledOnce();
-    } finally {
-      f.db.close();
-    }
-  },
-);
+it.each([
+  'anthropic',
+  'max',
+] as const)('uses only the selected %s account and retains its usage identity', async (provider) => {
+  const f = await fixture(provider);
+  try {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'synthetic-ambient-key');
+    vi.stubEnv('ANTHROPIC_AUTH_TOKEN', 'synthetic-ambient-token');
+    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://ambient.invalid');
+    const allowed = vi.fn(async () => {});
+    const result = await createFrozenScanJudge(f.config, f.accounts, logger, allowed)('Evidence');
+    expect(Anthropic).toHaveBeenCalledWith({
+      apiKey: provider === 'anthropic' ? 'synthetic-selected-key' : null,
+      authToken: provider === 'max' ? 'synthetic-selected-token' : null,
+      baseURL: 'https://api.anthropic.com',
+      ...(provider === 'max' ? { defaultHeaders: { 'anthropic-beta': 'oauth-2025-04-20' } } : {}),
+    });
+    expect(result).toMatchObject({
+      status: 'complete',
+      usage: { providerAccountId: 'account', provider, inputTokens: 10, outputTokens: 3 },
+    });
+    expect(request).toHaveBeenCalledOnce();
+    expect(request.mock.calls[0]?.[0]).not.toHaveProperty('tools');
+    expect(allowed).toHaveBeenCalledOnce();
+  } finally {
+    f.db.close();
+  }
+});
 
 it('rechecks account revocation after collection and before any paid request', async () => {
   const f = await fixture();

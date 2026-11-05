@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { createTestDb } from '../test-utils/mock-helpers.js';
 import { createPimActivationRepository } from './activation-repository.js';
 import {
+  createPimActivationService,
   type PimActivationProvider,
   type PimProviderActivation,
-  createPimActivationService,
 } from './activation-service.js';
 
 const selection: PimSelection = {

@@ -133,61 +133,61 @@ describe('captured execution authority at the actual Azure send boundary', () =>
     expect(assertCurrent.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it.each(['lifecycle', 'custody'] as const)(
-    'uses the captured real %s guard after auth, before any POST',
-    async (revocation) => {
-      const f = validationRecoveryFixture();
-      const entered = deferred<void>();
-      const release = deferred<void>();
-      try {
-        f.podRepo.update(f.podId, { containerId: null });
-        f.podRepo.update(f.podId, { executionTarget: 'sandbox', containerId: resource });
-        const pod = f.podRepo.getOrThrow(f.podId);
-        const assertCurrent = captureValidationMutationGuard(f.podRepo, pod);
-        const t = transport({
-          credential: {
-            async getToken() {
-              entered.resolve();
-              await release.promise;
-              return { token: 'synthetic-token', expiresOnTimestamp: Date.now() + 60_000 };
-            },
+  it.each([
+    'lifecycle',
+    'custody',
+  ] as const)('uses the captured real %s guard after auth, before any POST', async (revocation) => {
+    const f = validationRecoveryFixture();
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    try {
+      f.podRepo.update(f.podId, { containerId: null });
+      f.podRepo.update(f.podId, { executionTarget: 'sandbox', containerId: resource });
+      const pod = f.podRepo.getOrThrow(f.podId);
+      const assertCurrent = captureValidationMutationGuard(f.podRepo, pod);
+      const t = transport({
+        credential: {
+          async getToken() {
+            entered.resolve();
+            await release.promise;
+            return { token: 'synthetic-token', expiresOnTimestamp: Date.now() + 60_000 };
           },
-        });
-        const pending = guardValidationContainer(t.manager, assertCurrent)
-          .execInContainer(resource, ['true'])
-          .catch((error: unknown) => error);
-        await entered.promise;
-        if (revocation === 'lifecycle') {
-          f.podRepo.incrementLifecycleGeneration(f.podId);
-        } else {
-          const retries = f.podRepo.taskRetries;
-          const ledger = f.podRepo.validationExecutions;
-          if (!retries || !ledger) throw new Error('Missing validation ledger');
-          const admission = retries.admit(
-            pod.id,
-            pod.lifecycleGeneration,
-            {
-              source: 'a'.repeat(64),
-              contract: 'b'.repeat(64),
-              commands: 'c'.repeat(64),
-              environment: null,
-              implementation: null,
-            },
-            'd'.repeat(64),
-            [],
-          );
-          retries.start(admission.id);
-          expect(ledger.dispatch(pod, admission.id, 1, 'synthetic-scope')).not.toBeNull();
-        }
-        release.resolve();
-        expect(await pending).toBeInstanceOf(AutopodError);
-        expect(t.fetch).not.toHaveBeenCalled();
-      } finally {
-        release.resolve();
-        f.db.close();
+        },
+      });
+      const pending = guardValidationContainer(t.manager, assertCurrent)
+        .execInContainer(resource, ['true'])
+        .catch((error: unknown) => error);
+      await entered.promise;
+      if (revocation === 'lifecycle') {
+        f.podRepo.incrementLifecycleGeneration(f.podId);
+      } else {
+        const retries = f.podRepo.taskRetries;
+        const ledger = f.podRepo.validationExecutions;
+        if (!retries || !ledger) throw new Error('Missing validation ledger');
+        const admission = retries.admit(
+          pod.id,
+          pod.lifecycleGeneration,
+          {
+            source: 'a'.repeat(64),
+            contract: 'b'.repeat(64),
+            commands: 'c'.repeat(64),
+            environment: null,
+            implementation: null,
+          },
+          'd'.repeat(64),
+          [],
+        );
+        retries.start(admission.id);
+        expect(ledger.dispatch(pod, admission.id, 1, 'synthetic-scope')).not.toBeNull();
       }
-    },
-  );
+      release.resolve();
+      expect(await pending).toBeInstanceOf(AutopodError);
+      expect(t.fetch).not.toHaveBeenCalled();
+    } finally {
+      release.resolve();
+      f.db.close();
+    }
+  });
 
   it('preserves both supplied assertions and all buffered command options while current', async () => {
     const t = transport();
@@ -265,19 +265,18 @@ describe('captured execution authority at the actual Azure send boundary', () =>
     expect(t.getToken).toHaveBeenCalledTimes(1);
   });
 
-  it.each([429, 403])(
-    'preserves normal %s retries while authority remains current',
-    async (status) => {
-      const t = transport();
-      t.fetch.mockResolvedValueOnce(new Response('', { status }));
-      const assertCurrent = vi.fn();
-      await expect(
-        t.manager.execInContainer(resource, ['true'], { assertCurrent }),
-      ).resolves.toEqual({ stdout: '', stderr: '', exitCode: 0 });
-      expect(t.fetch).toHaveBeenCalledTimes(2);
-      expect(assertCurrent).toHaveBeenCalledTimes(2);
-    },
-  );
+  it.each([
+    429, 403,
+  ])('preserves normal %s retries while authority remains current', async (status) => {
+    const t = transport();
+    t.fetch.mockResolvedValueOnce(new Response('', { status }));
+    const assertCurrent = vi.fn();
+    await expect(t.manager.execInContainer(resource, ['true'], { assertCurrent })).resolves.toEqual(
+      { stdout: '', stderr: '', exitCode: 0 },
+    );
+    expect(t.fetch).toHaveBeenCalledTimes(2);
+    expect(assertCurrent).toHaveBeenCalledTimes(2);
+  });
 
   it('keeps 401 terminal without introducing a refresh or command retry', async () => {
     const t = transport();
@@ -291,48 +290,48 @@ describe('captured execution authority at the actual Azure send boundary', () =>
     expect(assertCurrent).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['observe', 'checkpoint'] as const)(
-    'passes captured %s authority into the backend before auth completes',
-    async (operation) => {
-      const entered = deferred<void>();
-      const release = deferred<void>();
-      const t = transport({
-        credential: {
-          async getToken() {
-            entered.resolve();
-            await release.promise;
-            return { token: 'synthetic-token', expiresOnTimestamp: Date.now() + 60_000 };
-          },
+  it.each([
+    'observe',
+    'checkpoint',
+  ] as const)('passes captured %s authority into the backend before auth completes', async (operation) => {
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    const t = transport({
+      credential: {
+        async getToken() {
+          entered.resolve();
+          await release.promise;
+          return { token: 'synthetic-token', expiresOnTimestamp: Date.now() + 60_000 };
         },
-      });
-      let current = true;
-      const assertCurrent = () => {
-        if (!current) throw stale();
-      };
-      const pending = (
-        operation === 'observe'
-          ? observeSandboxWorkspace(t.manager, resource, assertCurrent)
-          : checkpointSandboxWorkspace({
-              containerManager: t.manager,
-              containerId: resource,
-              podId: 'synthetic-task',
-              worktreePath: '/unused-synthetic-path',
-              sequence: 1,
-              assertCurrent,
-            })
-      ).catch((error: unknown) => error);
-      try {
-        await entered.promise;
-        current = false;
-      } finally {
-        release.resolve();
-      }
-      const outcome = await pending;
-      if (operation === 'observe') expect(outcome).toMatchObject({ code: 'STALE_AUTHORITY' });
-      else expect(outcome).toMatchObject({ promoted: false, error: { phase: 'capture' } });
-      expect(t.fetch).not.toHaveBeenCalled();
-    },
-  );
+      },
+    });
+    let current = true;
+    const assertCurrent = () => {
+      if (!current) throw stale();
+    };
+    const pending = (
+      operation === 'observe'
+        ? observeSandboxWorkspace(t.manager, resource, assertCurrent)
+        : checkpointSandboxWorkspace({
+            containerManager: t.manager,
+            containerId: resource,
+            podId: 'synthetic-task',
+            worktreePath: '/unused-synthetic-path',
+            sequence: 1,
+            assertCurrent,
+          })
+    ).catch((error: unknown) => error);
+    try {
+      await entered.promise;
+      current = false;
+    } finally {
+      release.resolve();
+    }
+    const outcome = await pending;
+    if (operation === 'observe') expect(outcome).toMatchObject({ code: 'STALE_AUTHORITY' });
+    else expect(outcome).toMatchObject({ promoted: false, error: { phase: 'capture' } });
+    expect(t.fetch).not.toHaveBeenCalled();
+  });
 
   it('fences native streaming setup after auth without sending any POST', async () => {
     const entered = deferred<void>();

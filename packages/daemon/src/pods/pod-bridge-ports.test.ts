@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createAdmissionFixture } from '../test-utils/admission-queries-helpers.js';
 import { createSessionBridge } from './pod-bridge-impl.js';
 import type { SessionBridgeManagerPort } from './pod-bridge-ports.js';
+
 describe('narrow bridge manager contract', () => {
   it('retains the actual manager receiver for a live replaced revalidation property', async () => {
     const f = createAdmissionFixture();

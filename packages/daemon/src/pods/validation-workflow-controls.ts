@@ -1,11 +1,12 @@
 import type { OperatorActor, Pod, UpdateFromBaseResponse, ValidationResult } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import { applyOverrides } from '../validation/override-applicator.js';
+import { assertNoInfrastructureBlocker } from './escalation-coordinator.js';
 import { captureValidationOwnership } from './validation-ownership.js';
 import {
   assertValidationExecutionSettled,
   assertValidationMutationSettled,
-  captureValidationMutationGuard,
+  captureValidationDispatchGuard,
 } from './validation-recovery-policy.js';
 import type {
   ValidationWorkflowCalls,
@@ -73,7 +74,7 @@ export function createValidationWorkflowControls(
     startFollowUpValidation: () => void,
   ): Promise<void> {
     const pod = podRepo.getOrThrow(podId);
-    const assertCurrent = captureValidationMutationGuard(podRepo, pod);
+    const assertCurrent = captureValidationDispatchGuard(podRepo, pod);
     if (!pod.worktreePath) {
       transition(pod, 'failed');
       return;
@@ -117,6 +118,7 @@ export function createValidationWorkflowControls(
 
   function applySkipValidationDecision(pod: Pod, result: ValidationResult): Pod | null {
     if (!pod.skipValidation) return null;
+    assertNoInfrastructureBlocker(podRepo, pod.id);
     assertValidationExecutionSettled({ ...pod, lastValidationResult: result });
     assertValidationMutationSettled(podRepo, pod.id);
 
@@ -147,9 +149,11 @@ export function createValidationWorkflowControls(
 
   function claimValidation(expectedPod: Pod, validationController: AbortController) {
     assertExecutionTerminationVerified(expectedPod.id);
+    assertNoInfrastructureBlocker(podRepo, expectedPod.id);
     let claimed = false;
     const ownership = captureValidationOwnership(expectedPod, {
       readCurrent: () => {
+        assertNoInfrastructureBlocker(podRepo, expectedPod.id);
         podRepo.sourceAdoptions?.assertAvailable(expectedPod.id);
         return podRepo.getOrThrow(expectedPod.id);
       },
@@ -174,6 +178,7 @@ export function createValidationWorkflowControls(
     podId: string,
     additionalAttempts: number,
   ): Promise<void> {
+    assertNoInfrastructureBlocker(podRepo, podId);
     if (attemptExtensionRuns.has(podId)) {
       logger.info({ podId }, 'Coalesced duplicate attempt extension during active recovery');
       return;
@@ -220,6 +225,7 @@ export function createValidationWorkflowControls(
   }
 
   async function applyOverridesInstant(podId: string): Promise<{ advanced: boolean }> {
+    assertNoInfrastructureBlocker(podRepo, podId);
     const pod = podRepo.getOrThrow(podId);
     if (pod.status !== 'review_required' && pod.status !== 'failed') {
       throw new AutopodError(
@@ -275,6 +281,7 @@ export function createValidationWorkflowControls(
     this: Pick<ValidationWorkflowCalls, 'triggerValidation'>,
     podId: string,
   ): Promise<UpdateFromBaseResponse> {
+    assertNoInfrastructureBlocker(podRepo, podId);
     const pod = podRepo.getOrThrow(podId);
 
     const eligibleStatuses = ['validating', 'failed', 'review_required'] as const;
@@ -310,7 +317,7 @@ export function createValidationWorkflowControls(
       return { ok: true, action: 'queued_after_abort' };
     }
 
-    const assertCurrent = captureValidationMutationGuard(podRepo, pod);
+    const assertCurrent = captureValidationDispatchGuard(podRepo, pod);
     // For failed / review_required pods: run the rebase directly.
     const profile = executionForPod(pod);
     const baseBranch = pod.baseBranch ?? profile.defaultBranch ?? 'main';
@@ -371,7 +378,10 @@ export function createValidationWorkflowControls(
         'FINDINGS_VALIDATION_NOT_APPLICABLE',
         409,
       );
-    if (skip) assertValidationMutationSettled(podRepo, podId);
+    if (skip) {
+      assertNoInfrastructureBlocker(podRepo, podId);
+      assertValidationMutationSettled(podRepo, podId);
+    }
     podRepo.update(podId, {
       skipValidation: skip,
       skipValidationActor: skip ? actor : null,

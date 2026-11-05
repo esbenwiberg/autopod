@@ -483,17 +483,18 @@ describe('CodexStreamParser', () => {
         category: 'unknown',
         definitive: false,
       },
-    ])(
-      'classifies turn.failed $name evidence conservatively',
-      async ({ error, category, definitive }) => {
-        const stream = Readable.from([`${JSON.stringify({ type: 'turn.failed', error })}\n`]);
-        const events: AgentEvent[] = [];
-        for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
-          events.push(event);
-        }
-        expect(events[0]).toMatchObject({ classification: { category, definitive } });
-      },
-    );
+    ])('classifies turn.failed $name evidence conservatively', async ({
+      error,
+      category,
+      definitive,
+    }) => {
+      const stream = Readable.from([`${JSON.stringify({ type: 'turn.failed', error })}\n`]);
+      const events: AgentEvent[] = [];
+      for await (const event of CodexStreamParser.parse(stream, 'pod-1', logger)) {
+        events.push(event);
+      }
+      expect(events[0]).toMatchObject({ classification: { category, definitive } });
+    });
 
     it('preserves turn_aborted reason and turn id', () => {
       const e = CodexStreamParser.mapEvent(
@@ -515,20 +516,21 @@ describe('CodexStreamParser', () => {
       });
     });
 
-    it.each(['replaced', 'budget_limited', 'future_reason'])(
-      'keeps non-recoverable turn aborts fatal: %s',
-      (reason) => {
-        const e = CodexStreamParser.mapEvent(
-          { id: 's', msg: { type: 'turn_aborted', reason } },
-          'pod-1',
-        );
-        expect(e).toMatchObject({
-          type: 'error',
-          fatal: true,
-          codexAbortReason: reason,
-        });
-      },
-    );
+    it.each([
+      'replaced',
+      'budget_limited',
+      'future_reason',
+    ])('keeps non-recoverable turn aborts fatal: %s', (reason) => {
+      const e = CodexStreamParser.mapEvent(
+        { id: 's', msg: { type: 'turn_aborted', reason } },
+        'pod-1',
+      );
+      expect(e).toMatchObject({
+        type: 'error',
+        fatal: true,
+        codexAbortReason: reason,
+      });
+    });
 
     it('sanitizes Codex provider text in both terminal error fields', () => {
       const e = CodexStreamParser.mapEvent(

@@ -1,5 +1,5 @@
-import { generateId } from '@autopod/shared';
 import type { EscalationRequest } from '@autopod/shared';
+import { generateId } from '@autopod/shared';
 import type { PendingRequests } from '../pending-requests.js';
 import type { PodBridge } from '../pod-bridge.js';
 
@@ -7,26 +7,27 @@ export interface ReportBlockerInput {
   description: string;
   attempted: string[];
   needs: string;
+  owner?: 'autopod' | 'parent' | 'validation';
+  phase?: string;
 }
 
 export async function reportBlocker(
   podId: string,
   input: ReportBlockerInput,
   bridge: PodBridge,
-  pendingRequests: PendingRequests,
+  _pendingRequests: PendingRequests,
 ): Promise<string> {
   const escalationId = generateId();
-  const autoPauseThreshold = bridge.getAutoPauseThreshold(podId);
-  const currentCount = bridge.getAutoPauseCount(podId);
-
-  const requiresResponse = currentCount + 1 >= autoPauseThreshold;
   const escalation: EscalationRequest = {
     id: escalationId,
     podId,
     type: 'report_blocker',
     timestamp: new Date().toISOString(),
     payload: {
-      requiresResponse,
+      kind: 'infrastructure',
+      owner: input.owner ?? 'autopod',
+      phase: input.phase,
+      requiresResponse: false,
       description: input.description,
       attempted: input.attempted,
       needs: input.needs,
@@ -37,19 +38,5 @@ export async function reportBlocker(
   bridge.createEscalation(escalation);
   bridge.incrementEscalationCount(podId);
 
-  if (requiresResponse) {
-    // Block and wait for human
-    const timeoutMs = bridge.getHumanResponseTimeout(podId) * 1000;
-    try {
-      const response = await pendingRequests.waitForResponse(escalationId, timeoutMs);
-      return response;
-    } catch (err) {
-      const isTimeout = err instanceof Error && err.message.includes('timed out');
-      return isTimeout
-        ? 'Blocker reported, but no human response arrived before the timeout. The pod remains awaiting input; do not continue work until the operator responds.'
-        : `Blocker response wait was cancelled: ${err instanceof Error ? err.message : String(err)}`;
-    }
-  }
-
-  return `Blocker reported: ${input.description}. Continuing with reduced confidence.`;
+  return `Infrastructure blocker recorded: ${input.description}. No human answer is requested. Stop blocked attempts; preserve work and report incomplete checks in report_task_summary, then finish. Autopod will hold completion after execution settles. This report is not a validation receipt, permission, or gate waiver.`;
 }

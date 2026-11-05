@@ -5,6 +5,7 @@ import {
   AzureSandboxApiClient,
   runtimeConfigInstallCommand,
 } from './autopod-canary-127-candidate.mjs';
+
 const root = '/private/tmp/autopod-durable-execution';
 const contractPath = `${root}/docs/analysis/2026-09-07/execution/fixtures/canary-126-contract.json`;
 const p = JSON.parse(fs.readFileSync(contractPath, 'utf8'));

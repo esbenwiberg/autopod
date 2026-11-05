@@ -9,8 +9,8 @@ import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/index.js';
 import { deriveBareRepoPath, pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
 import {
-  WORKSPACE_SYNC_EXCLUDES,
   buildWorkspaceMirrorCopyScript,
+  WORKSPACE_SYNC_EXCLUDES,
   workspaceMirrorPreservePredicates,
   workspaceMirrorPruneExpression,
 } from './workspace-mirror.js';

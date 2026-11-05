@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
-import { type NewPod, createPodRepository } from './pod-repository.js';
+import { createPodRepository, type NewPod } from './pod-repository.js';
 
 const repository = 'https://github.com/org/repo';
 const base = 'a'.repeat(40);
@@ -45,48 +45,49 @@ const active = [
 const finished = ['complete', 'failed', 'killed', 'rejected'] as const;
 
 describe('active-only duplicate policy', () => {
-  it.each(finished.flatMap((status) => [false, true].map((receipt) => ({ status, receipt }))))(
-    'ignores finished $status with receipt=$receipt without rewriting its evidence',
-    ({ status, receipt }) => {
-      const f = fixture();
-      try {
-        f.repo.insert(request('prior'));
-        const evidence = receipt ? f.ledger.inspect('prior', 1, repository, 'main', base) : null;
-        f.db.prepare("UPDATE pods SET status=? WHERE id='prior'").run(status);
-        f.repo.insert(request('next'));
-        expect(f.ledger.inspect('next', 1, repository, 'main', base)).toMatchObject({
-          status: 'admitted',
-          conflicts: [],
-        });
-        if (evidence)
-          expect(
-            f.db
-              .prepare('SELECT work_hash FROM execution_dispatch_preflights WHERE id=?')
-              .get(evidence.id),
-          ).toEqual({ work_hash: evidence.workHash });
-      } finally {
-        f.db.close();
-      }
-    },
-  );
-  it.each(active.flatMap((status) => [false, true].map((receipt) => ({ status, receipt }))))(
-    'blocks active $status with receipt=$receipt',
-    ({ status, receipt }) => {
-      const f = fixture();
-      try {
-        f.repo.insert(request('prior'));
-        if (receipt) f.ledger.inspect('prior', 1, repository, 'main', base);
-        f.db.prepare("UPDATE pods SET status=? WHERE id='prior'").run(status);
-        f.repo.insert(request('next'));
-        expect(f.ledger.inspect('next', 1, repository, 'main', base)).toMatchObject({
-          status: 'review_required',
-          conflicts: [{ podId: 'prior' }],
-        });
-      } finally {
-        f.db.close();
-      }
-    },
-  );
+  it.each(
+    finished.flatMap((status) => [false, true].map((receipt) => ({ status, receipt }))),
+  )('ignores finished $status with receipt=$receipt without rewriting its evidence', ({
+    status,
+    receipt,
+  }) => {
+    const f = fixture();
+    try {
+      f.repo.insert(request('prior'));
+      const evidence = receipt ? f.ledger.inspect('prior', 1, repository, 'main', base) : null;
+      f.db.prepare("UPDATE pods SET status=? WHERE id='prior'").run(status);
+      f.repo.insert(request('next'));
+      expect(f.ledger.inspect('next', 1, repository, 'main', base)).toMatchObject({
+        status: 'admitted',
+        conflicts: [],
+      });
+      if (evidence)
+        expect(
+          f.db
+            .prepare('SELECT work_hash FROM execution_dispatch_preflights WHERE id=?')
+            .get(evidence.id),
+        ).toEqual({ work_hash: evidence.workHash });
+    } finally {
+      f.db.close();
+    }
+  });
+  it.each(
+    active.flatMap((status) => [false, true].map((receipt) => ({ status, receipt }))),
+  )('blocks active $status with receipt=$receipt', ({ status, receipt }) => {
+    const f = fixture();
+    try {
+      f.repo.insert(request('prior'));
+      if (receipt) f.ledger.inspect('prior', 1, repository, 'main', base);
+      f.db.prepare("UPDATE pods SET status=? WHERE id='prior'").run(status);
+      f.repo.insert(request('next'));
+      expect(f.ledger.inspect('next', 1, repository, 'main', base)).toMatchObject({
+        status: 'review_required',
+        conflicts: [{ podId: 'prior' }],
+      });
+    } finally {
+      f.db.close();
+    }
+  });
   it('excludes deleted history before applying the active conflict bound', () => {
     const f = fixture();
     try {

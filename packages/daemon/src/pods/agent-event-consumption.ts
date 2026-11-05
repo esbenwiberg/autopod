@@ -4,10 +4,10 @@ import { AutopodError, PROVIDER_FAILOVER_HANDOFF_PATH } from '@autopod/shared';
 import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import { atomicPodChange } from '../db/unit-of-work.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
-import type { AgentRunOutcome } from './agent-execution-contracts.js';
 import type {
   AgentConsumerCaptured,
   AgentExecutionLiveDependencies,
+  AgentRunOutcome,
 } from './agent-execution-contracts.js';
 import {
   agentCompleteEventKey,
@@ -15,6 +15,7 @@ import {
   hasAlreadyCountedCompleteEvent,
   persistedAgentCompleteEventKeys,
 } from './agent-execution-policy.js';
+import { assertNoInfrastructureBlocker, isBlockingEscalation } from './escalation-coordinator.js';
 import type { PodUpdates } from './pod-repository.js';
 import { nativeSessionId } from './provider-attempt-policy.js';
 import { ProviderAttemptSupersededError } from './provider-attempt-repository.js';
@@ -23,8 +24,8 @@ import { canFail } from './state-machine.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import { workerRetryDeadline } from './worker-retry-deadline.js';
 import {
-  WORKER_RETRY_BACKOFFS_MS,
   unavailableWorkerInputs,
+  WORKER_RETRY_BACKOFFS_MS,
   workerBindingHash,
 } from './worker-retry-history.js';
 import { createWorkspaceFileObserver } from './workspace-file-observer.js';
@@ -147,6 +148,7 @@ export function createAgentEventConsumption(
     let fileObserver: ReturnType<typeof createWorkspaceFileObserver> | undefined;
     try {
       const initialized = atomicPodChange(podRepo, () => {
+        assertNoInfrastructureBlocker(podRepo, podId);
         const currentPod = podRepo.getOrThrow(podId);
         const currentProfile = resolveEffectiveBoundProfile(currentPod);
         podRepo.completionJournal?.begin(currentPod);
@@ -225,6 +227,7 @@ export function createAgentEventConsumption(
           workerNotBefore,
           deps.workerInfrastructureRetryDelay ?? sleep,
           () => {
+            assertNoInfrastructureBlocker(podRepo, podId);
             if (!ownsRun() || pauseIntents.has(podId))
               throw new TaskRetryBlockedError(
                 'Worker admission was cancelled or superseded during cooldown',
@@ -237,6 +240,7 @@ export function createAgentEventConsumption(
           );
         resolveEffectiveBoundProfile(podRepo.getOrThrow(podId));
       }
+      assertNoInfrastructureBlocker(podRepo, podId);
       if (workerAdmissionId) podRepo.workerRetries?.start(workerAdmissionId);
       workerStartedAt = performance.now();
       if (initialPod.containerId) {
@@ -269,8 +273,15 @@ export function createAgentEventConsumption(
           return outcome;
         }
       }
+      // Baseline capture awaits native I/O. A current-lifecycle report may have
+      // arrived without changing status or reaching the automatic pause threshold.
+      assertNoInfrastructureBlocker(podRepo, podId);
       for await (const event of events) {
         workerEventObserved = true;
+        // Negative termination evidence belongs to this immutable run, even
+        // when ordinary events are suppressed by pause or lifecycle replacement.
+        if (event.type === 'error' && event.executionTermination === 'unverified')
+          retainUnverifiedTermination();
         if (!ownsRun()) {
           logger.info(
             { podId, containerId: expected.containerId, generation: expected.generation },
@@ -325,7 +336,7 @@ export function createAgentEventConsumption(
 
         if (event.type === 'escalation') {
           const pod = podRepo.getOrThrow(podId);
-          if (pod.status === 'running') {
+          if (pod.status === 'running' && isBlockingEscalation(event.payload)) {
             const escalationPayload = event.payload.payload;
             const escalationSummary =
               'question' in escalationPayload
@@ -470,7 +481,9 @@ export function createAgentEventConsumption(
           }
 
           const blockerSummary = summarizeAgentCompletionBlocker(event.result);
-          if (blockerSummary) {
+          // A recorded infrastructure report owns preservation after native
+          // settlement; its completion wording must not bypass that gate.
+          if (blockerSummary && !podRepo.hasInfrastructureBlocker?.(podId)) {
             const s = podRepo.getOrThrow(podId);
             if (s.status === 'running') {
               emitActivityStatus(podId, `Agent reported blocker: ${blockerSummary}`);
@@ -534,6 +547,16 @@ export function createAgentEventConsumption(
                 maxBudgetExtensions: maxExtensions,
               });
 
+              if (podRepo.hasInfrastructureBlocker?.(podId)) {
+                // Usage and the exceeded event remain durable. Do not grant an
+                // extension or park before the settled infrastructure owner can
+                // preserve source. Continue draining for termination evidence.
+                emitActivityStatus(
+                  podId,
+                  'Token budget exhausted with infrastructure blocked — preserving after verified settlement, no continuation authorized',
+                );
+                continue;
+              }
               if (policy === 'hard' || !canExtend) {
                 emitActivityStatus(podId, 'Token budget hard limit reached — failing pod');
                 const s = podRepo.getOrThrow(podId);
@@ -569,7 +592,6 @@ export function createAgentEventConsumption(
           event.type === 'error' &&
           (event.fatal || event.executionTermination === 'unverified')
         ) {
-          if (event.executionTermination === 'unverified') retainUnverifiedTermination();
           const pod = podRepo.getOrThrow(podId);
           terminalClassification =
             event.classification ??
@@ -587,7 +609,7 @@ export function createAgentEventConsumption(
               terminalClassification.retryAfter,
               Date.now(),
             );
-          if (canFail(pod.status)) {
+          if (canFail(pod.status) && !podRepo.hasInfrastructureBlocker?.(podId)) {
             const failureReason = sanitizeFailureReason(event.message, 'Agent failed');
             emitActivityStatus(podId, failureReason);
             if (
@@ -662,7 +684,8 @@ export function createAgentEventConsumption(
           if (!superseded) {
             const current = podRepo.getOrThrow(podId);
             const providerLimit =
-              current.pauseReason === 'provider_limit' &&
+              (current.pauseReason === 'provider_limit' ||
+                podRepo.hasInfrastructureBlocker?.(podId)) &&
               terminalClassification?.category === 'quota_exhausted' &&
               terminalClassification.definitive;
             if (providerLimit) {
@@ -673,7 +696,8 @@ export function createAgentEventConsumption(
                 PROVIDER_FAILOVER_HANDOFF_PATH,
                 runOwner.providerOrdinal,
               );
-              await handleProviderLimit(podId, terminalClassification);
+              if (!podRepo.hasInfrastructureBlocker?.(podId))
+                await handleProviderLimit(podId, terminalClassification);
             } else if (
               current.pauseReason === 'provider_limit' &&
               outcome === 'failed' &&
@@ -747,6 +771,11 @@ export function createAgentEventConsumption(
               lastEventWriteAt.delete(podId);
             }
             settleActiveRun();
+            // Every caller (initial process, rejection, messages and correction)
+            // shares this settlement boundary. Never leave fatal continuations
+            // depending on a completed-only caller or a later watchdog.
+            if (!superseded && ownsExpectedLifecycle() && podRepo.hasInfrastructureBlocker?.(podId))
+              await captured.reconcileInfrastructureBlocker(podId);
           }
         }
       }

@@ -12,6 +12,7 @@ import {
   insertTestProfile,
   logger,
 } from '../test-utils/mock-helpers.js';
+import { createEscalationRepository } from './escalation-repository.js';
 import { createEventBus } from './event-bus.js';
 import { createEventRepository } from './event-repository.js';
 import { createPodRepository } from './pod-repository.js';
@@ -132,6 +133,23 @@ function fixture(input: Inputs = {}) {
     ...module,
     run: (fromTerminal = false, pod = repo.getOrThrow('worker')) =>
       module.startValidationAttempt(pod, profile, fromTerminal),
+    reportInfrastructure() {
+      createEscalationRepository(db).insert({
+        id: 'infra',
+        podId: 'worker',
+        type: 'report_blocker',
+        timestamp: new Date().toISOString(),
+        response: null,
+        payload: {
+          kind: 'infrastructure',
+          requiresResponse: false,
+          lifecycleGeneration: repo.getOrThrow('worker').lifecycleGeneration,
+          description: 'Runner unavailable',
+          attempted: [],
+          needs: 'Qualified execution',
+        },
+      });
+    },
     failStartPersistence() {
       db.exec(
         "CREATE TRIGGER reject_validation_start BEFORE INSERT ON events WHEN NEW.type = 'pod.validation_started' BEGIN SELECT RAISE(ABORT, 'start persistence rejected'); END",
@@ -155,6 +173,30 @@ function fixture(input: Inputs = {}) {
 }
 
 describe('validation attempt start persisted effects', () => {
+  it.each(
+    [false, true].flatMap((terminal) => ['before', 'scan'].map((stage) => ({ terminal, stage }))),
+  )('retains attempts and events across %j infrastructure arrival', async ({ terminal, stage }) => {
+    const f = fixture({ status: terminal ? 'failed' : 'running', count: 4 });
+    try {
+      const before = f.repo.getOrThrow('worker');
+      if (stage === 'before') f.reportInfrastructure();
+      else
+        f.scan.mockImplementationOnce(async () => {
+          f.reportInfrastructure();
+        });
+      await expect(f.run(terminal)).rejects.toMatchObject({ code: 'INFRASTRUCTURE_BLOCKED' });
+      expect(f.scan).toHaveBeenCalledTimes(stage === 'before' ? 0 : 1);
+      expect(f.transition).not.toHaveBeenCalled();
+      expect(f.repo.getOrThrow('worker')).toEqual(before);
+      const reopened = f.reopen();
+      expect(reopened.pod).toEqual(before);
+      expect(reopened.events.getForSession('worker', { type: 'pod.validation_started' })).toEqual(
+        [],
+      );
+    } finally {
+      f.close();
+    }
+  });
   const accounting: Array<Inputs & { name: string; attempt: number; terminal?: boolean }> = [
     { name: 'normal zero', count: 0, attempt: 1 },
     { name: 'normal nonzero', count: 2, attempt: 3 },
@@ -231,35 +273,35 @@ describe('validation attempt start persisted effects', () => {
     }
   });
 
-  it.each([false, true])(
-    'returns the exact transition snapshot before the wake/counter update, wake=%s',
-    async (wake) => {
-      const f = fixture({ marker: wake ? 'wake' : undefined });
-      try {
-        const body = f.transition.getMockImplementation();
-        if (!body) throw new Error('Missing transition');
-        f.transition.mockImplementationOnce((p, to) => ({
-          ...body(p, to),
-          task: 'distinct returned snapshot',
-        }));
-        const result = await f.run();
-        expect(result.s1).toBe(f.transition.mock.results[0]?.value);
-        expect(result.s1).toMatchObject({
-          task: 'distinct returned snapshot',
-          validationAttempts: 2,
-          lastRecoveryTrigger: wake ? 'wake' : null,
-        });
-        expect(f.suite.mock.calls[0]?.[0]).toBe(result.s1);
-        expect(f.reopen().pod).toMatchObject({
-          task: 'Start validation',
-          validationAttempts: wake ? 2 : 3,
-          lastRecoveryTrigger: null,
-        });
-      } finally {
-        f.close();
-      }
-    },
-  );
+  it.each([
+    false,
+    true,
+  ])('returns the exact transition snapshot before the wake/counter update, wake=%s', async (wake) => {
+    const f = fixture({ marker: wake ? 'wake' : undefined });
+    try {
+      const body = f.transition.getMockImplementation();
+      if (!body) throw new Error('Missing transition');
+      f.transition.mockImplementationOnce((p, to) => ({
+        ...body(p, to),
+        task: 'distinct returned snapshot',
+      }));
+      const result = await f.run();
+      expect(result.s1).toBe(f.transition.mock.results[0]?.value);
+      expect(result.s1).toMatchObject({
+        task: 'distinct returned snapshot',
+        validationAttempts: 2,
+        lastRecoveryTrigger: wake ? 'wake' : null,
+      });
+      expect(f.suite.mock.calls[0]?.[0]).toBe(result.s1);
+      expect(f.reopen().pod).toMatchObject({
+        task: 'Start validation',
+        validationAttempts: wake ? 2 : 3,
+        lastRecoveryTrigger: null,
+      });
+    } finally {
+      f.close();
+    }
+  });
 
   it('holds the scan before resets, status changes or start publication', async () => {
     const f = fixture({ status: 'failed', count: 4 });

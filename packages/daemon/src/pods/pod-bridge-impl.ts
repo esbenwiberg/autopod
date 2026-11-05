@@ -1,4 +1,5 @@
 import type {
+  PendingRequests,
   PodBridge,
   PreSubmitReviewInput,
   PreSubmitReviewToolResult,
@@ -6,7 +7,6 @@ import type {
   ValidationPhaseName,
   ValidationPhaseResult,
 } from '@autopod/escalation-mcp';
-import type { PendingRequests } from '@autopod/escalation-mcp';
 import type {
   ActionDefinition,
   ActionResponse,
@@ -24,7 +24,7 @@ import type {
   Pod,
   ReviewFeedbackResponseItem,
 } from '@autopod/shared';
-import { AutopodError, MAX_DIFF_LENGTH, generateId } from '@autopod/shared';
+import { AutopodError, generateId, MAX_DIFF_LENGTH } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionEngine } from '../actions/action-engine.js';
 import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
@@ -177,8 +177,23 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       if (!pod.launchConfigDigest) return undefined;
       return deps.scopedTools?.(podId);
     },
-    createEscalation(escalation: EscalationRequest): void {
+    createEscalation(request: EscalationRequest): void {
+      let escalation = request;
       podManager.touchHeartbeat(escalation.podId);
+      if (
+        escalation.type === 'report_blocker' &&
+        'kind' in escalation.payload &&
+        escalation.payload.kind === 'infrastructure'
+      ) {
+        escalation = {
+          ...escalation,
+          payload: {
+            ...escalation.payload,
+            requiresResponse: false,
+            lifecycleGeneration: podRepo.getOrThrow(escalation.podId).lifecycleGeneration,
+          },
+        };
+      }
       persistEscalation(podRepo, escalationRepo, escalation, () => {
         logger.info(
           { escalationId: escalation.id, podId: escalation.podId, type: escalation.type },
@@ -187,6 +202,49 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         // Transition pod to awaiting_input so the TUI shows the pending question/approval
         if (isBlockingEscalation(escalation)) {
           podManager.notifyEscalation(escalation.podId, escalation);
+        }
+        if (
+          escalation.type === 'report_blocker' &&
+          'kind' in escalation.payload &&
+          escalation.payload.kind === 'infrastructure'
+        ) {
+          const pod = podRepo.getOrThrow(escalation.podId);
+          if (!['running', 'awaiting_input'].includes(pod.status))
+            throw new AutopodError(
+              'Infrastructure reporting requires the current active worker or its pending decision; retain settled evidence instead of changing another lifecycle.',
+              'ESCALATION_STATE_CONFLICT',
+              409,
+            );
+          const report = escalation.payload;
+          const reason = `Infrastructure blocked${report.phase ? ` during ${report.phase}` : ''}: ${report.description}. Checks remain incomplete. Responsible system: ${report.owner ?? 'autopod'}. Inspect the recorded report before supported recovery; no answer, receipt or waiver is requested.`;
+          podRepo.update(pod.id, { failureReason: reason });
+          const reports = escalationRepo
+            .listBySession(pod.id)
+            .filter(
+              (entry) =>
+                entry.type === 'report_blocker' &&
+                'kind' in entry.payload &&
+                entry.payload.kind === 'infrastructure' &&
+                entry.payload.lifecycleGeneration === pod.lifecycleGeneration,
+            );
+          // Infrastructure reports alone consume this stop boundary. AI advice and
+          // true questions must neither trigger it nor be displaced by it.
+          if (
+            pod.status === 'running' &&
+            !pod.pendingEscalation &&
+            reports.length >= (escalationForPod(pod)?.autoPauseAfter ?? 3) &&
+            podManager.pauseSession
+          ) {
+            podRepo.afterCommit?.(() => {
+              void podManager.pauseSession?.(pod.id).catch((error: unknown) => {
+                if (error instanceof AutopodError && error.code === 'PAUSE_SETTLING') return;
+                logger.warn(
+                  { error, podId: pod.id },
+                  'Infrastructure stop did not settle; retain execution ownership and reports',
+                );
+              });
+            });
+          }
         }
       });
     },

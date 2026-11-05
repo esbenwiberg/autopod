@@ -216,30 +216,30 @@ describe('validation provenance recorder', () => {
     expect(f.get).not.toHaveBeenCalled();
     expect(f.reopen().rows).toEqual([]);
   });
-  it.each([undefined, 'validation'] as const)(
-    'keeps purpose=%s worker identity and actual execution/ledger keys',
-    async (purpose) => {
-      const f = fixture();
-      await f.run(purpose);
-      const saved = needed(f.reopen().rows[0]);
-      expect(saved).toMatchObject({
-        version: 1,
-        purpose: 'validation',
-        subject: 'worker',
-        runtime: 'claude',
-        model: 'worker-model',
-        podId: 'worker',
-        generation: f.pod.lifecycleGeneration,
-        taskId: expect.any(String),
-        executionId: expect.any(String),
-        status: 'checked',
-        imageDigest: f.metadata.imageDigest,
-      });
-      expect(f.resolve).toHaveBeenCalledTimes(2);
-      expect(f.get).toHaveBeenCalledExactlyOnceWith('local');
-      expect(f.record.mock.calls[0]?.slice(0, 2)).toEqual(['worker', f.pod.lifecycleGeneration]);
-    },
-  );
+  it.each([
+    undefined,
+    'validation',
+  ] as const)('keeps purpose=%s worker identity and actual execution/ledger keys', async (purpose) => {
+    const f = fixture();
+    await f.run(purpose);
+    const saved = needed(f.reopen().rows[0]);
+    expect(saved).toMatchObject({
+      version: 1,
+      purpose: 'validation',
+      subject: 'worker',
+      runtime: 'claude',
+      model: 'worker-model',
+      podId: 'worker',
+      generation: f.pod.lifecycleGeneration,
+      taskId: expect.any(String),
+      executionId: expect.any(String),
+      status: 'checked',
+      imageDigest: f.metadata.imageDigest,
+    });
+    expect(f.resolve).toHaveBeenCalledTimes(2);
+    expect(f.get).toHaveBeenCalledExactlyOnceWith('local');
+    expect(f.record.mock.calls[0]?.slice(0, 2)).toEqual(['worker', f.pod.lifecycleGeneration]);
+  });
   it('reads the repository once without a supplied guard and retains default config null/undefined projections', async () => {
     const f = fixture();
     f.config.buildWorkDir = undefined;
@@ -289,92 +289,91 @@ describe('validation provenance recorder', () => {
     ([[], ['health'], ['pages'], ['health', 'pages']] as ValidationPhase[][]).map((skips) => ({
       skips,
     })),
-  )(
-    'keeps the start command for skipPhases=$skips unless both web phases are skipped',
-    async ({ skips }) => {
-      const f = fixture();
-      f.config.skipPhases = skips;
-      await f.run();
-      expect(f.inspect.mock.calls[0]?.[3].startCommand).toBe(
-        skips.length === 2 ? '' : 'node server.js',
-      );
-      expect(f.reopen().rows).toHaveLength(1);
-    },
-  );
-  it.each([false, true])(
-    'projects facts skipped=%s but records the original contract hash and env/workdir',
-    async (skipped) => {
-      const f = fixture();
-      f.config.contract = {
-        contractVersion: 1,
-        title: 'Original',
-        dependsOn: [],
-        scenarios: [],
-        requiredFacts: [
-          {
-            id: 'fact',
-            proves: [],
-            kind: 'custom-command',
-            artifact: { path: 'proof.txt', change: 'create' },
-            command: 'node verify.js',
-          },
-        ],
-        humanReview: [],
-      };
-      f.config.skipPhases = skipped ? ['facts'] : [];
-      const original = f.config.contract;
-      await f.run();
-      const inspected = needed(f.inspect.mock.calls[0]);
-      expect(inspected[2]).toMatchObject({
-        skipValidation: false,
-        options: { validate: true },
-        contract: { ...original, requiredFacts: skipped ? [] : original.requiredFacts },
-      });
-      expect(inspected[3]).toMatchObject({
-        buildWorkDir: 'app',
-        buildEnv: { FIXTURE_ENV: 'value' },
-      });
-      expect(inspected[3].buildEnv).toBe(f.config.extraExecEnv);
-      expect(f.reopen().rows[0]?.contractHash).toBe(
-        createHash('sha256').update(JSON.stringify(original)).digest('hex'),
-      );
-      expect(f.config.contract).toBe(original);
-    },
-  );
-  it.each(['anthropic', 'openai'] as const)(
-    'attributes prepared council to %s reviewer identity',
-    async (provider) => {
-      const f = fixture();
+  )('keeps the start command for skipPhases=$skips unless both web phases are skipped', async ({
+    skips,
+  }) => {
+    const f = fixture();
+    f.config.skipPhases = skips;
+    await f.run();
+    expect(f.inspect.mock.calls[0]?.[3].startCommand).toBe(
+      skips.length === 2 ? '' : 'node server.js',
+    );
+    expect(f.reopen().rows).toHaveLength(1);
+  });
+  it.each([
+    false,
+    true,
+  ])('projects facts skipped=%s but records the original contract hash and env/workdir', async (skipped) => {
+    const f = fixture();
+    f.config.contract = {
+      contractVersion: 1,
+      title: 'Original',
+      dependsOn: [],
+      scenarios: [],
+      requiredFacts: [
+        {
+          id: 'fact',
+          proves: [],
+          kind: 'custom-command',
+          artifact: { path: 'proof.txt', change: 'create' },
+          command: 'node verify.js',
+        },
+      ],
+      humanReview: [],
+    };
+    f.config.skipPhases = skipped ? ['facts'] : [];
+    const original = f.config.contract;
+    await f.run();
+    const inspected = needed(f.inspect.mock.calls[0]);
+    expect(inspected[2]).toMatchObject({
+      skipValidation: false,
+      options: { validate: true },
+      contract: { ...original, requiredFacts: skipped ? [] : original.requiredFacts },
+    });
+    expect(inspected[3]).toMatchObject({
+      buildWorkDir: 'app',
+      buildEnv: { FIXTURE_ENV: 'value' },
+    });
+    expect(inspected[3].buildEnv).toBe(f.config.extraExecEnv);
+    expect(f.reopen().rows[0]?.contractHash).toBe(
+      createHash('sha256').update(JSON.stringify(original)).digest('hex'),
+    );
+    expect(f.config.contract).toBe(original);
+  });
+  it.each([
+    'anthropic',
+    'openai',
+  ] as const)('attributes prepared council to %s reviewer identity', async (provider) => {
+    const f = fixture();
+    f.config.councilOnly = true;
+    f.config.reviewerProvider = provider;
+    await f.run('review');
+    expect(f.reopen().rows[0]).toMatchObject({
+      purpose: 'review',
+      subject: 'reviewer',
+      runtime: provider === 'openai' ? 'codex' : 'claude',
+      model: 'sonnet',
+      providerId: provider,
+      providerAccountId: 'review-account',
+    });
+  });
+  it.each([
+    'unverified',
+    'unsupported',
+  ] as const)('rejects %s council before probes or receipt', async (kind) => {
+    const f = fixture();
+    if (kind === 'unsupported') {
       f.config.councilOnly = true;
-      f.config.reviewerProvider = provider;
-      await f.run('review');
-      expect(f.reopen().rows[0]).toMatchObject({
-        purpose: 'review',
-        subject: 'reviewer',
-        runtime: provider === 'openai' ? 'codex' : 'claude',
-        model: 'sonnet',
-        providerId: provider,
-        providerAccountId: 'review-account',
-      });
-    },
-  );
-  it.each(['unverified', 'unsupported'] as const)(
-    'rejects %s council before probes or receipt',
-    async (kind) => {
-      const f = fixture();
-      if (kind === 'unsupported') {
-        f.config.councilOnly = true;
-        f.config.reviewerProvider = 'pi';
-      }
-      await expect(f.run('review')).rejects.toMatchObject({
-        message:
-          'Independent council reviewer runtime is unsupported or unverified; reconcile its selected provider before review.',
-      });
-      expect(f.get).not.toHaveBeenCalled();
-      expect(f.inspect).not.toHaveBeenCalled();
-      expect(f.reopen().rows).toHaveLength(0);
-    },
-  );
+      f.config.reviewerProvider = 'pi';
+    }
+    await expect(f.run('review')).rejects.toMatchObject({
+      message:
+        'Independent council reviewer runtime is unsupported or unverified; reconcile its selected provider before review.',
+    });
+    expect(f.get).not.toHaveBeenCalled();
+    expect(f.inspect).not.toHaveBeenCalled();
+    expect(f.reopen().rows).toHaveLength(0);
+  });
   it('keeps trusted launch runtime overlay and reviewer default identity without adding a resolver consistency check', async () => {
     const f = fixture();
     f.config.reviewerModel = undefined;
@@ -391,110 +390,110 @@ describe('validation provenance recorder', () => {
       ]),
     });
   });
-  it.each(['first-prefight', 'fallback'] as const)(
-    'saves blocked receipt before throwing the %s reason',
-    async (kind) => {
-      const f = fixture();
-      f.config.councilOnly = true;
-      if (kind === 'first-prefight') {
-        vi.mocked(f.cm.execInContainer).mockResolvedValue({
-          stdout: '',
-          stderr: 'Missing CLI',
-          exitCode: 1,
-        });
-        f.metadata.memoryLimitBytes = 1024;
-      } else
-        vi.mocked(f.cm.execInContainer).mockRejectedValue(
-          new AutopodError('Probe unavailable', 'TRANSPORT_UNAVAILABLE', 503),
-        );
-      const error = await f.run('review').catch((failure) => failure);
-      expect(error).toBeInstanceOf(TaskRetryBlockedError);
-      const saved = needed(f.reopen().rows[0]);
-      expect(saved.status).toBe('blocked');
-      expect(error.message).toBe(
-        kind === 'fallback'
-          ? 'Validation environment requires reconciliation'
-          : needed(saved.diagnostics.find((item) => item.code.startsWith('PREFLIGHT_'))).detail,
+  it.each([
+    'first-prefight',
+    'fallback',
+  ] as const)('saves blocked receipt before throwing the %s reason', async (kind) => {
+    const f = fixture();
+    f.config.councilOnly = true;
+    if (kind === 'first-prefight') {
+      vi.mocked(f.cm.execInContainer).mockResolvedValue({
+        stdout: '',
+        stderr: 'Missing CLI',
+        exitCode: 1,
+      });
+      f.metadata.memoryLimitBytes = 1024;
+    } else
+      vi.mocked(f.cm.execInContainer).mockRejectedValue(
+        new AutopodError('Probe unavailable', 'TRANSPORT_UNAVAILABLE', 503),
       );
-    },
-  );
-  it.each(['ownership', 'binding', 'ledger-generation'] as const)(
-    'held inspector preserves post-await %s boundary',
-    async (change) => {
-      const f = fixture();
-      const held = f.hold();
-      const error = new Error('Binding failed');
-      const outcome = f.run(undefined, change !== 'ledger-generation').catch((failure) => failure);
-      try {
-        await held.entered;
-        if (change === 'binding')
-          f.resolve.mockImplementation(() => {
-            throw error;
-          });
-        else f.repo.incrementLifecycleGeneration('worker');
-      } finally {
-        held.release();
-      }
-      const failure = await outcome;
-      if (change === 'binding') expect(failure).toBe(error);
-      else
-        expect(failure).toMatchObject({
-          code:
-            change === 'ownership'
-              ? 'STALE_VALIDATION_EXECUTION'
-              : 'PROVENANCE_IDENTITY_UNAVAILABLE',
-        });
-      expect(f.record).toHaveBeenCalledTimes(change === 'ledger-generation' ? 1 : 0);
-      expect(f.reopen().rows).toHaveLength(0);
-    },
-  );
-  it.each(['replacement', 'removed'] as const)(
-    'looks up a ledger %s during the inspector await',
-    async (change) => {
-      const f = fixture();
-      const held = f.hold();
-      const actual = f.ledger.record.bind(f.ledger);
-      const replacement = vi.fn(actual);
-      const outcome = f.run().catch((failure) => failure);
-      try {
-        await held.entered;
-        f.repo.executionProvenance =
-          change === 'removed' ? undefined : { record: replacement, latest: f.ledger.latest };
-      } finally {
-        held.release();
-      }
-      const result = await outcome;
-      if (change === 'removed') {
-        expect(result).toBeInstanceOf(TypeError);
-        expect(f.reopen().rows).toHaveLength(0);
-      } else {
-        expect(result).toBeUndefined();
-        expect(replacement).toHaveBeenCalledOnce();
-        expect(f.reopen().rows).toHaveLength(1);
-      }
-    },
-  );
-  it.each(['profile', 'target', 'record'] as const)(
-    'propagates %s errors by identity',
-    async (stage) => {
-      const f = fixture();
-      const error = new Error(`${stage} failed`);
-      if (stage === 'profile')
+    const error = await f.run('review').catch((failure) => failure);
+    expect(error).toBeInstanceOf(TaskRetryBlockedError);
+    const saved = needed(f.reopen().rows[0]);
+    expect(saved.status).toBe('blocked');
+    expect(error.message).toBe(
+      kind === 'fallback'
+        ? 'Validation environment requires reconciliation'
+        : needed(saved.diagnostics.find((item) => item.code.startsWith('PREFLIGHT_'))).detail,
+    );
+  });
+  it.each([
+    'ownership',
+    'binding',
+    'ledger-generation',
+  ] as const)('held inspector preserves post-await %s boundary', async (change) => {
+    const f = fixture();
+    const held = f.hold();
+    const error = new Error('Binding failed');
+    const outcome = f.run(undefined, change !== 'ledger-generation').catch((failure) => failure);
+    try {
+      await held.entered;
+      if (change === 'binding')
         f.resolve.mockImplementation(() => {
           throw error;
         });
-      if (stage === 'target')
-        f.get.mockImplementation(() => {
-          throw error;
-        });
-      if (stage === 'record')
-        f.record.mockImplementation(() => {
-          throw error;
-        });
-      await expect(f.run()).rejects.toBe(error);
+      else f.repo.incrementLifecycleGeneration('worker');
+    } finally {
+      held.release();
+    }
+    const failure = await outcome;
+    if (change === 'binding') expect(failure).toBe(error);
+    else
+      expect(failure).toMatchObject({
+        code:
+          change === 'ownership' ? 'STALE_VALIDATION_EXECUTION' : 'PROVENANCE_IDENTITY_UNAVAILABLE',
+      });
+    expect(f.record).toHaveBeenCalledTimes(change === 'ledger-generation' ? 1 : 0);
+    expect(f.reopen().rows).toHaveLength(0);
+  });
+  it.each([
+    'replacement',
+    'removed',
+  ] as const)('looks up a ledger %s during the inspector await', async (change) => {
+    const f = fixture();
+    const held = f.hold();
+    const actual = f.ledger.record.bind(f.ledger);
+    const replacement = vi.fn(actual);
+    const outcome = f.run().catch((failure) => failure);
+    try {
+      await held.entered;
+      f.repo.executionProvenance =
+        change === 'removed' ? undefined : { record: replacement, latest: f.ledger.latest };
+    } finally {
+      held.release();
+    }
+    const result = await outcome;
+    if (change === 'removed') {
+      expect(result).toBeInstanceOf(TypeError);
       expect(f.reopen().rows).toHaveLength(0);
-    },
-  );
+    } else {
+      expect(result).toBeUndefined();
+      expect(replacement).toHaveBeenCalledOnce();
+      expect(f.reopen().rows).toHaveLength(1);
+    }
+  });
+  it.each([
+    'profile',
+    'target',
+    'record',
+  ] as const)('propagates %s errors by identity', async (stage) => {
+    const f = fixture();
+    const error = new Error(`${stage} failed`);
+    if (stage === 'profile')
+      f.resolve.mockImplementation(() => {
+        throw error;
+      });
+    if (stage === 'target')
+      f.get.mockImplementation(() => {
+        throw error;
+      });
+    if (stage === 'record')
+      f.record.mockImplementation(() => {
+        throw error;
+      });
+    await expect(f.run()).rejects.toBe(error);
+    expect(f.reopen().rows).toHaveLength(0);
+  });
   it('retains original dependency objects/functions and observes a new target method and ledger method', async () => {
     const f = fixture();
     f.deps.podRepo = {
@@ -608,31 +607,31 @@ describe('reviewer launch hooks', () => {
       imageDigest: null,
     });
   });
-  it.each(['checked', 'blocked'] as const)(
-    'keeps host receipt status=%s without recorder-style blocked throwing',
-    (status) => {
-      const f = fixture();
-      const wrapped = f.op.withReviewerLaunchPreflight(f.config, f.owner);
-      expect(
-        wrapped.recordHostReviewerDispatch?.({
-          model: 'sonnet',
-          cliPath: status === 'checked' ? '/fixture/claude' : null,
-          cliVersion: status === 'checked' ? '1.2.3' : null,
-          status,
-        }),
-      ).toBeUndefined();
-      expect(f.reopen().rows[0]).toMatchObject({
-        version: 2,
-        surface: 'host-cli',
-        status,
-        runtime: 'claude',
-        providerId: null,
-        providerAccountId: null,
+  it.each([
+    'checked',
+    'blocked',
+  ] as const)('keeps host receipt status=%s without recorder-style blocked throwing', (status) => {
+    const f = fixture();
+    const wrapped = f.op.withReviewerLaunchPreflight(f.config, f.owner);
+    expect(
+      wrapped.recordHostReviewerDispatch?.({
         model: 'sonnet',
-        dispatchModel: 'sonnet',
-      });
-    },
-  );
+        cliPath: status === 'checked' ? '/fixture/claude' : null,
+        cliVersion: status === 'checked' ? '1.2.3' : null,
+        status,
+      }),
+    ).toBeUndefined();
+    expect(f.reopen().rows[0]).toMatchObject({
+      version: 2,
+      surface: 'host-cli',
+      status,
+      runtime: 'claude',
+      providerId: null,
+      providerAccountId: null,
+      model: 'sonnet',
+      dispatchModel: 'sonnet',
+    });
+  });
   it.each(
     surfaces.flatMap((surface) =>
       (['ownership', 'binding', 'model', 'ledger'] as const).map((stage) => ({ surface, stage })),
@@ -688,23 +687,25 @@ describe('reviewer launch hooks', () => {
       dispatchModel: 'original-next',
     });
   });
-  it.each(['podId', 'containerId', 'runtime', 'model'] as const)(
-    'rejects mismatched container %s before probing or recording',
-    async (field) => {
-      const f = fixture();
-      const wrapped = f.op.withReviewerLaunchPreflight(f.config, f.owner);
-      const identity = {
-        ...f.identity,
-        [field]: field === 'runtime' ? ('codex' as const) : 'different',
-      };
-      await expect(wrapped.beforeReviewerLaunch?.(identity)).rejects.toMatchObject({
-        message: 'Reviewer launch identity differs from the frozen validation configuration.',
-      });
-      expect(f.resolve).toHaveBeenCalledOnce();
-      expect(f.get).not.toHaveBeenCalled();
-      expect(f.reopen().rows).toHaveLength(0);
-    },
-  );
+  it.each([
+    'podId',
+    'containerId',
+    'runtime',
+    'model',
+  ] as const)('rejects mismatched container %s before probing or recording', async (field) => {
+    const f = fixture();
+    const wrapped = f.op.withReviewerLaunchPreflight(f.config, f.owner);
+    const identity = {
+      ...f.identity,
+      [field]: field === 'runtime' ? ('codex' as const) : 'different',
+    };
+    await expect(wrapped.beforeReviewerLaunch?.(identity)).rejects.toMatchObject({
+      message: 'Reviewer launch identity differs from the frozen validation configuration.',
+    });
+    expect(f.resolve).toHaveBeenCalledOnce();
+    expect(f.get).not.toHaveBeenCalled();
+    expect(f.reopen().rows).toHaveLength(0);
+  });
   it('records matching container launch then returns a fresh synchronous dispatch guard', async () => {
     const f = fixture();
     const wrapped = f.op.withReviewerLaunchPreflight(f.config, f.owner);
@@ -739,33 +740,32 @@ describe('reviewer launch hooks', () => {
     expect(await outcome).toMatchObject({ code: 'STALE_VALIDATION_EXECUTION' });
     expect(f.reopen().rows).toHaveLength(0);
   });
-  it.each(surfaces)(
-    '%s observes live ledger replacement and propagates its method error by identity',
-    (surface) => {
-      const f = fixture();
-      const wrapped = f.op.withReviewerLaunchPreflight(f.config, f.owner);
-      const error = new Error('Receipt writer unavailable');
-      const record = vi.fn(() => {
-        throw error;
-      });
-      f.repo.executionProvenance = { record, latest: f.ledger.latest };
-      expect(
-        caught(() =>
-          dispatch(
-            wrapped,
-            surface,
-            surface === 'selected'
-              ? 'claude-sonnet-5-5'
-              : surface === 'legacy'
-                ? 'claude-sonnet-4-6'
-                : 'sonnet',
-          ),
+  it.each(
+    surfaces,
+  )('%s observes live ledger replacement and propagates its method error by identity', (surface) => {
+    const f = fixture();
+    const wrapped = f.op.withReviewerLaunchPreflight(f.config, f.owner);
+    const error = new Error('Receipt writer unavailable');
+    const record = vi.fn(() => {
+      throw error;
+    });
+    f.repo.executionProvenance = { record, latest: f.ledger.latest };
+    expect(
+      caught(() =>
+        dispatch(
+          wrapped,
+          surface,
+          surface === 'selected'
+            ? 'claude-sonnet-5-5'
+            : surface === 'legacy'
+              ? 'claude-sonnet-4-6'
+              : 'sonnet',
         ),
-      ).toBe(error);
-      expect(record).toHaveBeenCalledOnce();
-      expect(f.reopen().rows).toHaveLength(0);
-    },
-  );
+      ),
+    ).toBe(error);
+    expect(record).toHaveBeenCalledOnce();
+    expect(f.reopen().rows).toHaveLength(0);
+  });
   it('assertReviewerCurrent rechecks binding on every call without recording', () => {
     const f = fixture();
     const wrapped = f.op.withReviewerLaunchPreflight(f.config, f.owner);

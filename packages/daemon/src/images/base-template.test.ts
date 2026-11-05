@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,19 +55,18 @@ async function readScript(filename: string): Promise<string> {
 }
 
 describe('Trusted Pi worker base image prerequisites', () => {
-  it.each(workerBaseTemplates)(
-    '%s extends Node trust with system-managed roots',
-    async (filename) => {
-      const dockerfile = await readBaseTemplate(filename);
-      const trustIndex = dockerfile.indexOf(
-        'ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt',
-      );
-      expect(trustIndex).toBeGreaterThan(dockerfile.indexOf('ca-certificates'));
-      expect(trustIndex).toBeLessThan(dockerfile.indexOf('npm install'));
-      expect(dockerfile).not.toContain('NODE_TLS_REJECT_UNAUTHORIZED=0');
-      expect(dockerfile).not.toContain('strict-ssl=false');
-    },
-  );
+  it.each(
+    workerBaseTemplates,
+  )('%s extends Node trust with system-managed roots', async (filename) => {
+    const dockerfile = await readBaseTemplate(filename);
+    const trustIndex = dockerfile.indexOf(
+      'ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt',
+    );
+    expect(trustIndex).toBeGreaterThan(dockerfile.indexOf('ca-certificates'));
+    expect(trustIndex).toBeLessThan(dockerfile.indexOf('npm install'));
+    expect(dockerfile).not.toContain('NODE_TLS_REJECT_UNAUTHORIZED=0');
+    expect(dockerfile).not.toContain('strict-ssl=false');
+  });
 
   it.each(workerBaseTemplates)('%s installs pinned pnpm before using it', async (filename) => {
     const dockerfile = await readBaseTemplate(filename);
@@ -93,39 +92,38 @@ describe('Playwright base image templates', () => {
     expect(discovered.sort()).toEqual([...playwrightBaseTemplates].sort());
   });
 
-  it.each(playwrightBaseTemplates)(
-    '%s exports the browser cache path and verifies Chromium launch',
-    async (filename) => {
-      const dockerfile = await readBaseTemplate(filename);
+  it.each(
+    playwrightBaseTemplates,
+  )('%s exports the browser cache path and verifies Chromium launch', async (filename) => {
+    const dockerfile = await readBaseTemplate(filename);
 
-      expect(dockerfile).toContain('ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers');
-      expect(dockerfile).toContain("const { chromium } = require('playwright')");
-      expect(dockerfile).toContain('chromium.launch()');
-      expect(dockerfile).toContain('await browser.close()');
-      expect(dockerfile).toContain('cannot launch as the runtime user');
-      const ownership = dockerfile.indexOf('chown -R autopod:autopod /opt/pw-browsers');
-      const probe = dockerfile.indexOf('RUN node -e "const fs');
-      const launch = dockerfile.indexOf('RUN node -e "const { chromium }');
-      expect(ownership).toBeGreaterThan(dockerfile.indexOf('playwright install --with-deps'));
-      expect(probe).toBeGreaterThan(ownership);
-      expect(launch).toBeGreaterThan(probe);
-      for (const position of [probe, launch]) {
-        expect(
-          dockerfile
-            .slice(0, position)
-            .match(/^USER .+$/gm)
-            ?.at(-1),
-        ).toBe('USER autopod');
-      }
-      expect(dockerfile).toContain(
-        "for (const dir of ['/opt/pw-browsers', '/opt/pw-browsers/.links'])",
-      );
-      expect(dockerfile).toContain("const probe = dir + '/browser-cache-write-check'");
-      expect(dockerfile).toContain('fs.mkdirSync(probe); fs.rmdirSync(probe);');
-      expect(dockerfile).toContain('process.exit(1)');
-      expect(dockerfile).not.toContain('--no-sandbox');
-    },
-  );
+    expect(dockerfile).toContain('ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers');
+    expect(dockerfile).toContain("const { chromium } = require('playwright')");
+    expect(dockerfile).toContain('chromium.launch()');
+    expect(dockerfile).toContain('await browser.close()');
+    expect(dockerfile).toContain('cannot launch as the runtime user');
+    const ownership = dockerfile.indexOf('chown -R autopod:autopod /opt/pw-browsers');
+    const probe = dockerfile.indexOf('RUN node -e "const fs');
+    const launch = dockerfile.indexOf('RUN node -e "const { chromium }');
+    expect(ownership).toBeGreaterThan(dockerfile.indexOf('playwright install --with-deps'));
+    expect(probe).toBeGreaterThan(ownership);
+    expect(launch).toBeGreaterThan(probe);
+    for (const position of [probe, launch]) {
+      expect(
+        dockerfile
+          .slice(0, position)
+          .match(/^USER .+$/gm)
+          ?.at(-1),
+      ).toBe('USER autopod');
+    }
+    expect(dockerfile).toContain(
+      "for (const dir of ['/opt/pw-browsers', '/opt/pw-browsers/.links'])",
+    );
+    expect(dockerfile).toContain("const probe = dir + '/browser-cache-write-check'");
+    expect(dockerfile).toContain('fs.mkdirSync(probe); fs.rmdirSync(probe);');
+    expect(dockerfile).toContain('process.exit(1)');
+    expect(dockerfile).not.toContain('--no-sandbox');
+  });
 });
 
 describe('tmux toolchain', () => {
@@ -146,38 +144,38 @@ describe('tmux toolchain', () => {
 });
 
 describe('PostgreSQL base image templates', () => {
-  it.each(['node22-pw-pg', 'node24-pw-pg'])(
-    '%s includes jq for database validation',
-    async (template) => {
-      const dockerfile = await readBaseTemplate(`Dockerfile.${template}`);
+  it.each([
+    'node22-pw-pg',
+    'node24-pw-pg',
+  ])('%s includes jq for database validation', async (template) => {
+    const dockerfile = await readBaseTemplate(`Dockerfile.${template}`);
 
-      expect(dockerfile).toMatch(/\n\s+jq \\\n/);
-      expect(dockerfile).toContain('command -v jq');
-    },
-  );
+    expect(dockerfile).toMatch(/\n\s+jq \\\n/);
+    expect(dockerfile).toContain('command -v jq');
+  });
 
-  it.each(['node22-pw-pg', 'node24-pw-pg'])(
-    '%s avoids volatile runtime sockets',
-    async (template) => {
-      const dockerfile = await readBaseTemplate(`Dockerfile.${template}`);
-      const initdbWrapper = await readBaseTemplate('node22-pw-pg-initdb.sh');
+  it.each([
+    'node22-pw-pg',
+    'node24-pw-pg',
+  ])('%s avoids volatile runtime sockets', async (template) => {
+    const dockerfile = await readBaseTemplate(`Dockerfile.${template}`);
+    const initdbWrapper = await readBaseTemplate('node22-pw-pg-initdb.sh');
 
-      expect(dockerfile).toContain(`FROM node:${template.startsWith('node24') ? 24 : 22}-slim`);
-      expect(dockerfile).toContain('postgresql-17');
-      expect(dockerfile).toContain('/usr/share/postgresql/17/extension/pgcrypto.control');
-      expect(initdbWrapper).toContain("unix_socket_directories = ''");
-      expect(dockerfile).toContain(
-        'COPY templates/base/node22-pw-pg-initdb.sh /usr/local/bin/initdb',
-      );
-      expect(initdbWrapper).toContain('real_initdb=/usr/lib/postgresql/17/bin/initdb');
-      expect(dockerfile).not.toContain('/var/run/postgresql');
-      expect(dockerfile).toContain('ENV PGDATA=/tmp/pgdata');
-      expect(dockerfile).toContain('ENV PGHOST=127.0.0.1');
-      expect(dockerfile).toContain('ENV PGPORT=5433');
-      expect(dockerfile).toContain('for binary in pg_ctl postgres');
-      expect(dockerfile).not.toContain('pip install');
-    },
-  );
+    expect(dockerfile).toContain(`FROM node:${template.startsWith('node24') ? 24 : 22}-slim`);
+    expect(dockerfile).toContain('postgresql-17');
+    expect(dockerfile).toContain('/usr/share/postgresql/17/extension/pgcrypto.control');
+    expect(initdbWrapper).toContain("unix_socket_directories = ''");
+    expect(dockerfile).toContain(
+      'COPY templates/base/node22-pw-pg-initdb.sh /usr/local/bin/initdb',
+    );
+    expect(initdbWrapper).toContain('real_initdb=/usr/lib/postgresql/17/bin/initdb');
+    expect(dockerfile).not.toContain('/var/run/postgresql');
+    expect(dockerfile).toContain('ENV PGDATA=/tmp/pgdata');
+    expect(dockerfile).toContain('ENV PGHOST=127.0.0.1');
+    expect(dockerfile).toContain('ENV PGPORT=5433');
+    expect(dockerfile).toContain('for binary in pg_ctl postgres');
+    expect(dockerfile).not.toContain('pip install');
+  });
 
   it('makes every successfully initialized cluster TCP-only', async () => {
     const dockerfile = await readBaseTemplate('Dockerfile.node22-pw-pg');
@@ -271,18 +269,17 @@ printf "#unix_socket_directories = '/var/run/postgresql'\\n" > "$pgdata/postgres
 });
 
 describe('Dagger base image templates', () => {
-  it.each(daggerBaseTemplates)(
-    '%s pins and verifies the Dagger CLI at v0.20.8',
-    async (filename, versionArgument) => {
-      const dockerfile = await readBaseTemplate(filename);
+  it.each(
+    daggerBaseTemplates,
+  )('%s pins and verifies the Dagger CLI at v0.20.8', async (filename, versionArgument) => {
+    const dockerfile = await readBaseTemplate(filename);
 
-      expect(dockerfile).toContain(`ARG ${versionArgument}=v0.20.8`);
-      expect(dockerfile).toContain(`DAGGER_VERSION=\${${versionArgument}#v}`);
-      expect(dockerfile).toContain(
-        `dagger version | grep -Eq "(^|[[:space:]])\${${versionArgument}}([[:space:]]|$)"`,
-      );
-    },
-  );
+    expect(dockerfile).toContain(`ARG ${versionArgument}=v0.20.8`);
+    expect(dockerfile).toContain(`DAGGER_VERSION=\${${versionArgument}#v}`);
+    expect(dockerfile).toContain(
+      `dagger version | grep -Eq "(^|[[:space:]])\${${versionArgument}}([[:space:]]|$)"`,
+    );
+  });
 
   it.each(
     daggerBaseTemplates.filter(
@@ -303,15 +300,16 @@ describe('Dagger base image templates', () => {
 
 // Source contracts complement (and do not replace) scripts/smoke-node24-images.sh.
 describe('Node24 family native build contract', () => {
-  it.each(['node24', 'node24-pw', 'node24-pw-pg'])(
-    '%s uses matching bundled runtime and headers',
-    async (template) => {
-      const dockerfile = await readBaseTemplate(`Dockerfile.${template}`);
-      expect(dockerfile).toContain('FROM node:24-slim');
-      expect(dockerfile).toContain('python3 build-essential');
-      expect(dockerfile).toContain('ENV npm_config_nodedir=/usr/local');
-      expect(dockerfile).toContain('USER autopod');
-      expect(dockerfile).not.toContain('.local/node24');
-    },
-  );
+  it.each([
+    'node24',
+    'node24-pw',
+    'node24-pw-pg',
+  ])('%s uses matching bundled runtime and headers', async (template) => {
+    const dockerfile = await readBaseTemplate(`Dockerfile.${template}`);
+    expect(dockerfile).toContain('FROM node:24-slim');
+    expect(dockerfile).toContain('python3 build-essential');
+    expect(dockerfile).toContain('ENV npm_config_nodedir=/usr/local');
+    expect(dockerfile).toContain('USER autopod');
+    expect(dockerfile).not.toContain('.local/node24');
+  });
 });

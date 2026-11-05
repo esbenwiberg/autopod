@@ -12,13 +12,13 @@ import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.
 import type { ReviewerExecutor } from '../interfaces/reviewer-executor.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
+import type { MaxCredentialLineage } from '../providers/index.js';
 import {
   buildProviderEnv,
   persistOpenAiAuthJson,
   persistPiAuthJson,
   persistRefreshedCredentials,
 } from '../providers/index.js';
-import type { MaxCredentialLineage } from '../providers/index.js';
 import type { IsolatedReviewer } from '../validation/isolated-reviewer.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
 import { resolveEffectiveReviewerProfile } from './runtime-resolver.js';

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createWorkspaceFixture, deferred } from '../test-utils/workspace-recovery-helpers.js';
+
 describe('workspace durable deletion lifetime', () => {
   it('removes only after verified cleanup and persists deleted visibility/metadata cleanup through SQLite reopen', async () => {
     const f = createWorkspaceFixture(true);

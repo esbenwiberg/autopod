@@ -11,7 +11,15 @@ import type { EscalationRepository } from './escalation-repository.js';
 import type { PodRepository } from './pod-repository.js';
 
 /** An advisory blocker must not publish a question that its tool will not wait for. */
-export function isBlockingEscalation(request: EscalationRequest): boolean {
+export function isBlockingEscalation(
+  request: Pick<EscalationRequest, 'type' | 'payload'>,
+): boolean {
+  if (
+    request.type === 'report_blocker' &&
+    'kind' in request.payload &&
+    request.payload.kind === 'infrastructure'
+  )
+    return false;
   if (request.type === 'report_blocker')
     return !('requiresResponse' in request.payload) || request.payload.requiresResponse !== false;
   return ['ask_human', 'action_approval', 'request_credential', 'validation_override'].includes(
@@ -93,4 +101,17 @@ export function persistCompletionReply(
     pods.completionJournal?.recordReply(pod, message, actor);
     transitionAfterReply();
   });
+}
+
+/** A chat response is not evidence that a recorded infrastructure need was repaired. */
+export function assertNoInfrastructureBlocker(
+  pods: Pick<PodRepository, 'hasInfrastructureBlocker'>,
+  podId: string,
+): void {
+  if (pods.hasInfrastructureBlocker?.(podId))
+    throw new AutopodError(
+      'Infrastructure remains blocked for this lifecycle. Original work and evidence are retained. Ordinary Resume, tell and nudge cannot repair it; Autopod must diagnose the recorded needs and provision a qualified execution. No in-place chat recovery is supported.',
+      'INFRASTRUCTURE_BLOCKED',
+      409,
+    );
 }

@@ -5,6 +5,7 @@ import {
   unusedLocalPreviewUrl,
 } from '../test-utils/resource-helpers.js';
 import * as proxyModule from './sandbox-preview-proxy.js';
+
 afterEach(() => vi.unstubAllEnvs());
 describe('resource preview caches and transport', () => {
   it('persists native URL through SQLite reopen, reuses only matching container and unexposes once', async () => {

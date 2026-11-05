@@ -8,7 +8,9 @@ async function fixture(disk = false) {
   vi.mocked(f.worktreeManager.pushBranch).mockClear().mockImplementation(mockFixBranchPublication);
   return f;
 }
+
 import { createFixDelivery } from './fix-delivery.js';
+
 describe('validated fix delivery leaves parent merge ownership intact', () => {
   it('refuses queued fix rebase after immutable task custody arrives', async () => {
     const f = await fixture();

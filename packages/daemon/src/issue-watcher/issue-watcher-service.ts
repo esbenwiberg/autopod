@@ -2,13 +2,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   type CreatePodRequest,
+  collectPiiPatternNames,
   type Pod,
   type Profile,
-  type SystemEvent,
-  type WatchedIssue,
-  collectPiiPatternNames,
   parseBriefs,
   processContent,
+  type SystemEvent,
+  type WatchedIssue,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';

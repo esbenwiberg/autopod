@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createWorkspaceFixture } from '../test-utils/workspace-recovery-helpers.js';
+
 describe('workspace branch source ownership', () => {
   it('keeps standalone parent identity and refuses ownerless single-PR series', () => {
     const f = createWorkspaceFixture();

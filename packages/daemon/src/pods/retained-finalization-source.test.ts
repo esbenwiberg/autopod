@@ -196,89 +196,90 @@ async function checkpoint(
 }
 
 describe('immutable retained source authority', () => {
-  it.each(['worker', 'validation', 'provider'] as const)(
-    'refuses persisted unsettled %s ownership without rewriting it',
-    async (kind) => {
-      const f = await fixture();
-      const pod = f.pod();
-      if (kind === 'worker') {
-        f.ctx.podRepo.taskExecutions!.beginRun(f.podId, pod.lifecycleGeneration, 91, {
-          runtime: pod.runtime,
-          model: pod.model,
-          providerAccountId: 'fixture-account',
-        });
-      } else if (kind === 'validation') {
-        const retries = f.ctx.podRepo.taskRetries!;
-        retries.authorize(
-          f.podId,
-          'unsettled-checks',
-          'Fixture explicit validation admission',
-          f.actor,
-        );
-        const previous = f.ctx.db
-          .prepare(
-            'SELECT binding_hash FROM task_retry_attempts WHERE pod_id=? ORDER BY rowid DESC LIMIT 1',
-          )
-          .get(f.podId) as { binding_hash: string };
-        const admitted = retries.admit(
-          f.podId,
-          pod.lifecycleGeneration,
-          { source: null, contract: null, commands: null, environment: null, implementation: null },
-          previous.binding_hash,
-          [],
-        );
-        retries.start(admitted.id);
-        expect(
-          f.ctx.podRepo.validationExecutions!.dispatch(
-            pod,
-            admitted.id,
-            91,
-            f.cm.executionResourceScope,
-          ),
-        ).toBeTruthy();
-        retries.finish(admitted.id, 'nonretryable', 10); // Attempt closure alone is not immutable dispatch settlement.
-      } else {
-        const delivery = f.ctx.podRepo.deliveryLedger!;
-        const intent = delivery.reserve({
-          podId: f.podId,
-          worktreePath: pod.worktreePath!,
-          branch: pod.branch,
-          baseBranch: 'main',
-          task: pod.task,
-          profileName: pod.profileName,
-          profile: f.deps.executionForPod(pod),
-          podModel: pod.model,
-          validationResult: pod.lastValidationResult,
-          filesChanged: 0,
-          linesAdded: 0,
-          linesRemoved: 0,
-          previewUrl: null,
-        });
-        expect(delivery.claim(intent)).toBe(true);
-        delivery.uncertain(intent.id);
-      }
-      const tables = [
-        'task_agent_runs',
-        'task_retry_attempts',
-        'validation_dispatches',
-        'delivery_intents',
-      ];
-      const evidence = () =>
-        tables.map((table) => f.ctx.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
-      const before = evidence();
-      await expect(f.submit()).rejects.toMatchObject({
-        code: {
-          worker: 'TASK_EXECUTION_UNSETTLED',
-          validation: 'VALIDATION_EXECUTION_UNVERIFIED',
-          provider: 'SOURCE_DELIVERY_UNSETTLED',
-        }[kind],
+  it.each([
+    'worker',
+    'validation',
+    'provider',
+  ] as const)('refuses persisted unsettled %s ownership without rewriting it', async (kind) => {
+    const f = await fixture();
+    const pod = f.pod();
+    if (kind === 'worker') {
+      f.ctx.podRepo.taskExecutions!.beginRun(f.podId, pod.lifecycleGeneration, 91, {
+        runtime: pod.runtime,
+        model: pod.model,
+        providerAccountId: 'fixture-account',
       });
-      expect(evidence()).toEqual(before);
-      expect(f.ctx.podRepo.retainedFinalizations!.get(f.podId)).toBeNull();
-      expect(f.cm.stop).not.toHaveBeenCalled();
-      expect(f.provider.mergePr).not.toHaveBeenCalled();
-    },
-  );
+    } else if (kind === 'validation') {
+      const retries = f.ctx.podRepo.taskRetries!;
+      retries.authorize(
+        f.podId,
+        'unsettled-checks',
+        'Fixture explicit validation admission',
+        f.actor,
+      );
+      const previous = f.ctx.db
+        .prepare(
+          'SELECT binding_hash FROM task_retry_attempts WHERE pod_id=? ORDER BY rowid DESC LIMIT 1',
+        )
+        .get(f.podId) as { binding_hash: string };
+      const admitted = retries.admit(
+        f.podId,
+        pod.lifecycleGeneration,
+        { source: null, contract: null, commands: null, environment: null, implementation: null },
+        previous.binding_hash,
+        [],
+      );
+      retries.start(admitted.id);
+      expect(
+        f.ctx.podRepo.validationExecutions!.dispatch(
+          pod,
+          admitted.id,
+          91,
+          f.cm.executionResourceScope,
+        ),
+      ).toBeTruthy();
+      retries.finish(admitted.id, 'nonretryable', 10); // Attempt closure alone is not immutable dispatch settlement.
+    } else {
+      const delivery = f.ctx.podRepo.deliveryLedger!;
+      const intent = delivery.reserve({
+        podId: f.podId,
+        worktreePath: pod.worktreePath!,
+        branch: pod.branch,
+        baseBranch: 'main',
+        task: pod.task,
+        profileName: pod.profileName,
+        profile: f.deps.executionForPod(pod),
+        podModel: pod.model,
+        validationResult: pod.lastValidationResult,
+        filesChanged: 0,
+        linesAdded: 0,
+        linesRemoved: 0,
+        previewUrl: null,
+      });
+      expect(delivery.claim(intent)).toBe(true);
+      delivery.uncertain(intent.id);
+    }
+    const tables = [
+      'task_agent_runs',
+      'task_retry_attempts',
+      'validation_dispatches',
+      'delivery_intents',
+    ];
+    const evidence = () =>
+      tables.map((table) => f.ctx.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+    const before = evidence();
+    await expect(f.submit()).rejects.toMatchObject({
+      code: {
+        worker: 'TASK_EXECUTION_UNSETTLED',
+        validation: 'VALIDATION_EXECUTION_UNVERIFIED',
+        provider: 'SOURCE_DELIVERY_UNSETTLED',
+      }[kind],
+    });
+    expect(evidence()).toEqual(before);
+    expect(f.ctx.podRepo.retainedFinalizations!.get(f.podId)).toBeNull();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+  });
   it('refuses a current container claimed by a different persisted task', async () => {
     const f = await fixture();
     const pod = f.pod();
@@ -301,67 +302,69 @@ describe('immutable retained source authority', () => {
     expect(f.ctx.podRepo.retainedFinalizations!.get(f.podId)).toBeNull();
     expect(f.cm.stop).not.toHaveBeenCalled();
   });
-  it.each(['continuation', 'rewrite', 'repair'] as const)(
-    'records selected %s A and owned no-op descendant C, while provider proves A',
-    async (kind) => {
-      const f = await fixture(kind);
-      const observed = await checkpoint(f, f.selected.commitSha);
-      const receipt = await f.submit();
-      expect(receipt.state).toBe('finalized');
-      expect(f.ctx.podRepo.retainedFinalizations!.get(f.podId)?.evidence).toMatchObject({
-        anchor: { head: f.selected.commitSha, tree: f.selected.treeSha },
-        source: { commitSha: observed },
-        lineage: { head: observed, checkpoints: [observed] },
-        mergedHeadSha: f.selected.commitSha,
-      });
-      expect(f.provider.mergePr).not.toHaveBeenCalled();
-      expect(f.cm.start).not.toHaveBeenCalled();
-      expect(f.cm.kill).not.toHaveBeenCalled();
-    },
-  );
-  it.each(['continuation', 'rewrite', 'repair'] as const)(
-    'refuses clean merged B instead of selected %s A',
-    async (kind) => {
-      const f = await fixture(kind);
-      const cwd = f.pod().worktreePath!;
-      await writeFile(path.join(cwd, 'source.ts'), 'unselected clean substitution\n');
-      await repairGit(cwd, 'add', 'source.ts');
-      await repairGit(
-        cwd,
-        '-c',
-        'user.name=Fixture',
-        '-c',
-        'user.email=fixture@example.invalid',
-        'commit',
-        '-m',
-        'unselected B',
-      );
-      const head = await repairGit(cwd, 'rev-parse', 'HEAD');
-      f.provider.getPrStatus.mockResolvedValue(
-        pendingStatus({ merged: true, sourceTarget: f.target, headSha: head }),
-      );
-      await expect(f.submit()).rejects.toThrow(/source changed/i);
-      expect(f.ctx.podRepo.retainedFinalizations!.get(f.podId)).toBeNull();
-      expect(f.cm.stop).not.toHaveBeenCalled();
-      expect(f.provider.getPrStatus).not.toHaveBeenCalled();
-    },
-  );
-  it.each(['foreign', 'unrelated'] as const)(
-    'rejects same-tree %s checkpoint, even if provider merged it',
-    async (kind) => {
-      const f = await fixture();
-      const head = await checkpoint(
-        f,
-        kind === 'unrelated' ? null : f.selected.commitSha,
-        kind === 'foreign' ? 'another-pod' : f.podId,
-      );
-      f.provider.getPrStatus.mockResolvedValue(
-        pendingStatus({ merged: true, sourceTarget: f.target, headSha: head }),
-      );
-      await expect(f.submit()).rejects.toThrow(/checkpoint lineage/i);
-      expect(f.ctx.podRepo.retainedFinalizations!.get(f.podId)).toBeNull();
-    },
-  );
+  it.each([
+    'continuation',
+    'rewrite',
+    'repair',
+  ] as const)('records selected %s A and owned no-op descendant C, while provider proves A', async (kind) => {
+    const f = await fixture(kind);
+    const observed = await checkpoint(f, f.selected.commitSha);
+    const receipt = await f.submit();
+    expect(receipt.state).toBe('finalized');
+    expect(f.ctx.podRepo.retainedFinalizations!.get(f.podId)?.evidence).toMatchObject({
+      anchor: { head: f.selected.commitSha, tree: f.selected.treeSha },
+      source: { commitSha: observed },
+      lineage: { head: observed, checkpoints: [observed] },
+      mergedHeadSha: f.selected.commitSha,
+    });
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+    expect(f.cm.start).not.toHaveBeenCalled();
+    expect(f.cm.kill).not.toHaveBeenCalled();
+  });
+  it.each([
+    'continuation',
+    'rewrite',
+    'repair',
+  ] as const)('refuses clean merged B instead of selected %s A', async (kind) => {
+    const f = await fixture(kind);
+    const cwd = f.pod().worktreePath!;
+    await writeFile(path.join(cwd, 'source.ts'), 'unselected clean substitution\n');
+    await repairGit(cwd, 'add', 'source.ts');
+    await repairGit(
+      cwd,
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      'commit',
+      '-m',
+      'unselected B',
+    );
+    const head = await repairGit(cwd, 'rev-parse', 'HEAD');
+    f.provider.getPrStatus.mockResolvedValue(
+      pendingStatus({ merged: true, sourceTarget: f.target, headSha: head }),
+    );
+    await expect(f.submit()).rejects.toThrow(/source changed/i);
+    expect(f.ctx.podRepo.retainedFinalizations!.get(f.podId)).toBeNull();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.provider.getPrStatus).not.toHaveBeenCalled();
+  });
+  it.each([
+    'foreign',
+    'unrelated',
+  ] as const)('rejects same-tree %s checkpoint, even if provider merged it', async (kind) => {
+    const f = await fixture();
+    const head = await checkpoint(
+      f,
+      kind === 'unrelated' ? null : f.selected.commitSha,
+      kind === 'foreign' ? 'another-pod' : f.podId,
+    );
+    f.provider.getPrStatus.mockResolvedValue(
+      pendingStatus({ merged: true, sourceTarget: f.target, headSha: head }),
+    );
+    await expect(f.submit()).rejects.toThrow(/checkpoint lineage/i);
+    expect(f.ctx.podRepo.retainedFinalizations!.get(f.podId)).toBeNull();
+  });
   it.each(
     (['continuation', 'rewrite', 'repair'] as const).flatMap((kind) =>
       (['path', 'generation'] as const).map((field) => ({ kind, field })),

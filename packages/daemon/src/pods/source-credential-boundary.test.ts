@@ -26,28 +26,28 @@ describe('daemon-owned source credentials', () => {
       ctx.db.close();
     }
   });
-  it.each(['github', 'ado'] as const)(
-    'rejects direct %s injection before resolving or writing a credential',
-    async (service) => {
-      const ctx = createTestContext();
-      const resolveCredential = vi.fn();
-      const getToken = vi.fn();
-      try {
-        const manager = createPodManager({
-          ...ctx.deps,
-          githubAuth: { resolveCredential } as unknown as NonNullable<typeof ctx.deps.githubAuth>,
-          azureDevOpsAuth: { getToken } as unknown as NonNullable<typeof ctx.deps.azureDevOpsAuth>,
-        });
-        await expect(manager.injectCredential('any-pod', service)).rejects.toMatchObject({
-          code: 'SOURCE_CREDENTIAL_INJECTION_DISABLED',
-          statusCode: 410,
-        });
-        expect(resolveCredential).not.toHaveBeenCalled();
-        expect(getToken).not.toHaveBeenCalled();
-        expect(ctx.deps.containerManagerFactory.get).not.toHaveBeenCalled();
-      } finally {
-        ctx.db.close();
-      }
-    },
-  );
+  it.each([
+    'github',
+    'ado',
+  ] as const)('rejects direct %s injection before resolving or writing a credential', async (service) => {
+    const ctx = createTestContext();
+    const resolveCredential = vi.fn();
+    const getToken = vi.fn();
+    try {
+      const manager = createPodManager({
+        ...ctx.deps,
+        githubAuth: { resolveCredential } as unknown as NonNullable<typeof ctx.deps.githubAuth>,
+        azureDevOpsAuth: { getToken } as unknown as NonNullable<typeof ctx.deps.azureDevOpsAuth>,
+      });
+      await expect(manager.injectCredential('any-pod', service)).rejects.toMatchObject({
+        code: 'SOURCE_CREDENTIAL_INJECTION_DISABLED',
+        statusCode: 410,
+      });
+      expect(resolveCredential).not.toHaveBeenCalled();
+      expect(getToken).not.toHaveBeenCalled();
+      expect(ctx.deps.containerManagerFactory.get).not.toHaveBeenCalled();
+    } finally {
+      ctx.db.close();
+    }
+  });
 });

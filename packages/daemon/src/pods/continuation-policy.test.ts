@@ -2,11 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { StoredScan } from '../security/scan-repository.js';
 import { createTestContext } from '../test-utils/mock-helpers.js';
 import {
-  REWORK_IN_PROGRESS_PREFIX,
   buildManualReworkReason,
+  REWORK_IN_PROGRESS_PREFIX,
   renderPiHandoffFile,
   sanitizeSecurityReworkValue,
 } from './continuation-policy.js';
+
 const cleanups: Array<() => void> = [];
 afterEach(() => {
   for (const close of cleanups.splice(0)) close();
@@ -31,21 +32,23 @@ function fixture() {
   return ctx.podRepo.getOrThrow('policy');
 }
 describe('continuation policy', () => {
-  it.each(['failed', 'review_required', 'killed', 'validated'] as const)(
-    'retains %s manual rework reason',
-    (status) => {
-      const text = buildManualReworkReason({ ...fixture(), status });
-      expect(text).toContain(
-        status === 'failed'
-          ? 'previous attempt failed'
-          : status === 'review_required'
-            ? 'exhausted its validation attempts'
-            : status === 'killed'
-              ? 'previous pod was killed'
-              : 'previous work needs revision',
-      );
-    },
-  );
+  it.each([
+    'failed',
+    'review_required',
+    'killed',
+    'validated',
+  ] as const)('retains %s manual rework reason', (status) => {
+    const text = buildManualReworkReason({ ...fixture(), status });
+    expect(text).toContain(
+      status === 'failed'
+        ? 'previous attempt failed'
+        : status === 'review_required'
+          ? 'exhausted its validation attempts'
+          : status === 'killed'
+            ? 'previous pod was killed'
+            : 'previous work needs revision',
+    );
+  });
   it('prioritizes validation feedback over scanner metadata and retains the original task', () => {
     const pod = fixture();
     const result = buildManualReworkReason({

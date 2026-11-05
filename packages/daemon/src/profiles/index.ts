@@ -1,8 +1,8 @@
-export { createProfileStore, type ProfileStore } from './profile-store.js';
 export {
   buildSourceMap,
+  type FieldSource,
   resolveInheritance,
   validateInheritanceChain,
-  type FieldSource,
 } from './inheritance.js';
-export { validateProfile, type ProfileValidationResult } from './profile-validator.js';
+export { createProfileStore, type ProfileStore } from './profile-store.js';
+export { type ProfileValidationResult, validateProfile } from './profile-validator.js';

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  TEST_WAKEUP_ID as ID,
-  TEST_WAKEUP_KEY as KEY,
   createSandboxWakeupFixture,
   createTestWakeupClient,
+  TEST_WAKEUP_ID as ID,
+  TEST_WAKEUP_KEY as KEY,
 } from '../test-utils/sandbox-wakeup-helpers.js';
 
 const state = (value: string) =>
@@ -141,43 +141,43 @@ describe('retained sandbox wakeup recovery evidence', () => {
     expect(next.listForPod('recovery-pod')[0]?.settledBy).toBe('observed-running');
   });
 
-  it.each(['deadline', 'ownership'] as const)(
-    'cannot settle a retained request from a 429 response after %s changed',
-    async (changed) => {
-      vi.useFakeTimers();
-      const f = createSandboxWakeupFixture(true);
-      let current = true;
-      let respond!: (response: Response) => void;
-      const fetch = vi.fn(async (_url: string | URL, init?: RequestInit) => {
-        if (init?.method !== 'POST') return state('Stopped');
-        return new Promise<Response>((resolve) => {
-          respond = resolve;
-        });
+  it.each([
+    'deadline',
+    'ownership',
+  ] as const)('cannot settle a retained request from a 429 response after %s changed', async (changed) => {
+    vi.useFakeTimers();
+    const f = createSandboxWakeupFixture(true);
+    let current = true;
+    let respond!: (response: Response) => void;
+    const fetch = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      if (init?.method !== 'POST') return state('Stopped');
+      return new Promise<Response>((resolve) => {
+        respond = resolve;
       });
-      const done = expect(
-        createTestWakeupClient(f.journal, fetch).resume(ID, {
-          assertCurrent: () => {
-            if (!current) throw new Error('Superseded owner');
-          },
-        }),
-      ).rejects.toThrow();
-      await vi.advanceTimersByTimeAsync(1);
-      if (changed === 'deadline') {
-        await vi.advanceTimersByTimeAsync(49);
-        await done;
-      } else {
-        current = false;
-      }
-      respond(new Response(null, { status: 429 }));
-      await vi.runAllTimersAsync();
+    });
+    const done = expect(
+      createTestWakeupClient(f.journal, fetch).resume(ID, {
+        assertCurrent: () => {
+          if (!current) throw new Error('Superseded owner');
+        },
+      }),
+    ).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(1);
+    if (changed === 'deadline') {
+      await vi.advanceTimersByTimeAsync(49);
       await done;
-      expect(f.journal.retains(ID)).toBe(true);
-      expect(f.journal.listForPod('recovery-pod')[0]?.evidence.some((e) => e.status === 429)).toBe(
-        false,
-      );
-      expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
-    },
-  );
+    } else {
+      current = false;
+    }
+    respond(new Response(null, { status: 429 }));
+    await vi.runAllTimersAsync();
+    await done;
+    expect(f.journal.retains(ID)).toBe(true);
+    expect(f.journal.listForPod('recovery-pod')[0]?.evidence.some((e) => e.status === 429)).toBe(
+      false,
+    );
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  });
 
   it('does not classify unrelated conflicts as rejected resumes', async () => {
     vi.useFakeTimers();

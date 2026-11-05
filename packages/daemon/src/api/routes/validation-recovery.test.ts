@@ -178,15 +178,15 @@ describe('validation recovery admission and intent', () => {
     await tick();
   });
 
-  it.each([{ expectedGeneration: 999 }, { expectedValidationTimestamp: 'older-result' }])(
-    'refuses stale source/lifecycle inputs %j',
-    async (extra) => {
-      const response = await post('retry-checks', extra);
-      expect(response.statusCode).toBe(409);
-      expect(response.json().error).toBe('STALE_VALIDATION_RECOVERY');
-      expect(f.revalidate).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    { expectedGeneration: 999 },
+    { expectedValidationTimestamp: 'older-result' },
+  ])('refuses stale source/lifecycle inputs %j', async (extra) => {
+    const response = await post('retry-checks', extra);
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error).toBe('STALE_VALIDATION_RECOVERY');
+    expect(f.revalidate).not.toHaveBeenCalled();
+  });
 
   it('a replay after a new result cannot dispatch another run', async () => {
     await post('retry-checks');
@@ -227,43 +227,44 @@ describe('validation recovery admission and intent', () => {
     });
   });
 
-  it.each(['fix-validation', 'retry-checks'])(
-    'refuses unknown validation execution before %s',
-    async (action) => {
-      f.podRepo.update(f.podId, {
-        lastValidationResult: {
-          ...f.result,
-          infrastructureFailure: {
-            phase: 'test',
-            code: 'EXEC_EXIT_UNVERIFIED',
-            message: 'No exit evidence',
-            retryable: false,
-          },
+  it.each([
+    'fix-validation',
+    'retry-checks',
+  ])('refuses unknown validation execution before %s', async (action) => {
+    f.podRepo.update(f.podId, {
+      lastValidationResult: {
+        ...f.result,
+        infrastructureFailure: {
+          phase: 'test',
+          code: 'EXEC_EXIT_UNVERIFIED',
+          message: 'No exit evidence',
+          retryable: false,
         },
-      });
-      const state = (await app.inject({ url: url(), headers })).json();
-      expect(state.fixValidation).toMatchObject({
-        allowed: false,
-        code: 'VALIDATION_EXECUTION_UNVERIFIED',
-      });
-      expect(state.retryChecks).toMatchObject({
-        allowed: false,
-        code: 'VALIDATION_EXECUTION_UNVERIFIED',
-      });
-      expect((await post(action)).statusCode).toBe(409);
-      expect(f.repair).not.toHaveBeenCalled();
-      expect(f.revalidate).not.toHaveBeenCalled();
-    },
-  );
+      },
+    });
+    const state = (await app.inject({ url: url(), headers })).json();
+    expect(state.fixValidation).toMatchObject({
+      allowed: false,
+      code: 'VALIDATION_EXECUTION_UNVERIFIED',
+    });
+    expect(state.retryChecks).toMatchObject({
+      allowed: false,
+      code: 'VALIDATION_EXECUTION_UNVERIFIED',
+    });
+    expect((await post(action)).statusCode).toBe(409);
+    expect(f.repair).not.toHaveBeenCalled();
+    expect(f.revalidate).not.toHaveBeenCalled();
+  });
 
-  it.each(['running', 'validated', 'complete'] as const)(
-    'refuses %s, never turning retry into publication/merge',
-    async (status) => {
-      f.podRepo.update(f.podId, { status });
-      expect((await post('retry-checks')).statusCode).toBe(409);
-      expect(f.revalidate).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'running',
+    'validated',
+    'complete',
+  ] as const)('refuses %s, never turning retry into publication/merge', async (status) => {
+    f.podRepo.update(f.podId, { status });
+    expect((await post('retry-checks')).statusCode).toBe(409);
+    expect(f.revalidate).not.toHaveBeenCalled();
+  });
 
   it('does not offer retry for a passing validation with a downstream delivery failure', async () => {
     f.podRepo.update(f.podId, { lastValidationResult: { ...f.result, overall: 'pass' } });

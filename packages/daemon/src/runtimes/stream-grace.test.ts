@@ -3,8 +3,8 @@ import type { AgentEvent } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  type LivenessProbe,
   awaitExitCodeBounded,
+  type LivenessProbe,
   withIdleLivenessProbe,
   withPostCompleteGrace,
 } from './stream-grace.js';

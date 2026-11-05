@@ -1,10 +1,10 @@
 import type { MemoryEntry, Pod } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
-import { type ProfileLlmClientResult, createProfileAnthropicClient } from '../providers/index.js';
+import { createProfileAnthropicClient, type ProfileLlmClientResult } from '../providers/index.js';
 import {
-  type MemoryReviewer,
   createAnthropicMemoryReviewer,
+  type MemoryReviewer,
 } from '../providers/memory-reviewer.js';
 import type { MemoryRepository } from './memory-repository.js';
 import { prefilterMemories, selectRelevantMemories } from './memory-selector.js';

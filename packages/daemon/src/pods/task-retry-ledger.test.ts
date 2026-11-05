@@ -184,50 +184,48 @@ describe('durable task validation retry admission', () => {
   });
 });
 
-it.each([139, 155])(
-  'upgrades schema %s on disk without changing legacy evidence and retains retry settlement through reopen',
-  async (version) => {
-    const dir = mkdtempSync(join(tmpdir(), 'retry-upgrade-'));
-    const migrations = resolve(import.meta.dirname, '../db/migrations');
-    for (const file of readdirSync(migrations))
-      if (Number.parseInt(file, 10) <= version)
-        copyFileSync(join(migrations, file), join(dir, file));
-    const filename = join(dir, 'state.db');
-    let db = createDatabase(filename, logger);
+it.each([
+  139, 155,
+])('upgrades schema %s on disk without changing legacy evidence and retains retry settlement through reopen', async (version) => {
+  const dir = mkdtempSync(join(tmpdir(), 'retry-upgrade-'));
+  const migrations = resolve(import.meta.dirname, '../db/migrations');
+  for (const file of readdirSync(migrations))
+    if (Number.parseInt(file, 10) <= version) copyFileSync(join(migrations, file), join(dir, file));
+  const filename = join(dir, 'state.db');
+  let db = createDatabase(filename, logger);
+  db.pragma('foreign_keys = ON');
+  try {
+    runMigrations(db, dir, logger);
+    insertTestProfile(db);
+    db.prepare(
+      `INSERT INTO pods (id,profile_name,task,status,model,runtime,branch,user_id,task_summary) VALUES ('old','test-profile','old','failed','model','codex','branch','operator','malformed-preserve')`,
+    ).run();
+    await runMigrationsWithBackups(db, migrations, logger);
+    const repo = createPodRepository(db);
+    repo.taskExecutions?.register('old');
+    const admission = repo.taskRetries?.admit('old', 1, identity, binding, [0]);
+    if (!admission) throw new Error('No admission');
+    repo.taskRetries?.start(admission.id);
+    db.close();
+    db = createDatabase(filename, logger);
     db.pragma('foreign_keys = ON');
-    try {
-      runMigrations(db, dir, logger);
-      insertTestProfile(db);
-      db.prepare(
-        `INSERT INTO pods (id,profile_name,task,status,model,runtime,branch,user_id,task_summary) VALUES ('old','test-profile','old','failed','model','codex','branch','operator','malformed-preserve')`,
-      ).run();
-      await runMigrationsWithBackups(db, migrations, logger);
-      const repo = createPodRepository(db);
-      repo.taskExecutions?.register('old');
-      const admission = repo.taskRetries?.admit('old', 1, identity, binding, [0]);
-      if (!admission) throw new Error('No admission');
-      repo.taskRetries?.start(admission.id);
-      db.close();
-      db = createDatabase(filename, logger);
-      db.pragma('foreign_keys = ON');
-      const recovered = createPodRepository(db).taskRetries;
-      expect(recovered?.recoverInterrupted()).toBe(1);
-      expect(recovered?.state('old')).toMatchObject({
-        executedCount: 1,
-        interruptedCount: 1,
-        latest: { outcome: 'unknown', measuredDurationMs: null },
-      });
-      expect(db.prepare('SELECT task_summary FROM pods WHERE id = ?').get('old')).toEqual({
-        task_summary: 'malformed-preserve',
-      });
-      expect(db.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
-      expect(db.pragma('foreign_key_check')).toEqual([]);
-    } finally {
-      db.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  },
-);
+    const recovered = createPodRepository(db).taskRetries;
+    expect(recovered?.recoverInterrupted()).toBe(1);
+    expect(recovered?.state('old')).toMatchObject({
+      executedCount: 1,
+      interruptedCount: 1,
+      latest: { outcome: 'unknown', measuredDurationMs: null },
+    });
+    expect(db.prepare('SELECT task_summary FROM pods WHERE id = ?').get('old')).toEqual({
+      task_summary: 'malformed-preserve',
+    });
+    expect(db.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
+    expect(db.pragma('foreign_key_check')).toEqual([]);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 it('does not let retry authorization bypass an unanswered durable human decision', () => {
   const { db, ledger } = fixture();
@@ -382,97 +380,94 @@ it('consumes one task-wide Codex recovery allowance even after success and requi
   }
 });
 
-it.each(['auth', 'unknown', null, 'initialization'])(
-  'retains legacy worker failure %s and one scoped authorization across deletion and disk reopen',
-  (category) => {
-    const { db, repo } = fixture();
-    const bound = { runtime: 'codex', model: 'model', providerAccountId: null };
-    const run = repo.taskExecutions?.beginRun('root', 1, 1, bound);
-    if (!run) throw new Error('Missing run');
-    repo.taskExecutions?.finishRun(run, 'failed', category);
-    repo.delete('root');
-    const dir = mkdtempSync(join(tmpdir(), 'worker-auth-retry-'));
-    const file = join(dir, 'state.db');
-    writeFileSync(file, db.serialize());
-    db.close();
-    const reopened = createDatabase(file, logger);
-    try {
-      reopened.pragma('foreign_keys = ON');
-      const next = createPodRepository(reopened);
-      const ledger = next.workerRetries;
-      if (!ledger) throw new Error('Missing worker retries');
-      const state = ledger.state('fix');
-      expect(state).toMatchObject({
-        stage: 'worker',
-        admissionCount: 1,
-        executedCount: category === 'auth' ? 1 : 0,
-        latest: {
-          id: run,
-          outcome: category === 'auth' ? 'nonretryable' : 'unknown',
-          measuredDurationMs: null,
-          identity: unavailableWorkerInputs,
-        },
-      });
-      expect(ledger.state('fix')).toEqual(state);
-      expect(() =>
-        ledger.assertCanAdmit('fix', 1, unavailableWorkerInputs, workerBindingHash(bound), []),
-      ).toThrow(/authentication|nonretryable/);
-      const grant = ledger.authorize(
+it.each([
+  'auth',
+  'unknown',
+  null,
+  'initialization',
+])('retains legacy worker failure %s and one scoped authorization across deletion and disk reopen', (category) => {
+  const { db, repo } = fixture();
+  const bound = { runtime: 'codex', model: 'model', providerAccountId: null };
+  const run = repo.taskExecutions?.beginRun('root', 1, 1, bound);
+  if (!run) throw new Error('Missing run');
+  repo.taskExecutions?.finishRun(run, 'failed', category);
+  repo.delete('root');
+  const dir = mkdtempSync(join(tmpdir(), 'worker-auth-retry-'));
+  const file = join(dir, 'state.db');
+  writeFileSync(file, db.serialize());
+  db.close();
+  const reopened = createDatabase(file, logger);
+  try {
+    reopened.pragma('foreign_keys = ON');
+    const next = createPodRepository(reopened);
+    const ledger = next.workerRetries;
+    if (!ledger) throw new Error('Missing worker retries');
+    const state = ledger.state('fix');
+    expect(state).toMatchObject({
+      stage: 'worker',
+      admissionCount: 1,
+      executedCount: category === 'auth' ? 1 : 0,
+      latest: {
+        id: run,
+        outcome: category === 'auth' ? 'nonretryable' : 'unknown',
+        measuredDurationMs: null,
+        identity: unavailableWorkerInputs,
+      },
+    });
+    expect(ledger.state('fix')).toEqual(state);
+    expect(() =>
+      ledger.assertCanAdmit('fix', 1, unavailableWorkerInputs, workerBindingHash(bound), []),
+    ).toThrow(/authentication|nonretryable/);
+    const grant = ledger.authorize('fix', 'repair-auth', 'Credentials repaired; permit one retry', {
+      type: 'human',
+      userId: 'operator',
+    });
+    expect(() =>
+      ledger.assertCanAdmit(
         'fix',
-        'repair-auth',
-        'Credentials repaired; permit one retry',
-        {
-          type: 'human',
-          userId: 'operator',
-        },
+        1,
+        unavailableWorkerInputs,
+        workerBindingHash({ ...bound, model: 'other' }),
+        [],
+      ),
+    ).toThrow(/binding changed/);
+    expect(ledger.state('fix').authorizations[0]?.usedByAttemptId).toBeNull();
+    const admitted = reopened.transaction(() => {
+      const id = next.taskExecutions?.beginRun('fix', 1, 1, bound);
+      if (!id) throw new Error('Missing run');
+      const value = ledger.admit(
+        'fix',
+        1,
+        unavailableWorkerInputs,
+        workerBindingHash(bound),
+        [],
+        id,
       );
-      expect(() =>
-        ledger.assertCanAdmit(
-          'fix',
-          1,
-          unavailableWorkerInputs,
-          workerBindingHash({ ...bound, model: 'other' }),
-          [],
-        ),
-      ).toThrow(/binding changed/);
-      expect(ledger.state('fix').authorizations[0]?.usedByAttemptId).toBeNull();
-      const admitted = reopened.transaction(() => {
-        const id = next.taskExecutions?.beginRun('fix', 1, 1, bound);
-        if (!id) throw new Error('Missing run');
-        const value = ledger.admit(
-          'fix',
-          1,
-          unavailableWorkerInputs,
-          workerBindingHash(bound),
-          [],
-          id,
-        );
-        ledger.start(id);
-        return value;
-      })();
-      expect(admitted.retryKind).toBe('override');
-      expect(ledger.state('fix').authorizations).toContainEqual(
-        expect.objectContaining({ id: grant.id, usedByAttemptId: admitted.id }),
-      );
-      next.taskExecutions?.finishRun(admitted.id, 'failed', 'auth');
-      ledger.finish(admitted.id, 'nonretryable', 10);
-      expect(() =>
-        ledger.assertCanAdmit('fix', 1, unavailableWorkerInputs, workerBindingHash(bound), []),
-      ).toThrow(/authentication|nonretryable/);
-      expect(ledger.state('rerun').admissionCount).toBe(0);
-      expect(
-        reopened
-          .prepare('SELECT failure_category FROM task_history_task_agent_runs WHERE id = ?')
-          .get(run),
-      ).toEqual({ failure_category: category });
-      expect(reopened.pragma('integrity_check', { simple: true })).toBe('ok');
-      expect(reopened.pragma('foreign_key_check')).toEqual([]);
-    } finally {
-      reopened.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  },
-);
+      ledger.start(id);
+      return value;
+    })();
+    expect(admitted.retryKind).toBe('override');
+    expect(ledger.state('fix').authorizations).toContainEqual(
+      expect.objectContaining({ id: grant.id, usedByAttemptId: admitted.id }),
+    );
+    next.taskExecutions?.finishRun(admitted.id, 'failed', 'auth');
+    ledger.finish(admitted.id, 'nonretryable', 10);
+    expect(() =>
+      ledger.assertCanAdmit('fix', 1, unavailableWorkerInputs, workerBindingHash(bound), []),
+    ).toThrow(/authentication|nonretryable/);
+    expect(ledger.state('rerun').admissionCount).toBe(0);
+    expect(
+      reopened
+        .prepare('SELECT failure_category FROM task_history_task_agent_runs WHERE id = ?')
+        .get(run),
+    ).toEqual({ failure_category: category });
+    expect(reopened.pragma('integrity_check', { simple: true })).toBe('ok');
+    expect(reopened.pragma('foreign_key_check')).toEqual([]);
+  } finally {
+    reopened.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 it('rolls back a worker retry authorization use when initialization fails', () => {
   const { db, repo } = fixture();
@@ -520,89 +515,85 @@ it('does not claim legacy worker reservations executed without terminal executio
   }
 });
 
-it.each([{ backoffs: [] }, { backoffs: [0] }])(
-  'preserves frozen worker transient allowance $backoffs across disk reopen and deletion',
-  ({ backoffs }) => {
-    const { db, repo } = fixture();
-    const bound = { runtime: 'codex', model: 'model', providerAccountId: null };
-    const run = repo.taskExecutions?.beginRun('root', 1, 1, bound);
-    if (!run || !repo.workerRetries) throw new Error('Missing worker ledger');
+it.each([
+  { backoffs: [] },
+  { backoffs: [0] },
+])('preserves frozen worker transient allowance $backoffs across disk reopen and deletion', ({
+  backoffs,
+}) => {
+  const { db, repo } = fixture();
+  const bound = { runtime: 'codex', model: 'model', providerAccountId: null };
+  const run = repo.taskExecutions?.beginRun('root', 1, 1, bound);
+  if (!run || !repo.workerRetries) throw new Error('Missing worker ledger');
+  repo.workerRetries.admit(
+    'root',
+    1,
+    unavailableWorkerInputs,
+    workerBindingHash(bound),
+    backoffs,
+    run,
+  );
+  repo.workerRetries.start(run);
+  repo.taskExecutions?.finishRun(run, 'failed', 'transient');
+  repo.workerRetries.finish(run, 'transient', 10);
+  if (backoffs.length) {
+    const next = repo.taskExecutions?.beginRun('fix', 1, 1, bound);
+    if (!next) throw new Error('Missing retry run');
     repo.workerRetries.admit(
-      'root',
+      'fix',
       1,
       unavailableWorkerInputs,
       workerBindingHash(bound),
-      backoffs,
-      run,
+      [0, 0],
+      next,
     );
-    repo.workerRetries.start(run);
-    repo.taskExecutions?.finishRun(run, 'failed', 'transient');
-    repo.workerRetries.finish(run, 'transient', 10);
-    if (backoffs.length) {
-      const next = repo.taskExecutions?.beginRun('fix', 1, 1, bound);
-      if (!next) throw new Error('Missing retry run');
-      repo.workerRetries.admit(
+    repo.workerRetries.start(next);
+    repo.taskExecutions?.finishRun(next, 'failed', 'provider_unavailable');
+    repo.workerRetries.finish(next, 'transient', 15);
+  }
+  repo.delete('root');
+  const dir = mkdtempSync(join(tmpdir(), 'worker-transient-retry-'));
+  const file = join(dir, 'state.db');
+  writeFileSync(file, db.serialize());
+  db.close();
+  const reopened = createDatabase(file, logger);
+  try {
+    reopened.pragma('foreign_keys = ON');
+    const next = createPodRepository(reopened);
+    const ledger = next.workerRetries;
+    if (!ledger) throw new Error('Missing worker retries');
+    expect(ledger.state('fix')).toMatchObject({
+      backoffsMs: backoffs,
+      transientRetryCount: backoffs.length,
+      admissionCount: 1 + backoffs.length,
+      executedCount: 1 + backoffs.length,
+      authorizationRequired: true,
+      retryFailure: 'transient',
+    });
+    expect(() =>
+      ledger.assertCanAdmit('fix', 1, unavailableWorkerInputs, workerBindingHash(bound), [0, 0, 0]),
+    ).toThrow('budget exhausted');
+    ledger.authorize('fix', 'one-retry', 'Provider checked', {
+      type: 'human',
+      userId: 'operator',
+    });
+    expect(() =>
+      ledger.assertCanAdmit(
         'fix',
         1,
         unavailableWorkerInputs,
-        workerBindingHash(bound),
+        workerBindingHash({ ...bound, providerAccountId: 'other-account' }),
         [0, 0],
-        next,
-      );
-      repo.workerRetries.start(next);
-      repo.taskExecutions?.finishRun(next, 'failed', 'provider_unavailable');
-      repo.workerRetries.finish(next, 'transient', 15);
-    }
-    repo.delete('root');
-    const dir = mkdtempSync(join(tmpdir(), 'worker-transient-retry-'));
-    const file = join(dir, 'state.db');
-    writeFileSync(file, db.serialize());
-    db.close();
-    const reopened = createDatabase(file, logger);
-    try {
-      reopened.pragma('foreign_keys = ON');
-      const next = createPodRepository(reopened);
-      const ledger = next.workerRetries;
-      if (!ledger) throw new Error('Missing worker retries');
-      expect(ledger.state('fix')).toMatchObject({
-        backoffsMs: backoffs,
-        transientRetryCount: backoffs.length,
-        admissionCount: 1 + backoffs.length,
-        executedCount: 1 + backoffs.length,
-        authorizationRequired: true,
-        retryFailure: 'transient',
-      });
-      expect(() =>
-        ledger.assertCanAdmit(
-          'fix',
-          1,
-          unavailableWorkerInputs,
-          workerBindingHash(bound),
-          [0, 0, 0],
-        ),
-      ).toThrow('budget exhausted');
-      ledger.authorize('fix', 'one-retry', 'Provider checked', {
-        type: 'human',
-        userId: 'operator',
-      });
-      expect(() =>
-        ledger.assertCanAdmit(
-          'fix',
-          1,
-          unavailableWorkerInputs,
-          workerBindingHash({ ...bound, providerAccountId: 'other-account' }),
-          [0, 0],
-        ),
-      ).toThrow('binding changed');
-      expect(ledger.state('fix').authorizations[0]?.usedByAttemptId).toBeNull();
-      expect(ledger.state('rerun').admissionCount).toBe(0);
-      expect(reopened.pragma('integrity_check', { simple: true })).toBe('ok');
-    } finally {
-      reopened.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  },
-);
+      ),
+    ).toThrow('binding changed');
+    expect(ledger.state('fix').authorizations[0]?.usedByAttemptId).toBeNull();
+    expect(ledger.state('rerun').admissionCount).toBe(0);
+    expect(reopened.pragma('integrity_check', { simple: true })).toBe('ok');
+  } finally {
+    reopened.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 it('does not mint a new worker allowance for legacy transient history without a persisted policy', () => {
   const { db, repo } = fixture();

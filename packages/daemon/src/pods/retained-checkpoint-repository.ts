@@ -14,7 +14,9 @@ import {
   createRetainedFinalizationRepository,
   ownsRetainedFinalization,
 } from './retained-finalization-repository.js';
+
 export type { CheckpointRecoveryRequest } from '@autopod/shared';
+
 import type Database from 'better-sqlite3';
 import type { RetainedExecutionSelection } from '../configuration/retained-continuation-launch.js';
 import type { prepareRetainedCheckpointWorkspace } from '../worktrees/retained-checkpoint-workspace.js';

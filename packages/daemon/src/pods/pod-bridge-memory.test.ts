@@ -5,9 +5,9 @@ import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-help
 import { createMemoryRepository } from './memory-repository.js';
 import { createMemoryUsageRepository } from './memory-usage-repository.js';
 import {
-  type SessionBridgeDependencies,
   __resetSuggestBudgetForTests,
   createSessionBridge,
+  type SessionBridgeDependencies,
 } from './pod-bridge-impl.js';
 
 type StubSession = {

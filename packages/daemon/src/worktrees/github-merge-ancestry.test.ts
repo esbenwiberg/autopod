@@ -42,23 +42,27 @@ describe('GitHub already-merged source ancestry', () => {
     expect(observe).toHaveBeenCalledTimes(2);
     expect(compare).toHaveBeenCalledWith(config.publishedHeadSha, config.mergedHeadSha);
   });
-  it.each(['diverged', 'behind', 'unknown', 'base', 'merge-base', 'behind-count'])(
-    'refuses %s comparison',
-    async (kind) => {
-      const bad = { ...comparison };
-      if (kind === 'base') bad.base_commit = { sha: 'c'.repeat(40) };
-      else if (kind === 'merge-base') bad.merge_base_commit = { sha: 'c'.repeat(40) };
-      else if (kind === 'behind-count') bad.behind_by = 1;
-      else bad.status = kind;
-      expect(
-        await verifyGitHubMergedSourceAncestry(
-          config,
-          async () => status,
-          async () => bad,
-        ),
-      ).toBeNull();
-    },
-  );
+  it.each([
+    'diverged',
+    'behind',
+    'unknown',
+    'base',
+    'merge-base',
+    'behind-count',
+  ])('refuses %s comparison', async (kind) => {
+    const bad = { ...comparison };
+    if (kind === 'base') bad.base_commit = { sha: 'c'.repeat(40) };
+    else if (kind === 'merge-base') bad.merge_base_commit = { sha: 'c'.repeat(40) };
+    else if (kind === 'behind-count') bad.behind_by = 1;
+    else bad.status = kind;
+    expect(
+      await verifyGitHubMergedSourceAncestry(
+        config,
+        async () => status,
+        async () => bad,
+      ),
+    ).toBeNull();
+  });
   it.each([false, true])('refuses unmerged disposition (open: %s)', async (open) => {
     const compare = vi.fn();
     expect(
@@ -79,37 +83,37 @@ describe('GitHub already-merged source ancestry', () => {
       verifyGitHubMergedSourceAncestry(config, observe, async () => comparison),
     ).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
   });
-  it.each([true, false])(
-    'bounds real PR observations and avoids open-PR CI scans (merged: %s)',
-    async (merged) => {
-      const pr = {
-        number: 113,
-        state: merged ? 'closed' : 'open',
-        merged,
-        head: {
-          sha: config.mergedHeadSha,
-          ref: config.expectedTarget.branch,
-          repo: { full_name: 'org/repo' },
-        },
-        base: { ref: 'main', repo: { full_name: 'org/repo' } },
-      };
-      const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
-        const address = String(url);
-        if (address.endsWith('/pulls/113')) return new Response(JSON.stringify(pr));
-        if (address.includes('/compare/')) return new Response(JSON.stringify(comparison));
-        throw new Error('Unexpected CI scan or provider mutation');
-      });
-      const manager = new GitHubApiPrManager({
-        pat: 'fixture-only',
-        logger: pino({ level: 'silent' }),
-      });
-      const proof = await manager.verifyMergedSourceAncestry(config);
-      expect(Boolean(proof)).toBe(merged);
-      expect(fetch).toHaveBeenCalledTimes(merged ? 3 : 1);
-      for (const [, options] of fetch.mock.calls)
-        expect(options).toMatchObject({ signal: expect.any(AbortSignal) });
-    },
-  );
+  it.each([
+    true,
+    false,
+  ])('bounds real PR observations and avoids open-PR CI scans (merged: %s)', async (merged) => {
+    const pr = {
+      number: 113,
+      state: merged ? 'closed' : 'open',
+      merged,
+      head: {
+        sha: config.mergedHeadSha,
+        ref: config.expectedTarget.branch,
+        repo: { full_name: 'org/repo' },
+      },
+      base: { ref: 'main', repo: { full_name: 'org/repo' } },
+    };
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const address = String(url);
+      if (address.endsWith('/pulls/113')) return new Response(JSON.stringify(pr));
+      if (address.includes('/compare/')) return new Response(JSON.stringify(comparison));
+      throw new Error('Unexpected CI scan or provider mutation');
+    });
+    const manager = new GitHubApiPrManager({
+      pat: 'fixture-only',
+      logger: pino({ level: 'silent' }),
+    });
+    const proof = await manager.verifyMergedSourceAncestry(config);
+    expect(Boolean(proof)).toBe(merged);
+    expect(fetch).toHaveBeenCalledTimes(merged ? 3 : 1);
+    for (const [, options] of fetch.mock.calls)
+      expect(options).toMatchObject({ signal: expect.any(AbortSignal) });
+  });
 
   it('uses authenticated bounded GitHub API read-only requests', async () => {
     const fetch = vi

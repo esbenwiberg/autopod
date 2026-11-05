@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process';
 import {
   mkdir,
   mkdtemp,
-  readFile,
   readdir,
+  readFile,
   rename,
   rm,
   symlink,
@@ -149,53 +149,53 @@ describe('retained source location protection', () => {
     { name: 'held before unmount', holdBeforeMove: true, autoGc: false },
     { name: 'already unavailable at admission', holdBeforeMove: false, autoGc: false },
     { name: 'automatic GC during fetch', holdBeforeMove: true, autoGc: true },
-  ])(
-    'preserves unavailable linked-worktree metadata: $name',
-    async ({ holdBeforeMove, autoGc }) => {
-      const { f, origin, manager, source } = await materializedFixture(holdBeforeMove);
-      const pointer = await readFile(path.join(source.worktreePath, '.git'), 'utf8');
-      const admin = path.resolve(source.worktreePath, pointer.trim().replace(/^gitdir: /, ''));
-      const head = await readFile(path.join(admin, 'HEAD'), 'utf8');
-      // Exercise immediate eligibility rather than waiting for Git's default expiry.
-      await git(source.bareRepoPath, 'config', 'gc.worktreePruneExpire', 'now');
-      const offline = path.join(f.root, 'temporarily-offline');
-      await rename(source.worktreePath, offline);
-      if (!holdBeforeMove) f.hold([source.worktreePath]);
-      if (autoGc) {
-        await git(source.bareRepoPath, 'repack', '-ad');
-        await git(source.bareRepoPath, 'config', 'gc.autoPackLimit', '1');
-        await git(source.bareRepoPath, 'config', 'gc.autoDetach', 'false');
-        await git(source.bareRepoPath, 'config', 'fetch.unpackLimit', '1');
-        await writeFile(path.join(origin, 'additional.txt'), 'independent upstream commit');
-        await git(origin, 'add', 'additional.txt');
-        await git(origin, 'commit', '-m', 'advance independent main');
-      }
-      const other = await manager.create({
-        repoUrl: origin,
-        branch: 'other',
-        baseBranch: 'main',
-        sessionId: 'other',
-      });
-      expect(await readFile(path.join(admin, 'HEAD'), 'utf8')).toBe(head);
-      if (autoGc) {
-        // Two packs were eligible: automatic GC actually repacked them, without pruning custody.
-        expect(
-          (await readdir(path.join(source.bareRepoPath, 'objects', 'pack'))).filter((name) =>
-            name.endsWith('.pack'),
-          ),
-        ).toHaveLength(1);
-      }
-      await manager.cleanup(other.worktreePath);
-      expect(await readFile(path.join(admin, 'HEAD'), 'utf8')).toBe(head);
-      await rename(offline, source.worktreePath);
-      expect((await git(source.worktreePath, 'rev-parse', 'HEAD')).stdout.trim()).toBe(
-        source.startCommitSha,
-      );
-      expect(await readFile(path.join(source.worktreePath, 'report.json'), 'utf8')).toBe(
-        'unpublished report evidence',
-      );
-    },
-  );
+  ])('preserves unavailable linked-worktree metadata: $name', async ({
+    holdBeforeMove,
+    autoGc,
+  }) => {
+    const { f, origin, manager, source } = await materializedFixture(holdBeforeMove);
+    const pointer = await readFile(path.join(source.worktreePath, '.git'), 'utf8');
+    const admin = path.resolve(source.worktreePath, pointer.trim().replace(/^gitdir: /, ''));
+    const head = await readFile(path.join(admin, 'HEAD'), 'utf8');
+    // Exercise immediate eligibility rather than waiting for Git's default expiry.
+    await git(source.bareRepoPath, 'config', 'gc.worktreePruneExpire', 'now');
+    const offline = path.join(f.root, 'temporarily-offline');
+    await rename(source.worktreePath, offline);
+    if (!holdBeforeMove) f.hold([source.worktreePath]);
+    if (autoGc) {
+      await git(source.bareRepoPath, 'repack', '-ad');
+      await git(source.bareRepoPath, 'config', 'gc.autoPackLimit', '1');
+      await git(source.bareRepoPath, 'config', 'gc.autoDetach', 'false');
+      await git(source.bareRepoPath, 'config', 'fetch.unpackLimit', '1');
+      await writeFile(path.join(origin, 'additional.txt'), 'independent upstream commit');
+      await git(origin, 'add', 'additional.txt');
+      await git(origin, 'commit', '-m', 'advance independent main');
+    }
+    const other = await manager.create({
+      repoUrl: origin,
+      branch: 'other',
+      baseBranch: 'main',
+      sessionId: 'other',
+    });
+    expect(await readFile(path.join(admin, 'HEAD'), 'utf8')).toBe(head);
+    if (autoGc) {
+      // Two packs were eligible: automatic GC actually repacked them, without pruning custody.
+      expect(
+        (await readdir(path.join(source.bareRepoPath, 'objects', 'pack'))).filter((name) =>
+          name.endsWith('.pack'),
+        ),
+      ).toHaveLength(1);
+    }
+    await manager.cleanup(other.worktreePath);
+    expect(await readFile(path.join(admin, 'HEAD'), 'utf8')).toBe(head);
+    await rename(offline, source.worktreePath);
+    expect((await git(source.worktreePath, 'rev-parse', 'HEAD')).stdout.trim()).toBe(
+      source.startCommitSha,
+    );
+    expect(await readFile(path.join(source.worktreePath, 'report.json'), 'utf8')).toBe(
+      'unpublished report evidence',
+    );
+  });
 
   it('protects existing aliases and missing descendants reached through a symlink', async () => {
     const f = await fixture();

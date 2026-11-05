@@ -30,35 +30,32 @@ describe('retained finalization transport', () => {
     );
   });
 
-  it.each(['stop-retain', 'complete-merged'] as const)(
-    'POSTs only the exact %s request and preserves pending',
-    async (mode) => {
-      const request = { ...finalizationRequest(), mode };
-      const receipt = { ...finalizationReceipt('pending', request), podId: 'pod/id' };
-      mockFetch.mockResolvedValueOnce(jsonResponse(receipt, 202));
-      await expect(client.finalizeRetained('pod/id', request)).resolves.toEqual(receipt);
-      expect(mockFetch).toHaveBeenCalledExactlyOnceWith(
-        'https://daemon.invalid/pods/pod%2Fid/retained-finalization',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-token' },
-          body: JSON.stringify(request),
-        },
-      );
-    },
-  );
+  it.each([
+    'stop-retain',
+    'complete-merged',
+  ] as const)('POSTs only the exact %s request and preserves pending', async (mode) => {
+    const request = { ...finalizationRequest(), mode };
+    const receipt = { ...finalizationReceipt('pending', request), podId: 'pod/id' };
+    mockFetch.mockResolvedValueOnce(jsonResponse(receipt, 202));
+    await expect(client.finalizeRetained('pod/id', request)).resolves.toEqual(receipt);
+    expect(mockFetch).toHaveBeenCalledExactlyOnceWith(
+      'https://daemon.invalid/pods/pod%2Fid/retained-finalization',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-token' },
+        body: JSON.stringify(request),
+      },
+    );
+  });
 
-  it.each([401, 403, 404, 409, 422, 500, 503])(
-    'surfaces HTTP %i without automatic retry or fallback',
-    async (status) => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'Finalization refused' }, status));
-      await expect(
-        client.finalizeRetained('retained-pod', finalizationRequest()),
-      ).rejects.toThrow();
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-      expect(getToken).toHaveBeenCalledTimes(1);
-    },
-  );
+  it.each([
+    401, 403, 404, 409, 422, 500, 503,
+  ])('surfaces HTTP %i without automatic retry or fallback', async (status) => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'Finalization refused' }, status));
+    await expect(client.finalizeRetained('retained-pod', finalizationRequest())).rejects.toThrow();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(getToken).toHaveBeenCalledTimes(1);
+  });
 
   it('retains daemon refusal details', async () => {
     mockFetch.mockResolvedValueOnce(
@@ -108,18 +105,15 @@ describe('retained finalization transport', () => {
     ...(['requestKey', 'expectedGeneration', 'expectedBinding', 'mode', 'reason'] as const).map(
       (key) => [key, { request: { ...finalizationRequest(), [key]: 'different' } }],
     ),
-  ])(
-    'rejects an uncorrelated or unsupported %s receipt without replay',
-    async (_field, changes) => {
-      mockFetch.mockResolvedValueOnce(
-        jsonResponse({ ...finalizationReceipt('finalized'), ...(changes as object) }),
-      );
-      await expect(client.finalizeRetained('retained-pod', finalizationRequest())).rejects.toThrow(
-        'Unconfirmed finalization response',
-      );
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-    },
-  );
+  ])('rejects an uncorrelated or unsupported %s receipt without replay', async (_field, changes) => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ ...finalizationReceipt('finalized'), ...(changes as object) }),
+    );
+    await expect(client.finalizeRetained('retained-pod', finalizationRequest())).rejects.toThrow(
+      'Unconfirmed finalization response',
+    );
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
 
   it('does not retry an unreadable response after submission', async () => {
     mockFetch.mockResolvedValueOnce(

@@ -10,7 +10,7 @@ import { createDatabase } from '../db/connection.js';
 import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createNudgeRepository } from './nudge-repository.js';
-import { type SessionBridgeDependencies, createSessionBridge } from './pod-bridge-impl.js';
+import { createSessionBridge, type SessionBridgeDependencies } from './pod-bridge-impl.js';
 import { createPodRepository } from './pod-repository.js';
 import { createReworkRequestRepository } from './rework-request-repository.js';
 
@@ -85,51 +85,53 @@ function decode(result: { content: unknown }) {
   };
 }
 
-it.each(['check_messages', 'report_task_summary', 'ask_ai', 'validate_in_browser'] as const)(
-  'retains guidance when the actual %s MCP response is dropped',
-  async (tool) => {
-    const db = createTestDb();
-    const { nudges } = seed(db);
-    nudges.queue('worker', 'Preserve the selected work and inspect the outstanding finding.');
-    const { client, serverTransport, close } = await connect(db);
-    try {
-      const originalSend = serverTransport.send.bind(serverTransport);
-      let dropped = false;
-      vi.spyOn(serverTransport, 'send').mockImplementation(async (message) => {
-        if ('result' in message && !dropped) {
-          dropped = true;
-          return;
-        }
-        await originalSend(message);
-      });
-      await expect(
-        client.callTool(
-          {
-            name: tool,
-            arguments:
-              tool === 'report_task_summary'
-                ? { actualSummary: 'Done', deviations: [] }
-                : tool === 'ask_ai'
-                  ? { question: 'Help' }
-                  : tool === 'validate_in_browser'
-                    ? { url: 'http://localhost', checks: ['works'] }
-                    : {},
-          },
-          undefined,
-          { timeout: 100 },
-        ),
-      ).rejects.toThrow();
-      expect(dropped).toBe(true);
-      expect(nudges.hasPending('worker')).toBe(true);
-      expect(nudges.listPending('worker').map((row) => row.message)).toEqual([
-        'Preserve the selected work and inspect the outstanding finding.',
-      ]);
-    } finally {
-      await close();
-      db.close();
-    }
-  },
-);
+it.each([
+  'check_messages',
+  'report_task_summary',
+  'ask_ai',
+  'validate_in_browser',
+] as const)('retains guidance when the actual %s MCP response is dropped', async (tool) => {
+  const db = createTestDb();
+  const { nudges } = seed(db);
+  nudges.queue('worker', 'Preserve the selected work and inspect the outstanding finding.');
+  const { client, serverTransport, close } = await connect(db);
+  try {
+    const originalSend = serverTransport.send.bind(serverTransport);
+    let dropped = false;
+    vi.spyOn(serverTransport, 'send').mockImplementation(async (message) => {
+      if ('result' in message && !dropped) {
+        dropped = true;
+        return;
+      }
+      await originalSend(message);
+    });
+    await expect(
+      client.callTool(
+        {
+          name: tool,
+          arguments:
+            tool === 'report_task_summary'
+              ? { actualSummary: 'Done', deviations: [] }
+              : tool === 'ask_ai'
+                ? { question: 'Help' }
+                : tool === 'validate_in_browser'
+                  ? { url: 'http://localhost', checks: ['works'] }
+                  : {},
+        },
+        undefined,
+        { timeout: 100 },
+      ),
+    ).rejects.toThrow();
+    expect(dropped).toBe(true);
+    expect(nudges.hasPending('worker')).toBe(true);
+    expect(nudges.listPending('worker').map((row) => row.message)).toEqual([
+      'Preserve the selected work and inspect the outstanding finding.',
+    ]);
+  } finally {
+    await close();
+    db.close();
+  }
+});
 
 it('replays a receipt after disk reopen and loses neither late guidance nor a dropped acknowledgment response', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'guidance-reopen-'));
@@ -208,48 +210,46 @@ it('replays a receipt after disk reopen and loses neither late guidance nor a dr
   }
 });
 
-it.each(['run', 'generation'] as const)(
-  'rejects an old %s receipt and delivers the saved message to the replacement worker',
-  (mode) => {
-    const db = createTestDb();
-    const { repo, runId, nudges } = seed(db);
-    try {
-      nudges.queue('worker', 'Preserve across replacement');
-      const original = nudges.readPending('worker');
-      if (!original) throw new Error('Missing original');
-      expect(() => nudges.acknowledgeDelivery('other', original.deliveryId)).toThrow(
-        'Unknown operator guidance',
-      );
-      repo.taskExecutions?.finishRun(runId, 'completed');
-      if (mode === 'generation') repo.incrementLifecycleGeneration('worker');
-      const generation = repo.getOrThrow('worker').lifecycleGeneration;
-      repo.taskExecutions?.beginRun('worker', generation, 2, {
-        runtime: 'codex',
-        model: 'model',
-        providerAccountId: null,
-      });
-      expect(() => nudges.acknowledgeDelivery('worker', original.deliveryId)).toThrow(
-        'older worker',
-      );
-      expect(() =>
-        db
-          .prepare(
-            'INSERT INTO operator_guidance_acknowledgments(delivery_id,acknowledged_at) VALUES (?,?)',
-          )
-          .run(original.deliveryId, new Date().toISOString()),
-      ).toThrow('stale worker');
-      expect(nudges.hasPending('worker')).toBe(true);
-      const replacement = nudges.readPending('worker');
-      if (!replacement) throw new Error('Missing replacement');
-      expect(replacement.deliveryId).not.toBe(original.deliveryId);
-      expect(replacement.messages).toEqual(original.messages);
-      nudges.acknowledgeDelivery('worker', replacement.deliveryId);
-      expect(nudges.hasPending('worker')).toBe(false);
-    } finally {
-      db.close();
-    }
-  },
-);
+it.each([
+  'run',
+  'generation',
+] as const)('rejects an old %s receipt and delivers the saved message to the replacement worker', (mode) => {
+  const db = createTestDb();
+  const { repo, runId, nudges } = seed(db);
+  try {
+    nudges.queue('worker', 'Preserve across replacement');
+    const original = nudges.readPending('worker');
+    if (!original) throw new Error('Missing original');
+    expect(() => nudges.acknowledgeDelivery('other', original.deliveryId)).toThrow(
+      'Unknown operator guidance',
+    );
+    repo.taskExecutions?.finishRun(runId, 'completed');
+    if (mode === 'generation') repo.incrementLifecycleGeneration('worker');
+    const generation = repo.getOrThrow('worker').lifecycleGeneration;
+    repo.taskExecutions?.beginRun('worker', generation, 2, {
+      runtime: 'codex',
+      model: 'model',
+      providerAccountId: null,
+    });
+    expect(() => nudges.acknowledgeDelivery('worker', original.deliveryId)).toThrow('older worker');
+    expect(() =>
+      db
+        .prepare(
+          'INSERT INTO operator_guidance_acknowledgments(delivery_id,acknowledged_at) VALUES (?,?)',
+        )
+        .run(original.deliveryId, new Date().toISOString()),
+    ).toThrow('stale worker');
+    expect(nudges.hasPending('worker')).toBe(true);
+    const replacement = nudges.readPending('worker');
+    if (!replacement) throw new Error('Missing replacement');
+    expect(replacement.deliveryId).not.toBe(original.deliveryId);
+    expect(replacement.messages).toEqual(original.messages);
+    nudges.acknowledgeDelivery('worker', replacement.deliveryId);
+    expect(nudges.hasPending('worker')).toBe(false);
+  } finally {
+    db.close();
+  }
+});
 
 it('bounds batches, retains their exact membership, and rolls back partial acknowledgment', () => {
   const db = createTestDb();

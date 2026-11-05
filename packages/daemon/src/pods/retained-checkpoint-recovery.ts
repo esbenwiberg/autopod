@@ -25,17 +25,17 @@ import {
   assertCheckpointRepository,
   prepareRetainedCheckpointWorkspace,
 } from '../worktrees/retained-checkpoint-workspace.js';
-import { rewriteHash } from './approval-source-rewrite-repository.js';
 import { rewriteConfiguration } from './approval-source-rewrite.js';
+import { rewriteHash } from './approval-source-rewrite-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import {
   type CheckpointOutcomeRequest,
   type CheckpointRecoveryBinding,
   type CheckpointRecoveryRecord,
   type CheckpointRecoveryRequest,
-  type PreparedCheckpoint,
   checkpointError,
   checkpointHash,
+  type PreparedCheckpoint,
 } from './retained-checkpoint-repository.js';
 import {
   assertValidationExecutionSettled,

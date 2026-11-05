@@ -1,4 +1,3 @@
-import { AutopodError, CONTAINER_HOME_DIR, PROVIDER_CATALOG } from '@autopod/shared';
 import type {
   FoundryCredentials,
   GenericApiKeyCredentials,
@@ -10,6 +9,7 @@ import type {
   PublicProviderCatalog,
   RuntimeType,
 } from '@autopod/shared';
+import { AutopodError, CONTAINER_HOME_DIR, PROVIDER_CATALOG } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ProfileStore } from '../profiles/index.js';

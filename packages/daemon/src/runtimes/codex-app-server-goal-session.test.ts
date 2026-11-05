@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CodexAppServerGoalSession } from './codex-app-server-goal-session.js';
 import captured from './fixtures/codex-goal-usage-live.json';
+
 const native = {
   threadId: 'native',
   objective: 'Tests pass',

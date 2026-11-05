@@ -1,10 +1,10 @@
 import {
+  generateId,
   type ScanCheckpoint,
   type ScanDecision,
   type ScanDetectorName,
   type ScanFinding,
   type ScanSeverity,
-  generateId,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createResourceFixture, deferred, result } from '../test-utils/resource-helpers.js';
 import { captureValidationMutationGuard } from './validation-recovery-policy.js';
 import { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
+
 describe('resource commit polling ownership', () => {
   it('retains physical source and reports when an entered poll waits across an immutable dispatch', async () => {
     vi.useFakeTimers();

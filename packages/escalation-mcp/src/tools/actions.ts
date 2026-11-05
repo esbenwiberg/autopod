@@ -1,5 +1,5 @@
-import { generateId } from '@autopod/shared';
 import type { ActionDefinition, EscalationRequest } from '@autopod/shared';
+import { generateId } from '@autopod/shared';
 import type { PendingRequests } from '../pending-requests.js';
 import type { PodBridge } from '../pod-bridge.js';
 

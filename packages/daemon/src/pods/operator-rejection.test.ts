@@ -2,7 +2,23 @@ import { describe, expect, it, vi } from 'vitest';
 import { createPassingValidationResult } from '../test-utils/mock-helpers.js';
 import { createOperatorFixture } from '../test-utils/operator-helpers.js';
 import { AgentContinuationSupersededError } from './continuation-preflight.js';
+
 describe('operator rejection lifetime', () => {
+  it('retains infrastructure reports and counters before any rejection rework or dispatch', async () => {
+    const f = createOperatorFixture();
+    f.infrastructure();
+    f.mainCaptured.transition(f.pod(), 'failed');
+    f.podRepo.update('prepare', { validationAttempts: 2 });
+    const before = f.pod();
+    await expect(
+      f.rejection().rejectSession.call(f.calls, 'prepare', 'Go on'),
+    ).rejects.toMatchObject({ code: 'INFRASTRUCTURE_BLOCKED' });
+    expect(f.pod()).toEqual(before);
+    expect(f.rejectionCaptured.beginGoalTaskRework).not.toHaveBeenCalled();
+    expect(f.rejectionCaptured.taskFeedbackEvents).not.toHaveBeenCalled();
+    expect(f.cm.start).not.toHaveBeenCalled();
+    expect(f.calls.consumeAgentEvents).not.toHaveBeenCalled();
+  });
   it('rejects ineligible states before rework or container effects', async () => {
     const f = createOperatorFixture();
     await expect(

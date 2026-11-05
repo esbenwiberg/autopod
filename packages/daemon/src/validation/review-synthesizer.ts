@@ -171,7 +171,9 @@ export function parseSynthesis(
       merged.push({ finding: normalizedFinding, sourceIds });
       accepted.push(normalizedFinding);
     } else throw new Error('invalid synthesis action');
-    sourceIds.forEach((id) => used.add(id));
+    sourceIds.forEach((id) => {
+      used.add(id);
+    });
   }
   if (used.size !== candidates.length) throw new Error('synthesis omitted candidate');
   return { accepted, rejected, merged };

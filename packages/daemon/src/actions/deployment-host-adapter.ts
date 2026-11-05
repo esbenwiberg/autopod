@@ -6,7 +6,7 @@ import { DockerContainerManager } from '../containers/docker-container-manager.j
 import type { DockerNetworkManager } from '../containers/docker-network-manager.js';
 import type { DeploymentRun } from './deployment-run-repository.js';
 import { type DeploymentTarget, deploymentTargetSchema } from './deployment-service.js';
-import { IsolatedDeployRunner, type IsolatedDeploymentInput } from './isolated-deploy-runner.js';
+import { type IsolatedDeploymentInput, IsolatedDeployRunner } from './isolated-deploy-runner.js';
 
 /** The only composed deployment execution path. Never mounts a checkout or invokes a host shell. */
 export function createDeploymentHostAdapter(options: {

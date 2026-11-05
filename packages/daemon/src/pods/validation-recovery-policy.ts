@@ -5,6 +5,7 @@ import type {
   ExecOptions,
 } from '../interfaces/container-manager.js';
 import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
+import { assertNoInfrastructureBlocker } from './escalation-coordinator.js';
 import type { PodRepository } from './pod-repository.js';
 import { captureValidationOwnership } from './validation-ownership.js';
 
@@ -80,6 +81,20 @@ export function captureValidationMutationGuard(
   };
   assertCurrent();
   return assertCurrent;
+}
+
+/** Validation/rebase/delivery must not reuse a reported execution. Keep the
+ * generic mutation guard available to preservation and diagnostic controls. */
+export function captureValidationDispatchGuard(
+  repo: Pick<PodRepository, 'getOrThrow' | 'validationExecutions' | 'hasInfrastructureBlocker'>,
+  pod: Pod,
+): () => Pod {
+  assertNoInfrastructureBlocker(repo, pod.id);
+  const assertOwnership = captureValidationMutationGuard(repo, pod);
+  return () => {
+    assertNoInfrastructureBlocker(repo, pod.id);
+    return assertOwnership();
+  };
 }
 
 /** This action retries failed checks, not artifact collection, publication or merge. */

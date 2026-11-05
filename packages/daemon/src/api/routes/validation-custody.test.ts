@@ -92,26 +92,27 @@ async function fixture() {
   };
 }
 describe('public controls retain validation custody', () => {
-  it.each(['published', 'outcome', 'missing'] as const)(
-    'preview refuses %s before any provider call and retains physical reports',
-    async (kind) => {
-      const f = await fixture();
-      f.dispatch(kind);
-      vi.mocked(f.containerManager.getStatus).mockResolvedValue('stopped');
-      vi.mocked(f.containerManager.start).mockImplementation(async () => {
-        await writeFile(path.join(f.dir, 'partial.txt'), 'changed by preview resume');
-        throw new Error('Unsafe preview reached resource');
-      });
-      const response = await f.post('preview');
-      expect(response.statusCode).toBe(409);
-      expect(f.containerManager.getStatus).not.toHaveBeenCalled();
-      expect(f.containerManager.start).not.toHaveBeenCalled();
-      expect(f.containerManager.execInContainer).not.toHaveBeenCalled();
-      expect(await readFile(path.join(f.dir, 'partial.txt'), 'utf8')).toBe(
-        'original failed assertion',
-      );
-    },
-  );
+  it.each([
+    'published',
+    'outcome',
+    'missing',
+  ] as const)('preview refuses %s before any provider call and retains physical reports', async (kind) => {
+    const f = await fixture();
+    f.dispatch(kind);
+    vi.mocked(f.containerManager.getStatus).mockResolvedValue('stopped');
+    vi.mocked(f.containerManager.start).mockImplementation(async () => {
+      await writeFile(path.join(f.dir, 'partial.txt'), 'changed by preview resume');
+      throw new Error('Unsafe preview reached resource');
+    });
+    const response = await f.post('preview');
+    expect(response.statusCode).toBe(409);
+    expect(f.containerManager.getStatus).not.toHaveBeenCalled();
+    expect(f.containerManager.start).not.toHaveBeenCalled();
+    expect(f.containerManager.execInContainer).not.toHaveBeenCalled();
+    expect(await readFile(path.join(f.dir, 'partial.txt'), 'utf8')).toBe(
+      'original failed assertion',
+    );
+  });
 
   it('serves authenticated exact unpublished output without releasing task custody', async () => {
     const f = await fixture();
@@ -172,22 +173,23 @@ describe('public controls retain validation custody', () => {
     );
   });
 
-  it.each(['published', 'outcome', 'missing'] as const)(
-    'force-complete refuses %s execution before destructive cleanup',
-    async (kind) => {
-      const f = await fixture();
-      f.dispatch(kind);
-      const before = f.podRepo.getOrThrow(f.podId);
-      const response = await f.post('force-complete');
-      expect(response.statusCode).toBe(409);
-      expect(response.json().code).toBe('VALIDATION_EXECUTION_UNVERIFIED');
-      expect(f.containerManager.kill).not.toHaveBeenCalled();
-      expect(f.podRepo.getOrThrow(f.podId)).toEqual(before);
-      expect(await readFile(path.join(f.dir, 'partial.txt'), 'utf8')).toBe(
-        'original failed assertion',
-      );
-    },
-  );
+  it.each([
+    'published',
+    'outcome',
+    'missing',
+  ] as const)('force-complete refuses %s execution before destructive cleanup', async (kind) => {
+    const f = await fixture();
+    f.dispatch(kind);
+    const before = f.podRepo.getOrThrow(f.podId);
+    const response = await f.post('force-complete');
+    expect(response.statusCode).toBe(409);
+    expect(response.json().code).toBe('VALIDATION_EXECUTION_UNVERIFIED');
+    expect(f.containerManager.kill).not.toHaveBeenCalled();
+    expect(f.podRepo.getOrThrow(f.podId)).toEqual(before);
+    expect(await readFile(path.join(f.dir, 'partial.txt'), 'utf8')).toBe(
+      'original failed assertion',
+    );
+  });
   it('rechecks a dispatch created during awaited cleanup before deleting the resource', async () => {
     const f = await fixture();
     f.deps.beforeContainerCleanup = async () => {
@@ -201,20 +203,20 @@ describe('public controls retain validation custody', () => {
       'original failed assertion',
     );
   });
-  it.each(['recover-worktree', 'update-from-base'])(
-    '%s refuses before wake,checkpoint or rebase',
-    async (route) => {
-      const f = await fixture();
-      f.dispatch('missing');
-      if (route === 'recover-worktree') f.podRepo.update(f.podId, { worktreeCompromised: true });
-      const response = await f.post(route);
-      expect(response.statusCode).toBe(409);
-      expect(f.containerManager.start).not.toHaveBeenCalled();
-      expect(f.containerManager.execInContainer).not.toHaveBeenCalled();
-      expect(f.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
-      expect(await readFile(path.join(f.dir, 'partial.txt'), 'utf8')).toBe(
-        'original failed assertion',
-      );
-    },
-  );
+  it.each([
+    'recover-worktree',
+    'update-from-base',
+  ])('%s refuses before wake,checkpoint or rebase', async (route) => {
+    const f = await fixture();
+    f.dispatch('missing');
+    if (route === 'recover-worktree') f.podRepo.update(f.podId, { worktreeCompromised: true });
+    const response = await f.post(route);
+    expect(response.statusCode).toBe(409);
+    expect(f.containerManager.start).not.toHaveBeenCalled();
+    expect(f.containerManager.execInContainer).not.toHaveBeenCalled();
+    expect(f.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+    expect(await readFile(path.join(f.dir, 'partial.txt'), 'utf8')).toBe(
+      'original failed assertion',
+    );
+  });
 });

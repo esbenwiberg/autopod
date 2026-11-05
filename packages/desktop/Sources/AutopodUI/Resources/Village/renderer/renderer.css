@@ -1,6 +1,9 @@
 :root {
   color-scheme: dark;
-  font: 13px -apple-system, BlinkMacSystemFont, sans-serif;
+  font:
+    13px -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
   color: #ebece9;
   background: #172629;
 }

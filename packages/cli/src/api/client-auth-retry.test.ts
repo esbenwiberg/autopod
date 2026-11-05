@@ -77,31 +77,33 @@ describe('AutopodClient 401 response ownership', () => {
     }
   });
 
-  it.each(['absent', 'closed', 'errored', 'cancel rejects'] as const)(
-    'preserves the retry when the rejected body is %s',
-    async (state) => {
-      const body =
-        state === 'absent'
-          ? null
-          : new ReadableStream({
-              start: (controller) => {
-                if (state === 'closed') controller.close();
-                if (state === 'errored') controller.error(new Error('body stream failed'));
-              },
-              cancel: () => {
-                if (state === 'cancel rejects') return Promise.reject(new Error('cancel failed'));
-              },
-            });
-      mockFetch
-        .mockResolvedValueOnce(new Response(body, { status: 401 }))
-        .mockResolvedValueOnce(
-          new Response('[]', { headers: { 'content-type': 'application/json' } }),
-        );
-      await expect(client.listSessions()).resolves.toEqual([]);
-      expect(getToken).toHaveBeenCalledTimes(2);
-      expect(mockFetch).toHaveBeenCalledTimes(2);
-    },
-  );
+  it.each([
+    'absent',
+    'closed',
+    'errored',
+    'cancel rejects',
+  ] as const)('preserves the retry when the rejected body is %s', async (state) => {
+    const body =
+      state === 'absent'
+        ? null
+        : new ReadableStream({
+            start: (controller) => {
+              if (state === 'closed') controller.close();
+              if (state === 'errored') controller.error(new Error('body stream failed'));
+            },
+            cancel: () => {
+              if (state === 'cancel rejects') return Promise.reject(new Error('cancel failed'));
+            },
+          });
+    mockFetch
+      .mockResolvedValueOnce(new Response(body, { status: 401 }))
+      .mockResolvedValueOnce(
+        new Response('[]', { headers: { 'content-type': 'application/json' } }),
+      );
+    await expect(client.listSessions()).resolves.toEqual([]);
+    expect(getToken).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
 
   it('releases the rejected body even when refreshing the token fails', async () => {
     let cancelled = false;

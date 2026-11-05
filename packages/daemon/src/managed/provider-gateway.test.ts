@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { afterEach, expect, it, vi } from 'vitest';
-import { type ManagedFixture, fixture } from '../test-utils/managed-fixture.js';
+import { fixture, type ManagedFixture } from '../test-utils/managed-fixture.js';
 import { type BoundedProviderTransport, ManagedProviderFailure } from './bounded-provider.js';
 import { ManagedPodService } from './managed-service.js';
 import { ManagedProviderGateway } from './provider-gateway.js';
 import { ManagedQuotaBroker } from './quota-broker.js';
+
 let f: ManagedFixture;
 const gateways: ManagedProviderGateway[] = [];
 afterEach(() => {
@@ -205,48 +206,47 @@ it('rejects changed prompt, transport or request limit on replay and new keys', 
   }
   expect(x.generate).toHaveBeenCalledTimes(1);
 });
-it.each(['expiry', 'duration', 'revoked', 'stop', 'revision', 'foreign', 'closed'])(
-  'rejects %s before cached delivery',
-  async (kind) => {
-    const x = await setup();
-    await x.call();
-    if (kind === 'expiry') f.advance(f.request.effectiveGrant.budget.expiresAt);
-    if (kind === 'duration') f.advance(100 + f.request.effectiveGrant.budget.maxDurationSeconds);
+it.each([
+  'expiry',
+  'duration',
+  'revoked',
+  'stop',
+  'revision',
+  'foreign',
+  'closed',
+])('rejects %s before cached delivery', async (kind) => {
+  const x = await setup();
+  await x.call();
+  if (kind === 'expiry') f.advance(f.request.effectiveGrant.budget.expiresAt);
+  if (kind === 'duration') f.advance(100 + f.request.effectiveGrant.budget.maxDurationSeconds);
+  if (kind === 'revoked') f.db.prepare('UPDATE managed_pods SET revoked=1').run();
+  if (kind === 'stop') f.db.prepare('UPDATE managed_pods SET stop_requested=1').run();
+  if (kind === 'revision') f.db.prepare('UPDATE managed_pods SET grant_revision=2').run();
+  if (kind === 'closed') x.gateway.close();
+  await expect(
+    kind === 'foreign'
+      ? x.gateway.invoke('other-installation', x.handle.podId, 1, 'request-one', 'Read README', 100)
+      : x.call(),
+  ).rejects.toThrow();
+  expect(x.generate).toHaveBeenCalledTimes(1);
+});
+it.each([
+  'revoked',
+  'expiry',
+  'closed',
+])('aborts in-flight %s retaining the allowance', async (kind) => {
+  const x = await setup();
+  x.generate.mockImplementation(async (_route, _prompt, _tokens, signal) => {
     if (kind === 'revoked') f.db.prepare('UPDATE managed_pods SET revoked=1').run();
-    if (kind === 'stop') f.db.prepare('UPDATE managed_pods SET stop_requested=1').run();
-    if (kind === 'revision') f.db.prepare('UPDATE managed_pods SET grant_revision=2').run();
-    if (kind === 'closed') x.gateway.close();
-    await expect(
-      kind === 'foreign'
-        ? x.gateway.invoke(
-            'other-installation',
-            x.handle.podId,
-            1,
-            'request-one',
-            'Read README',
-            100,
-          )
-        : x.call(),
-    ).rejects.toThrow();
-    expect(x.generate).toHaveBeenCalledTimes(1);
-  },
-);
-it.each(['revoked', 'expiry', 'closed'])(
-  'aborts in-flight %s retaining the allowance',
-  async (kind) => {
-    const x = await setup();
-    x.generate.mockImplementation(async (_route, _prompt, _tokens, signal) => {
-      if (kind === 'revoked') f.db.prepare('UPDATE managed_pods SET revoked=1').run();
-      if (kind === 'expiry') f.advance(f.request.effectiveGrant.budget.expiresAt);
-      if (kind === 'closed') queueMicrotask(() => x.gateway.close());
-      return new Promise((_resolve, reject) => {
-        signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
-      });
+    if (kind === 'expiry') f.advance(f.request.effectiveGrant.budget.expiresAt);
+    if (kind === 'closed') queueMicrotask(() => x.gateway.close());
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
     });
-    await expect(x.call()).rejects.toThrow('attempt-unavailable');
-    expect(x.service.row('installation', x.handle.podId).consumed_tokens).toBe(100);
-  },
-);
+  });
+  await expect(x.call()).rejects.toThrow('attempt-unavailable');
+  expect(x.service.row('installation', x.handle.podId).consumed_tokens).toBe(100);
+});
 it('unsupported preflight creates no reservation or provider call', async () => {
   const x = await setup();
   x.transport.preflight = () => {

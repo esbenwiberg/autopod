@@ -10,88 +10,88 @@ import { resolveLaunchExecutionSettings } from './launch-execution-settings.js';
 import { createLaunchSnapshotRepository } from './launch-snapshot.js';
 
 describe('pod manager launch snapshot integration', () => {
-  it.each(['queued', 'validated'] as const)(
-    'reconciles composed children admitted after a %s parent',
-    async (parentStatus) => {
-      const ctx = createTestContext();
-      try {
-        const { services, store } = createTestConfiguration(ctx.db);
-        const accounts = createProviderAccountStore(ctx.db);
-        accounts.create({
-          id: 'account',
-          name: 'Main',
+  it.each([
+    'queued',
+    'validated',
+  ] as const)('reconciles composed children admitted after a %s parent', async (parentStatus) => {
+    const ctx = createTestContext();
+    try {
+      const { services, store } = createTestConfiguration(ctx.db);
+      const accounts = createProviderAccountStore(ctx.db);
+      accounts.create({
+        id: 'account',
+        name: 'Main',
+        provider: 'openai',
+        credentials: {
           provider: 'openai',
-          credentials: {
-            provider: 'openai',
-            authJson: JSON.stringify({ OPENAI_API_KEY: 'fixture' }),
-          },
+          authJson: JSON.stringify({ OPENAI_API_KEY: 'fixture' }),
+        },
+      });
+      services.resolveAgentRoute = async (route) => resolveLaunchAgentRoute(route, accounts);
+      store.write({
+        kind: 'ai',
+        id: 'ai',
+        name: 'AI',
+        expectedRevision: 1,
+        payload: { main: { providerAccountId: 'account', runtime: 'codex', model: 'gpt-5' } },
+      });
+      const snapshots = createLaunchSnapshotRepository(ctx.db, store);
+      const enqueueSession = vi.fn((id: string) => {
+        expect(snapshots.get(id)).not.toBeNull();
+      });
+      const manager = createPodManager({
+        ...ctx.deps,
+        enqueueSession,
+        providerAccountStore: accounts,
+        launchConfiguration: {
+          read: snapshots.get,
+          executionSettings: (config) =>
+            resolveLaunchExecutionSettings(config, { image: `sha256:${'a'.repeat(64)}` }),
+          assertCurrentCapabilities: async () => {},
+          prepareEnvironment: async () => 'fixture',
+        },
+      });
+      const create = manager.createResolvedSession?.bind(manager);
+      if (!create) throw new Error('Missing fixture admission');
+      const admit = (task: string, parents: string[] = []) =>
+        admitLaunch({
+          request: { repositoryId: 'repo-a', task, work: { dependsOnPodIds: parents } },
+          actorId: 'user',
+          services,
+          snapshots,
+          createPod: (config) => create(config, 'user').id,
         });
-        services.resolveAgentRoute = async (route) => resolveLaunchAgentRoute(route, accounts);
-        store.write({
-          kind: 'ai',
-          id: 'ai',
-          name: 'AI',
-          expectedRevision: 1,
-          payload: { main: { providerAccountId: 'account', runtime: 'codex', model: 'gpt-5' } },
+      const parent = await admit('Research');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      // Establish the prior lifecycle receipt without running a model in this integration fixture.
+      ctx.podRepo.update(parent.podId, { status: parentStatus });
+      enqueueSession.mockClear();
+      const child = await admit('Implement', [parent.podId]);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      if (parentStatus === 'validated') {
+        expect(enqueueSession).toHaveBeenCalledExactlyOnceWith(child.podId);
+        expect(ctx.podRepo.getOrThrow(child.podId)).toMatchObject({
+          baseBranch: 'main',
+          dependencyStartedAt: expect.any(String),
         });
-        const snapshots = createLaunchSnapshotRepository(ctx.db, store);
-        const enqueueSession = vi.fn((id: string) => {
-          expect(snapshots.get(id)).not.toBeNull();
-        });
-        const manager = createPodManager({
-          ...ctx.deps,
-          enqueueSession,
-          providerAccountStore: accounts,
-          launchConfiguration: {
-            read: snapshots.get,
-            executionSettings: (config) =>
-              resolveLaunchExecutionSettings(config, { image: `sha256:${'a'.repeat(64)}` }),
-            assertCurrentCapabilities: async () => {},
-            prepareEnvironment: async () => 'fixture',
-          },
-        });
-        const create = manager.createResolvedSession?.bind(manager);
-        if (!create) throw new Error('Missing fixture admission');
-        const admit = (task: string, parents: string[] = []) =>
-          admitLaunch({
-            request: { repositoryId: 'repo-a', task, work: { dependsOnPodIds: parents } },
-            actorId: 'user',
-            services,
-            snapshots,
-            createPod: (config) => create(config, 'user').id,
-          });
-        const parent = await admit('Research');
-        await new Promise<void>((resolve) => setImmediate(resolve));
-        // Establish the prior lifecycle receipt without running a model in this integration fixture.
-        ctx.podRepo.update(parent.podId, { status: parentStatus });
-        enqueueSession.mockClear();
-        const child = await admit('Implement', [parent.podId]);
-        await new Promise<void>((resolve) => setImmediate(resolve));
-        if (parentStatus === 'validated') {
-          expect(enqueueSession).toHaveBeenCalledExactlyOnceWith(child.podId);
-          expect(ctx.podRepo.getOrThrow(child.podId)).toMatchObject({
-            baseBranch: 'main',
-            dependencyStartedAt: expect.any(String),
-          });
-          const childConfig = snapshots.get(child.podId);
-          if (!childConfig?.repository) throw new Error('Missing child repository');
-          expect(
-            ctx.podRepo.dispatchPreflight?.inspect(
-              child.podId,
-              1,
-              childConfig.repository.config.remote,
-              'main',
-              'a'.repeat(40),
-            ).status,
-          ).toBe('admitted');
-          manager.rehydrateDependentSessions();
-          expect(ctx.podRepo.getOrThrow(child.podId).baseBranch).toBe('main');
-        } else expect(enqueueSession).not.toHaveBeenCalled();
-      } finally {
-        ctx.db.close();
-      }
-    },
-  );
+        const childConfig = snapshots.get(child.podId);
+        if (!childConfig?.repository) throw new Error('Missing child repository');
+        expect(
+          ctx.podRepo.dispatchPreflight?.inspect(
+            child.podId,
+            1,
+            childConfig.repository.config.remote,
+            'main',
+            'a'.repeat(40),
+          ).status,
+        ).toBe('admitted');
+        manager.rehydrateDependentSessions();
+        expect(ctx.podRepo.getOrThrow(child.podId).baseBranch).toBe('main');
+      } else expect(enqueueSession).not.toHaveBeenCalled();
+    } finally {
+      ctx.db.close();
+    }
+  });
 
   it('admits Goal state with the snapshot atomically and refuses ordinary completion or execution', async () => {
     const ctx = createTestContext();
@@ -184,82 +184,82 @@ describe('pod manager launch snapshot integration', () => {
       ctx.db.close();
     }
   });
-  it.each(['anthropic', 'openai'] as const)(
-    'binds a reviewer independently from a %s main account',
-    async (mainProvider) => {
-      const ctx = createTestContext();
-      try {
-        const { services, store } = createTestConfiguration(ctx.db);
-        const accounts = createProviderAccountStore(ctx.db);
-        const reviewerProvider = mainProvider === 'anthropic' ? 'openai' : 'anthropic';
-        for (const [id, provider] of [
-          ['account', mainProvider],
-          ['reviewer-account', reviewerProvider],
-        ] as const) {
-          accounts.create({
-            id,
-            name: id,
-            provider,
-            credentials:
-              provider === 'anthropic'
-                ? { provider, apiKey: 'fixture-key' }
-                : { provider, authJson: JSON.stringify({ OPENAI_API_KEY: 'fixture-key' }) },
-          });
-        }
-        services.resolveAgentRoute = async (route) => resolveLaunchAgentRoute(route, accounts);
-        const route = (provider: typeof mainProvider, providerAccountId: string) => ({
-          providerAccountId,
-          runtime: provider === 'anthropic' ? 'claude' : 'codex',
-          model: provider === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-5',
+  it.each([
+    'anthropic',
+    'openai',
+  ] as const)('binds a reviewer independently from a %s main account', async (mainProvider) => {
+    const ctx = createTestContext();
+    try {
+      const { services, store } = createTestConfiguration(ctx.db);
+      const accounts = createProviderAccountStore(ctx.db);
+      const reviewerProvider = mainProvider === 'anthropic' ? 'openai' : 'anthropic';
+      for (const [id, provider] of [
+        ['account', mainProvider],
+        ['reviewer-account', reviewerProvider],
+      ] as const) {
+        accounts.create({
+          id,
+          name: id,
+          provider,
+          credentials:
+            provider === 'anthropic'
+              ? { provider, apiKey: 'fixture-key' }
+              : { provider, authJson: JSON.stringify({ OPENAI_API_KEY: 'fixture-key' }) },
         });
-        store.write({
-          kind: 'ai',
-          id: 'ai',
-          name: 'Main AI',
-          expectedRevision: 1,
-          payload: {
-            main: route(mainProvider, 'account'),
-            reviewer: { mode: 'independent', route: route(reviewerProvider, 'reviewer-account') },
-          },
-        });
-        const snapshots = createLaunchSnapshotRepository(ctx.db, store);
-        const manager = createPodManager({
-          ...ctx.deps,
-          providerAccountStore: accounts,
-          launchConfiguration: {
-            read: snapshots.get,
-            executionSettings: (config) =>
-              resolveLaunchExecutionSettings(config, { image: `sha256:${'a'.repeat(64)}` }),
-            assertCurrentCapabilities: async () => {},
-            prepareEnvironment: async () => `sha256:${'a'.repeat(64)}`,
-          },
-        });
-        const launch = await admitLaunch({
-          request: { repositoryId: 'repo-a', task: 'Fix' },
-          actorId: 'user',
-          services,
-          snapshots,
-          createPod: (config) => {
-            if (!manager.createResolvedSession) throw new Error('Expected composable admission');
-            return manager.createResolvedSession(config, 'user').id;
-          },
-        });
-        const pod = ctx.podRepo.getOrThrow(launch.podId);
-        expect(manager.getReviewerConfig(pod).profile).toMatchObject({
-          modelProvider: reviewerProvider,
-          providerAccountId: 'reviewer-account',
-          defaultRuntime: route(reviewerProvider, '').runtime,
-        });
-        // Main account revocation must not redirect the independent reviewer to another account.
-        accounts.updateCredentials('account', null);
-        expect(manager.getReviewerConfig(pod).profile.providerAccountId).toBe('reviewer-account');
-        accounts.updateCredentials('reviewer-account', null);
-        expect(() => manager.getReviewerConfig(pod)).toThrow('not authenticated');
-      } finally {
-        ctx.db.close();
       }
-    },
-  );
+      services.resolveAgentRoute = async (route) => resolveLaunchAgentRoute(route, accounts);
+      const route = (provider: typeof mainProvider, providerAccountId: string) => ({
+        providerAccountId,
+        runtime: provider === 'anthropic' ? 'claude' : 'codex',
+        model: provider === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-5',
+      });
+      store.write({
+        kind: 'ai',
+        id: 'ai',
+        name: 'Main AI',
+        expectedRevision: 1,
+        payload: {
+          main: route(mainProvider, 'account'),
+          reviewer: { mode: 'independent', route: route(reviewerProvider, 'reviewer-account') },
+        },
+      });
+      const snapshots = createLaunchSnapshotRepository(ctx.db, store);
+      const manager = createPodManager({
+        ...ctx.deps,
+        providerAccountStore: accounts,
+        launchConfiguration: {
+          read: snapshots.get,
+          executionSettings: (config) =>
+            resolveLaunchExecutionSettings(config, { image: `sha256:${'a'.repeat(64)}` }),
+          assertCurrentCapabilities: async () => {},
+          prepareEnvironment: async () => `sha256:${'a'.repeat(64)}`,
+        },
+      });
+      const launch = await admitLaunch({
+        request: { repositoryId: 'repo-a', task: 'Fix' },
+        actorId: 'user',
+        services,
+        snapshots,
+        createPod: (config) => {
+          if (!manager.createResolvedSession) throw new Error('Expected composable admission');
+          return manager.createResolvedSession(config, 'user').id;
+        },
+      });
+      const pod = ctx.podRepo.getOrThrow(launch.podId);
+      expect(manager.getReviewerConfig(pod).profile).toMatchObject({
+        modelProvider: reviewerProvider,
+        providerAccountId: 'reviewer-account',
+        defaultRuntime: route(reviewerProvider, '').runtime,
+      });
+      // Main account revocation must not redirect the independent reviewer to another account.
+      accounts.updateCredentials('account', null);
+      expect(manager.getReviewerConfig(pod).profile.providerAccountId).toBe('reviewer-account');
+      accounts.updateCredentials('reviewer-account', null);
+      expect(() => manager.getReviewerConfig(pod)).toThrow('not authenticated');
+    } finally {
+      ctx.db.close();
+    }
+  });
   it('creates queued pods from one shared profile and reads their snapshots after edits, archive and manager restart', async () => {
     const ctx = createTestContext();
     try {

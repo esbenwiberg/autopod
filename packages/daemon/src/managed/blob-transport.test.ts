@@ -29,18 +29,15 @@ describe('managed identity Blob conditional create', () => {
   it.each([
     [409, 'BlobAlreadyExists'],
     [412, 'ConditionNotMet'],
-  ] as const)(
-    'accepts exact replay after Azure %s/%s only after reading the original bytes',
-    async (status, code) => {
-      const { value, request } = transport(status, code, 'frozen');
-      await expect(
-        value.putIfAbsent('artifact/bundle.tar.gz', Buffer.from('frozen')),
-      ).resolves.toBeUndefined();
-      expect(request).toHaveBeenCalledTimes(2);
-      expect(request.mock.calls[0]?.[1]?.headers).toMatchObject({ 'If-None-Match': '*' });
-      expect(request.mock.calls[1]?.[1]?.method).toBe('GET');
-    },
-  );
+  ] as const)('accepts exact replay after Azure %s/%s only after reading the original bytes', async (status, code) => {
+    const { value, request } = transport(status, code, 'frozen');
+    await expect(
+      value.putIfAbsent('artifact/bundle.tar.gz', Buffer.from('frozen')),
+    ).resolves.toBeUndefined();
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[0]?.[1]?.headers).toMatchObject({ 'If-None-Match': '*' });
+    expect(request.mock.calls[1]?.[1]?.method).toBe('GET');
+  });
 
   it.each([
     [409, 'BlobAlreadyExists'],
@@ -52,14 +49,15 @@ describe('managed identity Blob conditional create', () => {
     ).rejects.toThrow('artifact-immutable-conflict');
   });
 
-  it.each(['LeaseAlreadyPresent', 'BlobImmutableDueToPolicy', ''])(
-    'does not reinterpret unrelated 409/%s as an existing-object replay',
-    async (code) => {
-      const { value, request } = transport(409, code, 'frozen');
-      await expect(
-        value.putIfAbsent('artifact/bundle.tar.gz', Buffer.from('frozen')),
-      ).rejects.toThrow('artifact-store-unavailable');
-      expect(request).toHaveBeenCalledTimes(1);
-    },
-  );
+  it.each([
+    'LeaseAlreadyPresent',
+    'BlobImmutableDueToPolicy',
+    '',
+  ])('does not reinterpret unrelated 409/%s as an existing-object replay', async (code) => {
+    const { value, request } = transport(409, code, 'frozen');
+    await expect(
+      value.putIfAbsent('artifact/bundle.tar.gz', Buffer.from('frozen')),
+    ).rejects.toThrow('artifact-store-unavailable');
+    expect(request).toHaveBeenCalledTimes(1);
+  });
 });

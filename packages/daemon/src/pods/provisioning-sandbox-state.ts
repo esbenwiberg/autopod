@@ -6,7 +6,7 @@ import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.
 import { claudeStateDirForPod } from '../runtimes/claude-state-store.js';
 import { codexStateDirForPod } from '../runtimes/codex-state-store.js';
 import { ProviderAttemptSupersededError } from './provider-attempt-repository.js';
-import { POD_ARTIFACTS_CONTAINER_DIR, dataDir, safeFsSegment } from './provisioning-materials.js';
+import { dataDir, POD_ARTIFACTS_CONTAINER_DIR, safeFsSegment } from './provisioning-materials.js';
 import type { ProvisioningCaptured, ProvisioningLiveDependencies } from './provisioning-ports.js';
 
 type Captured = Pick<ProvisioningCaptured, 'podRepo' | 'containerManagerFactory' | 'logger'>;

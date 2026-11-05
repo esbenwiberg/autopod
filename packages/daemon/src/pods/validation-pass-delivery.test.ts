@@ -4,44 +4,45 @@ import { findingId } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { createValidationPassDelivery } from './validation-pass-delivery.js';
+
 describe('validation successful delivery lifetime', () => {
-  it.each(['old review finding', 'unrelated finding'])(
-    'refuses delivery despite a persisted dismissal of %s',
-    async (text) => {
-      const f = createDeliveryFixture();
-      f.validating();
-      const context = f.passContext();
-      const original = {
-        ...context.result,
-        overall: 'fail' as const,
-        taskReview:
-          text === 'old review finding'
-            ? { status: 'fail' as const, reasoning: 'Previous finding', issues: [text] }
-            : null,
-        test: { status: 'skip' as const, duration: 1, stdout: 'FAIL retained partial output' },
-        infrastructureFailure: {
-          phase: 'test' as const,
-          code: 'EXEC_EXIT_UNVERIFIED',
-          message: 'Unknown native execution',
-          retryable: false,
-        },
-      };
-      context.result = applyOverrides(original, [
-        { action: 'dismiss', findingId: findingId('task_review', text), description: text },
-      ]);
-      // Even a stale pass bit cannot authorize delivery beside the native failure.
-      context.result.overall = 'pass';
-      await expect(f.pass().completeValidationPass.call(f.calls, context)).rejects.toMatchObject({
-        code: 'VALIDATION_EXECUTION_UNVERIFIED',
-      });
-      expect(f.worktreeManager.pushArtifactBranch).not.toHaveBeenCalled();
-      expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
-      expect(f.provider.createPr).not.toHaveBeenCalled();
-      expect(f.mainCaptured.maybeTriggerDependents).not.toHaveBeenCalled();
-      expect(f.pod().status).toBe('validating');
-      expect(original.test.stdout).toBe('FAIL retained partial output');
-    },
-  );
+  it.each([
+    'old review finding',
+    'unrelated finding',
+  ])('refuses delivery despite a persisted dismissal of %s', async (text) => {
+    const f = createDeliveryFixture();
+    f.validating();
+    const context = f.passContext();
+    const original = {
+      ...context.result,
+      overall: 'fail' as const,
+      taskReview:
+        text === 'old review finding'
+          ? { status: 'fail' as const, reasoning: 'Previous finding', issues: [text] }
+          : null,
+      test: { status: 'skip' as const, duration: 1, stdout: 'FAIL retained partial output' },
+      infrastructureFailure: {
+        phase: 'test' as const,
+        code: 'EXEC_EXIT_UNVERIFIED',
+        message: 'Unknown native execution',
+        retryable: false,
+      },
+    };
+    context.result = applyOverrides(original, [
+      { action: 'dismiss', findingId: findingId('task_review', text), description: text },
+    ]);
+    // Even a stale pass bit cannot authorize delivery beside the native failure.
+    context.result.overall = 'pass';
+    await expect(f.pass().completeValidationPass.call(f.calls, context)).rejects.toMatchObject({
+      code: 'VALIDATION_EXECUTION_UNVERIFIED',
+    });
+    expect(f.worktreeManager.pushArtifactBranch).not.toHaveBeenCalled();
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.provider.createPr).not.toHaveBeenCalled();
+    expect(f.mainCaptured.maybeTriggerDependents).not.toHaveBeenCalled();
+    expect(f.pod().status).toBe('validating');
+    expect(original.test.stdout).toBe('FAIL retained partial output');
+  });
 
   it('embeds GitHub screenshots only against a successfully published artifact ref', async () => {
     const f = createDeliveryFixture();
@@ -112,50 +113,50 @@ describe('validation successful delivery lifetime', () => {
     expect(f.advisoryCurrent).toHaveBeenCalledOnce();
     expect(f.cm.stop).toHaveBeenCalledWith('container-123');
   });
-  it.each(['local', 'sandbox'] as const)(
-    'pushes an existing PR and routes a %s fix before auto-approval or stop',
-    async (executionTarget) => {
-      const f = createDeliveryFixture();
-      const seed = f.pod();
-      f.podRepo.insert({
-        id: 'fix',
-        profileName: seed.profileName,
-        task: 'Repair original task',
-        status: 'validating',
-        runtime: seed.runtime,
-        model: seed.model,
-        executionTarget,
-        branch: seed.branch,
-        userId: seed.userId,
-        maxValidationAttempts: 3,
-        skipValidation: false,
-        outputMode: 'pr',
-        linkedPodId: 'prepare',
-        prUrl: 'https://github.com/org/repo/pull/27',
-      });
-      f.podRepo.update('fix', {
-        containerId: 'container-fix',
-        worktreePath: f.directory,
-        autoApprove: true,
-      });
-      const fix = f.podRepo.getOrThrow('fix');
-      const context = { ...f.passContext(), podId: 'fix', pod: fix, s2: fix };
-      context.result = { ...context.result, podId: 'fix' };
-      f.podRepo.update('fix', { lastValidationResult: context.result });
-      await f.pass().completeValidationPass.call(f.calls, context);
-      expect(f.worktreeManager.mergeBranch).toHaveBeenCalled();
-      expect(f.provider.createPr).not.toHaveBeenCalled();
-      expect(f.passCaptured.completeFixPodAfterPush).toHaveBeenCalledOnce();
-      if (executionTarget === 'sandbox') {
-        expect(f.podRepo.getOrThrow('fix').artifactsPath).toBeTruthy();
-        expect(
-          vi.mocked(f.cm.extractDirectoryFromContainer).mock.invocationCallOrder[0],
-        ).toBeLessThan(f.passCaptured.completeFixPodAfterPush.mock.invocationCallOrder[0] ?? 0);
-      }
-      expect(f.cm.stop).not.toHaveBeenCalled();
-      expect(f.calls.approveSession).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'local',
+    'sandbox',
+  ] as const)('pushes an existing PR and routes a %s fix before auto-approval or stop', async (executionTarget) => {
+    const f = createDeliveryFixture();
+    const seed = f.pod();
+    f.podRepo.insert({
+      id: 'fix',
+      profileName: seed.profileName,
+      task: 'Repair original task',
+      status: 'validating',
+      runtime: seed.runtime,
+      model: seed.model,
+      executionTarget,
+      branch: seed.branch,
+      userId: seed.userId,
+      maxValidationAttempts: 3,
+      skipValidation: false,
+      outputMode: 'pr',
+      linkedPodId: 'prepare',
+      prUrl: 'https://github.com/org/repo/pull/27',
+    });
+    f.podRepo.update('fix', {
+      containerId: 'container-fix',
+      worktreePath: f.directory,
+      autoApprove: true,
+    });
+    const fix = f.podRepo.getOrThrow('fix');
+    const context = { ...f.passContext(), podId: 'fix', pod: fix, s2: fix };
+    context.result = { ...context.result, podId: 'fix' };
+    f.podRepo.update('fix', { lastValidationResult: context.result });
+    await f.pass().completeValidationPass.call(f.calls, context);
+    expect(f.worktreeManager.mergeBranch).toHaveBeenCalled();
+    expect(f.provider.createPr).not.toHaveBeenCalled();
+    expect(f.passCaptured.completeFixPodAfterPush).toHaveBeenCalledOnce();
+    if (executionTarget === 'sandbox') {
+      expect(f.podRepo.getOrThrow('fix').artifactsPath).toBeTruthy();
+      expect(
+        vi.mocked(f.cm.extractDirectoryFromContainer).mock.invocationCallOrder[0],
+      ).toBeLessThan(f.passCaptured.completeFixPodAfterPush.mock.invocationCallOrder[0] ?? 0);
+    }
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.calls.approveSession).not.toHaveBeenCalled();
+  });
   it('parks credential failure and halts before validated/readiness effects', async () => {
     const f = createDeliveryFixture();
     f.validating();

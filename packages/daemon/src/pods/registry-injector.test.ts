@@ -4,16 +4,16 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import { RUNTIME_TELEMETRY_OPT_OUT_ENV } from '../runtime-env.js';
 import {
-  CREDENTIAL_GUARD_HOOK,
-  NPM_RC_PATH,
-  NUGET_CONFIG_PATH,
   buildNuGetCredentialEnv,
   buildNuGetSecretFile,
   buildRegistryFiles,
   buildValidationExecEnv,
+  CREDENTIAL_GUARD_HOOK,
   ensureNuGetCredentialProvider,
   generateNpmrc,
   generateNuGetConfig,
+  NPM_RC_PATH,
+  NUGET_CONFIG_PATH,
   validateRegistryFiles,
   wrapValidationExecCommand,
 } from './registry-injector.js';
@@ -518,17 +518,14 @@ describe('validateRegistryFiles', () => {
     'not JSON',
     JSON.stringify({ version: 2, problems: [{ text: 'feed timed out' }], searchResult: [] }),
     JSON.stringify({ version: 2, problems: [] }),
-  ])(
-    'rejects incomplete successful search output without publishing raw provider text: %s',
-    async (stdout) => {
-      const cm = mockCm({
-        'dotnet package search __autopod_auth_probe__': { stdout, stderr: '', exitCode: 0 },
-      });
-      await expect(
-        validateRegistryFiles(cm, 'ctr-1', [{ path: NUGET_CONFIG_PATH, content: '' }]),
-      ).rejects.toThrow(/Registry probe incomplete/);
-    },
-  );
+  ])('rejects incomplete successful search output without publishing raw provider text: %s', async (stdout) => {
+    const cm = mockCm({
+      'dotnet package search __autopod_auth_probe__': { stdout, stderr: '', exitCode: 0 },
+    });
+    await expect(
+      validateRegistryFiles(cm, 'ctr-1', [{ path: NUGET_CONFIG_PATH, content: '' }]),
+    ).rejects.toThrow(/Registry probe incomplete/);
+  });
 
   it('throws when npmrc is invalid', async () => {
     const cm = mockCm({

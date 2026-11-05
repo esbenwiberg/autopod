@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import type { Dirent } from 'node:fs';
-import { access, mkdir, readFile, readdir } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
@@ -48,9 +48,9 @@ import {
 import type { HostBrowserRunner } from './host-browser-runner.js';
 import { getPreSubmitCacheDecision, hashDiff } from './pre-submit-review.js';
 import { runAgenticReview } from './review-agentic-runner.js';
-import { REVIEW_AXES, createFrozenReviewPacket, runReviewBatch } from './review-batch-runner.js';
+import { createFrozenReviewPacket, REVIEW_AXES, runReviewBatch } from './review-batch-runner.js';
 import { CodexReviewError, runCodexReview } from './review-codex-runner.js';
-import { type ReviewContext, gatherReviewContext } from './review-context-builder.js';
+import { gatherReviewContext, type ReviewContext } from './review-context-builder.js';
 import { applyDiffFilterToParsed } from './review-finding-filter.js';
 import {
   activeLedgerEntries,
@@ -66,11 +66,11 @@ import {
   reviewClosureOutputContract,
   taskReviewOutputContract,
 } from './review-structured-output.js';
-import { ToolReviewError, runToolUseReview } from './review-tool-runner.js';
+import { runToolUseReview, ToolReviewError } from './review-tool-runner.js';
 import { ReviewerApiDeadlineError, reviewerApiBudget } from './reviewer-api-budget.js';
 import {
-  MAX_ISOLATED_REVIEW_INPUT_BYTES,
   hasTruncatedReviewDiff,
+  MAX_ISOLATED_REVIEW_INPUT_BYTES,
 } from './reviewer-input-bounds.js';
 import { runValidationCommand } from './run-validation-command.js';
 import { runWithValidationEvidence } from './run-with-evidence.js';
@@ -1088,7 +1088,7 @@ export function createLocalValidationEngine(
               config.priorReviewBatch?.reviewedHead ?? 'unavailable',
               reviewedHead,
             );
-            let closure = undefined;
+            let closure: ReturnType<typeof parseClosureVerification> | undefined;
             let closureTokenUsage: TaskReviewResult['tokenUsage'];
             if (priorActive.length > 0) {
               if (batch.infrastructureUnavailable) {

@@ -3,7 +3,7 @@ import Dockerode from 'dockerode';
 import pino from 'pino';
 import { pack } from 'tar-stream';
 import { expect, it } from 'vitest';
-import { IsolatedDeployRunner, type IsolatedDeploymentInput } from './isolated-deploy-runner.js';
+import { type IsolatedDeploymentInput, IsolatedDeployRunner } from './isolated-deploy-runner.js';
 
 async function source(script: string) {
   const archive = pack();

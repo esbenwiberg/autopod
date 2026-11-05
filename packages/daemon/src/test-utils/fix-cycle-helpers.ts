@@ -1,4 +1,4 @@
-import { type Pod, outputModeFromPodOptions } from '@autopod/shared';
+import { outputModeFromPodOptions, type Pod } from '@autopod/shared';
 import { vi } from 'vitest';
 import { configurationDigest } from '../configuration/configuration-digest.js';
 import { deriveLaunch } from '../configuration/derive-launch.js';

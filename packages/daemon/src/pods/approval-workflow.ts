@@ -1,5 +1,5 @@
-import { AutopodError } from '@autopod/shared';
 import type { Pod } from '@autopod/shared';
+import { AutopodError } from '@autopod/shared';
 
 import type { ApprovalEntryCaptured, ApproveSessionOptions } from './approval-contracts.js';
 import { assertApprovalAllowed } from './approval-policy.js';

@@ -1,10 +1,10 @@
 import {
   type ConfigurationKind,
+  configurationIdSchema,
+  configurationKindSchema,
   type EffectiveLaunchConfig,
   type OperatorActor,
   type Pod,
-  configurationIdSchema,
-  configurationKindSchema,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';

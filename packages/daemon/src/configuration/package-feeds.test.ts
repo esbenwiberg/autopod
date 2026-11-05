@@ -128,48 +128,44 @@ describe('reusable package feeds', () => {
     ])
       expect(() => f.store.write({ kind: 'packageFeed', name: 'Invalid', payload })).toThrow();
   });
-  it.each(['local', 'sandbox'] as const)(
-    'refreshes the same frozen pod on %s after rotation; refuses revoked credentials and failed writes',
-    async (target) => {
-      await enroll();
-      select('repo-a', ['feed']);
-      const launch = await resolveLaunch({ repositoryId: 'repo-a', task: 'Work' }, f.services);
-      const before = JSON.stringify(launch);
-      const credentials = createLaunchExecutionCredentials(f.credentials);
-      const writeFile = vi.fn(async () => {});
-      const environment = createValidationEnvironment(
-        { launchConfiguration: { read: () => launch, assertCurrentCapabilities: async () => {} } },
-        {
-          executionCredentialsFor: () => credentials,
-          containerManagerFactory: {
-            get: vi.fn(() => ({ writeFile }) as unknown as ContainerManager),
-          },
+  it.each([
+    'local',
+    'sandbox',
+  ] as const)('refreshes the same frozen pod on %s after rotation; refuses revoked credentials and failed writes', async (target) => {
+    await enroll();
+    select('repo-a', ['feed']);
+    const launch = await resolveLaunch({ repositoryId: 'repo-a', task: 'Work' }, f.services);
+    const before = JSON.stringify(launch);
+    const credentials = createLaunchExecutionCredentials(f.credentials);
+    const writeFile = vi.fn(async () => {});
+    const environment = createValidationEnvironment(
+      { launchConfiguration: { read: () => launch, assertCurrentCapabilities: async () => {} } },
+      {
+        executionCredentialsFor: () => credentials,
+        containerManagerFactory: {
+          get: vi.fn(() => ({ writeFile }) as unknown as ContainerManager),
         },
-      );
-      const pod = { id: 'same-pod', containerId: 'same-container', executionTarget: target } as Pod;
-      const profile = resolveLaunchExecutionSettings(launch, { image: 'fixture-image' });
-      const original = f.credentials.get('registry');
-      const rotated = await f.credentials.rotate(
-        original.id,
-        original.revision,
-        'fixture-new-token',
-      );
-      await environment.validationEnvironmentForPod(pod, profile);
-      expect(writeFile).toHaveBeenCalledWith(
-        'same-container',
-        '/home/autopod/.npmrc',
-        expect.stringContaining('fixture-new-token'),
-        { mode: 0o600 },
-      );
-      expect(JSON.stringify(launch)).toBe(before);
-      writeFile.mockRejectedValueOnce(new Error('Write failed'));
-      await expect(environment.validationEnvironmentForPod(pod, profile)).rejects.toThrow(
-        'Write failed',
-      );
-      f.credentials.revoke(rotated.id, rotated.revision);
-      writeFile.mockClear();
-      await expect(environment.validationEnvironmentForPod(pod, profile)).rejects.toThrow();
-      expect(writeFile).not.toHaveBeenCalled();
-    },
-  );
+      },
+    );
+    const pod = { id: 'same-pod', containerId: 'same-container', executionTarget: target } as Pod;
+    const profile = resolveLaunchExecutionSettings(launch, { image: 'fixture-image' });
+    const original = f.credentials.get('registry');
+    const rotated = await f.credentials.rotate(original.id, original.revision, 'fixture-new-token');
+    await environment.validationEnvironmentForPod(pod, profile);
+    expect(writeFile).toHaveBeenCalledWith(
+      'same-container',
+      '/home/autopod/.npmrc',
+      expect.stringContaining('fixture-new-token'),
+      { mode: 0o600 },
+    );
+    expect(JSON.stringify(launch)).toBe(before);
+    writeFile.mockRejectedValueOnce(new Error('Write failed'));
+    await expect(environment.validationEnvironmentForPod(pod, profile)).rejects.toThrow(
+      'Write failed',
+    );
+    f.credentials.revoke(rotated.id, rotated.revision);
+    writeFile.mockClear();
+    await expect(environment.validationEnvironmentForPod(pod, profile)).rejects.toThrow();
+    expect(writeFile).not.toHaveBeenCalled();
+  });
 });

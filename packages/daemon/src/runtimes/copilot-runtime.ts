@@ -1,6 +1,6 @@
 import * as path from 'node:path';
-import { CONTAINER_HOME_DIR } from '@autopod/shared';
 import type { AgentEvent, Runtime, SpawnConfig } from '@autopod/shared';
+import { CONTAINER_HOME_DIR } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { captureBoundedStderr } from './bounded-stderr.js';

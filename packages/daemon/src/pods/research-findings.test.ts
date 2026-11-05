@@ -11,7 +11,7 @@ import { createMockContainerManager } from '../test-utils/mock-helpers.js';
 import { hasInterruptedArtifactCollection } from './artifact-finalization-recovery.js';
 import { createArtifactFinalizer } from './artifact-finalizer.js';
 import { fingerprintArtifactSnapshot } from './artifact-snapshot-receipt.js';
-import { type PodManager, createPodManager } from './pod-manager.js';
+import { createPodManager, type PodManager } from './pod-manager.js';
 import { createPodRepository } from './pod-repository.js';
 import { createFindingsAcceptance } from './research-findings.js';
 import {
@@ -121,33 +121,33 @@ function request() {
 const human = { type: 'human' as const, userId: 'reviewer' };
 
 describe('research findings contract', () => {
-  it.each(['none', 'artifact'] as const)(
-    'retains %s findings and releases worker without delivery or fabricated validation',
-    async (output) => {
-      f.podRepo.update('prepare', { options: { ...f.pod().options, output }, autoApprove: true });
-      const service = finalizer();
-      await service.finalizeArtifactPod(f.pod());
-      const pod = createPodRepository(f.db).getOrThrow('prepare');
-      expect(pod).toMatchObject({
-        status: 'research_ready',
-        containerId: null,
-        completedAt: null,
-        lastValidationResult: null,
-        researchFindings: {
-          summary: { actualSummary: expect.stringContaining('unresolved') },
-          acceptance: null,
-        },
-      });
-      expect(
-        await readFile(path.join(pod.artifactsPath ?? '', 'arbitrary-report.md'), 'utf8'),
-      ).toContain('failed');
-      expect(service.credentials).not.toHaveBeenCalled();
-      expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
-      expect(f.calls.triggerValidation).not.toHaveBeenCalled();
-      expect(hasInterruptedArtifactCollection(pod)).toBe(false);
-      expect(f.podRepo.getStats().byStatus.research_ready).toBe(1);
-    },
-  );
+  it.each([
+    'none',
+    'artifact',
+  ] as const)('retains %s findings and releases worker without delivery or fabricated validation', async (output) => {
+    f.podRepo.update('prepare', { options: { ...f.pod().options, output }, autoApprove: true });
+    const service = finalizer();
+    await service.finalizeArtifactPod(f.pod());
+    const pod = createPodRepository(f.db).getOrThrow('prepare');
+    expect(pod).toMatchObject({
+      status: 'research_ready',
+      containerId: null,
+      completedAt: null,
+      lastValidationResult: null,
+      researchFindings: {
+        summary: { actualSummary: expect.stringContaining('unresolved') },
+        acceptance: null,
+      },
+    });
+    expect(
+      await readFile(path.join(pod.artifactsPath ?? '', 'arbitrary-report.md'), 'utf8'),
+    ).toContain('failed');
+    expect(service.credentials).not.toHaveBeenCalled();
+    expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
+    expect(f.calls.triggerValidation).not.toHaveBeenCalled();
+    expect(hasInterruptedArtifactCollection(pod)).toBe(false);
+    expect(f.podRepo.getStats().byStatus.research_ready).toBe(1);
+  });
   it('reads exact retained files instead of a leftover worktree and refuses changed bytes', async () => {
     await finalizer().finalizeArtifactPod(f.pod());
     f.podRepo.update('prepare', { worktreePath: '/unrelated-worktree' });
@@ -276,21 +276,21 @@ describe('research findings contract', () => {
     ).rejects.toMatchObject({ statusCode: 409 });
     expect(f.pod().researchFindings?.acceptance?.actor).toEqual(human);
   });
-  it.each(['kill', 'rework'] as const)(
-    'rejects acceptance when %s supersedes asynchronous evidence verification',
-    async (operation) => {
-      await finalizer().finalizeArtifactPod(f.pod());
-      const service = acceptance();
-      // accept() checks authority synchronously, then yields to snapshot I/O.
-      const pending = service.accept('prepare', request(), human);
-      if (operation === 'kill') f.events.transition(f.pod(), 'killing');
-      else f.podRepo.incrementLifecycleGeneration('prepare');
-      await expect(pending).rejects.toMatchObject({ statusCode: 409 });
-      expect(service.completed).not.toHaveBeenCalled();
-      expect(service.dependents).not.toHaveBeenCalled();
-      expect(f.pod().completedAt).toBeNull();
-    },
-  );
+  it.each([
+    'kill',
+    'rework',
+  ] as const)('rejects acceptance when %s supersedes asynchronous evidence verification', async (operation) => {
+    await finalizer().finalizeArtifactPod(f.pod());
+    const service = acceptance();
+    // accept() checks authority synchronously, then yields to snapshot I/O.
+    const pending = service.accept('prepare', request(), human);
+    if (operation === 'kill') f.events.transition(f.pod(), 'killing');
+    else f.podRepo.incrementLifecycleGeneration('prepare');
+    await expect(pending).rejects.toMatchObject({ statusCode: 409 });
+    expect(service.completed).not.toHaveBeenCalled();
+    expect(service.dependents).not.toHaveBeenCalled();
+    expect(f.pod().completedAt).toBeNull();
+  });
   it('retains immutable ready and accepted receipts across a new lifecycle', async () => {
     await finalizer().finalizeArtifactPod(f.pod());
     const service = acceptance();
@@ -341,75 +341,74 @@ describe('research findings contract', () => {
     expect(f.pod().status).toBe('research_ready');
     expect(service.completed).not.toHaveBeenCalled();
   });
-  it.each(['projection', 'durable'] as const)(
-    'rejects pending human work in %s authority',
-    async (kind) => {
-      await finalizer().finalizeArtifactPod(f.pod());
-      const service = acceptance();
-      if (kind === 'projection') {
-        f.podRepo.update('prepare', { pendingEscalation: { id: 'unanswered', response: null } });
-      } else {
-        f.db
-          .prepare(
-            "UPDATE pod_finalizations SET pending_decision_id='unanswered' WHERE pod_id='prepare'",
-          )
-          .run();
-      }
-      await expect(service.accept('prepare', request(), human)).rejects.toThrow();
-      expect(f.pod().status).toBe('research_ready');
-      expect(service.completed).not.toHaveBeenCalled();
-      expect(service.dependents).not.toHaveBeenCalled();
-    },
-  );
-  it.each(['ordinary-task', 'workspace', 'artifact-export'] as const)(
-    'never infers findings acceptance for %s',
-    async (kind) => {
-      f.db.prepare("UPDATE pods SET completion_policy=NULL WHERE id='prepare'").run();
-      f.podRepo.update('prepare', {
-        options: {
-          agentMode: kind === 'workspace' ? 'interactive' : 'auto',
-          output: kind === 'artifact-export' ? 'artifact' : 'none',
-          validate: false,
+  it.each([
+    'projection',
+    'durable',
+  ] as const)('rejects pending human work in %s authority', async (kind) => {
+    await finalizer().finalizeArtifactPod(f.pod());
+    const service = acceptance();
+    if (kind === 'projection') {
+      f.podRepo.update('prepare', { pendingEscalation: { id: 'unanswered', response: null } });
+    } else {
+      f.db
+        .prepare(
+          "UPDATE pod_finalizations SET pending_decision_id='unanswered' WHERE pod_id='prepare'",
+        )
+        .run();
+    }
+    await expect(service.accept('prepare', request(), human)).rejects.toThrow();
+    expect(f.pod().status).toBe('research_ready');
+    expect(service.completed).not.toHaveBeenCalled();
+    expect(service.dependents).not.toHaveBeenCalled();
+  });
+  it.each([
+    'ordinary-task',
+    'workspace',
+    'artifact-export',
+  ] as const)('never infers findings acceptance for %s', async (kind) => {
+    f.db.prepare("UPDATE pods SET completion_policy=NULL WHERE id='prepare'").run();
+    f.podRepo.update('prepare', {
+      options: {
+        agentMode: kind === 'workspace' ? 'interactive' : 'auto',
+        output: kind === 'artifact-export' ? 'artifact' : 'none',
+        validate: false,
+      },
+    });
+    const service = acceptance();
+    await expect(
+      service.accept(
+        'prepare',
+        {
+          expectedGeneration: f.pod().lifecycleGeneration,
+          expectedCycle: f.pod().finalization?.cycle ?? 1,
+          expectedEvidenceHash: 'a'.repeat(64),
         },
+        human,
+      ),
+    ).rejects.toMatchObject({ code: 'FINDINGS_CONFLICT' });
+    expect(service.completed).not.toHaveBeenCalled();
+    expect(service.dependents).not.toHaveBeenCalled();
+    expect(f.pod().researchFindings).toBeNull();
+  });
+  it.each([
+    'summary',
+    'digest',
+  ] as const)('rejects changed %s identity after readiness', async (field) => {
+    await finalizer().finalizeArtifactPod(f.pod());
+    const reviewed = request();
+    if (field === 'summary')
+      f.podRepo.update('prepare', {
+        taskSummary: { actualSummary: 'Different investigation', deviations: [] },
       });
-      const service = acceptance();
-      await expect(
-        service.accept(
-          'prepare',
-          {
-            expectedGeneration: f.pod().lifecycleGeneration,
-            expectedCycle: f.pod().finalization?.cycle ?? 1,
-            expectedEvidenceHash: 'a'.repeat(64),
-          },
-          human,
-        ),
-      ).rejects.toMatchObject({ code: 'FINDINGS_CONFLICT' });
-      expect(service.completed).not.toHaveBeenCalled();
-      expect(service.dependents).not.toHaveBeenCalled();
-      expect(f.pod().researchFindings).toBeNull();
-    },
-  );
-  it.each(['summary', 'digest'] as const)(
-    'rejects changed %s identity after readiness',
-    async (field) => {
-      await finalizer().finalizeArtifactPod(f.pod());
-      const reviewed = request();
-      if (field === 'summary')
-        f.podRepo.update('prepare', {
-          taskSummary: { actualSummary: 'Different investigation', deviations: [] },
-        });
-      else
-        f.db
-          .prepare("UPDATE pods SET launch_config_digest=? WHERE id='prepare'")
-          .run('c'.repeat(64));
-      const service = acceptance();
-      await expect(service.accept('prepare', reviewed, human)).rejects.toMatchObject({
-        code: 'FINDINGS_CONFLICT',
-      });
-      expect(f.pod().status).toBe('research_ready');
-      expect(service.completed).not.toHaveBeenCalled();
-    },
-  );
+    else
+      f.db.prepare("UPDATE pods SET launch_config_digest=? WHERE id='prepare'").run('c'.repeat(64));
+    const service = acceptance();
+    await expect(service.accept('prepare', reviewed, human)).rejects.toMatchObject({
+      code: 'FINDINGS_CONFLICT',
+    });
+    expect(f.pod().status).toBe('research_ready');
+    expect(service.completed).not.toHaveBeenCalled();
+  });
   it('retains resources when preservation fails and identifies settled none-output recovery', async () => {
     const service = finalizer();
     vi.mocked(service.cm.extractDirectoryFromContainer).mockRejectedValue(

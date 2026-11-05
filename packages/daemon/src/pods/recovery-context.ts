@@ -4,8 +4,8 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import {
   MAX_PROVIDER_FAILOVER_HANDOFF_LENGTH,
-  PROVIDER_FAILOVER_HANDOFF_PATH,
   type Pod,
+  PROVIDER_FAILOVER_HANDOFF_PATH,
   type ProviderAttempt,
   type ProviderFailureClassification,
   processContent,

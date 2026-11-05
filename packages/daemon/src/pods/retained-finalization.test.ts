@@ -19,11 +19,11 @@ import {
   assertCheckpointResourceNotRetained,
   checkpointHash,
 } from './retained-checkpoint-repository.js';
+import { createRetainedFinalization } from './retained-finalization.js';
 import {
   assertFinalizationPathAvailable,
   createRetainedFinalizationRepository,
 } from './retained-finalization-repository.js';
-import { createRetainedFinalization } from './retained-finalization.js';
 import { SandboxOrphanReaper } from './sandbox-orphan-reaper.js';
 import { SandboxTerminalReaper } from './sandbox-terminal-reaper.js';
 
@@ -196,113 +196,113 @@ function configure(
 }
 
 describe('retained finalization', () => {
-  it.each(['stop-retain', 'complete-merged'] as const)(
-    'atomically persists the real terminal event pair for %s and isolates failing subscribers',
-    async (mode) => {
-      const f = await fixture('rewrite');
-      f.request.mode = mode;
-      const events = createEventRepository(f.db);
-      const last = events.getSince(0).at(-1)?.id ?? 0;
-      const delivered: Array<{ type: string; committed: boolean; state: string | undefined }> = [];
-      f.deps.eventBus.subscribe((event) => {
-        delivered.push({
-          type: event.type,
-          committed: !f.db.inTransaction,
-          state: f.pods.retainedFinalizations!.get(f.id)?.receipt.state,
-        });
-        throw new Error('on-finalized subscriber failed');
+  it.each([
+    'stop-retain',
+    'complete-merged',
+  ] as const)('atomically persists the real terminal event pair for %s and isolates failing subscribers', async (mode) => {
+    const f = await fixture('rewrite');
+    f.request.mode = mode;
+    const events = createEventRepository(f.db);
+    const last = events.getSince(0).at(-1)?.id ?? 0;
+    const delivered: Array<{ type: string; committed: boolean; state: string | undefined }> = [];
+    f.deps.eventBus.subscribe((event) => {
+      delivered.push({
+        type: event.type,
+        committed: !f.db.inTransaction,
+        state: f.pods.retainedFinalizations!.get(f.id)?.receipt.state,
       });
-      const surviving = vi.fn();
-      f.deps.eventBus.subscribe(surviving);
-      const receipt = await f.submit();
-      expect(receipt.state).toBe('finalized');
-      const saved = events.getSince(last);
-      expect(saved.map((event) => event.type)).toEqual(['pod.status_changed', 'pod.completed']);
-      expect(saved[0]?.payload).toMatchObject({
-        previousStatus: 'failed',
-        newStatus: mode === 'stop-retain' ? 'killed' : 'complete',
+      throw new Error('on-finalized subscriber failed');
+    });
+    const surviving = vi.fn();
+    f.deps.eventBus.subscribe(surviving);
+    const receipt = await f.submit();
+    expect(receipt.state).toBe('finalized');
+    const saved = events.getSince(last);
+    expect(saved.map((event) => event.type)).toEqual(['pod.status_changed', 'pod.completed']);
+    expect(saved[0]?.payload).toMatchObject({
+      previousStatus: 'failed',
+      newStatus: mode === 'stop-retain' ? 'killed' : 'complete',
+    });
+    expect(saved[1]?.payload).toMatchObject({
+      finalStatus: mode === 'stop-retain' ? 'killed' : 'complete',
+    });
+    expect(delivered).toEqual(
+      saved.map((event) => ({ type: event.type, committed: true, state: 'finalized' })),
+    );
+    expect(surviving).toHaveBeenCalledTimes(2);
+    expect(await f.submit()).toEqual(receipt);
+    expect(events.getSince(last)).toEqual(saved);
+    expect(surviving).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    'stop-retain',
+    'complete-merged',
+  ] as const)('rolls back status, receipt and both %s events on terminal persistence failure', async (mode) => {
+    const f = await fixture('rewrite');
+    f.request.mode = mode;
+    const events = createEventRepository(f.db);
+    const last = events.getSince(0).at(-1)?.id ?? 0;
+    const broadcast = vi.fn();
+    f.deps.eventBus.subscribe(broadcast);
+    const persist = f.deps.eventBus.emitAfterCommit.bind(f.deps.eventBus);
+    const fault = vi
+      .spyOn(f.deps.eventBus, 'emitAfterCommit')
+      .mockImplementation((event, afterCommit) => {
+        const id = persist(event, afterCommit);
+        if (event.type === 'pod.completed')
+          throw new Error('terminal event persistence interrupted');
+        return id;
       });
-      expect(saved[1]?.payload).toMatchObject({
-        finalStatus: mode === 'stop-retain' ? 'killed' : 'complete',
-      });
-      expect(delivered).toEqual(
-        saved.map((event) => ({ type: event.type, committed: true, state: 'finalized' })),
-      );
-      expect(surviving).toHaveBeenCalledTimes(2);
-      expect(await f.submit()).toEqual(receipt);
-      expect(events.getSince(last)).toEqual(saved);
-      expect(surviving).toHaveBeenCalledTimes(2);
-    },
-  );
-  it.each(['stop-retain', 'complete-merged'] as const)(
-    'rolls back status, receipt and both %s events on terminal persistence failure',
-    async (mode) => {
-      const f = await fixture('rewrite');
-      f.request.mode = mode;
-      const events = createEventRepository(f.db);
-      const last = events.getSince(0).at(-1)?.id ?? 0;
-      const broadcast = vi.fn();
-      f.deps.eventBus.subscribe(broadcast);
-      const persist = f.deps.eventBus.emitAfterCommit.bind(f.deps.eventBus);
-      const fault = vi
-        .spyOn(f.deps.eventBus, 'emitAfterCommit')
-        .mockImplementation((event, afterCommit) => {
-          const id = persist(event, afterCommit);
-          if (event.type === 'pod.completed')
-            throw new Error('terminal event persistence interrupted');
-          return id;
-        });
-      await expect(f.submit()).rejects.toThrow('terminal event persistence interrupted');
-      expect(f.pod().status).toBe('failed');
-      expect(f.pods.retainedFinalizations!.get(f.id)?.receipt.state).toBe('pending');
-      expect(events.getSince(last)).toEqual([]);
-      expect(broadcast).not.toHaveBeenCalled();
-      fault.mockRestore();
-      expect((await f.submit()).state).toBe('finalized');
-      expect(events.getSince(last)).toHaveLength(2);
-    },
-  );
-  it.each(['stop-retain', 'complete-merged'] as const)(
-    'retains %s events across reopen after commit but before broadcast without replay duplication',
-    async (mode) => {
-      const f = await fixture('rewrite');
-      f.request.mode = mode;
-      const events = createEventRepository(f.db);
-      const last = events.getSince(0).at(-1)?.id ?? 0;
-      const broadcast = vi.fn();
-      f.deps.eventBus.subscribe(broadcast);
-      const unsent: Array<() => void> = [];
-      vi.spyOn(f.pods, 'afterCommit').mockImplementation((effect) => {
-        unsent.push(effect);
-      });
-      const receipt = await f.submit();
-      expect(unsent).toHaveLength(2);
-      expect(broadcast).not.toHaveBeenCalled();
-      const saved = events.getSince(last);
-      expect(saved).toHaveLength(2);
-      const next = f.reopen!();
-      f.deps.podRepo = next.pods;
-      const restartedBroadcast = vi.fn();
-      f.deps.eventBus.subscribe(restartedBroadcast);
-      expect(await f.controller().finalizeRetained(f.id, f.request, f.actor)).toEqual(receipt);
-      expect(createEventRepository(next.db).getSince(last)).toEqual(saved);
-      expect(restartedBroadcast).not.toHaveBeenCalled();
-    },
-  );
-  it.each(['pending', 'finalized'] as const)(
-    'rejects a different human reusing a %s request',
-    async (state) => {
-      const f = await fixture();
-      if (state === 'pending')
-        vi.mocked(f.cm.getStatus).mockResolvedValueOnce('running').mockResolvedValue('unknown');
-      expect((await f.submit()).state).toBe(state);
-      const calls = vi.mocked(f.cm.getStatus).mock.calls.length;
-      await expect(
-        f.ctrl.finalizeRetained(f.id, f.request, { type: 'human', userId: 'other-human' }),
-      ).rejects.toThrow(/actor/);
-      expect(vi.mocked(f.cm.getStatus).mock.calls).toHaveLength(calls);
-    },
-  );
+    await expect(f.submit()).rejects.toThrow('terminal event persistence interrupted');
+    expect(f.pod().status).toBe('failed');
+    expect(f.pods.retainedFinalizations!.get(f.id)?.receipt.state).toBe('pending');
+    expect(events.getSince(last)).toEqual([]);
+    expect(broadcast).not.toHaveBeenCalled();
+    fault.mockRestore();
+    expect((await f.submit()).state).toBe('finalized');
+    expect(events.getSince(last)).toHaveLength(2);
+  });
+  it.each([
+    'stop-retain',
+    'complete-merged',
+  ] as const)('retains %s events across reopen after commit but before broadcast without replay duplication', async (mode) => {
+    const f = await fixture('rewrite');
+    f.request.mode = mode;
+    const events = createEventRepository(f.db);
+    const last = events.getSince(0).at(-1)?.id ?? 0;
+    const broadcast = vi.fn();
+    f.deps.eventBus.subscribe(broadcast);
+    const unsent: Array<() => void> = [];
+    vi.spyOn(f.pods, 'afterCommit').mockImplementation((effect) => {
+      unsent.push(effect);
+    });
+    const receipt = await f.submit();
+    expect(unsent).toHaveLength(2);
+    expect(broadcast).not.toHaveBeenCalled();
+    const saved = events.getSince(last);
+    expect(saved).toHaveLength(2);
+    const next = f.reopen!();
+    f.deps.podRepo = next.pods;
+    const restartedBroadcast = vi.fn();
+    f.deps.eventBus.subscribe(restartedBroadcast);
+    expect(await f.controller().finalizeRetained(f.id, f.request, f.actor)).toEqual(receipt);
+    expect(createEventRepository(next.db).getSince(last)).toEqual(saved);
+    expect(restartedBroadcast).not.toHaveBeenCalled();
+  });
+  it.each([
+    'pending',
+    'finalized',
+  ] as const)('rejects a different human reusing a %s request', async (state) => {
+    const f = await fixture();
+    if (state === 'pending')
+      vi.mocked(f.cm.getStatus).mockResolvedValueOnce('running').mockResolvedValue('unknown');
+    expect((await f.submit()).state).toBe(state);
+    const calls = vi.mocked(f.cm.getStatus).mock.calls.length;
+    await expect(
+      f.ctrl.finalizeRetained(f.id, f.request, { type: 'human', userId: 'other-human' }),
+    ).rejects.toThrow(/actor/);
+    expect(vi.mocked(f.cm.getStatus).mock.calls).toHaveLength(calls);
+  });
   it('fences real facade controls and competing candidate selection during finalization preflight', async () => {
     const f = await fixture();
     let release!: (value: string) => void;
@@ -341,25 +341,25 @@ describe('retained finalization', () => {
     expect(f.cm.start).not.toHaveBeenCalled();
     expect(f.cm.spawn).not.toHaveBeenCalled();
   });
-  it.each(['continuation', 'rewrite'] as const)(
-    'refuses clean merged B when %s owns A',
-    async (kind) => {
-      const f = await fixture(kind);
-      f.request.mode = 'complete-merged';
-      vi.mocked(f.worktrees.inspectSource!).mockResolvedValue({
-        branch: f.pod().branch,
-        commitSha: 'c'.repeat(40),
-        treeSha: 'd'.repeat(40),
-        worktreeClean: true,
-      });
-      f.provider.getPrStatus.mockResolvedValue(
-        pendingStatus({ merged: true, sourceTarget: f.target, headSha: 'c'.repeat(40) }),
-      );
-      await expect(f.submit()).rejects.toThrow();
-      expect(f.pods.retainedFinalizations!.get(f.id)).toBeNull();
-      expect(f.cm.stop).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'continuation',
+    'rewrite',
+  ] as const)('refuses clean merged B when %s owns A', async (kind) => {
+    const f = await fixture(kind);
+    f.request.mode = 'complete-merged';
+    vi.mocked(f.worktrees.inspectSource!).mockResolvedValue({
+      branch: f.pod().branch,
+      commitSha: 'c'.repeat(40),
+      treeSha: 'd'.repeat(40),
+      worktreeClean: true,
+    });
+    f.provider.getPrStatus.mockResolvedValue(
+      pendingStatus({ merged: true, sourceTarget: f.target, headSha: 'c'.repeat(40) }),
+    );
+    await expect(f.submit()).rejects.toThrow();
+    expect(f.pods.retainedFinalizations!.get(f.id)).toBeNull();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+  });
   it('wires the facade and blocks ordinary mutators without changing normal custody guards', async () => {
     const f = await fixture();
     const changes = f.db.prepare('SELECT total_changes() AS n').get();
@@ -394,40 +394,39 @@ describe('retained finalization', () => {
     ).not.toThrow();
     f.db.close();
   });
-  it.each(['continuation', 'rewrite'] as const)(
-    'cancels %s without modifying evidence, budgets or resources',
-    async (kind) => {
-      const f = await fixture(kind);
-      const before = f.pod();
-      const task = f.pods.taskExecutions!.snapshot(f.id);
-      const budget = f.pods.taskRetries!.state(f.id);
-      const result = await f.submit();
-      expect(result.state).toBe('finalized');
-      expect(f.pod()).toMatchObject({
-        status: 'killed',
-        containerId: before.containerId,
-        worktreePath: before.worktreePath,
-        lastValidationResult: before.lastValidationResult,
-        validationAttempts: before.validationAttempts,
-        maxValidationAttempts: before.maxValidationAttempts,
-      });
-      expect(f.pods.taskExecutions!.snapshot(f.id)).toEqual(task);
-      expect(f.pods.taskRetries!.state(f.id)).toEqual(budget);
-      expect(await f.submit()).toEqual(result);
-      expect(() => f.pods.update(f.id, { status: 'queued' })).toThrow(/finalization/i);
-      expect(() => f.pods.delete(f.id)).toThrow();
-      expect(() => assertCheckpointResourceNotRetained(f.db, before.containerId!)).toThrow();
-      expect(retainUnresolvedReconciliation(f.id, f.pods)).toBe(true);
-      expect(f.cm.stop).not.toHaveBeenCalled();
-      expect(f.cm.kill).not.toHaveBeenCalled();
-      expect(f.cm.start).not.toHaveBeenCalled();
-      expect(f.cm.spawn).not.toHaveBeenCalled();
-      expect(f.provider.mergePr).not.toHaveBeenCalled();
-      expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
-      if (f.reopen)
-        expect(f.reopen().pods.retainedFinalizations!.get(f.id)?.receipt).toEqual(result);
-    },
-  );
+  it.each([
+    'continuation',
+    'rewrite',
+  ] as const)('cancels %s without modifying evidence, budgets or resources', async (kind) => {
+    const f = await fixture(kind);
+    const before = f.pod();
+    const task = f.pods.taskExecutions!.snapshot(f.id);
+    const budget = f.pods.taskRetries!.state(f.id);
+    const result = await f.submit();
+    expect(result.state).toBe('finalized');
+    expect(f.pod()).toMatchObject({
+      status: 'killed',
+      containerId: before.containerId,
+      worktreePath: before.worktreePath,
+      lastValidationResult: before.lastValidationResult,
+      validationAttempts: before.validationAttempts,
+      maxValidationAttempts: before.maxValidationAttempts,
+    });
+    expect(f.pods.taskExecutions!.snapshot(f.id)).toEqual(task);
+    expect(f.pods.taskRetries!.state(f.id)).toEqual(budget);
+    expect(await f.submit()).toEqual(result);
+    expect(() => f.pods.update(f.id, { status: 'queued' })).toThrow(/finalization/i);
+    expect(() => f.pods.delete(f.id)).toThrow();
+    expect(() => assertCheckpointResourceNotRetained(f.db, before.containerId!)).toThrow();
+    expect(retainUnresolvedReconciliation(f.id, f.pods)).toBe(true);
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.cm.kill).not.toHaveBeenCalled();
+    expect(f.cm.start).not.toHaveBeenCalled();
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+    expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
+    if (f.reopen) expect(f.reopen().pods.retainedFinalizations!.get(f.id)?.receipt).toEqual(result);
+  });
   it('coalesces concurrent requests, durably fences before stop and only observes uncertain stop on retry', async () => {
     const f = await fixture();
     vi.mocked(f.cm.getStatus).mockResolvedValue('running');
@@ -453,43 +452,44 @@ describe('retained finalization', () => {
     );
     expect(f.cm.stop).toHaveBeenCalledOnce();
   });
-  it.each(['before-stop', 'after-stop', 'terminal-rollback'] as const)(
-    'reopens real SQLite after %s without losing intent or repeating stop',
-    async (crash) => {
-      const f = await fixture('rewrite');
-      vi.mocked(f.cm.getStatus).mockResolvedValue(
-        crash === 'terminal-rollback' ? 'stopped' : 'running',
-      );
-      if (crash === 'before-stop')
-        vi.mocked(f.cm.getStatus)
-          .mockResolvedValueOnce('running')
-          .mockRejectedValueOnce(new Error('crash before dispatch'));
-      if (crash === 'after-stop')
-        vi.mocked(f.cm.stop).mockRejectedValueOnce(new Error('crash after dispatch'));
-      if (crash === 'terminal-rollback') {
-        const finish = vi
-          .spyOn(f.pods.retainedFinalizations!, 'finish')
-          .mockImplementationOnce(() => {
-            throw new Error('crash before terminal commit');
-          });
-        await expect(f.submit()).rejects.toThrow('crash before terminal commit');
-        expect(f.pod().status).toBe('failed');
-        expect(f.pods.retainedFinalizations!.get(f.id)?.receipt.state).toBe('pending');
-        finish.mockRestore();
-      } else expect((await f.submit()).state).toBe('pending');
-      const next = f.reopen!();
-      f.deps.podRepo = next.pods;
-      vi.mocked(f.cm.getStatus).mockResolvedValue('stopped');
-      const receipt = await f.controller().finalizeRetained(f.id, f.request, f.actor);
-      expect(receipt.state).toBe('finalized');
-      expect(next.pods.getOrThrow(f.id).status).toBe('killed');
-      expect(f.cm.stop).toHaveBeenCalledTimes(crash === 'after-stop' ? 1 : 0);
-      const final = f.reopen!();
-      f.deps.podRepo = final.pods;
-      expect(await f.controller().finalizeRetained(f.id, f.request, f.actor)).toEqual(receipt);
-      expect(final.pods.listReferencedContainerIds()).toContain('replacement');
-    },
-  );
+  it.each([
+    'before-stop',
+    'after-stop',
+    'terminal-rollback',
+  ] as const)('reopens real SQLite after %s without losing intent or repeating stop', async (crash) => {
+    const f = await fixture('rewrite');
+    vi.mocked(f.cm.getStatus).mockResolvedValue(
+      crash === 'terminal-rollback' ? 'stopped' : 'running',
+    );
+    if (crash === 'before-stop')
+      vi.mocked(f.cm.getStatus)
+        .mockResolvedValueOnce('running')
+        .mockRejectedValueOnce(new Error('crash before dispatch'));
+    if (crash === 'after-stop')
+      vi.mocked(f.cm.stop).mockRejectedValueOnce(new Error('crash after dispatch'));
+    if (crash === 'terminal-rollback') {
+      const finish = vi
+        .spyOn(f.pods.retainedFinalizations!, 'finish')
+        .mockImplementationOnce(() => {
+          throw new Error('crash before terminal commit');
+        });
+      await expect(f.submit()).rejects.toThrow('crash before terminal commit');
+      expect(f.pod().status).toBe('failed');
+      expect(f.pods.retainedFinalizations!.get(f.id)?.receipt.state).toBe('pending');
+      finish.mockRestore();
+    } else expect((await f.submit()).state).toBe('pending');
+    const next = f.reopen!();
+    f.deps.podRepo = next.pods;
+    vi.mocked(f.cm.getStatus).mockResolvedValue('stopped');
+    const receipt = await f.controller().finalizeRetained(f.id, f.request, f.actor);
+    expect(receipt.state).toBe('finalized');
+    expect(next.pods.getOrThrow(f.id).status).toBe('killed');
+    expect(f.cm.stop).toHaveBeenCalledTimes(crash === 'after-stop' ? 1 : 0);
+    const final = f.reopen!();
+    f.deps.podRepo = final.pods;
+    expect(await f.controller().finalizeRetained(f.id, f.request, f.actor)).toEqual(receipt);
+    expect(final.pods.listReferencedContainerIds()).toContain('replacement');
+  });
   it('never reissues after a crash between durable dispatch marker and transport send', async () => {
     const f = await fixture('rewrite');
     vi.mocked(f.cm.getStatus).mockResolvedValueOnce('running').mockResolvedValue('unknown');
@@ -613,19 +613,19 @@ describe('retained finalization', () => {
     expect(f.pod().lastValidationResult?.overall).toBe('fail');
     expect(f.provider.verifyMergedSourceAncestry).toHaveBeenCalledTimes(2);
   });
-  it.each(['unknown', 'exception'] as const)(
-    'does not stop or finalize on %s observation',
-    async (failure) => {
-      const f = await fixture();
-      if (failure === 'exception')
-        vi.mocked(f.cm.getStatus).mockRejectedValue(new Error('unavailable'));
-      else vi.mocked(f.cm.getStatus).mockResolvedValue('unknown');
-      await expect(f.submit()).rejects.toThrow();
-      expect(f.pods.retainedFinalizations!.get(f.id)).toBeNull();
-      expect(f.pod().status).toBe('review_required');
-      expect(f.cm.stop).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'unknown',
+    'exception',
+  ] as const)('does not stop or finalize on %s observation', async (failure) => {
+    const f = await fixture();
+    if (failure === 'exception')
+      vi.mocked(f.cm.getStatus).mockRejectedValue(new Error('unavailable'));
+    else vi.mocked(f.cm.getStatus).mockResolvedValue('unknown');
+    await expect(f.submit()).rejects.toThrow();
+    expect(f.pods.retainedFinalizations!.get(f.id)).toBeNull();
+    expect(f.pod().status).toBe('review_required');
+    expect(f.cm.stop).not.toHaveBeenCalled();
+  });
   it('retains current replacement resources after terminal state and pointer loss', async () => {
     const f = await fixture('rewrite');
     await f.submit();
@@ -656,46 +656,52 @@ describe('retained finalization', () => {
     expect((await orphan.runSweep()).deleted).toBe(0);
     expect(f.cm.kill).not.toHaveBeenCalled();
   });
-  it.each(['key', 'mode', 'reason', 'generation', 'binding'] as const)(
-    'rejects conflicting admitted %s',
-    async (field) => {
-      const f = await fixture();
-      vi.mocked(f.cm.getStatus).mockResolvedValueOnce('running').mockResolvedValue('unknown');
-      await f.submit();
-      const changed = { ...f.request };
-      if (field === 'key') changed.requestKey += '-other';
-      if (field === 'mode') changed.mode = 'complete-merged';
-      if (field === 'reason') changed.reason += ' changed';
-      if (field === 'generation') changed.expectedGeneration++;
-      if (field === 'binding') changed.expectedBinding = '0'.repeat(64);
-      await expect(f.ctrl.finalizeRetained(f.id, changed, f.actor)).rejects.toThrow(/Conflicting/);
-      expect(f.cm.stop).not.toHaveBeenCalled();
-    },
-  );
-  it.each(['generation', 'container', 'owner', 'active', 'unknown-exit', 'goal'] as const)(
-    'rejects %s before intent',
-    async (change) => {
-      const f = await fixture();
-      if (change === 'generation') f.request.expectedGeneration++;
-      if (change === 'container')
-        f.db.prepare('UPDATE pods SET container_id=? WHERE id=?').run('drift', f.id);
-      if (change === 'owner') f.deps.isIdle.mockReturnValue(false);
-      if (change === 'active')
-        f.db.prepare("UPDATE pods SET status='running' WHERE id=?").run(f.id);
-      if (change === 'goal') f.deps.isGoal.mockReturnValue(true);
-      if (change === 'unknown-exit')
-        f.db.prepare('UPDATE pods SET last_validation_result=? WHERE id=?').run(
-          JSON.stringify({
-            ...f.pod().lastValidationResult,
-            infrastructureFailure: { code: 'EXEC_EXIT_UNVERIFIED' },
-          }),
-          f.id,
-        );
-      await expect(f.submit()).rejects.toThrow();
-      expect(f.pods.retainedFinalizations!.get(f.id)).toBeNull();
-      expect(f.cm.stop).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'key',
+    'mode',
+    'reason',
+    'generation',
+    'binding',
+  ] as const)('rejects conflicting admitted %s', async (field) => {
+    const f = await fixture();
+    vi.mocked(f.cm.getStatus).mockResolvedValueOnce('running').mockResolvedValue('unknown');
+    await f.submit();
+    const changed = { ...f.request };
+    if (field === 'key') changed.requestKey += '-other';
+    if (field === 'mode') changed.mode = 'complete-merged';
+    if (field === 'reason') changed.reason += ' changed';
+    if (field === 'generation') changed.expectedGeneration++;
+    if (field === 'binding') changed.expectedBinding = '0'.repeat(64);
+    await expect(f.ctrl.finalizeRetained(f.id, changed, f.actor)).rejects.toThrow(/Conflicting/);
+    expect(f.cm.stop).not.toHaveBeenCalled();
+  });
+  it.each([
+    'generation',
+    'container',
+    'owner',
+    'active',
+    'unknown-exit',
+    'goal',
+  ] as const)('rejects %s before intent', async (change) => {
+    const f = await fixture();
+    if (change === 'generation') f.request.expectedGeneration++;
+    if (change === 'container')
+      f.db.prepare('UPDATE pods SET container_id=? WHERE id=?').run('drift', f.id);
+    if (change === 'owner') f.deps.isIdle.mockReturnValue(false);
+    if (change === 'active') f.db.prepare("UPDATE pods SET status='running' WHERE id=?").run(f.id);
+    if (change === 'goal') f.deps.isGoal.mockReturnValue(true);
+    if (change === 'unknown-exit')
+      f.db.prepare('UPDATE pods SET last_validation_result=? WHERE id=?').run(
+        JSON.stringify({
+          ...f.pod().lastValidationResult,
+          infrastructureFailure: { code: 'EXEC_EXIT_UNVERIFIED' },
+        }),
+        f.id,
+      );
+    await expect(f.submit()).rejects.toThrow();
+    expect(f.pods.retainedFinalizations!.get(f.id)).toBeNull();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+  });
   it.each([
     'open',
     'closed',
@@ -751,21 +757,21 @@ describe('retained finalization', () => {
     expect(f.provider.mergePr).not.toHaveBeenCalled();
     expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
   });
-  it.each(['continuation', 'rewrite'] as const)(
-    'records merged %s source independently of failed validation',
-    async (kind) => {
-      const f = await fixture(kind);
-      f.request.mode = 'complete-merged';
-      const result = f.pod().lastValidationResult;
-      expect((await f.submit()).state).toBe('finalized');
-      expect(f.pod().status).toBe('complete');
-      expect(f.pod().lastValidationResult).toEqual(result);
-      expect(f.pods.retainedFinalizations!.get(f.id)?.evidence).toMatchObject({
-        source: { commitSha: 'a'.repeat(40) },
-      });
-      expect(f.provider.getPrStatus).toHaveBeenCalledTimes(2);
-      expect(f.provider.mergePr).not.toHaveBeenCalled();
-      expect(f.cm.kill).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'continuation',
+    'rewrite',
+  ] as const)('records merged %s source independently of failed validation', async (kind) => {
+    const f = await fixture(kind);
+    f.request.mode = 'complete-merged';
+    const result = f.pod().lastValidationResult;
+    expect((await f.submit()).state).toBe('finalized');
+    expect(f.pod().status).toBe('complete');
+    expect(f.pod().lastValidationResult).toEqual(result);
+    expect(f.pods.retainedFinalizations!.get(f.id)?.evidence).toMatchObject({
+      source: { commitSha: 'a'.repeat(40) },
+    });
+    expect(f.provider.getPrStatus).toHaveBeenCalledTimes(2);
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+    expect(f.cm.kill).not.toHaveBeenCalled();
+  });
 });

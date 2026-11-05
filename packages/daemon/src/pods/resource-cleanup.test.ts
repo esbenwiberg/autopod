@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createResourceFixture, deferred } from '../test-utils/resource-helpers.js';
+
 describe('container resource cleanup lifetime', () => {
   it('retains captured cleanup ordering and persists confirmed sandbox deletion through SQLite reopen', async () => {
     const f = createResourceFixture(true);

@@ -11,6 +11,7 @@ import {
   hasLatestPersistedAgentTerminalEventComplete,
   persistedAgentCompleteEventKeys,
 } from './agent-execution-policy.js';
+
 describe('agent execution accounting policy', () => {
   it.each([
     { usage: null, expected: 0 },

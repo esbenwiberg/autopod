@@ -11,7 +11,7 @@ import { Link, useParams } from 'react-router-dom';
 import { apiFetch, apiResponse } from '../lib/api.js';
 import type { ManagedArtifactSummary, ManagedPodSummary } from '../store/managed-pods.js';
 import { useManagedPodsStore } from '../store/managed-pods.js';
-import { ManagedStateChip, formatBytes, formatDate } from './ManagedPods.js';
+import { formatBytes, formatDate, ManagedStateChip } from './ManagedPods.js';
 
 interface Detail {
   pod: ManagedPodSummary;

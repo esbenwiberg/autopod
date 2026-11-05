@@ -51,41 +51,41 @@ describe('fix publication ownership and merge completion', () => {
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
   });
 
-  it.each(['receipt', 'plan'] as const)(
-    'recovers a crash before %s without pushing or merging again',
-    async (window) => {
-      vi.useFakeTimers();
-      const { f, fix, original, merged } = await fixture();
-      if (window === 'receipt') {
-        vi.mocked(f.worktreeManager.pushBranch).mockImplementationOnce(async (...args) => {
-          await mockFixBranchPublication(...args);
-          throw new Error('push result lost');
-        });
-      } else {
-        const journal = f.podRepo.mergeJournal;
-        if (!journal) throw new Error('Missing journal');
-        const plan = journal.plan.bind(journal);
-        vi.spyOn(journal, 'plan').mockImplementation((...args) => {
-          if (args[2] !== original.publication.publicationId)
-            throw new Error('crash before planning');
-          return plan(...args);
-        });
-      }
-      await f.delivery().completeFixPodAfterPush(fix);
-      expect(f.fix().status).toBe('awaiting_input');
-      expect(f.podRepo.sourcePublications?.fixForMerge(f.pod())?.confirmed).toBe(window === 'plan');
-      const restart = f.reopenPolling();
-      f.provider.getPrStatus.mockResolvedValue(merged);
-      restart.poll.resumeMergePolling();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(restart.next.pods.getOrThrow('prepare').status).toBe('complete');
-      expect(f.provider.mergePr).not.toHaveBeenCalled();
-      expect(f.worktreeManager.pushBranch).toHaveBeenCalledOnce();
-      expect(f.db.prepare('SELECT COUNT(*) AS n FROM source_publication_receipts').get()).toEqual({
-        n: 2,
+  it.each([
+    'receipt',
+    'plan',
+  ] as const)('recovers a crash before %s without pushing or merging again', async (window) => {
+    vi.useFakeTimers();
+    const { f, fix, original, merged } = await fixture();
+    if (window === 'receipt') {
+      vi.mocked(f.worktreeManager.pushBranch).mockImplementationOnce(async (...args) => {
+        await mockFixBranchPublication(...args);
+        throw new Error('push result lost');
       });
-    },
-  );
+    } else {
+      const journal = f.podRepo.mergeJournal;
+      if (!journal) throw new Error('Missing journal');
+      const plan = journal.plan.bind(journal);
+      vi.spyOn(journal, 'plan').mockImplementation((...args) => {
+        if (args[2] !== original.publication.publicationId)
+          throw new Error('crash before planning');
+        return plan(...args);
+      });
+    }
+    await f.delivery().completeFixPodAfterPush(fix);
+    expect(f.fix().status).toBe('awaiting_input');
+    expect(f.podRepo.sourcePublications?.fixForMerge(f.pod())?.confirmed).toBe(window === 'plan');
+    const restart = f.reopenPolling();
+    f.provider.getPrStatus.mockResolvedValue(merged);
+    restart.poll.resumeMergePolling();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(restart.next.pods.getOrThrow('prepare').status).toBe('complete');
+    expect(f.provider.mergePr).not.toHaveBeenCalled();
+    expect(f.worktreeManager.pushBranch).toHaveBeenCalledOnce();
+    expect(f.db.prepare('SELECT COUNT(*) AS n FROM source_publication_receipts').get()).toEqual({
+      n: 2,
+    });
+  });
 
   it('does not adopt an ambiguous push from a different provider source', async () => {
     vi.useFakeTimers();
@@ -105,27 +105,27 @@ describe('fix publication ownership and merge completion', () => {
     expect(f.provider.mergePr).not.toHaveBeenCalled();
   });
 
-  it.each(['admitted', 'scheduled'] as const)(
-    'refuses a fix push over an %s merge request',
-    async (state) => {
-      const { f, fix, original } = await fixture();
-      const journal = f.podRepo.mergeJournal;
-      if (!journal) throw new Error('Missing journal');
-      const attempt = journal.claim(
-        f.pod(),
-        f.pod(),
-        original.publication.publicationId,
-        original.entry.request.config,
-      );
-      if (state === 'scheduled')
-        journal.observe(attempt, { merged: false, autoMergeScheduled: true }, 'merge_response');
-      await f.delivery().completeFixPodAfterPush(fix);
-      expect(f.fix().status).toBe('awaiting_input');
-      expect(f.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
-      expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
-      expect(f.podRepo.sourcePublications?.fixForMerge(f.pod())).toBeNull();
-    },
-  );
+  it.each([
+    'admitted',
+    'scheduled',
+  ] as const)('refuses a fix push over an %s merge request', async (state) => {
+    const { f, fix, original } = await fixture();
+    const journal = f.podRepo.mergeJournal;
+    if (!journal) throw new Error('Missing journal');
+    const attempt = journal.claim(
+      f.pod(),
+      f.pod(),
+      original.publication.publicationId,
+      original.entry.request.config,
+    );
+    if (state === 'scheduled')
+      journal.observe(attempt, { merged: false, autoMergeScheduled: true }, 'merge_response');
+    await f.delivery().completeFixPodAfterPush(fix);
+    expect(f.fix().status).toBe('awaiting_input');
+    expect(f.worktreeManager.rebaseOntoBase).not.toHaveBeenCalled();
+    expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
+    expect(f.podRepo.sourcePublications?.fixForMerge(f.pod())).toBeNull();
+  });
 
   it('fences an old status lookup when a fix publishes while the lookup is in flight', async () => {
     vi.useFakeTimers();

@@ -115,56 +115,58 @@ describe('reconcileSandboxSessions', () => {
     }
   });
 
-  it.each([false, true])(
-    'retains interrupted artifact collection without resuming the sandbox (published=%s)',
-    async (published) => {
-      const deps = buildDeps('running', {
-        lifecycleGeneration: 1,
-        options: { agentMode: 'auto', output: 'artifact', validate: false },
-        containerId: published ? null : 'sandbox-1',
-        worktreePath: null,
-        artifactsPath: published ? '/saved/artifact-snapshot' : null,
-        finalization: {
-          generation: 1,
-          cycle: 1,
-          phase: 'preserving',
-          agentSettledAt: '2026-09-07T10:00:00Z',
-          result: 'Report complete',
-          pendingDecisionId: null,
-          sourcePreservedAt: published ? '2026-09-07T10:01:00Z' : null,
-        },
-      });
-      await reconcileSandboxSessions({ ...deps, logger });
-      expect(deps.pod.status).toBe('failed');
-      expect(deps.pod.containerId).toBe(published ? null : 'sandbox-1');
-      expect(deps.pod.artifactsPath).toBe(published ? '/saved/artifact-snapshot' : null);
-      expect(deps.preserveWorkspace).not.toHaveBeenCalled();
-      expect(deps.quiesceSandboxAgent).not.toHaveBeenCalled();
-      expect(deps.suspendSandbox).not.toHaveBeenCalled();
-      expect(deps.enqueueSession).not.toHaveBeenCalled();
-      expect(deps.sandboxContainerManager.start).not.toHaveBeenCalled();
-    },
-  );
-  it.each(['running', 'stopped', 'unknown', 'deleted'] as const)(
-    'retains unanswered triage when sandbox status is %s after restart',
-    async (status) => {
-      const deps = buildDeps(status, {
-        status: 'awaiting_input',
-        pendingEscalation: {
-          id: 'selection',
-          podId: 'pod-1',
-          type: 'ask_human',
-          timestamp: new Date().toISOString(),
-          payload: { question: 'Select repairs' },
-          response: null,
-        },
-      });
-      await reconcileSandboxSessions({ ...deps, logger });
-      expect(deps.pod.status).toBe('awaiting_input');
-      expect(deps.pod.pendingEscalation?.id).toBe('selection');
-      expect(deps.enqueueSession).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    false,
+    true,
+  ])('retains interrupted artifact collection without resuming the sandbox (published=%s)', async (published) => {
+    const deps = buildDeps('running', {
+      lifecycleGeneration: 1,
+      options: { agentMode: 'auto', output: 'artifact', validate: false },
+      containerId: published ? null : 'sandbox-1',
+      worktreePath: null,
+      artifactsPath: published ? '/saved/artifact-snapshot' : null,
+      finalization: {
+        generation: 1,
+        cycle: 1,
+        phase: 'preserving',
+        agentSettledAt: '2026-09-07T10:00:00Z',
+        result: 'Report complete',
+        pendingDecisionId: null,
+        sourcePreservedAt: published ? '2026-09-07T10:01:00Z' : null,
+      },
+    });
+    await reconcileSandboxSessions({ ...deps, logger });
+    expect(deps.pod.status).toBe('failed');
+    expect(deps.pod.containerId).toBe(published ? null : 'sandbox-1');
+    expect(deps.pod.artifactsPath).toBe(published ? '/saved/artifact-snapshot' : null);
+    expect(deps.preserveWorkspace).not.toHaveBeenCalled();
+    expect(deps.quiesceSandboxAgent).not.toHaveBeenCalled();
+    expect(deps.suspendSandbox).not.toHaveBeenCalled();
+    expect(deps.enqueueSession).not.toHaveBeenCalled();
+    expect(deps.sandboxContainerManager.start).not.toHaveBeenCalled();
+  });
+  it.each([
+    'running',
+    'stopped',
+    'unknown',
+    'deleted',
+  ] as const)('retains unanswered triage when sandbox status is %s after restart', async (status) => {
+    const deps = buildDeps(status, {
+      status: 'awaiting_input',
+      pendingEscalation: {
+        id: 'selection',
+        podId: 'pod-1',
+        type: 'ask_human',
+        timestamp: new Date().toISOString(),
+        payload: { question: 'Select repairs' },
+        response: null,
+      },
+    });
+    await reconcileSandboxSessions({ ...deps, logger });
+    expect(deps.pod.status).toBe('awaiting_input');
+    expect(deps.pod.pendingEscalation?.id).toBe('selection');
+    expect(deps.enqueueSession).not.toHaveBeenCalled();
+  });
   it('re-queues interrupted provisioning once with its surviving worktree', async () => {
     const worktreePath = await mkdtemp(path.join(tmpdir(), 'autopod-reconcile-'));
     const deps = buildDeps('unknown', {

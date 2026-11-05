@@ -19,6 +19,7 @@ import { assertValidationMutationSettled } from './validation-recovery-policy.js
 import { getPodValidationSkipPhases, getPodValidationSuite } from './validation-workflow-policy.js';
 
 export type { SourceAdoptionRequest } from './source-adoption-types.js';
+
 import type { SourceAdoptionRequest } from './source-adoption-types.js';
 export interface SourceAdoptionControllerDependencies {
   podRepo: PodRepository;

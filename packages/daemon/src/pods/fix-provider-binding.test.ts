@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createFixCycleFixture } from '../test-utils/fix-cycle-helpers.js';
+
 describe('live fix provider binding', () => {
   it('reads a replaced live repository field after construction and reconciles only matching identity', () => {
     const f = createFixCycleFixture();

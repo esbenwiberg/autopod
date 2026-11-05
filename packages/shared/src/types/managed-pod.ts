@@ -41,20 +41,20 @@ export const RouteSchema = z
   .object({
     providerAccountId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     model: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -69,20 +69,20 @@ export const RepositoryScopeSchema = z
   .object({
     enrollmentId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     remote: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -92,7 +92,7 @@ export const RepositoryScopeSchema = z
       .regex(/^[a-f0-9]{40}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -100,10 +100,10 @@ export const RepositoryScopeSchema = z
     access: z.enum(['read', 'write']),
     branchNamespace: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -115,10 +115,10 @@ export const IdentityBindingSchema = z
   .object({
     alias: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -128,7 +128,7 @@ export const IdentityBindingSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -160,10 +160,10 @@ export const NetworkScopeSchema = z
   .object({
     profileId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -172,10 +172,10 @@ export const NetworkScopeSchema = z
       .array(
         z
           .string()
-          .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+          .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
           .refine(
             (value) =>
-              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
                 value,
               ),
             'secret-material-forbidden',
@@ -216,10 +216,10 @@ export const EffectiveGrantSchema = z
     schemaVersion: z.literal(1),
     grantId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -227,10 +227,10 @@ export const EffectiveGrantSchema = z
     revision: z.number().int().min(1),
     dispatcherAttemptId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -240,7 +240,7 @@ export const EffectiveGrantSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -253,7 +253,7 @@ export const EffectiveGrantSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -265,10 +265,10 @@ export const ProfileSnapshotSchema = z
   .object({
     profileId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -279,7 +279,7 @@ export const ProfileSnapshotSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -298,10 +298,10 @@ export const ArtifactOutputSchema = z
       .array(
         z
           .string()
-          .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+          .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
           .refine(
             (value) =>
-              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
                 value,
               ),
             'secret-material-forbidden',
@@ -316,7 +316,7 @@ export const ArtifactOutputSchema = z
           .max(4096)
           .refine(
             (value) =>
-              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
                 value,
               ),
             'secret-material-forbidden',
@@ -331,7 +331,7 @@ export const ArtifactOutputSchema = z
           .max(4096)
           .refine(
             (value) =>
-              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
                 value,
               ),
             'secret-material-forbidden',
@@ -354,40 +354,40 @@ export const SourceOutputSchema = z
     mode: z.enum(['none', 'commit', 'branch', 'draft-pr']),
     repository: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     remote: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     head: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     base: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -402,17 +402,17 @@ export const ArtifactInputSchema = z
       .regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     backendArtifactId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -422,7 +422,7 @@ export const ArtifactInputSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -432,7 +432,7 @@ export const ArtifactInputSchema = z
       .regex(/^\/inputs\/[A-Za-z0-9_-]+$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -447,30 +447,30 @@ export const ManagedPodRequestSchema = z
     managedMode: z.literal(true),
     dispatcherJobId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     dispatcherAttemptId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     startKey: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -480,7 +480,7 @@ export const ManagedPodRequestSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -504,7 +504,7 @@ export const ManagedPodRequestSchema = z
           .max(4096)
           .refine(
             (value) =>
-              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
                 value,
               ),
             'secret-material-forbidden',
@@ -514,7 +514,7 @@ export const ManagedPodRequestSchema = z
           .regex(/^sha256:[a-f0-9]{64}$/)
           .refine(
             (value) =>
-              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
                 value,
               ),
             'secret-material-forbidden',
@@ -525,10 +525,10 @@ export const ManagedPodRequestSchema = z
               .object({
                 path: z
                   .string()
-                  .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+                  .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
                   .refine(
                     (value) =>
-                      !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+                      !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
                         value,
                       ),
                     'secret-material-forbidden',
@@ -538,7 +538,7 @@ export const ManagedPodRequestSchema = z
                   .max(1000000)
                   .refine(
                     (value) =>
-                      !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+                      !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
                         value,
                       ),
                     'secret-material-forbidden',
@@ -548,17 +548,17 @@ export const ManagedPodRequestSchema = z
                   .regex(/^sha256:[a-f0-9]{64}$/)
                   .refine(
                     (value) =>
-                      !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+                      !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
                         value,
                       ),
                     'secret-material-forbidden',
                   ),
                 sourceJobId: z
                   .string()
-                  .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+                  .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
                   .refine(
                     (value) =>
-                      !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+                      !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
                         value,
                       ),
                     'secret-material-forbidden',
@@ -582,20 +582,20 @@ export const ManagedPodRequestSchema = z
       .object({
         suite: z
           .string()
-          .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+          .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
           .refine(
             (value) =>
-              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
                 value,
               ),
             'secret-material-forbidden',
           ),
         verifierPolicy: z
           .string()
-          .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+          .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
           .refine(
             (value) =>
-              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
                 value,
               ),
             'secret-material-forbidden',
@@ -611,30 +611,30 @@ export const ManagedPodHandleSchema = z
     schemaVersion: z.literal(1),
     podId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     dispatcherInstallationId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     dispatcherAttemptId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -644,7 +644,7 @@ export const ManagedPodHandleSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -654,17 +654,17 @@ export const ManagedPodHandleSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     grantId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -675,7 +675,7 @@ export const ManagedPodHandleSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -684,10 +684,10 @@ export const ManagedPodHandleSchema = z
     createdAt: z.number().int().min(0).max(9007199254740991),
     initialCursor: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -699,10 +699,10 @@ export const ArtifactFileSchema = z
   .object({
     path: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -713,7 +713,7 @@ export const ArtifactFileSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -724,7 +724,7 @@ export const ArtifactFileSchema = z
       .max(4096)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -737,30 +737,30 @@ export const ArtifactManifestSchema = z
     schemaVersion: z.literal(1),
     artifactId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     podId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     dispatcherAttemptId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -770,7 +770,7 @@ export const ArtifactManifestSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -788,7 +788,7 @@ export const ArtifactManifestSchema = z
           .regex(/^sha256:[a-f0-9]{64}$/)
           .refine(
             (value) =>
-              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
                 value,
               ),
             'secret-material-forbidden',
@@ -803,30 +803,30 @@ export const ArtifactReceiptSchema = z
     schemaVersion: z.literal(1),
     artifactId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     podId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     dispatcherAttemptId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -836,7 +836,7 @@ export const ArtifactReceiptSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -846,7 +846,7 @@ export const ArtifactReceiptSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -856,7 +856,7 @@ export const ArtifactReceiptSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -872,30 +872,30 @@ export const SourceCandidateReceiptSchema = z
     schemaVersion: z.literal(1),
     candidateId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     podId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     dispatcherAttemptId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -905,47 +905,47 @@ export const SourceCandidateReceiptSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     repository: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     remote: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     head: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     base: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -955,7 +955,7 @@ export const SourceCandidateReceiptSchema = z
       .regex(/^[a-f0-9]{40}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -965,7 +965,7 @@ export const SourceCandidateReceiptSchema = z
       .regex(/^[a-f0-9]{40}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -975,7 +975,7 @@ export const SourceCandidateReceiptSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -985,7 +985,7 @@ export const SourceCandidateReceiptSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -998,20 +998,20 @@ export const VerificationReceiptSchema = z
     schemaVersion: z.literal(1),
     verificationId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     dispatcherAttemptId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1021,7 +1021,7 @@ export const VerificationReceiptSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1031,7 +1031,7 @@ export const VerificationReceiptSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1041,7 +1041,7 @@ export const VerificationReceiptSchema = z
       .regex(/^[a-f0-9]{40}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1051,27 +1051,27 @@ export const VerificationReceiptSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     verifierPolicy: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     verifierIdentity: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1083,7 +1083,7 @@ export const VerificationReceiptSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1096,20 +1096,20 @@ export const FinalizeSourceDeliveryRequestSchema = z
     schemaVersion: z.literal(1),
     dispatcherInstallationId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     dispatcherAttemptId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1119,7 +1119,7 @@ export const FinalizeSourceDeliveryRequestSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1129,7 +1129,7 @@ export const FinalizeSourceDeliveryRequestSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1137,10 +1137,10 @@ export const FinalizeSourceDeliveryRequestSchema = z
     verificationReceipt: VerificationReceiptSchema,
     grantId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1149,40 +1149,40 @@ export const FinalizeSourceDeliveryRequestSchema = z
     operation: z.enum(['commit', 'branch', 'draft-pr']),
     repository: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     remote: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     head: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     base: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1192,7 +1192,7 @@ export const FinalizeSourceDeliveryRequestSchema = z
       .regex(/^[a-f0-9]{40}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1202,7 +1202,7 @@ export const FinalizeSourceDeliveryRequestSchema = z
       .regex(/^[a-f0-9]{40}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1213,17 +1213,17 @@ export const FinalizeSourceDeliveryRequestSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     operationKey: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1236,10 +1236,10 @@ export const SourceDeliveryReceiptSchema = z
     schemaVersion: z.literal(1),
     dispatcherAttemptId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1249,7 +1249,7 @@ export const SourceDeliveryReceiptSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1259,7 +1259,7 @@ export const SourceDeliveryReceiptSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1269,17 +1269,17 @@ export const SourceDeliveryReceiptSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     operationKey: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1289,7 +1289,7 @@ export const SourceDeliveryReceiptSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1297,40 +1297,40 @@ export const SourceDeliveryReceiptSchema = z
     operation: z.enum(['commit', 'branch', 'draft-pr']),
     repository: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     remote: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     head: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     base: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1340,7 +1340,7 @@ export const SourceDeliveryReceiptSchema = z
       .regex(/^[a-f0-9]{40}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1350,7 +1350,7 @@ export const SourceDeliveryReceiptSchema = z
       .regex(/^[a-f0-9]{40}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1361,7 +1361,7 @@ export const SourceDeliveryReceiptSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1378,10 +1378,10 @@ export const FinalizeSourceDeliveryResponseSchema = z
     receipts: z.array(SourceDeliveryReceiptSchema).max(5000),
     reason: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1394,20 +1394,20 @@ export const ValidationEvidenceSchema = z
     schemaVersion: z.literal(1),
     evidenceId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     dispatcherAttemptId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1415,10 +1415,10 @@ export const ValidationEvidenceSchema = z
     kind: z.enum(['worker-claim', 'runtime-fact', 'validation', 'limitation']),
     name: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1429,7 +1429,7 @@ export const ValidationEvidenceSchema = z
       .regex(/^sha256:[a-f0-9]{64}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1442,40 +1442,40 @@ export const ManagedPodEventSchema = z
     schemaVersion: z.literal(1),
     eventId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     podId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     dispatcherAttemptId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     cursor: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1528,10 +1528,10 @@ export const ManagedPodResultSchema = z
       .array(
         z
           .string()
-          .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+          .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
           .refine(
             (value) =>
-              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
                 value,
               ),
             'secret-material-forbidden',
@@ -1553,10 +1553,10 @@ export const ManagedPodErrorSchema = z
     schemaVersion: z.literal(1),
     code: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1564,10 +1564,10 @@ export const ManagedPodErrorSchema = z
     retryable: z.boolean(),
     requestId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1580,10 +1580,10 @@ export const DriverHealthSchema = z
     schemaVersion: z.literal(1),
     backendId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1596,10 +1596,10 @@ export const DriverHealthSchema = z
       .array(
         z
           .string()
-          .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+          .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
           .refine(
             (value) =>
-              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+              !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
                 value,
               ),
             'secret-material-forbidden',
@@ -1616,20 +1616,20 @@ export const FollowUpEnvelopeSchema = z
     schemaVersion: z.literal(1),
     dispatcherAttemptId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     grantId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1641,7 +1641,7 @@ export const FollowUpEnvelopeSchema = z
       .max(4096)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1654,20 +1654,20 @@ export const ControlRequestSchema = z
     schemaVersion: z.literal(1),
     dispatcherAttemptId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
       ),
     grantId: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',
@@ -1693,10 +1693,10 @@ export const ManagedObservationSchema = z
     schemaVersion: z.literal(1),
     cursor: z
       .string()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
       .refine(
         (value) =>
-          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\/\s]+:[^\/\s]+@|[?&](?:sig|token|access_token)=)/.test(
+          !/(Bearer\s+[A-Za-z0-9._~-]+|(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^/\s]+:[^/\s]+@|[?&](?:sig|token|access_token)=)/.test(
             value,
           ),
         'secret-material-forbidden',

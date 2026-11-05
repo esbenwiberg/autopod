@@ -67,7 +67,7 @@ export interface TaskRetryLedger {
     reason: string,
     actor: OperatorActor,
     targetBindingHash?: string,
-    failureOrRepair?: string | RewriteRepairRetryTarget,
+    expectedFailureOrRepair?: string | RewriteRepairRetryTarget,
   ): TaskRetryAuthorization;
 }
 const keys: Array<keyof TaskRetryIdentity> = [
@@ -552,10 +552,12 @@ export function createTaskRetryLedger(
         reason: string,
         actor: OperatorActor,
         targetBindingHash?: string,
-        failureOrRepair?: string | RewriteRepairRetryTarget,
+        expectedFailureOrRepair?: string | RewriteRepairRetryTarget,
       ) => {
-        const expectedFailureId = typeof failureOrRepair === 'string' ? failureOrRepair : undefined;
-        const targetRepair = typeof failureOrRepair === 'string' ? undefined : failureOrRepair;
+        const expectedFailureId =
+          typeof expectedFailureOrRepair === 'string' ? expectedFailureOrRepair : undefined;
+        const targetRepair =
+          typeof expectedFailureOrRepair === 'object' ? expectedFailureOrRepair : undefined;
         if (
           (targetRepair !== undefined &&
             (stage !== 'validation' ||

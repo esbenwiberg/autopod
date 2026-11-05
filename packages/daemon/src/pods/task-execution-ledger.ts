@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { AutopodError, type ExecutionTarget, type TaskExecutionSummary } from '@autopod/shared';
+import {
+  AutopodError,
+  type ExecutionTarget,
+  type Pod,
+  type TaskExecutionSummary,
+} from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { readComposableUsage } from './composable-usage.js';
 import { COST_PHASE_COLUMNS } from './cost-pod-projection.js';
@@ -50,6 +55,11 @@ export interface TaskExecutionLedger
   snapshot(podId: string): TaskExecutionSummary;
   /** Unsettled durable evidence; not proof that a provider process is still alive. */
   hasActiveRun(podId: string): boolean;
+  /** Positive settlement evidence for this exact lifecycle, cycle and recorded resource. */
+  hasSettledRun?(
+    pod: Pick<Pod, 'id' | 'lifecycleGeneration' | 'containerId' | 'executionTarget'>,
+    cycle: number,
+  ): boolean;
   /** Prevent application deletion from erasing unresolved ownership anywhere in this task. */
   assertCanDelete(podId: string): void;
   /** Across this logical task, including retained failed runs in linked pods. */
@@ -537,6 +547,33 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           .prepare('SELECT 1 FROM task_agent_runs WHERE pod_id = ? AND ended_at IS NULL LIMIT 1')
           .get(podId),
       ),
+    hasSettledRun(pod, cycle) {
+      if (!isContainerReference(pod.containerId)) return false;
+      const run = db
+        .prepare(`SELECT ended_at AS endedAt, failure_category AS failureCategory,
+          CASE WHEN length(CAST(binding AS BLOB)) <= 16384 THEN binding END AS binding
+          FROM task_agent_runs WHERE pod_id = ? AND generation = ? AND cycle = ?
+          ORDER BY started_at DESC, id DESC LIMIT 1`)
+        .get(pod.id, pod.lifecycleGeneration, cycle) as
+        | { endedAt: string | null; failureCategory: string | null; binding: string | null }
+        | undefined;
+      if (
+        !run?.endedAt ||
+        !run.binding ||
+        run.failureCategory === 'execution_termination_unverified'
+      )
+        return false;
+      try {
+        const binding = JSON.parse(run.binding);
+        return (
+          binding?.version === 2 &&
+          binding.resource?.containerId === pod.containerId &&
+          binding.resource?.executionTarget === pod.executionTarget
+        );
+      } catch {
+        return false;
+      }
+    },
     assertCanDelete(podId) {
       const retained = db
         .prepare(`SELECT 1 FROM task_agent_runs r

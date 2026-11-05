@@ -2,10 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   type CompiledProviderManifest,
+  createProviderCatalog,
   PROVIDER_CATALOG,
   type Profile,
   type Runtime,
-  createProviderCatalog,
 } from '@autopod/shared';
 import Fastify from 'fastify';
 import pino from 'pino';
@@ -14,7 +14,7 @@ import { modelProviderRoutes } from './api/routes/model-providers.js';
 import { profileRoutes } from './api/routes/profiles.js';
 import { providerAccountRoutes } from './api/routes/provider-accounts.js';
 import type { CredentialsCipher } from './crypto/credentials-cipher.js';
-import { type NetworkManager, createPodManager } from './pods/pod-manager.js';
+import { createPodManager, type NetworkManager } from './pods/pod-manager.js';
 import { resolveProviderPreflight } from './pods/provider-preflight.js';
 import { addRuntimeNetworkDefaults } from './pods/runtime-network-defaults.js';
 import { createProfileStore } from './profiles/index.js';

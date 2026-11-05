@@ -379,29 +379,29 @@ describe('immutable engine evidence and derived validation publication', () => {
     );
   });
 
-  it.each(['pass', 'fail'] as const)(
-    'retains direct %s publication without an outcome or intermediate record',
-    (overall) => {
-      const f = fixture();
-      f.result.overall = overall;
-      f.retries.finish(f.admission.id, overall === 'pass' ? 'pass' : 'nonretryable', 1);
-      f.publish(podId, 1, f.result);
-      const raw = rawRows(f);
-      expect(raw.outcome).toEqual([]);
-      expect(raw.published).toEqual([
-        {
-          dispatch_id: f.dispatch,
-          result_hash: validationResultHash(f.result),
-          result: JSON.stringify(f.result),
-        },
-      ]);
-      const reopened = f.reopen();
-      reopened.publish(podId, 1, f.result, { intermediate: true });
-      reopened.publish(podId, 1, f.result);
-      assertPublished(f, f.result);
-      expect(rawRows(f)).toEqual(raw);
-    },
-  );
+  it.each([
+    'pass',
+    'fail',
+  ] as const)('retains direct %s publication without an outcome or intermediate record', (overall) => {
+    const f = fixture();
+    f.result.overall = overall;
+    f.retries.finish(f.admission.id, overall === 'pass' ? 'pass' : 'nonretryable', 1);
+    f.publish(podId, 1, f.result);
+    const raw = rawRows(f);
+    expect(raw.outcome).toEqual([]);
+    expect(raw.published).toEqual([
+      {
+        dispatch_id: f.dispatch,
+        result_hash: validationResultHash(f.result),
+        result: JSON.stringify(f.result),
+      },
+    ]);
+    const reopened = f.reopen();
+    reopened.publish(podId, 1, f.result, { intermediate: true });
+    reopened.publish(podId, 1, f.result);
+    assertPublished(f, f.result);
+    expect(rawRows(f)).toEqual(raw);
+  });
 
   it('preserves engine refs and their stored bytes while collecting missing refs, including duplicate paths', async () => {
     const f = fixture();
@@ -449,32 +449,32 @@ describe('immutable engine evidence and derived validation publication', () => {
     expect(f.ledger.evidence(podId, f.dispatch, validationResultHash(raw)).result).toEqual(raw);
   });
 
-  it.each(['exact', 'case-alias'] as const)(
-    'does not overwrite a retained screenshot through another attachment with a %s store filename',
-    async (mode) => {
-      const f = fixture();
-      const ref = await f.store.write(
-        podId,
-        'fact',
-        mode === 'exact' ? 'visible-Fact-0-fact.png' : 'visible-fact-0-fact.png',
-        Buffer.from('original fact'),
-      );
-      const fact = required(f.result.factValidation?.results[0]);
-      required(fact.attachments?.[0]).screenshot = ref;
-      required(f.result.factValidation).results.push({
-        ...fact,
-        attachments: [{ kind: 'screenshot', path: 'fact.PNG' }],
-      });
-      f.finish();
-      f.publish(podId, 1, f.result, { intermediate: true });
-      await f.collect();
-      expect(fact.attachments?.[0]?.screenshot).toBe(ref);
-      expect((await f.store.read(ref)).toString()).toBe('original fact');
-      expect(f.result.factValidation?.results[1]?.attachments?.[0]?.screenshot).toBeUndefined();
-      f.publish(podId, 1, f.result);
-      assertPublished(f, f.result);
-    },
-  );
+  it.each([
+    'exact',
+    'case-alias',
+  ] as const)('does not overwrite a retained screenshot through another attachment with a %s store filename', async (mode) => {
+    const f = fixture();
+    const ref = await f.store.write(
+      podId,
+      'fact',
+      mode === 'exact' ? 'visible-Fact-0-fact.png' : 'visible-fact-0-fact.png',
+      Buffer.from('original fact'),
+    );
+    const fact = required(f.result.factValidation?.results[0]);
+    required(fact.attachments?.[0]).screenshot = ref;
+    required(f.result.factValidation).results.push({
+      ...fact,
+      attachments: [{ kind: 'screenshot', path: 'fact.PNG' }],
+    });
+    f.finish();
+    f.publish(podId, 1, f.result, { intermediate: true });
+    await f.collect();
+    expect(fact.attachments?.[0]?.screenshot).toBe(ref);
+    expect((await f.store.read(ref)).toString()).toBe('original fact');
+    expect(f.result.factValidation?.results[1]?.attachments?.[0]?.screenshot).toBeUndefined();
+    f.publish(podId, 1, f.result);
+    assertPublished(f, f.result);
+  });
 
   it('rejects changes to engine fields, identity, array order, paths, usage and screenshot metadata before and after final publication', async () => {
     const f = fixture();
@@ -607,91 +607,92 @@ describe('immutable engine evidence and derived validation publication', () => {
     assertPublished(f, f.result);
   });
 
-  it.each(['completed-failure', 'unknown-exit', 'unknown-cleanup'] as const)(
-    'publishes %s truthfully without allowing screenshot metadata to clear resource custody',
-    async (kind) => {
-      const f = fixture();
-      f.result.overall = 'fail';
-      f.result.test = { status: 'fail', duration: 1, stdout: 'Original failed assertion' };
-      f.result.infrastructureFailure = {
-        phase: 'test',
-        code: kind === 'unknown-exit' ? 'EXEC_EXIT_UNVERIFIED' : 'EXEC_TIMEOUT',
-        message: 'Original failed command',
-        retryable: false,
-        execution: {
-          cause: 'timeout',
-          timeoutMs: 10,
-          cleanup: kind === 'unknown-cleanup' ? 'unverified' : 'confirmed',
-          ...(kind !== 'unknown-exit' ? { observedExitCode: 124 } : {}),
-        },
-      };
-      const raw = clone(f.result);
-      f.finish();
-      const held = kind !== 'completed-failure';
-      if (!held) f.publish(podId, 1, f.result, { intermediate: true });
-      expect(await f.collect()).toBe(!held);
-      expect(f.checkpoint).toHaveBeenCalledTimes(held ? 0 : 1);
-      if (held) expect(await f.store.list(podId)).toEqual([]);
-      f.publish(podId, 1, f.result);
-      f.repo.update(podId, { status: 'review_required' });
-      const original = rawRows(f);
-      assertPublished(f, f.result);
-      const reopened = f.reopen();
-      reopened.publish(podId, 1, f.result);
-      expect(reopened.ledger.find(reopened.repo.getOrThrow(podId))?.id).toBe(f.dispatch);
-      if (!held) {
-        expect(reopened.ledger.unsettled(podId)).toBeNull();
-        expect(() => reopened.ledger.assertTaskSettled(podId)).not.toThrow();
-      } else {
-        expect(reopened.ledger.unsettled(podId)).toMatchObject({ id: f.dispatch, published: true });
-        expect(() => assertValidationResourceSettled(f.db(), resource)).toThrow();
-        expect(() => assertValidationMutationSettled(reopened.repo, podId)).toThrow();
-        expect(() => reopened.repo.deletionOwnership?.acquire(podId, 'delete')).toThrow();
-        expect(() => reopened.repo.delete(podId)).toThrow();
-        expect(() => reopened.ledger.startDeletion(f.dispatch)).toThrow('immutable final');
-        expect(() => reopened.ledger.settle(reopened.repo.getOrThrow(podId), 'now')).toThrow(
-          'immutable final',
-        );
-        expect(reopened.recovery.getValidationExecutionRecovery(podId)).toMatchObject({
-          allowed: false,
-          settled: false,
-          code: 'VALIDATION_FINAL_CONTENT_UNVERIFIED',
-        });
-        await expect(
-          reopened.recovery.readValidationEvidence(
-            podId,
-            f.dispatch,
-            validationResultHash(raw),
-            'report.txt',
-          ),
-        ).rejects.toThrow('No verified report snapshot');
-        const cleared = clone(f.result);
-        cleared.infrastructureFailure = undefined;
-        expect(() => reopened.publish(podId, 1, cleared)).toThrow();
-        const decorated = clone(f.result);
-        required(decorated.smoke.pages[0]).screenshot = {
+  it.each([
+    'completed-failure',
+    'unknown-exit',
+    'unknown-cleanup',
+  ] as const)('publishes %s truthfully without allowing screenshot metadata to clear resource custody', async (kind) => {
+    const f = fixture();
+    f.result.overall = 'fail';
+    f.result.test = { status: 'fail', duration: 1, stdout: 'Original failed assertion' };
+    f.result.infrastructureFailure = {
+      phase: 'test',
+      code: kind === 'unknown-exit' ? 'EXEC_EXIT_UNVERIFIED' : 'EXEC_TIMEOUT',
+      message: 'Original failed command',
+      retryable: false,
+      execution: {
+        cause: 'timeout',
+        timeoutMs: 10,
+        cleanup: kind === 'unknown-cleanup' ? 'unverified' : 'confirmed',
+        ...(kind !== 'unknown-exit' ? { observedExitCode: 124 } : {}),
+      },
+    };
+    const raw = clone(f.result);
+    f.finish();
+    const held = kind !== 'completed-failure';
+    if (!held) f.publish(podId, 1, f.result, { intermediate: true });
+    expect(await f.collect()).toBe(!held);
+    expect(f.checkpoint).toHaveBeenCalledTimes(held ? 0 : 1);
+    if (held) expect(await f.store.list(podId)).toEqual([]);
+    f.publish(podId, 1, f.result);
+    f.repo.update(podId, { status: 'review_required' });
+    const original = rawRows(f);
+    assertPublished(f, f.result);
+    const reopened = f.reopen();
+    reopened.publish(podId, 1, f.result);
+    expect(reopened.ledger.find(reopened.repo.getOrThrow(podId))?.id).toBe(f.dispatch);
+    if (!held) {
+      expect(reopened.ledger.unsettled(podId)).toBeNull();
+      expect(() => reopened.ledger.assertTaskSettled(podId)).not.toThrow();
+    } else {
+      expect(reopened.ledger.unsettled(podId)).toMatchObject({ id: f.dispatch, published: true });
+      expect(() => assertValidationResourceSettled(f.db(), resource)).toThrow();
+      expect(() => assertValidationMutationSettled(reopened.repo, podId)).toThrow();
+      expect(() => reopened.repo.deletionOwnership?.acquire(podId, 'delete')).toThrow();
+      expect(() => reopened.repo.delete(podId)).toThrow();
+      expect(() => reopened.ledger.startDeletion(f.dispatch)).toThrow('immutable final');
+      expect(() => reopened.ledger.settle(reopened.repo.getOrThrow(podId), 'now')).toThrow(
+        'immutable final',
+      );
+      expect(reopened.recovery.getValidationExecutionRecovery(podId)).toMatchObject({
+        allowed: false,
+        settled: false,
+        code: 'VALIDATION_FINAL_CONTENT_UNVERIFIED',
+      });
+      await expect(
+        reopened.recovery.readValidationEvidence(
           podId,
-          source: 'smoke',
-          filename: '0-root.png',
-          relativePath: `screenshots/${podId}/smoke/0-root.png`,
-        };
-        expect(() => reopened.publish(podId, 1, decorated)).toThrow();
-        // A mutable projection cannot release the immutable original dispatch.
-        reopened.repo.update(podId, { containerId: null, lastValidationResult: cleared });
-        expect(() => reopened.ledger.assertTaskSettled(podId)).toThrow();
-        expect(() => assertValidationResourceSettled(f.db(), resource)).toThrow();
-        expect(reopened.repo.listReferencedContainerIds()).toContain(resource);
-      }
-      expect(rawRows(f)).toEqual(original);
-      expect(fs.readFileSync(path.join(f.worktree, 'report.txt'), 'utf8')).toBe('original report');
-      expect(f.cm.start).not.toHaveBeenCalled();
-      expect(f.cm.execInContainer).not.toHaveBeenCalled();
-      expect(f.cm.extractDirectoryFromContainer).not.toHaveBeenCalled();
-      expect(f.cm.kill).not.toHaveBeenCalled();
-      expect(f.sync).not.toHaveBeenCalled();
-      expect(reopened.ledger.isSettled(reopened.repo.getOrThrow(podId))).toBe(false);
-    },
-  );
+          f.dispatch,
+          validationResultHash(raw),
+          'report.txt',
+        ),
+      ).rejects.toThrow('No verified report snapshot');
+      const cleared = clone(f.result);
+      cleared.infrastructureFailure = undefined;
+      expect(() => reopened.publish(podId, 1, cleared)).toThrow();
+      const decorated = clone(f.result);
+      required(decorated.smoke.pages[0]).screenshot = {
+        podId,
+        source: 'smoke',
+        filename: '0-root.png',
+        relativePath: `screenshots/${podId}/smoke/0-root.png`,
+      };
+      expect(() => reopened.publish(podId, 1, decorated)).toThrow();
+      // A mutable projection cannot release the immutable original dispatch.
+      reopened.repo.update(podId, { containerId: null, lastValidationResult: cleared });
+      expect(() => reopened.ledger.assertTaskSettled(podId)).toThrow();
+      expect(() => assertValidationResourceSettled(f.db(), resource)).toThrow();
+      expect(reopened.repo.listReferencedContainerIds()).toContain(resource);
+    }
+    expect(rawRows(f)).toEqual(original);
+    expect(fs.readFileSync(path.join(f.worktree, 'report.txt'), 'utf8')).toBe('original report');
+    expect(f.cm.start).not.toHaveBeenCalled();
+    expect(f.cm.execInContainer).not.toHaveBeenCalled();
+    expect(f.cm.extractDirectoryFromContainer).not.toHaveBeenCalled();
+    expect(f.cm.kill).not.toHaveBeenCalled();
+    expect(f.sync).not.toHaveBeenCalled();
+    expect(reopened.ledger.isSettled(reopened.repo.getOrThrow(podId))).toBe(false);
+  });
 
   it('records completed metadata after a status-only stop without starting another checkpoint', async () => {
     const f = fixture();
@@ -730,69 +731,70 @@ describe('immutable engine evidence and derived validation publication', () => {
     expect(f.ledger.evidence(podId, f.dispatch, validationResultHash(raw)).result).toEqual(raw);
   });
 
-  it.each(['source', 'cleanup', 'lifecycle'] as const)(
-    'rechecks %s ownership after awaited screenshot storage before checkpoint or final publication',
-    async (fence) => {
-      const f = fixture();
-      f.finish();
-      f.publish(podId, 1, f.result, { intermediate: true });
-      const raw = rawRows(f);
-      const pod = f.repo.getOrThrow(podId);
-      const ownership = captureValidationOwnership(pod, {
-        readCurrent: () => {
-          f.repo.sourceAdoptions?.assertAvailable(podId);
-          f.repo.deletionOwnership?.assertTaskAvailable(podId);
-          return f.repo.getOrThrow(podId);
-        },
-        isCurrentInvocation: () => true,
-        hasPendingDecision: () => false,
-      });
-      const write = f.store.write.bind(f.store);
-      vi.spyOn(f.store, 'write').mockImplementationOnce(async (...args) => {
-        const ref = await write(...args);
-        if (fence === 'lifecycle') f.repo.incrementLifecycleGeneration(podId);
-        if (fence === 'cleanup')
-          f.db()
-            .prepare(`
+  it.each([
+    'source',
+    'cleanup',
+    'lifecycle',
+  ] as const)('rechecks %s ownership after awaited screenshot storage before checkpoint or final publication', async (fence) => {
+    const f = fixture();
+    f.finish();
+    f.publish(podId, 1, f.result, { intermediate: true });
+    const raw = rawRows(f);
+    const pod = f.repo.getOrThrow(podId);
+    const ownership = captureValidationOwnership(pod, {
+      readCurrent: () => {
+        f.repo.sourceAdoptions?.assertAvailable(podId);
+        f.repo.deletionOwnership?.assertTaskAvailable(podId);
+        return f.repo.getOrThrow(podId);
+      },
+      isCurrentInvocation: () => true,
+      hasPendingDecision: () => false,
+    });
+    const write = f.store.write.bind(f.store);
+    vi.spyOn(f.store, 'write').mockImplementationOnce(async (...args) => {
+      const ref = await write(...args);
+      if (fence === 'lifecycle') f.repo.incrementLifecycleGeneration(podId);
+      if (fence === 'cleanup')
+        f.db()
+          .prepare(`
           INSERT INTO deletion_cleanup_intents(id,pod_id,task_id,identity,created_at)
           SELECT 'cleanup-owner',pod_id,task_id,'identity','now' FROM task_executions WHERE pod_id=?
         `)
-            .run(podId);
-        if (fence === 'source')
-          required(f.repo.sourceAdoptions).claim(
-            'source-owner',
-            podId,
-            {
-              generation: pod.lifecycleGeneration,
-              fingerprint: sourcePodFingerprint(pod),
-              repository: 'https://github.com/org/repo',
-              branch: pod.branch,
-              baseBranch: 'main',
-              containerId: resource,
-              resourceKey: 'test-scope',
-              worktreePath: f.worktree,
-              oldHead: 'a'.repeat(40),
-              targetHead: 'b'.repeat(40),
-            },
-            { type: 'human', userId: 'operator' },
-            'Preserve exact original source',
-            () => {},
-          );
-        return ref;
-      });
-      await expect(
-        f.collect(() => {
-          ownership.assertCurrent();
-          assertValidationMutationSettled(f.repo, podId);
-        }),
-      ).rejects.toThrow();
-      expect(f.result.factValidation?.results[0]?.attachments?.[0]?.screenshot).toBeUndefined();
-      expect(f.checkpoint).not.toHaveBeenCalled();
-      expect(f.history.getForSession(podId)).toHaveLength(0);
-      expect(f.events.countForSession(podId, 'pod.validation_completed')).toBe(0);
-      expect(rawRows(f)).toEqual(raw);
-      expect(f.db().prepare('SELECT * FROM validation_logical_publications').all()).toEqual([]);
-      expect(f.repo.getOrThrow(podId).phaseTokenUsage?.review).toEqual(usage);
-    },
-  );
+          .run(podId);
+      if (fence === 'source')
+        required(f.repo.sourceAdoptions).claim(
+          'source-owner',
+          podId,
+          {
+            generation: pod.lifecycleGeneration,
+            fingerprint: sourcePodFingerprint(pod),
+            repository: 'https://github.com/org/repo',
+            branch: pod.branch,
+            baseBranch: 'main',
+            containerId: resource,
+            resourceKey: 'test-scope',
+            worktreePath: f.worktree,
+            oldHead: 'a'.repeat(40),
+            targetHead: 'b'.repeat(40),
+          },
+          { type: 'human', userId: 'operator' },
+          'Preserve exact original source',
+          () => {},
+        );
+      return ref;
+    });
+    await expect(
+      f.collect(() => {
+        ownership.assertCurrent();
+        assertValidationMutationSettled(f.repo, podId);
+      }),
+    ).rejects.toThrow();
+    expect(f.result.factValidation?.results[0]?.attachments?.[0]?.screenshot).toBeUndefined();
+    expect(f.checkpoint).not.toHaveBeenCalled();
+    expect(f.history.getForSession(podId)).toHaveLength(0);
+    expect(f.events.countForSession(podId, 'pod.validation_completed')).toBe(0);
+    expect(rawRows(f)).toEqual(raw);
+    expect(f.db().prepare('SELECT * FROM validation_logical_publications').all()).toEqual([]);
+    expect(f.repo.getOrThrow(podId).phaseTokenUsage?.review).toEqual(usage);
+  });
 });

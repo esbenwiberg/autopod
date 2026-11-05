@@ -6,8 +6,8 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { verifyArtifactSnapshot } from '../pods/artifact-snapshot-receipt.js';
 import {
-  type PreparedCheckpoint,
   checkpointError,
+  type PreparedCheckpoint,
 } from '../pods/retained-checkpoint-repository.js';
 import { safeAdoptionGit } from './source-adoption-git.js';
 

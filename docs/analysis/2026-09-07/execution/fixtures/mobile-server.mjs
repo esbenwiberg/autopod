@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+
 const dist = resolve('packages/mobile-web/dist');
 const successfulValidation = {
   podId: 'local-fixture',

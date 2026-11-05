@@ -87,30 +87,30 @@ function descriptor(id: string, podId: string) {
 }
 
 describe('finalization keeps otherwise unreferenced evidence', () => {
-  it.each(['complete', 'killed'] as const)(
-    'retains unrecorded pod-labelled sandbox after %s',
-    async (status) => {
-      const f = fixture();
-      f.pod('held', status);
-      f.hold('held');
-      f.pod('ordinary', status);
-      const manager = {
-        listSandboxes: vi.fn(async () => [
-          descriptor('lost-spawn-response', 'held'),
-          descriptor('ordinary-orphan', 'ordinary'),
-        ]),
-        kill: vi.fn(async () => {}),
-      };
-      expect(f.pods.listReferencedContainerIds()).not.toContain('lost-spawn-response');
-      const reaper = new SandboxOrphanReaper({
-        podRepo: f.pods,
-        sandboxContainerManager: manager,
-        logger,
-      });
-      await expect(reaper.runSweep()).resolves.toMatchObject({ deleted: 1 });
-      expect(manager.kill).toHaveBeenCalledExactlyOnceWith('ordinary-orphan');
-    },
-  );
+  it.each([
+    'complete',
+    'killed',
+  ] as const)('retains unrecorded pod-labelled sandbox after %s', async (status) => {
+    const f = fixture();
+    f.pod('held', status);
+    f.hold('held');
+    f.pod('ordinary', status);
+    const manager = {
+      listSandboxes: vi.fn(async () => [
+        descriptor('lost-spawn-response', 'held'),
+        descriptor('ordinary-orphan', 'ordinary'),
+      ]),
+      kill: vi.fn(async () => {}),
+    };
+    expect(f.pods.listReferencedContainerIds()).not.toContain('lost-spawn-response');
+    const reaper = new SandboxOrphanReaper({
+      podRepo: f.pods,
+      sandboxContainerManager: manager,
+      logger,
+    });
+    await expect(reaper.runSweep()).resolves.toMatchObject({ deleted: 1 });
+    expect(manager.kill).toHaveBeenCalledExactlyOnceWith('ordinary-orphan');
+  });
 
   it('rechecks finalization custody after an earlier orphan deletion awaits', async () => {
     const f = fixture();
@@ -183,36 +183,35 @@ describe('finalization keeps otherwise unreferenced evidence', () => {
     expect(await store.read(ref)).toEqual(Buffer.from('later evidence'));
   });
 
-  it.each([false, true])(
-    'retains screenshot bytes with stale candidate list=%s',
-    async (staleList) => {
-      const f = fixture();
-      f.pod('held');
-      f.pod('ordinary', 'complete');
-      const folder = await mkdtemp(path.join(os.tmpdir(), 'retained-screenshots-'));
-      cleanup.push(() => rm(folder, { recursive: true, force: true }));
-      const store = createScreenshotStore(folder);
-      const bytes = Buffer.from('independent validation screenshot evidence');
-      const ref = await store.write('held', 'review', 'retained.png', bytes);
-      await store.write('ordinary', 'review', 'ordinary.png', bytes);
-      const candidates = f.pods.listTerminalPodsCompletedBefore(new Date().toISOString());
-      f.hold('held');
-      if (staleList)
-        vi.spyOn(f.pods, 'listTerminalPodsCompletedBefore').mockReturnValue(candidates);
-      else
-        expect(
-          f.pods.listTerminalPodsCompletedBefore(new Date().toISOString()).map((p) => p.id),
-        ).toEqual(['ordinary']);
-      const sweeper = new ScreenshotRetention({
-        retentionDays: 30,
-        sweepIntervalMs: 60_000,
-        podRepository: f.pods,
-        screenshotStore: store,
-        logger,
-      });
-      expect((await sweeper.sweepOnce()).deleted).toBe(1);
-      expect(await store.read(ref)).toEqual(bytes);
-      expect(await store.list('ordinary')).toEqual([]);
-    },
-  );
+  it.each([
+    false,
+    true,
+  ])('retains screenshot bytes with stale candidate list=%s', async (staleList) => {
+    const f = fixture();
+    f.pod('held');
+    f.pod('ordinary', 'complete');
+    const folder = await mkdtemp(path.join(os.tmpdir(), 'retained-screenshots-'));
+    cleanup.push(() => rm(folder, { recursive: true, force: true }));
+    const store = createScreenshotStore(folder);
+    const bytes = Buffer.from('independent validation screenshot evidence');
+    const ref = await store.write('held', 'review', 'retained.png', bytes);
+    await store.write('ordinary', 'review', 'ordinary.png', bytes);
+    const candidates = f.pods.listTerminalPodsCompletedBefore(new Date().toISOString());
+    f.hold('held');
+    if (staleList) vi.spyOn(f.pods, 'listTerminalPodsCompletedBefore').mockReturnValue(candidates);
+    else
+      expect(
+        f.pods.listTerminalPodsCompletedBefore(new Date().toISOString()).map((p) => p.id),
+      ).toEqual(['ordinary']);
+    const sweeper = new ScreenshotRetention({
+      retentionDays: 30,
+      sweepIntervalMs: 60_000,
+      podRepository: f.pods,
+      screenshotStore: store,
+      logger,
+    });
+    expect((await sweeper.sweepOnce()).deleted).toBe(1);
+    expect(await store.read(ref)).toEqual(bytes);
+    expect(await store.list('ordinary')).toEqual([]);
+  });
 });

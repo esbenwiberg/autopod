@@ -4,7 +4,7 @@ import { ProfileExistsError, ProfileNotFoundError } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPodRepository } from '../pods/pod-repository.js';
-import { type ProfileStore, createProfileStore } from './profile-store.js';
+import { createProfileStore, type ProfileStore } from './profile-store.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, '../db/migrations');
 

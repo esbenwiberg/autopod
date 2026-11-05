@@ -106,34 +106,34 @@ describe('managed artifacts', () => {
     ).toEqual(receipt);
     expect(JSON.stringify(receipt)).not.toContain(directory);
   });
-  it.each(['after-freeze', 'after-commit'] as const)(
-    'recovers %s without another collection or agent run',
-    async (fault) => {
-      const { directory, db, database } = await setup();
-      const store = new MemoryArtifactStore();
-      await expect(
-        new ArtifactExports(db, store, () => 100).export(binding, directory, output, true, fault),
-      ).rejects.toThrow();
-      const frozen = db
-        .prepare('SELECT artifact_id,manifest_sha256,bundle_sha256 FROM artifact_exports')
-        .get() as { artifact_id: string; manifest_sha256: string; bundle_sha256: string };
-      db.close();
-      const restarted = createDatabase(database, logger);
-      databases.push(restarted);
-      await rm(directory, { recursive: true });
-      const receipt = await new ArtifactExports(restarted, store, () => 900).export(
-        binding,
-        directory,
-        output,
-        true,
-      );
-      expect(receipt).toMatchObject({
-        artifactId: frozen.artifact_id,
-        manifestSha256: frozen.manifest_sha256,
-        bundleSha256: frozen.bundle_sha256,
-      });
-    },
-  );
+  it.each([
+    'after-freeze',
+    'after-commit',
+  ] as const)('recovers %s without another collection or agent run', async (fault) => {
+    const { directory, db, database } = await setup();
+    const store = new MemoryArtifactStore();
+    await expect(
+      new ArtifactExports(db, store, () => 100).export(binding, directory, output, true, fault),
+    ).rejects.toThrow();
+    const frozen = db
+      .prepare('SELECT artifact_id,manifest_sha256,bundle_sha256 FROM artifact_exports')
+      .get() as { artifact_id: string; manifest_sha256: string; bundle_sha256: string };
+    db.close();
+    const restarted = createDatabase(database, logger);
+    databases.push(restarted);
+    await rm(directory, { recursive: true });
+    const receipt = await new ArtifactExports(restarted, store, () => 900).export(
+      binding,
+      directory,
+      output,
+      true,
+    );
+    expect(receipt).toMatchObject({
+      artifactId: frozen.artifact_id,
+      manifestSha256: frozen.manifest_sha256,
+      bundleSha256: frozen.bundle_sha256,
+    });
+  });
   it('retries a transient upload with a fresh Blob store object after response loss', async () => {
     const { directory, db } = await setup();
     const objects = new Map<string, Buffer>();
@@ -171,22 +171,23 @@ describe('managed artifacts', () => {
     expect(receipt?.status).toBe('committed');
     expect(objects.size).toBe(2);
   });
-  it.each(['symlink', 'hardlink', 'fifo'] as const)(
-    'rejects unsafe %s even if excluded',
-    async (kind) => {
-      const { directory } = await setup();
-      const unsafe = path.join(directory, 'unsafe');
-      if (kind === 'symlink') await symlink('research.md', unsafe);
-      if (kind === 'hardlink') await link(path.join(directory, 'research.md'), unsafe);
-      if (kind === 'fifo') {
-        const { execFileSync } = await import('node:child_process');
-        execFileSync('/usr/bin/mkfifo', [unsafe]);
-      }
-      await expect(collectOutput(directory, { ...output, exclude: ['unsafe'] })).rejects.toThrow(
-        'artifact-unsafe-entry',
-      );
-    },
-  );
+  it.each([
+    'symlink',
+    'hardlink',
+    'fifo',
+  ] as const)('rejects unsafe %s even if excluded', async (kind) => {
+    const { directory } = await setup();
+    const unsafe = path.join(directory, 'unsafe');
+    if (kind === 'symlink') await symlink('research.md', unsafe);
+    if (kind === 'hardlink') await link(path.join(directory, 'research.md'), unsafe);
+    if (kind === 'fifo') {
+      const { execFileSync } = await import('node:child_process');
+      execFileSync('/usr/bin/mkfifo', [unsafe]);
+    }
+    await expect(collectOutput(directory, { ...output, exclude: ['unsafe'] })).rejects.toThrow(
+      'artifact-unsafe-entry',
+    );
+  });
   it('enforces required paths, count/byte limits, active-writer exclusion and optional empty output', async () => {
     const { directory, db } = await setup();
     await expect(

@@ -1,6 +1,6 @@
 import { type AgentEvent, AutopodError } from '@autopod/shared';
 import { isObservedExitCode } from '../containers/exec-exit-evidence.js';
-import { type BoundedExitCodeOptions, awaitExitCodeBounded } from './stream-grace.js';
+import { awaitExitCodeBounded, type BoundedExitCodeOptions } from './stream-grace.js';
 
 /** Finite CLI invocations must settle their process even when a consumer stops reading. */
 export async function* withObservedRuntimeExit(

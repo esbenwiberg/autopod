@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createOperatorFixture } from '../test-utils/operator-helpers.js';
+
 describe('daemon credential and tool controls', () => {
   it('rejects source credential vending before any container write or install', async () => {
     const f = createOperatorFixture();

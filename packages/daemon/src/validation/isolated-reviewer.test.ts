@@ -256,20 +256,21 @@ describe('isolated reviewer execution', () => {
     expect(f.manager.spawn).toHaveBeenCalledTimes(1);
   });
 
-  it.each([undefined, { input_tokens: 2 }, { output_tokens: 1 }])(
-    'does not fail over with incomplete usage %j',
-    async (usage) => {
-      const f = await fixture(true);
-      providerFailure(f, usage);
-      await expect(f.execute({ prompt: 'Review', timeout: 5000 })).rejects.toThrow(
-        'Service unavailable',
-      );
-      expect(f.manager.spawn).toHaveBeenCalledOnce();
-      expect(f.db.prepare('SELECT state FROM isolated_reviewer_runs').get()).toEqual({
-        state: 'uncertain',
-      });
-    },
-  );
+  it.each([
+    undefined,
+    { input_tokens: 2 },
+    { output_tokens: 1 },
+  ])('does not fail over with incomplete usage %j', async (usage) => {
+    const f = await fixture(true);
+    providerFailure(f, usage);
+    await expect(f.execute({ prompt: 'Review', timeout: 5000 })).rejects.toThrow(
+      'Service unavailable',
+    );
+    expect(f.manager.spawn).toHaveBeenCalledOnce();
+    expect(f.db.prepare('SELECT state FROM isolated_reviewer_runs').get()).toEqual({
+      state: 'uncertain',
+    });
+  });
 
   it('does not fail over when cleanup is unconfirmed', async () => {
     const f = await fixture(true);
