@@ -3630,6 +3630,35 @@ describe('POST /pods/:podId/spawn-fix', () => {
     expect(repo.getOrThrow(podId).sidecarContainerIds).toEqual({ database: 'owned-sidecar' });
   });
 
+  it('rejects a stale displayed failure through retry authorization HTTP and preserves stable-key observation', async () => {
+    const podId = insertMergePendingPod();
+    const repo = createPodRepository(db);
+    repo.taskExecutions?.register(podId);
+    const addFailure = (id: string) =>
+      db
+        .prepare(`INSERT INTO task_retry_attempts(id,task_id,pod_id,execution_id,generation,stage,identity,binding_hash,admitted_at,not_before,started_at,ended_at,outcome)
+      SELECT ?,task_id,pod_id,execution_id,1,'validation','{}','binding','2026-09-08','2026-09-08','2026-09-08','2026-09-08','nonretryable' FROM task_executions WHERE pod_id=?`)
+        .run(id, podId);
+    addFailure('displayed');
+    const send = (requestKey: string, expectedFailureId?: string) =>
+      app.inject({
+        method: 'POST',
+        url: `/pods/${podId}/retry-authorizations`,
+        headers: authHeaders,
+        payload: { requestKey, reason: 'Inspected existing work', expectedFailureId },
+      });
+    expect((await send('stale-key', 'other-failure')).statusCode).toBe(409);
+    expect(repo.taskRetries?.state(podId).authorizations).toHaveLength(0);
+    const first = await send('bound-key', 'displayed');
+    expect(first.statusCode).toBe(201);
+    expect(first.json().failureId).toBe('displayed');
+    addFailure('later');
+    expect((await send('new-stale-key', 'displayed')).statusCode).toBe(409);
+    expect((await send('bound-key', 'displayed')).json().id).toBe(first.json().id);
+    // Supported legacy clients retain latest-failure semantics deliberately.
+    expect((await send('legacy-key')).json().failureId).toBe('later');
+  });
+
   it('reads retained retry duration coverage after pod deletion without allowing new admission', async () => {
     const podId = insertMergePendingPod();
     const repo = createPodRepository(db);

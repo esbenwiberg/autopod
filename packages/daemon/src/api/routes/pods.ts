@@ -936,8 +936,6 @@ export function podRoutes(
       input.runId,
       input.reason,
       humanActor(request),
-      undefined,
-      input.expectedFailureId,
     );
   });
 
@@ -971,6 +969,8 @@ export function podRoutes(
       input.requestKey,
       input.reason,
       humanActor(request),
+      undefined,
+      input.expectedFailureId,
     );
     reply.code(201);
     return result;

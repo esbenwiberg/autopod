@@ -141,3 +141,62 @@ it('shows recorded grants and bounded cooldowns without consuming or dispatching
     await f.close();
   }
 });
+
+it('coalesces concurrent HTTP requests while dispatch is unresolved and exposes the receipt', async () => {
+  const f = await fixture();
+  let release: (() => void) | undefined;
+  f.manager.triggerValidation.mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  try {
+    const payload = { requestKey: randomUUID(), generation: 1, guidance: 'Continuation' };
+    const send = () =>
+      f.app.inject({ method: 'POST' as const, url: '/pods/rework-fixture/rework-v1', payload });
+    const responses = await Promise.all([send(), send()]);
+    expect(responses.map((r) => r.statusCode).sort()).toEqual([200, 202]);
+    expect(f.manager.triggerValidation).toHaveBeenCalledTimes(1);
+    const inspect = await f.app.inject({
+      url: `/pods/rework-fixture/rework-v1/requests/${payload.requestKey}`,
+    });
+    expect(inspect.json()).toMatchObject({
+      requestKey: payload.requestKey,
+      settledAt: null,
+      guidance: payload.guidance,
+    });
+    expect(
+      (await f.app.inject({ url: '/pods/rework-fixture/rework-v1/eligibility' })).json().eligible,
+    ).toBe(false);
+  } finally {
+    release?.();
+    await new Promise((resolve) => setImmediate(resolve));
+    await f.close();
+  }
+});
+it('rejects actor injection, workspace restart and compromised source without queuing guidance', async () => {
+  const f = await fixture();
+  try {
+    const payload = { requestKey: randomUUID(), generation: 1, guidance: 'Continuation' };
+    expect(
+      (
+        await f.app.inject({
+          method: 'POST',
+          url: '/pods/rework-fixture/rework-v1',
+          payload: { ...payload, actor: { type: 'human', userId: 'forged' } },
+        })
+      ).statusCode,
+    ).toBe(400);
+    f.repo.update('rework-fixture', {
+      options: { ...f.repo.getOrThrow('rework-fixture').options, agentMode: 'interactive' },
+    });
+    expect(
+      (await f.app.inject({ url: '/pods/rework-fixture/rework-v1/eligibility' })).json().eligible,
+    ).toBe(false);
+    expect(f.manager.triggerValidation).not.toHaveBeenCalled();
+    expect(createNudgeRepository(f.db).hasPending('rework-fixture')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
