@@ -216,7 +216,7 @@ public struct SidebarView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Divider()
                 HStack(spacing: 7) {
-                    Circle().fill(isConnected ? DesktopTheme.accent : .orange).frame(width: 6, height: 6)
+                    Circle().fill(isConnected ? DesktopTheme.success : .orange).frame(width: 6, height: 6)
                     Text(connectionLabel).font(.caption).lineLimit(1).truncationMode(.middle)
                 }
                 DesktopAppearancePicker()

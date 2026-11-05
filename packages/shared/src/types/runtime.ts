@@ -112,6 +112,8 @@ export interface AgentFileChangeEvent {
   timestamp: string;
   path: string;
   action: 'create' | 'modify' | 'delete';
+  /** Workspace snapshots report net changes at observation time, not individual tool operations. */
+  source?: 'workspace';
   diff?: string;
 }
 
