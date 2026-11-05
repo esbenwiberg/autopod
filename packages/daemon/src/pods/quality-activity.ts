@@ -175,6 +175,8 @@ export function canonicalRepositoryPath(
 }
 
 function normalizeFileChange(event: AgentFileChangeEvent): QualityActivity[] {
+  // A delayed snapshot cannot prove operation count or read-before-write order.
+  if (event.source === 'workspace') return [];
   const path = canonicalRepositoryPath(event.path);
   if (!path) return [];
   return [{ kind: 'mutation', path, action: event.action, source: 'file-change' }];

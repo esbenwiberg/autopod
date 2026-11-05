@@ -4291,9 +4291,11 @@ describe('PodManager', () => {
         .prepare("UPDATE pods SET status = 'running', container_id = 'container-123' WHERE id = ?")
         .run(pod.id);
 
+      const enteredStream = deferred<void>();
       const consuming = manager.consumeAgentEvents(
         pod.id,
         (async function* () {
+          enteredStream.resolve();
           await releaseStream.promise;
           yield {
             type: 'status',
@@ -4302,6 +4304,9 @@ describe('PodManager', () => {
           } as const;
         })(),
       );
+      // Pause a worker that has actually started, not the new asynchronous
+      // pre-agent file-observation baseline (which can settle without a worker).
+      await enteredStream.promise;
       const pausing = manager.pauseSession(pod.id);
       const pauseFailure = expect(pausing).rejects.toMatchObject({
         code: 'PAUSE_QUIESCENCE_TIMEOUT',

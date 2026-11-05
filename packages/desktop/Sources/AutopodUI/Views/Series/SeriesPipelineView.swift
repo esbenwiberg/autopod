@@ -297,7 +297,7 @@ public struct SeriesPipelineView: View {
         let est = estimatedMinutesLeft()
         return HStack(spacing: 16) {
             if redesign {
-                footerChip("\(pods.filter { $0.status == .complete }.count) complete", color: DesktopTheme.accent)
+                footerChip("\(pods.filter { $0.status == .complete }.count) complete", color: DesktopTheme.success)
                 footerChip("\(pods.filter { $0.status.needsAttention }.count) need attention", color: .orange)
                 footerChip("\(counts.queued) queued", color: .secondary)
             } else {

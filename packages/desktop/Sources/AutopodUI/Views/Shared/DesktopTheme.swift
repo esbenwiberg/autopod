@@ -29,35 +29,29 @@ extension EnvironmentValues {
 
 @MainActor
 public enum DesktopTheme {
-    public static var canvas: Color { adaptive(0xF3F5F2, 0x181E1B) }
-    public static var surface: Color { adaptive(0xFFFFFF, 0x202722) }
-    public static var sidebar: Color { adaptive(0xEAF0E9, 0x1C241F) }
-    public static var line: Color { adaptive(0xDDE5DD, 0x354138) }
-    public static var accent: Color { adaptive(0x277D68, 0x83C9AE) }
-    public static var selection: Color { adaptive(0xDFEDE5, 0x2B4034) }
+    public static var choice: DesktopThemeChoice { DesktopThemePreferences.shared.choice }
+    public static var canvas: Color { choice.adaptive(\.canvas) }
+    public static var surface: Color { choice.adaptive(\.surface) }
+    public static var sidebar: Color { choice.adaptive(\.sidebar) }
+    public static var line: Color { choice.adaptive(\.line) }
+    public static var accent: Color { choice.adaptive(\.accent) }
+    public static var selection: Color { choice.adaptive(\.selection) }
+    public static var success: Color { choice.adaptive(\.success) }
 
-    /// Muted semantic colors tuned to the desktop's green/neutral surfaces.
+    /// Semantic colors remain recognizable regardless of the decorative accent.
     public static func statusColor(_ status: PodStatus) -> Color {
         switch status {
         case .provisioning, .running, .validating, .merging, .handoff:
-            adaptive(0x35658A, 0x91B5D8)
+            choice.adaptive(\.info)
         case .awaitingInput, .reviewRequired, .researchReady, .validated, .mergePending:
-            adaptive(0x8B631D, 0xD4B479)
+            choice.adaptive(\.warning)
         case .complete, .approved:
-            accent
+            success
         case .failed, .killing:
-            adaptive(0xA33E3A, 0xE39A94)
+            choice.adaptive(\.danger)
         case .queued, .paused, .killed:
-            adaptive(0x5E6A62, 0xA4ADA5)
+            choice.adaptive(\.muted)
         }
-    }
-    private static func adaptive(_ light: UInt32, _ dark: UInt32) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
-            return NSColor(srgbRed: Double((hex >> 16) & 255) / 255,
-                           green: Double((hex >> 8) & 255) / 255,
-                           blue: Double(hex & 255) / 255, alpha: 1)
-        })
     }
 }
 
@@ -83,7 +77,8 @@ public struct DesktopAppearanceModifier: ViewModifier {
 
 public struct DesktopAppearanceSettings: View {
     @AppStorage("autopod.desktop.redesign") private var redesign = DesktopIdentity.isPreview
-    @AppStorage("autopod.desktop.appearance") private var appearance = DesktopAppearance.system
+    @Environment(\.colorScheme) private var colorScheme
+    @Bindable private var preferences = DesktopThemePreferences.shared
     public init() {}
     public var body: some View {
         if redesign {
@@ -93,44 +88,24 @@ public struct DesktopAppearanceSettings: View {
                         .secondary)
                     Text("Appearance").font(.title2.weight(.semibold))
                     Text("Choose how Autopod looks.").font(.callout).foregroundStyle(.secondary)
-                    DesktopPanel(title: "Color scheme") {
-                        Text("Follow the system appearance or choose a fixed theme.").font(.callout)
-                            .foregroundStyle(.secondary)
-                        HStack(spacing: 14) {
-                            ForEach(DesktopAppearance.allCases) { choice in
-                                Button {
-                                    appearance = choice
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        HStack(spacing: 6) {
-                                            RoundedRectangle(cornerRadius: 3).fill(DesktopTheme.selection)
-                                                .frame(width: 22)
-                                            VStack(spacing: 5) {
-                                                RoundedRectangle(cornerRadius: 3).fill(DesktopTheme.line)
-                                                    .frame(height: 15)
-                                                Spacer(minLength: 0)
-                                            }
-                                        }.padding(8).frame(height: 64)
-                                            .background(
-                                                choice == .dark
-                                                    ? Color(red: 0.10, green: 0.14, blue: 0.11)
-                                                    : choice == .light ? .white : DesktopTheme.surface,
-                                                in: RoundedRectangle(cornerRadius: 5))
-                                        Text(choice.label).font(.caption)
-                                    }.padding(12).frame(width: 135)
-                                        .background(
-                                            appearance == choice
-                                                ? DesktopTheme.selection : DesktopTheme.surface,
-                                            in: RoundedRectangle(cornerRadius: 7)
-                                        )
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 7).stroke(
-                                                appearance == choice ? DesktopTheme.accent : DesktopTheme.line
-                                            ))
-                                }.buttonStyle(.plain).accessibilityLabel(choice.label)
-                                    .accessibilityAddTraits(appearance == choice ? .isSelected : [])
+                    DesktopPanel(title: "Theme") {
+                        Text("A palette for your workspace. Saved on this Mac and applied immediately.")
+                            .font(.callout).foregroundStyle(.secondary)
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .top, spacing: 12) {
+                                ForEach(DesktopThemeChoice.allCases) { choice in
+                                    themeCard(choice).frame(minWidth: 170)
+                                }
+                            }
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                                ForEach(DesktopThemeChoice.allCases) { themeCard($0) }
                             }
                         }
+                    }
+                    DesktopPanel(title: "Color scheme") {
+                        Text("Each theme supports light and dark. Follow macOS or choose a fixed appearance.")
+                            .font(.callout).foregroundStyle(.secondary)
+                        DesktopAppearancePicker().frame(maxWidth: 360, alignment: .leading)
                     }
                     DesktopPanel(title: "Desktop redesign") {
                         Toggle("New desktop interface", isOn: $redesign)
@@ -142,7 +117,11 @@ public struct DesktopAppearanceSettings: View {
                 .background(DesktopTheme.canvas)
         } else {
             Form {
-                Section("Appearance") { DesktopAppearancePicker() }
+                Section("Appearance") {
+                    DesktopAppearancePicker()
+                    Text("Enable the new desktop interface below to choose a workspace theme.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Desktop redesign") {
                     Toggle("New desktop interface", isOn: $redesign)
                     Text("Compare the redesigned workspace with the current interface.").font(.caption)
@@ -150,5 +129,12 @@ public struct DesktopAppearanceSettings: View {
                 }
             }.formStyle(.grouped)
         }
+    }
+
+    private func themeCard(_ choice: DesktopThemeChoice) -> some View {
+        DesktopThemePreviewCard(choice: choice, dark: colorScheme == .dark,
+            isSelected: preferences.choice == choice) {
+                preferences.choice = choice
+            }
     }
 }
