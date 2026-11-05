@@ -1,12 +1,15 @@
-import { AutopodError, MAX_INPUT_FILE_BYTES } from '@autopod/shared';
+import { AutopodError, inputPathSchema, MAX_INPUT_FILE_BYTES } from '@autopod/shared';
 import type { FastifyError, FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import type { InputBundleStore } from '../../inputs/input-bundle-store.js';
+import type { ReferencePreviewService } from '../../inputs/reference-preview-service.js';
 import { errorHandler } from '../error-handler.js';
 
 /** Operator-only, owner-scoped input uploads. Never serve active HTML in the daemon origin. */
 export async function inputBundleRoutes(
   app: FastifyInstance,
   store: InputBundleStore,
+  previews?: ReferencePreviewService,
 ): Promise<void> {
   await app.register(async (scope) => {
     scope.setErrorHandler<FastifyError>((error, request, reply) => {
@@ -65,6 +68,23 @@ export async function inputBundleRoutes(
         return reply.code(204).send();
       },
     );
+    scope.post('/input-bundles/:id/render', async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { path } = z.object({ path: inputPathSchema }).strict().parse(request.body);
+      // Authorize before capability errors so probing cannot reveal another owner's inputs.
+      store.get(id, request.user.oid);
+      if (!previews)
+        throw new AutopodError(
+          'An isolated reference renderer is not configured',
+          'REFERENCE_RENDER_UNAVAILABLE',
+          503,
+        );
+      const preview = await previews.render(id, request.user.oid, path);
+      reply.header('Cache-Control', 'private, no-store');
+      reply.header('X-Content-Type-Options', 'nosniff');
+      reply.header('Content-Security-Policy', "default-src 'none'; sandbox");
+      return { receipt: preview.receipt, base64: preview.bytes.toString('base64') };
+    });
     scope.post('/input-bundles/:id/seal', async (request) => {
       const { id } = request.params as { id: string };
       return store.seal(id, request.user.oid);

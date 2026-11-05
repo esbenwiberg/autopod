@@ -98,6 +98,7 @@ export function generateSystemInstructions(
       'Read relevant HTML/text files and use your native image-reading tool for images before implementing the design. A filename or base64 text is not visual inspection. If you cannot inspect a required visual reference, report a blocker rather than guessing.',
     );
     lines.push(
+      'For HTML, use render_reference if that MCP tool is available. It returns a native reference image from a separate offline sandbox at 1280x900, not an application screenshot. If unavailable, blocked, oversized or not visually inspectable, request a companion screenshot rather than claiming visual fidelity.',
       'Attaching HTML does not render it. Do not serve references on the app/control-plane port or change validation/network policy to render them. Configured isolated reviewers receive original PNG/JPEG/WebP references and bounded reference text. Comparing the actual rendered application also requires captured application views and configured advisory browser QA; a code review alone is not visual-fidelity proof.',
       '',
     );

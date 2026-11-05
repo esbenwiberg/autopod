@@ -20,7 +20,9 @@ describe('native reviewer image inputs', () => {
       type: 'image',
       source: { type: 'base64', media_type: 'image/png', data: expected.toString('base64') },
     });
-    expect(payload.message.content[0].text).toContain('original design');
+    expect(payload.message.content[0].text).toContain('admitted design');
+    expect(payload.message.content[0].text).toContain('explicitly sourced HTML derivatives');
+    expect(payload.message.content[0].text).toContain('Without reference images');
     expect(payload.message.content[0].text).not.toContain(expected.toString('base64'));
     expect(imageContextPrompt('Review', [])).toBe('Review');
     expect(reviewerImageEvidence(images)[0]).toMatchObject({

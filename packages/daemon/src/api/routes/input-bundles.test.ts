@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { AuthError, AutopodError } from '@autopod/shared';
+import { AuthError, AutopodError, type InputBundleRef } from '@autopod/shared';
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InputBundleStore } from '../../inputs/input-bundle-store.js';
+import { ReferencePreviewService } from '../../inputs/reference-preview-service.js';
 import { createTestDb } from '../../test-utils/mock-helpers.js';
+import { referencePreview } from '../../test-utils/reference-preview-helpers.js';
 import { errorHandler } from '../error-handler.js';
 import { authPlugin } from '../plugins/auth.js';
 import { inputBundleRoutes } from './input-bundles.js';
@@ -12,7 +14,7 @@ const closers: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const close of closers.splice(0)) await close();
 });
-async function fixture() {
+async function fixture(previews?: (store: InputBundleStore) => ReferencePreviewService) {
   const db = createTestDb();
   const store = new InputBundleStore(db);
   const app = Fastify();
@@ -20,7 +22,7 @@ async function fixture() {
   app.addHook('preHandler', async (request) => {
     request.user = { oid: String(request.headers['x-owner'] ?? 'owner') } as typeof request.user;
   });
-  await inputBundleRoutes(app, store);
+  await inputBundleRoutes(app, store, previews?.(store));
   closers.push(async () => {
     await app.close();
     db.close();
@@ -28,6 +30,92 @@ async function fixture() {
   return { app, store };
 }
 describe('owner-scoped reference uploads', () => {
+  it('returns only owner-authorized source-bound raster previews, never active HTML', async () => {
+    const image = `sha256:${'a'.repeat(64)}`;
+    const render = vi.fn(async (ref: InputBundleRef, path: string) =>
+      referencePreview(ref, path, image),
+    );
+    const { app, store } = await fixture(
+      (store) => new ReferencePreviewService(store, { image, render }),
+    );
+    const bytes = Buffer.from('<!doctype html><h1>Untrusted source</h1>');
+    const bundle = store.create(
+      {
+        requestKey: randomUUID(),
+        files: [
+          {
+            path: 'design.html',
+            mediaType: 'text/html',
+            byteLength: bytes.length,
+            sha256: createHash('sha256').update(bytes).digest('hex'),
+          },
+        ],
+      },
+      'owner',
+    );
+    store.put(bundle.id, 'owner', 0, bytes);
+    store.seal(bundle.id, 'owner');
+    const url = `/input-bundles/${bundle.id}/render`;
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url,
+          headers: { 'x-owner': 'other' },
+          payload: { path: 'design.html' },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(render).not.toHaveBeenCalled();
+    const rendered = await app.inject({ method: 'POST', url, payload: { path: 'design.html' } });
+    expect(rendered.statusCode).toBe(200);
+    expect(rendered.json().receipt.mediaType).toBe('image/jpeg');
+    expect(rendered.headers['cache-control']).toContain('private');
+    expect(rendered.headers['content-type']).toContain('application/json');
+    expect(rendered.body).not.toContain('Untrusted source');
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url,
+          payload: { path: 'design.html', url: 'http://localhost/' },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(render).toHaveBeenCalledTimes(1);
+  });
+  it('fails explicitly when isolated rendering is unavailable without revealing other owners', async () => {
+    const { app, store } = await fixture();
+    const bytes = Buffer.from('<p>Reference</p>');
+    const bundle = store.create(
+      {
+        requestKey: randomUUID(),
+        files: [
+          {
+            path: 'design.html',
+            mediaType: 'text/html',
+            byteLength: bytes.length,
+            sha256: createHash('sha256').update(bytes).digest('hex'),
+          },
+        ],
+      },
+      'owner',
+    );
+    const url = `/input-bundles/${bundle.id}/render`;
+    expect(
+      (await app.inject({ method: 'POST', url, payload: { path: 'design.html' } })).json().error,
+    ).toBe('REFERENCE_RENDER_UNAVAILABLE');
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url,
+          headers: { 'x-owner': 'other' },
+          payload: { path: 'design.html' },
+        })
+      ).statusCode,
+    ).toBe(404);
+  });
   it('inherits operator authentication and does not admit pod tokens', async () => {
     const db = createTestDb();
     const store = new InputBundleStore(db);

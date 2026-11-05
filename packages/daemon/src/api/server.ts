@@ -178,7 +178,10 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   authPlugin(app, deps.authModule, deps.sessionTokenIssuer);
   requestLoggerPlugin(app);
   const inputBundles = deps.configuration?.inputBundles;
-  if (inputBundles) await app.register(async (scope) => inputBundleRoutes(scope, inputBundles));
+  if (inputBundles)
+    await app.register(async (scope) =>
+      inputBundleRoutes(scope, inputBundles, deps.configuration?.referencePreviews),
+    );
   const managed = deps.managed;
   if (managed) {
     await app.register(async (managedApp) => {

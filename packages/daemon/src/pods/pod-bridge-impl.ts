@@ -85,6 +85,10 @@ export interface SessionBridgeDependencies {
   pendingRequestsByPod: Map<string, PendingRequests>;
   logger: Logger;
   hostBrowserRunner?: HostBrowserRunner;
+  referencePreviews?: Pick<
+    import('../inputs/reference-preview-service.js').ReferencePreviewService,
+    'renderAdmitted'
+  >;
   worktreeManager?: WorktreeManager;
   screenshotStore?: import('./screenshot-store.js').ScreenshotStore;
 }
@@ -108,6 +112,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     pendingRequestsByPod: _pendingRequestsBySession,
     logger,
     hostBrowserRunner,
+    referencePreviews,
     worktreeManager,
     screenshotStore,
   } = deps;
@@ -172,6 +177,44 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
   }
 
   return {
+    ...(referencePreviews
+      ? {
+          async renderReference(podId: string, path: string) {
+            assertAgentWriteAllowed(podId, 'render_reference');
+            const pod = podRepo.getOrThrow(podId);
+            const generation = pod.lifecycleGeneration;
+            const configDigest = pod.launchConfigDigest;
+            const launch = launchForPod(pod);
+            const ref = launch ? launch.work.inputBundle : pod.inputBundle;
+            if (!ref)
+              throw new AutopodError(
+                'This pod has no admitted references',
+                'REFERENCE_RENDER_INPUT',
+                400,
+              );
+            podManager.touchHeartbeat(podId);
+            const preview = await referencePreviews.renderAdmitted(ref, pod.userId, path);
+            assertAgentWriteAllowed(podId, 'render_reference');
+            const current = podRepo.getOrThrow(podId);
+            if (
+              current.lifecycleGeneration !== generation ||
+              current.launchConfigDigest !== configDigest
+            )
+              throw new AutopodError(
+                'Pod changed during reference rendering',
+                'REFERENCE_RENDER_STALE',
+                409,
+              );
+            if (preview.bytes.length > 512 * 1024)
+              throw new AutopodError(
+                'Rendered reference exceeds native tool image limit (512 KiB); supply a companion raster or simplify the reference',
+                'REFERENCE_PREVIEW_TOOL_LIMIT',
+                413,
+              );
+            return { receipt: preview.receipt, base64: preview.bytes.toString('base64') };
+          },
+        }
+      : {}),
     getScopedTools(podId: string) {
       const pod = podRepo.getOrThrow(podId);
       if (!pod.launchConfigDigest) return undefined;

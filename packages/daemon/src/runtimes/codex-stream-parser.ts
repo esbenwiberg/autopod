@@ -4,6 +4,7 @@ import type { AgentErrorEvent, AgentEvent } from '@autopod/shared';
 import { canonicalModelKey, computeCostWithCache } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { classifyProviderError } from './provider-error-classifier.js';
+import { isReferenceInput, toolInputSummary, toolResultSummary } from './tool-result-summary.js';
 
 /**
  * Codex CLI JSONL parser.
@@ -182,7 +183,7 @@ function mcpInput(
     input.arguments = msg.arguments;
   }
 
-  return input;
+  return toolInputSummary(mcpToolName(invocation), input);
 }
 
 function contentToString(content: unknown): string | undefined {
@@ -298,7 +299,10 @@ function publicItemEvents(
           ]
         : [];
     }
-    const output = typeof item.aggregated_output === 'string' ? item.aggregated_output : '';
+    const output = toolResultSummary(
+      typeof item.aggregated_output === 'string' ? item.aggregated_output : '',
+      isReferenceInput(commandInput(item.command)),
+    );
     const exit = typeof item.exit_code === 'number' ? ` (exit ${item.exit_code})` : '';
     return [
       {
@@ -322,7 +326,11 @@ function publicItemEvents(
           type: 'tool_use',
           timestamp,
           tool: qualifiedTool,
-          input: { call_id: callId, ...(server ? { server } : {}), ...input },
+          input: toolInputSummary(qualifiedTool, {
+            call_id: callId,
+            ...(server ? { server } : {}),
+            ...input,
+          }),
         },
       ];
     }
@@ -332,11 +340,12 @@ function publicItemEvents(
         type: 'tool_use',
         timestamp,
         tool: qualifiedTool,
-        input: { call_id: callId, ...(server ? { server } : {}), ...input },
-        output: truncate(
-          typeof result === 'string' ? result : JSON.stringify(result),
-          MAX_OUTPUT_LEN,
-        ),
+        input: toolInputSummary(qualifiedTool, {
+          call_id: callId,
+          ...(server ? { server } : {}),
+          ...input,
+        }),
+        output: truncate(toolResultSummary(result), MAX_OUTPUT_LEN),
       },
     ];
   }
@@ -395,11 +404,11 @@ function mapFunctionCall(msg: { [key: string]: unknown }, ts: string): AgentEven
     return { type: 'tool_use', timestamp: ts, tool: 'Bash', input };
   }
 
-  return { type: 'tool_use', timestamp: ts, tool: name, input };
+  return { type: 'tool_use', timestamp: ts, tool: name, input: toolInputSummary(name, input) };
 }
 
 function mapFunctionOutput(msg: { [key: string]: unknown }, ts: string): AgentEvent {
-  const output = typeof msg.output === 'string' ? msg.output : JSON.stringify(msg.output ?? null);
+  const output = toolResultSummary(msg.output ?? null);
   return {
     type: 'tool_use',
     timestamp: ts,
@@ -519,10 +528,7 @@ function mapEvent(event: CodexEnvelope, podId: string, logger?: Logger): CodexPa
         timestamp: ts,
         tool: mcpToolName(inv),
         input: mcpInput(msg, inv),
-        output: truncate(
-          typeof result === 'string' ? result : JSON.stringify(result),
-          MAX_OUTPUT_LEN,
-        ),
+        output: truncate(toolResultSummary(result), MAX_OUTPUT_LEN),
       };
     }
 
@@ -671,6 +677,23 @@ async function* parse(
   const rl = createInterface({ input: stream });
   let latestModel: string | null = modelHint && modelHint !== 'auto' ? modelHint : null;
   let latestAgentMessage: string | undefined;
+  const referenceCalls = new Set<string>();
+  const activity = (event: CodexParserEvent): CodexParserEvent => {
+    if (event.type !== 'tool_use') return event;
+    const input = event.input;
+    const callId = typeof input.call_id === 'string' ? input.call_id : undefined;
+    const reference = isReferenceInput(input) || input.reference === 'admitted reference';
+    if (callId && reference) referenceCalls.add(callId);
+    const privateOutput =
+      event.output !== undefined &&
+      (reference || (callId !== undefined && referenceCalls.has(callId)));
+    if (privateOutput && callId) referenceCalls.delete(callId);
+    return {
+      ...event,
+      input: toolInputSummary(event.tool, input),
+      ...(privateOutput ? { output: toolResultSummary(event.output, true) } : {}),
+    };
+  };
 
   for await (const line of rl) {
     const trimmed = line.trim();
@@ -683,7 +706,7 @@ async function* parse(
       logger.warn({
         component: 'codex-stream-parser',
         podId,
-        msg: `Failed to parse JSONL line: ${trimmed.slice(0, 200)}`,
+        msg: `Failed to parse JSONL line: ${toolResultSummary(trimmed).slice(0, 200)}`,
       });
       continue;
     }
@@ -733,7 +756,7 @@ async function* parse(
         latestAgentMessage = item.text;
       }
       for (const event of publicItemEvents(msg.type, item, tsOf(env))) {
-        yield event;
+        yield activity(event);
       }
       continue;
     }
@@ -812,7 +835,7 @@ async function* parse(
     }
 
     const mapped = mapEvent(env, podId, logger);
-    if (mapped) yield mapped;
+    if (mapped) yield activity(mapped);
   }
 }
 

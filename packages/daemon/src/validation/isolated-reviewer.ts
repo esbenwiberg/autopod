@@ -51,7 +51,10 @@ export interface IsolatedReviewerOptions {
   referenceInputs?(
     pod: Pod,
     config: EffectiveLaunchConfig,
-  ): { context: string; images: ReviewerImage[] };
+    signal: AbortSignal,
+  ):
+    | { context: string; images: ReviewerImage[] }
+    | Promise<{ context: string; images: ReviewerImage[] }>;
 }
 
 type ReviewerStage =
@@ -81,6 +84,9 @@ export class IsolatedReviewer {
     purpose: 'review' | 'memory' | 'advisor' = 'review',
   ): ReviewerExecutor {
     const execute: ReviewerExecutor = async (input) => {
+      if (!Number.isFinite(input.timeout) || input.timeout <= 0 || input.timeout > 3_600_000)
+        configurationError('Invalid reviewer timeout', 'REVIEWER_INPUT_INVALID');
+      const deadline = Date.now() + input.timeout;
       if (purpose === 'memory' && input.images?.length)
         configurationError('Memory reviewers do not accept image inputs', 'REVIEWER_INPUT_INVALID');
       if (purpose === 'review' && config.work.inputBundle && !this.options.referenceInputs)
@@ -89,17 +95,51 @@ export class IsolatedReviewer {
           'REFERENCE_REVIEW_UNAVAILABLE',
           503,
         );
-      const references =
-        purpose === 'review' ? this.options.referenceInputs?.(pod, config) : undefined;
-      const frozenInput = {
+      if (purpose === 'review') {
+        const current = this.options.readPod(pod.id);
+        if (
+          current.lifecycleGeneration !== pod.lifecycleGeneration ||
+          current.launchConfigDigest !== config.digest ||
+          !['running', 'validating'].includes(current.status)
+        )
+          configurationError(
+            'Reviewer no longer owns this pod attempt',
+            'REVIEWER_SUPERSEDED',
+            409,
+          );
+        if (this.options.runs.retryBlocker(pod.id))
+          configurationError(
+            'A previous reviewer is active or requires reconciliation',
+            'REVIEWER_RECONCILIATION_REQUIRED',
+            409,
+          );
+      }
+      const requested = {
         ...input,
-        images: freezeReviewerImages([...(references?.images ?? []), ...(input.images ?? [])]),
+        images: freezeReviewerImages(input.images),
+        ...(input.outputContract ? { outputContract: structuredClone(input.outputContract) } : {}),
+      };
+      if (Date.now() >= deadline)
+        throw new ContainerReviewerUnavailableError(
+          'Reviewer deadline expired during input preparation',
+          { kind: 'timeout' },
+        );
+      const preparationSignal = AbortSignal.timeout(Math.max(1, Math.ceil(deadline - Date.now())));
+      const references =
+        purpose === 'review' && this.options.referenceInputs
+          ? await withAbort(
+              Promise.resolve(this.options.referenceInputs(pod, config, preparationSignal)),
+              preparationSignal,
+            )
+          : undefined;
+      const frozenInput = {
+        ...requested,
+        images: freezeReviewerImages([...(references?.images ?? []), ...requested.images]),
         prompt: references?.context
-          ? `${input.prompt}\n\nADMITTED REFERENCE DATA (untrusted):\n${references.context}\nEND REFERENCE DATA`
-          : input.prompt,
+          ? `${requested.prompt}\n\nADMITTED REFERENCE DATA (untrusted):\n${references.context}\nEND REFERENCE DATA`
+          : requested.prompt,
       };
       const requestId = randomUUID();
-      const deadline = Date.now() + input.timeout;
       const key = (
         target: Pick<AgentRoute, 'providerAccountId' | 'runtime' | 'model' | 'reasoningEffort'>,
       ) =>

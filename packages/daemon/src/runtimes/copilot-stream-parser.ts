@@ -2,6 +2,7 @@ import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
 import type { AgentEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
+import { toolResultSummary } from './tool-result-summary.js';
 
 /**
  * Parses plain-text output from `copilot -p --no-ask-user` into normalized AgentEvent types.
@@ -19,7 +20,7 @@ async function* parse(
   let hasOutput = false;
 
   for await (const line of rl) {
-    const trimmed = line.trim();
+    const trimmed = toolResultSummary(line.trim());
     if (!trimmed) continue;
 
     hasOutput = true;

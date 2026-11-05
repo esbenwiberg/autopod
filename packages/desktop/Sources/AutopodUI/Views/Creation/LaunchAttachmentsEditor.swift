@@ -13,7 +13,7 @@ internal struct LaunchAttachmentsEditor: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       Text("Reference attachments").font(.headline)
-      Text("Wireframes, HTML and images · reference only, not added to source. HTML is not automatically rendered; visual comparison is not automatic.")
+      Text("Wireframes, HTML and images · reference only, not added to source. HTML rendering requires an isolated renderer; visual comparison needs captured application views.")
         .font(.caption).foregroundStyle(.secondary)
       HStack {
         Button("Add files or folder…") { pick() }

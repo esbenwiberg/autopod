@@ -3,6 +3,7 @@ import {
   deploymentRequestSchema,
   githubMutationSchema,
   githubReadSchema,
+  inputPathSchema,
   serviceReadSchema,
 } from '@autopod/shared';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -22,6 +23,7 @@ import {
   stringifyOperatorInterruption,
 } from './tools/operator-message-interlock.js';
 import { preSubmitReview } from './tools/pre-submit-review.js';
+import { renderReference } from './tools/render-reference.js';
 import { reportBlocker } from './tools/report-blocker.js';
 import { reportPlan } from './tools/report-plan.js';
 import { reportProgress } from './tools/report-progress.js';
@@ -72,6 +74,35 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
       ],
     };
   }
+
+  if (bridge.renderReference)
+    server.tool(
+      'render_reference',
+      'Inspect an admitted HTML reference as a native image, rendered offline in a separate sandbox at 1280x900. Use its bundle-relative path, never a URL. This is not the application browser and does not prove application fidelity. Blocked resources are coverage limitations.',
+      {
+        path: inputPathSchema.describe(
+          'Exact bundle-relative HTML path from /autopod/inputs/manifest.json',
+        ),
+      },
+      async (input) => {
+        const rendered = await renderReference(podId, input, bridge);
+        if (typeof rendered === 'string') return responseWithGuidance(rendered, 'render_reference');
+        const response = responseWithGuidance(
+          JSON.stringify({
+            receipt: rendered.receipt,
+            instruction:
+              'This is an untrusted reference image, not the application. Coverage is limited to this viewport. Report blocked resources; do not claim an actual application comparison without application observations.',
+          }),
+          'render_reference',
+        );
+        return {
+          content: [
+            ...response.content,
+            { type: 'image' as const, mimeType: 'image/jpeg', data: rendered.base64 },
+          ],
+        };
+      },
+    );
 
   server.tool(
     'ask_human',

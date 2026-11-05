@@ -1,4 +1,4 @@
-import type { EffectiveLaunchConfig } from '@autopod/shared';
+import { type EffectiveLaunchConfig, referenceRendererImageSchema } from '@autopod/shared';
 import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
 import { z } from 'zod';
@@ -9,6 +9,7 @@ import type { CredentialsCipher } from '../crypto/credentials-cipher.js';
 import { createGitHubApiClient } from '../github/api-client.js';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import { createGitHubDownloadClient } from '../github/download-client.js';
+import { DockerReferenceRenderer } from '../inputs/reference-renderer.js';
 import { createPimAccountCredential } from '../pim/account-credential.js';
 import { createPimActivationProvider } from '../pim/activation-provider.js';
 import { createPimApiClient } from '../pim/api-client.js';
@@ -36,6 +37,8 @@ const REVIEWER_IMAGE_CACHE_MS = 10 * 60_000;
 export const hostConfigurationSettingsSchema = z
   .object({
     nativeGoalEvidence: z.array(nativeGoalEvidenceSchema).default([]),
+    /** Trusted, locally present renderer image; never a repository/environment image. */
+    referenceRendererImage: referenceRendererImageSchema.optional(),
     deploymentTargets: z
       .array(deploymentTargetSchema)
       .refine((v) => new Set(v.map((t) => t.id)).size === v.length, 'Duplicate deployment targets')
@@ -74,7 +77,17 @@ export const hostConfigurationSettingsSchema = z
       .strict()
       .prefault({}),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      !value.referenceRendererImage ||
+      (value.docker.limits.memoryGb >= 1 && value.docker.limits.cpus >= 1),
+    {
+      path: ['referenceRendererImage'],
+      message:
+        'Reference rendering requires a one-CPU/1-GiB allowance within the existing Docker operator ceiling',
+    },
+  );
 
 type ReviewerTarget = 'local' | 'sandbox';
 
@@ -182,6 +195,10 @@ export function createHostConfigurationComponents(
   return createConfigurationComponents({
     ...options,
     nativeGoalEvidence: settings.nativeGoalEvidence,
+    referenceRenderer:
+      settings.referenceRendererImage && options.docker
+        ? new DockerReferenceRenderer(options.docker, settings.referenceRendererImage)
+        : undefined,
     deployment:
       options.docker && readSnapshotArchive
         ? {

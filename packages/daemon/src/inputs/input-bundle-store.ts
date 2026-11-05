@@ -22,6 +22,7 @@ import {
 import type Database from 'better-sqlite3';
 import { configurationDigest } from '../configuration/configuration-digest.js';
 import { assertInputImageSize } from './image-dimensions.js';
+import { type ReferencePreview, verifyReferencePreview } from './reference-renderer.js';
 import { freezeReviewerImages, type ReviewerImage } from './reviewer-images.js';
 
 const OWNER_BYTES = 250 * 1024 * 1024;
@@ -85,7 +86,9 @@ export class InputBundleStore {
         )
         .get(owner) as { bytes: number; count: number };
       const global = this.db
-        .prepare('SELECT COALESCE(SUM(byte_length),0) AS bytes FROM input_bundles')
+        .prepare(
+          'SELECT COALESCE(SUM(byte_length),0) + (SELECT COALESCE(SUM(length(bytes)),0) FROM input_reference_previews) AS bytes FROM input_bundles',
+        )
         .get() as { bytes: number };
       if (
         usage.bytes + total > OWNER_BYTES ||
@@ -184,7 +187,11 @@ export class InputBundleStore {
     if (configurationDigest(inputBundleRefSchema.parse(ref)) !== configurationDigest(actual))
       fail('Input reference changed; select the sealed bundle again', 'INPUT_REFERENCE_MISMATCH');
   }
-  reviewInputs(ref: InputBundleRef, owner: string): { context: string; images: ReviewerImage[] } {
+  reviewInputs(
+    ref: InputBundleRef,
+    owner: string,
+    previews: readonly ReferencePreview[] = [],
+  ): { context: string; images: ReviewerImage[] } {
     this.assert(ref, owner);
     const images: ReviewerImage[] = [];
     const context = [
@@ -199,8 +206,19 @@ export class InputBundleStore {
         file.mediaType === 'image/jpeg' ||
         file.mediaType === 'image/webp'
       ) {
-        images.push({ label: file.path, role: 'reference', mediaType: file.mediaType, bytes });
+        if (previews.some((preview) => preview.receipt.resourceSha256s.includes(file.sha256)))
+          context.push(
+            'Included as a local HTML render resource; not separately inspected outside the captured viewport.',
+          );
+        else images.push({ label: file.path, role: 'reference', mediaType: file.mediaType, bytes });
       } else if (file.mediaType !== 'application/pdf' && file.mediaType !== 'image/gif') {
+        if (
+          file.mediaType === 'text/html' &&
+          !previews.some((preview) => preview.receipt.entrypoint === file.path)
+        )
+          context.push(
+            'HTML source only: no rendered reference pixels were supplied. Source analysis is not visual inspection or fidelity proof.',
+          );
         const remaining = Math.max(0, Math.min(64 * 1024, 128 * 1024 - textBytes));
         const preview = bytes.subarray(0, remaining);
         context.push(
@@ -212,7 +230,100 @@ export class InputBundleStore {
           'Not visually attached: this file type needs a separate qualified reader. Do not claim it was inspected.',
         );
     }
+    for (const preview of previews) {
+      const verified = verifyReferencePreview(
+        preview,
+        ref,
+        preview.receipt.entrypoint,
+        preview.receipt.rendererImage,
+      );
+      images.push({
+        label: `Rendered HTML: ${verified.receipt.entrypoint} (1280x900, JPEG quality 80)`,
+        role: 'reference',
+        mediaType: 'image/jpeg',
+        bytes: verified.bytes,
+        derivation: {
+          sourceSha256: verified.receipt.sourceSha256,
+          rendererImage: verified.receipt.rendererImage,
+          width: verified.receipt.width,
+          height: verified.receipt.height,
+        },
+      });
+      context.push(`RENDER PROVENANCE: ${JSON.stringify(verified.receipt)}`);
+      if (verified.receipt.blockedRequests > 0 || verified.receipt.scriptErrors > 0)
+        context.push(
+          'RENDER COVERAGE LIMITATION: resources/navigation were blocked or reference scripts failed. Do not issue a visual-fidelity pass for this reference; report missing resources/unsupported behavior and ask for local assets or a companion screenshot.',
+        );
+    }
     return { context: context.join('\n'), images: freezeReviewerImages(images) };
+  }
+
+  preview(
+    ref: InputBundleRef,
+    owner: string,
+    entrypoint: string,
+    rendererImage?: string,
+  ): ReferencePreview | null {
+    this.assert(ref, owner);
+    const row = this.db
+      .prepare(
+        'SELECT receipt,bytes,renderer_image FROM input_reference_previews WHERE bundle_id=? AND entrypoint=? AND (? IS NULL OR renderer_image=?)',
+      )
+      .get(ref.id, entrypoint, rendererImage ?? null, rendererImage ?? null) as
+      | { receipt: string; bytes: Buffer; renderer_image: string }
+      | undefined;
+    return row
+      ? verifyReferencePreview(
+          { receipt: JSON.parse(row.receipt), bytes: row.bytes },
+          ref,
+          entrypoint,
+          row.renderer_image,
+        )
+      : null;
+  }
+  savePreview(ref: InputBundleRef, owner: string, preview: ReferencePreview): ReferencePreview {
+    const verified = verifyReferencePreview(
+      preview,
+      ref,
+      preview.receipt.entrypoint,
+      preview.receipt.rendererImage,
+    );
+    return this.db.transaction(() => {
+      this.assert(ref, owner);
+      const existing = this.preview(ref, owner, verified.receipt.entrypoint);
+      if (existing) return existing;
+      const count = this.db
+        .prepare('SELECT COUNT(*) AS count FROM input_reference_previews WHERE bundle_id=?')
+        .get(ref.id) as { count: number };
+      const ownerUsage = this.db
+        .prepare(
+          'SELECT COALESCE(SUM(length(p.bytes)),0) AS bytes FROM input_reference_previews p JOIN input_bundles b ON b.id=p.bundle_id WHERE b.owner_id=?',
+        )
+        .get(owner) as { bytes: number };
+      const totalUsage = this.db
+        .prepare(
+          'SELECT COALESCE(SUM(length(bytes)),0) + (SELECT COALESCE(SUM(byte_length),0) FROM input_bundles) AS bytes FROM input_reference_previews',
+        )
+        .get() as { bytes: number };
+      if (
+        count.count >= 4 ||
+        ownerUsage.bytes + verified.bytes.length > 100 * 1024 * 1024 ||
+        totalUsage.bytes + verified.bytes.length > GLOBAL_BYTES
+      )
+        fail('Reference preview storage quota reached', 'INPUT_PREVIEW_QUOTA', 413);
+      this.db
+        .prepare(
+          'INSERT INTO input_reference_previews(bundle_id,entrypoint,renderer_image,receipt,bytes) VALUES(?,?,?,?,?)',
+        )
+        .run(
+          ref.id,
+          verified.receipt.entrypoint,
+          verified.receipt.rendererImage,
+          JSON.stringify(verified.receipt),
+          verified.bytes,
+        );
+      return verified;
+    })();
   }
 
   pin(ref: InputBundleRef, owner: string, podId: string): void {

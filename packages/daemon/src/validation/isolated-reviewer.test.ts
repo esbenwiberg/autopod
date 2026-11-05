@@ -14,8 +14,9 @@ import {
 } from '../test-utils/configuration-helpers.js';
 import { createMockContainerManager, createTestDb } from '../test-utils/mock-helpers.js';
 import { referenceImage } from '../test-utils/reference-image-helpers.js';
+import { deferred } from '../test-utils/resource-helpers.js';
 import { ContainerReviewerUnavailableError } from './container-reviewer-runner.js';
-import { IsolatedReviewer } from './isolated-reviewer.js';
+import { IsolatedReviewer, type IsolatedReviewerOptions } from './isolated-reviewer.js';
 import { ReviewerRunRepository } from './reviewer-run-repository.js';
 
 const databases: ReturnType<typeof createTestDb>[] = [];
@@ -23,7 +24,12 @@ afterEach(() => {
   for (const db of databases.splice(0)) db.close();
 });
 
-async function fixture(failover = false, advisor = false, withImages = false) {
+async function fixture(
+  failover = false,
+  advisor = false,
+  withImages = false,
+  referenceInputs?: IsolatedReviewerOptions['referenceInputs'],
+) {
   const db = createTestDb();
   databases.push(db);
   const { services } = createTestConfiguration(db);
@@ -133,10 +139,12 @@ async function fixture(failover = false, advisor = false, withImages = false) {
     logger: pino({ level: 'silent' }),
     readPod: () => pod,
     assertAllowed,
-    referenceInputs: (target, launch) =>
-      launch.work.inputBundle
-        ? inputs.reviewInputs(launch.work.inputBundle, target.userId)
-        : { context: '', images: [] },
+    referenceInputs:
+      referenceInputs ??
+      ((target, launch) =>
+        launch.work.inputBundle
+          ? inputs.reviewInputs(launch.work.inputBundle, target.userId)
+          : { context: '', images: [] }),
   });
   const selection = advisor ? config.ai.advisor : config.ai.reviewer;
   if (selection?.mode !== 'independent') throw new Error('fixture inference route');
@@ -157,6 +165,33 @@ async function fixture(failover = false, advisor = false, withImages = false) {
 }
 
 describe('isolated reviewer execution', () => {
+  it('freezes supplied observations and prompt before awaiting asynchronous HTML reference preparation', async () => {
+    const ready = deferred<{ context: string; images: ReturnType<typeof referenceImage>[] }>();
+    const f = await fixture(false, false, true, () => ready.promise);
+    const observation = referenceImage({ role: 'observation' });
+    const request = { prompt: 'Original task', timeout: 5000, images: [observation] };
+    const work = f.execute(request);
+    observation.bytes.fill(0);
+    request.prompt = 'Mutated request';
+    ready.resolve({ context: 'Prepared reference', images: [referenceImage()] });
+    await work;
+    const write = vi
+      .mocked(f.manager.writeFile)
+      .mock.calls.find(([, path]) => path.endsWith('.prompt'));
+    const payload = JSON.parse(String(write?.[2]));
+    expect(
+      payload.message.content.filter((block: { type: string }) => block.type === 'image')[1].source
+        .data,
+    ).toBe(referenceImage().bytes.toString('base64'));
+    expect(payload.message.content[0].text).toContain('Original task');
+    expect(payload.message.content[0].text).not.toContain('Mutated request');
+  });
+  it('keeps reference preparation inside the review deadline without starting inference', async () => {
+    const f = await fixture(false, false, true, () => new Promise(() => {}));
+    await expect(f.execute({ prompt: 'Review', timeout: 5 })).rejects.toThrow(/abort|timeout/i);
+    expect(f.manager.spawn).not.toHaveBeenCalled();
+    expect(f.runs.list('pod')).toEqual([]);
+  });
   it('attaches authoritative originals without mounting worker state and retains hash-only evidence', async () => {
     const f = await fixture(false, false, true);
     await f.execute({ prompt: 'Review this task', timeout: 5000 });

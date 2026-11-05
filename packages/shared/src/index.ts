@@ -166,6 +166,7 @@ export {
   providerFailoverTargetSchema,
   updateProviderAccountSchema,
 } from './schemas/provider-account.schema.js';
+export * from './schemas/reference-preview.schema.js';
 export * from './schemas/series-launch.schema.js';
 export * from './schemas/service-access.schema.js';
 // Series brief parsing (CLI + daemon share this)

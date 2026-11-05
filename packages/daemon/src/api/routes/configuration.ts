@@ -45,6 +45,7 @@ export interface ConfigurationRouteDependencies {
   watchers?: import('../../issue-watcher/watcher-binding-repository.js').WatcherBindingRepository;
   resolution: LaunchResolutionServices;
   inputBundles?: import('../../inputs/input-bundle-store.js').InputBundleStore;
+  referencePreviews?: import('../../inputs/reference-preview-service.js').ReferencePreviewService;
   db: Database.Database;
   credentials?: ConfigurationCredentialStore;
   githubDiscovery?: import('../../github/discovery.js').GitHubDiscovery;

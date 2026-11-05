@@ -1,8 +1,11 @@
 import { AutopodError } from '@autopod/shared';
 
 /** Header-only limits before any model/renderer decodes an uploaded raster image. */
-export function assertInputImageSize(bytes: Buffer, mediaType: string): void {
-  if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mediaType)) return;
+export function inputImageDimensions(
+  bytes: Buffer,
+  mediaType: string,
+): { width: number; height: number } | null {
+  if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mediaType)) return null;
   let width = 0;
   let height = 0;
   if (
@@ -62,4 +65,8 @@ export function assertInputImageSize(bytes: Buffer, mediaType: string): void {
       'INPUT_IMAGE_DIMENSIONS',
       400,
     );
+  return { width, height };
+}
+export function assertInputImageSize(bytes: Buffer, mediaType: string): void {
+  inputImageDimensions(bytes, mediaType);
 }
