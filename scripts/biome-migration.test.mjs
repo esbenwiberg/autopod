@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -29,7 +29,9 @@ test('Biome 2 migration keeps pinned tooling, rule intent and repository gate co
 });
 
 test('the installed binary checks maintained source and retains generated/cache exclusions', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'autopod-biome-policy-'));
+  // Linux /tmp is itself excluded by the policy under test. Keep the fixture
+  // outside ignored ancestors, then exercise tmp/ exclusion inside the fixture.
+  const directory = await mkdtemp(path.join(homedir(), '.autopod-biome-policy-'));
   try {
     await writeFile(path.join(directory, 'biome.json'), configText);
     const sources = ['daemon', 'cli', 'shared', 'validator', 'escalation-mcp', 'mobile-web'].map(
