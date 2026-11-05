@@ -8,7 +8,7 @@ import { runMigrations } from './migrate.js';
 
 const migrations = new URL('./migrations/', import.meta.url).pathname;
 const repair = '237_rewrite_repair_retry_binding.sql';
-const finalization = '238_retained_finalization.sql';
+const finalization = '241_retained_finalization.sql';
 
 describe('ordered recovery/finalization production migration', () => {
   let db: Database.Database;
@@ -37,18 +37,18 @@ describe('ordered recovery/finalization production migration', () => {
     fs.rmSync(directory, { recursive: true, force: true });
   });
 
-  it('applies 237 before 238, preserves old evidence and remains idempotent', () => {
+  it('applies 237 before 241, preserves old evidence and remains idempotent', () => {
     const pod = db.prepare('SELECT * FROM pods WHERE id=?').get('retained');
     add(repair);
     add(finalization);
     runMigrations(db, directory, logger);
-    expect(version()).toBe(238);
+    expect(version()).toBe(241);
     expect(db.prepare('SELECT * FROM pods WHERE id=?').get('retained')).toEqual(pod);
     expect(db.prepare('SELECT rewrite_repair FROM task_retry_authorizations').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM retained_finalizations').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM retained_finalization_resources').all()).toEqual([]);
     runMigrations(db, directory, logger);
-    expect(version()).toBe(238);
+    expect(version()).toBe(241);
     expect(db.pragma('foreign_key_check')).toEqual([]);
     expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
   });
@@ -64,7 +64,30 @@ describe('ordered recovery/finalization production migration', () => {
     expect(db.prepare('SELECT * FROM pods WHERE id=?').get('retained')).toEqual(pod);
     add(repair);
     runMigrations(db, directory, logger);
-    expect(version()).toBe(238);
+    expect(version()).toBe(241);
     expect(db.prepare('SELECT * FROM pods WHERE id=?').get('retained')).toEqual(pod);
+  });
+
+  it('upgrades current main through 240 without losing attachment or pod evidence', () => {
+    for (const file of fs.readdirSync(migrations)) {
+      const number = Number.parseInt(file, 10);
+      if (file.endsWith('.sql') && number >= 237 && number <= 240) add(file);
+    }
+    runMigrations(db, directory, logger);
+    expect(version()).toBe(240);
+    db.exec(`INSERT INTO input_bundles(id,owner_id,request_key,digest,manifest,byte_length,status,created_at)
+      VALUES ('bundle','human','upload','digest','{}',3,'sealed','2026-11-05');
+      INSERT INTO input_bundle_files VALUES ('bundle',0,X'0001FF');
+      INSERT INTO pod_input_bundles VALUES ('retained','bundle');`);
+    const pod = db.prepare('SELECT * FROM pods WHERE id=?').get('retained');
+    const tables = ['input_bundles', 'input_bundle_files', 'pod_input_bundles'];
+    const before = tables.map((table) => db.prepare(`SELECT * FROM ${table}`).all());
+    add(finalization);
+    runMigrations(db, directory, logger);
+    expect(version()).toBe(241);
+    expect(db.prepare('SELECT * FROM pods WHERE id=?').get('retained')).toEqual(pod);
+    expect(tables.map((table) => db.prepare(`SELECT * FROM ${table}`).all())).toEqual(before);
+    expect(db.prepare('SELECT * FROM retained_finalizations').all()).toEqual([]);
+    expect(db.pragma('foreign_key_check')).toEqual([]);
   });
 });

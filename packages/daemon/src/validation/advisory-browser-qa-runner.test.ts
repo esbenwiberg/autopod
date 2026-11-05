@@ -1,7 +1,9 @@
 import { parseSpecContract, type SpecContract } from '@autopod/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { ReviewerExecutor } from '../interfaces/reviewer-executor.js';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
+import { referenceImage } from '../test-utils/reference-image-helpers.js';
 import {
   ADVISORY_BROWSER_QA_TARGET_CAP,
   buildAdvisoryChecklistTargets,
@@ -209,6 +211,52 @@ describe('buildAdvisoryChecklistTargets', () => {
 });
 
 describe('runAdvisoryBrowserQa', () => {
+  it('sends collected application screenshots as native observation images to isolated review', async () => {
+    const hostBrowserRunner = createHostBrowserRunner(
+      browserStdout([
+        {
+          targetId: 'scenario:dashboard',
+          url: 'http://127.0.0.1:3000/',
+          title: 'Dashboard',
+          notes: ['Visible dashboard'],
+          frames: [browserFrame('initial', '/tmp/advisory/screenshots/dashboard.png')],
+        },
+      ]),
+    );
+    vi.mocked(hostBrowserRunner.readScreenshot).mockResolvedValue(
+      referenceImage().bytes.toString('base64'),
+    );
+    const executor = vi.fn<ReviewerExecutor>().mockResolvedValue({
+      stdout: JSON.stringify({
+        actions: [],
+        status: 'pass',
+        reasoning: 'Inspected supplied images',
+        observations: [
+          { targetId: 'scenario:dashboard', status: 'pass', summary: 'Dashboard visible' },
+        ],
+      }),
+    });
+    const result = await runAdvisoryBrowserQa({
+      podId: 'pod',
+      task: 'Compare the design',
+      baseUrl: 'http://127.0.0.1:3000',
+      contract: parseSpecContract(scenarioOnlyContractYaml()),
+      reviewerModel: 'review-model',
+      reviewerProvider: 'anthropic',
+      reviewerExecutor: executor,
+      hostBrowserRunner,
+      screenshotStore: createScreenshotStore(),
+      pauseBetweenTargetsMs: 0,
+    });
+    const call = executor.mock.calls.find(([input]) => input.images?.length);
+    expect(call?.[0].images?.[0]).toMatchObject({
+      role: 'observation',
+      mediaType: 'image/png',
+      bytes: referenceImage().bytes,
+    });
+    expect(call?.[0].prompt).toContain('screenshot images');
+    expect(result.status).toBe('pass');
+  });
   it('returns complete advisory evidence with screenshots', async () => {
     const hostBrowserRunner = createHostBrowserRunner(
       browserStdout([

@@ -7,6 +7,7 @@ import {
   type ProviderErrorEvidence,
   sanitizeProviderMessage,
 } from './provider-error-classifier.js';
+import { isReferenceInput, toolInputSummary, toolResultSummary } from './tool-result-summary.js';
 
 export interface PiRpcStats {
   events: number;
@@ -331,12 +332,16 @@ function mapRecord(
   }
 
   if (kind === 'tool' || kind === 'tool_use') {
+    const tool = stringField(record, 'tool') ?? stringField(record, 'name') ?? 'pi_tool';
+    const input = objectField(record, 'input') ?? objectField(record, 'arguments') ?? {};
     return {
       type: 'tool_use',
       timestamp: ts,
-      tool: stringField(record, 'tool') ?? stringField(record, 'name') ?? 'pi_tool',
-      input: objectField(record, 'input') ?? objectField(record, 'arguments') ?? {},
-      ...(record.output !== undefined && { output: truncate(String(record.output), MAX_OUTPUT) }),
+      tool,
+      input: toolInputSummary(tool, input),
+      ...(record.output !== undefined && {
+        output: truncate(toolResultSummary(record.output, isReferenceInput(input)), MAX_OUTPUT),
+      }),
     };
   }
 
@@ -463,16 +468,13 @@ function mapNativeToolExecution(
 
   const output =
     record.result !== undefined
-      ? truncate(
-          typeof record.result === 'string' ? record.result : JSON.stringify(record.result),
-          MAX_OUTPUT,
-        )
+      ? truncate(toolResultSummary(record.result, isReferenceInput(retainedArgs)), MAX_OUTPUT)
       : undefined;
   return {
     type: 'tool_use',
     timestamp,
     tool,
-    input: { ...retainedArgs, call_id: callId },
+    input: toolInputSummary(tool, { ...retainedArgs, call_id: callId }),
     ...(output !== undefined && { output }),
   };
 }

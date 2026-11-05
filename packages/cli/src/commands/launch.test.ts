@@ -3,8 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   type ConfigurationEntity,
+  type CreateInputBundleRequest,
   configurationPayloadSchemas,
   type EffectiveLaunchConfig,
+  type InputFile,
   type LaunchRequest,
   launchRequestSchema,
 } from '@autopod/shared';
@@ -61,6 +63,79 @@ afterEach(() => {
 });
 
 describe('shared launch request CLI', () => {
+  it('uploads references before preview and retries a lost launch without rereading local files', async () => {
+    const directory = temporary();
+    const file = join(directory, 'wireframe.html');
+    writeFileSync(file, 'original reference');
+    let uploadedFiles: InputFile[] = [];
+    const id = 'inputs-11111111-1111-4111-a111-111111111111';
+    const client = {
+      listConfigurations: lookup,
+      createInputBundle: vi.fn(async (request: CreateInputBundleRequest) => {
+        uploadedFiles = request.files;
+        return { id, digest: 'b'.repeat(64), files: uploadedFiles, status: 'uploading' };
+      }),
+      uploadInputFile: vi.fn(),
+      sealInputBundle: vi.fn(async () => ({
+        id,
+        digest: 'b'.repeat(64),
+        files: uploadedFiles,
+        status: 'sealed',
+      })),
+      resolveLaunch: vi.fn(async () => ({ digest: 'a'.repeat(64) })),
+      launchPod: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Lost launch response'))
+        .mockResolvedValue({ id: 'created' }),
+    };
+    let saved: LaunchRequest | undefined;
+    const program = new Command().exitOverride();
+    registerLaunchCommand(
+      program,
+      () => client as unknown as AutopodClient,
+      (request) => {
+        saved = request;
+        return 'receipt';
+      },
+    );
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(
+      program.parseAsync([
+        'node',
+        'ap',
+        'run',
+        '--repo',
+        'Project',
+        '--task',
+        'Implement',
+        '--attach',
+        file,
+        '--json',
+      ]),
+    ).rejects.toThrow('Lost launch response');
+    expect(client.uploadInputFile).toHaveBeenCalledWith(
+      expect.any(String),
+      0,
+      Buffer.from('original reference'),
+    );
+    expect(saved?.work?.inputBundle?.files[0]?.path).toBe('wireframe.html');
+    const config = join(directory, 'launch.json');
+    writeFileSync(config, JSON.stringify(saved));
+    writeFileSync(file, 'changed after launch');
+    client.createInputBundle.mockClear();
+    client.resolveLaunch.mockClear();
+    const retry = new Command().exitOverride();
+    registerLaunchCommand(
+      retry,
+      () => client as unknown as AutopodClient,
+      () => 'receipt',
+    );
+    await retry.parseAsync(['node', 'ap', 'run', '--config', config, '--json']);
+    expect(client.createInputBundle).not.toHaveBeenCalled();
+    expect(client.resolveLaunch).not.toHaveBeenCalled();
+    expect(client.launchPod.mock.calls[1]?.[0]).toEqual(saved);
+  });
   it('describes source branches and the output branch truthfully', () => {
     const program = new Command();
     registerLaunchCommand(program, vi.fn());

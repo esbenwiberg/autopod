@@ -2,6 +2,9 @@ import {
   type AgentRoute,
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
   type EffectiveLaunchConfig,
+  MAX_INPUT_BUNDLE_BYTES,
+  MAX_INPUT_FILE_BYTES,
+  MAX_INPUT_FILES,
   type Pod,
   PodNotFoundError,
   type ScheduledJob,
@@ -21,6 +24,9 @@ import { GitHubDiscovery } from '../github/discovery.js';
 import type { GitHubMutationClient } from '../github/mutation-broker.js';
 import type { GitHubDownloadClient } from '../github/read-broker.js';
 import type { ImageBuilder } from '../images/image-builder.js';
+import { InputBundleStore } from '../inputs/input-bundle-store.js';
+import { ReferencePreviewService } from '../inputs/reference-preview-service.js';
+import type { ReferenceRenderer } from '../inputs/reference-renderer.js';
 import { createWatcherBindingRepository } from '../issue-watcher/watcher-binding-repository.js';
 import { createPimActivationRepository } from '../pim/activation-repository.js';
 import type { PimActivationProvider } from '../pim/activation-service.js';
@@ -76,6 +82,7 @@ export interface ConfigurationComponentsOptions {
   >;
   pim?: { eligibility: PimEligibilityService; provider: PimActivationProvider };
   reviewer: Pick<IsolatedReviewerOptions, 'manager' | 'image' | 'network'>;
+  referenceRenderer?: ReferenceRenderer;
   ports: Pick<
     LaunchResolutionServices,
     'referenceRevision' | 'skillContent' | 'executionCapabilities' | 'assertCapabilities'
@@ -92,6 +99,10 @@ export interface ConfigurationComponentsOptions {
 export function createConfigurationComponents(options: ConfigurationComponentsOptions) {
   const { db } = options;
   const store = createConfigurationStore(db);
+  const inputBundles = new InputBundleStore(db);
+  const referencePreviews = options.referenceRenderer
+    ? new ReferencePreviewService(inputBundles, options.referenceRenderer)
+    : undefined;
   const watchers = createWatcherBindingRepository(db);
   const snapshots = createLaunchSnapshotRepository(db, store);
   const policy = new ConfigurationSecurityPolicyStore(db);
@@ -209,6 +220,11 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
   const resolution: LaunchResolutionServices = {
     ...options.ports,
     deploymentAvailable: !!deployments,
+    assertInputBundle(ref, actorId) {
+      if (!actorId)
+        configurationError('Attachment owner identity is required', 'INPUT_OWNER_REQUIRED', 403);
+      inputBundles.assert(ref, actorId);
+    },
     readLaunch: snapshots.get,
     store,
     resolveEnvironment: (environment, target, clis) =>
@@ -232,6 +248,14 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     logger: options.logger,
     readPod: (id) => options.pods.getOrThrow(id),
     assertAllowed: assertCurrent,
+    referenceInputs: async (pod, config, signal) => {
+      const ref = config.work.inputBundle;
+      if (!ref) return { context: '', images: [] };
+      const previews = referencePreviews
+        ? await referencePreviews.forReview(ref, pod.userId, signal)
+        : [];
+      return inputBundles.reviewInputs(ref, pod.userId, previews);
+    },
   });
   const scopedTools = createScopedPodTools({
     db,
@@ -499,6 +523,8 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     reviewer,
   };
   const routes: ConfigurationRouteDependencies = {
+    inputBundles,
+    referencePreviews,
     reviewerRuns: {
       list: (podId) => reviewerRuns.list(podId),
       reconcile: (podId, runId, actorId, note, usage) =>
@@ -567,6 +593,20 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
       );
       return {
         schemaVersion: 1,
+        inputBundles: {
+          available: true,
+          maxFiles: MAX_INPUT_FILES,
+          maxFileBytes: MAX_INPUT_FILE_BYTES,
+          maxBundleBytes: MAX_INPUT_BUNDLE_BYTES,
+          visualReview: { available: true, automatic: false, requiresAdvisoryBrowserQa: true },
+          isolatedImageReview: { maxImages: 8, maxBytes: 8 * 1024 * 1024 },
+          htmlRendering: {
+            configured: !!referencePreviews,
+            available: referencePreviews ? await referencePreviews.available() : false,
+            viewport: { width: 1280, height: 900 },
+            network: 'none',
+          },
+        },
         launchAvailable: ready.ready && !suspended,
         launchUnavailableReason: suspended
           ? 'Execution is suspended by the operator'

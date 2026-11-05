@@ -7,12 +7,14 @@ import {
   CONTAINER_HOME_DIR,
   DEFAULT_CONTAINER_MEMORY_GB,
   generateId,
+  INPUTS_CONTAINER_DIR,
   resolveContainerNanoCpus,
 } from '@autopod/shared';
 import type { LaunchRegistryMaterial } from '../configuration/execution-credentials.js';
 import { computeNetworkPolicyAllowlist } from '../containers/docker-network-manager.js';
 import { launchSidecarSpec } from '../containers/launch-sidecars.js';
 import { resolveSidecarSpec, sidecarPodEnv } from '../containers/sidecar-resolver.js';
+import { inputBundleVerificationCommand } from '../inputs/input-bundle-delivery.js';
 import { RUNTIME_TELEMETRY_OPT_OUT_ENV } from '../runtime-env.js';
 import { ensureClaudeStateDir } from '../runtimes/claude-state-store.js';
 import { ensureCodexStateDir } from '../runtimes/codex-state-store.js';
@@ -20,6 +22,7 @@ import { buildValidationContextEnv } from '../validation/validation-context-env.
 import { mergeMcpServers } from './injection-merger.js';
 import { resolvePodSpawnImage, verifySandboxWarmImageAccess } from './provisioning-image-policy.js';
 import {
+  dataDir,
   ensureSeriesArtifactsDir,
   materializeSpecContextFiles,
   POD_ARTIFACTS_CONTAINER_DIR,
@@ -86,6 +89,19 @@ export function createProvisioningContainer(
         : podId;
     // Select container manager based on execution target
     const containerManager = containerManagerFactory.get(pod.executionTarget);
+    // Fail before allocating network/sidecars if retained reference bytes are unavailable.
+    const inputBundle = launchConfig ? launchConfig.work.inputBundle : pod.inputBundle;
+    let inputsHostPath: string | null = null;
+    if (inputBundle) {
+      const store = podRepo.inputBundles;
+      if (!store)
+        throw new AutopodError(
+          'Reference input storage is unavailable',
+          'INPUT_BUNDLES_UNAVAILABLE',
+          503,
+        );
+      inputsHostPath = await store.materialize(inputBundle, pod.userId, dataDir());
+    }
 
     // Compute initial network config — this creates the per-pod bridge
     // so sidecars can join it. The firewall script built here does NOT
@@ -423,6 +439,9 @@ export function createProvisioningContainer(
                 },
               ]
             : []),
+          ...(inputsHostPath
+            ? [{ host: inputsHostPath, container: INPUTS_CONTAINER_DIR, readOnly: true }]
+            : []),
           ...(seriesArtifactsHostPath
             ? [{ host: seriesArtifactsHostPath, container: POD_ARTIFACTS_CONTAINER_DIR }]
             : []),
@@ -446,6 +465,32 @@ export function createProvisioningContainer(
           : resolveContainerNanoCpus(process.env.CONTAINER_CPUS),
         onProgress: emitStatus,
       });
+      if (inputBundle) {
+        try {
+          const verification = await containerManager.execInContainer(
+            containerId,
+            inputBundleVerificationCommand(inputBundle),
+            { timeout: 30_000 },
+          );
+          if (verification.exitCode !== 0)
+            throw new AutopodError(
+              'Reference input delivery verification failed',
+              'INPUT_DELIVERY_MISMATCH',
+              409,
+            );
+          emitStatus('Reference attachment bytes verified outside the checkout');
+        } catch (error) {
+          await containerManager
+            .kill(containerId)
+            .catch((cleanupError) =>
+              logger.warn(
+                { err: cleanupError, podId },
+                'Failed to remove container after input verification failure',
+              ),
+            );
+          throw error;
+        }
+      }
     } catch (err) {
       // Pod container failed to spawn — tear down sidecars we already
       // brought up so they don't leak on the per-pod bridge.

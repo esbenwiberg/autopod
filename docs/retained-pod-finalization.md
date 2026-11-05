@@ -116,10 +116,12 @@ absent; another sheet cannot overwrite an uncertain request.
 
 ## Integration and qualification
 
-Migration **238** introduces the operation/resource ledger. PR518/migration237 is
-now included in the local dependency integration at `44136092`; **237 must also be
-present on the deployment branch before 238**. Do not deploy this checkout before
-parent qualification and final integration.
+Migration **241** introduces the operation/resource ledger, following the input
+attachment migrations238–240 on main. PR518/migration237 is a prerequisite;
+241 refuses a database missing its repair-binding column. Upgrade tests preserve
+both historical pod evidence and attachment records through the current main schema.
+The earlier local-only238 finalization migration was renumbered before publication;
+it was never deployed. Deployment and live incident use require separate authorization.
 Never downgrade to a binary unaware of retained-finalization custody.
 
 Tests use real SQLite, including reopen and transaction-failure cases, with

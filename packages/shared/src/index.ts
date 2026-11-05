@@ -114,6 +114,7 @@ export {
   injectedMcpServerSchema,
   injectedSkillSchema,
 } from './schemas/injection.schema.js';
+export * from './schemas/input-bundle.schema.js';
 export * from './schemas/issue-watcher-binding.schema.js';
 export * from './schemas/launch-config.schema.js';
 export * from './schemas/launch-work.schema.js';
@@ -165,6 +166,7 @@ export {
   providerFailoverTargetSchema,
   updateProviderAccountSchema,
 } from './schemas/provider-account.schema.js';
+export * from './schemas/reference-preview.schema.js';
 export * from './schemas/series-launch.schema.js';
 export * from './schemas/service-access.schema.js';
 // Series brief parsing (CLI + daemon share this)

@@ -13,6 +13,7 @@ public struct ComposableCreatePodSheet: View {
   public var actions: LaunchConfigurationActions
   private var onCreated: (@MainActor (String) -> Void)?
   @State private var request = ComposableLaunchRequest()
+  @State private var referenceFiles: [InputAttachment] = []
   @State private var preview: EffectiveLaunchPreview?
   @State private var previewRequest: ComposableLaunchRequest?
   @State private var pendingRequest: ComposableLaunchRequest?
@@ -88,7 +89,8 @@ public struct ComposableCreatePodSheet: View {
     } footer: {
       composerFooter
     }
-    .onChange(of: request) { _, _ in invalidatePreview(); dirty = true }
+    .onChange(of: request) { _, _ in if previewRequest != request { invalidatePreview() }; dirty = true }
+    .onChange(of: referenceFiles) { _, _ in invalidatePreview(); dirty = true }
     .onChange(of: actions.documents) { _, _ in if pendingRequest == nil { invalidatePreview() } }
     .onChange(of: actions.capabilities) { _, _ in if pendingRequest == nil { invalidatePreview() } }
     .interactiveDismissDisabled(busy || dirty || jsonDirty || pendingRequest != nil)
@@ -176,6 +178,7 @@ public struct ComposableCreatePodSheet: View {
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(DesktopTheme.line)).accessibilityIdentifier("launch-task")
       Text("Describe the outcome, boundaries and evidence you expect. The profile supplies tools, workflow and delivery rules.")
         .font(.callout).foregroundStyle(.secondary)
+      LaunchAttachmentsEditor(files: $referenceFiles, work: $request.work, available: actions.capabilities["inputBundles"]?["available"]?.bool == true)
     }
   }
   private func intentButton(_ title: String, value: String) -> some View {
@@ -220,6 +223,7 @@ public struct ComposableCreatePodSheet: View {
               if !nativeGoalAvailable { Text("Native Goals are not yet verified for this AI account and execution backend. Task mode is available.").font(.caption).foregroundStyle(.secondary) }
               Text(request.intent == "goal" ? "Objective" : "Task or objective").font(.headline)
               TextEditor(text: $request.task).frame(minHeight: 90).font(.body).overlay(RoundedRectangle(cornerRadius: 5).stroke(.quaternary))
+              LaunchAttachmentsEditor(files: $referenceFiles, work: $request.work, available: actions.capabilities["inputBundles"]?["available"]?.bool == true)
             }.padding(8)
           }
           VStack(spacing: 12) {
@@ -278,7 +282,8 @@ public struct ComposableCreatePodSheet: View {
       }.padding()
     }
     .frame(minWidth: 680, idealWidth: 780, minHeight: 700, idealHeight: 850)
-    .onChange(of: request) { _, _ in preview = nil; previewRequest = nil }
+    .onChange(of: request) { _, _ in if previewRequest != request { invalidatePreview() } }
+    .onChange(of: referenceFiles) { _, _ in invalidatePreview() }
     .sheet(isPresented: $showPim) {
       PimSelectionSheet(selected: effectivePim, cached: actions.cachedPim(), discover: actions.discoverPim) { selections in
         if request.overrides == nil { request.overrides = LaunchOverrides() }; request.overrides?.pim = selections
@@ -444,10 +449,20 @@ public struct ComposableCreatePodSheet: View {
   private func resolve() async {
     guard !busy, !jsonDirty, canPreview else { return }
     if request.intent == "goal" && !nativeGoalAvailable { error = "Native Goal is not verified for this account and execution backend."; return }
-    busy = true; error = nil; let candidate = request; let generation = previewGeneration
+    busy = true; error = nil; let source = request; let generation = previewGeneration; let files = referenceFiles
     defer { busy = false }
-    do { let resolved = try await actions.resolve(candidate); guard request == candidate, previewGeneration == generation, !jsonDirty else { return }; preview = resolved; previewRequest = candidate; stage = .review }
-    catch { self.error = error.localizedDescription }
+    do {
+      var candidate = source
+      if !files.isEmpty {
+        let bundle = try await actions.uploadInputs(files)
+        if candidate.work == nil { candidate.work = [:] }
+        candidate.work?["inputBundle"] = bundle.configuration
+      }
+      guard request == source, referenceFiles == files, previewGeneration == generation, !jsonDirty else { return }
+      let resolved = try await actions.resolve(candidate)
+      guard request == source, referenceFiles == files, previewGeneration == generation, !jsonDirty else { return }
+      request = candidate; preview = resolved; previewRequest = candidate; stage = .review
+    } catch { self.error = error.localizedDescription }
   }
   private func submit() async {
     guard !busy else { return }

@@ -15,7 +15,12 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { createGzip } from 'node:zlib';
-import { type ArtifactOutput, AutopodError, type NativeGoalProcessIdentity } from '@autopod/shared';
+import {
+  type ArtifactOutput,
+  AutopodError,
+  INPUTS_CONTAINER_DIR,
+  type NativeGoalProcessIdentity,
+} from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { Logger } from 'pino';
 import { type Pack as TarPack, pack as tarPack } from 'tar-stream';
@@ -272,6 +277,34 @@ export class SandboxContainerManager implements ContainerManager {
       if (config.volumes?.length) {
         config.onProgress?.('Uploading workspace to sandbox…');
         await this.uploadVolumes(sandboxId, config.volumes);
+        if (
+          config.volumes.some(
+            (volume) => volume.container === INPUTS_CONTAINER_DIR && volume.readOnly,
+          )
+        ) {
+          const protectedInputs = await this.client.exec(
+            sandboxId,
+            [
+              'python3',
+              '-c',
+              `import os
+root='/autopod/inputs'
+if os.path.realpath(root) != root or not os.path.isdir(root): raise RuntimeError('unsafe input root')
+for directory, dirs, files in os.walk(root):
+ if os.path.islink(directory) or any(os.path.islink(os.path.join(directory,name)) for name in dirs): raise RuntimeError('unsafe input directory')
+ os.chown(directory,0,0);os.chmod(directory,0o555)
+ for name in files:
+  file=os.path.join(directory,name)
+  if os.path.islink(file): raise RuntimeError('unsafe input file')
+  os.chown(file,0,0);os.chmod(file,0o444)
+os.chown('/autopod',0,0);os.chmod('/autopod',0o755)
+`,
+            ],
+            { user: 'root' },
+          );
+          if (protectedInputs.exitCode !== 0)
+            throw new Error('Cannot protect sandbox reference inputs');
+        }
       }
     } catch (err) {
       await this.kill(sandboxId).catch((deleteErr) => {
@@ -824,7 +857,13 @@ for root in sys.argv[1:]:
         );
         continue;
       }
-      await this.uploadPath(sandboxId, volume.host, volume.container, index);
+      await this.uploadPath(
+        sandboxId,
+        volume.host,
+        volume.container,
+        index,
+        !(volume.container === INPUTS_CONTAINER_DIR && volume.readOnly),
+      );
     }
   }
 
@@ -833,11 +872,12 @@ for root in sys.argv[1:]:
     hostPath: string,
     containerPath: string,
     volumeIndex: number,
+    workspaceExclusions = true,
   ): Promise<void> {
     const stat = lstatSync(hostPath);
     if (stat.isDirectory()) {
       const startedAt = Date.now();
-      const archive = await this.createVolumeArchive(hostPath);
+      const archive = await this.createVolumeArchive(hostPath, workspaceExclusions);
       const safeSandboxId = sandboxId.replace(/[^A-Za-z0-9_-]/g, '-');
       const archivePath = `/tmp/.autopod-volume-${safeSandboxId}-${volumeIndex}.tar.gz`;
       const archiveParts: string[] = [];
@@ -908,10 +948,13 @@ for root in sys.argv[1:]:
     }
   }
 
-  private async createVolumeArchive(hostPath: string): Promise<SandboxVolumeArchive> {
+  private async createVolumeArchive(
+    hostPath: string,
+    workspaceExclusions: boolean,
+  ): Promise<SandboxVolumeArchive> {
     for (let attempt = 1; ; attempt++) {
       try {
-        return await createSandboxVolumeArchive(hostPath);
+        return await createSandboxVolumeArchive(hostPath, workspaceExclusions);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
         if (
@@ -966,7 +1009,10 @@ interface SandboxVolumeArchive {
 
 type TarHeaders = Parameters<TarPack['entry']>[0];
 
-async function createSandboxVolumeArchive(rootPath: string): Promise<SandboxVolumeArchive> {
+async function createSandboxVolumeArchive(
+  rootPath: string,
+  workspaceExclusions: boolean,
+): Promise<SandboxVolumeArchive> {
   const pack = tarPack();
   const gzip = createGzip({ level: 1 });
   const chunks: Buffer[] = [];
@@ -994,7 +1040,7 @@ async function createSandboxVolumeArchive(rootPath: string): Promise<SandboxVolu
       await addTarEntry(pack, { ...common, type: 'directory' });
       entries++;
       for (const entry of readdirSync(hostPath).sort()) {
-        if (shouldSkipUploadedVolumeEntry(hostPath, entry)) continue;
+        if (workspaceExclusions && shouldSkipUploadedVolumeEntry(hostPath, entry)) continue;
         await addPath(join(hostPath, entry), posix.join(archivePath, entry));
       }
       return;
@@ -1022,7 +1068,7 @@ async function createSandboxVolumeArchive(rootPath: string): Promise<SandboxVolu
 
   try {
     for (const entry of readdirSync(rootPath).sort()) {
-      if (shouldSkipUploadedVolumeEntry(rootPath, entry)) continue;
+      if (workspaceExclusions && shouldSkipUploadedVolumeEntry(rootPath, entry)) continue;
       await addPath(join(rootPath, entry), entry);
     }
     pack.finalize();

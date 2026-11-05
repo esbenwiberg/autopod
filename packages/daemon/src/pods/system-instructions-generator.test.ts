@@ -254,6 +254,32 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('do not copy or commit');
   });
 
+  it('lists source-free references and distinguishes image inspection from file delivery', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession({
+        inputBundle: {
+          id: 'inputs-11111111-1111-4111-a111-111111111111',
+          digest: 'a'.repeat(64),
+          files: [
+            {
+              path: 'design/wireframe.png',
+              mediaType: 'image/png',
+              byteLength: 123,
+              sha256: 'b'.repeat(64),
+            },
+          ],
+        },
+      }),
+      'http://localhost:8080/mcp/abc12345',
+    );
+    expect(md).toContain('/autopod/inputs/files/design/wireframe.png');
+    expect(md).toContain('Do not copy or commit');
+    expect(md).toContain('report a blocker rather than guessing');
+    expect(md).toContain('Attaching HTML does not render it');
+    expect(md).toContain('code review alone is not visual-fidelity proof');
+  });
+
   it('uses ephemeral artifact handovers for series pods', () => {
     const md = generateSystemInstructions(
       makeProfile(),

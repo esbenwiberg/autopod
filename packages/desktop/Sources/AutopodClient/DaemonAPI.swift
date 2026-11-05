@@ -113,6 +113,30 @@ public actor DaemonAPI {
   public func archiveConfiguration(_ kind: ConfigurationKind, id: String, expectedRevision: Int) async throws {
     let _: EmptyResponse = try await request("DELETE", "\(kind.endpoint)/\(id)", body: encode(["expectedRevision": expectedRevision]))
   }
+  public func uploadInputs(_ attachments: [InputAttachment]) async throws -> InputBundleReference {
+    try InputAttachment.validate(attachments)
+    guard !attachments.isEmpty else { throw DaemonError.badRequest("Select reference files first") }
+    let ordered = attachments.sorted { $0.file.path < $1.file.path }
+    let files = ordered.map(\.file)
+    let canonical = JSONEncoder(); canonical.outputFormatting = [.sortedKeys]
+    let digest = SHA256.hash(data: try canonical.encode(files)).map { String(format: "%02x", $0) }.joined()
+    let chars = Array(digest.prefix(32))
+    let key = String(chars[0..<8]) + "-" + String(chars[8..<12]) + "-5" + String(chars[13..<16]) + "-a" + String(chars[17..<20]) + "-" + String(chars[20..<32])
+    struct Create: Encodable { let requestKey: String; let files: [InputFileManifest] }
+    struct Response: Decodable { let id: String; let digest: String; let files: [InputFileManifest]; let status: String }
+    let bundle: Response = try await request("POST", "/input-bundles", body: encode(Create(requestKey: key, files: files)))
+    guard bundle.files.count == files.count, bundle.files.allSatisfy({ files.contains($0) }), bundle.id.range(of: #"^inputs-[a-f0-9-]{36}$"#, options: .regularExpression) != nil else { throw DaemonError.badRequest("Attachment manifest changed") }
+    if bundle.status != "sealed" {
+      for (index, file) in bundle.files.enumerated() {
+        guard let attachment = ordered.first(where: { $0.file == file }) else { throw DaemonError.badRequest("Attachment manifest changed") }
+        let _: EmptyResponse = try await request("PUT", "/input-bundles/\(bundle.id)/files/\(index)", body: attachment.bytes, timeout: 120, contentType: "application/octet-stream")
+      }
+    }
+    let sealed: Response = try await request("POST", "/input-bundles/\(bundle.id)/seal")
+    guard sealed.status == "sealed", sealed.files == bundle.files, sealed.id == bundle.id, sealed.digest == bundle.digest else { throw DaemonError.badRequest("References were not sealed consistently") }
+    return InputBundleReference(id: sealed.id, digest: sealed.digest, files: sealed.files)
+  }
+
   public func resolveLaunch(_ body: ComposableLaunchRequest) async throws -> EffectiveLaunchPreview {
     try await request("POST", "/launch/resolve", body: encode(body))
   }
@@ -1213,7 +1237,8 @@ public actor DaemonAPI {
     _ path: String,
     query: [String: String] = [:],
     body: Data? = nil,
-    timeout: TimeInterval = 30
+    timeout: TimeInterval = 30,
+    contentType: String = "application/json"
   ) async throws -> T {
     let url = try makeRequestURL(path, query: query)
 
@@ -1224,7 +1249,7 @@ public actor DaemonAPI {
     req.timeoutInterval = timeout
 
     if let body {
-      req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      req.setValue(contentType, forHTTPHeaderField: "Content-Type")
       req.httpBody = body
     }
 

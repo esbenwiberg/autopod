@@ -11,6 +11,7 @@ import type {
   MemoryScope,
   OperatorGuidanceDelivery,
   PimSelection,
+  ReferencePreviewResponse,
   ReviewFeedbackResponseItem,
   ScreenshotRef,
   ScreenshotSource,
@@ -39,6 +40,7 @@ export interface ScopedPodTools {
 }
 
 export interface PodBridge {
+  renderReference?(podId: string, path: string): Promise<ReferencePreviewResponse>;
   getScopedTools?(podId: string): ScopedPodTools | undefined;
   createEscalation(escalation: EscalationRequest): void;
   resolveEscalation(escalationId: string, response: EscalationResponse): void;

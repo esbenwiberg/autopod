@@ -3,6 +3,7 @@ import type { Readable } from 'node:stream';
 import type { AgentEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { classifyProviderError } from './provider-error-classifier.js';
+import { isReferenceInput, toolInputSummary, toolResultSummary } from './tool-result-summary.js';
 
 /**
  * Claude CLI `--output-format stream-json` event shape.
@@ -30,6 +31,7 @@ interface ClaudeStreamMessage {
 }
 
 interface ClaudeToolUseResult {
+  file?: { filePath?: string };
   stdout?: string;
   stderr?: string;
   interrupted?: boolean;
@@ -88,6 +90,7 @@ function fileChangePath(input: Record<string, unknown>): string {
 export class ClaudeStreamParser {
   static async *parse(stream: Readable, podId: string, logger: Logger): AsyncIterable<AgentEvent> {
     const rl = createInterface({ input: stream });
+    const referenceReads = new Set<string>();
 
     for await (const line of rl) {
       const trimmed = line.trim();
@@ -101,13 +104,13 @@ export class ClaudeStreamParser {
         logger.info({
           component: 'claude-stream-parser',
           podId,
-          raw: trimmed.slice(0, 500),
+          raw: toolResultSummary(trimmed).slice(0, 500),
           msg: 'Non-JSON stdout line from claude',
         });
         yield {
           type: 'status',
           timestamp: new Date().toISOString(),
-          message: `[stdout] ${trimmed.slice(0, 500)}`,
+          message: `[stdout] ${toolResultSummary(trimmed).slice(0, 500)}`,
         };
         continue;
       }
@@ -117,6 +120,8 @@ export class ClaudeStreamParser {
         const content = event.message?.content;
         if (Array.isArray(content)) {
           for (const block of content) {
+            if (block.type === 'tool_use' && block.id && isReferenceInput(block.input ?? {}))
+              referenceReads.add(block.id);
             const mapped = ClaudeStreamParser.mapContentBlock(block, ts);
             if (mapped) yield mapped;
           }
@@ -124,7 +129,15 @@ export class ClaudeStreamParser {
         continue;
       }
 
-      const mapped = ClaudeStreamParser.mapEvent(event, podId, logger);
+      const referenceContent =
+        event.type === 'user' &&
+        event.message?.content?.some(
+          (block) =>
+            block.type === 'tool_result' &&
+            !!block.tool_use_id &&
+            referenceReads.delete(block.tool_use_id),
+        );
+      const mapped = ClaudeStreamParser.mapEvent(event, podId, logger, referenceContent);
       if (mapped) yield mapped;
     }
   }
@@ -152,7 +165,12 @@ export class ClaudeStreamParser {
           action: block.name === 'Write' ? 'create' : 'modify',
         };
       }
-      return { type: 'tool_use', timestamp: ts, tool: block.name, input: block.input ?? {} };
+      return {
+        type: 'tool_use',
+        timestamp: ts,
+        tool: block.name,
+        input: toolInputSummary(block.name, block.input ?? {}),
+      };
     }
     return null;
   }
@@ -167,7 +185,12 @@ export class ClaudeStreamParser {
    * - result                   → AgentCompleteEvent
    * - error                    → AgentErrorEvent
    */
-  static mapEvent(event: ClaudeStreamEvent, podId: string, logger?: Logger): AgentEvent | null {
+  static mapEvent(
+    event: ClaudeStreamEvent,
+    podId: string,
+    logger?: Logger,
+    referenceContent = false,
+  ): AgentEvent | null {
     const ts = new Date().toISOString();
 
     switch (event.type) {
@@ -204,7 +227,14 @@ export class ClaudeStreamParser {
           timestamp: ts,
           tool: 'tool_result',
           input: { tool_use_id: toolResultBlock.tool_use_id },
-          output: typeof output === 'string' ? output.slice(0, 2000) : undefined,
+          output:
+            typeof output === 'string'
+              ? toolResultSummary(
+                  output,
+                  referenceContent ||
+                    isReferenceInput({ path: event.tool_use_result?.file?.filePath }),
+                ).slice(0, 2000)
+              : undefined,
         };
       }
 

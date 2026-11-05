@@ -951,6 +951,7 @@ const scheduledJobScheduler = createScheduledJobScheduler(scheduledJobManager, l
 
 // Pod bridge for MCP escalation
 const podBridge = createSessionBridge({
+  referencePreviews: configuration.routes.referencePreviews,
   scopedTools: configuration.scopedTools.get,
   podManager,
   podRepo,

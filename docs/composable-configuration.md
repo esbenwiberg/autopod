@@ -16,6 +16,7 @@ ap run --repo autopod --task 'Investigate startup' --preview --json
 ap run --repo autopod --profile development --ai alternate --execution local --memory-gb 8 --task 'Investigate startup'
 ap run --repo autopod --task 'Read the integration contract' --reference 'contracts=main'
 ap run --repo autopod --spec ./specs/startup-fix --preview --json
+ap run --repo autopod --task 'Implement this wireframe' --attach ./wireframe.html --attach ./wireframe.png
 ap workspace autopod scratch --profile development --instructions 'Implement the reviewed brief'
 ap shell autopod --ai alternate
 ```
@@ -23,6 +24,8 @@ ap shell autopod --ai alternate
 `start` and `pod create` use the same flags as `run`. `workspace` and `shell` take a repository positionally; `shell` offers an enrolled-repository picker when omitted. All creation uses the shared resolver. Workspace preview prints the effective configuration without creating or attaching.
 
 Select presets with `--environment`, `--ai`, `--workflow`, `--github-access` and repeated `--tool-pack`. Clear optional selections with `--no-github-access`, `--no-tool-packs` and `--no-references`. A reference requires an enrolled repository and explicit ref; admission freezes its resolved revision and read-only archive. It does not grant that repository's memory or GitHub actions.
+
+Use repeatable `--attach <file>` / `--attach-dir <folder>` for reference-only files outside the target repository. See [reference attachments](input-attachments.md) for binary-safe uploads, limits, privacy, and visual interpretation limitations. Do not use `--include-specs` for source-free references.
 
 Use `--sidecar <instance-id>` repeatedly to require configured environment sidecars. `--no-sidecars` clears the request's required list; it does not disable sidecars that the environment itself requires. Unsupported backend sizes and sidecars fail during resolution.
 

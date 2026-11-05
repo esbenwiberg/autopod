@@ -12,6 +12,30 @@ import {
 import { resolveLaunch } from './launch-resolver.js';
 
 describe('configuration host composition', () => {
+  it('keeps HTML rendering opt-in, content-pinned and within existing operator resource ceilings', () => {
+    const image = `sha256:${'a'.repeat(64)}`;
+    expect(hostConfigurationSettingsSchema.parse({}).referenceRendererImage).toBeUndefined();
+    expect(
+      hostConfigurationSettingsSchema.safeParse({ referenceRendererImage: 'worker:latest' })
+        .success,
+    ).toBe(false);
+    expect(
+      hostConfigurationSettingsSchema.parse({ referenceRendererImage: image })
+        .referenceRendererImage,
+    ).toBe(image);
+    expect(
+      hostConfigurationSettingsSchema.safeParse({
+        referenceRendererImage: image,
+        docker: { limits: { memoryGb: 0.5, cpus: 1 } },
+      }).success,
+    ).toBe(false);
+    expect(
+      hostConfigurationSettingsSchema.safeParse({
+        referenceRendererImage: image,
+        docker: { limits: { memoryGb: 1, cpus: 0.5 } },
+      }).success,
+    ).toBe(false);
+  });
   it('advertises accepted sandbox Goals and resolves them through the real host gates', async () => {
     const ctx = createTestContext();
     try {
