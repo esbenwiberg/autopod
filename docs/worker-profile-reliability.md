@@ -100,6 +100,26 @@ children against local certificate fixtures: managed roots succeed; absent or
 unrelated roots and wrong hostnames still fail. Template tests check every worker
 family, but do not prove a provider's injected certificates or runtime environment.
 
+## Complete input for isolated review
+
+Bound launches use packet-only reviewers: no repository workspace, main-account
+home or shell tools are exposed to them. Ordinary validation and revalidation
+request a larger diff capture rather than the smaller legacy/tool-review default;
+accepted prompts retain the existing 1,000,000-byte UTF-8 ceiling. The pinned
+comparison base and legacy capture behavior are unchanged.
+
+A truncation footer or oversized UTF-8 diff blocks isolated review before either
+broad inference or canonical council. An oversized broad prompt also blocks before
+inference; the isolated executor retains its hard whole-prompt byte limit for all
+calls. Warning text inside a Git hunk is not a truncation footer. No model verdict,
+cached first gate or unchanged retry can substitute for the omitted source.
+
+This does not increase the prompt ceiling, change frozen presets or deadlines, or
+relax reviewer isolation. Source that cannot fit requires an explicitly complete,
+bounded review strategy; do not waive review, clear uncertainty or discard code to
+make a partial packet pass. Local qualification of this daemon behavior does not
+retroactively turn an earlier incomplete managed review into a passing result.
+
 ## agent-pods-platform
 
 The reusable repository setup must match its selected source. Foundation and

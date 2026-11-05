@@ -3646,6 +3646,89 @@ human_review: []
   });
 
   it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])(
+    'rejects incomplete isolated review input before inference (canonical=%s, oversized UTF8=%s)',
+    async (canonical, oversized) => {
+      const executor = vi.fn(async () => ({
+        stdout: JSON.stringify({
+          status: 'pass',
+          reasoning: 'Optimistic partial review',
+          issues: [],
+        }),
+      }));
+      const result = await createLocalValidationEngine(stubContainerManager()).validate(
+        baseConfig({
+          diff: oversized
+            ? `diff --git a/a.ts b/a.ts\n${'+界\n'.repeat(240_000)}`
+            : 'diff --git a/a.ts b/a.ts\n+change\n⚠ DIFF TRUNCATED: omitted client.ts',
+          reviewerModel: 'claude-sonnet-4-6',
+          reviewerExecutor: executor,
+          ...(canonical ? { validationSuite: 'full' as const, councilOnly: true } : {}),
+        }),
+      );
+      expect(executor.mock.calls.length).toBe(0);
+      expect(runToolUseReview).not.toHaveBeenCalled();
+      expect(runAgenticReview).not.toHaveBeenCalled();
+      expect(result.overall).toBe('fail');
+      expect(result.taskReview?.status).toBe('fail');
+      expect(result.reviewSkipReason).toContain('incomplete');
+    },
+  );
+
+  it('rejects oversized isolated review prompt even when the complete diff fits', async () => {
+    const executor = vi.fn(async () => ({
+      stdout: JSON.stringify({ status: 'pass', reasoning: 'Would pass', issues: [] }),
+    }));
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({
+        diff: '+'.repeat(990_000),
+        task: 'task '.repeat(5_000),
+        reviewerModel: 'claude-sonnet-4-6',
+        reviewerExecutor: executor,
+      }),
+    );
+    expect(executor.mock.calls.length).toBe(0);
+    expect(result.overall).toBe('fail');
+    expect(result.reviewSkipReason).toContain('incomplete');
+  });
+
+  it.each(['\r', '\u2028', '\u2029'])(
+    'does not treat a non-LF separator inside a complete Git hunk as a footer (%j)',
+    async (separator) => {
+      const diff = `diff --git a/text.txt b/text.txt\n@@ -0,0 +1 @@\n+captured output${separator}⚠ DIFF TRUNCATED: example warning\n`;
+      const executor = vi.fn(async () => ({
+        stdout: JSON.stringify({ status: 'pass', reasoning: 'Complete hunk reviewed', issues: [] }),
+      }));
+      const result = await createLocalValidationEngine(stubContainerManager()).validate(
+        baseConfig({ diff, reviewerModel: 'claude-sonnet-4-6', reviewerExecutor: executor }),
+      );
+      expect(executor.mock.calls.length).toBe(1);
+      expect(result.overall).toBe('pass');
+      expect(result.taskReview?.diff).toBe(diff);
+    },
+  );
+
+  it('passes complete bounded isolated review input, including code beyond the legacy diff limit', async () => {
+    const diff = `${['implementation.ts', 'client.ts']
+      .map((name) => `diff --git a/${name} b/${name}\n${'+new line\n'.repeat(19_000)}`)
+      .join('')}+// ⚠ DIFF TRUNCATED: warning text in changed code is not a footer\n`;
+    const executor = vi.fn(async (_input: { prompt: string }) => ({
+      stdout: JSON.stringify({ status: 'pass', reasoning: 'Complete input reviewed', issues: [] }),
+    }));
+    const result = await createLocalValidationEngine(stubContainerManager()).validate(
+      baseConfig({ diff, reviewerModel: 'claude-sonnet-4-6', reviewerExecutor: executor }),
+    );
+    expect(result.overall).toBe('pass');
+    expect(executor).toHaveBeenCalledOnce();
+    expect(executor.mock.calls[0]?.[0].prompt).toContain(diff);
+    expect(result.taskReview?.diff).toBe(diff);
+  });
+
+  it.each([
     [null, 2],
     ['reviewer run review-1 requires reconciliation', 1],
   ])(

@@ -68,6 +68,10 @@ import {
 } from './review-structured-output.js';
 import { ToolReviewError, runToolUseReview } from './review-tool-runner.js';
 import { ReviewerApiDeadlineError, reviewerApiBudget } from './reviewer-api-budget.js';
+import {
+  MAX_ISOLATED_REVIEW_INPUT_BYTES,
+  hasTruncatedReviewDiff,
+} from './reviewer-input-bounds.js';
 import { runValidationCommand } from './run-validation-command.js';
 import { runWithValidationEvidence } from './run-with-evidence.js';
 import type { ValidationEvidenceCache } from './validation-evidence-cache.js';
@@ -858,18 +862,43 @@ export function createLocalValidationEngine(
           const useCanonicalCouncil =
             config.validationSuite === 'full' &&
             (config.priorReviewBatch !== undefined || config.councilOnly === true);
-          let reviewRun: Awaited<ReturnType<typeof runTaskReview>> = useCanonicalCouncil
+          // Packet-only reviewers cannot recover omitted source with tools. Reject
+          // known incomplete input before either broad review or canonical council;
+          // never let a stochastic pass or a repeated call turn it into evidence.
+          const incompleteInput =
+            config.reviewerExecutor &&
+            (hasTruncatedReviewDiff(config.diff ?? '') ||
+              Buffer.byteLength(config.diff ?? '') > MAX_ISOLATED_REVIEW_INPUT_BYTES ||
+              (!useCanonicalCouncil &&
+                Buffer.byteLength(buildReviewPrompt(config, reviewContext)) >
+                  MAX_ISOLATED_REVIEW_INPUT_BYTES));
+          const inputFailure =
+            'Review failed: incomplete isolated reviewer input (truncated or oversized packet); complete bounded source capture is required.';
+          let reviewRun: Awaited<ReturnType<typeof runTaskReview>> = incompleteInput
             ? {
+                requiredReviewUnavailable: true,
+                skipReason: inputFailure,
                 result: {
-                  status: 'pass' as const,
-                  reasoning: 'Running canonical frozen council and prior-finding closure.',
+                  status: 'fail',
+                  reasoning: inputFailure,
                   issues: [],
                   model: config.reviewerModel ?? 'auto',
                   screenshots: [],
                   diff: config.diff,
                 },
               }
-            : await runTaskReview(containerManager, config, log, reviewContext);
+            : useCanonicalCouncil
+              ? {
+                  result: {
+                    status: 'pass' as const,
+                    reasoning: 'Running canonical frozen council and prior-finding closure.',
+                    issues: [],
+                    model: config.reviewerModel ?? 'auto',
+                    screenshots: [],
+                    diff: config.diff,
+                  },
+                }
+              : await runTaskReview(containerManager, config, log, reviewContext);
           // A timed-out reviewer leaves unmeasured usage that blocks the next reservation until an
           // operator reconciles it; retrying would only produce a misleading second failure.
           const retryBlocker =
@@ -3754,7 +3783,7 @@ async function runTaskReview(
 
   log?.info({ model: config.reviewerModel }, 'running AI task review');
 
-  const diffIsTruncated = config.diff?.includes('⚠ DIFF TRUNCATED:') ?? false;
+  const diffIsTruncated = hasTruncatedReviewDiff(config.diff ?? '');
   const prompt = buildReviewPrompt(config, reviewContext);
   const reviewTimeout = config.reviewTimeout ?? 300_000;
   const apiBudget = reviewerApiBudget(reviewTimeout);

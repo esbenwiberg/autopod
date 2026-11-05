@@ -23,6 +23,7 @@ import {
   runContainerReviewer,
 } from './container-reviewer-runner.js';
 import { CodexReviewError, type CodexReviewTokenUsage } from './review-codex-runner.js';
+import { MAX_ISOLATED_REVIEW_INPUT_BYTES } from './reviewer-input-bounds.js';
 import {
   type ReviewerRunRecord,
   type ReviewerRunRepository,
@@ -189,7 +190,7 @@ export class IsolatedReviewer {
         !Number.isFinite(input.timeout) ||
         input.timeout <= 0 ||
         input.timeout > 3_600_000 ||
-        Buffer.byteLength(input.prompt) > 1_000_000
+        Buffer.byteLength(input.prompt) > MAX_ISOLATED_REVIEW_INPUT_BYTES
       )
         configurationError('Reviewer input exceeds the execution bounds', 'REVIEWER_INPUT_INVALID');
       const id = `review-${randomUUID()}`;

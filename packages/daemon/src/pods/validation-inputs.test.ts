@@ -20,6 +20,7 @@ import {
   insertTestProfile,
   logger,
 } from '../test-utils/mock-helpers.js';
+import { truncateDiffAtFileBoundary } from '../worktrees/diff-utils.js';
 import { createPendingOverrideRepository } from './pending-override-repository.js';
 import type { PendingOverrideRepository } from './pending-override-repository.js';
 import { createPodRepository } from './pod-repository.js';
@@ -289,6 +290,33 @@ function fixture() {
 }
 
 describe('validation inputs persisted effects', () => {
+  it('preserves complete bounded isolated review diff without changing legacy capture or source scope', async () => {
+    const f = fixture();
+    try {
+      const full = ['implementation.ts', 'client.ts']
+        .map((name) => `diff --git a/${name} b/${name}\n${'+new line\n'.repeat(19_000)}`)
+        .join('');
+      f.diff.mockImplementation(async (_path, _base, limit = 200_000) =>
+        truncateDiffAtFileBoundary(full, limit),
+      );
+      expect((await f.run()).validationConfig.diff).toContain('DIFF TRUNCATED');
+      f.pod.launchConfigDigest = 'a'.repeat(64);
+      const config = (await f.run()).validationConfig;
+      expect(config.diff?.length).toBe(full.length);
+      expect(config.diff).toBe(full);
+      expect(config.reviewerExecutor).toBe(f.executor);
+      expect(config.startCommitSha).toBe('start-sha');
+      expect(f.diff).toHaveBeenLastCalledWith(
+        '/private/input-tree',
+        'main',
+        1_000_000,
+        'start-sha',
+      );
+    } finally {
+      f.close();
+    }
+  });
+
   it('carries only bound projected literals, excluding resolved execution secrets', async () => {
     const f = fixture();
     try {
