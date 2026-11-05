@@ -382,7 +382,7 @@ it('rejects each tampered prepared candidate without changing retained custody',
   expect(f.pod()).toEqual(before);
   expect(f.ctx.podRepo.taskRetries!.state(f.podId)).toEqual(retries);
   expect(f.recovery.list(f.podId)[0]!.selected).toBeNull();
-// Eight native Git scenarios retain their original aggregate 8 × 5s budget.
+  // Eight native Git scenarios retain their original aggregate 8 × 5s budget.
 }, 40_000);
 
 it('retains crashed preparation as a non-replayable claim across database reopen', async () => {
