@@ -170,6 +170,7 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     };
     checkRoute(config.ai.main);
     if (config.ai.reviewer.mode === 'independent') checkRoute(config.ai.reviewer.route);
+    if (config.ai.advisor?.mode === 'independent') checkRoute(config.ai.advisor.route);
     const currentReferences = resolveLaunchCredentialReferences(config, options.credentials);
     if (configurationDigest(currentReferences) !== configurationDigest(config.credentialReferences))
       configurationError(

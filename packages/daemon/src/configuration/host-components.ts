@@ -267,6 +267,29 @@ export function createHostConfigurationComponents(
             ? [config.ai.reviewer.route, ...config.ai.reviewer.route.failover]
             : []),
         ];
+        const escalation = config.workflow.escalation;
+        const consultationEnabled =
+          escalation &&
+          (escalation.askAi.enabled ||
+            escalation.advisor.enabled ||
+            !escalation.askHuman ||
+            escalation.askHumanOnTimeout === 'ask_ai');
+        if (config.ai.advisor?.mode === 'independent' || consultationEnabled) {
+          const advisor = config.ai.advisor;
+          const selection =
+            advisor && advisor.mode !== 'follow-reviewer' ? advisor : config.ai.reviewer;
+          const selected = selection.mode === 'independent' ? selection.route : config.ai.main;
+          const advisorRoutes = [selected, ...selected.failover];
+          for (const route of advisorRoutes)
+            if (!['claude', 'codex'].includes(route.runtime))
+              configurationError(
+                'Advisor runtime has no isolated inference adapter',
+                'ADVISOR_RUNTIME_UNAVAILABLE',
+                409,
+              );
+          if (advisor?.mode === 'independent') routes.push(...advisorRoutes);
+          await image(config.execution.target);
+        }
         for (const route of routes) {
           if (config.agentAccounts[route.providerAccountId]?.providerId === 'copilot')
             configurationError(

@@ -468,6 +468,7 @@ async function resolve(
   for (const route of [
     config.ai.main,
     ...(config.ai.reviewer.mode === 'independent' ? [config.ai.reviewer.route] : []),
+    ...(config.ai.advisor?.mode === 'independent' ? [config.ai.advisor.route] : []),
   ]) {
     for (const target of [
       route,

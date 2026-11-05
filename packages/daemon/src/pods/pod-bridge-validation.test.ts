@@ -56,6 +56,7 @@ function buildBridge(opts: BuildOpts = {}): {
   eventEmit: ReturnType<typeof vi.fn>;
   touchHeartbeat: ReturnType<typeof vi.fn>;
   profileRead: Deps['profileStore']['get'];
+  manager: Deps['podManager'];
 } {
   const db = createTestDb();
   const podId = 'sess-1';
@@ -151,7 +152,15 @@ function buildBridge(opts: BuildOpts = {}): {
     logger,
   });
 
-  return { bridge, execMock, podId, eventEmit, touchHeartbeat, profileRead: profileStore.get };
+  return {
+    bridge,
+    execMock,
+    podId,
+    eventEmit,
+    touchHeartbeat,
+    profileRead: profileStore.get,
+    manager: podManager,
+  };
 }
 
 function validationActivityMessages(eventEmit: ReturnType<typeof vi.fn>): string[] {
@@ -550,10 +559,52 @@ describe('PodBridge.runValidationPhase', () => {
   });
 });
 
-describe('PodBridge.callReviewerModel', () => {
+describe('PodBridge.callAdvisorModel', () => {
   beforeEach(() => {
     mockRunCodexReview.mockReset();
     mockCreateProfileAnthropicClient.mockReset();
+  });
+
+  it('uses Advisor for consultation metadata and keeps browser generation on Reviewer', async () => {
+    const db = createTestDb();
+    try {
+      const { services } = createTestConfiguration(db);
+      const launch = await resolveLaunch({ repositoryId: 'repo-a', task: 'Advise' }, services);
+      const f = buildBridge({ launch });
+      const advisor = vi.fn(async () => ({
+        stdout: 'Advisor answer',
+        model: 'advisor-fallback-model',
+      }));
+      const reviewer = vi.fn(async () => ({ stdout: 'Reviewer script' }));
+      f.manager.getReviewerExecutor = vi.fn((_pod, _purpose, role) =>
+        role === 'advisor' ? advisor : reviewer,
+      );
+      vi.mocked(f.manager.getReviewerConfig).mockImplementation((_pod, role) => ({
+        profile: {
+          ...f.profileRead('proj'),
+          reviewerModel: role === 'advisor' ? 'advisor-model' : 'reviewer-model',
+        },
+        credentials: null,
+      }));
+      expect(f.bridge.getAdvisorModel(f.podId)).toBe('advisor-model');
+      await expect(f.bridge.callAdvisorModel(f.podId, 'Question', 'Context')).resolves.toEqual({
+        response: 'Advisor answer',
+        model: 'advisor-fallback-model',
+      });
+      expect(advisor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: expect.stringContaining('Agent-provided context:\nContext'),
+        }),
+      );
+      expect(f.manager.getReviewerExecEnv).not.toHaveBeenCalled();
+      await expect(f.bridge.generateBrowserValidationScript(f.podId, 'Browser')).resolves.toBe(
+        'Reviewer script',
+      );
+      expect(reviewer).toHaveBeenCalledTimes(1);
+      expect(advisor).toHaveBeenCalledTimes(1);
+    } finally {
+      db.close();
+    }
   });
 
   it('reports the profile reviewerModel instead of the ask_ai model', () => {
@@ -574,7 +625,7 @@ describe('PodBridge.callReviewerModel', () => {
       },
     });
 
-    expect(bridge.getReviewerModel(podId)).toBe('gpt-5');
+    expect(bridge.getAdvisorModel(podId)).toBe('gpt-5');
   });
 
   it('runs browser QA advisory through Codex for OpenAI profiles', async () => {
@@ -588,9 +639,9 @@ describe('PodBridge.callReviewerModel', () => {
       },
     });
 
-    const result = await bridge.callReviewerModel(podId, 'Generate a browser QA script', 'ctx');
+    const result = await bridge.callAdvisorModel(podId, 'Generate a browser QA script', 'ctx');
 
-    expect(result).toBe('generated playwright script');
+    expect(result.response).toBe('generated playwright script');
     expect(mockRunCodexReview).toHaveBeenCalledWith(
       expect.objectContaining({
         podId,
@@ -627,9 +678,9 @@ describe('PodBridge.callReviewerModel', () => {
       execImpl: async () => ({ stdout: 'advisor answer\n', stderr: '', exitCode: 0 }),
     });
 
-    const result = await bridge.callReviewerModel(podId, 'Review this', 'ctx');
+    const result = await bridge.callAdvisorModel(podId, 'Review this', 'ctx');
 
-    expect(result).toBe('advisor answer');
+    expect(result.response).toBe('advisor answer');
     expect(execMock).toHaveBeenCalledWith(
       'container-abc',
       [
@@ -658,9 +709,9 @@ describe('PodBridge.callReviewerModel', () => {
       },
     });
 
-    const result = await bridge.callReviewerModel(podId, 'Generate a browser QA script');
+    const result = await bridge.callAdvisorModel(podId, 'Generate a browser QA script');
 
-    expect(result).toContain('provider copilot is not supported');
+    expect(result.response).toContain('provider copilot is not supported');
     expect(mockRunCodexReview).not.toHaveBeenCalled();
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
   });
@@ -680,9 +731,9 @@ describe('PodBridge.callReviewerModel', () => {
       },
     });
 
-    const result = await bridge.callReviewerModel(podId, 'Review this');
+    const result = await bridge.callAdvisorModel(podId, 'Review this');
 
-    expect(result).toBe('AI review failed: AI reviewer requires a live pod container');
+    expect(result.response).toBe('AI consultation failed: Advisor requires a live pod container');
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
     expect(mockRunCodexReview).not.toHaveBeenCalled();
   });
@@ -702,9 +753,9 @@ describe('PodBridge.callReviewerModel', () => {
       },
     });
 
-    const result = await bridge.callReviewerModel(podId, 'Review this');
+    const result = await bridge.callAdvisorModel(podId, 'Review this');
 
-    expect(result).toBe('AI review failed: AI reviewer requires a live pod container');
+    expect(result.response).toBe('AI consultation failed: Advisor requires a live pod container');
     expect(execMock).not.toHaveBeenCalled();
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
     expect(mockRunCodexReview).not.toHaveBeenCalled();

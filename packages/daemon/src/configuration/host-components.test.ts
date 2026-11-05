@@ -101,6 +101,39 @@ describe('configuration host composition', () => {
       await expect(resolveLaunch(request, components.resolution)).resolves.toMatchObject({
         intent: 'goal',
       });
+      // Advisor requires the isolated image even without automated review phases.
+      await expect(
+        resolveLaunch(
+          {
+            ...request,
+            intent: 'task',
+            overrides: {
+              execution: { target: 'sandbox' },
+              ai: {
+                advisor: {
+                  mode: 'independent',
+                  route: { providerAccountId: 'account', runtime: 'codex', model: 'gpt-6.1-sol' },
+                },
+              },
+            },
+          },
+          components.resolution,
+        ),
+      ).rejects.toMatchObject({ code: 'REVIEWER_IMAGE_UNAVAILABLE' });
+      await expect(
+        resolveLaunch(
+          {
+            ...request,
+            intent: 'task',
+            overrides: {
+              execution: { target: 'sandbox' },
+              ai: { advisor: { mode: 'follow-main' } },
+              workflow: { escalation: { askAi: { enabled: true } } },
+            },
+          },
+          components.resolution,
+        ),
+      ).rejects.toMatchObject({ code: 'REVIEWER_IMAGE_UNAVAILABLE' });
       recovery = false;
       expect(await components.routes.capabilities()).toMatchObject({ nativeGoals: [] });
       await expect(resolveLaunch(request, components.resolution)).rejects.toMatchObject({

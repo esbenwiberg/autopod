@@ -17,7 +17,11 @@ export async function askHuman(
 ): Promise<string> {
   // Series unattended mode: redirect to AI instead of blocking for a human
   if (bridge.isAskHumanDisabled(podId)) {
-    const aiResponse = await bridge.callReviewerModel(podId, input.question, input.context);
+    const { response: aiResponse } = await bridge.callAdvisorModel(
+      podId,
+      input.question,
+      input.context,
+    );
     return `[Auto-routed to AI — ask_human is disabled for this series]\n\n${aiResponse}`;
   }
 
@@ -53,10 +57,15 @@ export async function askHuman(
     // Timeout or cancellation — return a message rather than throwing INTERNAL_ERROR
     const isTimeout = err instanceof Error && err.message.includes('timed out');
     if (isTimeout && bridge.getHumanResponseOnTimeout(podId) === 'ask_ai') {
-      const aiResponse = await bridge.callReviewerModel(podId, input.question, input.context);
+      const { response: aiResponse, model } = await bridge.callAdvisorModel(
+        podId,
+        input.question,
+        input.context,
+      );
       bridge.resolveEscalation(escalationId, {
         response: aiResponse,
         respondedBy: 'ai',
+        model,
         respondedAt: new Date().toISOString(),
       });
       bridge.logEscalationAnswer(podId, 'ai', aiResponse);

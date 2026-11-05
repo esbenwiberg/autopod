@@ -247,18 +247,26 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       logger.info({ pod: podId, who, answer }, 'Escalation answer received');
     },
 
-    getReviewerModel(podId: string): string {
+    getAdvisorModel(podId: string): string {
       const pod = podManager.getSession(podId);
-      const profile = reviewerProfileForPod(pod);
+      const profile = pod.launchConfigDigest
+        ? podManager.getReviewerConfig(pod, 'advisor').profile
+        : reviewerProfileForPod(pod);
       return resolveReviewerModel(profile, logger);
     },
 
-    async callReviewerModel(podId: string, question: string, context?: string): Promise<string> {
+    async callAdvisorModel(
+      podId: string,
+      question: string,
+      context?: string,
+    ): Promise<{ response: string; model: string }> {
       const pod = podManager.getSession(podId);
-      const profile = reviewerProfileForPod(pod);
+      const profile = pod.launchConfigDigest
+        ? podManager.getReviewerConfig(pod, 'advisor').profile
+        : reviewerProfileForPod(pod);
       const model = resolveReviewerModel(profile, logger);
 
-      // Enrich the prompt with pod state so the reviewer has full context
+      // Enrich the prompt with pod state so Advisor has full context
       // beyond what the agent manually passes.
       const contextParts: string[] = [];
 
@@ -297,21 +305,31 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           provider: resolveReviewerProvider(profile),
           question: question.slice(0, 100),
         },
-        'Calling reviewer model',
+        'Calling Advisor model',
       );
 
       try {
         if (!pod.containerId) {
-          return 'AI review failed: AI reviewer requires a live pod container';
+          return {
+            response: 'AI consultation failed: Advisor requires a live pod container',
+            model,
+          };
         }
         const cm = containerManagerFactory.get(pod.executionTarget);
         const containerStatus = await cm.getStatus(pod.containerId);
         if (containerStatus !== 'running') {
-          return 'AI review failed: AI reviewer requires a live pod container';
+          return {
+            response: 'AI consultation failed: Advisor requires a live pod container',
+            model,
+          };
         }
-        const reviewerExecEnv = await podManager.getReviewerExecEnv(pod);
-        const { stdout } = await runContainerReviewer({
-          executor: pod.launchConfigDigest ? podManager.getReviewerExecutor(pod) : undefined,
+        const reviewerExecEnv = pod.launchConfigDigest
+          ? undefined
+          : await podManager.getReviewerExecEnv(pod);
+        const { stdout, model: executedModel } = await runContainerReviewer({
+          executor: pod.launchConfigDigest
+            ? podManager.getReviewerExecutor(pod, 'review', 'advisor')
+            : undefined,
           podId,
           containerId: pod.containerId,
           containerManager: withReviewerExecEnv(cm, reviewerExecEnv),
@@ -322,10 +340,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           logger,
         });
 
-        return stdout.trim();
+        return { response: stdout.trim(), model: executedModel ?? model };
       } catch (err) {
-        logger.error({ err, podId }, 'Reviewer model call failed');
-        return `AI review failed: ${err instanceof Error ? err.message : String(err)}`;
+        logger.error({ err, podId }, 'Advisor model call failed');
+        return {
+          response: `AI consultation failed: ${err instanceof Error ? err.message : String(err)}`,
+          model,
+        };
       }
     },
 

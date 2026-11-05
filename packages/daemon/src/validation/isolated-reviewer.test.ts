@@ -20,7 +20,7 @@ afterEach(() => {
   for (const db of databases.splice(0)) db.close();
 });
 
-async function fixture(failover = false) {
+async function fixture(failover = false, advisor = false) {
   const db = createTestDb();
   databases.push(db);
   const { services } = createTestConfiguration(db);
@@ -39,7 +39,7 @@ async function fixture(failover = false) {
       task: 'Implement feature',
       overrides: {
         ai: {
-          reviewer: {
+          [advisor ? 'advisor' : 'reviewer']: {
             mode: 'independent',
             route: {
               providerAccountId: 'reviewer',
@@ -103,7 +103,8 @@ async function fixture(failover = false) {
     readPod: () => pod,
     assertAllowed,
   });
-  if (config.ai.reviewer.mode !== 'independent') throw new Error('fixture reviewer');
+  const selection = advisor ? config.ai.advisor : config.ai.reviewer;
+  if (selection?.mode !== 'independent') throw new Error('fixture inference route');
   return {
     db,
     config,
@@ -113,7 +114,7 @@ async function fixture(failover = false) {
     runs,
     service,
     assertAllowed,
-    execute: service.executor(pod, config, config.ai.reviewer.route),
+    execute: service.executor(pod, config, selection.route, advisor ? 'advisor' : 'review'),
     setPod: (patch: Partial<Pod>) => {
       pod = { ...pod, ...patch };
     },
@@ -211,6 +212,48 @@ describe('isolated reviewer execution', () => {
     expect(JSON.stringify(vi.mocked(f.manager.writeFile).mock.calls)).toContain(
       'fixture-alternate-secret',
     );
+  });
+
+  it('keeps independent Advisor failover isolated and records its actual route and shared spend', async () => {
+    const f = await fixture(true, true);
+    const before = structuredClone(f.config.ai);
+    providerFailure(f, { input_tokens: 2, output_tokens: 0 });
+    await expect(f.execute({ prompt: 'Consult Advisor', timeout: 5000 })).resolves.toMatchObject({
+      stdout: 'Review complete',
+      model: 'claude-sonnet-4-6',
+    });
+    expect(f.config.ai).toEqual(before);
+    expect(
+      f.db.prepare('SELECT account_id FROM isolated_reviewer_runs ORDER BY ordinal').all(),
+    ).toEqual([{ account_id: 'reviewer' }, { account_id: 'alternate' }]);
+    f.config.workflow.reviewerTokenBudget = 12;
+    await expect(f.execute({ prompt: 'Consult again', timeout: 5000 })).rejects.toMatchObject({
+      code: 'REVIEWER_BUDGET_EXHAUSTED',
+    });
+  });
+
+  it('allows timeout-rerouted Advisor consultation while awaiting human input, with Advisor evidence', async () => {
+    const f = await fixture(false, true);
+    f.setPod({ status: 'awaiting_input' });
+    await expect(
+      f.execute({ prompt: 'Human timeout consultation', timeout: 5000 }),
+    ).resolves.toMatchObject({ stdout: 'Review complete' });
+    expect(f.runs.list('pod')[0]?.id).toMatch(/^advisor-/);
+    f.setPod({ status: 'paused' });
+    await expect(f.execute({ prompt: 'Superseded', timeout: 5000 })).rejects.toMatchObject({
+      code: 'REVIEWER_SUPERSEDED',
+    });
+  });
+
+  it('blocks independent Advisor retries and failover when usage is unknown', async () => {
+    const f = await fixture(true, true);
+    providerFailure(f);
+    await expect(f.execute({ prompt: 'Consult', timeout: 5000 })).rejects.toThrow();
+    expect(f.manager.spawn).toHaveBeenCalledTimes(1);
+    await expect(f.execute({ prompt: 'Retry', timeout: 5000 })).rejects.toMatchObject({
+      code: 'REVIEWER_RECONCILIATION_REQUIRED',
+    });
+    expect(f.manager.spawn).toHaveBeenCalledTimes(1);
   });
 
   it.each([undefined, { input_tokens: 2 }, { output_tokens: 1 }])(

@@ -46,11 +46,18 @@ export function createReviewerContext(
   captured: ReviewerContextCapturedDependencies,
 ): {
   buildReviewerExecEnv(pod: Pod): Promise<Record<string, string> | undefined>;
-  getEffectiveReviewerConfig(pod: Pod): {
+  getEffectiveReviewerConfig(
+    pod: Pod,
+    role?: 'reviewer' | 'advisor',
+  ): {
     profile: PodExecutionSettings;
     credentials: ProviderCredentials | null;
   };
-  getReviewerExecutor(pod: Pod, purpose?: 'review' | 'memory'): ReviewerExecutor | undefined;
+  getReviewerExecutor(
+    pod: Pod,
+    purpose?: 'review' | 'memory',
+    role?: 'reviewer' | 'advisor',
+  ): ReviewerExecutor | undefined;
 } {
   const {
     providerAccountStore,
@@ -165,14 +172,18 @@ export function createReviewerContext(
     return { POD_ID: pod.id, ...result.env };
   }
 
-  function getEffectiveReviewerConfig(pod: Pod): {
+  function getEffectiveReviewerConfig(
+    pod: Pod,
+    role: 'reviewer' | 'advisor' = 'reviewer',
+  ): {
     profile: PodExecutionSettings;
     credentials: ProviderCredentials | null;
   } {
     const launch = deps.launchConfiguration?.read(pod.id);
     if (launch) {
-      if (launch.ai.reviewer.mode === 'independent') {
-        const route = launch.ai.reviewer.route;
+      const selected = selectedRoute(launch, role);
+      if (selected.mode === 'independent') {
+        const route = selected.route;
         if (!providerAccountStore)
           throw new AutopodError(
             'Provider account storage is unavailable',
@@ -224,6 +235,7 @@ export function createReviewerContext(
   function getReviewerExecutor(
     pod: Pod,
     purpose: 'review' | 'memory' = 'review',
+    role: 'reviewer' | 'advisor' = 'reviewer',
   ): import('../interfaces/reviewer-executor.js').ReviewerExecutor | undefined {
     if (!pod.launchConfigDigest) return undefined;
     const launch = deps.launchConfiguration?.read(pod.id);
@@ -234,11 +246,11 @@ export function createReviewerContext(
         'REVIEWER_ISOLATION_REQUIRED',
         503,
       );
-    const profile = getEffectiveReviewerConfig(pod).profile;
-    const selected =
-      launch.ai.reviewer.mode === 'independent' ? launch.ai.reviewer.route : launch.ai.main;
+    const profile = getEffectiveReviewerConfig(pod, role).profile;
+    const selection = selectedRoute(launch, role);
+    const selected = selection.mode === 'independent' ? selection.route : launch.ai.main;
     const route =
-      launch.ai.reviewer.mode === 'independent'
+      selection.mode === 'independent'
         ? selected
         : {
             ...selected,
@@ -247,7 +259,14 @@ export function createReviewerContext(
             model: profile.defaultModel ?? selected.model,
             reasoningEffort: profile.reasoningEffort ?? selected.reasoningEffort,
           };
-    return reviewer.executor(pod, launch, route, purpose);
+    return reviewer.executor(pod, launch, route, role === 'advisor' ? 'advisor' : purpose);
+  }
+
+  function selectedRoute(launch: EffectiveLaunchConfig, role: 'reviewer' | 'advisor') {
+    const advisor = launch.ai.advisor;
+    return role === 'advisor' && advisor && advisor.mode !== 'follow-reviewer'
+      ? advisor
+      : launch.ai.reviewer;
   }
 
   return { buildReviewerExecEnv, getEffectiveReviewerConfig, getReviewerExecutor };

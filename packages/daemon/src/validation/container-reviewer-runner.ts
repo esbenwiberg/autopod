@@ -72,7 +72,7 @@ const TERMINATION_CONFIRM_TIMEOUT_MS = 5_000;
 
 export async function runContainerReviewer(
   config: ContainerReviewerRunnerConfig,
-): Promise<{ stdout: string; tokenUsage?: CodexReviewTokenUsage }> {
+): Promise<{ stdout: string; tokenUsage?: CodexReviewTokenUsage; model?: string }> {
   if (config.executor)
     return config.executor({
       prompt: config.prompt,

@@ -205,9 +205,7 @@ describe('validateInBrowser', () => {
 
   function makeBridge(scriptOutput: string) {
     return {
-      callReviewerModel: vi
-        .fn()
-        .mockRejectedValue(new Error('callReviewerModel should not be used')),
+      callAdvisorModel: vi.fn().mockRejectedValue(new Error('callAdvisorModel should not be used')),
       generateBrowserValidationScript: vi.fn().mockResolvedValue('console.log("script")'),
       writeFileInContainer: vi.fn().mockResolvedValue(undefined),
       execInContainer: vi.fn().mockImplementation((_sid: string, cmd: string[]) => {
@@ -334,7 +332,7 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
     // 1. Dedicated browser-script bridge call to generate script
     expect(bridge.generateBrowserValidationScript).toHaveBeenCalledOnce();
     expect(bridge.generateBrowserValidationScript.mock.calls[0][0]).toBe('sess-42');
-    expect(bridge.callReviewerModel).not.toHaveBeenCalled();
+    expect(bridge.callAdvisorModel).not.toHaveBeenCalled();
 
     // 2. Write script to container
     expect(bridge.writeFileInContainer).toHaveBeenCalledOnce();
@@ -373,7 +371,7 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
     expect(bridge.generateBrowserValidationScript).toHaveBeenCalledOnce();
     const prompt = bridge.generateBrowserValidationScript.mock.calls[0][1] as string;
     expect(prompt).toContain('http://localhost:3000');
-    expect(bridge.callReviewerModel).not.toHaveBeenCalled();
+    expect(bridge.callAdvisorModel).not.toHaveBeenCalled();
   });
 
   it('keeps adversarial check text inside container execution', async () => {
@@ -438,9 +436,7 @@ __AUTOPOD_BROWSER_RESULTS_END__`;
 __AUTOPOD_BROWSER_RESULTS_END__`;
 
     const bridge = {
-      callReviewerModel: vi
-        .fn()
-        .mockRejectedValue(new Error('callReviewerModel should not be used')),
+      callAdvisorModel: vi.fn().mockRejectedValue(new Error('callAdvisorModel should not be used')),
       generateBrowserValidationScript: vi.fn().mockResolvedValue('script'),
       writeFileInContainer: vi.fn().mockResolvedValue(undefined),
       execInContainer: vi.fn().mockImplementation((_sid: string, cmd: string[]) => {

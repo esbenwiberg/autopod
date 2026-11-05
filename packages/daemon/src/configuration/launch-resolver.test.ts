@@ -1,11 +1,14 @@
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createProviderAccountStore } from '../provider-accounts/provider-account-store.js';
 import {
   createTestConfiguration,
   insertConfigurationTestPod,
 } from '../test-utils/configuration-helpers.js';
 import { createTestDb } from '../test-utils/mock-helpers.js';
+import { resolveLaunchAgentRoute } from './agent-route-resolution.js';
 import { createConfigurationStore } from './configuration-store.js';
+import { deriveLaunch } from './derive-launch.js';
 import { configurationDigest, resolveLaunch } from './launch-resolver.js';
 import { createLaunchSnapshotRepository } from './launch-snapshot.js';
 import { proposeLaunchProfile, saveLaunchProfile } from './save-launch-profile.js';
@@ -17,6 +20,104 @@ describe('launch resolution and snapshots', () => {
   });
   afterEach(() => {
     db.close();
+  });
+  it('freezes Advisor-only fallback accounts and preserves old snapshot absence', async () => {
+    const { services, store } = createTestConfiguration(db);
+    const old = await resolveLaunch({ repositoryId: 'repo-a', task: 'Old' }, services);
+    expect(old.ai).not.toHaveProperty('advisor');
+    const snapshots = createLaunchSnapshotRepository(db, store);
+    snapshots.admit({
+      config: old,
+      requestDigest: 'old',
+      createPod: () => insertConfigurationTestPod(db, 'old-advisor'),
+    });
+    expect(snapshots.get('old-advisor')).toEqual(old);
+    expect(snapshots.get('old-advisor')?.digest).toBe(old.digest);
+    const derived = deriveLaunch(old, {
+      source: { podId: 'old-advisor', digest: old.digest, kind: 'follow-up' },
+      task: 'Next',
+    });
+    expect(derived.ai).toEqual(old.ai);
+    expect(derived.ai).not.toHaveProperty('advisor');
+    expect(old.digest).toBe(snapshots.get('old-advisor')?.digest);
+
+    const resolve = vi.spyOn(services, 'resolveAgentRoute');
+    const route = {
+      ...old.ai.main,
+      providerAccountId: 'advisor',
+      failover: [
+        {
+          providerAccountId: 'advisor-fallback',
+          runtime: old.ai.main.runtime,
+          model: old.ai.main.model,
+          reasoningEffort: old.ai.main.reasoningEffort,
+        },
+      ],
+      maxHops: 1,
+    };
+    const config = await resolveLaunch(
+      {
+        repositoryId: 'repo-a',
+        task: 'Consult',
+        overrides: { ai: { advisor: { mode: 'independent', route } } },
+      },
+      services,
+    );
+    expect(config.agentAccounts.advisor?.accountId).toBe('advisor');
+    expect(config.agentAccounts['advisor-fallback']?.accountId).toBe('advisor-fallback');
+    expect(resolve.mock.calls.map(([target]) => target.providerAccountId)).toContain(
+      'advisor-fallback',
+    );
+    expect(config.ai.main).toEqual(old.ai.main);
+    expect(config.ai.reviewer).toEqual(old.ai.reviewer);
+  });
+  it('rejects unsafe or missing Advisor-only fallback accounts during launch', async () => {
+    const { services } = createTestConfiguration(db);
+    const accounts = createProviderAccountStore(db);
+    accounts.create({
+      id: 'account',
+      name: 'Main',
+      provider: 'anthropic',
+      credentials: { provider: 'anthropic', apiKey: 'fixture' },
+    });
+    accounts.create({
+      id: 'unsafe',
+      name: 'Source credential',
+      provider: 'copilot',
+      credentials: { provider: 'copilot', token: 'fixture' },
+    });
+    services.resolveAgentRoute = async (route) => resolveLaunchAgentRoute(route, accounts);
+    for (const providerAccountId of ['missing', 'unsafe']) {
+      await expect(
+        resolveLaunch(
+          {
+            repositoryId: 'repo-a',
+            task: 'Consult',
+            overrides: {
+              ai: {
+                advisor: {
+                  mode: 'independent',
+                  route: {
+                    providerAccountId: 'account',
+                    runtime: 'claude',
+                    model: 'sonnet',
+                    failover: [
+                      {
+                        providerAccountId,
+                        runtime: providerAccountId === 'unsafe' ? 'copilot' : 'claude',
+                        model: 'fallback',
+                      },
+                    ],
+                    maxHops: 1,
+                  },
+                },
+              },
+            },
+          },
+          services,
+        ),
+      ).rejects.toThrow();
+    }
   });
   it('requires explicit supported findings policy and preserves ordinary defaults', async () => {
     const { services } = createTestConfiguration(db);

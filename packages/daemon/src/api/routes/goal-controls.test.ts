@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import { expect, it, vi } from 'vitest';
 import { createTestConfiguration } from '../../test-utils/configuration-helpers.js';
 import { createTestDb } from '../../test-utils/mock-helpers.js';
+import type { ReviewerRunRecord } from '../../validation/reviewer-run-repository.js';
 import { errorHandler } from '../error-handler.js';
 import { configurationRoutes } from './configuration.js';
 
@@ -99,61 +100,67 @@ it('accepts explicit operator budget removal and rejects malformed budget change
   }
 });
 
-it('reconciles reviewer runs with an attributed note and validates reported usage', async () => {
-  const db = createTestDb();
-  const app = Fastify();
-  app.setErrorHandler(errorHandler);
-  app.addHook('onRequest', async (request) => {
-    request.user = { oid: 'operator' } as typeof request.user;
-  });
-  const { services } = createTestConfiguration(db);
-  const runId = 'review-00000000-0000-4000-8000-000000000001';
-  const reviewerRuns = {
-    list: vi.fn(() => []),
-    reconcile: vi.fn(
-      async () =>
-        ({ id: runId }) as import('../../validation/reviewer-run-repository.js').ReviewerRunRecord,
-    ),
-  };
-  configurationRoutes(app, { db, resolution: services, capabilities: () => ({}), reviewerRuns });
-  const url = `/pods/pod/reviewer-runs/${runId}/reconcile`;
-  try {
-    expect((await app.inject({ method: 'GET', url: '/pods/pod/reviewer-runs' })).statusCode).toBe(
-      200,
-    );
-    expect(reviewerRuns.list).toHaveBeenCalledExactlyOnceWith('pod');
-    for (const payload of [
-      {},
-      { note: '   ' },
-      { note: 'x'.repeat(2001) },
-      { note: 'ok', inputTokens: 10 },
-      { note: 'ok', inputTokens: -1, outputTokens: 0 },
-      { note: 'ok', inputTokens: 1.5, outputTokens: 0 },
-      { note: 'ok', usageBasis: 'unknown-accepted' },
-    ])
-      expect((await app.inject({ method: 'POST', url, payload })).statusCode).toBe(400);
-    expect(
-      (
-        await app.inject({
-          method: 'POST',
-          url: '/pods/pod/reviewer-runs/not-a-run/reconcile',
-          payload: { note: 'ok' },
-        })
-      ).statusCode,
-    ).toBe(400);
-    expect(reviewerRuns.reconcile).not.toHaveBeenCalled();
-    await app.inject({ method: 'POST', url, payload: { note: ' timed out ' } });
-    await app.inject({
-      method: 'POST',
-      url,
-      payload: { note: 'console', inputTokens: 10, outputTokens: 2 },
+it.each(['review', 'advisor'])(
+  'reconciles %s runs with attributed notes and validated usage',
+  async (role) => {
+    const db = createTestDb();
+    const app = Fastify();
+    app.setErrorHandler(errorHandler);
+    app.addHook('onRequest', async (request) => {
+      request.user = { oid: 'operator' } as typeof request.user;
     });
-    expect(reviewerRuns.reconcile.mock.calls).toEqual([
-      ['pod', runId, 'operator', 'timed out', undefined],
-      ['pod', runId, 'operator', 'console', { inputTokens: 10, outputTokens: 2 }],
-    ]);
-  } finally {
-    await app.close();
-    db.close();
-  }
-});
+    const { services } = createTestConfiguration(db);
+    const runId = `${role}-00000000-0000-4000-8000-000000000001`;
+    const reviewerRuns = {
+      list: vi.fn(() => []),
+      reconcile: vi.fn(async () => ({ id: runId }) as ReviewerRunRecord),
+    };
+    configurationRoutes(app, { db, resolution: services, capabilities: () => ({}), reviewerRuns });
+    const url = `/pods/pod/reviewer-runs/${runId}/reconcile`;
+    try {
+      expect((await app.inject({ method: 'GET', url: '/pods/pod/reviewer-runs' })).statusCode).toBe(
+        200,
+      );
+      expect(reviewerRuns.list).toHaveBeenCalledExactlyOnceWith('pod');
+      for (const payload of [
+        {},
+        { note: '   ' },
+        { note: 'x'.repeat(2001) },
+        { note: 'ok', inputTokens: 10 },
+        { note: 'ok', inputTokens: -1, outputTokens: 0 },
+        { note: 'ok', inputTokens: 1.5, outputTokens: 0 },
+        { note: 'ok', usageBasis: 'unknown-accepted' },
+      ])
+        expect((await app.inject({ method: 'POST', url, payload })).statusCode).toBe(400);
+      for (const invalidId of [
+        'not-a-run',
+        'advisor-short',
+        'worker-00000000-0000-4000-8000-000000000001',
+      ]) {
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url: `/pods/pod/reviewer-runs/${invalidId}/reconcile`,
+              payload: { note: 'ok' },
+            })
+          ).statusCode,
+        ).toBe(400);
+      }
+      expect(reviewerRuns.reconcile).not.toHaveBeenCalled();
+      await app.inject({ method: 'POST', url, payload: { note: ' timed out ' } });
+      await app.inject({
+        method: 'POST',
+        url,
+        payload: { note: 'console', inputTokens: 10, outputTokens: 2 },
+      });
+      expect(reviewerRuns.reconcile.mock.calls).toEqual([
+        ['pod', runId, 'operator', 'timed out', undefined],
+        ['pod', runId, 'operator', 'console', { inputTokens: 10, outputTokens: 2 }],
+      ]);
+    } finally {
+      await app.close();
+      db.close();
+    }
+  },
+);

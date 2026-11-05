@@ -9,7 +9,10 @@ import type { ContainerManager } from '../interfaces/index.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 export interface SessionBridgeManagerPort {
   getLaunchConfiguration?(podId: string): EffectiveLaunchConfig | null;
-  getReviewerConfig(pod: Pod): {
+  getReviewerConfig(
+    pod: Pod,
+    role?: 'reviewer' | 'advisor',
+  ): {
     profile: PodExecutionSettings;
     credentials: ProviderCredentials | null;
   };
@@ -19,6 +22,8 @@ export interface SessionBridgeManagerPort {
   getReviewerExecEnv(pod: Pod): Promise<Record<string, string> | undefined>;
   getReviewerExecutor(
     pod: Pod,
+    purpose?: 'review' | 'memory',
+    role?: 'reviewer' | 'advisor',
   ): import('../interfaces/reviewer-executor.js').ReviewerExecutor | undefined;
   revalidateSession(
     podId: string,
