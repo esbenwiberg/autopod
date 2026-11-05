@@ -8,14 +8,14 @@ import { addTokenUsage } from '../validation/review-synthesizer.js';
 import {
   assertValidationExecutionSettled,
   assertValidationMutationSettled,
-  captureValidationMutationGuard,
+  captureValidationDispatchGuard,
   guardValidationContainer,
   requiresValidationSettlement,
 } from './validation-recovery-policy.js';
 
 import { AgentContinuationSupersededError } from './continuation-preflight.js';
 import { buildCorrectionMessage } from './correction-context.js';
-import { persistEscalation } from './escalation-coordinator.js';
+import { assertNoInfrastructureBlocker, persistEscalation } from './escalation-coordinator.js';
 import { resolvePodModel, resolvePodRuntime } from './runtime-resolver.js';
 import { isTerminalState } from './state-machine.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
@@ -116,6 +116,7 @@ export function createValidationTriggerWorkflow(
     },
   ): Promise<void> {
     assertExecutionTerminationVerified(podId);
+    assertNoInfrastructureBlocker(podRepo, podId);
     let pod = podRepo.getOrThrow(podId);
     if (pod.completionPolicy === 'accept-findings')
       throw new AutopodError(
@@ -328,7 +329,7 @@ export function createValidationTriggerWorkflow(
       fromTerminal,
     );
 
-    const assertPreflight = captureValidationMutationGuard(podRepo, s1);
+    const assertPreflight = captureValidationDispatchGuard(podRepo, s1);
 
     try {
       if (!pod.containerId) {
@@ -1002,6 +1003,9 @@ export function createValidationTriggerWorkflow(
       )
         return;
       logger.error({ err, podId }, 'Validation error');
+      // The shared consumer/preservation owner retains current reports and
+      // unknown exits. Do not overwrite its state or stop retained resources.
+      if (podRepo.hasInfrastructureBlocker?.(podId)) return;
       const s2 = podRepo.getOrThrow(podId);
       if (err instanceof TaskRetryBlockedError) {
         await parkOnRetryAdmission(s2, err);

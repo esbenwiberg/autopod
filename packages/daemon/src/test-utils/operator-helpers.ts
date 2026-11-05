@@ -51,6 +51,9 @@ export function createOperatorFixture(disk = false, target: ExecutionTarget = 'l
     killSession: vi.fn<OperatorWorkflowCalls['killSession']>(async () => {}),
   };
   const messagesCaptured = {
+    reconcileInfrastructureBlocker: vi.fn<
+      OperatorMessagesCaptured['reconcileInfrastructureBlocker']
+    >(async () => {}),
     ...f.mainCaptured,
     ...state,
     ...registry,
@@ -78,7 +81,12 @@ export function createOperatorFixture(disk = false, target: ExecutionTarget = 'l
     resolveEffectiveBoundProfile: f.captured.resolveEffectiveBoundProfile,
   } satisfies OperatorMessagesCaptured;
   const rejectionCaptured = { ...messagesCaptured } satisfies OperatorRejectionCaptured;
-  const pauseCaptured = { ...messagesCaptured } satisfies OperatorPauseCaptured;
+  const pauseCaptured = {
+    ...messagesCaptured,
+    reconcileInfrastructureBlocker: vi.fn<OperatorPauseCaptured['reconcileInfrastructureBlocker']>(
+      async () => {},
+    ),
+  } satisfies OperatorPauseCaptured;
   const killCaptured = {
     ...messagesCaptured,
     ...f.guards,
@@ -99,6 +107,23 @@ export function createOperatorFixture(disk = false, target: ExecutionTarget = 'l
     installGhBinary: vi.fn<OperatorToolsCaptured['installGhBinary']>(async () => {}),
     installAzViaPip: vi.fn<OperatorToolsCaptured['installAzViaPip']>(async () => {}),
   } satisfies OperatorToolsCaptured;
+  function infrastructure() {
+    f.deps.escalationRepo.insert({
+      id: `operator-infrastructure-${f.pod().lifecycleGeneration}`,
+      podId: 'prepare',
+      type: 'report_blocker',
+      timestamp: new Date().toISOString(),
+      response: null,
+      payload: {
+        kind: 'infrastructure',
+        lifecycleGeneration: f.pod().lifecycleGeneration,
+        requiresResponse: false,
+        description: 'Configured execution unavailable',
+        attempted: ['configured check'],
+        needs: 'Qualified execution',
+      },
+    });
+  }
   function awaiting(
     type: EscalationRequest['type'] = 'ask_human',
     payload: EscalationRequest['payload'] = { question: 'Proceed?', context: 'Synthetic context' },
@@ -179,6 +204,7 @@ export function createOperatorFixture(disk = false, target: ExecutionTarget = 'l
     killCaptured,
     controlsCaptured,
     toolsCaptured,
+    infrastructure,
     awaiting,
     waiter,
     goal,

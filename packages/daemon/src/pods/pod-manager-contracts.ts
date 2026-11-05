@@ -227,6 +227,7 @@ export interface PodManager {
     lifecycle?: { generation: number; containerId: string | null; nativeGoal?: boolean },
   ): Promise<AgentRunOutcome>;
   handleCompletion(podId: string): Promise<void>;
+  reconcileInfrastructureBlocker(podId: string): Promise<void>;
   getArtifactResumeObservation?(podId: string): ArtifactResumeObservation;
   preserveWorkspace(podId: string, reason?: string): Promise<void>;
   quiesceSandboxAgent(podId: string): Promise<void>;

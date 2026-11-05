@@ -22,6 +22,120 @@ afterEach(() => {
 });
 
 describe('agent event consumption owner', () => {
+  it('rechecks a report arriving during persisted cooldown before starting another worker', async () => {
+    const f = fixture();
+    f.running();
+    vi.useFakeTimers({ now: Date.now() });
+    const delay = vi.fn(async (milliseconds: number) => {
+      vi.setSystemTime(Date.now() + milliseconds);
+      f.deps.escalationRepo.insert({
+        id: 'cooldown-infra',
+        podId: 'prepare',
+        type: 'report_blocker',
+        timestamp: new Date().toISOString(),
+        response: null,
+        payload: {
+          kind: 'infrastructure',
+          requiresResponse: false,
+          lifecycleGeneration: f.pod().lifecycleGeneration,
+          description: 'Runner unavailable',
+          attempted: [],
+          needs: 'Qualified execution',
+        },
+      });
+    });
+    const consumer = createAgentEventConsumption(
+      {
+        ...f.deps,
+        workerInfrastructureRetryBackoffMs: [1000],
+        workerInfrastructureRetryDelay: delay,
+      },
+      f.consumerCaptured,
+    );
+    await consumer.consumeAgentEvents(
+      'prepare',
+      agentEvents({
+        type: 'error',
+        timestamp: syntheticComplete.timestamp,
+        message: 'Transient provider failure',
+        fatal: true,
+        classification: {
+          category: 'transient',
+          definitive: false,
+          sanitizedMessage: 'Transient provider failure',
+        },
+      }),
+    );
+    f.running();
+    const executed = f.podRepo.workerRetries?.state('prepare').executedCount;
+    let pulled = false;
+    await expect(
+      consumer.consumeAgentEvents(
+        'prepare',
+        (async function* () {
+          pulled = true;
+          yield syntheticComplete;
+        })(),
+      ),
+    ).rejects.toMatchObject({ code: 'INFRASTRUCTURE_BLOCKED' });
+    expect(delay).toHaveBeenCalledOnce();
+    expect(pulled).toBe(false);
+    expect(f.podRepo.workerRetries?.state('prepare').executedCount).toBe(executed);
+    expect(f.consumerCaptured.reconcileInfrastructureBlocker).toHaveBeenCalledExactlyOnceWith(
+      'prepare',
+    );
+  });
+  it('does not start a worker when infrastructure is reported during baseline capture', async () => {
+    const f = fixture();
+    f.running();
+    let resolve!: (value: { stdout: string; stderr: string; exitCode: number }) => void;
+    vi.mocked(f.cm.execInContainer).mockImplementationOnce(
+      async () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    let pulled = false;
+    const consuming = f.consumer.consumeAgentEvents(
+      'prepare',
+      (async function* () {
+        pulled = true;
+        yield syntheticComplete;
+      })(),
+    );
+    // A below-threshold report is durable without changing lifecycle or pause intent.
+    f.deps.escalationRepo.insert({
+      id: 'baseline-infra',
+      podId: 'prepare',
+      type: 'report_blocker',
+      timestamp: new Date().toISOString(),
+      response: null,
+      payload: {
+        kind: 'infrastructure',
+        requiresResponse: false,
+        lifecycleGeneration: f.pod().lifecycleGeneration,
+        description: 'Runner unavailable',
+        attempted: [],
+        needs: 'Qualified execution',
+      },
+    });
+    expect(f.pod().status).toBe('running');
+    expect(f.consumerCaptured.pauseIntents.has('prepare')).toBe(false);
+    const rejected = expect(consuming).rejects.toMatchObject({ code: 'INFRASTRUCTURE_BLOCKED' });
+    resolve({
+      stdout: JSON.stringify({ version: 1, complete: true, files: [] }),
+      stderr: '',
+      exitCode: 0,
+    });
+    await rejected;
+    expect(pulled).toBe(false);
+    expect(f.deps.eventRepo.getForSession('prepare', { type: 'pod.agent_activity' })).toEqual([]);
+    expect(f.consumerCaptured.reconcileInfrastructureBlocker).toHaveBeenCalledExactlyOnceWith(
+      'prepare',
+    );
+    expect(f.registry.activeAgentRuns.size).toBe(0);
+  });
+
   it.each(['claude', 'codex', 'pi', 'copilot'] as const)(
     'publishes one observed File event for %s shell edits before completion, preserving tool events',
     async (runtime) => {
@@ -174,6 +288,34 @@ describe('agent event consumption owner', () => {
     },
   );
 
+  it.each(['paused', 'superseded'] as const)(
+    'retains bound unverified termination before suppressing %s events',
+    async (mode) => {
+      const f = fixture(true);
+      f.running();
+      const stream = (async function* () {
+        if (mode === 'paused') f.consumerCaptured.pauseIntents.set('prepare', Symbol('pause'));
+        else f.podRepo.incrementLifecycleGeneration('prepare');
+        yield {
+          type: 'error' as const,
+          timestamp: syntheticComplete.timestamp,
+          message: 'Native termination not confirmed',
+          fatal: true,
+          executionTermination: 'unverified' as const,
+        };
+      })();
+      expect(await f.consumer.consumeAgentEvents('prepare', stream)).toBe(
+        mode === 'paused' ? 'paused' : 'stopped',
+      );
+      expect(f.podRepo.taskExecutions?.hasUnverifiedTermination('prepare')).toBe(true);
+      expect(f.podRepo.taskExecutions?.hasActiveRun('prepare')).toBe(true);
+      expect(f.pod().status).toBe('running');
+      expect(f.registry.activeAgentRuns.size).toBe(0);
+      const reopened = f.reopen();
+      expect(reopened.pods.taskExecutions?.hasUnverifiedTermination('prepare')).toBe(true);
+      expect(reopened.pods.taskExecutions?.hasActiveRun('prepare')).toBe(true);
+    },
+  );
   it('records a repeated completion once and settles every shared run owner', async () => {
     const f = fixture();
     f.running();

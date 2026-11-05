@@ -12,6 +12,7 @@ import {
   insertTestProfile,
   logger,
 } from '../test-utils/mock-helpers.js';
+import { createEscalationRepository } from './escalation-repository.js';
 import { createEventBus } from './event-bus.js';
 import { createEventRepository } from './event-repository.js';
 import { createPodRepository } from './pod-repository.js';
@@ -132,6 +133,23 @@ function fixture(input: Inputs = {}) {
     ...module,
     run: (fromTerminal = false, pod = repo.getOrThrow('worker')) =>
       module.startValidationAttempt(pod, profile, fromTerminal),
+    reportInfrastructure() {
+      createEscalationRepository(db).insert({
+        id: 'infra',
+        podId: 'worker',
+        type: 'report_blocker',
+        timestamp: new Date().toISOString(),
+        response: null,
+        payload: {
+          kind: 'infrastructure',
+          requiresResponse: false,
+          lifecycleGeneration: repo.getOrThrow('worker').lifecycleGeneration,
+          description: 'Runner unavailable',
+          attempted: [],
+          needs: 'Qualified execution',
+        },
+      });
+    },
     failStartPersistence() {
       db.exec(
         "CREATE TRIGGER reject_validation_start BEFORE INSERT ON events WHEN NEW.type = 'pod.validation_started' BEGIN SELECT RAISE(ABORT, 'start persistence rejected'); END",
@@ -155,6 +173,30 @@ function fixture(input: Inputs = {}) {
 }
 
 describe('validation attempt start persisted effects', () => {
+  it.each(
+    [false, true].flatMap((terminal) => ['before', 'scan'].map((stage) => ({ terminal, stage }))),
+  )('retains attempts and events across %j infrastructure arrival', async ({ terminal, stage }) => {
+    const f = fixture({ status: terminal ? 'failed' : 'running', count: 4 });
+    try {
+      const before = f.repo.getOrThrow('worker');
+      if (stage === 'before') f.reportInfrastructure();
+      else
+        f.scan.mockImplementationOnce(async () => {
+          f.reportInfrastructure();
+        });
+      await expect(f.run(terminal)).rejects.toMatchObject({ code: 'INFRASTRUCTURE_BLOCKED' });
+      expect(f.scan).toHaveBeenCalledTimes(stage === 'before' ? 0 : 1);
+      expect(f.transition).not.toHaveBeenCalled();
+      expect(f.repo.getOrThrow('worker')).toEqual(before);
+      const reopened = f.reopen();
+      expect(reopened.pod).toEqual(before);
+      expect(reopened.events.getForSession('worker', { type: 'pod.validation_started' })).toEqual(
+        [],
+      );
+    } finally {
+      f.close();
+    }
+  });
   const accounting: Array<Inputs & { name: string; attempt: number; terminal?: boolean }> = [
     { name: 'normal zero', count: 0, attempt: 1 },
     { name: 'normal nonzero', count: 2, attempt: 3 },

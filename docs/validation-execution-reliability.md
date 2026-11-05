@@ -1,5 +1,8 @@
 # Validation execution reliability
 
+For decision versus infrastructure reporting, legacy reply compatibility and rollout
+gates, see [actionable input and infrastructure blockers](actionable-input-and-infrastructure-blockers.md).
+
 For effective launch selection, resource limits and system certificate trust, see
 [worker profile reliability](worker-profile-reliability.md). Profile changes do not
 deploy this executor or alter frozen launches.

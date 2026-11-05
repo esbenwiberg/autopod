@@ -1303,6 +1303,7 @@ if (sandboxContainerManager) {
     preserveWorkspace: (id) => podManager.preserveWorkspace(id, 'daemon restart'),
     quiesceSandboxAgent: (id) => podManager.quiesceSandboxAgent(id),
     suspendSandbox: (id) => podManager.suspendSandboxForRecovery(id),
+    reconcileInfrastructureBlocker: (id) => podManager.reconcileInfrastructureBlocker(id),
     enqueueSession: (id) => podQueue.enqueue(id),
     logger,
   }).catch((err) => {
@@ -1328,6 +1329,7 @@ try {
     podRepo,
     readNativeGoal: configuration.launchConfiguration.goals?.get,
     finishCancelledGoal: (id) => podManager.killSession(id),
+    reconcileInfrastructureBlocker: (id) => podManager.reconcileInfrastructureBlocker(id),
     eventBus,
     containerManager,
     enqueueSession: (id) => podQueue.enqueue(id),

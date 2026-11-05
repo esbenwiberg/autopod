@@ -76,7 +76,10 @@ export interface PodFacadeOwners {
   >;
   processWorkflow: Pick<ReturnType<typeof createAgentProcessWorkflow>, 'processPod'>;
   agentEventConsumption: Pick<ReturnType<typeof createAgentEventConsumption>, 'consumeAgentEvents'>;
-  completionWorkflow: Pick<ReturnType<typeof createCompletionWorkflow>, 'handleCompletion'>;
+  completionWorkflow: Pick<
+    ReturnType<typeof createCompletionWorkflow>,
+    'handleCompletion' | 'reconcileInfrastructureBlocker'
+  >;
   operatorMessages: Pick<ReturnType<typeof createOperatorMessages>, 'sendMessage'>;
   approvalWorkflow: Pick<ReturnType<typeof createApprovalWorkflow>, 'approveSession'>;
   operatorRejection: Pick<ReturnType<typeof createOperatorRejection>, 'rejectSession'>;

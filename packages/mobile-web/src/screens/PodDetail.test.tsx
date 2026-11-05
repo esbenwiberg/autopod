@@ -10,14 +10,17 @@ it.each([
   { status: 'failed', unverified: false },
   { status: 'merge_pending', unverified: false },
   { status: 'failed', unverified: true },
+  { status: 'paused', unverified: false },
 ] as const)(
   'shows retained delivery recovery and waits for explicit action (%s)',
   async ({ status, unverified }) => {
     const reason = unverified
       ? 'Codex execution termination is unverified; retain completion and source before another execution.'
-      : status === 'failed'
-        ? 'Delivery history is unavailable. Original resources retained. Use Resume to revalidate the retained source before approving delivery.'
-        : 'Merge reconciliation required. Original resources retained.';
+      : status === 'paused'
+        ? 'Infrastructure blocked: Runner unavailable. Checks remain incomplete. Responsible system: validation.'
+        : status === 'failed'
+          ? 'Delivery history is unavailable. Original resources retained. Use Resume to revalidate the retained source before approving delivery.'
+          : 'Merge reconciliation required. Original resources retained.';
     const pod = {
       id: 'recovery',
       task: 'Recover delivery',
@@ -26,7 +29,7 @@ it.each([
       model: 'fixture',
       status,
       options: { agentMode: 'auto', output: 'pr', validate: true },
-      failureReason: status === 'failed' ? reason : null,
+      failureReason: status === 'failed' || status === 'paused' ? reason : null,
       mergeBlockReason: reason,
       readinessReview: null,
       pendingEscalation: null,

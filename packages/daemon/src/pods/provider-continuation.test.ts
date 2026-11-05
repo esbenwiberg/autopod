@@ -18,6 +18,7 @@ import {
   insertTestProfile,
 } from '../test-utils/mock-helpers.js';
 import type { ContinuationCaptured, ContinuationLiveDependencies } from './continuation-ports.js';
+import { createEscalationRepository } from './escalation-repository.js';
 import { createEventRepository } from './event-repository.js';
 import { createPodRepository } from './pod-repository.js';
 import { createProviderAttemptContext } from './provider-attempt-context.js';
@@ -185,6 +186,75 @@ function fixture(disk = false) {
   };
 }
 describe('provider continuation', () => {
+  it.each(
+    [false, true].flatMap((automatic) =>
+      ['before', 'abort', 'sync', 'preview', 'deny', 'kill', 'handoff'].map((stage) => ({
+        automatic,
+        stage,
+      })),
+    ),
+  )(
+    'fences infrastructure before provider authorization/teardown/queueing (%j)',
+    async ({ automatic, stage }) => {
+      const f = fixture();
+      if (!automatic) f.podRepo.update('continuation', { status: 'failed', pauseReason: null });
+      const before = f.pod();
+      const attempts = f.repo.list('continuation');
+      const report = () =>
+        createEscalationRepository(f.db).insert({
+          id: 'provider-infrastructure',
+          podId: 'continuation',
+          type: 'report_blocker',
+          timestamp: new Date().toISOString(),
+          response: null,
+          payload: {
+            kind: 'infrastructure',
+            lifecycleGeneration: f.pod().lifecycleGeneration,
+            requiresResponse: false,
+            description: 'Configured environment unavailable',
+            attempted: [],
+            needs: 'Qualified execution',
+          },
+        });
+      const arrive = async () => {
+        report();
+      };
+      if (stage === 'before') report();
+      else if (stage === 'abort') vi.mocked(f.runtime.abort).mockImplementationOnce(arrive);
+      else if (stage === 'sync')
+        f.captured.syncWorkspaceBack.mockImplementationOnce(async () => {
+          report();
+          return { pushed: false };
+        });
+      else if (stage === 'preview')
+        f.captured.stopSandboxPreviewProxy.mockImplementationOnce(arrive);
+      else if (stage === 'deny') f.captured.stopHaproxyDenyReceiver.mockImplementationOnce(arrive);
+      else if (stage === 'kill') vi.mocked(f.cm.kill).mockImplementationOnce(arrive);
+      else f.captured.worktreeManager.ensureExcludes.mockImplementationOnce(arrive);
+      if (automatic) await f.c.handleProviderLimit('continuation', classification);
+      else
+        await expect(f.c.continueProvider('continuation', 'profile-primary')).rejects.toMatchObject(
+          { code: 'INFRASTRUCTURE_BLOCKED' },
+        );
+      // Effects already admitted before the report remain truthful; no later
+      // teardown, target attempt, or queue admission is allowed after the hold.
+      expect(f.pod()).toEqual({
+        ...before,
+        containerId: stage === 'handoff' ? null : before.containerId,
+        ...(stage === 'handoff' ? { updatedAt: expect.any(String) } : {}),
+      });
+      expect(f.repo.list('continuation')).toEqual(attempts);
+      expect(f.runtime.abort).toHaveBeenCalledTimes(stage === 'before' ? 0 : 1);
+      expect(f.captured.syncWorkspaceBack).toHaveBeenCalledTimes(
+        ['before', 'abort'].includes(stage) ? 0 : 1,
+      );
+      expect(f.cm.kill).toHaveBeenCalledTimes(['kill', 'handoff'].includes(stage) ? 1 : 0);
+      expect(f.captured.enqueueSession).not.toHaveBeenCalled();
+      expect(
+        createEscalationRepository(f.db).getOrThrow('provider-infrastructure').response,
+      ).toBeNull();
+    },
+  );
   it('reads late event services and projects only selected visible status/tool events', () => {
     const f = fixture();
     f.live.eventRepo = undefined;

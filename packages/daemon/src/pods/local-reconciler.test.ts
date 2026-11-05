@@ -1416,3 +1416,53 @@ describe('reconcileLocalSessions — trigger param', () => {
     expect(deps).toBeDefined();
   });
 });
+
+it('retains typed infrastructure across restart without dispatching or inventing artifact recovery', async () => {
+  const ctx = createTestContext();
+  const enqueueSession = vi.fn();
+  const containerManager = createMockContainerManager();
+  try {
+    ctx.podRepo.insert(
+      makeSession({ id: 'infra-restart', status: 'running', completionPolicy: 'accept-findings' }),
+    );
+    const pod = ctx.podRepo.getOrThrow('infra-restart');
+    ctx.podRepo.update(pod.id, { failureReason: 'Infrastructure blocked: Runner unavailable' });
+    ctx.escalationRepo.insert({
+      id: 'infra-report',
+      podId: pod.id,
+      type: 'report_blocker',
+      timestamp: new Date().toISOString(),
+      payload: {
+        kind: 'infrastructure',
+        lifecycleGeneration: pod.lifecycleGeneration,
+        requiresResponse: false,
+        description: 'Runner unavailable',
+        attempted: [],
+        needs: 'Autopod repair',
+      },
+      response: null,
+    });
+    const result = await reconcileLocalSessions({
+      podRepo: ctx.podRepo,
+      eventBus: ctx.eventBus,
+      containerManager,
+      enqueueSession,
+      validationRepo: ctx.deps.validationRepo,
+      logger,
+    });
+    expect(result.skipped).toContain(pod.id);
+    expect(ctx.podRepo.getOrThrow(pod.id)).toMatchObject({
+      status: 'running',
+      failureReason: 'Infrastructure blocked: Runner unavailable',
+      pendingEscalation: null,
+    });
+    expect(enqueueSession).not.toHaveBeenCalled();
+    expect(containerManager.kill).not.toHaveBeenCalled();
+    expect(ctx.podRepo.hasInfrastructureBlocker?.(pod.id)).toBe(true);
+    ctx.podRepo.incrementLifecycleGeneration(pod.id);
+    expect(ctx.podRepo.hasInfrastructureBlocker?.(pod.id)).toBe(false);
+    expect(ctx.escalationRepo.getOrThrow('infra-report').response).toBeNull();
+  } finally {
+    ctx.db.close();
+  }
+});

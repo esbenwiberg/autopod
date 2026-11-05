@@ -348,3 +348,47 @@ describe('operator-message interlock', () => {
     }
   });
 });
+
+describe('decision and infrastructure tool contracts', () => {
+  beforeEach(() => {
+    toolRegistrations.length = 0;
+  });
+
+  it('requires a recommendation and useful choices for new human decisions', async () => {
+    const { createEscalationMcpServer } = await import('./server.js');
+    createEscalationMcpServer({ podId: 'husky-booby', bridge: makeBridge() });
+    const schema = z.object(getTool('ask_human').schema);
+    expect(schema.safeParse({ question: 'Continue?' }).success).toBe(false);
+    expect(
+      schema.safeParse({
+        question: 'Change scope?',
+        recommendation: 'Keep scope because it meets the brief',
+        options: ['Keep scope'],
+      }).success,
+    ).toBe(false);
+    expect(
+      schema.parse({
+        question: 'Include archived records?',
+        recommendation: 'Exclude them for screen parity',
+        options: ['Exclude for screen parity', 'Include for complete audit'],
+      }).kind,
+    ).toBe('decision');
+    expect(getTool('ask_human').description).toContain('report_blocker');
+  });
+
+  it('defaults infrastructure ownership without accepting worker-selected response or lifecycle authority', async () => {
+    const { createEscalationMcpServer } = await import('./server.js');
+    createEscalationMcpServer({ podId: 'husky-booby', bridge: makeBridge() });
+    const schema = z.object(getTool('report_blocker').schema);
+    const report = schema.parse({
+      description: 'Runner unavailable',
+      attempted: [],
+      needs: 'Repair runner',
+      requiresResponse: true,
+      lifecycleGeneration: 99,
+    });
+    expect(report.owner).toBe('autopod');
+    expect(report).not.toHaveProperty('requiresResponse');
+    expect(report).not.toHaveProperty('lifecycleGeneration');
+  });
+});

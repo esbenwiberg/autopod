@@ -8,6 +8,7 @@ import {
   openAdoptedSourceValidation,
 } from './adopted-source-validation.js';
 import { rewriteError } from './approval-source-rewrite-repository.js';
+import { assertNoInfrastructureBlocker } from './escalation-coordinator.js';
 import { resolveReviewerModel, resolveReviewerProvider } from './runtime-resolver.js';
 import { sourceAdoptionError } from './source-adoption-repository.js';
 import { isTerminalState } from './state-machine.js';
@@ -108,6 +109,7 @@ export function createValidationRevalidationWorkflow(
         'SOURCE_CHECKS_REQUIRED',
       );
     assertExecutionTerminationVerified(podId);
+    assertNoInfrastructureBlocker(podRepo, podId);
     assertGuidanceCollected(podId);
     assertValidationExecutionSettled(pod, podRepo.validationExecutions?.isSettled(pod));
     if (
@@ -131,7 +133,14 @@ export function createValidationRevalidationWorkflow(
       : undefined;
     const owned = <T>(operation: () => Promise<T>) =>
       adopted ? adopted.owned(operation) : operation();
-    let assertPreflight = captureValidationMutationGuard(podRepo, pod);
+    const capturePreflight = (current: typeof pod) => {
+      const assertCurrent = captureValidationMutationGuard(podRepo, current);
+      return () => {
+        assertCurrent();
+        assertNoInfrastructureBlocker(podRepo, podId);
+      };
+    };
+    let assertPreflight = capturePreflight(pod);
     const preflight = async <T>(operation: () => Promise<T>): Promise<T> => {
       assertPreflight();
       try {
@@ -254,7 +263,7 @@ export function createValidationRevalidationWorkflow(
     }
     assertPreflight();
     const validationPod = transition(pod, 'validating', { failureReason: null });
-    assertPreflight = captureValidationMutationGuard(podRepo, validationPod);
+    assertPreflight = capturePreflight(validationPod);
 
     // Re-run validation (force=true restarts container, but we don't want agent retry on failure)
     const attempt = adopted ? pod.validationAttempts + 1 : 1;
@@ -518,6 +527,7 @@ export function createValidationRevalidationWorkflow(
         return { newCommits, result: 'fail' };
       }
       assertValidationMutationSettled(podRepo, podId);
+      assertNoInfrastructureBlocker(podRepo, podId);
 
       const skipValidatedPod = options?.checksOnly
         ? undefined

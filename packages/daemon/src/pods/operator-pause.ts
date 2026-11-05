@@ -2,6 +2,7 @@ import { AutopodError } from '@autopod/shared';
 import type { OperatorPauseCaptured, OperatorPauseLiveDependencies } from './operator-contracts.js';
 import { PAUSE_QUIESCENCE_TIMEOUT_MS } from './operator-state.js';
 import { canPause } from './state-machine.js';
+import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
 export function createOperatorPause(
   deps: OperatorPauseLiveDependencies,
   captured: OperatorPauseCaptured,
@@ -28,6 +29,7 @@ export function createOperatorPause(
       );
     }
 
+    assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
     emitActivityStatus(podId, 'Pausing pod…');
     const pauseToken = Symbol(podId);
     pauseIntents.set(podId, pauseToken);
@@ -82,7 +84,55 @@ export function createOperatorPause(
       activeRun = nextRun?.token === activeRun.token ? undefined : nextRun;
     }
 
-    transition(pod, 'paused', { pauseReason: 'manual' });
+    const settledPod = podRepo.getOrThrow(podId);
+    if (
+      settledPod.lifecycleGeneration !== pod.lifecycleGeneration ||
+      settledPod.containerId !== pod.containerId ||
+      settledPod.pendingEscalation ||
+      settledPod.status !== 'running'
+    ) {
+      if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);
+      emitActivityStatus(
+        podId,
+        'Execution settled; retaining the current lifecycle or pending decision instead of replacing it with a pause.',
+      );
+      return;
+    }
+    try {
+      assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
+      podRepo.validationExecutions?.assertTaskSettled(podId);
+    } catch (error) {
+      if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);
+      emitActivityStatus(
+        podId,
+        'Execution stop remains unverified; retain source and resources for the Autopod execution owner. No automatic retry is authorized.',
+      );
+      throw error;
+    }
+    if (podRepo.hasInfrastructureBlocker?.(podId) === true) {
+      try {
+        // Keep duplicate pause/message admission fenced while the narrow owner
+        // verifies exact native settlement and preserves the workspace. Absence
+        // of active runs is not permission to park without that evidence.
+        await captured.reconcileInfrastructureBlocker(podId);
+        const current = podRepo.getOrThrow(podId);
+        if (
+          current.status === 'running' &&
+          current.lifecycleGeneration === pod.lifecycleGeneration &&
+          current.containerId === pod.containerId &&
+          !current.pendingEscalation
+        ) {
+          emitActivityStatus(
+            podId,
+            'Infrastructure finalization remains unsettled; source and resources retained for reconciliation.',
+          );
+        }
+      } finally {
+        if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);
+      }
+      return;
+    }
+    transition(settledPod, 'paused', { pauseReason: 'manual' });
     if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);
     emitActivityStatus(podId, 'Pod paused — use [t] tell or [u] nudge to resume');
     logger.info({ podId }, 'Pod paused');

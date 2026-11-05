@@ -16,6 +16,74 @@ describe('validation recovery safety', () => {
     for (const f of fixtures.splice(0)) f.db.close();
   });
 
+  it.each(['revalidation', 'ordinary'] as const)(
+    'refuses %s validation before source mutation or spending another attempt',
+    async (kind) => {
+      const f = fixture();
+      f.revalidate.mockRestore();
+      if (kind === 'ordinary') f.repair.mockRestore();
+      f.escalationRepo.insert({
+        id: 'blocked-revalidation',
+        podId: f.podId,
+        type: 'report_blocker',
+        timestamp: new Date().toISOString(),
+        response: null,
+        payload: {
+          kind: 'infrastructure',
+          lifecycleGeneration: f.podRepo.getOrThrow(f.podId).lifecycleGeneration,
+          requiresResponse: false,
+          description: 'Configured execution unavailable',
+          attempted: [],
+          needs: 'Qualified execution',
+        },
+      });
+      const before = f.podRepo.getOrThrow(f.podId);
+      const operation =
+        kind === 'ordinary'
+          ? f.manager.triggerValidation(f.podId)
+          : f.manager.revalidateSession(f.podId, { force: true });
+      await expect(operation).rejects.toMatchObject({ code: 'INFRASTRUCTURE_BLOCKED' });
+      expect(f.podRepo.getOrThrow(f.podId)).toEqual(before);
+      expect(f.worktreeManager.pullBranch).not.toHaveBeenCalled();
+      expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
+      expect(f.containerManager.start).not.toHaveBeenCalled();
+      expect(f.validationEngine.validate).not.toHaveBeenCalled();
+      expect(f.runtime.spawn).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rechecks infrastructure reports after an awaited pull before validation or delivery', async () => {
+    const f = fixture();
+    f.revalidate.mockRestore();
+    vi.mocked(f.worktreeManager.pullBranch).mockImplementationOnce(async () => {
+      f.escalationRepo.insert({
+        id: 'late-infrastructure',
+        podId: f.podId,
+        type: 'report_blocker',
+        timestamp: new Date().toISOString(),
+        response: null,
+        payload: {
+          kind: 'infrastructure',
+          lifecycleGeneration: f.podRepo.getOrThrow(f.podId).lifecycleGeneration,
+          requiresResponse: false,
+          description: 'Execution unavailable',
+          attempted: [],
+          needs: 'Qualified execution',
+        },
+      });
+      return { newCommits: true };
+    });
+    const attempts = f.podRepo.getOrThrow(f.podId).validationAttempts;
+    await expect(f.manager.revalidateSession(f.podId, { force: true })).rejects.toMatchObject({
+      code: 'INFRASTRUCTURE_BLOCKED',
+    });
+    expect(f.podRepo.getOrThrow(f.podId).validationAttempts).toBe(attempts);
+    expect(f.validationEngine.validate).not.toHaveBeenCalled();
+    expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
+    expect(f.containerManager.start).not.toHaveBeenCalled();
+    expect(f.escalationRepo.getOrThrow('late-infrastructure').response).toBeNull();
+  });
+
   it('fences a reused resource when immutable dispatch custody arrives during an awaited pull', async () => {
     const f = fixture();
     f.revalidate.mockRestore();

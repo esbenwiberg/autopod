@@ -1663,3 +1663,42 @@ describe('validation execution recovery commands', () => {
     }
   });
 });
+
+it.each([false, true])(
+  'distinguishes infrastructure from legacy pending input (legacy=%s)',
+  async (legacy) => {
+    const client = createMockClient();
+    const pod = await client.getSession('husky-booby');
+    vi.mocked(client.getSession).mockResolvedValue({
+      ...pod,
+      id: 'husky-booby',
+      status: legacy ? 'awaiting_input' : 'failed',
+      failureReason: legacy
+        ? null
+        : 'Infrastructure blocked: Runner unavailable. Checks remain incomplete.',
+      pendingEscalation: legacy
+        ? {
+            id: 'legacy',
+            podId: 'husky-booby',
+            type: 'report_blocker',
+            timestamp: '2026-11-03T00:00:00Z',
+            payload: { description: 'Legacy decision', attempted: [], needs: 'Reply' },
+            response: null,
+          }
+        : null,
+    });
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const program = new Command();
+      registerPodCommands(program, () => client);
+      await program.parseAsync(['node', 'ap', 'status', 'husky-booby']);
+      const rendered = output.mock.calls.flat().join('\n');
+      expect(rendered).toContain(
+        legacy ? 'Pending escalation:' : 'Infrastructure blocked: Runner unavailable',
+      );
+      if (!legacy) expect(rendered).not.toContain('Pending escalation:');
+    } finally {
+      output.mockRestore();
+    }
+  },
+);

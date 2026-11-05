@@ -50,12 +50,46 @@ it.each(
     podManager: manager,
     pendingRequestsByPod: waiters,
   });
-  vi.spyOn(bridge, 'getAutoPauseThreshold').mockReturnValue(1);
   const { server } = createEscalationMcpServer({
     podId: pod.id,
     bridge,
     pendingRequests: pending,
   });
+  // A pre-upgrade attached waiter still exists after source rollout. New calls
+  // cannot request this legacy blocking behavior; this fixture represents the
+  // already-stored report and its original transport, not a production backdoor.
+  if (tool === 'report_blocker')
+    server.tool('legacy_report_blocker', 'Stored legacy blocker waiter fixture', {}, async () => {
+      const id = 'legacy-attached-report';
+      bridge.createEscalation({
+        id,
+        podId: pod.id,
+        type: 'report_blocker',
+        timestamp: new Date().toISOString(),
+        payload: { description: 'Legacy source decision', attempted: [], needs: 'Direction' },
+        response: null,
+      });
+      const response = await pending.waitForResponse(id, 60_000);
+      const guidance = bridge.readOperatorGuidance(pod.id);
+      return {
+        content: [
+          { type: 'text' as const, text: response },
+          ...(guidance
+            ? [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    deliveryId: guidance.deliveryId,
+                    completedTool: tool,
+                    instruction:
+                      'Do not repeat an already completed action; acknowledge saved guidance.',
+                  }),
+                },
+              ]
+            : []),
+        ],
+      };
+    });
   const client = new Client({ name: 'attached-reply-fixture', version: '1' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -75,11 +109,18 @@ it.each(
     const reply = client
       .callTool(
         {
-          name: tool,
+          name: tool === 'report_blocker' ? 'legacy_report_blocker' : tool,
           arguments:
             tool === 'ask_human'
-              ? { question: 'Keep the existing source?' }
-              : { description: 'Need source decision', attempted: [], needs: 'Direction' },
+              ? {
+                  question: 'Keep the existing source?',
+                  recommendation: 'Keep it to preserve completed work',
+                  options: [
+                    'Keep existing source and continue scope',
+                    'Rework source to change scope',
+                  ],
+                }
+              : {},
         },
         undefined,
         { timeout: 1000 },

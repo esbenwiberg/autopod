@@ -45,6 +45,7 @@ export function createAgentExecutionFixture(disk = false) {
     hasDurableAgentExecutionEvidence: vi.fn(() => false),
     syncSandboxRuntimeSessionState: f.sandbox.syncSandboxRuntimeSessionState,
     handleProviderLimit: vi.fn(async () => {}),
+    reconcileInfrastructureBlocker: vi.fn(async () => {}),
   } satisfies AgentConsumerCaptured;
   const consumer = createAgentEventConsumption(f.deps, consumerCaptured);
   const processCaptured = {
@@ -87,6 +88,7 @@ export function createAgentExecutionFixture(disk = false) {
   const calls = {
     consumeAgentEvents: vi.fn(consumer.consumeAgentEvents),
     handleCompletion: vi.fn(async () => {}),
+    reconcileInfrastructureBlocker: vi.fn(async () => {}),
     triggerValidation: vi.fn(async () => {}),
   } satisfies AgentProcessCalls;
   return {

@@ -60,6 +60,7 @@ export interface WorkspaceManualFixCalls {
   ): Pod;
 }
 export interface WorkspaceWatchdogCalls {
+  reconcileInfrastructureBlocker(podId: string): Promise<void>;
   killSession(podId: string): Promise<void>;
   cleanupPodResourcesForRecovery(podId: string): Promise<void>;
 }

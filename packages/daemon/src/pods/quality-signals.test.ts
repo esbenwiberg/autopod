@@ -577,6 +577,24 @@ describe('computeQualitySignals', () => {
     expect(signals.editsWithoutPriorRead).toBe(0);
   });
 
+  it('excludes infrastructure reports while retaining legacy blocker interruptions', () => {
+    podRepo.insert(basePod());
+    for (const [id, kind] of [
+      ['infra', 'infrastructure'],
+      ['legacy', undefined],
+    ] as const) {
+      escalationRepo.insert({
+        id,
+        podId: POD_ID,
+        type: 'report_blocker',
+        timestamp: new Date().toISOString(),
+        payload: { kind, description: 'Blocked', attempted: [], needs: 'Repair' },
+        response: null,
+      });
+    }
+    expect(computeQualitySignals(POD_ID, deps).userInterrupts).toBe(1);
+  });
+
   it('counts ask_human escalations toward user interrupts', () => {
     podRepo.insert(basePod());
     escalationRepo.insert(askHuman('esc-1'));

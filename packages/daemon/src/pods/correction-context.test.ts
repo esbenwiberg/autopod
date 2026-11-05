@@ -260,6 +260,28 @@ describe('truncateDiff', () => {
 });
 
 describe('buildCorrectionContext', () => {
+  it.each([
+    'PREREQUISITE_MISSING',
+    'RESOURCE_UNAVAILABLE',
+    'TRANSPORT_FAILURE',
+    'VALIDATION_ENGINE_TERMINATION_UNVERIFIED',
+  ])('never dispatches typed infrastructure %s as coding correction', async (code) => {
+    const cm = mockContainerManager();
+    const result: ValidationResult = {
+      ...mockValidationResult({ buildFailed: true }),
+      infrastructureFailure: {
+        phase: 'build',
+        code,
+        message: 'Execution unavailable',
+        retryable: false,
+      },
+    };
+    await expect(buildCorrectionContext(mockSession(), mockProfile(), result, cm)).rejects.toThrow(
+      'not sent as coding correction',
+    );
+    expect(cm.execInContainer).not.toHaveBeenCalled();
+  });
+
   it('includes previous diff from container', async () => {
     const cm = mockContainerManager('+added line\n-removed line');
     const context = await buildCorrectionContext(
