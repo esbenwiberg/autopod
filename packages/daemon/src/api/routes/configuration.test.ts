@@ -13,6 +13,10 @@ describe('composable configuration API', () => {
     db = createTestDb();
     app = Fastify();
     app.setErrorHandler(errorHandler);
+    // Production auth supplies the caller used to authorize launch references.
+    app.addHook('preHandler', async (request) => {
+      request.user = { oid: 'fixture-operator', name: 'Fixture Operator' };
+    });
     const { services } = createTestConfiguration(db);
     configurationRoutes(app, {
       db,
