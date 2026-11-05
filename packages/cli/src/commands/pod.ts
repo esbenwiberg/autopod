@@ -22,6 +22,7 @@ import { followLogs } from '../utils/log-follow.js';
 import { registerBudgetCommand } from './budget.js';
 import { registerGoalCommands } from './goal.js';
 import { registerLaunchCommand } from './launch.js';
+import { registerApprovalRewriteRepairCommand } from './approval-rewrite-repair.js';
 import { registerRetainedContinuationCommand } from './retained-continuation.js';
 import { registerReviewerRunsCommand } from './reviewer-runs.js';
 import { registerSourceRecoveryCommand } from './source-recovery.js';
@@ -144,6 +145,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   registerReviewerRunsCommand(program, getClient);
   registerSourceRecoveryCommand(program, getClient);
   registerRetainedContinuationCommand(program, getClient);
+  registerApprovalRewriteRepairCommand(program, getClient);
   program
     .command('execution-provenance <id>')
     .description('Inspect recorded runtime, image, build, resource and command preflight evidence')

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { AutopodError, type Pod } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { BranchPublicationReceipt } from '../interfaces/worktree-manager.js';
+import { createRetainedCheckpointRepository } from './retained-checkpoint-repository.js';
 
 export const rewriteHash = (value: unknown) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -34,6 +35,8 @@ export interface ApprovalRewrite {
   activated?: { generation: number };
   checked?: { head: string; tree: string; validationHash: string };
   aborted?: { reason: string };
+  /** Current selection projection; get(id) always returns the unchanged original facts. */
+  repairId?: string;
 }
 /** Append-only facts. Neither a checked candidate nor a failed push changes the original lease. */
 export function createApprovalSourceRewriteRepository(db: Database.Database) {
@@ -63,10 +66,44 @@ export function createApprovalSourceRewriteRepository(db: Database.Database) {
         ORDER BY rowid DESC LIMIT 1`)
       .get(pod.id) as { id: string } | undefined;
     const record = row ? get(row.id) : null;
-    return record &&
-      !record.aborted &&
-      (record.generation === pod.lifecycleGeneration ||
-        record.activated?.generation === pod.lifecycleGeneration)
+    if (!record || record.aborted) return null;
+    const repair = createRetainedCheckpointRepository(db).latest(pod.id);
+    if (repair?.binding.approvalRewrite?.id === record.id && repair.activated) {
+      if (
+        repair.activated.generation !== pod.lifecycleGeneration ||
+        !repair.prepared ||
+        !repair.selected
+      )
+        rewriteError('Repair selection is inconsistent with the current lifecycle.');
+      if (repair.binding.approvalRewrite.evidenceHash !== rewriteHash(record))
+        rewriteError('Original rewrite evidence changed after repair admission.');
+      // Preserve the immutable predecessor/base/configuration. Only CURRENT source
+      // projection changes; no old prepared/checked event becomes a writable slot.
+      return {
+        ...record,
+        repairId: repair.id,
+        prepared: {
+          worktreePath: repair.prepared.worktree,
+          head: repair.selected.head,
+          tree: repair.selected.tree,
+        },
+        activated: repair.activated,
+        checked:
+          repair.checked?.result.overall === 'pass' &&
+          repair.checked.result.taskReview?.status === 'pass' &&
+          repair.checked.snapshot &&
+          repair.checked.source &&
+          !repair.blocked
+            ? {
+                head: repair.checked.source.head,
+                tree: repair.checked.source.tree,
+                validationHash: repair.checked.resultHash,
+              }
+            : undefined,
+      };
+    }
+    return record.generation === pod.lifecycleGeneration ||
+      record.activated?.generation === pod.lifecycleGeneration
       ? record
       : null;
   };

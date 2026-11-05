@@ -80,13 +80,43 @@ export function assertSourceDeliveryAllowed(db: Database.Database, podId: string
     const result = current?.last_validation_result
       ? JSON.parse(String(current.last_validation_result))
       : null;
+    // A later ordinary approval may prepare another isolated base rewrite. It
+    // inherits the checked repair as predecessor; only its own fresh checked
+    // selection can supersede CURRENT delivery proof. Historical repair holds stay.
+    const successor =
+      recovery.binding.approvalRewrite &&
+      recovery.checked?.source &&
+      db
+        .prepare(`SELECT 1 FROM approval_source_rewrites r
+        JOIN approval_source_rewrite_events a ON a.rewrite_id=r.id AND a.kind='activated'
+        JOIN approval_source_rewrite_events s ON s.rewrite_id=r.id AND s.kind='prepared'
+        JOIN approval_source_rewrite_events c ON c.rewrite_id=r.id AND c.kind='checked'
+        JOIN pods p ON p.id=r.pod_id
+        WHERE r.pod_id=? AND r.id<>? AND r.generation=?
+          AND json_extract(r.binding,'$.worktreePath')=?
+          AND json_extract(r.binding,'$.validationHash')=?
+          AND json_extract(r.binding,'$.predecessor.commitSha')=?
+          AND json_extract(a.evidence,'$.generation')=p.lifecycle_generation
+          AND json_extract(s.evidence,'$.worktreePath')=p.worktree_path
+          AND json_extract(c.evidence,'$.validationHash')=?
+          AND NOT EXISTS(SELECT 1 FROM approval_source_rewrite_events e WHERE e.rewrite_id=r.id AND e.kind='aborted')`)
+        .get(
+          podId,
+          recovery.binding.approvalRewrite.id,
+          recovery.activated?.generation,
+          recovery.prepared?.worktree,
+          recovery.checked.resultHash,
+          recovery.checked.source.head,
+          checkpointHash(result),
+        );
     if (
       !recovery.checked ||
       recovery.checked.result.overall !== 'pass' ||
       result?.taskReview?.status !== 'pass' ||
-      recovery.checked.resultHash !== checkpointHash(result) ||
-      current?.lifecycle_generation !== recovery.activated?.generation ||
-      current?.worktree_path !== recovery.prepared?.worktree ||
+      (!successor &&
+        (recovery.checked.resultHash !== checkpointHash(result) ||
+          current?.lifecycle_generation !== recovery.activated?.generation ||
+          current?.worktree_path !== recovery.prepared?.worktree)) ||
       current?.skip_validation ||
       current?.validation_waiver ||
       (current?.validation_overrides && JSON.parse(String(current.validation_overrides)).length)

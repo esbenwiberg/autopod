@@ -29,3 +29,17 @@ export interface RetainedContinuationCheckRequest {
   expectedExecutionDigest?: string;
   reason: string;
 }
+
+/** Repair remains owned by the exact failed approval rewrite; no task/config amendment. */
+export interface ApprovalRewriteRepairRequest extends CheckpointRecoveryRequest {
+  rewriteId: string;
+  failedDispatchId: string;
+}
+export interface ApprovalRewriteRepairCheckRequest {
+  rewriteId: string;
+  failedDispatchId: string;
+  expectedGeneration: number;
+  expectedResultHash: string;
+  candidateHead: string;
+  reason: string;
+}

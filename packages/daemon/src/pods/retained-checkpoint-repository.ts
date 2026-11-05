@@ -46,6 +46,13 @@ export interface CheckpointRecoveryBinding {
   cycle: number;
   resultHash: string;
   configurationHash: string;
+  /** Frozen rewrite ownership, not permission to use ordinary continuation. */
+  approvalRewrite?: {
+    id: string;
+    dispatchId: string;
+    evidenceHash: string;
+    artifactsPath: string | null;
+  };
   /** New explicit selection, not legacy unknown-execution reconciliation. */
   continuation?: {
     remoteHead?: string;
@@ -100,6 +107,7 @@ export interface CheckpointRecoveryRecord {
   activated: { generation: number } | null;
   checking: { generation: number } | null;
   checked: {
+    source?: { head: string; tree: string };
     result: ValidationResult;
     resultHash: string;
     snapshot: { path: string; cycle: number; containerId: string } | null;

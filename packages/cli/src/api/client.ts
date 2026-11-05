@@ -536,6 +536,22 @@ export class AutopodClient {
       `/pods/${id}/retained-continuation/execution?profileId=${encodeURIComponent(profileId)}`,
     );
   }
+  async getRewriteRepairs(id: string): Promise<unknown> {
+    return this.request('GET', `/pods/${id}/approval-rewrite-repair`);
+  }
+  async prepareRewriteRepair(
+    id: string,
+    input: import('@autopod/shared').ApprovalRewriteRepairRequest,
+  ): Promise<unknown> {
+    return this.request('POST', `/pods/${id}/approval-rewrite-repair`, input);
+  }
+  async checkRewriteRepair(
+    id: string,
+    recoveryId: string,
+    input: import('@autopod/shared').ApprovalRewriteRepairCheckRequest,
+  ): Promise<unknown> {
+    return this.request('POST', `/pods/${id}/approval-rewrite-repair/${recoveryId}/check`, input);
+  }
   async continueRetained(
     id: string,
     input: import('@autopod/shared').RetainedContinuationRequest,

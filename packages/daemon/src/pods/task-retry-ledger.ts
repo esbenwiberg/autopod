@@ -12,6 +12,7 @@ import {
 import type Database from 'better-sqlite3';
 import { hasUnansweredDecision } from './decision-admission.js';
 import { createDeletionOwnership } from './deletion-ownership.js';
+import { createRetainedCheckpointRepository } from './retained-checkpoint-repository.js';
 import { createValidationExecutionLedger } from './validation-execution-ledger.js';
 import { retainWorkerRetryHistory, workerRetryFailure } from './worker-retry-history.js';
 
@@ -242,6 +243,29 @@ export function createTaskRetryLedger(
       task.backoffsMs ??
       (stage === 'worker' && task.admissionCount > 0 ? [] : backoffs.slice(legacyUsed));
     const prior = latest(member.taskId);
+    const repair =
+      stage === 'validation' ? createRetainedCheckpointRepository(db).latest(podId) : null;
+    const repairSelection =
+      repair?.binding.approvalRewrite && repair.activated?.generation === generation
+        ? repair
+        : null;
+    if (
+      repairSelection &&
+      (repairSelection.activated?.generation !== generation ||
+        !repairSelection.selected ||
+        !repairSelection.checking ||
+        repairSelection.checked ||
+        repairSelection.blocked ||
+        db
+          .prepare(
+            "SELECT 1 FROM task_retry_attempts WHERE pod_id=? AND generation=? AND stage='validation'",
+          )
+          .get(podId, generation))
+    )
+      throw new TaskRetryBlockedError(
+        'Rewrite repair admits one source-bound validation only; observe the retained invocation',
+      );
+
     let retryKind: TaskRetryAttempt['retryKind'] = null;
     let useAuthorization: string | undefined;
     let notBefore = Date.now();
@@ -259,6 +283,8 @@ export function createTaskRetryLedger(
         `A ${label} admission is already active for this logical task`,
         'TASK_RETRY_IN_PROGRESS',
       );
+    if (repairSelection && (!prior || prior.outcome === 'pass'))
+      throw new TaskRetryBlockedError('Failed rewrite retry admission evidence is unavailable');
     const workerFailure = stage === 'worker' && prior ? workerRetryFailure(db, prior.id) : null;
     if (
       prior &&
@@ -286,6 +312,10 @@ export function createTaskRetryLedger(
       if (grant) {
         retryKind = 'override';
         useAuthorization = grant.id as string;
+      } else if (repairSelection) {
+        throw new TaskRetryBlockedError(
+          'Rewrite repair requires a separate authenticated retry authorization for this selected checks invocation',
+        );
       } else if (stage === 'worker' && workerFailure === 'auth') {
         throw new TaskRetryBlockedError(
           'Unchanged or unverified worker authentication failure; reconcile credentials and record a human retry authorization before another worker execution.',
