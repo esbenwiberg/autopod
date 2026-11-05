@@ -1,8 +1,9 @@
 import { createServer } from 'node:http';
 import { Command } from 'commander';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { AutopodClient } from '../api/client.js';
+import { AutopodClient } from '../api/client.js';
 import { registerApprovalRewriteRepairCommand } from './approval-rewrite-repair.js';
+import { registerPodCommands } from './pod.js';
 const client = {
   getRewriteRepairs: vi.fn(async () => ({})),
   prepareRewriteRepair: vi.fn(async () => ({})),
@@ -66,14 +67,12 @@ it('uses dedicated transports and propagates old-server failure without a fallba
 it.each([404, 201])(
   'requires a confirmed targeted retry response without fallback, server status=%s',
   async (status) => {
-    const { AutopodClient } = await import('../api/client.js');
-    const { registerPodCommands } = await import('./pod.js');
     const requests: Array<{ url: string; body: unknown }> = [];
     const server = createServer(async (request, response) => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       requests.push({ url: request.url ?? '', body: JSON.parse(Buffer.concat(chunks).toString()) });
-      response.writeHead(status, { 'content-type': 'application/json' });
+      response.writeHead(status, { 'content-type': 'application/json', connection: 'close' });
       response.end(
         JSON.stringify(
           status === 404
