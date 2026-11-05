@@ -1,4 +1,4 @@
-import type { Pod, PodStatus } from '@autopod/shared';
+import type { Pod, PodGoal, PodStatus } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { SandboxContainerManager } from '../containers/sandbox-container-manager.js';
 import { createTestContext, logger } from '../test-utils/mock-helpers.js';
@@ -15,7 +15,9 @@ function fixture({
   target = 'local',
   recordRun = true,
   bindResource = true,
+  runtime = 'claude',
 }: {
+  runtime?: Pod['runtime'];
   target?: Pod['executionTarget'];
   recordRun?: boolean;
   bindResource?: boolean;
@@ -28,7 +30,7 @@ function fixture({
     task: 'Retain infrastructure evidence',
     status: 'running',
     model: 'opus',
-    runtime: 'claude',
+    runtime,
     executionTarget: target,
     branch: 'blocked-restart',
     userId: 'operator',
@@ -170,6 +172,134 @@ function fixture({
 }
 
 describe('infrastructure blocker restart reconciliation', () => {
+  it('re-evaluates a human reply that arrives while question preservation is coalesced', async () => {
+    const f = fixture();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      const question = {
+        id: 'question',
+        podId: f.pod.id,
+        type: 'ask_human' as const,
+        timestamp: new Date().toISOString(),
+        response: null,
+        payload: { question: 'Which scope?' },
+      };
+      f.escalationRepo.insert(question);
+      f.podRepo.update(f.pod.id, { status: 'awaiting_input', pendingEscalation: question });
+      f.podRepo.taskExecutions?.finishRun(f.runId, 'completed');
+      f.preserve.mockImplementationOnce(async () => {
+        await gate;
+      });
+      const first = f.completion.reconcileInfrastructureBlocker(f.pod.id);
+      await vi.waitFor(() => expect(f.preserve).toHaveBeenCalledOnce());
+      f.escalationRepo.update('question', {
+        response: 'Proceed',
+        respondedBy: 'human',
+        respondedAt: new Date().toISOString(),
+      });
+      f.podRepo.update(f.pod.id, { status: 'running', pendingEscalation: null });
+      f.nudgeRepo.queue(f.pod.id, 'Proceed');
+      const reply = f.completion.reconcileInfrastructureBlocker(f.pod.id);
+      release();
+      await Promise.all([first, reply]);
+      expect(f.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+        status: 'failed',
+        pendingEscalation: null,
+        finalization: { sourcePreservedAt: expect.any(String) },
+      });
+      expect(f.escalationRepo.getOrThrow('question').response?.response).toBe('Proceed');
+      expect(f.nudgeRepo.hasPending(f.pod.id)).toBe(true);
+      f.expectNoDispatch();
+    } finally {
+      release();
+      f.db.close();
+    }
+  });
+  it('coalesces terminal, pause and restart preservation for the same settled resource', async () => {
+    const f = fixture();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.preserve.mockImplementation(async () => {
+      await gate;
+    });
+    f.podRepo.taskExecutions?.finishRun(f.runId, 'paused');
+    const first = f.completion.reconcileInfrastructureBlocker(f.pod.id);
+    const second = f.completion.reconcileInfrastructureBlocker(f.pod.id);
+    try {
+      await vi.waitFor(() => expect(f.preserve).toHaveBeenCalledOnce());
+      expect(f.podRepo.getOrThrow(f.pod.id).finalization?.sourcePreservedAt).toBeNull();
+    } finally {
+      release();
+    }
+    try {
+      await Promise.all([first, second]);
+      expect(f.preserve).toHaveBeenCalledOnce();
+      expect(f.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+        status: 'failed',
+        finalization: { sourcePreservedAt: expect.any(String) },
+      });
+      f.expectNoDispatch();
+    } finally {
+      f.db.close();
+    }
+  });
+  it.each([true, false])(
+    'retains native Goal stop evidence before infrastructure preservation; stopped=%s',
+    async (executionStopped) => {
+      const f = fixture({ runtime: 'codex' });
+      try {
+        f.podRepo.taskExecutions?.finishRun(f.runId, 'failed', 'infrastructure');
+        const goal: PodGoal = {
+          podId: f.pod.id,
+          objective: 'Retain blocked Goal work',
+          state: 'paused',
+          revision: 1,
+          runtime: 'codex',
+          fence: { generation: f.pod.lifecycleGeneration, attemptId: f.runId },
+          nativeSessionId: 'native',
+          nativeStatus: 'paused',
+          executionStopped,
+          controlIntent: null,
+          observedTokens: 0,
+          observedSeconds: 0,
+          reason: null,
+          createdAt: 'now',
+          updatedAt: 'now',
+        };
+        await reconcileLocalSessions({ ...f.deps, readNativeGoal: () => goal });
+        expect(f.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+          status: executionStopped ? 'failed' : 'running',
+          finalization: { sourcePreservedAt: executionStopped ? expect.any(String) : null },
+        });
+        expect(f.preserve).toHaveBeenCalledTimes(executionStopped ? 1 : 0);
+        f.expectNoDispatch();
+      } finally {
+        f.db.close();
+      }
+    },
+  );
+  it('retains infrastructure ownership when its Goal recovery read fails', async () => {
+    const f = fixture({ runtime: 'codex' });
+    try {
+      f.podRepo.taskExecutions?.finishRun(f.runId, 'failed', 'infrastructure');
+      await reconcileLocalSessions({
+        ...f.deps,
+        readNativeGoal: () => {
+          throw new Error('Goal custody unavailable');
+        },
+      });
+      expect(f.podRepo.getOrThrow(f.pod.id).status).toBe('running');
+      expect(f.preserve).not.toHaveBeenCalled();
+      f.expectNoDispatch();
+    } finally {
+      f.db.close();
+    }
+  });
   it('parks a verified settled worker through source preservation instead of leaving it running', async () => {
     const f = fixture();
     try {

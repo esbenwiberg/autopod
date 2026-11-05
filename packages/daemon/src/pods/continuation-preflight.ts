@@ -1,6 +1,7 @@
 import { AutopodError, type Pod } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
+import { assertNoInfrastructureBlocker } from './escalation-coordinator.js';
 import { inspectExecutionPreflight } from './execution-preflight.js';
 import type { ExecutionProvenanceLedger } from './execution-provenance-ledger.js';
 import type { PodRepository } from './pod-repository.js';
@@ -59,7 +60,11 @@ export async function prepareRetainedAgentContinuation(
     containerManager: ContainerManager;
     podRepo: Pick<
       PodRepository,
-      'getOrThrow' | 'hasUnansweredDecision' | 'taskExecutions' | 'sourceAdoptions'
+      | 'getOrThrow'
+      | 'hasUnansweredDecision'
+      | 'hasInfrastructureBlocker'
+      | 'taskExecutions'
+      | 'sourceAdoptions'
     >;
     resolveProfile(pod: Pod): PodExecutionSettings;
   },
@@ -73,6 +78,7 @@ export async function prepareRetainedAgentContinuation(
         Boolean(deps.podRepo.getOrThrow(pod.id).pendingEscalation),
     });
     assertTaskExecutionTerminationVerified(deps.podRepo.taskExecutions, pod.id);
+    assertNoInfrastructureBlocker(deps.podRepo, pod.id);
     deps.resolveProfile(current);
   };
   async function awaitCurrent<T>(operation: () => Promise<T>): Promise<T> {

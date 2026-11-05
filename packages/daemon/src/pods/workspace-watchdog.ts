@@ -1,4 +1,4 @@
-import type { PodStatus } from '@autopod/shared';
+import type { Pod, PodStatus } from '@autopod/shared';
 import { reconcileLocalSessions } from './local-reconciler.js';
 import type {
   WorkspaceWatchdogCalls,
@@ -37,6 +37,33 @@ export function createWorkspaceWatchdog(
 
     const WAKE_GRACE_MS = 60_000;
     let lastWakeAt: number | null = null;
+    const retainReport = async (podId: string) => {
+      try {
+        await this.reconcileInfrastructureBlocker(podId);
+      } catch (err) {
+        logger.warn({ err, podId }, 'Watchdog: infrastructure custody remains held');
+      }
+    };
+    const inspect = (expected: Pod): { pod: Pod; state: 'owned' | 'reported' | 'superseded' } => {
+      const pod = podRepo.getOrThrow(expected.id);
+      if (
+        pod.status !== 'running' ||
+        pod.options?.agentMode === 'interactive' ||
+        pod.lifecycleGeneration !== expected.lifecycleGeneration ||
+        pod.containerId !== expected.containerId ||
+        pod.executionTarget !== expected.executionTarget ||
+        pod.worktreePath !== expected.worktreePath
+      )
+        return { pod, state: 'superseded' };
+      if (podRepo.hasInfrastructureBlocker?.(pod.id)) return { pod, state: 'reported' };
+      if (
+        pod.lastAgentEventAt !== expected.lastAgentEventAt ||
+        pod.lastHeartbeatAt !== expected.lastHeartbeatAt ||
+        pod.startedAt !== expected.startedAt
+      )
+        return { pod, state: 'superseded' };
+      return { pod, state: 'owned' };
+    };
 
     const tick = async (): Promise<void> => {
       try {
@@ -47,11 +74,19 @@ export function createWorkspaceWatchdog(
         }
         const running = podRepo.list({ status: 'running' as PodStatus });
         const now = Date.now();
-        for (const pod of running) {
+        for (const listed of running) {
+          const pod = podRepo.getOrThrow(listed.id);
+          if (pod.status !== 'running') continue;
           // Workspace (interactive) pods have no agent by design — the human
           // drives the container directly. They will never emit agent events,
           // so silence-based timeout cannot apply.
           if (pod.options?.agentMode === 'interactive') continue;
+          if (podRepo.hasInfrastructureBlocker?.(pod.id)) {
+            await retainReport(pod.id);
+            // Silence cannot settle an unknown execution or authorize a stop.
+            // The narrow owner alone can preserve a positively settled source.
+            continue;
+          }
           // Reference is the most recent of (lastAgentEventAt, lastHeartbeatAt,
           // startedAt) — all are real liveness signals scoped to the current run.
           // MCP tools can legitimately stay open while validation runs without
@@ -85,6 +120,11 @@ export function createWorkspaceWatchdog(
           if (pod.containerId) {
             try {
               await stopSandboxPreviewProxy(pod.id);
+              const afterPreview = inspect(pod);
+              if (afterPreview.state !== 'owned') {
+                if (afterPreview.state === 'reported') await retainReport(pod.id);
+                continue;
+              }
               const cm = containerManagerFactory.get(pod.executionTarget);
               await cm.stop(pod.containerId);
             } catch (err) {
@@ -92,9 +132,12 @@ export function createWorkspaceWatchdog(
             }
           }
           try {
-            const fresh = podRepo.getOrThrow(pod.id);
-            if (fresh.status !== 'running') continue; // raced with another transition
-            transition(fresh, 'failed', { completedAt: new Date(now).toISOString() });
+            const afterStop = inspect(pod);
+            if (afterStop.state !== 'owned') {
+              if (afterStop.state === 'reported') await retainReport(pod.id);
+              continue;
+            }
+            transition(afterStop.pod, 'failed', { completedAt: new Date(now).toISOString() });
             emitActivityStatus(pod.id, 'Watchdog: no agent activity — pod auto-failed');
           } catch (err) {
             logger.warn({ err, podId: pod.id }, 'Watchdog: transition to failed failed');

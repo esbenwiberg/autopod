@@ -25,8 +25,11 @@ is attempted before the transition; capture failures retain original resources a
 are explicit. An existing unanswered question takes priority and is never displaced.
 At the configured report threshold, Autopod also requests the existing owned pause:
 only infrastructure reports from the current lifecycle count, and the stop waits
-for the active run to settle before parking as failed. It retains the infrastructure
-reason without manufacturing a question. Ordinary Resume, Rework, tell and nudge
+for the active run to settle, then invokes that same narrow infrastructure completion
+owner to preserve the workspace before parking as failed. Duplicate pause and message
+admission remain fenced through preservation; missing positive settlement cannot be
+replaced by a direct failed-state transition. It retains the infrastructure reason
+without manufacturing a question. Ordinary Resume, Rework, tell and nudge
 cannot clear the recorded infrastructure need or dispatch the same lifecycle. No
 in-place chat recovery is supported: Autopod must diagnose the needs and provision
 a qualified execution. Restart and host wake finish source preservation and park an
@@ -36,7 +39,44 @@ recorded container/backend, with no outstanding task execution or cleanup owners
 A complete event, an empty active-run set, an old cycle or a container-status lookup
 alone is not termination proof. Missing evidence and failed reconciliation reads
 retain the block and original resources without dispatch or artifact collection.
-A pending real question prevents this automatic pause. AI advice cannot consume this report stop threshold.
+Periodic watchdog ticks route current automatic-worker reports to this same owner,
+including late reports after dispatch was refused. They do not convert silence or
+an ownership-read failure into a container stop or generic terminal failure. Reports,
+resource/generation ownership and renewed activity are rechecked after awaited preview
+or stop work; an already-admitted stop is retained as an effect, not called absent.
+A pending real question prevents this automatic pause. A genuine answer still records
+its actor and delivery custody; after the worker has settled, it cannot start another
+coding turn on infrastructure blocked in that lifecycle. Saved guidance remains held
+for a qualified execution, not an ordinary Rework suggestion. Direct rejection,
+revalidation and validation-override dispatch also retain this infrastructure fence.
+Ordinary validation, update-from-base (including post-abort rebases), instant overrides,
+legacy attempt extensions, waiver application and pass delivery recheck it at their
+owned boundaries. Preservation and diagnostic mutation guards remain available; they
+are not validation authorization. Host credential repair replies retain their actor
+and decision receipt atomically with leaving the answered-question state. A current
+report leaves unknown execution running/held and lets positive settlement park it,
+never an empty `awaiting_input` decision. It prevents both fetch/worker queueing and
+push/PR/auto-approval dispatch. Delivery rechecks ownership after awaited boundaries.
+Override guidance and other reply error paths retain shared settlement, unknown exits
+and the original error rather than overwriting them with a generic failure.
+Provider recovery (including profile-primary and automatic failover) cannot authorize,
+tear down or queue over a current report; asynchronous boundaries recheck the hold.
+Already-admitted effects remain recorded rather than being undone or called absent.
+A report from an older lifecycle is preserved, not rewritten into a current block.
+Recognized blocked-completion wording, exhausted token budgets, and fatal exits use
+the same settled preservation owner. Budget usage/exceeded events, limits and extension
+counts remain unchanged; preservation grants no continuation or extra budget. Concurrent
+pause, terminal and restart calls coalesce for the same resource/cycle. A newly
+recorded answer is re-evaluated after an in-flight question capture, without acting
+on a replacement lifecycle or releasing saved guidance. Unverified
+termination evidence is retained for its original run before paused or superseded
+ordinary events are suppressed. The shared event-consumption settlement boundary
+invokes preservation for feedback/message/correction runs as well as initial workers,
+including fatal outcomes and stream errors. Worker admission and persisted cooldown
+wakeups recheck reports before pulling another coding iterator. Local
+Goal recovery requires stopped native execution as well as the resource-bound ledger
+proof; generic Goal parking and failed Goal reads must not bypass preservation.
+AI advice cannot turn this report stop threshold into a human decision.
 Stream closure alone is not native termination proof: an unverified execution
 retains its active ownership and resources without another stop or retry.
 A report is a worker claim requiring diagnosis, not authoritative proof of an

@@ -75,6 +75,7 @@ export interface OperatorKillLiveDependencies extends OperatorPauseLiveDependenc
 }
 
 export interface OperatorMessagesCaptured {
+  reconcileInfrastructureBlocker(podId: string): Promise<void>;
   pauseIntents: Map<string, symbol>;
   podRepo: PodRepository;
   activeAgentRuns: ReturnType<typeof createAgentRunRegistry>['activeAgentRuns'];
@@ -119,6 +120,7 @@ export interface OperatorMessagesCaptured {
 }
 
 export interface OperatorRejectionCaptured {
+  reconcileInfrastructureBlocker(podId: string): Promise<void>;
   podRepo: PodRepository;
   resolveEffectiveBoundProfile: OperatorMessagesCaptured['resolveEffectiveBoundProfile'];
   beginGoalTaskRework: (pod: Pod, task: string) => Promise<boolean>;
@@ -137,6 +139,7 @@ export interface OperatorRejectionCaptured {
 }
 
 export interface OperatorPauseCaptured {
+  reconcileInfrastructureBlocker(podId: string): Promise<void>;
   pauseIntents: Map<string, symbol>;
   podRepo: PodRepository;
   emitActivityStatus: ReturnType<typeof createCompletionEvents>['emitActivityStatus'];

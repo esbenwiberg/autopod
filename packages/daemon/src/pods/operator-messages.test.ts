@@ -4,6 +4,63 @@ import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { createEscalationRepository } from './escalation-repository.js';
 import { createNudgeRepository } from './nudge-repository.js';
 describe('complete operator message lifetime', () => {
+  it.each(
+    (['host_fetch', 'host_push'] as const).flatMap((source) =>
+      ['before', 'credential'].map((stage) => ({ source, stage })),
+    ),
+  )(
+    'retains credential reply custody without dispatch under %j infrastructure',
+    async ({ source, stage }) => {
+      const f = createOperatorFixture(true);
+      const request = f.awaiting('request_credential', {
+        service: 'github',
+        reason: 'Repair daemon authentication',
+        source,
+      });
+      const actor = { type: 'human' as const, userId: 'credential-owner' };
+      const before = f.pod();
+      if (stage === 'before') f.infrastructure();
+      else
+        vi.mocked(f.messagesCaptured.resolveGitCredential).mockImplementationOnce(async () => {
+          f.infrastructure();
+          return 'synthetic-git-key';
+        });
+      await f.messages().sendMessage.call(f.calls, 'prepare', 'repaired', actor);
+      expect(f.messagesCaptured.enqueueSession).not.toHaveBeenCalled();
+      expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+      expect(f.provider.createPr).not.toHaveBeenCalled();
+      expect(f.calls.approveSession).not.toHaveBeenCalled();
+      expect(f.cm.stop).not.toHaveBeenCalled();
+      expect(f.cm.kill).not.toHaveBeenCalled();
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(f.messagesCaptured.reconcileInfrastructureBlocker).toHaveBeenCalledExactlyOnceWith(
+        'prepare',
+      );
+      expect(f.pod()).toMatchObject({
+        status: 'running',
+        pendingEscalation: null,
+        containerId: before.containerId,
+        worktreePath: before.worktreePath,
+        validationAttempts: before.validationAttempts,
+        budgetExtensionsUsed: before.budgetExtensionsUsed,
+        lifecycleGeneration: before.lifecycleGeneration,
+        prUrl: null,
+      });
+      const receipt = {
+        actor,
+        response: source === 'host_push' ? 'daemon_auth_repaired' : 'credential_repaired',
+      };
+      expect(f.deps.escalationRepo.getOrThrow(request.id).response).toMatchObject(receipt);
+      const saved = f.pod();
+      const reopened = f.reopen();
+      expect(reopened.pods.getOrThrow('prepare')).toEqual(saved);
+      expect(createEscalationRepository(f.db).getOrThrow(request.id).response).toMatchObject(
+        receipt,
+      );
+      expect(reopened.pods.hasInfrastructureBlocker?.('prepare')).toBe(true);
+    },
+  );
   it('persists actor-labelled attached reply and queued guidance before resolving the shared waiter, through SQLite reopen', async () => {
     const f = createOperatorFixture(true);
     const request = f.awaiting();
@@ -89,6 +146,74 @@ describe('complete operator message lifetime', () => {
     });
     expect(f.calls.handleCompletion).toHaveBeenCalledWith('prepare');
   });
+  it.each(['credential', 'push', 'base'] as const)(
+    'does not publish or fail a replacement after host-push %s awaits',
+    async (stage) => {
+      const f = createOperatorFixture();
+      const request = f.awaiting('request_credential', {
+        service: 'github',
+        reason: 'Host push',
+        source: 'host_push',
+      });
+      let replacement: ReturnType<typeof f.pod> | undefined;
+      const replace = () => {
+        f.podRepo.incrementLifecycleGeneration('prepare');
+        f.podRepo.update('prepare', { status: 'running', pendingEscalation: null });
+        replacement = f.pod();
+      };
+      if (stage === 'credential')
+        f.messagesCaptured.resolveGitCredential = vi.fn(async () => {
+          replace();
+          return 'synthetic-git-key';
+        });
+      if (stage === 'push')
+        vi.mocked(f.worktreeManager.mergeBranch).mockImplementationOnce(async () => {
+          replace();
+        });
+      if (stage === 'base')
+        f.messagesCaptured.ensurePrBaseBranchOnOrigin = vi.fn(async () => {
+          replace();
+        });
+      await expect(
+        f.messages().sendMessage.call(f.calls, 'prepare', 'repaired'),
+      ).rejects.toMatchObject({ code: 'STALE_VALIDATION_EXECUTION' });
+      expect(replacement).toBeDefined();
+      expect(f.pod()).toEqual(replacement);
+      expect(f.worktreeManager.mergeBranch).toHaveBeenCalledTimes(stage === 'credential' ? 0 : 1);
+      expect(f.provider.createPr).not.toHaveBeenCalled();
+      expect(f.calls.approveSession).not.toHaveBeenCalled();
+      expect(f.cm.stop).not.toHaveBeenCalled();
+      expect(f.messagesCaptured.reconcileInfrastructureBlocker).not.toHaveBeenCalled();
+      expect(f.deps.escalationRepo.getOrThrow(request.id).response?.response ?? null).toBe(
+        stage === 'credential' ? null : 'daemon_auth_repaired',
+      );
+    },
+  );
+  it('rechecks host-push ownership before a deferred automatic approval', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = createOperatorFixture();
+      f.awaiting('request_credential', {
+        service: 'github',
+        reason: 'Host push',
+        source: 'host_push',
+      });
+      f.podRepo.update('prepare', {
+        prUrl: 'https://github.com/org/repo/pull/29',
+        autoApprove: true,
+      });
+      await f.messages().sendMessage.call(f.calls, 'prepare', 'repaired');
+      expect(f.pod().status).toBe('validated');
+      f.podRepo.incrementLifecycleGeneration('prepare');
+      f.podRepo.update('prepare', { status: 'killed' });
+      const replacement = f.pod();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.calls.approveSession).not.toHaveBeenCalled();
+      expect(f.pod()).toEqual(replacement);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('repairs host-fetch auth by queueing without container injection or agent resume', async () => {
     const f = createOperatorFixture();
     f.awaiting('request_credential', {
@@ -162,6 +287,20 @@ describe('complete operator message lifetime', () => {
     );
     expect(f.cm.writeFile).not.toHaveBeenCalled();
     expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+  });
+  it('does not turn a validation override into infrastructure repair or erase its decision', async () => {
+    const f = createOperatorFixture();
+    f.infrastructure();
+    const request = f.awaiting('validation_override', { findings: [], attempt: 1, maxAttempts: 3 });
+    const before = f.pod();
+    await expect(
+      f.messages().sendMessage.call(f.calls, 'prepare', 'dismiss all'),
+    ).rejects.toMatchObject({ code: 'INFRASTRUCTURE_BLOCKED' });
+    expect(f.pod()).toEqual(before);
+    expect(f.deps.escalationRepo.getOrThrow(request.id).response).toBeNull();
+    expect(f.calls.triggerValidation).not.toHaveBeenCalled();
+    expect(f.messagesCaptured.beginGoalTaskRework).not.toHaveBeenCalled();
+    expect(f.messagesCaptured.taskFeedbackEvents).not.toHaveBeenCalled();
   });
   it('routes dismissals to validation without starting another agent turn', async () => {
     const f = createOperatorFixture();

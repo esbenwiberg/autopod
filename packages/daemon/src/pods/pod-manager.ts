@@ -1068,6 +1068,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
 
   const agentEventConsumption = createAgentEventConsumption(deps, {
+    reconcileInfrastructureBlocker: (id) => completionWorkflow.reconcileInfrastructureBlocker(id),
     podRepo,
     activeAgentRunResolvers,
     activeAgentRuns,
@@ -1182,6 +1183,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     isFixCycleTerminal,
   });
   const operatorMessages = createOperatorMessages(deps, {
+    reconcileInfrastructureBlocker: (id) => completionWorkflow.reconcileInfrastructureBlocker(id),
     pauseIntents,
     podRepo,
     activeAgentRuns,
@@ -1214,6 +1216,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     resolveEffectiveBoundProfile,
   });
   const operatorRejection = createOperatorRejection({
+    reconcileInfrastructureBlocker: (id) => completionWorkflow.reconcileInfrastructureBlocker(id),
     podRepo,
     resolveEffectiveBoundProfile,
     beginGoalTaskRework,
@@ -1225,6 +1228,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     persistRuntimeCredentialsForPod,
   });
   const operatorPause = createOperatorPause(deps, {
+    reconcileInfrastructureBlocker: (id) => completionWorkflow.reconcileInfrastructureBlocker(id),
     pauseIntents,
     podRepo,
     emitActivityStatus,

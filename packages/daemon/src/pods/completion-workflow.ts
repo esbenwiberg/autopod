@@ -161,12 +161,13 @@ export function createCompletionWorkflow(
     if (!preparedSource) return;
     await applyCompletionDecision(pod, preparedSource, (id) => this.triggerValidation(id));
   }
+  const infrastructureCompletions = new Map<string, Promise<void>>();
   /** Restart can finish an already-settled block, never manufacture termination or dispatch. */
   async function reconcileInfrastructureBlocker(podId: string): Promise<void> {
     const pod = podRepo.getOrThrow(podId);
     const cycle = pod.finalization?.cycle;
     if (
-      pod.status !== 'running' ||
+      (pod.status !== 'running' && pod.status !== 'awaiting_input') ||
       !podRepo.hasInfrastructureBlocker?.(podId) ||
       cycle === undefined ||
       !podRepo.taskExecutions?.hasSettledRun?.(pod, cycle)
@@ -178,7 +179,39 @@ export function createCompletionWorkflow(
     podRepo.deletionOwnership.assertTaskAvailable(podId);
     // Deliberately avoid general completion: this can only preserve/park existing
     // human or infrastructure work, not validate, publish or collect artifacts.
-    await holdCompletionForHumanWork(pod);
+    const key = JSON.stringify([
+      podId,
+      pod.lifecycleGeneration,
+      cycle,
+      pod.containerId,
+      pod.executionTarget,
+    ]);
+    const pending = infrastructureCompletions.get(key);
+    if (pending) {
+      await pending;
+      const current = podRepo.getOrThrow(podId);
+      // A reply can replace the pending question while its capture is in flight.
+      // Coalesce the capture, not the newly required blocked/guidance transition.
+      if (
+        current.lifecycleGeneration === pod.lifecycleGeneration &&
+        current.finalization?.cycle === cycle &&
+        current.containerId === pod.containerId &&
+        current.executionTarget === pod.executionTarget &&
+        current.status === 'running' &&
+        current.pendingEscalation === null
+      )
+        await reconcileInfrastructureBlocker(podId);
+      return;
+    }
+    const completion = Promise.resolve().then(async () => {
+      await holdCompletionForHumanWork(pod);
+    });
+    infrastructureCompletions.set(key, completion);
+    try {
+      await completion;
+    } finally {
+      if (infrastructureCompletions.get(key) === completion) infrastructureCompletions.delete(key);
+    }
   }
   return { handleCompletion, reconcileInfrastructureBlocker };
 }

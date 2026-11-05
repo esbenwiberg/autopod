@@ -8,7 +8,7 @@ import { isTerminalState } from './state-machine.js';
 import { ValidationSupersededError } from './validation-ownership.js';
 import {
   assertValidationExecutionSettled,
-  captureValidationMutationGuard,
+  captureValidationDispatchGuard,
 } from './validation-recovery-policy.js';
 import type {
   RevalidationPassCaptured,
@@ -52,7 +52,7 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
     }: RevalidationPassContext,
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
     assertValidationExecutionSettled({ ...s2, lastValidationResult: result });
-    const assertCurrent = captureValidationMutationGuard(podRepo, s2);
+    const assertCurrent = captureValidationDispatchGuard(podRepo, s2);
     emitActivityStatus(
       podId,
       checksOnly

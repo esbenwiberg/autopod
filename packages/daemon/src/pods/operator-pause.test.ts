@@ -1,6 +1,81 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createOperatorFixture } from '../test-utils/operator-helpers.js';
+function blockedFixture() {
+  const f = createOperatorFixture();
+  f.deps.escalationRepo.insert({
+    id: 'pause-infrastructure',
+    podId: 'prepare',
+    type: 'report_blocker',
+    timestamp: new Date().toISOString(),
+    response: null,
+    payload: {
+      kind: 'infrastructure',
+      lifecycleGeneration: f.pod().lifecycleGeneration,
+      requiresResponse: false,
+      description: 'Configured runner unavailable',
+      attempted: ['configured check'],
+      needs: 'Qualified execution',
+    },
+  });
+  return f;
+}
 describe('pause settlement ownership', () => {
+  it('retains its admission fence until the narrow infrastructure owner settles', async () => {
+    const f = blockedFixture();
+    const run = f.activeRun();
+    let release!: () => void;
+    const preservation = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(f.pauseCaptured.reconcileInfrastructureBlocker).mockReturnValueOnce(preservation);
+    const owner = f.pause();
+    const pending = owner.pauseSession('prepare');
+    await Promise.resolve();
+    expect(f.pauseCaptured.reconcileInfrastructureBlocker).not.toHaveBeenCalled();
+    run.settle();
+    await vi.waitFor(() =>
+      expect(f.pauseCaptured.reconcileInfrastructureBlocker).toHaveBeenCalledWith('prepare'),
+    );
+    expect(f.pod().status).toBe('running');
+    expect(f.state.pauseIntents.has('prepare')).toBe(true);
+    await expect(owner.pauseSession('prepare')).rejects.toMatchObject({ code: 'PAUSE_SETTLING' });
+    await expect(f.messages().sendMessage.call(f.calls, 'prepare', 'Resume')).rejects.toMatchObject(
+      { code: 'PAUSE_SETTLING' },
+    );
+    release();
+    await pending;
+    // A narrow owner that declines finalization is not permission to park anyway.
+    expect(f.pod().status).toBe('running');
+    expect(f.state.pauseIntents.size).toBe(0);
+    expect(f.calls.handleCompletion).not.toHaveBeenCalled();
+    expect(f.calls.triggerValidation).not.toHaveBeenCalled();
+    expect(f.calls.approveSession).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.suspend).toHaveBeenCalledTimes(1);
+  });
+  it('propagates narrow-owner failure without parking or retaining its pause token', async () => {
+    const f = blockedFixture();
+    const failure = new Error('Infrastructure ownership read failed');
+    vi.mocked(f.pauseCaptured.reconcileInfrastructureBlocker).mockRejectedValueOnce(failure);
+    await expect(f.pause().pauseSession('prepare')).rejects.toBe(failure);
+    expect(f.pod().status).toBe('running');
+    expect(f.state.pauseIntents.size).toBe(0);
+    expect(f.calls.handleCompletion).not.toHaveBeenCalled();
+    expect(f.calls.triggerValidation).not.toHaveBeenCalled();
+  });
+  it('does not clear a replacement pause token or overwrite a newer lifecycle after finalization', async () => {
+    const f = blockedFixture();
+    const token = Symbol('newer-pause');
+    const generation = f.pod().lifecycleGeneration;
+    vi.mocked(f.pauseCaptured.reconcileInfrastructureBlocker).mockImplementationOnce(async () => {
+      f.state.pauseIntents.set('prepare', token);
+      f.podRepo.incrementLifecycleGeneration('prepare');
+    });
+    const emit = vi.spyOn(f.pauseCaptured, 'emitActivityStatus');
+    await f.pause().pauseSession('prepare');
+    expect(f.state.pauseIntents.get('prepare')).toBe(token);
+    expect(f.pod()).toMatchObject({ status: 'running', lifecycleGeneration: generation + 1 });
+    expect(emit).toHaveBeenCalledExactlyOnceWith('prepare', 'Pausing pod…');
+  });
   it('suspends and waits for the original run before marking paused and clearing its timer', async () => {
     vi.useFakeTimers();
     const f = createOperatorFixture();

@@ -5,6 +5,7 @@ import {
   preflightAgentContinuation,
   prepareRetainedAgentContinuation,
 } from './continuation-preflight.js';
+import { assertNoInfrastructureBlocker } from './escalation-coordinator.js';
 import { resolvedReasoningEffort } from './provider-attempt-policy.js';
 import {
   buildContinuationPrompt as buildContinuationPromptFromWorktree,
@@ -66,7 +67,10 @@ export function createContinuationContext(deps: ContinuationLiveDependencies, ca
   async function recordContinuationProvenance(pod: Pod, containerId: string): Promise<void> {
     await preflightAgentContinuation(pod, containerId, {
       containerManager: containerManagerFactory.get(pod.executionTarget),
-      assertAvailable: () => podRepo.sourceAdoptions?.assertAvailable(pod.id),
+      assertAvailable: () => {
+        podRepo.sourceAdoptions?.assertAvailable(pod.id);
+        assertNoInfrastructureBlocker(podRepo, pod.id);
+      },
       readCurrent: () => podRepo.getOrThrow(pod.id),
       hasPendingDecision: () =>
         podRepo.hasUnansweredDecision?.(pod.id) ??
@@ -119,6 +123,7 @@ export function createContinuationContext(deps: ContinuationLiveDependencies, ca
     await recordContinuationProvenance(pod, pod.containerId);
     const mcpServers = await primeRuntimeForResume(pod, runtime, pod.containerId, env);
     const continuationMessage = appendDecisionContext(pod, message);
+    assertNoInfrastructureBlocker(podRepo, podId);
     if (!fresh) return runtime.resume(podId, continuationMessage, pod.containerId, env);
     const profile = executionForPod(pod);
     return runtime.spawn({

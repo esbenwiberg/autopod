@@ -103,11 +103,45 @@ async function reconcileSession(
 ): Promise<void> {
   const { podRepo, eventBus, containerManager, enqueueSession, logger } = deps;
 
+  // A daemon restart is not an answer to a human decision. Retain its identity
+  // and resources; a later explicit reply drives recovery rather than auto-dispatch.
+  if (pod.status === 'awaiting_input' || pod.pendingEscalation) {
+    podRepo.update(pod.id, {
+      lastRecoveryTrigger: 'restart',
+      lastCorrectionMessage:
+        'Human decision remains pending after daemon restart. Review the pending question; preserved worker state may require recovery before continuation.',
+    });
+    result.skipped.push(pod.id);
+    return;
+  }
+
+  if (podRepo.hasInfrastructureBlocker?.(pod.id)) {
+    podRepo.update(pod.id, {
+      lastRecoveryTrigger: deps.trigger ?? 'restart',
+      lastCorrectionMessage:
+        'Infrastructure remains blocked. Original execution, source and reports retained; no automatic retry or chat recovery is supported.',
+    });
+    try {
+      const goal = deps.readNativeGoal?.(pod.id);
+      if (goal?.fence && !goal.executionStopped) {
+        result.skipped.push(pod.id);
+        return;
+      }
+      await deps.reconcileInfrastructureBlocker?.(pod.id);
+    } catch (err) {
+      // Failed reads/preservation must not reach the generic mark-killed fallback.
+      logger.error(
+        { err, podId: pod.id },
+        'Infrastructure reconciliation retained original ownership',
+      );
+    }
+    result.skipped.push(pod.id);
+    return;
+  }
+
   const nativeGoal = deps.readNativeGoal?.(pod.id);
   if (
     nativeGoal?.fence &&
-    pod.status !== 'awaiting_input' &&
-    !pod.pendingEscalation &&
     !hasInterruptedArtifactCollection(pod) &&
     !(pod.status === 'queued' && nativeGoal.controlIntent === 'resume')
   ) {
@@ -131,37 +165,6 @@ async function reconcileSession(
       result.skipped.push(pod.id);
       return;
     }
-  }
-
-  // A daemon restart is not an answer to a human decision. Retain its identity
-  // and resources; a later explicit reply drives recovery rather than auto-dispatch.
-  if (pod.status === 'awaiting_input' || pod.pendingEscalation) {
-    podRepo.update(pod.id, {
-      lastRecoveryTrigger: 'restart',
-      lastCorrectionMessage:
-        'Human decision remains pending after daemon restart. Review the pending question; preserved worker state may require recovery before continuation.',
-    });
-    result.skipped.push(pod.id);
-    return;
-  }
-
-  if (podRepo.hasInfrastructureBlocker?.(pod.id)) {
-    podRepo.update(pod.id, {
-      lastRecoveryTrigger: deps.trigger ?? 'restart',
-      lastCorrectionMessage:
-        'Infrastructure remains blocked. Original execution, source and reports retained; no automatic retry or chat recovery is supported.',
-    });
-    try {
-      await deps.reconcileInfrastructureBlocker?.(pod.id);
-    } catch (err) {
-      // Failed reads/preservation must not reach the generic mark-killed fallback.
-      logger.error(
-        { err, podId: pod.id },
-        'Infrastructure reconciliation retained original ownership',
-      );
-    }
-    result.skipped.push(pod.id);
-    return;
   }
 
   if (hasInterruptedArtifactCollection(pod)) {

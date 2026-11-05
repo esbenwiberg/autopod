@@ -356,6 +356,7 @@ export function createAgentProcessWorkflow(
                 timestamp: goal.updatedAt,
                 fatal: true,
                 message: `Native Goal ${goal.state}; continuation requires operator review`,
+                ...(!goal.executionStopped ? { executionTermination: 'unverified' as const } : {}),
               };
           } catch (error) {
             const goal = goals.get(podId);
@@ -608,7 +609,12 @@ export function createAgentProcessWorkflow(
         );
       }
 
-      if (outcome === 'completed') {
+      if (!ownsLifecycle(podId, lifecycleGeneration, containerId)) return;
+      if (podRepo.hasInfrastructureBlocker?.(podId)) {
+        // All terminal outcomes use the same positively-settled preservation
+        // owner, not provider recovery, budget parking, or general completion.
+        await this.reconcileInfrastructureBlocker(podId);
+      } else if (outcome === 'completed') {
         visibleFailurePhase = 'completion';
         await this.handleCompletion(podId);
       } else if (outcome === 'failed') {
@@ -632,6 +638,14 @@ export function createAgentProcessWorkflow(
       }
       if (!ownsLifecycle(podId, lifecycleGeneration, null)) {
         logger.info({ podId, generation: lifecycleGeneration }, 'Discarded stale lifecycle error');
+        return;
+      }
+      if (podRepo.hasInfrastructureBlocker?.(podId)) {
+        logger.warn(
+          { err, podId },
+          'Infrastructure blocked; retaining resources for owned settlement',
+        );
+        await this.reconcileInfrastructureBlocker(podId);
         return;
       }
       if (err instanceof SandboxInfrastructureError) {

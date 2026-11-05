@@ -6,7 +6,10 @@ import type { NudgeRepository } from './nudge-repository.js';
 import type { PodRepository } from './pod-repository.js';
 
 interface CompletionHumanGateDependencies {
-  podRepo: Pick<PodRepository, 'getOrThrow' | 'completionJournal' | 'atomically'>;
+  podRepo: Pick<
+    PodRepository,
+    'getOrThrow' | 'completionJournal' | 'atomically' | 'hasInfrastructureBlocker'
+  >;
   escalationRepo?: Pick<EscalationRepository, 'listBySession'>;
   nudgeRepo: Pick<NudgeRepository, 'hasPending'>;
   preservePodWorkspace(pod: Pod, reason: string): Promise<void>;
@@ -75,7 +78,10 @@ export function createCompletionHumanGate(deps: CompletionHumanGateDependencies)
     }
     if (!ownsArtifactCompletion(pod, false, true)) return;
     const current = podRepo.getOrThrow(podId);
-    const reason = `Worker settled with uncollected human guidance. Use Rework to read check_messages, acknowledge its receipt, and apply the saved guidance before validation or delivery.${preservationFailure} Original resources and guidance retained.`;
+    const recovery = podRepo.hasInfrastructureBlocker?.(podId)
+      ? 'Infrastructure also remains blocked. The Autopod execution owner must diagnose the recorded need; preserve this guidance for a qualified execution, without ordinary coding retry.'
+      : 'Use Rework to read check_messages, acknowledge its receipt, and apply the saved guidance before validation or delivery.';
+    const reason = `Worker settled with uncollected human guidance. ${recovery}${preservationFailure} Original resources and guidance retained.`;
     atomicPodChange(podRepo, () => {
       podRepo.completionJournal?.mark(current, 'awaiting_human', preserved);
       transition(current, 'failed', { failureReason: reason });

@@ -109,18 +109,33 @@ export function createOperatorPause(
       );
       throw error;
     }
-    const infrastructure = podRepo.hasInfrastructureBlocker?.(podId) === true;
-    transition(settledPod, infrastructure ? 'failed' : 'paused', {
-      pauseReason: infrastructure ? null : 'manual',
-    });
+    if (podRepo.hasInfrastructureBlocker?.(podId) === true) {
+      try {
+        // Keep duplicate pause/message admission fenced while the narrow owner
+        // verifies exact native settlement and preserves the workspace. Absence
+        // of active runs is not permission to park without that evidence.
+        await captured.reconcileInfrastructureBlocker(podId);
+        const current = podRepo.getOrThrow(podId);
+        if (
+          current.status === 'running' &&
+          current.lifecycleGeneration === pod.lifecycleGeneration &&
+          current.containerId === pod.containerId &&
+          !current.pendingEscalation
+        ) {
+          emitActivityStatus(
+            podId,
+            'Infrastructure finalization remains unsettled; source and resources retained for reconciliation.',
+          );
+        }
+      } finally {
+        if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);
+      }
+      return;
+    }
+    transition(settledPod, 'paused', { pauseReason: 'manual' });
     if (pauseIntents.get(podId) === pauseToken) pauseIntents.delete(podId);
-    emitActivityStatus(
-      podId,
-      infrastructure
-        ? 'Infrastructure blocked; execution settled and source retained. Ordinary Resume, tell and nudge cannot repair the recorded needs. Autopod execution diagnosis and a qualified execution are required.'
-        : 'Pod paused — use [t] tell or [u] nudge to resume',
-    );
-    logger.info({ podId }, infrastructure ? 'Pod blocked by infrastructure' : 'Pod paused');
+    emitActivityStatus(podId, 'Pod paused — use [t] tell or [u] nudge to resume');
+    logger.info({ podId }, 'Pod paused');
   }
   return { pauseSession };
 }

@@ -8,6 +8,7 @@ import {
   assertAgentContinuationCurrent,
   prepareRetainedAgentContinuation,
 } from './continuation-preflight.js';
+import { assertNoInfrastructureBlocker } from './escalation-coordinator.js';
 import { formatFeedback } from './feedback-formatter.js';
 import type { OperatorRejectionCalls, OperatorRejectionCaptured } from './operator-contracts.js';
 import { isTerminalState } from './state-machine.js';
@@ -45,6 +46,7 @@ export function createOperatorRejection(captured: OperatorRejectionCaptured) {
       podRepo.sourceAdoptions?.assertAvailable(podId);
       podRepo.deletionOwnership?.assertTaskAvailable(podId);
       assertTaskExecutionTerminationVerified(podRepo.taskExecutions, podId);
+      assertNoInfrastructureBlocker(podRepo, podId);
       assertAgentContinuationCurrent(pod, pod.containerId, {
         readCurrent: () => podRepo.getOrThrow(podId),
         expectedStatus: pod.status,
@@ -131,8 +133,26 @@ export function createOperatorRejection(captured: OperatorRejectionCaptured) {
       // Roll back to failed — don't leave the pod stuck in 'running' with no agent
       if (err instanceof AgentContinuationSupersededError) throw err;
       logger.error({ err, podId }, 'Failed to resume agent after rejection');
+      if (podRepo.hasInfrastructureBlocker?.(podId)) {
+        try {
+          const current = podRepo.getOrThrow(podId);
+          if (
+            current.lifecycleGeneration === pod.lifecycleGeneration &&
+            current.containerId === pod.containerId &&
+            current.executionTarget === pod.executionTarget &&
+            current.worktreePath === pod.worktreePath
+          )
+            await captured.reconcileInfrastructureBlocker(podId);
+        } catch (captureError) {
+          logger.warn(
+            { err: captureError, podId },
+            'Reported rejection remains held after failure',
+          );
+        }
+        throw err;
+      }
       const s = podRepo.getOrThrow(podId);
-      if (!isTerminalState(s.status)) {
+      if (!isTerminalState(s.status) && !podRepo.hasInfrastructureBlocker?.(podId)) {
         transition(s, 'failed');
         emitActivityStatus(
           podId,
