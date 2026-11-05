@@ -51,6 +51,19 @@ this resource-policy gap; fresh native checks and independent review still gate
 any retained-source delivery. Preserve 8 GiB allocation and serialize expensive
 checks rather than treating heap size as a reservation or removing declarations.
 
+A later Advisor-route candidate exhausted the declaration worker on native Node22
+CI even with the 4 GiB default. Its watcher binding schema repeatedly serialized
+a large refined launch-schema intersection. Naming the exact existing types cuts
+shared declaration output by about 48% for that candidate, with byte-identical
+runtime output and compile-time equality checks for schema, input and output.
+All 74 extended daemon entries remain covered; the heap bound is unchanged.
+Offline Node22.23.4 Linux qualification passed full build and typecheck within
+8 GiB / 2 CPUs (5.87 GiB cumulative cgroup peak, no OOM events). The local baseline
+also passed, and that amd64 environment injects Node's `--no-opt`; this does not
+reproduce or certify the native CI failure. Fresh native CI remains required.
+The declaration-size regression protects against renewed expansion, not against
+every possible compiler-memory regression.
+
 Disk-reopen fixtures should use the production `createDatabase` connection
 policy, including WAL and `synchronous=NORMAL`, rather than paying a separate
 full-sync rollback-journal transaction for every schema version. The retained
@@ -80,6 +93,19 @@ legacy checkpoint reconciliation fixture uses WAL only during input construction
 then explicitly seals it back to DELETE and verifies no sidecars remain before
 capturing the immutable input bytes. The actual conversion, backups, packaged CLI,
 negative cases and 30-second deadline remain unchanged.
+
+Ordinary in-memory unit fixtures now migrate one empty template per test module
+instance and deserialize a private copy for each caller. They do not share a live
+connection, rows, transactions, or mutable schema. Foreign keys are enabled on
+every new connection. The uncached migration path remains available and is checked
+against the copied schema, seeded rows, integrity and connection settings. Tests
+also exercise cross-fixture write/schema/transaction isolation and prove later
+copies do not reread migration files. Historical migration, disk/reopen and
+production migration paths are unchanged. This removes repeated fixture setup;
+it does not skip test cases, increase deadlines, or certify an old timed-out run.
+
+For an end-to-end self-development checklist, see
+[developing Autopod in Autopod](autopod-self-development.md).
 
 Disposable qualification must give tests their own writable dependency caches;
 a read-only dependency mount can break Playwright/Vite fixture setup independently
