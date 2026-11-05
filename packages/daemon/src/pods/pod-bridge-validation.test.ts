@@ -711,7 +711,7 @@ describe('PodBridge.callAdvisorModel', () => {
 
     const result = await bridge.callAdvisorModel(podId, 'Generate a browser QA script');
 
-    expect(result).toContain('provider copilot is not supported');
+    expect(result.response).toContain('provider copilot is not supported');
     expect(mockRunCodexReview).not.toHaveBeenCalled();
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
   });

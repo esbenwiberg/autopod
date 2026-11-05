@@ -1,10 +1,12 @@
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createProviderAccountStore } from '../provider-accounts/provider-account-store.js';
 import {
   createTestConfiguration,
   insertConfigurationTestPod,
 } from '../test-utils/configuration-helpers.js';
 import { createTestDb } from '../test-utils/mock-helpers.js';
+import { resolveLaunchAgentRoute } from './agent-route-resolution.js';
 import { createConfigurationStore } from './configuration-store.js';
 import { deriveLaunch } from './derive-launch.js';
 import { configurationDigest, resolveLaunch } from './launch-resolver.js';
@@ -68,6 +70,54 @@ describe('launch resolution and snapshots', () => {
     );
     expect(config.ai.main).toEqual(old.ai.main);
     expect(config.ai.reviewer).toEqual(old.ai.reviewer);
+  });
+  it('rejects unsafe or missing Advisor-only fallback accounts during launch', async () => {
+    const { services } = createTestConfiguration(db);
+    const accounts = createProviderAccountStore(db);
+    accounts.create({
+      id: 'account',
+      name: 'Main',
+      provider: 'anthropic',
+      credentials: { provider: 'anthropic', apiKey: 'fixture' },
+    });
+    accounts.create({
+      id: 'unsafe',
+      name: 'Source credential',
+      provider: 'copilot',
+      credentials: { provider: 'copilot', token: 'fixture' },
+    });
+    services.resolveAgentRoute = async (route) => resolveLaunchAgentRoute(route, accounts);
+    for (const providerAccountId of ['missing', 'unsafe']) {
+      await expect(
+        resolveLaunch(
+          {
+            repositoryId: 'repo-a',
+            task: 'Consult',
+            overrides: {
+              ai: {
+                advisor: {
+                  mode: 'independent',
+                  route: {
+                    providerAccountId: 'account',
+                    runtime: 'claude',
+                    model: 'sonnet',
+                    failover: [
+                      {
+                        providerAccountId,
+                        runtime: providerAccountId === 'unsafe' ? 'copilot' : 'claude',
+                        model: 'fallback',
+                      },
+                    ],
+                    maxHops: 1,
+                  },
+                },
+              },
+            },
+          },
+          services,
+        ),
+      ).rejects.toThrow();
+    }
   });
   it('requires explicit supported findings policy and preserves ordinary defaults', async () => {
     const { services } = createTestConfiguration(db);

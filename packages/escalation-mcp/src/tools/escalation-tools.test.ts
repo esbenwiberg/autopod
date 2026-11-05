@@ -210,12 +210,10 @@ describe('askHuman', () => {
     const bridge = makeBridge({
       getHumanResponseTimeout: vi.fn().mockReturnValue(1),
       getHumanResponseOnTimeout: vi.fn().mockReturnValue('ask_ai'),
-      callAdvisorModel: vi
-        .fn()
-        .mockResolvedValue({
-          response: 'AI consultation failed: Advisor requires a live pod container',
-          model: 'advisor-model',
-        }),
+      callAdvisorModel: vi.fn().mockResolvedValue({
+        response: 'AI consultation failed: Advisor requires a live pod container',
+        model: 'advisor-model',
+      }),
     });
     const promise = askHuman('sess-1', { question: 'Slow?' }, bridge, pendingRequests);
     vi.advanceTimersByTime(1_500);
@@ -227,12 +225,10 @@ describe('askHuman', () => {
   it('routes to AI immediately when ask_human is disabled for a series', async () => {
     const bridge = makeBridge({
       isAskHumanDisabled: vi.fn().mockReturnValue(true),
-      callAdvisorModel: vi
-        .fn()
-        .mockResolvedValue({
-          response: 'AI consultation failed: Advisor requires a live pod container',
-          model: 'advisor-model',
-        }),
+      callAdvisorModel: vi.fn().mockResolvedValue({
+        response: 'AI consultation failed: Advisor requires a live pod container',
+        model: 'advisor-model',
+      }),
     });
 
     const result = await askHuman(
