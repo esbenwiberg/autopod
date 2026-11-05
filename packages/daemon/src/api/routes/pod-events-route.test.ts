@@ -80,6 +80,25 @@ describe('GET /pods/:podId/events', () => {
     ]);
   });
 
+  it('replays observed file changes with provenance and stable ids for the File filter', async () => {
+    const event: SystemEvent = {
+      type: 'pod.agent_activity',
+      timestamp: new Date().toISOString(),
+      podId: 'sess-001',
+      event: {
+        type: 'file_change',
+        timestamp: new Date().toISOString(),
+        path: 'src/app.ts',
+        action: 'modify',
+        source: 'workspace',
+      },
+    };
+    const id = eventRepo.insert(event);
+    const res = await app.inject({ method: 'GET', url: '/pods/sess-001/events' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([{ ...event.event, eventId: id }]);
+  });
+
   it('returns firewall denials as replayable log events', async () => {
     const firstId = eventRepo.insert(agentActivity('first'));
     const denialId = eventRepo.insert(firewallDenied('oraios-software.de'));
