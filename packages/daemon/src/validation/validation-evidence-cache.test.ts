@@ -1,8 +1,8 @@
 import { copyFileSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { logger } from '../test-utils/mock-helpers.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
@@ -39,7 +39,7 @@ describe('exact-input validation evidence', () => {
       for (const file of readdirSync(migrations))
         if (Number.parseInt(file, 10) <= version)
           copyFileSync(join(migrations, file), join(dir, file));
-      let db = new Database(join(dir, 'test.db'));
+      let db = createDatabase(join(dir, 'test.db'), logger);
       try {
         runMigrations(db, dir, logger);
         insertTestProfile(db);
@@ -51,7 +51,7 @@ describe('exact-input validation evidence', () => {
           duration: 100,
         });
         db.close();
-        db = new Database(join(dir, 'test.db'));
+        db = createDatabase(join(dir, 'test.db'), logger);
         await runMigrationsWithBackups(db, migrations, logger);
         expect(
           createValidationEvidenceCache(db).get('test', identity)?.reusedEvidence.receiptId,

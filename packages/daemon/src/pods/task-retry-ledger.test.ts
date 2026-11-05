@@ -1,8 +1,8 @@
 import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createPodRepository } from './pod-repository.js';
@@ -81,7 +81,7 @@ describe('durable task validation retry admission', () => {
     const dir = mkdtempSync(join(tmpdir(), 'retry-ledger-'));
     writeFileSync(join(dir, 'state.db'), f.db.serialize());
     f.db.close();
-    const db = new Database(join(dir, 'state.db'));
+    const db = createDatabase(join(dir, 'state.db'), logger);
     try {
       const next = createPodRepository(db).taskRetries;
       expect(next?.state('fix')).toMatchObject({
@@ -193,7 +193,7 @@ it.each([139, 155])(
       if (Number.parseInt(file, 10) <= version)
         copyFileSync(join(migrations, file), join(dir, file));
     const filename = join(dir, 'state.db');
-    let db = new Database(filename);
+    let db = createDatabase(filename, logger);
     db.pragma('foreign_keys = ON');
     try {
       runMigrations(db, dir, logger);
@@ -208,7 +208,7 @@ it.each([139, 155])(
       if (!admission) throw new Error('No admission');
       repo.taskRetries?.start(admission.id);
       db.close();
-      db = new Database(filename);
+      db = createDatabase(filename, logger);
       db.pragma('foreign_keys = ON');
       const recovered = createPodRepository(db).taskRetries;
       expect(recovered?.recoverInterrupted()).toBe(1);
@@ -284,7 +284,7 @@ it('persists sandbox startup policy across disk restart and linked fixes indepen
   const dir = mkdtempSync(join(tmpdir(), 'startup-retry-ledger-'));
   writeFileSync(join(dir, 'state.db'), f.db.serialize());
   f.db.close();
-  const db = new Database(join(dir, 'state.db'));
+  const db = createDatabase(join(dir, 'state.db'), logger);
   try {
     const repo = createPodRepository(db);
     const next = repo.sandboxStartupRetries;
@@ -395,7 +395,7 @@ it.each(['auth', 'unknown', null, 'initialization'])(
     const file = join(dir, 'state.db');
     writeFileSync(file, db.serialize());
     db.close();
-    const reopened = new Database(file);
+    const reopened = createDatabase(file, logger);
     try {
       reopened.pragma('foreign_keys = ON');
       const next = createPodRepository(reopened);
@@ -558,7 +558,7 @@ it.each([{ backoffs: [] }, { backoffs: [0] }])(
     const file = join(dir, 'state.db');
     writeFileSync(file, db.serialize());
     db.close();
-    const reopened = new Database(file);
+    const reopened = createDatabase(file, logger);
     try {
       reopened.pragma('foreign_keys = ON');
       const next = createPodRepository(reopened);
@@ -710,7 +710,7 @@ it('scopes worker provider reconciliation to its exact target and preserves it a
   const file = join(dir, 'state.db');
   writeFileSync(file, db.serialize());
   db.close();
-  const reopened = new Database(file);
+  const reopened = createDatabase(file, logger);
   try {
     const next = createPodRepository(reopened);
     const retries = next.workerRetries;
@@ -746,7 +746,7 @@ it('upgrades schema 177 without broadening an existing worker permission', async
   const migrations = resolve(import.meta.dirname, '../db/migrations');
   for (const file of readdirSync(migrations))
     if (Number.parseInt(file, 10) <= 177) copyFileSync(join(migrations, file), join(dir, file));
-  const db = new Database(join(dir, 'state.db'));
+  const db = createDatabase(join(dir, 'state.db'), logger);
   try {
     db.pragma('foreign_keys = ON');
     runMigrations(db, dir, logger);
@@ -860,7 +860,7 @@ it('retains provider cooldowns through deletion and disk reopen without consumin
   const file = join(dir, 'state.db');
   writeFileSync(file, db.serialize());
   db.close();
-  const reopened = new Database(file);
+  const reopened = createDatabase(file, logger);
   try {
     const next = createPodRepository(reopened);
     const retries = next.workerRetries;
@@ -898,7 +898,7 @@ it('upgrades schema 178 without inventing provider deadlines for older worker ev
   for (const file of readdirSync(migrations))
     if (Number.parseInt(file, 10) <= 178) copyFileSync(join(migrations, file), join(dir, file));
   const file = join(dir, 'state.db');
-  const db = new Database(file);
+  const db = createDatabase(file, logger);
   try {
     db.pragma('foreign_keys = ON');
     runMigrations(db, dir, logger);

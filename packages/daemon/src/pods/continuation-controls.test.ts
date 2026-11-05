@@ -2,10 +2,10 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { EffectiveLaunchConfig, ValidationResult } from '@autopod/shared';
-import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveLaunch } from '../configuration/launch-resolver.js';
+import { createDatabase } from '../db/connection.js';
 import { createProfileStore } from '../profiles/index.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
 import {
@@ -56,8 +56,7 @@ function fixture(disk = false) {
     filename = join(directory, 'state.db');
     writeFileSync(filename, db.serialize());
     db.close();
-    db = new Database(filename);
-    db.pragma('foreign_keys=ON');
+    db = createDatabase(filename, pino({ level: 'silent' }));
   }
   cleanups.push(() => {
     db.close();
@@ -158,8 +157,7 @@ function fixture(disk = false) {
     reopen() {
       if (!filename) throw new Error('Expected private file fixture');
       db.close();
-      db = new Database(filename);
-      db.pragma('foreign_keys=ON');
+      db = createDatabase(filename, pino({ level: 'silent' }));
       return {
         pods: createPodRepository(db),
         goals: createGoalRepository(db),

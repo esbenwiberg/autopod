@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   copyFileSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -13,6 +14,7 @@ import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { expect, it } from 'vitest';
 import { insertTestProfile, logger } from '../test-utils/mock-helpers.js';
+import { createDatabase } from './connection.js';
 import { runMigrations } from './migrate.js';
 import { reconcileNativeCheckpoint } from './reconcile-native-checkpoint.js';
 
@@ -36,14 +38,20 @@ it.each([151, 158, 163])(
       for (const name of readdirSync(legacyDir))
         if (Number.parseInt(name, 10) <= version)
           copyFileSync(join(legacyDir, name), join(dir, name));
-      const db = new Database(input);
+      // Construct the fixture using production WAL, then seal a standalone legacy
+      // DELETE-journal checkpoint. Conversion and its real backup/commit path stay unchanged.
+      const db = createDatabase(input, logger);
       runMigrations(db, dir, logger);
       insertTestProfile(db);
       db.exec(`INSERT INTO pods(id,profile_name,task,status,model,runtime,branch,user_id,task_summary)
       VALUES ('retained','test-profile','Keep source','failed','model','codex','branch','operator','preserve summary');
       INSERT INTO completion_decisions(pod_id,decision_id,response,actor,responded_at)
       VALUES ('retained','question','Keep report only','{"type":"human","userId":"operator"}','2026-01-01');`);
+      expect(db.pragma('journal_mode = DELETE', { simple: true })).toBe('delete');
       db.close();
+      expect(['-wal', '-shm', '-journal'].some((suffix) => existsSync(`${input}${suffix}`))).toBe(
+        false,
+      );
       const bytes = readFileSync(input);
       const receipt = await reconcileNativeCheckpoint(input, output, {
         migrationsDir,

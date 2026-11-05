@@ -9,8 +9,9 @@ import type {
   ValidationPhase,
   ValidationResult,
 } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ReviewerExecutor } from '../interfaces/reviewer-executor.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
@@ -99,8 +100,7 @@ function fixture() {
   } finally {
     seed.close();
   }
-  let db = new Database(file);
-  db.pragma('foreign_keys = ON');
+  let db = createDatabase(file, pino({ level: 'silent' }));
   const repo = createPodRepository(db);
   for (const id of ['worker', 'other'])
     repo.insert({
@@ -272,8 +272,7 @@ function fixture() {
     },
     reopen() {
       db.close();
-      db = new Database(file);
-      db.pragma('foreign_keys = ON');
+      db = createDatabase(file, pino({ level: 'silent' }));
       expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
       expect(db.pragma('foreign_key_check')).toEqual([]);
       return {

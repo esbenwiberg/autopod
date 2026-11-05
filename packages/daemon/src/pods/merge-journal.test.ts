@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import { runMigrations } from '../db/migrate.js';
 import type { MergePrResult } from '../interfaces/pr-manager.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
@@ -156,7 +156,7 @@ describe('durable merge journal', () => {
   it('keeps historical alias admission and accounting consistent across a real database reopen', () => {
     const dir = mkdtempSync(join(tmpdir(), 'autopod-historical-merge-'));
     const path = join(dir, 'journal.db');
-    let db = new Database(path);
+    let db = createDatabase(path, logger);
     try {
       db.pragma('foreign_keys = ON');
       runMigrations(db, new URL('../db/migrations', import.meta.url).pathname, logger);
@@ -172,7 +172,7 @@ describe('durable merge journal', () => {
         "INSERT INTO merge_attempts(id,intent_id,admitted_at) VALUES ('old-attempt','old',?)",
       ).run(new Date().toISOString());
       db.close();
-      db = new Database(path);
+      db = createDatabase(path, logger);
       const restarted = createMergeJournal(db);
       expect(() => restarted.claim(f.pod, f.publicationPod, f.publicationId, f.config)).toThrow(
         'ambiguous',
@@ -447,14 +447,14 @@ describe('durable merge journal', () => {
   it('retains a source-bound merged observation across disk restart without inventing a request', () => {
     const dir = mkdtempSync(join(tmpdir(), 'autopod-merge-disposition-'));
     const path = join(dir, 'journal.db');
-    let db = new Database(path);
+    let db = createDatabase(path, logger);
     try {
       db.pragma('foreign_keys = ON');
       runMigrations(db, new URL('../db/migrations', import.meta.url).pathname, logger);
       const f = fixture(db);
       const planned = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
       db.close();
-      db = new Database(path);
+      db = createDatabase(path, logger);
       const restarted = createMergeJournal(db);
       const closed = {
         merged: false,
@@ -467,7 +467,7 @@ describe('durable merge journal', () => {
       };
       restarted.observeStatus(planned.id, closed);
       db.close();
-      db = new Database(path);
+      db = createDatabase(path, logger);
       const afterClosure = createMergeJournal(db);
       expect(afterClosure.find(f.pod)).toMatchObject({ state: 'planned', prDisposition: 'closed' });
       expect(() =>
@@ -480,7 +480,7 @@ describe('durable merge journal', () => {
       afterClosure.observeDisposition(planned.id, f.result);
       afterClosure.observeDisposition(planned.id, f.result);
       db.close();
-      db = new Database(path);
+      db = createDatabase(path, logger);
       const recovered = createMergeJournal(db);
       expect(recovered.find(f.pod)).toMatchObject({
         state: 'merged',
@@ -566,14 +566,14 @@ describe('durable merge journal', () => {
   it('retains ambiguous admission across independent connections and close/reopen, then records one immutable confirmation', () => {
     const dir = mkdtempSync(join(tmpdir(), 'autopod-merge-journal-'));
     const path = join(dir, 'journal.db');
-    let db = new Database(path);
+    let db = createDatabase(path, logger);
     try {
       db.pragma('foreign_keys = ON');
       runMigrations(db, new URL('../db/migrations', import.meta.url).pathname, logger);
       const f = fixture(db);
       const planned = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
       db.close();
-      db = new Database(path);
+      db = createDatabase(path, logger);
       db.pragma('foreign_keys = ON');
       const beforeAdmission = createMergeJournal(db);
       expect(beforeAdmission.find(f.pod)).toMatchObject({
@@ -583,7 +583,7 @@ describe('durable merge journal', () => {
       });
       expect(db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 0 });
       const attempt = beforeAdmission.claim(f.pod, f.publicationPod, f.publicationId, f.config);
-      const second = new Database(path);
+      const second = createDatabase(path, logger);
       try {
         expect(() =>
           createMergeJournal(second).claim(f.pod, f.publicationPod, f.publicationId, f.config),
@@ -593,7 +593,7 @@ describe('durable merge journal', () => {
         second.close();
       }
       db.close();
-      db = new Database(path);
+      db = createDatabase(path, logger);
       const restarted = createMergeJournal(db);
       expect(restarted.find(f.pod)?.state).toBe('admitted');
       expect(() => restarted.claim(f.pod, f.publicationPod, f.publicationId, f.config)).toThrow(
