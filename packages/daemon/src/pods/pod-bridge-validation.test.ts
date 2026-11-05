@@ -550,7 +550,7 @@ describe('PodBridge.runValidationPhase', () => {
   });
 });
 
-describe('PodBridge.callReviewerModel', () => {
+describe('PodBridge.callAdvisorModel', () => {
   beforeEach(() => {
     mockRunCodexReview.mockReset();
     mockCreateProfileAnthropicClient.mockReset();
@@ -574,7 +574,7 @@ describe('PodBridge.callReviewerModel', () => {
       },
     });
 
-    expect(bridge.getReviewerModel(podId)).toBe('gpt-5');
+    expect(bridge.getAdvisorModel(podId)).toBe('gpt-5');
   });
 
   it('runs browser QA advisory through Codex for OpenAI profiles', async () => {
@@ -588,7 +588,7 @@ describe('PodBridge.callReviewerModel', () => {
       },
     });
 
-    const result = await bridge.callReviewerModel(podId, 'Generate a browser QA script', 'ctx');
+    const result = await bridge.callAdvisorModel(podId, 'Generate a browser QA script', 'ctx');
 
     expect(result).toBe('generated playwright script');
     expect(mockRunCodexReview).toHaveBeenCalledWith(
@@ -627,7 +627,7 @@ describe('PodBridge.callReviewerModel', () => {
       execImpl: async () => ({ stdout: 'advisor answer\n', stderr: '', exitCode: 0 }),
     });
 
-    const result = await bridge.callReviewerModel(podId, 'Review this', 'ctx');
+    const result = await bridge.callAdvisorModel(podId, 'Review this', 'ctx');
 
     expect(result).toBe('advisor answer');
     expect(execMock).toHaveBeenCalledWith(
@@ -658,7 +658,7 @@ describe('PodBridge.callReviewerModel', () => {
       },
     });
 
-    const result = await bridge.callReviewerModel(podId, 'Generate a browser QA script');
+    const result = await bridge.callAdvisorModel(podId, 'Generate a browser QA script');
 
     expect(result).toContain('provider copilot is not supported');
     expect(mockRunCodexReview).not.toHaveBeenCalled();
@@ -680,7 +680,7 @@ describe('PodBridge.callReviewerModel', () => {
       },
     });
 
-    const result = await bridge.callReviewerModel(podId, 'Review this');
+    const result = await bridge.callAdvisorModel(podId, 'Review this');
 
     expect(result).toBe('AI review failed: AI reviewer requires a live pod container');
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
@@ -702,7 +702,7 @@ describe('PodBridge.callReviewerModel', () => {
       },
     });
 
-    const result = await bridge.callReviewerModel(podId, 'Review this');
+    const result = await bridge.callAdvisorModel(podId, 'Review this');
 
     expect(result).toBe('AI review failed: AI reviewer requires a live pod container');
     expect(execMock).not.toHaveBeenCalled();

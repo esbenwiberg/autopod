@@ -10,6 +10,35 @@ import {
 } from './launch-config.schema.js';
 
 describe('composable launch contracts', () => {
+  it('preserves absent advisor and accepts only strict Advisor modes', () => {
+    const main = { providerAccountId: 'main', runtime: 'claude', model: 'sonnet' };
+    expect(aiPresetSchema.parse({ main })).not.toHaveProperty('advisor');
+    expect(launchOverridesSchema.parse({ ai: { main } })).toMatchObject({
+      ai: { main },
+    });
+    for (const advisor of [
+      { mode: 'follow-main' },
+      { mode: 'follow-reviewer' },
+      {
+        mode: 'independent',
+        route: { ...main, failover: [{ ...main, providerAccountId: 'fallback' }], maxHops: 1 },
+      },
+    ]) {
+      expect(aiPresetSchema.safeParse({ main, advisor }).success).toBe(true);
+      expect(launchOverridesSchema.parse({ ai: { advisor } }).ai?.advisor?.mode).toBe(advisor.mode);
+    }
+    for (const advisor of [
+      null,
+      {},
+      { mode: 'unknown' },
+      { mode: 'independent' },
+      { mode: 'follow-main', route: main },
+      { mode: 'follow-reviewer', extra: true },
+      { mode: 'independent', route: { ...main, apiKey: 'secret' } },
+      { mode: 'independent', route: { ...main, failover: [{ ...main, maxHops: 1 }] } },
+    ])
+      expect(aiPresetSchema.safeParse({ main, advisor }).success).toBe(false);
+  });
   it('distinguishes defaults, clearing and empty collections', () => {
     const base = { repositoryId: 'repo', task: 'Fix tests' };
     const missing = launchRequestSchema.parse(base);

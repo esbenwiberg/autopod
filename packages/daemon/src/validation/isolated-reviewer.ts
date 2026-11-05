@@ -465,7 +465,7 @@ export class IsolatedReviewer {
         );
         guard();
         completed = true;
-        return result;
+        return { ...result, model: route.model };
       } catch (error) {
         if (
           error instanceof CodexReviewError ||

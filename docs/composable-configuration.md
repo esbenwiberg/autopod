@@ -164,3 +164,25 @@ Only the owning operator can approve or deny. The daemon records the decision an
 An uncertain execution blocks the target across pods and request keys. After checking the destination, use the desktop's **Reconcile** action or `ap deployment reconcile RUN_ID --digest REVIEW_DIGEST --outcome deployed --note 'What was checked'` (or `not-deployed`). AutoPod first confirms cleanup, then records the operator's external observation. It never automatically repeats an uncertain deployment.
 
 Offline conversion requires an explicit `deploymentByProfile` mapping containing `source: "published-default"`, `targetId`, and `allowedScripts`; enroll the resulting repository/setup IDs on the target before launch. This does not modify any hosted profile by itself. Production admission remains closed pending the overall configuration cutover and live acceptance.
+
+### Advisor and Reviewer routes
+
+AI presets contain `main`, `reviewer`, and optional `advisor`. Reviewer runs automated
+facts, task, pre-submit and browser reviews, including browser script generation.
+Advisor handles `ask_ai`, proactive consultations, and human questions rerouted to AI
+by the existing escalation policy. Consultation enablement and rate limits still apply.
+
+Advisor accepts `{ "mode": "follow-main" }`, `{ "mode": "follow-reviewer" }`, or
+`{ "mode": "independent", "route": { ... } }`. Absence means follow-reviewer;
+existing saved presets and frozen snapshots need no migration. Follow main uses the
+effective main binding after failover. Independent routes use the same controls as
+Reviewer: `providerAccountId`, `runtime`, `model`, `reasoningEffort`, ordered
+`failover` targets and `maxHops`. Advisor failover does not change Main or Reviewer.
+All accounts, including Advisor-only fallbacks, are frozen and checked at launch.
+
+Desktop AI setup tabs are Main agent / Reviewer / Advisor / Failover / Complete JSON.
+Choose Follow main, Follow reviewer, or Independent account and model on Advisor.
+Independent Advisor fallbacks appear in Failover (inline in the older editor).
+Reviewer and Advisor share `reviewerTokenBudget` and whole-task budget accounting,
+including unknown-usage reconciliation and cleanup guards; there is no separate
+Advisor budget. Non-composed legacy profiles retain their existing behavior.

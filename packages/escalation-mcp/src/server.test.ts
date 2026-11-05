@@ -317,7 +317,7 @@ describe('operator-message interlock', () => {
       });
       expect(bridge.runPreSubmitReview).not.toHaveBeenCalled();
       expect(bridge.validateBrowserUrl).not.toHaveBeenCalled();
-      expect(bridge.callReviewerModel).not.toHaveBeenCalled();
+      expect(bridge.callAdvisorModel).not.toHaveBeenCalled();
       expect(bridge.reportTaskSummary).not.toHaveBeenCalled();
     }
   });

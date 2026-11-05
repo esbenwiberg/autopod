@@ -112,6 +112,9 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     screenshotStore,
   } = deps;
 
+  // Bounded, transient response metadata; durable evidence lives in isolated_reviewer_runs.
+  const advisorResponseModels = new Map<string, string>();
+
   function launchForPod(pod: Pod): EffectiveLaunchConfig | null {
     if (pod.launchConfigDigest) {
       const launch = podManager.getLaunchConfiguration?.(pod.id);
@@ -247,18 +250,28 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       logger.info({ pod: podId, who, answer }, 'Escalation answer received');
     },
 
-    getReviewerModel(podId: string): string {
+    getAdvisorModel(podId: string): string {
+      const recorded = advisorResponseModels.get(podId);
+      if (recorded) {
+        advisorResponseModels.delete(podId);
+        return recorded;
+      }
       const pod = podManager.getSession(podId);
-      const profile = reviewerProfileForPod(pod);
+      const profile = pod.launchConfigDigest
+        ? podManager.getReviewerConfig(pod, 'advisor').profile
+        : reviewerProfileForPod(pod);
       return resolveReviewerModel(profile, logger);
     },
 
-    async callReviewerModel(podId: string, question: string, context?: string): Promise<string> {
+    async callAdvisorModel(podId: string, question: string, context?: string): Promise<string> {
       const pod = podManager.getSession(podId);
-      const profile = reviewerProfileForPod(pod);
+      const profile = pod.launchConfigDigest
+        ? podManager.getReviewerConfig(pod, 'advisor').profile
+        : reviewerProfileForPod(pod);
       const model = resolveReviewerModel(profile, logger);
+      advisorResponseModels.delete(podId);
 
-      // Enrich the prompt with pod state so the reviewer has full context
+      // Enrich the prompt with pod state so Advisor has full context
       // beyond what the agent manually passes.
       const contextParts: string[] = [];
 
@@ -297,7 +310,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           provider: resolveReviewerProvider(profile),
           question: question.slice(0, 100),
         },
-        'Calling reviewer model',
+        'Calling Advisor model',
       );
 
       try {
@@ -309,9 +322,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         if (containerStatus !== 'running') {
           return 'AI review failed: AI reviewer requires a live pod container';
         }
-        const reviewerExecEnv = await podManager.getReviewerExecEnv(pod);
-        const { stdout } = await runContainerReviewer({
-          executor: pod.launchConfigDigest ? podManager.getReviewerExecutor(pod) : undefined,
+        const reviewerExecEnv = pod.launchConfigDigest
+          ? undefined
+          : await podManager.getReviewerExecEnv(pod);
+        const { stdout, model: executedModel } = await runContainerReviewer({
+          executor: pod.launchConfigDigest
+            ? podManager.getReviewerExecutor(pod, 'review', 'advisor')
+            : undefined,
           podId,
           containerId: pod.containerId,
           containerManager: withReviewerExecEnv(cm, reviewerExecEnv),
@@ -322,9 +339,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           logger,
         });
 
+        if (advisorResponseModels.size >= 1000) advisorResponseModels.clear();
+        advisorResponseModels.set(podId, executedModel ?? model);
         return stdout.trim();
       } catch (err) {
-        logger.error({ err, podId }, 'Reviewer model call failed');
+        logger.error({ err, podId }, 'Advisor model call failed');
         return `AI review failed: ${err instanceof Error ? err.message : String(err)}`;
       }
     },

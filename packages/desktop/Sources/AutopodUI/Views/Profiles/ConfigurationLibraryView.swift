@@ -524,7 +524,9 @@ public struct ConfigurationLibraryView: View {
         .compactMap { $0 }.joined(separator: " · ")
       let reviewer = document.payload["reviewer"]?["mode"]?.string == "independent"
         ? "Independent review" : "Reviewer follows main"
-      return [target, reviewer].filter { !$0.isEmpty }.joined(separator: " · ")
+      let advisorMode = document.payload["advisor"]?["mode"]?.string ?? "follow-reviewer"
+      let advisor = advisorMode == "independent" ? "Independent Advisor" : advisorMode == "follow-main" ? "Advisor follows main" : "Advisor follows Reviewer"
+      return [target, reviewer, advisor].filter { !$0.isEmpty }.joined(separator: " · ")
     case .workflow:
       let phases = document.payload["validationPhases"]?.array?.count ?? 0
       return [
@@ -578,7 +580,7 @@ public struct ConfigurationLibraryView: View {
   private func kindLongDescription(_ targetKind: ConfigurationKind) -> String {
     switch targetKind {
     case .environment: "Runtime, software, and sidecar definitions."
-    case .ai: "Models, reasoning, failover, and review behavior."
+    case .ai: "Main agent, Reviewer, Advisor consultations, reasoning and failover."
     case .workflow: "Validation, review, and daemon-owned delivery behavior."
     case .githubAccess: "Reusable repository permission scopes."
     case .toolPack: "Installed CLI tools, skills, MCP servers and usage guidance for the agent."
@@ -1311,16 +1313,40 @@ struct ConfigurationEditorSheet: View {
           GroupBox("Independent reviewer") { routeEditor(reviewerRoute, showFailover: !redesign) }
         }
         Text(
-          "Each route owns its account, runtime, model and failover choices. Review usage counts within the whole-pod budget."
+          "Each route owns its account, runtime, model and failover choices. Reviewer and Advisor usage share the reviewer token limit and whole-task budget."
         ).font(.caption).foregroundStyle(.secondary)
       }
+      if visible(.advisor) {
+        Picker("Advisor", selection: Binding(
+          get: { ConfigurationAdvisorSelection.mode(payload) },
+          set: { mode in
+            payload["advisor"] = ConfigurationAdvisorSelection.value(mode: mode, initialRoute: Self.initialRoute)
+          })) {
+          Text("Follow main").tag("follow-main")
+          Text("Follow reviewer").tag("follow-reviewer")
+          Text("Independent account and model").tag("independent")
+        }
+        if payload["advisor"]?["mode"]?.string == "independent" {
+          GroupBox("Independent Advisor") { routeEditor(advisorRoute, showFailover: !redesign) }
+        }
+        Text("Advisor handles AI consultations. Reviewer handles automated review. Both share the reviewer token limit and whole-task budget.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
       if redesign && area == .failover {
+        if payload["advisor"]?["mode"]?.string == "independent" {
+          GroupBox("Advisor failover") { routeEditor(advisorRoute, showTarget: false) }
+        }
         GroupBox("Main agent failover") { routeEditor(objectBinding("main"), showTarget: false) }
         if payload["reviewer"]?["mode"]?.string == "independent" {
           GroupBox("Reviewer failover") { routeEditor(reviewerRoute, showTarget: false) }
         }
       }
     }
+  }
+  private var advisorRoute: Binding<[String: ConfigurationJSON]> {
+    Binding(
+      get: { payload["advisor"]?["route"]?.object ?? [:] },
+      set: { payload["advisor"] = .object(["mode": .string("independent"), "route": .object($0)]) })
   }
   private var reviewerRoute: Binding<[String: ConfigurationJSON]> {
     Binding(

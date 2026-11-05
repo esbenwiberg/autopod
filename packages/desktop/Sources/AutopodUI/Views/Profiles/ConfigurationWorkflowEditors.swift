@@ -57,7 +57,7 @@ struct ConfigurationWorkflowEscalationEditor: View {
   @Binding var payload: [String: ConfigurationJSON]
   private var policy: Binding<[String: ConfigurationJSON]> { workflowObject($payload, "escalation") }
   var body: some View {
-    ConfigurationSection(title: "Escalation policy", subtitle: "AI consultation uses the reviewer in the selected AI setup.") {
+    ConfigurationSection(title: "Escalation policy", subtitle: "AI consultation uses Advisor in the selected AI setup; automated review uses Reviewer.") {
       Toggle("Customize escalation", isOn: Binding(get: { payload["escalation"]?.object != nil }, set: {
         payload["escalation"] = $0 ? .object([:]) : .null
       })).accessibilityIdentifier("workflow-escalation-custom")
@@ -74,7 +74,7 @@ struct ConfigurationWorkflowEscalationEditor: View {
         ConfigurationWorkflowInteger(title: "Human response timeout (seconds)", id: "workflow-human-timeout", fields: policy, key: "humanResponseTimeout", fallback: 3600, range: 60...86400)
         Picker("If nobody responds", selection: Binding(get: { policy.wrappedValue["askHumanOnTimeout"]?.string ?? "continue" }, set: { policy.wrappedValue["askHumanOnTimeout"] = .string($0) })) {
           Text("Continue with best judgement").tag("continue")
-          Text("Ask the AI reviewer").tag("ask_ai")
+          Text("Ask Advisor").tag("ask_ai")
         }.accessibilityIdentifier("workflow-human-timeout-action")
       } else {
         Text("Use daemon defaults: human questions allowed, AI consultation and advisor off, pause after 3 blockers, and wait 1 hour for a human.")

@@ -8,6 +8,7 @@ enum ConfigurationEditorArea: String, Identifiable, CaseIterable {
     case access = "Access & worker"
     case main = "Main agent"
     case reviewer = "Reviewer"
+    case advisor = "Advisor"
     case failover = "Failover"
     case run = "Run & deliver"
     case validation = "Validation"
@@ -30,7 +31,7 @@ enum ConfigurationEditorArea: String, Identifiable, CaseIterable {
     static func areas(for kind: ConfigurationKind) -> [Self] {
         switch kind {
         case .profile: [.composition, .execution, .network, .sidecars, .access, .advanced]
-        case .ai: [.main, .reviewer, .failover, .advanced]
+        case .ai: [.main, .reviewer, .advisor, .failover, .advanced]
         case .workflow: [.run, .validation, .security, .budgets, .escalation, .delivery, .advanced]
         case .environment: [.runtime, .software, .sidecars, .capabilities, .advanced]
         case .githubAccess: [.rules, .advanced]
@@ -47,5 +48,17 @@ func configurationReferences(_ value: ConfigurationJSON, id: String) -> Bool {
     case .array(let values): values.contains { configurationReferences($0, id: id) }
     case .object(let fields): fields.values.contains { configurationReferences($0, id: id) }
     default: false
+    }
+}
+
+/// Editor defaults are presentation only: opening old JSON must not insert Advisor.
+enum ConfigurationAdvisorSelection {
+    static func mode(_ payload: [String: ConfigurationJSON]) -> String {
+        payload["advisor"]?["mode"]?.string ?? "follow-reviewer"
+    }
+    static func value(mode: String, initialRoute: [String: ConfigurationJSON]) -> ConfigurationJSON {
+        .object(mode == "independent"
+            ? ["mode": .string(mode), "route": .object(initialRoute)]
+            : ["mode": .string(mode)])
     }
 }

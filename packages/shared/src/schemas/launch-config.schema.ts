@@ -210,6 +210,14 @@ export const agentRouteSchema = agentTargetSchema
 export const aiPresetSchema = z
   .object({
     main: agentRouteSchema,
+    // Absence preserves historical frozen snapshot bytes and means follow-reviewer.
+    advisor: z
+      .discriminatedUnion('mode', [
+        z.object({ mode: z.literal('follow-main') }).strict(),
+        z.object({ mode: z.literal('follow-reviewer') }).strict(),
+        z.object({ mode: z.literal('independent'), route: agentRouteSchema }).strict(),
+      ])
+      .optional(),
     reviewer: z
       .discriminatedUnion('mode', [
         z.object({ mode: z.literal('follow-main') }).strict(),

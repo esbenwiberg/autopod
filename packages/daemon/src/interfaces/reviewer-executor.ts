@@ -6,7 +6,7 @@ export type ReviewerExecutor = ((input: {
   prompt: string;
   timeout: number;
   outputContract?: ReviewerOutputContract;
-}) => Promise<{ stdout: string; tokenUsage?: CodexReviewTokenUsage }>) & {
+}) => Promise<{ stdout: string; tokenUsage?: CodexReviewTokenUsage; model?: string }>) & {
   /** Why another reviewer would be refused right now (e.g. unreconciled usage), else null. */
   retryBlocker?: () => string | null;
 };

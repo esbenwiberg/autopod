@@ -267,6 +267,18 @@ export function createHostConfigurationComponents(
             ? [config.ai.reviewer.route, ...config.ai.reviewer.route.failover]
             : []),
         ];
+        if (config.ai.advisor?.mode === 'independent') {
+          const advisorRoutes = [config.ai.advisor.route, ...config.ai.advisor.route.failover];
+          for (const route of advisorRoutes)
+            if (!['claude', 'codex'].includes(route.runtime))
+              configurationError(
+                'Advisor runtime has no isolated inference adapter',
+                'ADVISOR_RUNTIME_UNAVAILABLE',
+                409,
+              );
+          routes.push(...advisorRoutes);
+          await image(config.execution.target);
+        }
         for (const route of routes) {
           if (config.agentAccounts[route.providerAccountId]?.providerId === 'copilot')
             configurationError(

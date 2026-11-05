@@ -78,6 +78,13 @@ function registerEntityCommands(
   kind: ConfigurationKind,
   getClient: () => AutopodClient,
 ): void {
+  if (kind === 'ai')
+    command.addHelpText(
+      'after',
+      '\nAI presets configure main, reviewer (automated review), and optional advisor (consultations). ' +
+        'Advisor modes: follow-main, follow-reviewer (default when absent), independent with a full route. ' +
+        'Reviewer and Advisor share reviewerTokenBudget and whole-task accounting.\n',
+    );
   command
     .command('list')
     .alias('ls')

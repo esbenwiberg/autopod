@@ -377,11 +377,14 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     },
 
     touchHeartbeat,
-    getReviewerConfig(pod: Pod): {
+    getReviewerConfig(
+      pod: Pod,
+      role?: 'reviewer' | 'advisor',
+    ): {
       profile: PodExecutionSettings;
       credentials: ProviderCredentials | null;
     } {
-      return getEffectiveReviewerConfig(pod);
+      return getEffectiveReviewerConfig(pod, role);
     },
     getReviewerExecEnv(pod: Pod): Promise<Record<string, string> | undefined> {
       return buildReviewerExecEnv(pod);

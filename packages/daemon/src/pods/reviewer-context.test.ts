@@ -299,6 +299,33 @@ function controlledBuild(f: ReturnType<typeof fixture>) {
 }
 
 describe('reviewer configuration and executor', () => {
+  it.each(['absent', 'follow-reviewer', 'follow-main', 'independent'] as const)(
+    'selects Advisor %s without changing Reviewer or the frozen launch',
+    async (mode) => {
+      const f = fixture();
+      const l = await launch(f, 'independent');
+      if (mode === 'independent') {
+        if (l.config.ai.reviewer.mode !== 'independent') throw new Error('fixture');
+        l.config.ai.advisor = {
+          mode,
+          route: { ...l.config.ai.reviewer.route, model: 'advisor-model' },
+        };
+      } else if (mode !== 'absent') l.config.ai.advisor = { mode };
+      const before = JSON.stringify(l.config);
+      const expected =
+        mode === 'follow-main' ? 'main-model' : mode === 'independent' ? 'advisor-model' : 'sonnet';
+      expect(f.op.getEffectiveReviewerConfig(f.pod, 'advisor').profile.reviewerModel).toBe(
+        expected,
+      );
+      f.op.getReviewerExecutor(f.pod, 'review', 'advisor');
+      expect(l.select.mock.calls.at(-1)?.[2].model).toBe(expected);
+      expect(f.op.getEffectiveReviewerConfig(f.pod).profile.reviewerModel).toBe('sonnet');
+      f.op.getReviewerExecutor(f.pod);
+      expect(l.select.mock.calls.at(-1)?.[2].model).toBe('sonnet');
+      expect(JSON.stringify(l.config)).toBe(before);
+      f.reopen();
+    },
+  );
   it.each([false, true])(
     'uses production disk policy with persisted rows; reopened=%s',
     (reopened) => {
