@@ -77,6 +77,12 @@ import {
   createRetainedCheckpointRepository,
 } from './retained-checkpoint-repository.js';
 import {
+  type RetainedFinalizationRepository,
+  assertFinalizationPathAvailable,
+  assertFinalizationResourceAvailable,
+  createRetainedFinalizationRepository,
+} from './retained-finalization-repository.js';
+import {
   type SourceAdoptionRepository,
   createSourceAdoptionRepository,
 } from './source-adoption-repository.js';
@@ -303,6 +309,7 @@ import {
 export interface PodRepository extends Partial<UnitOfWork> {
   taskRetries?: TaskRetryLedger;
   validationExecutions?: ValidationExecutionLedger;
+  retainedFinalizations?: RetainedFinalizationRepository;
   retainedCheckpoints?: RetainedCheckpointRepository;
   sandboxStartupRetries?: TaskRetryLedger;
   codexInterruptionRetries?: TaskRetryLedger;
@@ -849,6 +856,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
     taskRetries: createTaskRetryLedger(db),
     validationExecutions: createValidationExecutionLedger(db),
+    retainedFinalizations: createRetainedFinalizationRepository(db),
     retainedCheckpoints: createRetainedCheckpointRepository(db),
     sandboxStartupRetries: createTaskRetryLedger(db, 'sandbox_startup'),
     codexInterruptionRetries: createTaskRetryLedger(db, 'codex_interruption'),
@@ -1005,6 +1013,11 @@ export function createPodRepository(db: Database.Database): PodRepository {
       ).map((row) => JSON.parse(row.receipt) as NonNullable<Pod['researchFindings']>);
     },
     update(id: string, changes: PodUpdates): void {
+      createRetainedFinalizationRepository(db).assertAvailable(id);
+      if (changes.containerId) assertFinalizationResourceAvailable(db, changes.containerId);
+      if (changes.worktreePath) assertFinalizationPathAvailable(db, changes.worktreePath);
+      if (changes.recoveryWorktreePath)
+        assertFinalizationPathAvailable(db, changes.recoveryWorktreePath);
       createRetainedCheckpointRepository(db).assertAvailable(id);
       // Any mutation during validation preservation could invalidate its evidence.
       assertNoValidationRecovery(db, id);
@@ -1492,6 +1505,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
       })();
     },
     incrementLifecycleGeneration(id: string): number {
+      createRetainedFinalizationRepository(db).assertAvailable(id);
       assertSourceAvailable(db, id);
       deletionOwnership.assertTaskAvailable(id);
       const result = db
@@ -1617,7 +1631,11 @@ export function createPodRepository(db: Database.Database): PodRepository {
         )
         .all() as { container_id: string }[];
       return [
-        ...new Set([...rows.map((r) => r.container_id), ...listValidationExecutionResourceIds(db)]),
+        ...new Set([
+          ...rows.map((r) => r.container_id),
+          ...listValidationExecutionResourceIds(db),
+          ...createRetainedFinalizationRepository(db).resourceIds(),
+        ]),
       ];
     },
 
@@ -1638,6 +1656,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     delete: db.transaction((id: string): void => {
+      createRetainedFinalizationRepository(db).assertAvailable(id);
       if (createRetainedCheckpointRepository(db).latest(id))
         checkpointError(
           'Original checkpoint recovery resources/evidence remain retained; deletion and archival are unavailable.',
@@ -1754,6 +1773,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
            WHERE status IN ('complete', 'killed', 'failed')
              AND completed_at IS NOT NULL
              AND completed_at <= @cutoffIso
+             AND NOT EXISTS (SELECT 1 FROM retained_finalizations f WHERE f.pod_id = pods.id)
            ORDER BY completed_at ASC`,
         )
         .all({ cutoffIso }) as Record<string, unknown>[];

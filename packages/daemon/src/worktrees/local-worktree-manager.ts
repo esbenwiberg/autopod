@@ -167,6 +167,14 @@ function git(
         : `Basic ${Buffer.from(`${credential.username}:${credential.password}`).toString('base64')}`;
     env = { ...extraEnv, ...authenticatedGitEnvironment(credentialUrl, authorization) };
   }
+  // Fetch/commit may invoke automatic GC. Only the custody-checked explicit
+  // prune below may discard linked-worktree metadata, including missing mounts.
+  if (args[0] !== 'worktree' || args[1] !== 'prune') {
+    const slot = Number(env.GIT_CONFIG_COUNT);
+    env[`GIT_CONFIG_KEY_${slot}`] = 'gc.worktreePruneExpire';
+    env[`GIT_CONFIG_VALUE_${slot}`] = 'never';
+    env.GIT_CONFIG_COUNT = String(slot + 1);
+  }
   return execFileAsync('git', args, {
     ...execOptions,
     env,
@@ -403,6 +411,8 @@ async function removeAutopodSyncStagingRecords(
 }
 
 export interface LocalWorktreeManagerConfig {
+  /** Durable source custody, including terminal tasks and orphan-conflict paths. */
+  assertPathMutable?: (worktreePath: string) => void;
   cacheDir?: string;
   worktreeDir?: string;
   logger: Logger;
@@ -724,6 +734,8 @@ export class LocalWorktreeManager implements WorktreeManager {
   private worktreeDir: string;
   private logger: Logger;
   private llmDeps?: ProfileLlmClientDeps;
+  private assertPathMutable: (worktreePath: string) => void;
+  private readonly hasPathCustodyGuard: boolean;
 
   /** Per-repo mutex to avoid git lock contention during concurrent fetches. */
   private repoLocks = new KeyedPromiseQueue();
@@ -732,6 +744,8 @@ export class LocalWorktreeManager implements WorktreeManager {
   private azureDevOpsAuth?: AzureDevOpsAuth;
 
   constructor(config: LocalWorktreeManagerConfig) {
+    this.assertPathMutable = config.assertPathMutable ?? (() => {});
+    this.hasPathCustodyGuard = config.assertPathMutable !== undefined;
     this.cacheDir =
       config.cacheDir ??
       process.env.AUTOPOD_REPO_CACHE ??
@@ -778,6 +792,7 @@ export class LocalWorktreeManager implements WorktreeManager {
         const valid = await this.isBareRepoValid(bareRepoPath);
         if (!valid) {
           // Remove any incomplete/stale directory before cloning
+          this.assertPathMutable(bareRepoPath);
           await fs.rm(bareRepoPath, { recursive: true, force: true });
           this.logger.info({ repoUrl, bareRepoPath }, 'Cloning bare repo');
           // Clone with auth URL so the initial fetch authenticates, then immediately
@@ -849,15 +864,18 @@ export class LocalWorktreeManager implements WorktreeManager {
         // Clean up stale worktree registration if a previous pod left one behind
         // (e.g. killed pod whose cleanup didn't fully complete).
         // Always try both git worktree remove AND fs.rm — either alone can leave remnants.
+        this.assertPathMutable(worktreePath);
         await git(['worktree', 'remove', '--force', worktreePath], {
           cwd: bareRepoPath,
         }).catch(() => {});
+        this.assertPathMutable(worktreePath);
         await fs.rm(worktreePath, { recursive: true, force: true }).catch(() => {});
-        await git(['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {});
+        await this.pruneWorktrees(bareRepoPath);
 
         // -B force-creates branch to handle retry scenarios
         this.logger.info({ worktreePath, branch, startPoint }, 'Creating worktree');
         try {
+          this.assertPathMutable(worktreePath);
           await git(['worktree', 'add', '-B', branch, worktreePath, startPoint], {
             cwd: bareRepoPath,
           });
@@ -868,6 +886,7 @@ export class LocalWorktreeManager implements WorktreeManager {
           const match = /already used by worktree at '(.+)'/.exec(msg);
           if (match?.[1]) {
             const conflictPath = match[1];
+            this.assertPathMutable(conflictPath);
             this.logger.warn(
               { conflictPath, branch },
               'Branch locked by orphaned worktree — removing and retrying',
@@ -875,8 +894,9 @@ export class LocalWorktreeManager implements WorktreeManager {
             await git(['worktree', 'remove', '--force', conflictPath], {
               cwd: bareRepoPath,
             }).catch(() => {});
+            this.assertPathMutable(conflictPath);
             await fs.rm(conflictPath, { recursive: true, force: true }).catch(() => {});
-            await git(['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {});
+            await this.pruneWorktrees(bareRepoPath);
             await git(['worktree', 'add', '-B', branch, worktreePath, startPoint], {
               cwd: bareRepoPath,
             });
@@ -986,28 +1006,53 @@ export class LocalWorktreeManager implements WorktreeManager {
     }
   }
 
+  private async pruneWorktrees(bareRepoPath: string): Promise<void> {
+    // Pruning is optional and repository-wide. Never let a custody refusal
+    // escape into cleanup's filesystem-removal fallback.
+    try {
+      this.assertPathMutable(bareRepoPath);
+      if (this.hasPathCustodyGuard) {
+        const { stdout } = await git(['worktree', 'list', '--porcelain', '-z'], {
+          cwd: bareRepoPath,
+        });
+        const locations = stdout.split('\0').filter((field) => field.startsWith('worktree '));
+        if (!locations.length) return;
+        for (const location of locations)
+          this.assertPathMutable(location.slice('worktree '.length));
+        // Also covers an admission during the registry read, and source paths
+        // that were already unavailable when their hold was recorded.
+        this.assertPathMutable(bareRepoPath);
+      }
+      await git(['worktree', 'prune'], { cwd: bareRepoPath });
+    } catch (err) {
+      this.logger.debug({ err, bareRepoPath }, 'Skipping unavailable or retained worktree pruning');
+    }
+  }
+
   async cleanup(worktreePath: string): Promise<void> {
+    this.assertPathMutable(worktreePath);
     // Find the bare repo that owns this worktree
     try {
       const { stdout } = await git(['rev-parse', '--git-common-dir'], {
         cwd: worktreePath,
       });
       const bareRepoPath = path.resolve(worktreePath, stdout.trim());
+      this.assertPathMutable(worktreePath);
       await git(['worktree', 'remove', '--force', worktreePath], {
         cwd: bareRepoPath,
       }).catch(async () => {
         // Fallback: rm -rf if git worktree remove fails
         this.logger.warn({ worktreePath }, 'git worktree remove failed, falling back to rm -rf');
+        this.assertPathMutable(worktreePath);
         await fs.rm(worktreePath, { recursive: true, force: true });
       });
 
       // Prune stale worktree refs
-      await git(['worktree', 'prune'], { cwd: bareRepoPath }).catch(() => {
-        // Non-fatal
-      });
+      await this.pruneWorktrees(bareRepoPath);
     } catch {
       // If we can't determine the bare repo, just nuke the directory
       this.logger.warn({ worktreePath }, 'Cannot determine bare repo, removing directory directly');
+      this.assertPathMutable(worktreePath);
       await fs.rm(worktreePath, { recursive: true, force: true });
     }
   }
@@ -1204,6 +1249,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     try {
       return await this.repoLocks.run(cacheKey, async () => {
         if (!(await this.isBareRepoValid(bareRepoPath))) {
+          this.assertPathMutable(bareRepoPath);
           await fs.rm(bareRepoPath, { recursive: true, force: true });
           this.logger.info({ repoUrl, bareRepoPath }, 'getBranchDiff: cloning bare repo');
           try {
@@ -2210,6 +2256,7 @@ export class LocalWorktreeManager implements WorktreeManager {
     return await this.repoLocks.run(cacheKey, async () => {
       // Ensure bare repo exists.
       if (!(await this.isBareRepoValid(bareRepoPath))) {
+        this.assertPathMutable(bareRepoPath);
         await fs.rm(bareRepoPath, { recursive: true, force: true });
         this.logger.info({ repoUrl, bareRepoPath }, 'readBranchFolder: cloning bare repo');
         try {

@@ -5,6 +5,7 @@ import { createProvisioningToolInstallation } from './provisioning-tool-installa
 import { createProvisioningWorkflow } from './provisioning-workflow.js';
 import { createRetainedCheckpointRecovery } from './retained-checkpoint-recovery.js';
 import { checkpointError } from './retained-checkpoint-repository.js';
+import { createRetainedFinalization } from './retained-finalization.js';
 import { createValidationExecutionRecovery } from './validation-execution-recovery.js';
 import { ValidationSupersededError } from './validation-ownership.js';
 import {
@@ -1417,6 +1418,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
 
   const controlOperations = createControlOperationRegistry((podId, operation) => {
+    podRepo.retainedFinalizations?.assertAvailable(podId);
+    if (retainedFinalization?.isActive(podId))
+      checkpointError('Retained finalization preflight owns this control.');
     const metadataOnly = new Set([
       'interruptValidation',
       'notifyEscalation',
@@ -1492,6 +1496,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     podRepo,
     getContainerManager: () => containerManagerFactory.get('sandbox'),
     isActive: (id, exceptCurrent) =>
+      Boolean(retainedFinalization?.isActive(id)) ||
       controlOperations.isActive(id, exceptCurrent) ||
       activeAgentRuns.has(id) ||
       validationAbortControllers.has(id) ||
@@ -1510,6 +1515,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       Boolean(deps.launchConfiguration?.goals?.get(podId)),
     assertGuidanceCollected,
     assertIdle: (podId) => {
+      if (retainedFinalization?.isActive(podId))
+        checkpointError('Finalization preflight is active.');
+      podRepo.retainedFinalizations?.assertAvailable(podId);
       sandboxRecovery.assertAvailable(podId);
       if (
         controlOperations.isActive(podId) ||
@@ -1535,44 +1543,72 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     ),
     emit: emitActivityStatus,
   });
-  const checkpointRecovery = podRepo.retainedCheckpoints
-    ? createRetainedCheckpointRecovery({
-        podRepo,
-        executionForPod,
-        worktreeManager,
-        getContainerManager: (target = 'sandbox') => containerManagerFactory.get(target),
-        readLaunch: deps.launchConfiguration?.read,
-        executionSettings: deps.launchConfiguration?.executionSettings,
-        previewExecution: deps.launchConfiguration?.previewRetainedExecution,
-        isIdle: (id) =>
-          !controlOperations.isActive(id) &&
-          !activeAgentRuns.has(id) &&
-          !validationAbortControllers.has(id) &&
-          !validationResumeRuns.has(id) &&
-          !artifactResumeRuns.has(id) &&
-          !artifactCompletionRuns.has(id) &&
-          !attemptExtensionRuns.has(id),
-        isGoal: (id) =>
-          deps.launchConfiguration?.read(id)?.intent === 'goal' ||
-          Boolean(deps.launchConfiguration?.goals?.get(id)),
-        assertGuidanceCollected,
-        enqueue: enqueueSession,
-        logger,
-        transition,
-        emit: emitActivityStatus,
-        root: path.join(
-          process.env.DATA_DIR ??
-            (process.env.DB_PATH
-              ? path.dirname(path.resolve(process.env.DB_PATH))
-              : path.join(process.cwd(), '.autopod-data')),
-          'checkpoint-recoveries',
-        ),
-      })
-    : undefined;
+  const checkpointRecovery: ReturnType<typeof createRetainedCheckpointRecovery> | undefined =
+    podRepo.retainedCheckpoints
+      ? createRetainedCheckpointRecovery({
+          podRepo,
+          executionForPod,
+          worktreeManager,
+          getContainerManager: (target = 'sandbox') => containerManagerFactory.get(target),
+          readLaunch: deps.launchConfiguration?.read,
+          executionSettings: deps.launchConfiguration?.executionSettings,
+          previewExecution: deps.launchConfiguration?.previewRetainedExecution,
+          isIdle: (id) =>
+            !retainedFinalization?.isActive(id) &&
+            !controlOperations.isActive(id) &&
+            !activeAgentRuns.has(id) &&
+            !validationAbortControllers.has(id) &&
+            !validationResumeRuns.has(id) &&
+            !artifactResumeRuns.has(id) &&
+            !artifactCompletionRuns.has(id) &&
+            !attemptExtensionRuns.has(id),
+          isGoal: (id) =>
+            deps.launchConfiguration?.read(id)?.intent === 'goal' ||
+            Boolean(deps.launchConfiguration?.goals?.get(id)),
+          assertGuidanceCollected,
+          enqueue: enqueueSession,
+          logger,
+          transition,
+          emit: emitActivityStatus,
+          root: path.join(
+            process.env.DATA_DIR ??
+              (process.env.DB_PATH
+                ? path.dirname(path.resolve(process.env.DB_PATH))
+                : path.join(process.cwd(), '.autopod-data')),
+            'checkpoint-recoveries',
+          ),
+        })
+      : undefined;
+  const retainedFinalization: ReturnType<typeof createRetainedFinalization> | undefined =
+    podRepo.retainedFinalizations
+      ? createRetainedFinalization({
+          podRepo,
+          executionForPod,
+          worktreeManager,
+          // Observational proof must not rewrite the legacy delivery ledger.
+          prManagerFactory: rawPrManagerFactory,
+          eventBus,
+          getContainerManager: (target) => containerManagerFactory.get(target),
+          isIdle: (id) =>
+            !checkpointRecovery?.isActive(id) &&
+            !controlOperations.isActive(id) &&
+            !activeAgentRuns.has(id) &&
+            !validationAbortControllers.has(id) &&
+            !validationResumeRuns.has(id) &&
+            !artifactResumeRuns.has(id) &&
+            !artifactCompletionRuns.has(id) &&
+            !attemptExtensionRuns.has(id),
+          isGoal: (id) =>
+            deps.launchConfiguration?.read(id)?.intent === 'goal' ||
+            Boolean(deps.launchConfiguration?.goals?.get(id)),
+          assertGuidanceCollected,
+        })
+      : undefined;
   const sandboxRecovery = createSandboxRecovery({
     podRepo,
     getContainerManager: () => containerManagerFactory.get('sandbox'),
     isIdle: (id) =>
+      !retainedFinalization?.isActive(id) &&
       !controlOperations.isActive(id) &&
       !activeAgentRuns.has(id) &&
       !validationAbortControllers.has(id) &&
@@ -1588,6 +1624,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   return controlOperations.wrap(
     createPodManagerFacade({
       sandboxRecovery,
+      retainedFinalization,
       checkpointRecovery,
       acceptFindings,
       sourceAdoption,

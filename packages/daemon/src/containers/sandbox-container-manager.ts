@@ -38,6 +38,10 @@ import {
   SANDBOX_OUTPUT_INVENTORY,
   extractManagedSandboxOutput,
 } from '../managed/output-extraction.js';
+import {
+  assertFinalizationResourceAvailable,
+  ownsRetainedFinalizationStop,
+} from '../pods/retained-finalization-repository.js';
 import { assertSourceResourceReleasable } from '../pods/source-custody-guards.js';
 import { assertValidationResourceSettled } from '../pods/validation-execution-evidence.js';
 import { AzureSandboxApiClient } from './azure-sandbox-api-client.js';
@@ -176,6 +180,13 @@ export class SandboxContainerManager implements ContainerManager {
         wakeupJournal: options.wakeupJournal,
         assertWakeAllowed: (id) => {
           if (options.managedDatabase) assertValidationResourceSettled(options.managedDatabase, id);
+        },
+        assertStopAllowed: (id) => {
+          if (
+            options.managedDatabase &&
+            !ownsRetainedFinalizationStop(options.managedDatabase, id, 'sandbox')
+          )
+            assertSourceResourceReleasable(options.managedDatabase, id);
         },
         assertReleaseAllowed: (id) => {
           if (options.managedDatabase) assertSourceResourceReleasable(options.managedDatabase, id);
@@ -388,6 +399,8 @@ for root in sys.argv[1:]:
   }
 
   async refreshFirewall(containerId: string, script: string): Promise<void> {
+    if (this.managedDatabase)
+      assertFinalizationResourceAvailable(this.managedDatabase, containerId);
     const policy = parseSandboxEgressRefresh(script) ?? this.egressPolicies.get(containerId);
     if (!policy) {
       throw new Error(
@@ -407,11 +420,17 @@ for root in sys.argv[1:]:
   }
 
   async stop(containerId: string): Promise<void> {
-    if (this.managedDatabase) assertSourceResourceReleasable(this.managedDatabase, containerId);
+    if (
+      this.managedDatabase &&
+      !ownsRetainedFinalizationStop(this.managedDatabase, containerId, 'sandbox')
+    )
+      assertSourceResourceReleasable(this.managedDatabase, containerId);
     await this.client.suspend(containerId, 'memory');
   }
 
   async start(containerId: string, options: ContainerStartOptions = {}): Promise<void> {
+    if (this.managedDatabase)
+      assertFinalizationResourceAvailable(this.managedDatabase, containerId);
     options.assertCurrent?.();
     await this.client.resume(containerId, options);
     options.assertCurrent?.();
@@ -423,6 +442,8 @@ for root in sys.argv[1:]:
     content: string | Buffer,
     options?: FileWriteOptions,
   ): Promise<void> {
+    if (this.managedDatabase)
+      assertFinalizationResourceAvailable(this.managedDatabase, containerId);
     options?.assertCurrent?.();
     const buf = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
     await this.client.writeFile(
@@ -590,6 +611,8 @@ for root in sys.argv[1:]:
     command: string[],
     options?: ExecOptions,
   ): Promise<ExecResult> {
+    if (this.managedDatabase)
+      assertFinalizationResourceAvailable(this.managedDatabase, containerId);
     const result = await this.client.exec(containerId, command, toSandboxExecOptions(options));
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
   }
@@ -599,6 +622,8 @@ for root in sys.argv[1:]:
     command: string[],
     options?: ExecOptions,
   ): Promise<StreamingExecResult> {
+    if (this.managedDatabase)
+      assertFinalizationResourceAvailable(this.managedDatabase, containerId);
     if (options?.onProcessCreated && !this.supportsExecRecovery)
       throw new Error('Recoverable native Goal processes are unavailable on this backend');
     const sandboxOptions = toSandboxExecOptions(options);
@@ -625,6 +650,8 @@ for root in sys.argv[1:]:
     containerId: string,
     options: TerminalSessionOptions,
   ): Promise<TerminalSession> {
+    if (this.managedDatabase)
+      assertFinalizationResourceAvailable(this.managedDatabase, containerId);
     if (!this.client.attachTerminal) {
       throw new Error(
         'Sandbox interactive terminal is not supported by this data-plane client (no exec-stream TTY support).',
@@ -661,6 +688,8 @@ for root in sys.argv[1:]:
     port: number,
     options?: ExposePortOptions,
   ): Promise<ExposedPort> {
+    if (this.managedDatabase)
+      assertFinalizationResourceAvailable(this.managedDatabase, containerId);
     if (!this.client.addPort) {
       throw new Error('Sandbox port exposure is not supported by this data-plane client.');
     }
@@ -675,6 +704,8 @@ for root in sys.argv[1:]:
   }
 
   async unexposePort(containerId: string, port: number): Promise<void> {
+    if (this.managedDatabase)
+      assertFinalizationResourceAvailable(this.managedDatabase, containerId);
     if (!this.client.removePort) return;
     await this.client.removePort(containerId, port);
   }

@@ -24,6 +24,7 @@ import { registerBudgetCommand } from './budget.js';
 import { registerGoalCommands } from './goal.js';
 import { registerLaunchCommand } from './launch.js';
 import { registerRetainedContinuationCommand } from './retained-continuation.js';
+import { registerRetainedFinalizationCommand } from './retained-finalization.js';
 import { registerReviewerRunsCommand } from './reviewer-runs.js';
 import { registerSourceRecoveryCommand } from './source-recovery.js';
 
@@ -146,6 +147,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   registerSourceRecoveryCommand(program, getClient);
   registerRetainedContinuationCommand(program, getClient);
   registerApprovalRewriteRepairCommand(program, getClient);
+  registerRetainedFinalizationCommand(program, getClient);
   program
     .command('execution-provenance <id>')
     .description('Inspect recorded runtime, image, build, resource and command preflight evidence')

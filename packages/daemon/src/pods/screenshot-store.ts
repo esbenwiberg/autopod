@@ -69,7 +69,10 @@ const SOURCE_ORDER: ScreenshotSource[] = ['smoke', 'fact', 'review', 'advisory']
  * `dataDir` follows the same resolution as pod-manager.ts:4520:
  *   process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data')
  */
-export function createScreenshotStore(dataDir: string): ScreenshotStore {
+export function createScreenshotStore(
+  dataDir: string,
+  assertMutationAllowed: (podId: string) => void = () => {},
+): ScreenshotStore {
   function podDir(podId: string): string {
     return path.join(dataDir, 'screenshots', podId);
   }
@@ -84,6 +87,7 @@ export function createScreenshotStore(dataDir: string): ScreenshotStore {
 
   return {
     async write(podId, source, filename, bytes) {
+      assertMutationAllowed(podId);
       const safe = validateFilename(filename);
       const dir = sourceDir(podId, source);
       await fsp.mkdir(dir, { recursive: true });
@@ -93,7 +97,9 @@ export function createScreenshotStore(dataDir: string): ScreenshotStore {
 
       // Atomic write: write to a uniquely-named .tmp sibling, rename into place
       // (last writer wins; unique suffix prevents concurrent-write collisions)
+      assertMutationAllowed(podId);
       await fsp.writeFile(tmpPath, bytes);
+      assertMutationAllowed(podId);
       await fsp.rename(tmpPath, filePath);
 
       const relativePath = path.join('screenshots', podId, source, safe);
@@ -131,6 +137,7 @@ export function createScreenshotStore(dataDir: string): ScreenshotStore {
     },
 
     async delete(podId) {
+      assertMutationAllowed(podId);
       const dir = podDir(podId);
       try {
         await fsp.rm(dir, { recursive: true, force: true });

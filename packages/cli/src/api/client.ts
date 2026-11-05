@@ -59,6 +59,9 @@ import type {
   PublicProviderAccount,
   PublicProviderCatalog,
   ReadinessStatus,
+  RetainedFinalizationReceipt,
+  RetainedFinalizationRequest,
+  RetainedFinalizationView,
   ReworkEligibility,
   ReworkRequestInput,
   ReworkRequestReceipt,
@@ -555,6 +558,40 @@ export class AutopodClient {
   ): Promise<unknown> {
     return this.request('POST', `/pods/${id}/checkpoint-recovery`, input);
   }
+  async inspectRetainedFinalization(id: string): Promise<RetainedFinalizationView> {
+    return this.request('GET', `/pods/${encodeURIComponent(id)}/retained-finalization`);
+  }
+
+  async finalizeRetained(
+    id: string,
+    input: RetainedFinalizationRequest,
+  ): Promise<RetainedFinalizationReceipt> {
+    // Snapshot the exact selection before authentication awaits. Replay is manual, even on 401.
+    const saved = { ...input };
+    const receipt = await this.request<RetainedFinalizationReceipt | null>(
+      'POST',
+      `/pods/${encodeURIComponent(id)}/retained-finalization`,
+      saved,
+      false,
+    );
+    if (
+      !receipt ||
+      receipt.podId !== id ||
+      !['pending', 'finalized'].includes(receipt.state) ||
+      receipt.resourcesRetained !== true ||
+      typeof receipt.message !== 'string' ||
+      (Object.keys(saved) as Array<keyof RetainedFinalizationRequest>).some(
+        (key) => receipt.request?.[key] !== saved[key],
+      ) ||
+      (receipt.state === 'finalized' &&
+        (!receipt.finalizedAt || !Number.isFinite(Date.parse(receipt.finalizedAt))))
+    )
+      throw new Error(
+        'Unconfirmed finalization response; preserve the original request and inspect before reconciling. No terminal outcome is inferred.',
+      );
+    return receipt;
+  }
+
   async previewRetainedExecution(id: string, profileId: string): Promise<unknown> {
     return this.request(
       'GET',
@@ -1174,7 +1211,12 @@ export class AutopodClient {
   }
 
   // Internal
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    retryAuth = true,
+  ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     let token: string;
 
@@ -1198,7 +1240,7 @@ export class AutopodClient {
       throw new DaemonUnreachableError(this.baseUrl);
     }
 
-    if (response.status === 401) {
+    if (response.status === 401 && retryAuth) {
       // Single retry with fresh token
       try {
         await response.body?.cancel();

@@ -8,6 +8,7 @@ export function retainUnresolvedReconciliation(
   trigger: 'restart' | 'wake' = 'restart',
 ): boolean {
   try {
+    podRepo.retainedFinalizations?.assertAvailable(podId);
     const pod = podRepo.getOrThrow(podId);
     const rewrite = podRepo.approvalRewrites?.latest(pod);
     if (rewrite?.activated && pod.status !== 'queued') {

@@ -60,6 +60,8 @@ export class ScreenshotRetention {
         'screenshot-retention: deleting screenshots for stale pod',
       );
       try {
+        // Recheck after each prior asynchronous delete; the initial cohort can be stale.
+        podRepository.retainedFinalizations?.assertAvailable(pod.id);
         await screenshotStore.delete(pod.id);
         deleted++;
       } catch (err) {

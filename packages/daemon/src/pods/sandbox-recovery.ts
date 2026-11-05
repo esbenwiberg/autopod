@@ -51,6 +51,7 @@ export function createSandboxRecovery(deps: {
     sandboxId?: string,
     completedCleanup?: SandboxRecoveryReceipt,
   ) {
+    deps.podRepo.retainedFinalizations?.assertAvailable(podId);
     if (active.has(podId) && active.get(podId) !== owner)
       recoveryError('Another sandbox recovery is in flight');
     const pod = deps.podRepo.getOrThrow(podId);

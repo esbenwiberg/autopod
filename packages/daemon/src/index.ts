@@ -75,6 +75,7 @@ import {
 } from './pods/index.js';
 import { createSessionBridge } from './pods/pod-bridge-impl.js';
 import { checkpointCredentialEpoch } from './pods/retained-checkpoint-repository.js';
+import { assertFinalizationPathAvailable } from './pods/retained-finalization-repository.js';
 import { SandboxOrphanReaper } from './pods/sandbox-orphan-reaper.js';
 import { SandboxTerminalReaper } from './pods/sandbox-terminal-reaper.js';
 import { ScreenshotRetention } from './pods/screenshot-retention.js';
@@ -409,6 +410,7 @@ function parseEnvList(value: string | undefined): string[] {
 const authModule: AuthModule = createConfiguredAuthModule();
 
 const worktreeManager = new LocalWorktreeManager({
+  assertPathMutable: (location) => assertFinalizationPathAvailable(db, location),
   logger,
   llmDeps,
   githubAuth,
@@ -550,7 +552,9 @@ if (process.env.AUTOPOD_WARM_IMAGE_MAINTENANCE) {
 }
 
 const hostBrowserRunner = createHostBrowserRunner(logger);
-const screenshotStore = createScreenshotStore(resolveDataDir());
+const screenshotStore = createScreenshotStore(resolveDataDir(), (id) =>
+  podRepo.retainedFinalizations?.assertAvailable(id),
+);
 
 const retentionDays = Number.parseInt(process.env.AUTOPOD_SCREENSHOT_RETENTION_DAYS ?? '30', 10);
 if (!Number.isFinite(retentionDays) || retentionDays <= 0) {

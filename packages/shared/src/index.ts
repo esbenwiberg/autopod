@@ -5,6 +5,12 @@ export type {
   ValidationExecutionRecoveryState,
   ValidationExecutionRecoveryRequest,
 } from './types/validation-execution-recovery.js';
+export type {
+  RetainedFinalizationMode,
+  RetainedFinalizationRequest,
+  RetainedFinalizationReceipt,
+  RetainedFinalizationView,
+} from './types/retained-finalization.js';
 // Types
 export type {
   ApprovalRewriteRepairRequest,
