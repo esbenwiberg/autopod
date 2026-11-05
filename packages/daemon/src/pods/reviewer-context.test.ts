@@ -308,8 +308,19 @@ describe('reviewer configuration and executor', () => {
         if (l.config.ai.reviewer.mode !== 'independent') throw new Error('fixture');
         l.config.ai.advisor = {
           mode,
-          route: { ...l.config.ai.reviewer.route, model: 'advisor-model' },
+          route: {
+            ...l.config.ai.reviewer.route,
+            providerAccountId: 'other',
+            model: 'advisor-model',
+          },
         };
+        l.config.agentAccounts.other = resolveLaunchAgentRoute(
+          l.config.ai.advisor.route,
+          f.accounts,
+        );
+        expect(f.op.getEffectiveReviewerConfig(f.pod, 'advisor').credentials).toEqual(
+          f.other.credentials,
+        );
       } else if (mode !== 'absent') l.config.ai.advisor = { mode };
       const before = JSON.stringify(l.config);
       const expected =
