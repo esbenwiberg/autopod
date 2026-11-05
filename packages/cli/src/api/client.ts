@@ -482,11 +482,13 @@ export class AutopodClient {
     requestKey: string,
     reason: string,
     stage: TaskRetryStage = 'validation',
+    rewriteRepair?: import('@autopod/shared').RewriteRepairRetryTarget,
   ): Promise<TaskRetryAuthorization> {
     return this.request('POST', `/pods/${id}/retry-authorizations`, {
       requestKey,
       reason,
       ...(stage === 'validation' ? {} : { stage }),
+      ...(rewriteRepair ? { rewriteRepair } : {}),
     });
   }
   async getSourceAdoptions(id: string): Promise<SourceAdoptionList> {

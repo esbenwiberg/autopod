@@ -61,3 +61,60 @@ it('uses dedicated transports and propagates old-server failure without a fallba
   );
   expect(client.prepareRewriteRepair).toHaveBeenCalledTimes(1);
 });
+
+it('sends targeted retry authority through the existing operation and never retries an old server without its target', async () => {
+  const { AutopodClient } = await import('../api/client.js');
+  const { registerPodCommands } = await import('./pod.js');
+  const requests: Array<{ url: string; body: unknown }> = [];
+  const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    requests.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) });
+    return new Response(JSON.stringify({ message: 'Unknown rewriteRepair authority' }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const api = new AutopodClient({
+    baseUrl: 'http://127.0.0.1:9999',
+    getToken: async () => 'fixture-token',
+  });
+  const program = new Command().exitOverride();
+  registerPodCommands(program, () => api);
+  try {
+    await expect(
+      program.parseAsync(
+        [
+          'authorize-retry',
+          'whole-pod-id',
+          '--request-key',
+          'targeted-retry',
+          '--reason',
+          'Authorize exactly this prepared repair source',
+          '--rewrite-repair',
+          'repair',
+          '--candidate-head',
+          'a'.repeat(40),
+          '--candidate-tree',
+          'b'.repeat(40),
+          '--json',
+        ],
+        { from: 'user' },
+      ),
+    ).rejects.toThrow();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toEqual({
+      url: 'http://127.0.0.1:9999/pods/whole-pod-id/retry-authorizations',
+      body: {
+        requestKey: 'targeted-retry',
+        reason: 'Authorize exactly this prepared repair source',
+        rewriteRepair: {
+          recoveryId: 'repair',
+          candidateHead: 'a'.repeat(40),
+          candidateTree: 'b'.repeat(40),
+        },
+      },
+    });
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

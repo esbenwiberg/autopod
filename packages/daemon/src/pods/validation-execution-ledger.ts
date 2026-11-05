@@ -252,6 +252,11 @@ export function createValidationExecutionLedger(db: Database.Database): Validati
         exact.id !== dispatchId ||
         pod.lastValidationResult?.overall !== 'fail' ||
         !db
+          .prepare(`SELECT 1 FROM task_retry_attempts WHERE id=? AND pod_id=? AND task_id=? AND generation=?
+          AND stage='validation' AND started_at IS NOT NULL AND ended_at IS NOT NULL
+          AND outcome IN ('nonretryable','transient')`)
+          .get(exact.binding.admissionId, pod.id, exact.binding.taskId, pod.lifecycleGeneration) ||
+        !db
           .prepare(
             'SELECT 1 FROM validation_logical_publications WHERE dispatch_id=? AND result_hash=?',
           )

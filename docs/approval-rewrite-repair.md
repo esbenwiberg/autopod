@@ -53,8 +53,8 @@ approve, grant retry or release anything. It creates an independent Git store
 under the daemon's checkpoint-recoveries namespace from the exact failed source.
 The original pre-rebase source/resource and failed candidate/resource/reports
 remain held. The failed result/review and artifact path are retained in immutable
-custody evidence. Host capture includes dirty/ignored artifact bytes truthfully;
-uncertified/oversize/partial capture fails closed. Existing inventory and 1 GiB
+custody evidence. Host capture preserves all bytes, including ignored artifact bytes. Dirty tracked
+or untracked Git source is refused; uncertified/oversize/partial capture fails closed. Existing inventory and 1 GiB
 bounds apply. This is host capture, not certification of inaccessible sandbox
 reports or dependency closure; those original resources stay untouched.
 
@@ -93,9 +93,25 @@ of a failed repair is deliberately not admitted through ordinary continuation.
 A separate existing authenticated retry authorization is required before the
 repair's validation admission. Inspect retry state and use the existing
 `ap authorize-retry` operation with explicit human authority and a stable request
-key when appropriate. Source changes do not grant a retry, reset counters or
-expand budgets. The normal admission binds the grant's one-shot use to the actual
-selected source/configuration/generation. A consumed grant cannot admit another
+key when appropriate, before submitting `--check`:
+
+```sh
+ap authorize-retry "$POD_ID" --stage validation --request-key "$RETRY_REQUEST_KEY" \
+  --rewrite-repair "$REPAIR_ID" --candidate-head "$REPAIRED_FULL_SHA" \
+  --candidate-tree "$REPAIRED_TREE_FULL_SHA" \
+  --reason 'Authorize one check of the explicitly prepared rewrite repair; preserve all budgets and holds' --json
+```
+
+The generic retry operation is permission only. Do not use Resume/Rework after it;
+those remain blocked for rewrite custody. An old daemon strictly rejects the new
+`rewriteRepair` field on retry authorization; the CLI never retries without it.
+Obtain the exact commit and tree in the prepared checkout with
+`git rev-parse HEAD HEAD^{tree}`. Source changes do not grant a retry, reset counters or
+expand budgets. The daemon binds this targeted grant to the prepared operation, exact prospective
+commit/tree, failed dispatch, frozen configuration/request and next generation.
+Selection must independently prove those Git identities; the grant is not source
+proof. Generic or earlier task grants and grants for another candidate cannot
+admit repair checks. The normal admission consumes the exact matched grant once. A consumed grant cannot admit another
 validation for this repair, including automatic infrastructure correction.
 Selection without a grant can remain held; it is not a passing check receipt or
 an automatically replayable queue entry. Arrange separate permission before its
@@ -128,14 +144,20 @@ Human-only, strict JSON endpoints:
 - `POST /pods/:podId/approval-rewrite-repair/:recoveryId/check`: `rewriteId`,
   `failedDispatchId`, `expectedGeneration`, `expectedResultHash`, `candidateHead`,
   `reason`.
+- Existing `POST /pods/:podId/retry-authorizations`: `requestKey`, `reason`,
+  validation `stage`, and strict `rewriteRepair: {recoveryId, candidateHead,
+  candidateTree}` for one prospective repair selection. Additional binding fields
+  are server-derived. It neither selects source nor starts checks.
 
 Actor comes from authentication. Unknown fields (including paths, force, config,
 result/proof, budgets and execution overrides) fail. Old servers fail the new
 routes; the CLI has no Resume/approve/continuation fallback.
 
 This extends the append-only schema234 rewrite and schema235 checkpoint selection
-records using explicit rewrite bindings; it adds no migration and changes no
-historical migration. Back up and qualify a retention-aware release before use.
+records using explicit rewrite bindings. Fresh migration236 adds a nullable exact
+repair target to existing retry authorizations and a storage-level use fence;
+historical grants retain their original authority. No historical migration changes.
+Check prefix uniqueness when integrating another branch before release. Back up and qualify a retention-aware release before use.
 Do not downgrade to a binary unaware of repair selection: it cannot interpret the
 current source projection. Roll forward with preserved database, sources,
 resources and reports. No hold release or historical-resource deletion protocol

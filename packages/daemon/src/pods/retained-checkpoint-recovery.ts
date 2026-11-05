@@ -20,6 +20,7 @@ import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import { assertApprovalRepairStorage } from '../worktrees/approval-rewrite-repair-source.js';
 import { inspectCheckpointSource } from '../worktrees/checkpoint-source-identity.js';
+import { assertMergeRepository } from '../worktrees/merge-source-identity.js';
 import {
   assertCheckpointRepository,
   prepareRetainedCheckpointWorkspace,
@@ -131,6 +132,8 @@ export function createRetainedCheckpointRecovery(deps: {
       const dispatch = deps.podRepo.validationExecutions.find(pod);
       if (
         pod.executionTarget !== 'sandbox' ||
+        !deps.podRepo.sandboxWakeups ||
+        rewriteHash(pod.task) !== repair.taskHash ||
         !rewrite ||
         selected?.id !== rewrite.id ||
         selected.repairId ||
@@ -154,13 +157,24 @@ export function createRetainedCheckpointRecovery(deps: {
         dispatch.binding.containerId !== pod.containerId ||
         dispatch.binding.worktreePath !== pod.worktreePath ||
         dispatch.binding.generation !== rewrite.activated.generation ||
+        deps.podRepo.taskRetries?.state(pod.id).latest?.id !== dispatch.binding.admissionId ||
         !dispatch.binding.resourceScope ||
         deps.getContainerManager('sandbox').executionResourceScope !==
           dispatch.binding.resourceScope ||
-        dispatch.intent ||
-        deps.executionForPod(pod).repoUrl !== rewrite.binding.predecessor.repository
+        dispatch.intent
       )
         checkpointError('Exact failed sandbox rewrite dispatch/source/configuration required');
+      const repository =
+        deps.executionForPod(pod).repoUrl ?? checkpointError('Frozen repository unavailable');
+      assertCheckpointRepository(repository);
+      assertMergeRepository(
+        {
+          repository: rewrite.binding.predecessor.repository,
+          branch: pod.branch,
+          baseBranch: rewrite.binding.baseBranch,
+        },
+        repository,
+      );
       deps.podRepo.validationExecutions.assertFailedChecksSelection(pod, repair.dispatchId);
       for (const id of deps.podRepo.sourceAdoptions.taskPodIds(pod.id))
         if (deps.podRepo.sandboxWakeups?.listForPod(id).some((intent) => intent.endedAt === null))
@@ -391,6 +405,12 @@ export function createRetainedCheckpointRecovery(deps: {
         containerManager.executionResourceScope !== dispatch.binding.resourceScope
       )
         checkpointError('Validation provider namespace changed');
+      if (
+        (await containerManager.getStatus(containerId)) !== 'stopped' ||
+        (await containerManager.getResourceKey(containerId)) !== resourceKey
+      )
+        checkpointError('Failed rewrite resource changed during source observation');
+      assertCurrent();
       const rewrite = deps.podRepo.approvalRewrites?.get(repair.id);
       if (
         source.branch !== pod.branch ||
@@ -504,6 +524,7 @@ export function createRetainedCheckpointRecovery(deps: {
       id: input.rewriteId,
       dispatchId: input.failedDispatchId,
       evidenceHash: rewriteHash(rewrite),
+      taskHash: rewriteHash(pod.task),
       artifactsPath: pod.artifactsPath,
     });
   }
@@ -690,6 +711,7 @@ export function createRetainedCheckpointRecovery(deps: {
           record.prepared!,
           record.binding.repository,
           assertCurrent,
+          { generation: record.generation, cycle: record.binding.cycle },
         );
       const inspect =
         deps.worktreeManager.inspectSourceAdoption ??
@@ -718,7 +740,17 @@ export function createRetainedCheckpointRecovery(deps: {
           record.prepared!,
           record.binding.repository,
           assertCurrent,
+          { generation: record.generation, cycle: record.binding.cycle },
         );
+      if (record.binding.approvalRewrite) {
+        const cm = deps.getContainerManager('sandbox');
+        if (
+          (await cm.getStatus(record.containerId)) !== 'stopped' ||
+          (await cm.getResourceKey?.(record.containerId)) !== record.resourceKey
+        )
+          checkpointError('Failed rewrite resource changed during candidate selection');
+        assertCurrent();
+      }
       const after = await inspect.call(
         deps.worktreeManager,
         record.prepared!.worktree,
@@ -988,6 +1020,8 @@ export function createRetainedCheckpointRecovery(deps: {
       if (
         current.lifecycleGeneration !== record.activated?.generation ||
         current.worktreePath !== record.prepared?.worktree ||
+        (record.binding.approvalRewrite &&
+          rewriteHash(current.task) !== record.binding.approvalRewrite.taskHash) ||
         configuration(current) !==
           (record.selected?.execution?.configurationHash ??
             record.binding.continuation?.execution?.configurationHash ??
@@ -999,7 +1033,10 @@ export function createRetainedCheckpointRecovery(deps: {
         );
     };
     if (record.binding.approvalRewrite)
-      await assertApprovalRepairStorage(record.prepared, record.binding.repository, assertCurrent);
+      await assertApprovalRepairStorage(record.prepared, record.binding.repository, assertCurrent, {
+        generation: record.generation,
+        cycle: record.binding.cycle,
+      });
     return inspectCheckpointSource({
       podId,
       worktreePath: record.prepared.worktree,

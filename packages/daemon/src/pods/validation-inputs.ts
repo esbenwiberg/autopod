@@ -200,7 +200,7 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
       codeReviewSkill,
       commitLog: commitLog || undefined,
       plan: pod.plan ?? undefined,
-      taskSummary: freshSource ? undefined : (pod.taskSummary ?? undefined),
+      taskSummary: continuation ? undefined : (pod.taskSummary ?? undefined),
       briefTouches: pod.touches ?? undefined,
       briefDoesNotTouch: pod.doesNotTouch ?? undefined,
       worktreePath: pod.worktreePath ?? undefined,

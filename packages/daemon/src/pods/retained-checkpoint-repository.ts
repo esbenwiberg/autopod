@@ -5,6 +5,8 @@ import {
   type CheckpointRecoveryRequest,
   type OperatorActor,
   type Pod,
+  type RewriteRepairRetryTarget,
+  type TaskRetryAuthorization,
   type ValidationResult,
 } from '@autopod/shared';
 export type { CheckpointRecoveryRequest } from '@autopod/shared';
@@ -51,6 +53,7 @@ export interface CheckpointRecoveryBinding {
     id: string;
     dispatchId: string;
     evidenceHash: string;
+    taskHash: string;
     artifactsPath: string | null;
   };
   /** New explicit selection, not legacy unknown-execution reconciliation. */
@@ -114,6 +117,23 @@ export interface CheckpointRecoveryRecord {
   } | null;
   blocked: { code: string } | null;
   reconciled: CheckpointOutcomeReceipt | null;
+}
+/** Exact prospective candidate authorization; actual Git proof is required at selection. */
+export function rewriteRepairRetryBinding(
+  record: CheckpointRecoveryRecord,
+  source: RewriteRepairRetryTarget,
+): NonNullable<TaskRetryAuthorization['rewriteRepair']> {
+  const owner = record.binding.approvalRewrite ?? checkpointError('Rewrite-owned repair required');
+  return {
+    recoveryId: record.id,
+    candidateHead: source.candidateHead,
+    candidateTree: source.candidateTree,
+    generation: record.generation + 1,
+    requestHash: record.requestHash,
+    configurationHash: record.binding.configurationHash,
+    rewriteId: owner.id,
+    failedDispatchId: owner.dispatchId,
+  };
 }
 const scopes = new WeakMap<Database.Database, AsyncLocalStorage<string>>();
 function scope(db: Database.Database) {

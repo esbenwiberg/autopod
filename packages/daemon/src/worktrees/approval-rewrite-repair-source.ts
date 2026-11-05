@@ -1,7 +1,10 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { verifyArtifactSnapshot } from '../pods/artifact-snapshot-receipt.js';
 import {
   type PreparedCheckpoint,
   checkpointError,
@@ -15,6 +18,7 @@ export async function assertApprovalRepairStorage(
   prepared: PreparedCheckpoint,
   repository: string,
   assertCurrent: () => void,
+  preservation: { generation: number; cycle: number },
 ) {
   const root = path.dirname(prepared.worktree);
   if (
@@ -27,6 +31,8 @@ export async function assertApprovalRepairStorage(
     prepared.worktree,
     prepared.bare,
     path.join(prepared.bare, 'objects'),
+    path.join(prepared.bare, 'info'),
+    path.join(prepared.bare, 'objects', 'info'),
     path.join(prepared.bare, 'worktrees'),
     path.join(prepared.bare, 'worktrees', 'worktree'),
   ]) {
@@ -64,6 +70,7 @@ export async function assertApprovalRepairStorage(
         GIT_CONFIG_GLOBAL: '/dev/null',
         GIT_OPTIONAL_LOCKS: '0',
         GIT_TERMINAL_PROMPT: '0',
+        GIT_NO_LAZY_FETCH: '1',
       },
       timeout: 15_000,
       maxBuffer: 1024 * 1024,
@@ -71,6 +78,15 @@ export async function assertApprovalRepairStorage(
     assertCurrent();
     return result;
   });
+  const config = (await git(['config', '--null', '--list'])).stdout.split('\0');
+  if (
+    config.some((entry) =>
+      /^extensions\.partialclone\n|^remote\..*\.promisor\n|^core\.alternaterefscommand\n/i.test(
+        entry,
+      ),
+    )
+  )
+    checkpointError('Repair partial/shared Git imports are not authorized');
   if (!(await lstat(path.join(prepared.worktree, '.git'))).isFile())
     checkpointError('Repair worktree Git pointer must remain a regular file');
   const metadata = (await git(['rev-parse', '--absolute-git-dir'])).stdout.trim();
@@ -89,5 +105,30 @@ export async function assertApprovalRepairStorage(
     (await git(['for-each-ref', '--format=%(refname)', 'refs/replace/'])).stdout.trim()
   )
     checkpointError('Repair Git storage/repository identity changed');
+  await verifyArtifactSnapshot(
+    prepared.snapshot,
+    path.join(root, 'host'),
+    preservation.generation,
+    preservation.cycle,
+    prepared.hostInventoryHash,
+  );
+  assertCurrent();
+  if (
+    prepared.bundle !== path.join(root, 'source.bundle') ||
+    !(await lstat(prepared.bundle)).isFile()
+  )
+    checkpointError('Repair preservation bundle identity changed');
+  if ((await lstat(prepared.bundle)).size > 1_073_741_824)
+    checkpointError('Repair preservation bundle exceeds capture bounds');
+  const digest = createHash('sha256');
+  let total = 0;
+  for await (const bytes of createReadStream(prepared.bundle)) {
+    total += bytes.length;
+    if (total > 1_073_741_824) checkpointError('Repair preservation bundle exceeds capture bounds');
+    digest.update(bytes);
+    assertCurrent();
+  }
+  if (digest.digest('hex') !== prepared.bundleHash)
+    checkpointError('Repair preservation bundle changed');
   assertCurrent();
 }

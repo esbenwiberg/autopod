@@ -6,6 +6,7 @@ import { terminationAuth } from '../../test-utils/termination-reconciliation-hel
 import { errorHandler } from '../error-handler.js';
 import { authPlugin } from '../plugins/auth.js';
 import { checkpointRecoveryRoutes } from './checkpoint-recovery.js';
+import { podRoutes } from './pods.js';
 
 it('authenticates and strictly transports rewrite repair preparation/selection; GET is read-only', async () => {
   const f = await rewriteRepairFixture();
@@ -95,4 +96,58 @@ it('authenticates and strictly transports rewrite repair preparation/selection; 
     f.ctx.db.close();
     await rm(f.root, { recursive: true, force: true });
   }
-});
+}, 15_000);
+
+it('uses the existing human retry operation with a strict exact candidate target and no implicit execution', async () => {
+  const f = await rewriteRepairFixture();
+  const app = Fastify();
+  app.setErrorHandler(errorHandler);
+  authPlugin(app, terminationAuth());
+  podRoutes(app, f.manager, undefined, undefined, f.ctx.podRepo);
+  try {
+    await f.recovery.prepareRewriteRepair(f.podId, f.request, f.actor);
+    await f.recovery.wait(f.request.id);
+    const op = f.recovery.list(f.podId)[0]!;
+    const input = {
+      requestKey: 'targeted-retry',
+      reason: 'Authorize one exact source-bound repair checks invocation',
+      rewriteRepair: {
+        recoveryId: op.id,
+        candidateHead: op.prepared!.head,
+        candidateTree: op.prepared!.tree,
+      },
+    };
+    const url = `/pods/${f.podId}/retry-authorizations`;
+    for (const authorization of [undefined, 'Bearer pod-token'])
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url,
+            payload: input,
+            headers: authorization ? { authorization } : {},
+          })
+        ).statusCode,
+      ).toBe(401);
+    const headers = { authorization: 'Bearer human-token' };
+    for (const extra of [
+      { actor: f.actor },
+      { stage: 'worker' },
+      { rewriteRepair: { ...input.rewriteRepair, force: true } },
+    ])
+      expect(
+        (await app.inject({ method: 'POST', url, headers, payload: { ...input, ...extra } }))
+          .statusCode,
+      ).toBe(400);
+    const response = await app.inject({ method: 'POST', url, headers, payload: input });
+    expect(response.statusCode, response.body).toBe(201);
+    expect(response.json().rewriteRepair).toMatchObject(input.rewriteRepair);
+    expect(f.deps.enqueue).not.toHaveBeenCalled();
+    expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+    expect(f.pod().lifecycleGeneration).toBe(f.request.expectedGeneration);
+  } finally {
+    await app.close();
+    f.ctx.db.close();
+    await rm(f.root, { recursive: true, force: true });
+  }
+}, 15_000);

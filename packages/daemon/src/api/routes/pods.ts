@@ -935,6 +935,14 @@ export function podRoutes(
     const input = z
       .object({
         requestKey: z.string().min(1).max(200),
+        rewriteRepair: z
+          .object({
+            recoveryId: z.string().regex(/^[a-zA-Z0-9-]{1,64}$/),
+            candidateHead: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
+            candidateTree: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
+          })
+          .strict()
+          .optional(),
         reason: z.string().trim().min(1).max(4000),
         stage: z
           .enum(['validation', 'sandbox_startup', 'codex_interruption', 'worker'])
@@ -957,6 +965,8 @@ export function podRoutes(
       input.requestKey,
       input.reason,
       humanActor(request),
+      undefined,
+      input.rewriteRepair,
     );
     reply.code(201);
     return result;

@@ -211,7 +211,9 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
                 id: repair.id,
                 failedDispatchId: repair.binding.approvalRewrite.dispatchId,
                 phase:
-                  repair.blocked || repair.checked?.result.overall === 'fail'
+                  repair.blocked ||
+                  repair.checked?.result.overall === 'fail' ||
+                  (repair.activated && held)
                     ? ('held' as const)
                     : repair.checked
                       ? ('checked' as const)
