@@ -331,7 +331,10 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           throw new Error(
             'Stage must be validation, sandbox_startup, codex_interruption or worker',
           );
-        const repair = opts.rewriteRepair || opts.candidateHead || opts.candidateTree;
+        const repair =
+          opts.rewriteRepair !== undefined ||
+          opts.candidateHead !== undefined ||
+          opts.candidateTree !== undefined;
         if (
           repair &&
           (opts.stage !== 'validation' ||

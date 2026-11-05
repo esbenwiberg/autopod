@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import Database from 'better-sqlite3';
 import { vi } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import { createEscalationRepository } from '../pods/escalation-repository.js';
 import { createEventBus } from '../pods/event-bus.js';
 import { createEventRepository } from '../pods/event-repository.js';
@@ -30,7 +30,7 @@ import { createProvisioningWorkspace } from '../pods/provisioning-workspace.js';
 import { createValidationRepository } from '../pods/validation-repository.js';
 import { createProfileStore } from '../profiles/index.js';
 import { createProviderAccountStore } from '../provider-accounts/index.js';
-import { createTestContext } from './mock-helpers.js';
+import { createTestContext, logger } from './mock-helpers.js';
 
 export function createProvisioningFixture(disk = false) {
   const ctx = createTestContext();
@@ -48,7 +48,7 @@ export function createProvisioningFixture(disk = false) {
   let db = ctx.db;
   if (disk) {
     writeFileSync(filename, db.serialize());
-    db = new Database(filename);
+    db = createDatabase(filename, logger);
     db.pragma('foreign_keys=ON');
   }
   const podRepo = createPodRepository(db);
@@ -255,7 +255,7 @@ export function createProvisioningFixture(disk = false) {
     reopen() {
       if (!disk) throw new Error('Expected file fixture');
       db.close();
-      db = new Database(filename);
+      db = createDatabase(filename, logger);
       db.pragma('foreign_keys=ON');
       return {
         pods: createPodRepository(db),

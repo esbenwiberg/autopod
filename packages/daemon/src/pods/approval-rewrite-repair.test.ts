@@ -155,6 +155,121 @@ it('prepares failed rewrite independently, selects an operator commit once and p
     expect(method).not.toHaveBeenCalled();
 }, 15_000);
 
+it('admits a normal promoted no-op sandbox checkpoint without rewriting frozen source facts', async () => {
+  const f = await fixture();
+  const before = f.pod();
+  const rewrite = f.ctx.podRepo.approvalRewrites!.get(f.rewriteId);
+  const retries = f.ctx.podRepo.taskRetries!.state(f.podId);
+  // Execute the production capture/bundle/import path through the local guest
+  // transport used by validation, rather than inventing an equal-tree receipt.
+  const checkpoint = await f.ctx.deps.sandboxWorkspaceCheckpoint!({
+    containerManager: f.cm,
+    containerId: f.containerId,
+    podId: f.podId,
+    worktreePath: before.worktreePath!,
+    sequence: 1,
+    assertCurrent: () => {},
+  });
+  expect(checkpoint).toMatchObject({
+    sourceHead: rewrite!.prepared!.head,
+    snapshotTree: rewrite!.prepared!.tree,
+    promoted: true,
+    materialized: true,
+    lineageVerified: true,
+  });
+  expect(checkpoint.snapshotCommit).not.toBe(rewrite!.prepared!.head);
+  const request = { ...f.request, checkpointHead: checkpoint.snapshotCommit };
+  await f.recovery.prepareRewriteRepair(f.podId, request, f.actor);
+  await f.recovery.wait(request.id);
+  const op = f.recovery.list(f.podId)[0]!;
+  expect(op.blocked).toBeNull();
+  expect(op.binding.head).toBe(checkpoint.snapshotCommit);
+  expect(op.prepared!.head).toBe(checkpoint.snapshotCommit);
+  expect(op.originalEvidence.result).toEqual(JSON.parse(JSON.stringify(f.result)));
+  expect(f.ctx.podRepo.approvalRewrites!.get(f.rewriteId)).toEqual(rewrite);
+  expect(f.ctx.podRepo.taskRetries!.state(f.podId)).toEqual(retries);
+  expect(f.pod()).toEqual(before);
+  expect(f.deps.enqueue).not.toHaveBeenCalled();
+  expect(await repairGit(f.original, 'rev-parse', 'HEAD')).toBe(f.source.commitSha);
+  expect(await repairGit(before.worktreePath!, 'rev-parse', 'HEAD')).toBe(
+    checkpoint.snapshotCommit,
+  );
+});
+
+it.each([
+  'foreign',
+  'unbound',
+  'tree-changing',
+  'restored-tree',
+  'merge',
+  'unrelated',
+  'stale-head',
+  'changed-observation',
+] as const)('refuses %s checkpoint lineage before claiming repair custody', async (kind) => {
+  const f = await fixture();
+  const cwd = f.pod().worktreePath!;
+  const rewrite = f.ctx.podRepo.approvalRewrites!.get(f.rewriteId);
+  const retries = f.ctx.podRepo.taskRetries!.state(f.podId);
+  const checkpoint = async (parents: string[], tree = f.source.treeSha) => {
+    const head = await repairGit(
+      cwd,
+      '-c',
+      'user.name=Autopod',
+      '-c',
+      'user.email=autopod@localhost',
+      'commit-tree',
+      tree,
+      ...parents.flatMap((parent) => ['-p', parent]),
+      '-m',
+      'autopod sandbox checkpoint',
+    );
+    await repairGit(cwd, 'update-ref', `refs/autopod-quarantine/${f.podId}/${head}`, head);
+    await repairGit(cwd, 'reset', '--hard', head);
+    return head;
+  };
+  let head = await checkpoint([f.source.commitSha]);
+  if (kind === 'foreign' || kind === 'unbound') {
+    await repairGit(cwd, 'update-ref', '-d', `refs/autopod-quarantine/${f.podId}/${head}`);
+    if (kind === 'foreign')
+      await repairGit(cwd, 'update-ref', 'refs/autopod-quarantine/another-pod/1', head);
+  }
+  if (kind === 'tree-changing' || kind === 'restored-tree') {
+    await writeFile(path.join(cwd, 'source.ts'), 'changed source\n');
+    await repairGit(cwd, 'add', 'source.ts');
+    head = await checkpoint([head], await repairGit(cwd, 'write-tree'));
+    if (kind === 'restored-tree') head = await checkpoint([head]);
+  }
+  if (kind === 'merge') head = await checkpoint([head, f.source.commitSha]);
+  if (kind === 'unrelated') head = await checkpoint([await checkpoint([])]);
+  if (kind === 'changed-observation') {
+    const inspect = f.worktrees.inspectSourceAdoption.getMockImplementation()!;
+    f.worktrees.inspectSourceAdoption.mockImplementationOnce(async (...args) => {
+      const observed = await inspect(...args);
+      await repairGit(cwd, 'reset', '--hard', f.source.commitSha);
+      return observed;
+    });
+  }
+  await expect(
+    f.recovery.prepareRewriteRepair(
+      f.podId,
+      { ...f.request, checkpointHead: kind === 'stale-head' ? f.source.commitSha : head },
+      f.actor,
+    ),
+  ).rejects.toMatchObject({
+    code:
+      kind === 'stale-head' || kind === 'changed-observation'
+        ? 'CHECKPOINT_RECOVERY_BLOCKED'
+        : 'CHECKPOINT_SOURCE_CHANGED',
+  });
+  expect(f.recovery.list(f.podId)).toEqual([]);
+  expect(f.ctx.podRepo.approvalRewrites!.get(f.rewriteId)).toEqual(rewrite);
+  expect(f.ctx.podRepo.taskRetries!.state(f.podId)).toEqual(retries);
+  expect(f.deps.enqueue).not.toHaveBeenCalled();
+  expect(await repairGit(cwd, 'rev-parse', 'HEAD')).toBe(
+    kind === 'changed-observation' ? f.source.commitSha : head,
+  );
+});
+
 it.each([
   'dispatch',
   'generation',

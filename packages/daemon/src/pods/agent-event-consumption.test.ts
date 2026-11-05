@@ -1,9 +1,14 @@
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { AgentEvent } from '@autopod/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   agentEvents,
   createAgentExecutionFixture,
   syntheticComplete,
 } from '../test-utils/agent-execution-helpers.js';
+import { createAgentEventConsumption } from './agent-event-consumption.js';
 const fixtures: ReturnType<typeof createAgentExecutionFixture>[] = [];
 function fixture(disk = false) {
   const f = createAgentExecutionFixture(disk);
@@ -17,6 +22,158 @@ afterEach(() => {
 });
 
 describe('agent event consumption owner', () => {
+  it.each(['claude', 'codex', 'pi', 'copilot'] as const)(
+    'publishes one observed File event for %s shell edits before completion, preserving tool events',
+    async (runtime) => {
+      const f = fixture();
+      f.running();
+      f.podRepo.update('prepare', { runtime });
+      const git = (...args: string[]) => execFileSync('git', args, { cwd: f.directory });
+      git('init', '-q');
+      git('config', 'user.name', 'Observer Test');
+      git('config', 'user.email', 'observer@example.invalid');
+      git('config', 'core.hooksPath', '/dev/null');
+      writeFileSync(join(f.directory, '.gitignore'), '*\n');
+      writeFileSync(join(f.directory, 'source.ts'), 'initial');
+      git('add', '-f', 'source.ts', '.gitignore');
+      git('commit', '-qm', 'initial');
+      vi.mocked(f.cm.execInContainer).mockImplementation(async (_id, command, options) => {
+        options?.assertCurrent?.();
+        return {
+          stdout: execFileSync(process.execPath, command.slice(1), {
+            cwd: f.directory,
+            encoding: 'utf8',
+          }),
+          stderr: '',
+          exitCode: 0,
+        };
+      });
+      const live: AgentEvent[] = [];
+      f.deps.eventBus.subscribe((event) => {
+        if (event.type === 'pod.agent_activity') live.push(event.event);
+      });
+      // This test varies event runtime only; provider eligibility is covered
+      // by provider-attempt tests rather than synthetic cross-provider accounts.
+      const consumer = createAgentEventConsumption(
+        { ...f.deps, providerAttemptRepo: undefined },
+        {
+          ...f.consumerCaptured,
+          resolveEffectiveBoundProfile: () => f.profiles.get('test-profile'),
+          ensureProviderAttempt: () => null,
+          closeProviderAttempt: vi.fn(),
+        },
+      );
+      const stream = (async function* () {
+        // The baseline must exist before the first iterator pull edits anything.
+        execFileSync('/bin/sh', ['-c', 'printf edited > source.ts'], { cwd: f.directory });
+        yield {
+          type: 'tool_use',
+          timestamp: syntheticComplete.timestamp,
+          tool: 'Bash',
+          input: { command: 'edit via shell' },
+        } as const;
+        // A duplicate native patch report and even a failed/no-op phantom must
+        // not produce additional File rows when observation is authoritative.
+        yield {
+          type: 'file_change',
+          timestamp: syntheticComplete.timestamp,
+          path: '/workspace/source.ts',
+          action: 'modify',
+        } as const;
+        yield {
+          type: 'file_change',
+          timestamp: syntheticComplete.timestamp,
+          path: 'phantom.ts',
+          action: 'create',
+        } as const;
+        git('add', 'source.ts');
+        git('commit', '-qm', 'agent edit');
+        yield syntheticComplete;
+      })();
+      expect(await consumer.consumeAgentEvents('prepare', stream)).toBe('completed');
+      expect(live.map((event) => event.type)).toEqual(['tool_use', 'file_change', 'complete']);
+      expect(live[1]).toMatchObject({ path: 'source.ts', action: 'modify', source: 'workspace' });
+      const stored = f.deps.eventRepo.getForSession('prepare', { type: 'pod.agent_activity' });
+      expect(stored.map((entry) => entry.payload)).toMatchObject(
+        live.map((event) => ({ type: 'pod.agent_activity', podId: 'prepare', event })),
+      );
+    },
+  );
+
+  it.each(['pause', 'replacement'] as const)(
+    'does not start the worker or publish file events after %s during baseline capture',
+    async (change) => {
+      const f = fixture();
+      f.running();
+      let resolve!: (value: { stdout: string; stderr: string; exitCode: number }) => void;
+      vi.mocked(f.cm.execInContainer).mockImplementationOnce(
+        async () =>
+          new Promise((done) => {
+            resolve = done;
+          }),
+      );
+      let pulled = false;
+      const consuming = f.consumer.consumeAgentEvents(
+        'prepare',
+        (async function* () {
+          pulled = true;
+          yield syntheticComplete;
+        })(),
+      );
+      if (change === 'pause') f.consumerCaptured.pauseIntents.set('prepare', Symbol('pause'));
+      else f.podRepo.incrementLifecycleGeneration('prepare');
+      resolve({
+        stdout: JSON.stringify({ version: 1, complete: true, files: [] }),
+        stderr: '',
+        exitCode: 0,
+      });
+      expect(await consuming).toBe(change === 'pause' ? 'paused' : 'stopped');
+      expect(pulled).toBe(false);
+      expect(f.deps.eventRepo.getForSession('prepare', { type: 'pod.agent_activity' })).toEqual([]);
+    },
+  );
+
+  it.each(['pause', 'replacement'] as const)(
+    'drops a final snapshot and completion after %s while terminal observation is in flight',
+    async (change) => {
+      const f = fixture();
+      f.running();
+      let finishStarted!: () => void;
+      const started = new Promise<void>((done) => {
+        finishStarted = done;
+      });
+      let resolve!: (value: { stdout: string; stderr: string; exitCode: number }) => void;
+      vi.mocked(f.cm.execInContainer)
+        .mockResolvedValueOnce({
+          stdout: JSON.stringify({ version: 1, complete: true, files: [] }),
+          stderr: '',
+          exitCode: 0,
+        })
+        .mockImplementationOnce(async () => {
+          finishStarted();
+          return new Promise((done) => {
+            resolve = done;
+          });
+        });
+      const consuming = f.consumer.consumeAgentEvents('prepare', agentEvents(syntheticComplete));
+      await started;
+      if (change === 'pause') f.consumerCaptured.pauseIntents.set('prepare', Symbol('pause'));
+      else f.podRepo.incrementLifecycleGeneration('prepare');
+      resolve({
+        stdout: JSON.stringify({
+          version: 1,
+          complete: true,
+          files: [['late.ts', `100644:${'a'.repeat(40)}`]],
+        }),
+        stderr: '',
+        exitCode: 0,
+      });
+      expect(await consuming).toBe(change === 'pause' ? 'paused' : 'stopped');
+      expect(f.deps.eventRepo.getForSession('prepare', { type: 'pod.agent_activity' })).toEqual([]);
+      expect(f.pod().inputTokens).toBe(0);
+    },
+  );
+
   it('records a repeated completion once and settles every shared run owner', async () => {
     const f = fixture();
     f.running();

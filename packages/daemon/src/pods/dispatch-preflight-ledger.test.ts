@@ -1,8 +1,8 @@
 import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { type NewPod, createPodRepository } from './pod-repository.js';
@@ -59,7 +59,8 @@ describe('dispatch admission against immutable execution evidence', () => {
       );
       const rerun = ledger.inspect('rerun', 1, repository, 'main', base);
       expect(rerun).toMatchObject({
-        status: 'admitted',
+        // The linked fix is an additional active execution, absent from this grant.
+        status: 'review_required',
         rerun: { ofPodId: 'first', actor: { type: 'human', userId: 'operator' } },
       });
       expect(rerun.executionId).not.toBe(first.executionId);
@@ -83,7 +84,7 @@ describe('dispatch admission against immutable execution evidence', () => {
     const dir = mkdtempSync(join(tmpdir(), 'dispatch-restart-'));
     writeFileSync(join(dir, 'state.db'), f.db.serialize());
     f.db.close();
-    const db = new Database(join(dir, 'state.db'));
+    const db = createDatabase(join(dir, 'state.db'), logger);
     try {
       const ledger = createPodRepository(db).dispatchPreflight;
       expect(ledger?.latest('first')).toBeNull();
@@ -254,7 +255,7 @@ it.each([139, 156])('upgrades schema %s and preserves unknown legacy evidence', 
   const migrations = resolve(import.meta.dirname, '../db/migrations');
   for (const file of readdirSync(migrations))
     if (Number.parseInt(file, 10) <= version) copyFileSync(join(migrations, file), join(dir, file));
-  const db = new Database(join(dir, 'state.db'));
+  const db = createDatabase(join(dir, 'state.db'), logger);
   db.pragma('foreign_keys = ON');
   try {
     runMigrations(db, dir, logger);

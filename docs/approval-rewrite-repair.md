@@ -155,7 +155,7 @@ result/proof, budgets and execution overrides) fail. Old servers fail the new
 routes; the CLI has no Resume/approve/continuation fallback.
 
 This extends the append-only schema234 rewrite and schema235 checkpoint selection
-records using explicit rewrite bindings. Fresh migration236 adds a nullable exact
+records using explicit rewrite bindings. Fresh migration237 adds a nullable exact
 repair target to existing retry authorizations and a storage-level use fence;
 historical grants retain their original authority. No historical migration changes.
 Check prefix uniqueness when integrating another branch before release. Back up and qualify a retention-aware release before use.

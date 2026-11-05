@@ -1,7 +1,6 @@
 import { copyFileSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 import { createDatabase } from '../db/connection.js';
 import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
@@ -331,7 +330,7 @@ describe('durable PR delivery boundary', () => {
       for (const file of readdirSync(migrations))
         if (Number.parseInt(file, 10) <= version)
           copyFileSync(join(migrations, file), join(dir, file));
-      let db = new Database(join(dir, 'test.db'));
+      let db = createDatabase(join(dir, 'test.db'), logger);
       try {
         runMigrations(db, dir, logger);
         await runMigrationsWithBackups(db, migrations, logger);
@@ -339,7 +338,7 @@ describe('durable PR delivery boundary', () => {
         const intent = f.ledger.reserve(f.config);
         expect(f.ledger.claim(intent)).toBe(true);
         db.close();
-        db = new Database(join(dir, 'test.db'));
+        db = createDatabase(join(dir, 'test.db'), logger);
         const ledger = createDeliveryLedger(db);
         const provider = f.provider;
         vi.mocked(requireValue(provider.findPr)).mockResolvedValue({

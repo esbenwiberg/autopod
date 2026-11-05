@@ -1,6 +1,9 @@
 import type { Pod } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
+import { selectSinglePrOwner } from './single-pr-owner.js';
 import type { WorkspaceBranchSourceCaptured } from './workspace-contracts.js';
+
+export { selectSinglePrOwner } from './single-pr-owner.js';
 
 export function createWorkspaceBranchSource(captured: WorkspaceBranchSourceCaptured) {
   const { podRepo, logger } = captured;
@@ -15,17 +18,15 @@ export function createWorkspaceBranchSource(captured: WorkspaceBranchSourceCaptu
     }
     const seriesPods = podRepo.getPodsBySeries(parent.seriesId);
     const prOwners = seriesPods.filter((p) => p.prUrl);
-    if (prOwners.length === 0) {
+    const prOwner = selectSinglePrOwner(parent, prOwners);
+    if (!prOwner) {
       throw new AutopodError(
         `Cannot spawn fix pod for pod ${parent.id}: no pod in series ${parent.seriesId} owns a PR yet`,
         'INVALID_STATE',
         409,
       );
     }
-    let prOwner = prOwners[0] as Pod;
     if (prOwners.length > 1) {
-      const matching = parent.prUrl ? prOwners.find((p) => p.prUrl === parent.prUrl) : undefined;
-      prOwner = matching ?? prOwner;
       logger.warn(
         {
           podId: parent.id,

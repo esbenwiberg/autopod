@@ -4,8 +4,9 @@ import { join, resolve } from 'node:path';
 import { createEscalationMcpServer } from '@autopod/escalation-mcp';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { expect, it, vi } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createNudgeRepository } from './nudge-repository.js';
@@ -143,7 +144,7 @@ it('replays a receipt after disk reopen and loses neither late guidance nor a dr
     await channel.close();
     writeFileSync(file, db.serialize());
     db.close();
-    db = new Database(file);
+    db = createDatabase(file, logger);
     db.pragma('foreign_keys = ON');
     channel = await connect(db);
     const recovered = createNudgeRepository(db);
@@ -314,7 +315,7 @@ it('upgrades schema 179 without inventing acknowledgment of consumed legacy rows
   const migrations = resolve(import.meta.dirname, '../db/migrations');
   for (const file of readdirSync(migrations))
     if (Number.parseInt(file, 10) <= 179) copyFileSync(join(migrations, file), join(dir, file));
-  const db = new Database(join(dir, 'state.db'));
+  const db = createDatabase(join(dir, 'state.db'), logger);
   try {
     db.pragma('foreign_keys = ON');
     runMigrations(db, dir, logger);

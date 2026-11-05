@@ -8,11 +8,11 @@ import {
   type Pod,
   type ProviderCredentials,
 } from '@autopod/shared';
-import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveLaunchAgentRoute } from '../configuration/agent-route-resolution.js';
 import { resolveLaunch } from '../configuration/launch-resolver.js';
+import { createDatabase } from '../db/connection.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ReviewerExecutor } from '../interfaces/reviewer-executor.js';
 import { createProviderAccountStore } from '../provider-accounts/provider-account-store.js';
@@ -90,8 +90,7 @@ function fixture(provider: Provider = 'openai') {
   } finally {
     seed.close();
   }
-  let db = new Database(file);
-  db.pragma('foreign_keys = ON');
+  let db = createDatabase(file, pino({ level: 'silent' }));
   cleanup.push(() => {
     db.close();
     fs.rmSync(root, { recursive: true, force: true });
@@ -164,8 +163,7 @@ function fixture(provider: Provider = 'openai') {
   const savedProfile = db.prepare('SELECT * FROM profiles WHERE name=?').get('test-profile');
   const reopen = () => {
     db.close();
-    db = new Database(file);
-    db.pragma('foreign_keys = ON');
+    db = createDatabase(file, pino({ level: 'silent' }));
     expect(db.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
     expect(db.pragma('foreign_key_check')).toEqual([]);
     expect(createProviderAccountStore(db).get('other')).toEqual(other);
@@ -301,6 +299,27 @@ function controlledBuild(f: ReturnType<typeof fixture>) {
 }
 
 describe('reviewer configuration and executor', () => {
+  it.each([false, true])(
+    'uses production disk policy with persisted rows; reopened=%s',
+    (reopened) => {
+      const f = fixture();
+      f.openAttempt(true);
+      const pod = f.repo.getOrThrow('worker');
+      const account = f.accounts.get('selected');
+      const attempts = f.attempts.listRaw('worker');
+      if (reopened) f.reopen();
+      const db = f.db();
+      expect(db.pragma('journal_mode', { simple: true })).toBe('wal');
+      expect(db.pragma('synchronous', { simple: true })).toBe(1);
+      expect(db.pragma('foreign_keys', { simple: true })).toBe(1);
+      expect(db.pragma('busy_timeout', { simple: true })).toBe(5000);
+      expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
+      expect(db.pragma('foreign_key_check')).toEqual([]);
+      expect(createPodRepository(db).getOrThrow('worker')).toEqual(pod);
+      expect(createProviderAccountStore(db).get('selected')).toEqual(account);
+      expect(createProviderAttemptRepository(db).listRaw('worker')).toEqual(attempts);
+    },
+  );
   it('constructs without collaborator work and retains no-digest executor early return', () => {
     const f = fixture();
     const read = vi.fn(() => {

@@ -32,6 +32,7 @@ const active = [
   'provisioning',
   'running',
   'awaiting_input',
+  'research_ready',
   'paused',
   'validating',
   'validated',

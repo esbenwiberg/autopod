@@ -1,7 +1,6 @@
 import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import Database from 'better-sqlite3';
 import { expect, it, vi } from 'vitest';
 import { createDatabase } from '../db/connection.js';
 import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
@@ -146,7 +145,7 @@ it.each(['worktree', 'archive'] as const)(
     const dir = mkdtempSync(join(tmpdir(), 'deletion-reopen-'));
     const file = join(dir, 'state.db');
     writeFileSync(file, ctx.db.serialize());
-    const reopened = new Database(file);
+    const reopened = createDatabase(file, logger);
     try {
       reopened.pragma('foreign_keys = ON');
       if (fault === 'archive') reopened.exec('DROP TRIGGER fail_archive');

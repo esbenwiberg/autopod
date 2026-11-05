@@ -16,6 +16,7 @@ import { saveClipboardImage } from '../utils/clipboard.js';
 import { resolvePodId } from '../utils/id-resolver.js';
 import { runRemoteTerminalSession } from '../utils/remote-terminal.js';
 import { type LaunchFlags, buildLaunchRequest } from './launch-request.js';
+import { validateEffectiveLaunchSources, validateLaunchSources } from './launch-sources.js';
 import { addLaunchPresetOptions } from './launch.js';
 
 const IMAGE_EXTENSIONS = new Set([
@@ -330,11 +331,11 @@ function addWorkspaceOptions(command: Command): Command {
     .option('-b, --branch <name>', 'Name for the new working branch (defaults to autopod/<id>).')
     .option(
       '--base-branch <ref>',
-      'Remote ref to start the workspace from AND target as the merge base (must exist on the remote; no fallback to the repository default).',
+      'Published remote branch name to start the workspace from AND target as the merge base (must exist on the remote; no fallback to the repository default).',
     )
     .option(
       '--start-branch <ref>',
-      'Remote ref to start the workspace from while the eventual PR still targets the repository default (use instead of --base-branch to keep the merge base as main).',
+      'Published remote branch name to start the workspace from while the eventual PR still targets the repository default (use instead of --base-branch to keep the merge base as main).',
     )
     .option(
       '-i, --instructions <text>',
@@ -470,7 +471,9 @@ async function createWorkspacePod(
       advisoryBrowserQaEnabled: false,
     },
   };
+  validateLaunchSources(request.work);
   const effective = await client.resolveLaunch(request);
+  validateEffectiveLaunchSources(effective);
   if (opts.preview) {
     console.log(JSON.stringify(effective, null, 2));
     return;

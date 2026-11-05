@@ -61,6 +61,168 @@ afterEach(() => {
 });
 
 describe('shared launch request CLI', () => {
+  it('describes source branches and the output branch truthfully', () => {
+    const program = new Command();
+    registerLaunchCommand(program, vi.fn());
+    const help = program.commands[0]?.helpInformation();
+    expect(help).toContain('published remote branch name');
+    expect(help).toContain('Output branch');
+    expect(help).not.toContain('branch or revision');
+  });
+  it.each(['startBranch', 'baseBranch'] as const)(
+    'rejects invalid %s before preview or admission',
+    async (field) => {
+      for (const value of [
+        'a'.repeat(40),
+        'B'.repeat(64),
+        'main~1',
+        'main^',
+        'main@{1}',
+        'main..other',
+      ]) {
+        for (const preview of [false, true]) {
+          for (const fileInput of [false, true]) {
+            const client = {
+              listConfigurations: lookup,
+              resolveLaunch: vi.fn(),
+              launchPod: vi.fn(),
+            };
+            const save = vi.fn();
+            const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+            const program = new Command().exitOverride();
+            registerLaunchCommand(program, () => client as unknown as AutopodClient, save);
+            const file = join(temporary(), 'request.json');
+            writeFileSync(
+              file,
+              JSON.stringify({ repositoryId: 'repo', task: 'Task', work: { [field]: value } }),
+            );
+            const args = fileInput
+              ? ['--config', file]
+              : [
+                  '--repo',
+                  'Project',
+                  '--task',
+                  'Task',
+                  field === 'startBranch' ? '--start-branch' : '--base-branch',
+                  value,
+                ];
+            await expect(
+              program.parseAsync(['node', 'ap', 'run', ...args, ...(preview ? ['--preview'] : [])]),
+            ).rejects.toThrow(`work.${field}`);
+            expect(save).not.toHaveBeenCalled();
+            expect(client.launchPod).not.toHaveBeenCalled();
+            expect(client.resolveLaunch).not.toHaveBeenCalled();
+            expect(log).not.toHaveBeenCalled();
+          }
+        }
+      }
+    },
+  );
+  it.each([false, true])('checks inherited effective sources (preview=%s)', async (preview) => {
+    const client = {
+      getPodLaunchConfiguration: vi.fn(async () => ({
+        digest: 'a'.repeat(64),
+        profileId: 'profile',
+        task: 'Task',
+        repository: { id: 'repo', setup: { id: 'web' } },
+      })),
+      resolveLaunch: vi.fn(async () => ({ work: { startBranch: 'a'.repeat(40) } })),
+      launchPod: vi.fn(),
+    };
+    const save = vi.fn();
+    const program = new Command().exitOverride();
+    registerLaunchCommand(program, () => client as unknown as AutopodClient, save);
+    await expect(
+      program.parseAsync([
+        'node',
+        'ap',
+        'run',
+        '--from-pod',
+        'parent',
+        ...(preview ? ['--preview'] : []),
+      ]),
+    ).rejects.toThrow('work.startBranch');
+    expect(save).not.toHaveBeenCalled();
+    expect(client.launchPod).not.toHaveBeenCalled();
+  });
+  it('replays old exact SHA receipts unchanged without discovery', async () => {
+    const request = {
+      repositoryId: 'repo',
+      task: 'Task',
+      work: { startBranch: 'a'.repeat(40) },
+      requestId: 'saved',
+      expectedDigest: 'b'.repeat(64),
+      referenceRepositories: [],
+    };
+    const file = join(temporary(), 'saved.json');
+    const original = JSON.stringify(request);
+    writeFileSync(file, original);
+    const client = {
+      resolveLaunch: vi.fn(),
+      listConfigurations: vi.fn(),
+      launchPod: vi.fn(async () => ({ id: 'test-pod' })),
+    };
+    const save = vi.fn(() => file);
+    const program = new Command().exitOverride();
+    registerLaunchCommand(program, () => client as unknown as AutopodClient, save);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await program.parseAsync(['node', 'ap', 'run', '--config', file]);
+    expect(client.launchPod).toHaveBeenCalledWith(request);
+    expect(client.resolveLaunch).not.toHaveBeenCalled();
+    expect(client.listConfigurations).not.toHaveBeenCalled();
+    expect(readFileSync(file, 'utf8')).toBe(original);
+    const preview = new Command().exitOverride();
+    registerLaunchCommand(preview, () => client as unknown as AutopodClient, save);
+    await expect(
+      preview.parseAsync(['node', 'ap', 'run', '--config', file, '--preview']),
+    ).rejects.toThrow('work.startBranch');
+    expect(client.launchPod).toHaveBeenCalledOnce();
+    expect(save).toHaveBeenCalledOnce();
+    expect(readFileSync(file, 'utf8')).toBe(original);
+  });
+  it('preserves reference SHA, output branch and task evidence on a valid launch', async () => {
+    const sha = 'a'.repeat(40);
+    const client = {
+      listConfigurations: lookup,
+      resolveLaunch: vi.fn(async (request: LaunchRequest) => ({
+        ...request,
+        digest: 'b'.repeat(64),
+      })),
+      launchPod: vi.fn(async () => ({ id: 'test-pod' })),
+    };
+    const program = new Command().exitOverride();
+    const save = vi.fn(() => 'receipt.json');
+    registerLaunchCommand(program, () => client as unknown as AutopodClient, save);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await program.parseAsync([
+      'node',
+      'ap',
+      'run',
+      '--repo',
+      'Project',
+      '--task',
+      sha,
+      '--reference',
+      `Project=${sha}`,
+      '--branch',
+      sha,
+      '--start-branch',
+      'feature/prep.v2',
+      '--base-branch',
+      'release/v2',
+      '--json',
+    ]);
+    expect(client.launchPod).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: sha,
+        referenceRepositories: [{ repositoryId: 'repo', ref: sha, access: 'read' }],
+        work: { branch: sha, startBranch: 'feature/prep.v2', baseBranch: 'release/v2' },
+      }),
+    );
+    expect(save).toHaveBeenCalledOnce();
+  });
   it('selects an original source snapshot without looking up mutable profile names', async () => {
     const client = {
       getPodLaunchConfiguration: vi.fn(async () => ({

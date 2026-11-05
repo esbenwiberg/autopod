@@ -2,9 +2,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { OperatorActor, Pod, ValidationResult } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createDatabase } from '../db/connection.js';
 import {
   createMockProfileStore,
   createMockWorktreeManager,
@@ -65,8 +66,7 @@ function fixture(status: Pod['status'] = 'validating', persistent = false) {
     file = path.join(root, 'state.db');
     fs.writeFileSync(file, seed.serialize());
     seed.close();
-    db = new Database(file);
-    db.pragma('foreign_keys = ON');
+    db = createDatabase(file, pino({ level: 'silent' }));
   }
   cleanup.push(() => {
     db.close();
@@ -164,8 +164,7 @@ function fixture(status: Pod['status'] = 'validating', persistent = false) {
         escalations: db.prepare('SELECT * FROM escalations').all(),
       };
       db.close();
-      db = new Database(file);
-      db.pragma('foreign_keys = ON');
+      db = createDatabase(file, pino({ level: 'silent' }));
       expect(db.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
       expect(db.pragma('foreign_key_check')).toEqual([]);
       expect({

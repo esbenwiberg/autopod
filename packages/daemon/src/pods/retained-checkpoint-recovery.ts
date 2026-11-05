@@ -402,6 +402,21 @@ export function createRetainedCheckpointRecovery(deps: {
     if (!source.worktreeClean || source.commitSha !== input.checkpointHead)
       checkpointError('Selected commit must match the clean retained host checkpoint');
     if (repair) {
+      const rewrite = deps.podRepo.approvalRewrites?.get(repair.id);
+      const prepared = rewrite?.prepared ?? checkpointError('Failed candidate source unavailable');
+      // Validation promotes pod-owned no-op checkpoints before/after checks.
+      // Prove their exact lineage from the frozen rewrite, not tree equality alone.
+      const verified = await inspectCheckpointSource({
+        podId,
+        worktreePath,
+        branch: pod.branch,
+        head: prepared.head,
+        tree: prepared.tree,
+        worktreeManager: deps.worktreeManager,
+        assertCurrent,
+      });
+      if (verified.head !== source.commitSha)
+        checkpointError('Failed candidate source changed during observation');
       const dispatch = deps.podRepo.validationExecutions?.find(pod);
       if (
         !dispatch?.binding.resourceScope ||
@@ -414,13 +429,6 @@ export function createRetainedCheckpointRecovery(deps: {
       )
         checkpointError('Failed rewrite resource changed during source observation');
       assertCurrent();
-      const rewrite = deps.podRepo.approvalRewrites?.get(repair.id);
-      if (
-        source.branch !== pod.branch ||
-        source.commitSha !== rewrite?.prepared?.head ||
-        source.treeSha !== rewrite.prepared.tree
-      )
-        checkpointError('Failed candidate source identity changed');
     }
     const profile = deps.executionForPod(pod);
     if (!profile.repoUrl) checkpointError('Original frozen repository is unavailable');

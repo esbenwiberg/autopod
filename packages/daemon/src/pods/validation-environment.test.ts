@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { EffectiveLaunchConfig, Pod } from '@autopod/shared';
-import Database from 'better-sqlite3';
+import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveLaunchCredentialReferences } from '../configuration/credential-references.js';
 import { createConfigurationCredentialStore } from '../configuration/credential-store.js';
@@ -15,6 +15,7 @@ import {
 import { resolveLaunch } from '../configuration/launch-resolver.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
 import { loadOrCreateKey } from '../crypto/credentials-cipher.js';
+import { createDatabase } from '../db/connection.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import { RUNTIME_TELEMETRY_OPT_OUT_ENV } from '../runtime-env.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
@@ -566,8 +567,7 @@ async function durableFixture() {
   } finally {
     seed.close();
   }
-  let db = new Database(file);
-  db.pragma('foreign_keys = ON');
+  let db = createDatabase(file, pino({ level: 'silent' }));
   cleanup.push(() => {
     db.close();
     fs.rmSync(root, { recursive: true, force: true });
@@ -694,8 +694,7 @@ async function durableFixture() {
     run: () => op.validationEnvironmentForPod(pod, profile),
     reopen() {
       db.close();
-      db = new Database(file);
-      db.pragma('foreign_keys = ON');
+      db = createDatabase(file, pino({ level: 'silent' }));
       expect(db.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
       expect(db.pragma('foreign_key_check')).toEqual([]);
       return { snapshots: createLaunchSnapshotRepository(db, store), rows: rows() };

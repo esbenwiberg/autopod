@@ -1,13 +1,13 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import Database from 'better-sqlite3';
 import pino from 'pino';
 import { afterEach } from 'vitest';
 import { AzureSandboxApiClient } from '../containers/azure-sandbox-api-client.js';
 import { createSandboxWakeupJournal } from '../containers/sandbox-wakeup-journal.js';
+import { createDatabase } from '../db/connection.js';
 import type { PodRepository } from '../pods/pod-repository.js';
-import { createTestDb } from './mock-helpers.js';
+import { createTestDb, logger } from './mock-helpers.js';
 
 export const TEST_WAKEUP_ID = 'synthetic-worker';
 export const TEST_WAKEUP_KEY =
@@ -77,7 +77,7 @@ export function createSandboxWakeupFixture(knownRunning = false, disk = false) {
   if (file) {
     writeFileSync(file, db.serialize());
     db.close();
-    db = new Database(file);
+    db = createDatabase(file, logger);
   }
   let journal = createSandboxWakeupJournal(db);
   // Synthetic backend observation in a test fixture, never live provider proof.
@@ -96,7 +96,7 @@ export function createSandboxWakeupFixture(knownRunning = false, disk = false) {
     reopen() {
       if (!file) throw new Error('Disk fixture required');
       db.close();
-      db = new Database(file);
+      db = createDatabase(file, logger);
       journal = createSandboxWakeupJournal(db);
       return journal;
     },

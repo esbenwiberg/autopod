@@ -64,6 +64,42 @@ it('uses dedicated transports and propagates old-server failure without a fallba
   expect(client.prepareRewriteRepair).toHaveBeenCalledTimes(1);
 });
 
+it.each([
+  ['--rewrite-repair', ''],
+  ['--candidate-head', ''],
+  ['--candidate-tree', ''],
+  ['--rewrite-repair', '', '--candidate-head', '', '--candidate-tree', ''],
+  ['--rewrite-repair', 'repair'],
+  ['--candidate-head', 'a'.repeat(40)],
+  ['--candidate-tree', 'b'.repeat(40)],
+  ['--rewrite-repair', '', '--candidate-head', 'a'.repeat(40), '--candidate-tree', 'b'.repeat(40)],
+  ['--rewrite-repair', 'repair', '--candidate-head', '', '--candidate-tree', 'b'.repeat(40)],
+  ['--rewrite-repair', 'repair', '--candidate-head', 'a'.repeat(40), '--candidate-tree', ''],
+  ['--rewrite-repair', ' ', '--candidate-head', 'a'.repeat(40), '--candidate-tree', 'b'.repeat(40)],
+])(
+  'rejects incomplete or empty retry targets before creating any client: %j',
+  async (...target) => {
+    const program = new Command().exitOverride();
+    registerPodCommands(program, getClient);
+    await expect(
+      program.parseAsync(
+        [
+          'authorize-retry',
+          'whole-pod-id',
+          '--request-key',
+          'targeted-retry',
+          '--reason',
+          'Authorize exactly this prepared repair source',
+          ...target,
+        ],
+        { from: 'user' },
+      ),
+    ).rejects.toThrow('Targeted rewrite retry requires');
+    // In particular, an older daemon cannot receive a generic grant or fallback.
+    expect(getClient).not.toHaveBeenCalled();
+  },
+);
+
 it.each([404, 201])(
   'requires a confirmed targeted retry response without fallback, server status=%s',
   async (status) => {

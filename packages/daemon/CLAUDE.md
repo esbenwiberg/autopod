@@ -304,6 +304,40 @@ Each runtime in `src/runtimes/` implements the `Runtime` interface:
 Stream parsers are the tricky part — each vendor's SSE format is different. When adding parser logic,
 add test cases to the co-located `.test.ts` covering partial chunks, multi-event lines, and error frames.
 
+### File activity logs
+
+Coding-agent runs baseline `/workspace` after provisioning and before pulling the runtime
+stream, observe it every 15 seconds, and flush observations before normal completion.
+`pods/workspace-file-observer.ts` uses the container abstraction for both execution targets.
+Native file notifications are superseded only after a successful baseline: this gives Claude,
+Codex, Pi and Copilot the same File log behavior, including Python/Bash edits, without duplicate
+native/observed rows or treating a failed/no-op tool attempt as a successful change. Tool logs
+remain available. Runtime-specific native-edit preferences are generated independently of
+code-navigation MCP selection; justified generators/scripts remain allowed.
+
+Observed events carry `source: 'workspace'` and mean a **net content/mode change at observation
+time**, not one tool call or an exact write timestamp. Repeated dirty-file changes and commits
+between observations are detected; a commit of unchanged bytes is not another edit. Renames
+are delete/create. Ignored untracked files and submodule internals are excluded; tracked files
+remain observable even when ignored. Symlink contents are not followed. Changes made and reverted
+entirely between observations, including intermediate revisions, are not a complete edit history.
+Log counts are not final branch diff statistics, and resumes establish a fresh baseline.
+
+Snapshots are read-only and bounded (10-second exec, 30,000 files, 4 MiB manifest, 16 MiB per dirty
+file and 64 MiB total dirty bytes). Malformed, failed or oversized observations retain the last
+good baseline and report incomplete tracking once per run; initial-baseline failure retains
+legacy native events for that run. Cancellation/supersession suppresses late results. No source
+contents or diffs are emitted by the observer. Repository `.gitignore` owns exclusion of ordinary
+untracked build output; nonignored generated files are workspace changes, not proof the agent
+personally wrote them.
+
+Workspace observations cannot establish edit operation counts or read-before-write ordering.
+Quality normalization excludes them from edit/churn counts and marks inspection-derived metrics
+unavailable (`unresolved_write`) when they occur, even if some native read/edit evidence exists.
+This deliberately avoids falsely scoring incomplete timing evidence. Historical native events
+without `source` keep their existing quality semantics. No database migration or desktop filter
+change is needed; persisted REST replay and live events retain the `file_change` type.
+
 ## Validation Engine (`src/validation/local-validation-engine.ts`)
 
 Runs inside the pod container in phases:
