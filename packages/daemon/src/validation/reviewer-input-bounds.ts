@@ -1,9 +1,9 @@
 /** Existing hard UTF-8 prompt ceiling for packet-only, isolated reviewers. */
 export const MAX_ISOLATED_REVIEW_INPUT_BYTES = 1_000_000;
 
-/** Git hunk lines have a prefix; a quoted warning in changed code is not a footer. */
+/** Match the collector's literal LF footer, not JS line separators inside Git hunks. */
 export function hasTruncatedReviewDiff(diff: string): boolean {
-  return /^⚠ DIFF TRUNCATED:/m.test(diff);
+  return /(?:^|\n)⚠ DIFF TRUNCATED:/.test(diff);
 }
 
 /**

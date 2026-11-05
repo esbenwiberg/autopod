@@ -3696,6 +3696,22 @@ human_review: []
     expect(result.reviewSkipReason).toContain('incomplete');
   });
 
+  it.each(['\r', '\u2028', '\u2029'])(
+    'does not treat a non-LF separator inside a complete Git hunk as a footer (%j)',
+    async (separator) => {
+      const diff = `diff --git a/text.txt b/text.txt\n@@ -0,0 +1 @@\n+captured output${separator}⚠ DIFF TRUNCATED: example warning\n`;
+      const executor = vi.fn(async () => ({
+        stdout: JSON.stringify({ status: 'pass', reasoning: 'Complete hunk reviewed', issues: [] }),
+      }));
+      const result = await createLocalValidationEngine(stubContainerManager()).validate(
+        baseConfig({ diff, reviewerModel: 'claude-sonnet-4-6', reviewerExecutor: executor }),
+      );
+      expect(executor.mock.calls.length).toBe(1);
+      expect(result.overall).toBe('pass');
+      expect(result.taskReview?.diff).toBe(diff);
+    },
+  );
+
   it('passes complete bounded isolated review input, including code beyond the legacy diff limit', async () => {
     const diff = `${['implementation.ts', 'client.ts']
       .map((name) => `diff --git a/${name} b/${name}\n${'+new line\n'.repeat(19_000)}`)
