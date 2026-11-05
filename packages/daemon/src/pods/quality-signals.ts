@@ -12,12 +12,12 @@ import type { EscalationRepository } from './escalation-repository.js';
 import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
-import { type QualityActivity, normalizeQualityActivityEvidence } from './quality-activity.js';
+import { normalizeQualityActivityEvidence, type QualityActivity } from './quality-activity.js';
+import { computeProcessHealthScore } from './quality-score.js';
 import {
   QUALITY_SCORE_ALGORITHM_VERSION,
   type QualityScoreRepository,
 } from './quality-score-repository.js';
-import { computeProcessHealthScore } from './quality-score.js';
 import type { ValidationRepository } from './validation-repository.js';
 
 export interface QualitySignalsDeps {

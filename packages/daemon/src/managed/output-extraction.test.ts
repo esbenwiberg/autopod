@@ -47,18 +47,20 @@ it('Docker and Sandbox extraction feed one collector with matching normalized by
   expect(docker?.bundle).toEqual(sandbox?.bundle);
   expect(docker?.files).toEqual(sandbox?.files);
 });
-it.each(['symlink', 'link', 'character-device', 'fifo'] as const)(
-  'rejects Docker %s before writing staging content',
-  async (type) => {
-    const base = await root();
-    const pack = tar.pack();
-    pack.entry({ name: 'output/unsafe', type, linkname: '/outside' });
-    pack.finalize();
-    await expect(
-      extractManagedDockerOutput(pack, path.join(base, 'staging'), output),
-    ).rejects.toThrow('unsafe-entry');
-  },
-);
+it.each([
+  'symlink',
+  'link',
+  'character-device',
+  'fifo',
+] as const)('rejects Docker %s before writing staging content', async (type) => {
+  const base = await root();
+  const pack = tar.pack();
+  pack.entry({ name: 'output/unsafe', type, linkname: '/outside' });
+  pack.finalize();
+  await expect(
+    extractManagedDockerOutput(pack, path.join(base, 'staging'), output),
+  ).rejects.toThrow('unsafe-entry');
+});
 it('rejects traversal and oversized extraction before writes', async () => {
   const base = await root();
   const pack = tar.pack();

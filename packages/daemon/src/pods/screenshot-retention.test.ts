@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
-import { createPodRepository } from './pod-repository.js';
 import type { NewPod } from './pod-repository.js';
+import { createPodRepository } from './pod-repository.js';
 import { ScreenshotRetention } from './screenshot-retention.js';
 import type { ScreenshotStore } from './screenshot-store.js';
 

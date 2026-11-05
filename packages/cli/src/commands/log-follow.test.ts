@@ -1,6 +1,6 @@
 import { access } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { FIXTURE_TOKEN, createCliFixture } from '../test-utils/cli-executable.js';
+import { createCliFixture, FIXTURE_TOKEN } from '../test-utils/cli-executable.js';
 
 const podId = 'fixture-pod';
 const args = ['logs', podId, '--follow'];
@@ -54,30 +54,26 @@ describe('built CLI log following', () => {
   it.each([
     { code: 1000, exit: 1, stderr: disconnect(1000) },
     { code: 4001, exit: 2, stderr: 'Error: Log stream authentication failed.\nTry: ap login\n' },
-  ])(
-    'reports remote close $code with exit $exit',
-    async ({ code, exit, stderr }) => {
-      const fixture = await createCliFixture({ websocket: 'accept' });
-      try {
-        const child = fixture.start(args);
-        const peer = await fixture.waitForSubscription(child);
-        peer.socket.close(code, 'Untrusted server reason must not be printed');
-        expect(await child.result).toEqual({
-          code: exit,
-          signal: null,
-          failure: null,
-          cancelled: false,
-          stdout: banner,
-          stderr,
-        });
-        await peer.closed;
-        expect(fixture.websocketCount).toBe(0);
-      } finally {
-        await dispose(fixture);
-      }
-    },
-    30_000,
-  );
+  ])('reports remote close $code with exit $exit', async ({ code, exit, stderr }) => {
+    const fixture = await createCliFixture({ websocket: 'accept' });
+    try {
+      const child = fixture.start(args);
+      const peer = await fixture.waitForSubscription(child);
+      peer.socket.close(code, 'Untrusted server reason must not be printed');
+      expect(await child.result).toEqual({
+        code: exit,
+        signal: null,
+        failure: null,
+        cancelled: false,
+        stdout: banner,
+        stderr,
+      });
+      await peer.closed;
+      expect(fixture.websocketCount).toBe(0);
+    } finally {
+      await dispose(fixture);
+    }
+  }, 30_000);
 
   it('fails a top-level protocol error and releases a peer that does not close itself', async () => {
     const fixture = await createCliFixture({ websocket: 'accept' });

@@ -1,5 +1,5 @@
 import type { PodBridge } from '@autopod/escalation-mcp';
-import { type PendingRequests, createEscalationMcpServer } from '@autopod/escalation-mcp';
+import { createEscalationMcpServer, type PendingRequests } from '@autopod/escalation-mcp';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';

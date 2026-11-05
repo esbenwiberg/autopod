@@ -7,6 +7,7 @@ import type {
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '../lib/api.js';
+import { withOccurrenceKeys } from '../lib/occurrence-keys.js';
 
 export function DispatchPreflightPanel({ pod }: { pod: Pod }) {
   const [evidence, setEvidence] = useState<DispatchPreflightEvidence | null>(null);
@@ -158,19 +159,23 @@ export function DispatchPreflightPanel({ pod }: { pod: Pod }) {
             Memory: {environment.capabilities.memoryLimitBytes ?? 'unverified'} bytes · CPU:{' '}
             {environment.capabilities.cpuLimit ?? 'unverified'}
           </p>
-          {environment.commands.requirements.map((command, index) => (
-            <p key={`${command.source}-${index}`}>
-              {command.source}: {command.executable} ·{' '}
-              {command.available === null
-                ? 'unverified'
-                : command.available
-                  ? 'available'
-                  : 'missing'}
-            </p>
-          ))}
-          {environment.diagnostics.map((diagnostic, index) => (
-            <p key={`${diagnostic.code}-${index}`}>{diagnostic.detail}</p>
-          ))}
+          {withOccurrenceKeys(environment.commands.requirements, JSON.stringify).map(
+            ({ item: command, key }) => (
+              <p key={key}>
+                {command.source}: {command.executable} ·{' '}
+                {command.available === null
+                  ? 'unverified'
+                  : command.available
+                    ? 'available'
+                    : 'missing'}
+              </p>
+            ),
+          )}
+          {withOccurrenceKeys(environment.diagnostics, JSON.stringify).map(
+            ({ item: diagnostic, key }) => (
+              <p key={key}>{diagnostic.detail}</p>
+            ),
+          )}
         </>
       ) : (
         !environmentError && <p>No execution environment receipt recorded.</p>

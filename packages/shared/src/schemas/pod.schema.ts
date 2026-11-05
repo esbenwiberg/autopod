@@ -45,9 +45,9 @@ function rejectForbiddenReadinessRawEvidence(
   path: Array<string | number> = [],
 ): void {
   if (Array.isArray(value)) {
-    value.forEach((item, index) =>
-      rejectForbiddenReadinessRawEvidence(item, ctx, [...path, index]),
-    );
+    value.forEach((item, index) => {
+      rejectForbiddenReadinessRawEvidence(item, ctx, [...path, index]);
+    });
     return;
   }
   if (!value || typeof value !== 'object') return;

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  IssueProviderRequestError,
   fetchIssueProvider,
+  IssueProviderRequestError,
   isIssueProviderAuthError,
-  isTransientIssueProviderError,
   issueProviderHttpError,
+  isTransientIssueProviderError,
 } from './issue-fetch.js';
 
 describe('fetchIssueProvider', () => {

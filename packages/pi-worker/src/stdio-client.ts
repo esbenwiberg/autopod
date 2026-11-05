@@ -1,10 +1,10 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
-import { type Interface, createInterface } from 'node:readline';
+import { createInterface, type Interface } from 'node:readline';
 import {
   assertSuccess,
   createCancelledNotification,
-  createInitializeRequest,
   createInitializedNotification,
+  createInitializeRequest,
   createToolsCallRequest,
   createToolsListRequest,
   parseCallToolResult,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createOperatorFixture } from '../test-utils/operator-helpers.js';
-import { PAUSE_QUIESCENCE_TIMEOUT_MS, createOperatorPauseState } from './operator-state.js';
+import { createOperatorPauseState, PAUSE_QUIESCENCE_TIMEOUT_MS } from './operator-state.js';
+
 describe('single pause-intent owner', () => {
   it('allocates per-instance state shared with all operator consumers', () => {
     const f = createOperatorFixture();

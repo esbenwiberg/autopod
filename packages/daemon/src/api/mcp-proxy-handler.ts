@@ -1,5 +1,5 @@
 import type { InjectedMcpServer } from '@autopod/shared';
-import { type ProcessContentConfig, collectPiiPatternNames, processContent } from '@autopod/shared';
+import { collectPiiPatternNames, type ProcessContentConfig, processContent } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
 import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';

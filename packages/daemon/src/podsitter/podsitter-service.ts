@@ -9,12 +9,12 @@ import type {
 import type { Logger } from 'pino';
 import type { EventBus } from '../pods/event-bus.js';
 import type {
-  SystemDecisionRunResult,
   SystemDecisionRunner,
+  SystemDecisionRunResult,
 } from '../system-sandbox/system-decision-runner.js';
 import type { PodsitterActionExecutor } from './action-executor.js';
 import { evaluatePodsitterActivation } from './activation.js';
-import { type PodsitterEvidencePacket, buildPodsitterDecisionPrompt } from './evidence-builder.js';
+import { buildPodsitterDecisionPrompt, type PodsitterEvidencePacket } from './evidence-builder.js';
 import type { PodsitterRepository } from './podsitter-repository.js';
 
 const DEFAULT_SWEEP_MS = 60_000;

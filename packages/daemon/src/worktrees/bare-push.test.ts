@@ -5,10 +5,10 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  type RunGit,
   autopodStagingRef,
   deriveBareRepoPath,
   pushCommitsToBareViaStagingRef,
+  type RunGit,
 } from './bare-push.js';
 
 const execFileAsync = promisify(execFile);

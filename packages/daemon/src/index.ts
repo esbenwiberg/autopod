@@ -32,8 +32,7 @@ import { createDatabase } from './db/connection.js';
 import { runMigrationsWithBackups } from './db/migrate.js';
 import { GhCliDaemonGitHubAuth } from './github/daemon-github-auth.js';
 import { getConfiguredBaseImage } from './images/dockerfile-generator.js';
-import type { AuthModule } from './interfaces/index.js';
-import type { ContainerManager } from './interfaces/index.js';
+import type { AuthModule, ContainerManager } from './interfaces/index.js';
 import type { PodExecutionSettings } from './interfaces/pod-execution-settings.js';
 import {
   composeManagedAcceptance,
@@ -45,12 +44,12 @@ import {
   composeManagedProfileSet,
   parseManagedProfileSetConfig,
 } from './managed/profile-set-config.js';
+import type { NotificationConfig } from './notifications/index.js';
 import {
   createNotificationService,
   createRateLimiter,
   createTeamsAdapter,
 } from './notifications/index.js';
-import type { NotificationConfig } from './notifications/index.js';
 import { clearUnusedResourceTimings } from './performance-cleanup.js';
 import {
   createEscalationRepository,
@@ -94,8 +93,8 @@ import {
   ClaudeRuntime,
   CodexRuntime,
   CopilotRuntime,
-  PiRuntime,
   createRuntimeRegistry,
+  PiRuntime,
 } from './runtimes/index.js';
 import { createSafetyEventsRepository } from './safety/safety-events-repository.js';
 import { auditNpmLockfile } from './scheduled-jobs/npm-lock-audit.js';
@@ -109,8 +108,8 @@ import { createScheduledJobScheduler } from './scheduled-jobs/scheduled-job-sche
 import { createScheduledJobTemplateRepository } from './scheduled-jobs/scheduled-job-template-repository.js';
 import { createModelManager, createRepoScanner, createScanRepository } from './security/index.js';
 import {
-  SystemDecisionRunner,
   resolveSystemDecisionExecutionTarget,
+  SystemDecisionRunner,
 } from './system-sandbox/index.js';
 import { capLargeStrings } from './util/log-sanitizer.js';
 import { createHostBrowserRunner } from './validation/host-browser-runner.js';

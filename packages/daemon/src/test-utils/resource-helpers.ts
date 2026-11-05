@@ -1,5 +1,5 @@
-import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
+import { createServer } from 'node:net';
 import { afterEach, vi } from 'vitest';
 import type { SidecarManager } from '../containers/sidecar-manager.js';
 import {
@@ -21,9 +21,9 @@ import type {
 } from '../pods/resource-contracts.js';
 import { createResourceDenials } from '../pods/resource-denials.js';
 import { createResourceNetwork } from '../pods/resource-network.js';
+import { createResourcePreview } from '../pods/resource-preview.js';
 import { createResourcePreviewControls } from '../pods/resource-preview-controls.js';
 import { createResourcePreviewTimers } from '../pods/resource-preview-timers.js';
-import { createResourcePreview } from '../pods/resource-preview.js';
 import { createOperatorFixture } from './operator-helpers.js';
 export function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;

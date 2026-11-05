@@ -248,41 +248,41 @@ describe('infrastructure blocker restart reconciliation', () => {
       f.db.close();
     }
   });
-  it.each([true, false])(
-    'retains native Goal stop evidence before infrastructure preservation; stopped=%s',
-    async (executionStopped) => {
-      const f = fixture({ runtime: 'codex' });
-      try {
-        f.podRepo.taskExecutions?.finishRun(f.runId, 'failed', 'infrastructure');
-        const goal: PodGoal = {
-          podId: f.pod.id,
-          objective: 'Retain blocked Goal work',
-          state: 'paused',
-          revision: 1,
-          runtime: 'codex',
-          fence: { generation: f.pod.lifecycleGeneration, attemptId: f.runId },
-          nativeSessionId: 'native',
-          nativeStatus: 'paused',
-          executionStopped,
-          controlIntent: null,
-          observedTokens: 0,
-          observedSeconds: 0,
-          reason: null,
-          createdAt: 'now',
-          updatedAt: 'now',
-        };
-        await reconcileLocalSessions({ ...f.deps, readNativeGoal: () => goal });
-        expect(f.podRepo.getOrThrow(f.pod.id)).toMatchObject({
-          status: executionStopped ? 'failed' : 'running',
-          finalization: { sourcePreservedAt: executionStopped ? expect.any(String) : null },
-        });
-        expect(f.preserve).toHaveBeenCalledTimes(executionStopped ? 1 : 0);
-        f.expectNoDispatch();
-      } finally {
-        f.db.close();
-      }
-    },
-  );
+  it.each([
+    true,
+    false,
+  ])('retains native Goal stop evidence before infrastructure preservation; stopped=%s', async (executionStopped) => {
+    const f = fixture({ runtime: 'codex' });
+    try {
+      f.podRepo.taskExecutions?.finishRun(f.runId, 'failed', 'infrastructure');
+      const goal: PodGoal = {
+        podId: f.pod.id,
+        objective: 'Retain blocked Goal work',
+        state: 'paused',
+        revision: 1,
+        runtime: 'codex',
+        fence: { generation: f.pod.lifecycleGeneration, attemptId: f.runId },
+        nativeSessionId: 'native',
+        nativeStatus: 'paused',
+        executionStopped,
+        controlIntent: null,
+        observedTokens: 0,
+        observedSeconds: 0,
+        reason: null,
+        createdAt: 'now',
+        updatedAt: 'now',
+      };
+      await reconcileLocalSessions({ ...f.deps, readNativeGoal: () => goal });
+      expect(f.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+        status: executionStopped ? 'failed' : 'running',
+        finalization: { sourcePreservedAt: executionStopped ? expect.any(String) : null },
+      });
+      expect(f.preserve).toHaveBeenCalledTimes(executionStopped ? 1 : 0);
+      f.expectNoDispatch();
+    } finally {
+      f.db.close();
+    }
+  });
   it('retains infrastructure ownership when its Goal recovery read fails', async () => {
     const f = fixture({ runtime: 'codex' });
     try {
@@ -332,78 +332,78 @@ describe('infrastructure blocker restart reconciliation', () => {
     }
   });
 
-  it.each(['local', 'sandbox'] as const)(
-    'parks a verified %s failure without requiring an agent complete event',
-    async (target) => {
-      const f = fixture({ target });
+  it.each([
+    'local',
+    'sandbox',
+  ] as const)('parks a verified %s failure without requiring an agent complete event', async (target) => {
+    const f = fixture({ target });
+    try {
+      f.podRepo.taskExecutions?.finishRun(f.runId, 'failed', 'infrastructure');
+      await f.reconcile('wake');
+      expect(f.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+        status: 'failed',
+        containerId: f.pod.containerId,
+        worktreePath: f.pod.worktreePath,
+        lifecycleGeneration: f.pod.lifecycleGeneration,
+        validationAttempts: 2,
+        recoveryCount: 2,
+        lastRecoveryTrigger: target === 'local' ? 'wake' : 'restart',
+        failureReason: expect.stringContaining('Infrastructure blocked during build'),
+        finalization: {
+          agentSettledAt: expect.any(String),
+          sourcePreservedAt: expect.any(String),
+        },
+      });
+      expect(f.preserve).toHaveBeenCalledOnce();
+      f.expectNoDispatch();
+    } finally {
+      f.db.close();
+    }
+  });
+
+  it.each([
+    'local',
+    'sandbox',
+  ] as const)('does not infer %s termination from a complete event, missing run or old custody', async (target) => {
+    for (const evidence of [
+      'active',
+      'unverified',
+      'missing',
+      'old-cycle',
+      'wrong-resource',
+      'legacy-binding',
+    ] as const) {
+      const f = fixture({
+        target,
+        recordRun: evidence !== 'missing',
+        bindResource: evidence !== 'legacy-binding',
+      });
       try {
-        f.podRepo.taskExecutions?.finishRun(f.runId, 'failed', 'infrastructure');
-        await f.reconcile('wake');
-        expect(f.podRepo.getOrThrow(f.pod.id)).toMatchObject({
-          status: 'failed',
-          containerId: f.pod.containerId,
-          worktreePath: f.pod.worktreePath,
-          lifecycleGeneration: f.pod.lifecycleGeneration,
-          validationAttempts: 2,
-          recoveryCount: 2,
-          lastRecoveryTrigger: target === 'local' ? 'wake' : 'restart',
-          failureReason: expect.stringContaining('Infrastructure blocked during build'),
-          finalization: {
-            agentSettledAt: expect.any(String),
-            sourcePreservedAt: expect.any(String),
-          },
-        });
-        expect(f.preserve).toHaveBeenCalledOnce();
+        f.podRepo.completionJournal?.settle(f.pod, 'Complete event is not native exit proof');
+        if (evidence === 'unverified') f.podRepo.taskExecutions?.retainUnverifiedRun(f.runId);
+        else if (!['active', 'missing'].includes(evidence)) {
+          f.podRepo.taskExecutions?.finishRun(f.runId, 'completed', null);
+        }
+        if (evidence === 'old-cycle') {
+          f.podRepo.completionJournal?.begin(f.podRepo.getOrThrow(f.pod.id));
+        }
+        if (evidence === 'wrong-resource') {
+          f.podRepo.update(f.pod.id, { containerId: 'replacement-resource' });
+        }
+        const before = f.db.prepare('SELECT * FROM task_agent_runs WHERE id = ?').get(f.runId);
+        await f.reconcile();
+        expect(f.podRepo.getOrThrow(f.pod.id).status, evidence).toBe('running');
+        expect(f.preserve, evidence).not.toHaveBeenCalled();
+        expect(f.transition, evidence).not.toHaveBeenCalled();
+        expect(f.db.prepare('SELECT * FROM task_agent_runs WHERE id = ?').get(f.runId)).toEqual(
+          before,
+        );
         f.expectNoDispatch();
       } finally {
         f.db.close();
       }
-    },
-  );
-
-  it.each(['local', 'sandbox'] as const)(
-    'does not infer %s termination from a complete event, missing run or old custody',
-    async (target) => {
-      for (const evidence of [
-        'active',
-        'unverified',
-        'missing',
-        'old-cycle',
-        'wrong-resource',
-        'legacy-binding',
-      ] as const) {
-        const f = fixture({
-          target,
-          recordRun: evidence !== 'missing',
-          bindResource: evidence !== 'legacy-binding',
-        });
-        try {
-          f.podRepo.completionJournal?.settle(f.pod, 'Complete event is not native exit proof');
-          if (evidence === 'unverified') f.podRepo.taskExecutions?.retainUnverifiedRun(f.runId);
-          else if (!['active', 'missing'].includes(evidence)) {
-            f.podRepo.taskExecutions?.finishRun(f.runId, 'completed', null);
-          }
-          if (evidence === 'old-cycle') {
-            f.podRepo.completionJournal?.begin(f.podRepo.getOrThrow(f.pod.id));
-          }
-          if (evidence === 'wrong-resource') {
-            f.podRepo.update(f.pod.id, { containerId: 'replacement-resource' });
-          }
-          const before = f.db.prepare('SELECT * FROM task_agent_runs WHERE id = ?').get(f.runId);
-          await f.reconcile();
-          expect(f.podRepo.getOrThrow(f.pod.id).status, evidence).toBe('running');
-          expect(f.preserve, evidence).not.toHaveBeenCalled();
-          expect(f.transition, evidence).not.toHaveBeenCalled();
-          expect(f.db.prepare('SELECT * FROM task_agent_runs WHERE id = ?').get(f.runId)).toEqual(
-            before,
-          );
-          f.expectNoDispatch();
-        } finally {
-          f.db.close();
-        }
-      }
-    },
-  );
+    }
+  });
 
   it('requires the exact lifecycle, cycle and backend in the positive ledger read', () => {
     const f = fixture();
@@ -427,57 +427,57 @@ describe('infrastructure blocker restart reconciliation', () => {
     }
   });
 
-  it.each(['local', 'sandbox'] as const)(
-    'retains %s ownership when reconciliation reads fail instead of taking a generic terminal fallback',
-    async (target) => {
-      const f = fixture({ target });
-      try {
-        f.podRepo.taskExecutions?.finishRun(f.runId, 'completed', null);
-        f.reconcileInfrastructureBlocker.mockRejectedValueOnce(
-          new Error('Settlement storage unavailable'),
-        );
-        await f.reconcile();
-        expect(f.podRepo.getOrThrow(f.pod.id).status).toBe('running');
-        expect(f.preserve).not.toHaveBeenCalled();
-        expect(f.transition).not.toHaveBeenCalled();
-        f.expectNoDispatch();
-      } finally {
-        f.db.close();
-      }
-    },
-  );
+  it.each([
+    'local',
+    'sandbox',
+  ] as const)('retains %s ownership when reconciliation reads fail instead of taking a generic terminal fallback', async (target) => {
+    const f = fixture({ target });
+    try {
+      f.podRepo.taskExecutions?.finishRun(f.runId, 'completed', null);
+      f.reconcileInfrastructureBlocker.mockRejectedValueOnce(
+        new Error('Settlement storage unavailable'),
+      );
+      await f.reconcile();
+      expect(f.podRepo.getOrThrow(f.pod.id).status).toBe('running');
+      expect(f.preserve).not.toHaveBeenCalled();
+      expect(f.transition).not.toHaveBeenCalled();
+      f.expectNoDispatch();
+    } finally {
+      f.db.close();
+    }
+  });
 
-  it.each(['local', 'sandbox'] as const)(
-    'keeps a real unanswered %s decision ahead of the infrastructure report',
-    async (target) => {
-      const f = fixture({ target });
-      try {
-        const question = {
-          id: 'owner-decision',
-          podId: f.pod.id,
-          type: 'ask_human' as const,
-          timestamp: new Date().toISOString(),
-          payload: { question: 'Which scope?', requiresResponse: true },
-          response: null,
-        };
-        f.escalationRepo.insert(question);
-        f.podRepo.update(f.pod.id, { status: 'awaiting_input', pendingEscalation: question });
-        f.podRepo.completionJournal?.settle(f.podRepo.getOrThrow(f.pod.id));
-        f.podRepo.taskExecutions?.finishRun(f.runId, 'completed', null);
-        await f.reconcile();
-        expect(f.podRepo.getOrThrow(f.pod.id)).toMatchObject({
-          status: 'awaiting_input',
-          pendingEscalation: question,
-          finalization: { pendingDecisionId: question.id },
-        });
-        expect(f.transition).not.toHaveBeenCalled();
-        expect(f.escalationRepo.getOrThrow(question.id).response).toBeNull();
-        f.expectNoDispatch();
-      } finally {
-        f.db.close();
-      }
-    },
-  );
+  it.each([
+    'local',
+    'sandbox',
+  ] as const)('keeps a real unanswered %s decision ahead of the infrastructure report', async (target) => {
+    const f = fixture({ target });
+    try {
+      const question = {
+        id: 'owner-decision',
+        podId: f.pod.id,
+        type: 'ask_human' as const,
+        timestamp: new Date().toISOString(),
+        payload: { question: 'Which scope?', requiresResponse: true },
+        response: null,
+      };
+      f.escalationRepo.insert(question);
+      f.podRepo.update(f.pod.id, { status: 'awaiting_input', pendingEscalation: question });
+      f.podRepo.completionJournal?.settle(f.podRepo.getOrThrow(f.pod.id));
+      f.podRepo.taskExecutions?.finishRun(f.runId, 'completed', null);
+      await f.reconcile();
+      expect(f.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+        status: 'awaiting_input',
+        pendingEscalation: question,
+        finalization: { pendingDecisionId: question.id },
+      });
+      expect(f.transition).not.toHaveBeenCalled();
+      expect(f.escalationRepo.getOrThrow(question.id).response).toBeNull();
+      f.expectNoDispatch();
+    } finally {
+      f.db.close();
+    }
+  });
 
   it('does not finalize a replacement lifecycle after awaited preservation', async () => {
     const f = fixture();
@@ -498,29 +498,29 @@ describe('infrastructure blocker restart reconciliation', () => {
     }
   });
 
-  it.each(['local', 'sandbox'] as const)(
-    'retains original %s resources and reports capture failure after verified settlement',
-    async (target) => {
-      const f = fixture({ target });
-      try {
-        f.podRepo.taskExecutions?.finishRun(f.runId, 'completed', null);
-        f.preserve.mockRejectedValueOnce(new Error('Checkpoint unavailable'));
-        await f.reconcile();
-        expect(f.podRepo.getOrThrow(f.pod.id)).toMatchObject({
-          status: 'failed',
-          containerId: f.pod.containerId,
-          worktreePath: f.pod.worktreePath,
-          validationAttempts: 2,
-          recoveryCount: 2,
-          failureReason: expect.stringContaining(
-            'Workspace preservation failed: Checkpoint unavailable',
-          ),
-          finalization: { sourcePreservedAt: null },
-        });
-        f.expectNoDispatch();
-      } finally {
-        f.db.close();
-      }
-    },
-  );
+  it.each([
+    'local',
+    'sandbox',
+  ] as const)('retains original %s resources and reports capture failure after verified settlement', async (target) => {
+    const f = fixture({ target });
+    try {
+      f.podRepo.taskExecutions?.finishRun(f.runId, 'completed', null);
+      f.preserve.mockRejectedValueOnce(new Error('Checkpoint unavailable'));
+      await f.reconcile();
+      expect(f.podRepo.getOrThrow(f.pod.id)).toMatchObject({
+        status: 'failed',
+        containerId: f.pod.containerId,
+        worktreePath: f.pod.worktreePath,
+        validationAttempts: 2,
+        recoveryCount: 2,
+        failureReason: expect.stringContaining(
+          'Workspace preservation failed: Checkpoint unavailable',
+        ),
+        finalization: { sourcePreservedAt: null },
+      });
+      f.expectNoDispatch();
+    } finally {
+      f.db.close();
+    }
+  });
 });

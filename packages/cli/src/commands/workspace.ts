@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { readFile, stat, unlink } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { MAX_HANDOFF_INSTRUCTIONS_LENGTH } from '@autopod/shared';
 import type { Pod, PodStatus } from '@autopod/shared';
+import { MAX_HANDOFF_INSTRUCTIONS_LENGTH } from '@autopod/shared';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import type { IPty } from 'node-pty';
@@ -15,9 +15,9 @@ import { withSpinner } from '../output/spinner.js';
 import { saveClipboardImage } from '../utils/clipboard.js';
 import { resolvePodId } from '../utils/id-resolver.js';
 import { runRemoteTerminalSession } from '../utils/remote-terminal.js';
-import { type LaunchFlags, buildLaunchRequest } from './launch-request.js';
-import { validateEffectiveLaunchSources, validateLaunchSources } from './launch-sources.js';
 import { addLaunchPresetOptions } from './launch.js';
+import { buildLaunchRequest, type LaunchFlags } from './launch-request.js';
+import { validateEffectiveLaunchSources, validateLaunchSources } from './launch-sources.js';
 
 const IMAGE_EXTENSIONS = new Set([
   '.png',
@@ -422,7 +422,9 @@ async function pickRepositoryInteractively(client: AutopodClient): Promise<strin
     throw new Error('No enrolled repositories. Add one with ap repository create.');
   if (repositories.length === 1 && repositories[0]) return repositories[0].id;
   console.log(chalk.bold('Select repository:'));
-  repositories.forEach((item, index) => console.log(`  ${index + 1}. ${item.name} (${item.id})`));
+  repositories.forEach((item, index) => {
+    console.log(`  ${index + 1}. ${item.name} (${item.id})`);
+  });
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     while (true) {

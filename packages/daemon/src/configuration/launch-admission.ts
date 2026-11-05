@@ -5,8 +5,8 @@ import {
 } from '@autopod/shared';
 import { configurationError } from './configuration-store.js';
 import {
-  type LaunchResolutionServices,
   configurationDigest,
+  type LaunchResolutionServices,
   resolveLaunch,
 } from './launch-resolver.js';
 import type { LaunchSnapshotRepository } from './launch-snapshot.js';

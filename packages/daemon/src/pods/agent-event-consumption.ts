@@ -4,10 +4,10 @@ import { AutopodError, PROVIDER_FAILOVER_HANDOFF_PATH } from '@autopod/shared';
 import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import { atomicPodChange } from '../db/unit-of-work.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
-import type { AgentRunOutcome } from './agent-execution-contracts.js';
 import type {
   AgentConsumerCaptured,
   AgentExecutionLiveDependencies,
+  AgentRunOutcome,
 } from './agent-execution-contracts.js';
 import {
   agentCompleteEventKey,
@@ -24,8 +24,8 @@ import { canFail } from './state-machine.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import { workerRetryDeadline } from './worker-retry-deadline.js';
 import {
-  WORKER_RETRY_BACKOFFS_MS,
   unavailableWorkerInputs,
+  WORKER_RETRY_BACKOFFS_MS,
   workerBindingHash,
 } from './worker-retry-history.js';
 import { createWorkspaceFileObserver } from './workspace-file-observer.js';

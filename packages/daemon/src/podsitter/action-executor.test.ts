@@ -10,7 +10,7 @@ import type { PodManager } from '../pods/pod-manager.js';
 import { createProviderAccountStore } from '../provider-accounts/provider-account-store.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { PodsitterActionExecutor } from './action-executor.js';
-import { type PodsitterRepository, createPodsitterRepository } from './podsitter-repository.js';
+import { createPodsitterRepository, type PodsitterRepository } from './podsitter-repository.js';
 
 const actor = {
   type: 'podsitter' as const,

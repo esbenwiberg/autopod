@@ -2,8 +2,8 @@ import {
   type CreatePodRequest,
   type EffectiveLaunchConfig,
   type IssueWatcherBinding,
-  type Pod,
   launchWorkSchema,
+  type Pod,
 } from '@autopod/shared';
 import type {
   IssueWatcherLaunches,

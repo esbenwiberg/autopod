@@ -215,51 +215,48 @@ describe('completion source material boundary', () => {
     }
   });
 
-  it.each([0, 100])(
-    'enforces real deletion threshold %s without inventing workspace rollback',
-    async (threshold) => {
-      const f = await fixture();
-      try {
-        const names =
-          threshold === 0 ? ['base.txt'] : Array.from({ length: 101 }, (_, i) => `remove-${i}.txt`);
-        if (threshold === 100) {
-          await Promise.all(
-            names.map((name) => writeFile(path.join(f.source, name), 'retained\n')),
-          );
-          await git(f.source, ['add', '.']);
-          await git(f.source, ['commit', '-m', 'tracked files']);
-          f.repo.update('worker', { containerId: null });
-        } else {
-          f.dependencies.syncWorkspaceBack.mockResolvedValueOnce({ pushed: false });
-        }
-        const before = await f.snapshot();
-        await Promise.all(names.map((name) => rm(path.join(f.source, name))));
-        expect(await f.prepare()).toBeUndefined();
-        const after = await f.snapshot();
-        expect(after.head).toBe(before.head);
-        expect(after.tree).toBe(before.tree);
-        expect(await git(f.source, ['diff', '--cached', '--name-only'])).toBe('');
-        expect((await git(f.source, ['diff', '--name-only'])).split('\n').sort()).toEqual(
-          names.sort(),
-        );
-        expect(
-          f.worktreeManager.commitPendingChangesWithGeneratedMessage.mock.calls[0]?.[4],
-        ).toEqual({ maxDeletions: threshold });
-        expect(f.dependencies.handleDeletionGuardError).toHaveBeenCalledWith(
-          'worker',
-          expect.any(DeletionGuardError),
-        );
-        expect(f.worktreeManager.getDiffStats).not.toHaveBeenCalled();
-        expect(f.reopen().getOrThrow('worker')).toMatchObject({
-          status: 'failed',
-          worktreeCompromised: true,
-          filesChanged: 9,
-        });
-      } finally {
-        await f.close();
+  it.each([
+    0, 100,
+  ])('enforces real deletion threshold %s without inventing workspace rollback', async (threshold) => {
+    const f = await fixture();
+    try {
+      const names =
+        threshold === 0 ? ['base.txt'] : Array.from({ length: 101 }, (_, i) => `remove-${i}.txt`);
+      if (threshold === 100) {
+        await Promise.all(names.map((name) => writeFile(path.join(f.source, name), 'retained\n')));
+        await git(f.source, ['add', '.']);
+        await git(f.source, ['commit', '-m', 'tracked files']);
+        f.repo.update('worker', { containerId: null });
+      } else {
+        f.dependencies.syncWorkspaceBack.mockResolvedValueOnce({ pushed: false });
       }
-    },
-  );
+      const before = await f.snapshot();
+      await Promise.all(names.map((name) => rm(path.join(f.source, name))));
+      expect(await f.prepare()).toBeUndefined();
+      const after = await f.snapshot();
+      expect(after.head).toBe(before.head);
+      expect(after.tree).toBe(before.tree);
+      expect(await git(f.source, ['diff', '--cached', '--name-only'])).toBe('');
+      expect((await git(f.source, ['diff', '--name-only'])).split('\n').sort()).toEqual(
+        names.sort(),
+      );
+      expect(f.worktreeManager.commitPendingChangesWithGeneratedMessage.mock.calls[0]?.[4]).toEqual(
+        { maxDeletions: threshold },
+      );
+      expect(f.dependencies.handleDeletionGuardError).toHaveBeenCalledWith(
+        'worker',
+        expect.any(DeletionGuardError),
+      );
+      expect(f.worktreeManager.getDiffStats).not.toHaveBeenCalled();
+      expect(f.reopen().getOrThrow('worker')).toMatchObject({
+        status: 'failed',
+        worktreeCompromised: true,
+        filesChanged: 9,
+      });
+    } finally {
+      await f.close();
+    }
+  });
 
   it('retries a real guarded commit with 100 after controlled recovery restores actual source files', async () => {
     const f = await fixture();
@@ -291,127 +288,131 @@ describe('completion source material boundary', () => {
     }
   });
 
-  it.each(['changed', 'unchanged', 'net-zero', 'excluded-only', 'mode-only'] as const)(
-    'classifies real sandbox Git state %s and returns matching checkpoint/host proof',
-    async (mode) => {
-      const f = await fixture('sandbox');
-      try {
-        if (mode === 'changed' || mode === 'net-zero') {
-          await writeFile(path.join(f.source, 'base.txt'), 'changed\n');
-          await git(f.source, ['commit', '-am', 'change']);
-          if (mode === 'net-zero') {
-            await writeFile(path.join(f.source, 'base.txt'), 'original\n');
-            await git(f.source, ['commit', '-am', 'restore tree']);
-          }
-        } else if (mode === 'excluded-only') {
-          await writeFile(path.join(f.source, 'pnpm-lock.yaml'), 'new lock\n');
-          await git(f.source, ['commit', '-am', 'lock only']);
-        } else if (mode === 'mode-only') {
-          await chmod(path.join(f.source, 'base.txt'), 0o755);
-          await git(f.source, ['commit', '-am', 'mode only']);
+  it.each([
+    'changed',
+    'unchanged',
+    'net-zero',
+    'excluded-only',
+    'mode-only',
+  ] as const)('classifies real sandbox Git state %s and returns matching checkpoint/host proof', async (mode) => {
+    const f = await fixture('sandbox');
+    try {
+      if (mode === 'changed' || mode === 'net-zero') {
+        await writeFile(path.join(f.source, 'base.txt'), 'changed\n');
+        await git(f.source, ['commit', '-am', 'change']);
+        if (mode === 'net-zero') {
+          await writeFile(path.join(f.source, 'base.txt'), 'original\n');
+          await git(f.source, ['commit', '-am', 'restore tree']);
         }
-        const before = await f.snapshot();
-        const prepared = await f.prepare();
-        expect(prepared).toMatchObject({
-          sandboxCanonicalOutcome: mode === 'changed' ? 'changed' : 'unchanged',
-          sandboxCheckpoint: { snapshotCommit: before.head, snapshotTree: before.tree },
-          sandboxHostProof: { head: before.head, tree: before.tree },
-        });
-        expect(f.worktreeManager.classifyCanonicalDiff).toHaveBeenCalledWith(
-          f.source,
-          f.base,
-          before.head,
-          before.tree,
-        );
-        expect(f.worktreeManager.commitPendingChangesWithGeneratedMessage).not.toHaveBeenCalled();
-        expect(f.dependencies.syncWorkspaceBack).not.toHaveBeenCalled();
-        expect(await f.snapshot()).toEqual(before);
-        expect(f.reopen().getOrThrow('worker')).toMatchObject({
-          status: 'running',
-          filesChanged: mode === 'changed' ? 1 : 0,
-          linesAdded: mode === 'changed' ? 1 : 0,
-          linesRemoved: mode === 'changed' ? 1 : 0,
-        });
-      } finally {
-        await f.close();
+      } else if (mode === 'excluded-only') {
+        await writeFile(path.join(f.source, 'pnpm-lock.yaml'), 'new lock\n');
+        await git(f.source, ['commit', '-am', 'lock only']);
+      } else if (mode === 'mode-only') {
+        await chmod(path.join(f.source, 'base.txt'), 0o755);
+        await git(f.source, ['commit', '-am', 'mode only']);
       }
-    },
-  );
+      const before = await f.snapshot();
+      const prepared = await f.prepare();
+      expect(prepared).toMatchObject({
+        sandboxCanonicalOutcome: mode === 'changed' ? 'changed' : 'unchanged',
+        sandboxCheckpoint: { snapshotCommit: before.head, snapshotTree: before.tree },
+        sandboxHostProof: { head: before.head, tree: before.tree },
+      });
+      expect(f.worktreeManager.classifyCanonicalDiff).toHaveBeenCalledWith(
+        f.source,
+        f.base,
+        before.head,
+        before.tree,
+      );
+      expect(f.worktreeManager.commitPendingChangesWithGeneratedMessage).not.toHaveBeenCalled();
+      expect(f.dependencies.syncWorkspaceBack).not.toHaveBeenCalled();
+      expect(await f.snapshot()).toEqual(before);
+      expect(f.reopen().getOrThrow('worker')).toMatchObject({
+        status: 'running',
+        filesChanged: mode === 'changed' ? 1 : 0,
+        linesAdded: mode === 'changed' ? 1 : 0,
+        linesRemoved: mode === 'changed' ? 1 : 0,
+      });
+    } finally {
+      await f.close();
+    }
+  });
 
-  it.each(['missing-base', 'head-mismatch', 'tree-mismatch'] as const)(
-    'blocks actual sandbox proof failure %s without rewriting source or stored stats',
-    async (mode) => {
-      const f = await fixture('sandbox');
-      try {
-        if (mode === 'missing-base') f.repo.update('worker', { startCommitSha: 'f'.repeat(40) });
-        else {
-          const proof = await f.dependencies.checkpointSandboxWorkspaceForPod(
-            f.repo.getOrThrow('worker'),
-          );
-          f.dependencies.checkpointSandboxWorkspaceForPod.mockResolvedValueOnce({
-            ...proof,
-            ...(mode === 'head-mismatch'
-              ? { snapshotCommit: 'f'.repeat(40) }
-              : { snapshotTree: 'f'.repeat(40) }),
-          });
-        }
-        const before = await f.snapshot();
-        expect(await f.prepare()).toBeUndefined();
-        expect(await f.snapshot()).toEqual(before);
-        expect(f.dependencies.parkOnWorktreeSyncFailure).toHaveBeenCalledWith(
-          'worker',
-          expect.stringContaining(
-            mode === 'missing-base' ? 'BASE_UNAVAILABLE' : 'HOST_PROOF_MISMATCH',
-          ),
+  it.each([
+    'missing-base',
+    'head-mismatch',
+    'tree-mismatch',
+  ] as const)('blocks actual sandbox proof failure %s without rewriting source or stored stats', async (mode) => {
+    const f = await fixture('sandbox');
+    try {
+      if (mode === 'missing-base') f.repo.update('worker', { startCommitSha: 'f'.repeat(40) });
+      else {
+        const proof = await f.dependencies.checkpointSandboxWorkspaceForPod(
+          f.repo.getOrThrow('worker'),
         );
-        expect(f.reopen().getOrThrow('worker')).toMatchObject({
-          status: 'failed',
-          worktreeCompromised: true,
-          filesChanged: 9,
-          linesAdded: 19,
-          linesRemoved: 4,
+        f.dependencies.checkpointSandboxWorkspaceForPod.mockResolvedValueOnce({
+          ...proof,
+          ...(mode === 'head-mismatch'
+            ? { snapshotCommit: 'f'.repeat(40) }
+            : { snapshotTree: 'f'.repeat(40) }),
         });
-      } finally {
-        await f.close();
       }
-    },
-  );
+      const before = await f.snapshot();
+      expect(await f.prepare()).toBeUndefined();
+      expect(await f.snapshot()).toEqual(before);
+      expect(f.dependencies.parkOnWorktreeSyncFailure).toHaveBeenCalledWith(
+        'worker',
+        expect.stringContaining(
+          mode === 'missing-base' ? 'BASE_UNAVAILABLE' : 'HOST_PROOF_MISMATCH',
+        ),
+      );
+      expect(f.reopen().getOrThrow('worker')).toMatchObject({
+        status: 'failed',
+        worktreeCompromised: true,
+        filesChanged: 9,
+        linesAdded: 19,
+        linesRemoved: 4,
+      });
+    } finally {
+      await f.close();
+    }
+  });
 
-  it.each(['handover', 'checkpoint', 'classifier', 'recovery'] as const)(
-    'propagates controlled %s rejection without a source-success object',
-    async (mode) => {
-      const f = await fixture(mode === 'checkpoint' || mode === 'classifier' ? 'sandbox' : 'local');
-      try {
-        if (mode === 'handover')
-          f.dependencies.syncSandboxSeriesHandover.mockRejectedValueOnce(
+  it.each([
+    'handover',
+    'checkpoint',
+    'classifier',
+    'recovery',
+  ] as const)('propagates controlled %s rejection without a source-success object', async (mode) => {
+    const f = await fixture(mode === 'checkpoint' || mode === 'classifier' ? 'sandbox' : 'local');
+    try {
+      if (mode === 'handover')
+        f.dependencies.syncSandboxSeriesHandover.mockRejectedValueOnce(new Error('boundary fault'));
+      else if (mode === 'recovery') {
+        f.dependencies.syncWorkspaceBack.mockRejectedValueOnce(new Error('sync fault'));
+        f.dependencies.tryRecoverAfterWorkspaceSyncFailure.mockRejectedValueOnce(
+          new Error('boundary fault'),
+        );
+      } else {
+        if (mode === 'checkpoint')
+          f.dependencies.checkpointSandboxWorkspaceForPod.mockRejectedValueOnce(
             new Error('boundary fault'),
           );
-        else if (mode === 'recovery') {
-          f.dependencies.syncWorkspaceBack.mockRejectedValueOnce(new Error('sync fault'));
-          f.dependencies.tryRecoverAfterWorkspaceSyncFailure.mockRejectedValueOnce(
+        else
+          f.worktreeManager.classifyCanonicalDiff.mockRejectedValueOnce(
             new Error('boundary fault'),
           );
-        } else {
-          if (mode === 'checkpoint')
-            f.dependencies.checkpointSandboxWorkspaceForPod.mockRejectedValueOnce(
-              new Error('boundary fault'),
-            );
-          else
-            f.worktreeManager.classifyCanonicalDiff.mockRejectedValueOnce(
-              new Error('boundary fault'),
-            );
-        }
-        await expect(f.prepare()).rejects.toThrow('boundary fault');
-        expect(f.worktreeManager.commitPendingChangesWithGeneratedMessage).not.toHaveBeenCalled();
-        expect(f.reopen().getOrThrow('worker')).toMatchObject({
-          status: 'running',
-          filesChanged: 9,
-        });
-      } finally {
-        await f.close();
       }
-    },
-  );
+      await expect(f.prepare()).rejects.toThrow('boundary fault');
+      expect(f.worktreeManager.commitPendingChangesWithGeneratedMessage).not.toHaveBeenCalled();
+      expect(f.reopen().getOrThrow('worker')).toMatchObject({
+        status: 'running',
+        filesChanged: 9,
+      });
+    } finally {
+      await f.close();
+    }
+  });
 
   it.each([
     'commit-error',

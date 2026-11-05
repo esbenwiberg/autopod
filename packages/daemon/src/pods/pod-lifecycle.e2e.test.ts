@@ -27,7 +27,6 @@ import { createActionRegistry } from '../actions/action-registry.js';
 import { createActionAuditRepository } from '../actions/audit-repository.js';
 import type { PrManager } from '../interfaces/index.js';
 import {
-  type TestContext,
   collectAndAcknowledgeGuidance,
   completeEvent,
   createFailingValidationResult,
@@ -38,9 +37,10 @@ import {
   insertTestProfile,
   mockPrMerge,
   statusEvent,
+  type TestContext,
 } from '../test-utils/mock-helpers.js';
 import { publishSource } from '../worktrees/durable-source-publication.js';
-import { type PodManager, createPodManager } from './pod-manager.js';
+import { createPodManager, type PodManager } from './pod-manager.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -367,65 +367,65 @@ describe('Pod Lifecycle E2E', () => {
       );
     });
 
-    it.each([true, false])(
-      'reconciles detached MCP fallback with collection=%s',
-      async (collectReply) => {
-        const pendingRequests = new PendingRequests();
-        const responsePromise = pendingRequests.waitForResponse('esc-1', 5000);
-        pendingRequests.markDetached('esc-1', 'mcp_response_stream_closed');
+    it.each([
+      true,
+      false,
+    ])('reconciles detached MCP fallback with collection=%s', async (collectReply) => {
+      const pendingRequests = new PendingRequests();
+      const responsePromise = pendingRequests.waitForResponse('esc-1', 5000);
+      pendingRequests.markDetached('esc-1', 'mcp_response_stream_closed');
 
-        const runtime = createMockRuntime({
-          resume: vi.fn(async function* () {
-            if (collectReply) {
-              const delivery = ctx.nudgeRepo.readPending(pod.id);
-              if (!delivery) throw new Error('Missing guidance delivery');
-              expect(delivery.messages.join('\n')).toContain('Use PostgreSQL');
-              expect(delivery.messages.join('\n')).toContain('original MCP response stream closed');
-              ctx.nudgeRepo.acknowledgeDelivery(pod.id, delivery.deliveryId);
-            }
-            yield completeEvent('Resumed after detached MCP reply');
-          } as () => AsyncIterable<AgentEvent>),
-        });
+      const runtime = createMockRuntime({
+        resume: vi.fn(async function* () {
+          if (collectReply) {
+            const delivery = ctx.nudgeRepo.readPending(pod.id);
+            if (!delivery) throw new Error('Missing guidance delivery');
+            expect(delivery.messages.join('\n')).toContain('Use PostgreSQL');
+            expect(delivery.messages.join('\n')).toContain('original MCP response stream closed');
+            ctx.nudgeRepo.acknowledgeDelivery(pod.id, delivery.deliveryId);
+          }
+          yield completeEvent('Resumed after detached MCP reply');
+        } as () => AsyncIterable<AgentEvent>),
+      });
 
-        const ctx = createTestContext({ runtime });
-        const pendingRequestsByPod = new Map<string, PendingRequests>();
-        ctx.deps.pendingRequestsByPod = pendingRequestsByPod;
-        const manager = createPodManager(ctx.deps);
+      const ctx = createTestContext({ runtime });
+      const pendingRequestsByPod = new Map<string, PendingRequests>();
+      ctx.deps.pendingRequestsByPod = pendingRequestsByPod;
+      const manager = createPodManager(ctx.deps);
 
-        const pod = manager.createSession(
-          { profileName: 'test-profile', task: 'Add database support', skipValidation: true },
-          'user-1',
+      const pod = manager.createSession(
+        { profileName: 'test-profile', task: 'Add database support', skipValidation: true },
+        'user-1',
+      );
+      pendingRequestsByPod.set(pod.id, pendingRequests);
+
+      ctx.podRepo.update(pod.id, {
+        status: 'awaiting_input',
+        containerId: 'ctr-1',
+        pendingEscalation: { id: 'esc-1', type: 'ask_human', question: 'Which DB?' },
+      });
+
+      await manager.sendMessage(pod.id, 'Use PostgreSQL');
+
+      await expect(responsePromise).resolves.toBe('Use PostgreSQL');
+      expect(runtime.resume).toHaveBeenCalledTimes(1);
+      const resumeMessage = vi.mocked(runtime.resume).mock.calls[0]?.[1] as string;
+      expect(resumeMessage).toContain('Fallback response for the previous ask_human MCP call');
+      expect(resumeMessage).toContain('Use PostgreSQL');
+
+      const queued = ctx.nudgeRepo.listPending(pod.id);
+      expect(queued).toHaveLength(collectReply ? 0 : 1);
+      if (!collectReply) {
+        expect(queued[0]?.message).toContain(
+          'Fallback response for the previous ask_human MCP call',
         );
-        pendingRequestsByPod.set(pod.id, pendingRequests);
-
-        ctx.podRepo.update(pod.id, {
-          status: 'awaiting_input',
-          containerId: 'ctr-1',
-          pendingEscalation: { id: 'esc-1', type: 'ask_human', question: 'Which DB?' },
-        });
-
-        await manager.sendMessage(pod.id, 'Use PostgreSQL');
-
-        await expect(responsePromise).resolves.toBe('Use PostgreSQL');
-        expect(runtime.resume).toHaveBeenCalledTimes(1);
-        const resumeMessage = vi.mocked(runtime.resume).mock.calls[0]?.[1] as string;
-        expect(resumeMessage).toContain('Fallback response for the previous ask_human MCP call');
-        expect(resumeMessage).toContain('Use PostgreSQL');
-
-        const queued = ctx.nudgeRepo.listPending(pod.id);
-        expect(queued).toHaveLength(collectReply ? 0 : 1);
-        if (!collectReply) {
-          expect(queued[0]?.message).toContain(
-            'Fallback response for the previous ask_human MCP call',
-          );
-          expect(queued[0]?.message).toContain('Use PostgreSQL');
-          expect(queued[0]?.message).toContain('original MCP response stream closed');
-          expect(manager.getSession(pod.id).failureReason).toContain('uncollected human guidance');
-          expect(manager.getSession(pod.id).finalization?.sourcePreservedAt).toBeNull();
-        }
-        expect(manager.getSession(pod.id).status).toBe(collectReply ? 'validated' : 'failed');
-      },
-    );
+        expect(queued[0]?.message).toContain('Use PostgreSQL');
+        expect(queued[0]?.message).toContain('original MCP response stream closed');
+        expect(manager.getSession(pod.id).failureReason).toContain('uncollected human guidance');
+        expect(manager.getSession(pod.id).finalization?.sourcePreservedAt).toBeNull();
+      }
+      expect(manager.getSession(pod.id).status).toBe(collectReply ? 'validated' : 'failed');
+    });
 
     it('fails the pod when the worker crashes while awaiting human input', async () => {
       const runtime = createMockRuntime({

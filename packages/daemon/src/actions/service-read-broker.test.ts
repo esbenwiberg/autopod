@@ -1,6 +1,6 @@
 import { serviceAccessSchema } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
-import { type ServiceReadTransport, readScopedService } from './service-read-broker.js';
+import { readScopedService, type ServiceReadTransport } from './service-read-broker.js';
 import { createServiceReadTransport } from './service-read-transport.js';
 
 const rules = serviceAccessSchema.parse([

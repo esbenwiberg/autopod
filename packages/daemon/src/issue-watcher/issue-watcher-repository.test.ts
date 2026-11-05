@@ -1,8 +1,8 @@
 import type Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
-import { createIssueWatcherRepository } from './issue-watcher-repository.js';
 import type { IssueWatcherRepository } from './issue-watcher-repository.js';
+import { createIssueWatcherRepository } from './issue-watcher-repository.js';
 
 function insertTestSession(db: Database.Database, id: string) {
   db.prepare(

@@ -24,6 +24,7 @@ import { createPodRepository } from './pod-repository.js';
 import { createProviderAttemptContext } from './provider-attempt-context.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 import { createProviderContinuation } from './provider-continuation.js';
+
 const cleanups: Array<() => void> = [];
 afterEach(() => {
   vi.useRealTimers();
@@ -193,68 +194,67 @@ describe('provider continuation', () => {
         stage,
       })),
     ),
-  )(
-    'fences infrastructure before provider authorization/teardown/queueing (%j)',
-    async ({ automatic, stage }) => {
-      const f = fixture();
-      if (!automatic) f.podRepo.update('continuation', { status: 'failed', pauseReason: null });
-      const before = f.pod();
-      const attempts = f.repo.list('continuation');
-      const report = () =>
-        createEscalationRepository(f.db).insert({
-          id: 'provider-infrastructure',
-          podId: 'continuation',
-          type: 'report_blocker',
-          timestamp: new Date().toISOString(),
-          response: null,
-          payload: {
-            kind: 'infrastructure',
-            lifecycleGeneration: f.pod().lifecycleGeneration,
-            requiresResponse: false,
-            description: 'Configured environment unavailable',
-            attempted: [],
-            needs: 'Qualified execution',
-          },
-        });
-      const arrive = async () => {
-        report();
-      };
-      if (stage === 'before') report();
-      else if (stage === 'abort') vi.mocked(f.runtime.abort).mockImplementationOnce(arrive);
-      else if (stage === 'sync')
-        f.captured.syncWorkspaceBack.mockImplementationOnce(async () => {
-          report();
-          return { pushed: false };
-        });
-      else if (stage === 'preview')
-        f.captured.stopSandboxPreviewProxy.mockImplementationOnce(arrive);
-      else if (stage === 'deny') f.captured.stopHaproxyDenyReceiver.mockImplementationOnce(arrive);
-      else if (stage === 'kill') vi.mocked(f.cm.kill).mockImplementationOnce(arrive);
-      else f.captured.worktreeManager.ensureExcludes.mockImplementationOnce(arrive);
-      if (automatic) await f.c.handleProviderLimit('continuation', classification);
-      else
-        await expect(f.c.continueProvider('continuation', 'profile-primary')).rejects.toMatchObject(
-          { code: 'INFRASTRUCTURE_BLOCKED' },
-        );
-      // Effects already admitted before the report remain truthful; no later
-      // teardown, target attempt, or queue admission is allowed after the hold.
-      expect(f.pod()).toEqual({
-        ...before,
-        containerId: stage === 'handoff' ? null : before.containerId,
-        ...(stage === 'handoff' ? { updatedAt: expect.any(String) } : {}),
+  )('fences infrastructure before provider authorization/teardown/queueing (%j)', async ({
+    automatic,
+    stage,
+  }) => {
+    const f = fixture();
+    if (!automatic) f.podRepo.update('continuation', { status: 'failed', pauseReason: null });
+    const before = f.pod();
+    const attempts = f.repo.list('continuation');
+    const report = () =>
+      createEscalationRepository(f.db).insert({
+        id: 'provider-infrastructure',
+        podId: 'continuation',
+        type: 'report_blocker',
+        timestamp: new Date().toISOString(),
+        response: null,
+        payload: {
+          kind: 'infrastructure',
+          lifecycleGeneration: f.pod().lifecycleGeneration,
+          requiresResponse: false,
+          description: 'Configured environment unavailable',
+          attempted: [],
+          needs: 'Qualified execution',
+        },
       });
-      expect(f.repo.list('continuation')).toEqual(attempts);
-      expect(f.runtime.abort).toHaveBeenCalledTimes(stage === 'before' ? 0 : 1);
-      expect(f.captured.syncWorkspaceBack).toHaveBeenCalledTimes(
-        ['before', 'abort'].includes(stage) ? 0 : 1,
-      );
-      expect(f.cm.kill).toHaveBeenCalledTimes(['kill', 'handoff'].includes(stage) ? 1 : 0);
-      expect(f.captured.enqueueSession).not.toHaveBeenCalled();
-      expect(
-        createEscalationRepository(f.db).getOrThrow('provider-infrastructure').response,
-      ).toBeNull();
-    },
-  );
+    const arrive = async () => {
+      report();
+    };
+    if (stage === 'before') report();
+    else if (stage === 'abort') vi.mocked(f.runtime.abort).mockImplementationOnce(arrive);
+    else if (stage === 'sync')
+      f.captured.syncWorkspaceBack.mockImplementationOnce(async () => {
+        report();
+        return { pushed: false };
+      });
+    else if (stage === 'preview') f.captured.stopSandboxPreviewProxy.mockImplementationOnce(arrive);
+    else if (stage === 'deny') f.captured.stopHaproxyDenyReceiver.mockImplementationOnce(arrive);
+    else if (stage === 'kill') vi.mocked(f.cm.kill).mockImplementationOnce(arrive);
+    else f.captured.worktreeManager.ensureExcludes.mockImplementationOnce(arrive);
+    if (automatic) await f.c.handleProviderLimit('continuation', classification);
+    else
+      await expect(f.c.continueProvider('continuation', 'profile-primary')).rejects.toMatchObject({
+        code: 'INFRASTRUCTURE_BLOCKED',
+      });
+    // Effects already admitted before the report remain truthful; no later
+    // teardown, target attempt, or queue admission is allowed after the hold.
+    expect(f.pod()).toEqual({
+      ...before,
+      containerId: stage === 'handoff' ? null : before.containerId,
+      ...(stage === 'handoff' ? { updatedAt: expect.any(String) } : {}),
+    });
+    expect(f.repo.list('continuation')).toEqual(attempts);
+    expect(f.runtime.abort).toHaveBeenCalledTimes(stage === 'before' ? 0 : 1);
+    expect(f.captured.syncWorkspaceBack).toHaveBeenCalledTimes(
+      ['before', 'abort'].includes(stage) ? 0 : 1,
+    );
+    expect(f.cm.kill).toHaveBeenCalledTimes(['kill', 'handoff'].includes(stage) ? 1 : 0);
+    expect(f.captured.enqueueSession).not.toHaveBeenCalled();
+    expect(
+      createEscalationRepository(f.db).getOrThrow('provider-infrastructure').response,
+    ).toBeNull();
+  });
   it('reads late event services and projects only selected visible status/tool events', () => {
     const f = fixture();
     f.live.eventRepo = undefined;
@@ -305,32 +305,32 @@ describe('provider continuation', () => {
       }).trim(),
     ).toBe(PROVIDER_FAILOVER_HANDOFF_PATH);
   });
-  it.each([false, true])(
-    'queues alternate bindings with defer=%s and clears old native sessions',
-    async (defer) => {
-      const f = fixture();
-      const requeue = vi.fn(() => f.order.push('deferred'));
-      f.live.requeueSessionAfterCurrent = requeue;
-      await f.c.queueProviderContinuation(f.pod(), target, classification, defer, true);
-      expect(f.pod()).toMatchObject({
-        status: 'queued',
-        runtime: 'codex',
-        model: 'gpt-5',
-        providerAccountIdSnapshot: 'backup',
-        providerIdSnapshot: 'openai',
-        containerId: null,
-        recoveryWorktreePath: f.directory,
-        pauseReason: null,
-        claudeSessionId: null,
-      });
-      expect(f.repo.getActive('continuation')).toMatchObject({
-        ordinal: 2,
-        providerAccountId: 'backup',
-      });
-      expect(f.order[0]).toBe(defer ? 'deferred' : 'enqueue');
-      expect(f.order[1]).toBe('Provider continuation queued: codex/gpt-5');
-    },
-  );
+  it.each([
+    false,
+    true,
+  ])('queues alternate bindings with defer=%s and clears old native sessions', async (defer) => {
+    const f = fixture();
+    const requeue = vi.fn(() => f.order.push('deferred'));
+    f.live.requeueSessionAfterCurrent = requeue;
+    await f.c.queueProviderContinuation(f.pod(), target, classification, defer, true);
+    expect(f.pod()).toMatchObject({
+      status: 'queued',
+      runtime: 'codex',
+      model: 'gpt-5',
+      providerAccountIdSnapshot: 'backup',
+      providerIdSnapshot: 'openai',
+      containerId: null,
+      recoveryWorktreePath: f.directory,
+      pauseReason: null,
+      claudeSessionId: null,
+    });
+    expect(f.repo.getActive('continuation')).toMatchObject({
+      ordinal: 2,
+      providerAccountId: 'backup',
+    });
+    expect(f.order[0]).toBe(defer ? 'deferred' : 'enqueue');
+    expect(f.order[1]).toBe('Provider continuation queued: codex/gpt-5');
+  });
   it('preserves a native session for the exact same source account/runtime/model', async () => {
     const f = fixture();
     await f.c.queueProviderContinuation(
@@ -367,28 +367,30 @@ describe('provider continuation', () => {
     ]);
     expect(f.captured.enqueueSession).not.toHaveBeenCalled();
   });
-  it.each(['abort', 'sync', 'kill', 'timeout'] as const)(
-    'fails closed during automatic %s drain and cleans timers',
-    async (stage) => {
-      const f = fixture();
-      const error = new Error('Controlled drain failure');
-      if (stage === 'abort') vi.mocked(f.runtime.abort).mockRejectedValueOnce(error);
-      if (stage === 'sync') f.captured.syncWorkspaceBack.mockRejectedValueOnce(error);
-      if (stage === 'kill') vi.mocked(f.cm.kill).mockRejectedValueOnce(error);
-      if (stage === 'timeout') {
-        vi.useFakeTimers();
-        vi.mocked(f.cm.kill).mockReturnValueOnce(new Promise<void>(() => {}));
-      }
-      const before = f.repo.listRaw('continuation');
-      const operation = f.c.handleProviderLimit('continuation', classification);
-      if (stage === 'timeout') await vi.advanceTimersByTimeAsync(15_001);
-      await operation;
-      expect(f.repo.listRaw('continuation')).toEqual(before);
-      expect(f.pod().containerId).toBe('container');
-      expect(f.captured.enqueueSession).not.toHaveBeenCalled();
-      if (stage === 'timeout') expect(vi.getTimerCount()).toBe(0);
-    },
-  );
+  it.each([
+    'abort',
+    'sync',
+    'kill',
+    'timeout',
+  ] as const)('fails closed during automatic %s drain and cleans timers', async (stage) => {
+    const f = fixture();
+    const error = new Error('Controlled drain failure');
+    if (stage === 'abort') vi.mocked(f.runtime.abort).mockRejectedValueOnce(error);
+    if (stage === 'sync') f.captured.syncWorkspaceBack.mockRejectedValueOnce(error);
+    if (stage === 'kill') vi.mocked(f.cm.kill).mockRejectedValueOnce(error);
+    if (stage === 'timeout') {
+      vi.useFakeTimers();
+      vi.mocked(f.cm.kill).mockReturnValueOnce(new Promise<void>(() => {}));
+    }
+    const before = f.repo.listRaw('continuation');
+    const operation = f.c.handleProviderLimit('continuation', classification);
+    if (stage === 'timeout') await vi.advanceTimersByTimeAsync(15_001);
+    await operation;
+    expect(f.repo.listRaw('continuation')).toEqual(before);
+    expect(f.pod().containerId).toBe('container');
+    expect(f.captured.enqueueSession).not.toHaveBeenCalled();
+    if (stage === 'timeout') expect(vi.getTimerCount()).toBe(0);
+  });
   it('drains and forgets lineage before protecting and queueing an automatic target', async () => {
     const f = fixture();
     vi.mocked(f.runtime.abort).mockImplementationOnce(async () => {
@@ -402,25 +404,26 @@ describe('provider continuation', () => {
     expect(f.pod()).toMatchObject({ status: 'queued', containerId: null });
     expect(f.captured.enqueueSession).toHaveBeenCalledOnce();
   });
-  it.each(['same', 'alternate', 'primary'] as const)(
-    'returns the original explicit %s continuation action',
-    async (mode) => {
-      const f = fixture();
-      if (mode === 'primary') f.podRepo.update('continuation', { status: 'failed' });
-      const result = await f.c.continueProvider(
-        'continuation',
-        mode === 'primary' ? 'profile-primary' : mode === 'alternate' ? target : undefined,
-      );
-      expect(result.action).toBe(
-        mode === 'primary'
-          ? 'primary-provider'
-          : mode === 'alternate'
-            ? 'alternate-provider'
-            : 'same-provider',
-      );
-      expect(f.pod().status).toBe('queued');
-    },
-  );
+  it.each([
+    'same',
+    'alternate',
+    'primary',
+  ] as const)('returns the original explicit %s continuation action', async (mode) => {
+    const f = fixture();
+    if (mode === 'primary') f.podRepo.update('continuation', { status: 'failed' });
+    const result = await f.c.continueProvider(
+      'continuation',
+      mode === 'primary' ? 'profile-primary' : mode === 'alternate' ? target : undefined,
+    );
+    expect(result.action).toBe(
+      mode === 'primary'
+        ? 'primary-provider'
+        : mode === 'alternate'
+          ? 'alternate-provider'
+          : 'same-provider',
+    );
+    expect(f.pod().status).toBe('queued');
+  });
   it('rejects unsupported state and missing definitive evidence without changing retained source', async () => {
     const f = fixture();
     const before = f.pod();
@@ -433,45 +436,47 @@ describe('provider continuation', () => {
       code: 'WORKTREE_COMPROMISED',
     });
   });
-  it.each(['worker', 'evidence', 'policy', 'same-hop'] as const)(
-    'retains source before explicit %s guard denial',
-    async (reason) => {
-      const f = fixture();
-      let c = f.c;
-      let requested: typeof target | undefined;
-      let code = 'INVALID_PROVIDER_TARGET';
-      if (reason === 'worker') {
-        const executions = f.podRepo.taskExecutions;
-        if (!executions) throw new Error('Missing task ledger fixture');
-        vi.spyOn(executions, 'hasActiveRun').mockReturnValue(true);
-        code = 'TASK_AGENT_RUN_ACTIVE';
-      } else if (reason === 'evidence') {
-        c = createProviderContinuation(
-          { ...f.live, providerAttemptRepo: { list: () => [] } },
-          f.captured,
-        );
-        code = 'PROVIDER_LIMIT_NOT_DEFINITIVE';
-      } else if (reason === 'policy') {
-        requested = { ...target, model: 'unconfigured-model' };
-      } else {
-        f.attempts.ensureProviderAttempt(f.pod(), f.profiles.get('test-profile'));
-        f.attempts.closeProviderAttempt(
-          'continuation',
-          'quota_exhausted',
-          classification,
-          PROVIDER_FAILOVER_HANDOFF_PATH,
-        );
-        code = 'PROVIDER_FAILOVER_HOP_LIMIT';
-      }
-      const before = f.pod();
-      const history = f.repo.listRaw('continuation');
-      await expect(c.continueProvider('continuation', requested)).rejects.toMatchObject({ code });
-      expect(f.pod()).toEqual(before);
-      expect(f.repo.listRaw('continuation')).toEqual(history);
-      expect(f.runtime.abort).not.toHaveBeenCalled();
-      expect(f.captured.enqueueSession).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'worker',
+    'evidence',
+    'policy',
+    'same-hop',
+  ] as const)('retains source before explicit %s guard denial', async (reason) => {
+    const f = fixture();
+    let c = f.c;
+    let requested: typeof target | undefined;
+    let code = 'INVALID_PROVIDER_TARGET';
+    if (reason === 'worker') {
+      const executions = f.podRepo.taskExecutions;
+      if (!executions) throw new Error('Missing task ledger fixture');
+      vi.spyOn(executions, 'hasActiveRun').mockReturnValue(true);
+      code = 'TASK_AGENT_RUN_ACTIVE';
+    } else if (reason === 'evidence') {
+      c = createProviderContinuation(
+        { ...f.live, providerAttemptRepo: { list: () => [] } },
+        f.captured,
+      );
+      code = 'PROVIDER_LIMIT_NOT_DEFINITIVE';
+    } else if (reason === 'policy') {
+      requested = { ...target, model: 'unconfigured-model' };
+    } else {
+      f.attempts.ensureProviderAttempt(f.pod(), f.profiles.get('test-profile'));
+      f.attempts.closeProviderAttempt(
+        'continuation',
+        'quota_exhausted',
+        classification,
+        PROVIDER_FAILOVER_HANDOFF_PATH,
+      );
+      code = 'PROVIDER_FAILOVER_HOP_LIMIT';
+    }
+    const before = f.pod();
+    const history = f.repo.listRaw('continuation');
+    await expect(c.continueProvider('continuation', requested)).rejects.toMatchObject({ code });
+    expect(f.pod()).toEqual(before);
+    expect(f.repo.listRaw('continuation')).toEqual(history);
+    expect(f.runtime.abort).not.toHaveBeenCalled();
+    expect(f.captured.enqueueSession).not.toHaveBeenCalled();
+  });
   it('reports unconfirmed explicit teardown without queueing or rewriting attempt history', async () => {
     const f = fixture();
     vi.mocked(f.cm.kill).mockRejectedValueOnce(new Error('Unconfirmed kill'));

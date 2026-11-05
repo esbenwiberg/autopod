@@ -11,7 +11,7 @@ import { ContainerCodexChannel, codexAgentCommand } from './codex-channel.js';
 import type { ManagedGitHubReadConfig } from './github-read-gateway.js';
 import { type ManagedAdmission, REQUIRED_ENFORCEMENT } from './grants.js';
 import type { ManagedPodRow, ManagedRuntimePort } from './managed-service.js';
-import type { ManagedProfileSetConfig, composeManagedProfileSet } from './profile-set-config.js';
+import type { composeManagedProfileSet, ManagedProfileSetConfig } from './profile-set-config.js';
 import { composeManagedRuntime } from './runtime-composition.js';
 import type { ManagedRepositoryMirror } from './workspaces.js';
 

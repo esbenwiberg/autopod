@@ -19,12 +19,16 @@ describe('isPrivateIp', () => {
     expect(isPrivateIp(ip)).toBe(true);
   });
 
-  it.each(['8.8.8.8', '1.1.1.1', '172.32.0.1', '172.15.255.255', '100.63.0.1', '100.128.0.1'])(
-    'accepts public IPv4 %s',
-    (ip) => {
-      expect(isPrivateIp(ip)).toBe(false);
-    },
-  );
+  it.each([
+    '8.8.8.8',
+    '1.1.1.1',
+    '172.32.0.1',
+    '172.15.255.255',
+    '100.63.0.1',
+    '100.128.0.1',
+  ])('accepts public IPv4 %s', (ip) => {
+    expect(isPrivateIp(ip)).toBe(false);
+  });
 
   it.each([
     '::',
@@ -40,12 +44,13 @@ describe('isPrivateIp', () => {
     expect(isPrivateIp(ip)).toBe(true);
   });
 
-  it.each(['2001:4860:4860::8888', '2606:4700:4700::1111', '::ffff:8.8.8.8'])(
-    'accepts public IPv6 %s',
-    (ip) => {
-      expect(isPrivateIp(ip)).toBe(false);
-    },
-  );
+  it.each([
+    '2001:4860:4860::8888',
+    '2606:4700:4700::1111',
+    '::ffff:8.8.8.8',
+  ])('accepts public IPv6 %s', (ip) => {
+    expect(isPrivateIp(ip)).toBe(false);
+  });
 });
 
 describe('isPrivateUrl', () => {
@@ -86,14 +91,14 @@ describe('isPrivateUrl', () => {
 });
 
 describe('assertPublicUrl', () => {
-  it.each(['fe80::1%lo0', 'not-an-address'])(
-    'rejects malformed or scoped resolver address %s without throwing',
-    async (address) => {
-      await expect(
-        assertPublicUrl('https://fixture.invalid', { resolver: async () => [address] }),
-      ).resolves.toMatchObject({ ok: false });
-    },
-  );
+  it.each([
+    'fe80::1%lo0',
+    'not-an-address',
+  ])('rejects malformed or scoped resolver address %s without throwing', async (address) => {
+    await expect(
+      assertPublicUrl('https://fixture.invalid', { resolver: async () => [address] }),
+    ).resolves.toMatchObject({ ok: false });
+  });
 
   it('rejects malformed URL without DNS', async () => {
     const result = await assertPublicUrl('not a url', {

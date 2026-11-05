@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import { fixture } from '../test-utils/managed-fixture.js';
 import { managedComponents } from './bootstrap.js';
 import { composeDarkManagedCli, parseManagedCliConfig } from './cli-config.js';
+
 const input = {
   bindings: [
     {

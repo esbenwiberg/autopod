@@ -6,14 +6,14 @@ import { z } from 'zod';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import {
+  chatGptCredential,
   type ManagedAcceptanceRuntime,
   type ManagedProviderAccountReader,
-  chatGptCredential,
 } from './acceptance-config.js';
 import type { ManagedComponentsConfig } from './bootstrap.js';
 import { canonical, digest } from './canonical.js';
 import { ChatGptReportTransport } from './chatgpt-provider.js';
-import { type ManagedCliConfig, createManagedArtifactStore } from './cli-config.js';
+import { createManagedArtifactStore, type ManagedCliConfig } from './cli-config.js';
 import { ContainerCodexChannel, codexAgentCommand } from './codex-channel.js';
 import type { ManagedGitHubReadConfig } from './github-read-gateway.js';
 import { REQUIRED_ENFORCEMENT } from './grants.js';

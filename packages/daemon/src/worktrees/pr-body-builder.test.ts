@@ -1,6 +1,6 @@
 import type { ValidationResult, ValidationWaiver } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
-import { type PrBodyConfig, buildPrBody, buildPrTitle, escapeMd } from './pr-body-builder.js';
+import { buildPrBody, buildPrTitle, escapeMd, type PrBodyConfig } from './pr-body-builder.js';
 
 describe('buildPrTitle', () => {
   it('prefixes with feat: when no conventional commit prefix', () => {

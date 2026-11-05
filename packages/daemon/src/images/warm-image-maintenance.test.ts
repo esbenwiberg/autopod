@@ -2,8 +2,8 @@ import type { Profile } from '@autopod/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { logger } from '../test-utils/mock-helpers.js';
 import {
-  type WarmImageMaintenanceDeps,
   createWarmImageMaintenanceJob,
+  type WarmImageMaintenanceDeps,
 } from './warm-image-maintenance.js';
 
 function mockProfile(overrides: Partial<Profile> = {}): Profile {

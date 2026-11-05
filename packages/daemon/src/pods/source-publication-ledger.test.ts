@@ -85,30 +85,33 @@ describe('durable source publication', () => {
     }
   });
 
-  it.each(['generation', 'worktree', 'branch', 'decision', 'mismatched-proof'] as const)(
-    'does not confirm stale or unproven source (%s)',
-    (change) => {
-      const f = fixture();
-      try {
-        const id = f.ledger.admit(f.pod, proof);
-        if (change === 'generation') f.repo.incrementLifecycleGeneration(f.pod.id);
-        if (change === 'worktree') f.repo.update(f.pod.id, { worktreePath: '/tmp/replaced' });
-        if (change === 'branch')
-          f.db.prepare("UPDATE pods SET branch = 'replacement' WHERE id = ?").run(f.pod.id);
-        if (change === 'decision') f.repo.update(f.pod.id, { status: 'awaiting_input' });
-        expect(() =>
-          f.ledger.confirm(
-            f.pod,
-            id,
-            change === 'mismatched-proof'
-              ? { ...proof, observedRemoteCommitSha: 'c'.repeat(40) }
-              : proof,
-          ),
-        ).toThrow();
-        expect(f.ledger.get(id)).toMatchObject({ state: 'admitted', receipt: null });
-      } finally {
-        f.db.close();
-      }
-    },
-  );
+  it.each([
+    'generation',
+    'worktree',
+    'branch',
+    'decision',
+    'mismatched-proof',
+  ] as const)('does not confirm stale or unproven source (%s)', (change) => {
+    const f = fixture();
+    try {
+      const id = f.ledger.admit(f.pod, proof);
+      if (change === 'generation') f.repo.incrementLifecycleGeneration(f.pod.id);
+      if (change === 'worktree') f.repo.update(f.pod.id, { worktreePath: '/tmp/replaced' });
+      if (change === 'branch')
+        f.db.prepare("UPDATE pods SET branch = 'replacement' WHERE id = ?").run(f.pod.id);
+      if (change === 'decision') f.repo.update(f.pod.id, { status: 'awaiting_input' });
+      expect(() =>
+        f.ledger.confirm(
+          f.pod,
+          id,
+          change === 'mismatched-proof'
+            ? { ...proof, observedRemoteCommitSha: 'c'.repeat(40) }
+            : proof,
+        ),
+      ).toThrow();
+      expect(f.ledger.get(id)).toMatchObject({ state: 'admitted', receipt: null });
+    } finally {
+      f.db.close();
+    }
+  });
 });

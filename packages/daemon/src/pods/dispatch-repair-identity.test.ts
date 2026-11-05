@@ -5,7 +5,7 @@ import {
   DISPATCH_CANDIDATES_SQL,
   GENERIC_REPAIR_CANDIDATES_SQL,
 } from './dispatch-preflight-ledger.js';
-import { type NewPod, createPodRepository } from './pod-repository.js';
+import { createPodRepository, type NewPod } from './pod-repository.js';
 
 const base = 'a'.repeat(40);
 const repository = 'https://github.com/org/repo';
@@ -95,134 +95,141 @@ describe('canonical PR repair dispatch and exact rerun authorization', () => {
       f.db.close();
     }
   });
-  it.each(['generic-first', 'repair-first'])(
-    'blocks unknown placeholder ownership in %s admission order',
-    (order) => {
-      const f = fixture();
-      try {
-        const generic = () => f.repo.insert(request('literal', { task: repairPlaceholder }));
-        const repair = () => addRepair(f, 'parent', 'fix', 11);
-        (order === 'generic-first' ? generic : repair)();
-        const first = order === 'generic-first' ? 'literal' : 'fix';
-        const second = order === 'generic-first' ? 'fix' : 'literal';
-        const receipt = f.inspect(first);
-        expect(receipt.status).toBe('admitted');
-        const original = f.db
-          .prepare('SELECT * FROM execution_dispatch_preflights WHERE id=?')
-          .get(receipt.id);
-        (order === 'generic-first' ? repair : generic)();
-        expect(f.inspect(second)).toMatchObject({
-          status: 'review_required',
-          conflicts: [{ podId: first, evidence: 'dispatch_receipt' }],
-        });
-        expect(
-          f.db.prepare('SELECT * FROM execution_dispatch_preflights WHERE id=?').get(receipt.id),
-        ).toEqual(original);
-      } finally {
-        f.db.close();
-      }
-    },
-  );
-  it.each(['expanded-and-readmitted', 'missing-pr', 'deleted-parent', 'changed-contract'])(
-    'retains scoped evidence after %s',
-    (change) => {
-      const f = fixture();
-      try {
-        addRepair(f, 'parent', 'fix', 11);
+  it.each([
+    'generic-first',
+    'repair-first',
+  ])('blocks unknown placeholder ownership in %s admission order', (order) => {
+    const f = fixture();
+    try {
+      const generic = () => f.repo.insert(request('literal', { task: repairPlaceholder }));
+      const repair = () => addRepair(f, 'parent', 'fix', 11);
+      (order === 'generic-first' ? generic : repair)();
+      const first = order === 'generic-first' ? 'literal' : 'fix';
+      const second = order === 'generic-first' ? 'fix' : 'literal';
+      const receipt = f.inspect(first);
+      expect(receipt.status).toBe('admitted');
+      const original = f.db
+        .prepare('SELECT * FROM execution_dispatch_preflights WHERE id=?')
+        .get(receipt.id);
+      (order === 'generic-first' ? repair : generic)();
+      expect(f.inspect(second)).toMatchObject({
+        status: 'review_required',
+        conflicts: [{ podId: first, evidence: 'dispatch_receipt' }],
+      });
+      expect(
+        f.db.prepare('SELECT * FROM execution_dispatch_preflights WHERE id=?').get(receipt.id),
+      ).toEqual(original);
+    } finally {
+      f.db.close();
+    }
+  });
+  it.each([
+    'expanded-and-readmitted',
+    'missing-pr',
+    'deleted-parent',
+    'changed-contract',
+  ])('retains scoped evidence after %s', (change) => {
+    const f = fixture();
+    try {
+      addRepair(f, 'parent', 'fix', 11);
+      expect(f.inspect('fix').status).toBe('admitted');
+      if (change === 'expanded-and-readmitted') {
+        f.repo.update('fix', { task: '[PR FIX] Actual executable feedback' });
         expect(f.inspect('fix').status).toBe('admitted');
-        if (change === 'expanded-and-readmitted') {
-          f.repo.update('fix', { task: '[PR FIX] Actual executable feedback' });
-          expect(f.inspect('fix').status).toBe('admitted');
-        }
-        if (change === 'missing-pr') f.repo.update('fix', { prUrl: null });
-        if (change === 'deleted-parent') f.repo.delete('parent');
-        if (change === 'changed-contract')
-          f.repo.update('fix', {
-            contract: {
-              contractVersion: 1,
-              title: 'Changed',
-              dependsOn: [],
-              scenarios: [],
-              requiredFacts: [],
-              humanReview: [],
-            },
-          });
-        f.repo.insert(request('literal', { task: repairPlaceholder }));
-        expect(f.inspect('literal')).toMatchObject({
-          status: 'review_required',
-          conflicts: [{ podId: 'fix', evidence: 'dispatch_receipt' }],
+      }
+      if (change === 'missing-pr') f.repo.update('fix', { prUrl: null });
+      if (change === 'deleted-parent') f.repo.delete('parent');
+      if (change === 'changed-contract')
+        f.repo.update('fix', {
+          contract: {
+            contractVersion: 1,
+            title: 'Changed',
+            dependsOn: [],
+            scenarios: [],
+            requiredFacts: [],
+            humanReview: [],
+          },
         });
-      } finally {
-        f.db.close();
-      }
-    },
-  );
-  it.each(['complete', 'failed', 'killed', 'rejected', 'deleted'])(
-    'does not block a generic placeholder with %s scoped work',
-    (status) => {
-      const f = fixture();
-      try {
-        addRepair(f, 'parent', 'fix', 11);
-        const receipt = f.inspect('fix');
-        if (status === 'deleted') f.repo.delete('fix');
-        else f.db.prepare("UPDATE pods SET status=? WHERE id='fix'").run(status);
-        f.repo.insert(request('literal', { task: repairPlaceholder }));
-        expect(f.inspect('literal')).toMatchObject({ status: 'admitted', conflicts: [] });
-        expect(
-          f.db
-            .prepare('SELECT work_hash FROM execution_dispatch_preflights WHERE id=?')
-            .get(receipt.id),
-        ).toEqual({ work_hash: receipt.workHash });
-      } finally {
-        f.db.close();
-      }
-    },
-  );
-  it.each(['ordinary', 'different-contract', 'different-base', 'different-repository'])(
-    'excludes positively distinct %s work from the reverse probe',
-    (kind) => {
-      const f = fixture();
-      try {
-        addRepair(f, 'parent', 'fix', 11);
-        if (kind === 'ordinary') f.repo.update('fix', { task: 'Unrelated executable work' });
-        if (kind === 'different-contract')
-          f.repo.update('fix', {
-            contract: {
-              contractVersion: 1,
-              title: 'Distinct contract',
-              dependsOn: [],
-              scenarios: [],
-              requiredFacts: [],
-              humanReview: [],
-            },
-          });
-        expect(f.inspect('fix').status).toBe('admitted');
-        if (kind === 'different-repository')
-          f.db
-            .prepare(
-              "UPDATE profiles SET repo_url='https://github.com/org/other' WHERE name='test-profile'",
-            )
-            .run();
-        f.repo.insert(
-          request('literal', {
-            task: repairPlaceholder,
-            ...(kind === 'different-base' ? { baseBranch: 'release' } : {}),
-          }),
-        );
-        expect(
-          f.ledger.inspect(
-            'literal',
-            1,
-            kind === 'different-repository' ? 'https://github.com/org/other' : repository,
-            kind === 'different-base' ? 'release' : 'main',
-            base,
-          ),
-        ).toMatchObject({ status: 'admitted', conflicts: [] });
-      } finally {
-        f.db.close();
-      }
-    },
-  );
+      f.repo.insert(request('literal', { task: repairPlaceholder }));
+      expect(f.inspect('literal')).toMatchObject({
+        status: 'review_required',
+        conflicts: [{ podId: 'fix', evidence: 'dispatch_receipt' }],
+      });
+    } finally {
+      f.db.close();
+    }
+  });
+  it.each([
+    'complete',
+    'failed',
+    'killed',
+    'rejected',
+    'deleted',
+  ])('does not block a generic placeholder with %s scoped work', (status) => {
+    const f = fixture();
+    try {
+      addRepair(f, 'parent', 'fix', 11);
+      const receipt = f.inspect('fix');
+      if (status === 'deleted') f.repo.delete('fix');
+      else f.db.prepare("UPDATE pods SET status=? WHERE id='fix'").run(status);
+      f.repo.insert(request('literal', { task: repairPlaceholder }));
+      expect(f.inspect('literal')).toMatchObject({ status: 'admitted', conflicts: [] });
+      expect(
+        f.db
+          .prepare('SELECT work_hash FROM execution_dispatch_preflights WHERE id=?')
+          .get(receipt.id),
+      ).toEqual({ work_hash: receipt.workHash });
+    } finally {
+      f.db.close();
+    }
+  });
+  it.each([
+    'ordinary',
+    'different-contract',
+    'different-base',
+    'different-repository',
+  ])('excludes positively distinct %s work from the reverse probe', (kind) => {
+    const f = fixture();
+    try {
+      addRepair(f, 'parent', 'fix', 11);
+      if (kind === 'ordinary') f.repo.update('fix', { task: 'Unrelated executable work' });
+      if (kind === 'different-contract')
+        f.repo.update('fix', {
+          contract: {
+            contractVersion: 1,
+            title: 'Distinct contract',
+            dependsOn: [],
+            scenarios: [],
+            requiredFacts: [],
+            humanReview: [],
+          },
+        });
+      expect(f.inspect('fix').status).toBe('admitted');
+      if (kind === 'different-repository')
+        f.db
+          .prepare(
+            "UPDATE profiles SET repo_url='https://github.com/org/other' WHERE name='test-profile'",
+          )
+          .run();
+      f.repo.insert(
+        request('literal', {
+          task: repairPlaceholder,
+          ...(kind === 'different-base' ? { baseBranch: 'release' } : {}),
+        }),
+      );
+      expect(
+        f.ledger.inspect(
+          'literal',
+          1,
+          kind === 'different-repository' ? 'https://github.com/org/other' : repository,
+          kind === 'different-base' ? 'release' : 'main',
+          base,
+        ),
+      ).toMatchObject({ status: 'admitted', conflicts: [] });
+    } finally {
+      f.db.close();
+    }
+  });
   it('rejects placeholder reruns atomically without an executable handoff', () => {
     const f = fixture();
     try {
@@ -489,67 +496,70 @@ it.each([false, true])('preserves immutable parent-first ancestry, corrupt=%s', 
   }
 });
 
-it.each(['base', 'repository', 'branch', 'pointer', 'series', 'missing-pr'] as const)(
-  'blocks contradictory generic witnesses: %s',
-  (kind) => {
-    const f = fixture();
-    try {
-      addRepair(f, 'old-parent', 'old-fix', 11);
-      recordLegacyRepair(f, 'old-fix');
-      if (kind === 'base') f.repo.update('old-parent', { baseBranch: 'release' });
-      if (kind === 'repository')
-        f.db
-          .prepare("UPDATE pods SET profile_snapshot=? WHERE id='old-parent'")
-          .run(
-            JSON.stringify({ repoUrl: 'https://github.com/foreign/repo', defaultBranch: 'main' }),
-          );
-      if (kind === 'repository')
-        f.db
-          .prepare(
-            "DELETE FROM execution_dispatch_bindings WHERE execution_id=(SELECT execution_id FROM task_executions WHERE pod_id='old-parent')",
-          )
-          .run();
-      if (kind === 'branch')
-        f.db.prepare("UPDATE pods SET branch='foreign' WHERE id='old-parent'").run();
-      if (kind === 'pointer') f.repo.update('old-parent', { fixPodId: null });
-      if (kind === 'series')
-        f.db
-          .prepare("UPDATE pods SET pr_mode='single', series_id=NULL WHERE id='old-parent'")
-          .run();
-      if (kind === 'missing-pr') {
-        f.repo.update('old-parent', { prUrl: null });
-        f.repo.delete('old-parent');
-      }
-      addRepair(f, 'new-parent', 'new-fix', 12);
-      expect(f.inspect('new-fix').status).toBe('review_required');
-    } finally {
-      f.db.close();
+it.each([
+  'base',
+  'repository',
+  'branch',
+  'pointer',
+  'series',
+  'missing-pr',
+] as const)('blocks contradictory generic witnesses: %s', (kind) => {
+  const f = fixture();
+  try {
+    addRepair(f, 'old-parent', 'old-fix', 11);
+    recordLegacyRepair(f, 'old-fix');
+    if (kind === 'base') f.repo.update('old-parent', { baseBranch: 'release' });
+    if (kind === 'repository')
+      f.db
+        .prepare("UPDATE pods SET profile_snapshot=? WHERE id='old-parent'")
+        .run(JSON.stringify({ repoUrl: 'https://github.com/foreign/repo', defaultBranch: 'main' }));
+    if (kind === 'repository')
+      f.db
+        .prepare(
+          "DELETE FROM execution_dispatch_bindings WHERE execution_id=(SELECT execution_id FROM task_executions WHERE pod_id='old-parent')",
+        )
+        .run();
+    if (kind === 'branch')
+      f.db.prepare("UPDATE pods SET branch='foreign' WHERE id='old-parent'").run();
+    if (kind === 'pointer') f.repo.update('old-parent', { fixPodId: null });
+    if (kind === 'series')
+      f.db.prepare("UPDATE pods SET pr_mode='single', series_id=NULL WHERE id='old-parent'").run();
+    if (kind === 'missing-pr') {
+      f.repo.update('old-parent', { prUrl: null });
+      f.repo.delete('old-parent');
     }
-  },
-);
+    addRepair(f, 'new-parent', 'new-fix', 12);
+    expect(f.inspect('new-fix').status).toBe('review_required');
+  } finally {
+    f.db.close();
+  }
+});
 
-it.each(['missing-parent', 'missing-pr', 'base', 'series', 'foreign-repository'] as const)(
-  'refuses missing/changed repair ownership: %s',
-  (kind) => {
-    const f = fixture();
-    try {
-      addRepair(f, 'parent', 'fix', 11);
-      if (kind === 'missing-parent') f.repo.delete('parent');
-      if (kind === 'missing-pr') f.repo.update('parent', { prUrl: null });
-      if (kind === 'base') f.repo.update('parent', { baseBranch: 'release' });
-      if (kind === 'series')
-        f.db.prepare("UPDATE pods SET pr_mode='single', series_id=NULL WHERE id='parent'").run();
-      if (kind === 'foreign-repository') {
-        f.repo.update('parent', { prUrl: 'https://github.com/foreign/repo/pull/11' });
-        f.repo.update('fix', { prUrl: 'https://github.com/foreign/repo/pull/11' });
-      }
-      expect(() => f.inspect('fix')).toThrow('repair identity');
-      expect(f.ledger.latest('fix')).toBeNull();
-    } finally {
-      f.db.close();
+it.each([
+  'missing-parent',
+  'missing-pr',
+  'base',
+  'series',
+  'foreign-repository',
+] as const)('refuses missing/changed repair ownership: %s', (kind) => {
+  const f = fixture();
+  try {
+    addRepair(f, 'parent', 'fix', 11);
+    if (kind === 'missing-parent') f.repo.delete('parent');
+    if (kind === 'missing-pr') f.repo.update('parent', { prUrl: null });
+    if (kind === 'base') f.repo.update('parent', { baseBranch: 'release' });
+    if (kind === 'series')
+      f.db.prepare("UPDATE pods SET pr_mode='single', series_id=NULL WHERE id='parent'").run();
+    if (kind === 'foreign-repository') {
+      f.repo.update('parent', { prUrl: 'https://github.com/foreign/repo/pull/11' });
+      f.repo.update('fix', { prUrl: 'https://github.com/foreign/repo/pull/11' });
     }
-  },
-);
+    expect(() => f.inspect('fix')).toThrow('repair identity');
+    expect(f.ledger.latest('fix')).toBeNull();
+  } finally {
+    f.db.close();
+  }
+});
 
 it.each([false, true])('supports equivalent ADO PR URLs, admitted receipt=%s', (admitted) => {
   const f = fixture();
@@ -649,41 +659,41 @@ it('bounds active candidates independently of deleted history', () => {
   }
 });
 
-it.each(['series_id', 'pr_mode'] as const)(
-  'refuses contradictory current child %s metadata',
-  (column) => {
-    const f = fixture();
-    try {
-      addRepair(f, 'parent', 'fix', 11);
-      f.db.prepare(`UPDATE pods SET ${column}='foreign' WHERE id='fix'`).run();
-      expect(() => f.inspect('fix')).toThrow('repair identity');
-      expect(f.ledger.latest('fix')).toBeNull();
-    } finally {
-      f.db.close();
-    }
-  },
-);
+it.each([
+  'series_id',
+  'pr_mode',
+] as const)('refuses contradictory current child %s metadata', (column) => {
+  const f = fixture();
+  try {
+    addRepair(f, 'parent', 'fix', 11);
+    f.db.prepare(`UPDATE pods SET ${column}='foreign' WHERE id='fix'`).run();
+    expect(() => f.inspect('fix')).toThrow('repair identity');
+    expect(f.ledger.latest('fix')).toBeNull();
+  } finally {
+    f.db.close();
+  }
+});
 
-it.each(['series_id', 'pr_mode'] as const)(
-  'blocks generic receipts with contradictory child %s',
-  (column) => {
-    const f = fixture();
-    try {
-      addRepair(f, 'old-parent', 'old-fix', 11);
-      recordLegacyRepair(f, 'old-fix');
-      const receipt = f.db.prepare('SELECT * FROM execution_dispatch_preflights').all();
-      f.db.prepare(`UPDATE pods SET ${column}='foreign' WHERE id='old-fix'`).run();
-      f.repo.delete('old-parent');
-      addRepair(f, 'new-parent', 'new-fix', 12);
-      expect(f.inspect('new-fix').status).toBe('review_required');
-      expect(
-        f.db.prepare("SELECT * FROM execution_dispatch_preflights WHERE id='legacy-old-fix'").all(),
-      ).toEqual(receipt);
-    } finally {
-      f.db.close();
-    }
-  },
-);
+it.each([
+  'series_id',
+  'pr_mode',
+] as const)('blocks generic receipts with contradictory child %s', (column) => {
+  const f = fixture();
+  try {
+    addRepair(f, 'old-parent', 'old-fix', 11);
+    recordLegacyRepair(f, 'old-fix');
+    const receipt = f.db.prepare('SELECT * FROM execution_dispatch_preflights').all();
+    f.db.prepare(`UPDATE pods SET ${column}='foreign' WHERE id='old-fix'`).run();
+    f.repo.delete('old-parent');
+    addRepair(f, 'new-parent', 'new-fix', 12);
+    expect(f.inspect('new-fix').status).toBe('review_required');
+    expect(
+      f.db.prepare("SELECT * FROM execution_dispatch_preflights WHERE id='legacy-old-fix'").all(),
+    ).toEqual(receipt);
+  } finally {
+    f.db.close();
+  }
+});
 
 it('supports matching and absent child series metadata', () => {
   const f = fixture();

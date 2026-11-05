@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { afterEach, expect, it, vi } from 'vitest';
 import { registerManagedCommands } from './managed.js';
+
 const state = vi.hoisted(() => ({ token: '', endpoint: 'https://daemon.test' }));
 vi.mock('../config/credential-store.js', () => ({
   readCredentials: () => ({ accessToken: state.token }),

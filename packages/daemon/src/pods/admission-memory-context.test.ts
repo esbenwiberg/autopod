@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createAdmissionFixture } from '../test-utils/admission-queries-helpers.js';
 import type { AdmissionMemoryCaptured } from './admission-contracts.js';
 import { createAdmissionMemoryContext } from './admission-memory-context.js';
+
 describe('launch memory context', () => {
   it('rejects unavailable executor and refuses a native missing frozen scope', () => {
     const f = createAdmissionFixture();

@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { AUTOPOD_INSTRUCTIONS_PATH } from '@autopod/shared';
 import type { AgentEvent, ReasoningEffort, Runtime, SpawnConfig } from '@autopod/shared';
-import { CLAUDE_DEFAULT_MODEL, CLAUDE_REVIEWER_MODEL } from '@autopod/shared';
+import {
+  AUTOPOD_INSTRUCTIONS_PATH,
+  CLAUDE_DEFAULT_MODEL,
+  CLAUDE_REVIEWER_MODEL,
+} from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import { ClaudeStreamParser } from './claude-stream-parser.js';

@@ -4,8 +4,8 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import type { Logger } from 'pino';
 import {
-  type BackupReceipt,
   assertBackupIntegrity,
+  type BackupReceipt,
   databaseIdentity,
   databaseWatermark,
   fileChecksum,

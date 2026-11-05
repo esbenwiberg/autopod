@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createWorkspaceFixture } from '../test-utils/workspace-recovery-helpers.js';
 import { DeletionGuardError } from '../worktrees/local-worktree-manager.js';
+
 describe('workspace preservation and lifecycle fences', () => {
   it('requires current interactive identity and rejects queued guidance before cleanup', () => {
     const f = createWorkspaceFixture();

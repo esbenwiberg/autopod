@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createDeliveryFixture } from '../test-utils/delivery-helpers.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { createEscalationRepository } from './escalation-repository.js';
+
 describe('host push credential parking', () => {
   for (const service of ['github', 'ado'] as const)
     it(`persists ${service} escalation and retained resources through private SQLite reopen`, () => {

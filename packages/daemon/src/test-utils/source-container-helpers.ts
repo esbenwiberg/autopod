@@ -12,6 +12,7 @@ import { sourcePodFingerprint } from '../pods/source-adoption-repository.js';
 import { createSourceContainerAdoption } from '../pods/source-container-adoption.js';
 import { createMockContainerManager } from './mock-helpers.js';
 import { createOperatorFixture } from './operator-helpers.js';
+
 const exec = promisify(execFile);
 
 /** Local fake data plane with real Git/process exits; never Docker/Azure or a model worker. */

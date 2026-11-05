@@ -652,39 +652,39 @@ describe('PiRpcParser', () => {
       startError: '429 quota_exceeded: Provider quota exhausted',
       finalError: '529 provider_unavailable: Provider unavailable',
     },
-  ])(
-    'fails closed when provider evidence changes at $driftAt',
-    async ({ startError, finalError }) => {
-      const quotaError = '429 quota_exceeded: Provider quota exhausted';
-      const records: object[] = [
-        {
-          type: 'agent_end',
-          messages: [{ role: 'assistant', stopReason: 'error', errorMessage: quotaError }],
-          willRetry: true,
-        },
-      ];
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
-        records.push({
-          type: 'auto_retry_start',
-          attempt,
-          maxAttempts: 3,
-          delayMs: attempt * 2_000,
-          errorMessage: startError,
-        });
-      }
-      records.push(
-        { type: 'auto_retry_end', success: false, attempt: 3, finalError },
-        { type: 'agent_settled' },
-      );
-
-      const { events } = await parseLines(records.map((record) => JSON.stringify(record)));
-      expect(events.at(-1)).toMatchObject({
-        type: 'error',
-        fatal: true,
-        classification: { definitive: false },
+  ])('fails closed when provider evidence changes at $driftAt', async ({
+    startError,
+    finalError,
+  }) => {
+    const quotaError = '429 quota_exceeded: Provider quota exhausted';
+    const records: object[] = [
+      {
+        type: 'agent_end',
+        messages: [{ role: 'assistant', stopReason: 'error', errorMessage: quotaError }],
+        willRetry: true,
+      },
+    ];
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      records.push({
+        type: 'auto_retry_start',
+        attempt,
+        maxAttempts: 3,
+        delayMs: attempt * 2_000,
+        errorMessage: startError,
       });
-    },
-  );
+    }
+    records.push(
+      { type: 'auto_retry_end', success: false, attempt: 3, finalError },
+      { type: 'agent_settled' },
+    );
+
+    const { events } = await parseLines(records.map((record) => JSON.stringify(record)));
+    expect(events.at(-1)).toMatchObject({
+      type: 'error',
+      fatal: true,
+      classification: { definitive: false },
+    });
+  });
 
   it('keeps malformed Pi records non-terminal and unclassified', async () => {
     const { events, stats } = await parseLines(['{not-json']);

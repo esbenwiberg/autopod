@@ -4,10 +4,11 @@ import fs from 'node:fs';
 import {
   AzureSandboxApiClient,
   CGROUP_EXECUTION_METADATA_PROBE,
-  SandboxContainerManager,
   parseCgroupExecutionMetadata,
   runtimeConfigInstallCommand,
+  SandboxContainerManager,
 } from './autopod-canary-resource-131-candidate.mjs';
+
 const root = '/private/tmp/autopod-durable-execution';
 if (process.argv[2] !== '--execute-approved-resource131')
   throw new Error('explicit_execution_flag_required');

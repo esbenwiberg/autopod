@@ -25,8 +25,8 @@ import type {
 import { createProvisioningSandboxState } from '../pods/provisioning-sandbox-state.js';
 import { createProvisioningSessionMaterials } from '../pods/provisioning-session-materials.js';
 import { createProvisioningWorkflow } from '../pods/provisioning-workflow.js';
-import { createProvisioningWorkspacePopulation } from '../pods/provisioning-workspace-population.js';
 import { createProvisioningWorkspace } from '../pods/provisioning-workspace.js';
+import { createProvisioningWorkspacePopulation } from '../pods/provisioning-workspace-population.js';
 import { createValidationRepository } from '../pods/validation-repository.js';
 import { createProfileStore } from '../profiles/index.js';
 import { createProviderAccountStore } from '../provider-accounts/index.js';

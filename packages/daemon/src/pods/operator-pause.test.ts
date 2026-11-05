@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createOperatorFixture } from '../test-utils/operator-helpers.js';
+
 function blockedFixture() {
   const f = createOperatorFixture();
   f.deps.escalationRepo.insert({

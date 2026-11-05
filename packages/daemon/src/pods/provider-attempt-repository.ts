@@ -1,4 +1,3 @@
-import { AutopodError } from '@autopod/shared';
 import type {
   ProviderAccountProvider,
   ProviderAttempt,
@@ -6,6 +5,7 @@ import type {
   ProviderFailureClassification,
   RuntimeType,
 } from '@autopod/shared';
+import { AutopodError } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 
 export interface OpenProviderAttempt {

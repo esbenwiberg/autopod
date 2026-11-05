@@ -2,6 +2,7 @@ import { readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createOperatorFixture } from '../test-utils/operator-helpers.js';
+
 describe('operator kill lifetime and fences', () => {
   it('rechecks validation evidence after asynchronous cleanup before deleting source', async () => {
     const f = createOperatorFixture();

@@ -384,9 +384,9 @@
     </div>
   </div>
   <div class="filters">
-    <button id="show-issues">Show only briefs with issues</button>
-    <button id="expand-all">Expand all</button>
-    <button id="collapse-all">Collapse all</button>
+    <button type="button" id="show-issues">Show only briefs with issues</button>
+    <button type="button" id="expand-all">Expand all</button>
+    <button type="button" id="collapse-all">Collapse all</button>
   </div>
 </div>
 
@@ -525,8 +525,8 @@
                 <span class="label">⚠ AC theatre risk</span>
                 Both ACs are grep-bans / grep-presence — they prove the code mentions ADO attachment URLs, not that an actual upload succeeds. The harness can't impersonate an ADO PAT, so a real <code>api</code> AC against the ADO endpoint is impossible. Test expectations cover the upload mock; reviewer judges the live path. Confirm this is the right anchor.
                 <div class="actions">
-                  <a>accept · grep-ban + tests</a>
-                  <a>require manual smoke before greenlight</a>
+                  <a href="#composer-fallback">accept · grep-ban + tests</a>
+                  <a href="#composer-fallback">require manual smoke before greenlight</a>
                 </div>
               </div>
             </div>
@@ -659,8 +659,8 @@
                 Success signal #3 says <em>"after the configured retention period, terminal-state pods have empty screenshot directories"</em>. None of these 3 ACs actually fire the sweeper and assert directories are gone — they only verify the sweeper module exists and the env var is read. A user could ship a sweeper that never deletes anything and all 3 ACs pass.
                 <p style="margin-top: 6px;">Suggested AC: a <code>cmd</code> step that seeds an old fake screenshot, invokes the sweeper, then asserts <code>! test -d &lt;dir&gt;</code>. Or accept that unit tests in <code>screenshot-retention.test.ts</code> are the anchor.</p>
                 <div class="actions">
-                  <a>add behavioural cmd AC</a>
-                  <a>accept · unit tests are the anchor</a>
+                  <a href="#composer-fallback">add behavioural cmd AC</a>
+                  <a href="#composer-fallback">accept · unit tests are the anchor</a>
                 </div>
               </div>
             </div>
@@ -715,8 +715,8 @@
                 <p style="margin: 6px 0;">(a) accept zero — SwiftUI snapshot tests live in the desktop package; reviewer judges the lightbox.<br>
                 (b) add an indirect <code>cmd</code> AC: assert <code>ScreenshotLightbox.swift</code> exists and is referenced from <code>ValidationTab.swift</code> + <code>SummaryTab.swift</code>. Corroborates wiring; doesn't validate render.</p>
                 <div class="actions">
-                  <a>accept zero · reviewer + Test expectations</a>
-                  <a>add cmd AC for wiring corroboration</a>
+                  <a href="#composer-fallback">accept zero · reviewer + Test expectations</a>
+                  <a href="#composer-fallback">add cmd AC for wiring corroboration</a>
                 </div>
               </div>
             </div>
@@ -748,8 +748,8 @@
       <p><em>"After the configured retention period, terminal-state pods have empty screenshot directories."</em></p>
       <p>Brief 02-prune ships 3 cmd ACs but none of them actually fire the sweeper and assert deletion. A no-op sweeper would pass all three. Either add a behavioural <code>cmd</code> AC or re-frame the success signal to drop the run-time clause.</p>
       <div class="actions">
-        <a>add behavioural AC to brief 02-prune</a>
-        <a>re-frame signal #3</a>
+        <a href="#composer-fallback">add behavioural AC to brief 02-prune</a>
+        <a href="#composer-fallback">re-frame signal #3</a>
       </div>
     </div>
 
@@ -758,8 +758,8 @@
       <p>Briefs 01 and 02-attach-ado both list <code>pod-manager.ts</code> in <code>touches</code>. The daemon may dispatch them concurrently. Worktree-level merge conflicts are likely on the screenshot-collection callsite (line 6345).</p>
       <p>Either (a) serialise — make 02-attach-ado depend on 01 and not run parallel, or (b) accept the merge cost (review-time fixup is small).</p>
       <div class="actions">
-        <a>serialise — promote 02-attach-ado to gate 3</a>
-        <a>accept · expect merge fixup at review</a>
+        <a href="#composer-fallback">serialise — promote 02-attach-ado to gate 3</a>
+        <a href="#composer-fallback">accept · expect merge fixup at review</a>
       </div>
     </div>
 
@@ -845,10 +845,10 @@
 <script>
   // ---- expand / collapse all
   document.getElementById('expand-all').addEventListener('click', () => {
-    document.querySelectorAll('details.brief, details.adr').forEach(d => d.open = true);
+    document.querySelectorAll('details.brief, details.adr').forEach(d => { d.open = true; });
   });
   document.getElementById('collapse-all').addEventListener('click', () => {
-    document.querySelectorAll('details.brief, details.adr').forEach(d => d.open = false);
+    document.querySelectorAll('details.brief, details.adr').forEach(d => { d.open = false; });
   });
 
   // ---- show only briefs with issues
@@ -900,7 +900,7 @@
       pill.addEventListener('click', e => {
         e.preventDefault();
         const wasSelected = pill.classList.contains('selected');
-        pills.forEach(p => p.classList.remove('selected'));
+        pills.forEach(p => { p.classList.remove('selected'); });
         if (!wasSelected) pill.classList.add('selected');
         refreshCount();
       });

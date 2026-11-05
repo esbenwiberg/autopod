@@ -11,73 +11,21 @@ import {
   assertValidationMutationSettled,
   captureValidationMutationGuard,
 } from './validation-recovery-policy.js';
+
 export {
-  AGENT_SHIM_PATH,
   AGENT_ENV_PATH,
+  AGENT_SHIM_PATH,
   AGENT_SHIM_SCRIPT,
 } from './provisioning-runtime-files.js';
+
 import { execFile } from 'node:child_process';
 import path from 'node:path';
-import { createControlOperationRegistry } from './control-operation-registry.js';
-import { createSourceAdoptionController } from './source-adoption-controller.js';
-import { sourceAdoptionError } from './source-adoption-identity.js';
-
 import { promisify } from 'node:util';
-
-import { createContinuationContext } from './continuation-context.js';
-import { createContinuationControls } from './continuation-controls.js';
-import { buildManualReworkReason } from './continuation-policy.js';
-import { createProviderAttemptContext } from './provider-attempt-context.js';
-import { resolvedReasoningEffort } from './provider-attempt-policy.js';
-import { createProviderContinuation } from './provider-continuation.js';
-import { createValidationRevalidationWorkflow } from './validation-revalidation-workflow.js';
-import { createValidationTriggerWorkflow } from './validation-trigger-workflow.js';
-import { createValidationWorkflowControls } from './validation-workflow-controls.js';
-import {
-  assertProtectedOperationalPathsInScope,
-  getPodValidationSkipPhases,
-  getPodValidationSuite,
-  loadCodeReviewSkill,
-  makeUnexpectedValidationFailureResult,
-} from './validation-workflow-policy.js';
-import { createValidationWorkflowState } from './validation-workflow-state.js';
-
 import { createAdvisoryValidation } from './advisory-validation.js';
-
-import { createArtifactFinalizer } from './artifact-finalizer.js';
-import { createFindingsAcceptance } from './research-findings.js';
-
-import { createReviewerContext } from './reviewer-context.js';
-
-import { createRuntimeResumeContext } from './runtime-resume-context.js';
-
-import { createValidationAttemptStart } from './validation-attempt-start.js';
-import { createValidationEnvironment } from './validation-environment.js';
-import { createValidationEvidence } from './validation-evidence.js';
-import { createValidationExecution } from './validation-execution.js';
-import {
-  createValidationInfrastructure,
-  isReviewInfrastructureOnlyFailure,
-  reviewInfrastructureFailureLabel,
-  validationInfrastructureFailureLabel,
-} from './validation-infrastructure.js';
-import { createValidationInputs } from './validation-inputs.js';
-
-import { createValidationProgress } from './validation-progress.js';
-import { createValidationProvenance } from './validation-provenance.js';
-import { createValidationPublication } from './validation-publication.js';
-
-import { createValidationWorkspace } from './validation-workspace.js';
-import { createWorkerRuntimeCredentials } from './worker-runtime-credentials.js';
-
-import { createWorkspacePreservation } from './workspace-preservation.js';
-
 import { createAgentActivity } from './agent-activity.js';
 import { createAgentEventConsumption } from './agent-event-consumption.js';
-
 import { createAgentProcessWorkflow } from './agent-process-workflow.js';
 import { createAgentRunRegistry } from './agent-run-registry.js';
-
 import { createApprovalControls } from './approval-controls.js';
 import { createApprovalDeliveryExecution } from './approval-delivery-execution.js';
 import { createApprovalDeliveryPreparation } from './approval-delivery-preparation.js';
@@ -85,17 +33,21 @@ import { actorLabel, buildValidationWaiver, legacyRespondedBy } from './approval
 import { createApprovalReadiness, createReadinessRefresh } from './approval-readiness.js';
 import { rewriteError } from './approval-source-rewrite-repository.js';
 import { createApprovalWorkflow } from './approval-workflow.js';
+import { createArtifactFinalizer } from './artifact-finalizer.js';
 import {
+  createCompletionDiagnostics,
   formatElapsedDuration,
   operatorErrorMessage,
   sanitizeFailureReason,
   summarizeAgentCompletionBlocker,
 } from './completion-diagnostics.js';
-
-import { createCompletionDiagnostics } from './completion-diagnostics.js';
 import { createCompletionEvents } from './completion-events.js';
 import { createCompletionGuards } from './completion-guards.js';
 import { createCompletionOwners, createCompletionWorkflow } from './completion-workflow.js';
+import { createContinuationContext } from './continuation-context.js';
+import { createContinuationControls } from './continuation-controls.js';
+import { buildManualReworkReason } from './continuation-policy.js';
+import { createControlOperationRegistry } from './control-operation-registry.js';
 import { createDeliveryCredentials } from './delivery-credentials.js';
 import {
   formatRebaseConflictReason,
@@ -115,10 +67,48 @@ import {
   buildPrFixTask,
   createFixCyclePolicy,
 } from './fix-policy.js';
+import { createProviderAttemptContext } from './provider-attempt-context.js';
+import { resolvedReasoningEffort } from './provider-attempt-policy.js';
+import { createProviderContinuation } from './provider-continuation.js';
+import { createFindingsAcceptance } from './research-findings.js';
 import { createRevalidationPassDelivery } from './revalidation-pass-delivery.js';
+import { createReviewerContext } from './reviewer-context.js';
+import { createRuntimeResumeContext } from './runtime-resume-context.js';
+import { createSourceAdoptionController } from './source-adoption-controller.js';
+import { sourceAdoptionError } from './source-adoption-identity.js';
+import { createValidationAttemptStart } from './validation-attempt-start.js';
+import { createValidationEnvironment } from './validation-environment.js';
+import { createValidationEvidence } from './validation-evidence.js';
+import { createValidationExecution } from './validation-execution.js';
+import {
+  createValidationInfrastructure,
+  isReviewInfrastructureOnlyFailure,
+  reviewInfrastructureFailureLabel,
+  validationInfrastructureFailureLabel,
+} from './validation-infrastructure.js';
+import { createValidationInputs } from './validation-inputs.js';
 import { createValidationPassDelivery } from './validation-pass-delivery.js';
+import { createValidationProgress } from './validation-progress.js';
+import { createValidationProvenance } from './validation-provenance.js';
+import { createValidationPublication } from './validation-publication.js';
+import { createValidationRevalidationWorkflow } from './validation-revalidation-workflow.js';
+import { createValidationTriggerWorkflow } from './validation-trigger-workflow.js';
+import { createValidationWorkflowControls } from './validation-workflow-controls.js';
+import {
+  assertProtectedOperationalPathsInScope,
+  getPodValidationSkipPhases,
+  getPodValidationSuite,
+  loadCodeReviewSkill,
+  makeUnexpectedValidationFailureResult,
+} from './validation-workflow-policy.js';
+import { createValidationWorkflowState } from './validation-workflow-state.js';
+import { createValidationWorkspace } from './validation-workspace.js';
+import { createWorkerRuntimeCredentials } from './worker-runtime-credentials.js';
+import { createWorkspacePreservation } from './workspace-preservation.js';
 import { createWorkspaceTransfer } from './workspace-transfer.js';
-export { buildPrFixTask, buildActionableFailureSummary } from './fix-policy.js';
+
+export { buildActionableFailureSummary, buildPrFixTask } from './fix-policy.js';
+
 import { createFixAdmission } from './fix-admission.js';
 import { createFixControls } from './fix-controls.js';
 import { createFixDelivery } from './fix-delivery.js';
@@ -135,13 +125,15 @@ import { createOperatorPauseState } from './operator-state.js';
 import { createOperatorTools } from './operator-tools.js';
 
 import {
+  allocateHostPort,
   CONTAINER_APP_PORT,
   CONTAINER_CLEANUP_TIMEOUT_MS,
-  allocateHostPort,
   hostnameFromUrl,
   portFromUrl,
 } from './resource-policy.js';
+
 export type { NetworkManager } from './resource-contracts.js';
+
 import { createResourceAdvisoryCleanup, createResourceAdvisoryState } from './resource-advisory.js';
 import { createResourceAuxiliary } from './resource-auxiliary.js';
 import { createResourceCleanup } from './resource-cleanup.js';
@@ -151,11 +143,12 @@ import {
 } from './resource-commit-polling.js';
 import { createResourceDenials } from './resource-denials.js';
 import { createResourceNetwork } from './resource-network.js';
+import { createResourcePreview } from './resource-preview.js';
 import { createResourcePreviewControls } from './resource-preview-controls.js';
 import { createResourcePreviewTimers } from './resource-preview-timers.js';
-import { createResourcePreview } from './resource-preview.js';
 
 export type { PodCreator } from './workspace-contracts.js';
+
 import { mergeOverrides, warnIfSinglePrSeriesMissingSeriesMeta } from './admission-policy.js';
 import { createSandboxRecovery } from './sandbox-recovery.js';
 import { createWorkspaceArtifactObservation } from './workspace-artifact-observation.js';
@@ -176,7 +169,9 @@ import {
   createWorkspaceRecoveryState,
 } from './workspace-recovery-state.js';
 import { createWorkspaceWatchdog } from './workspace-watchdog.js';
+
 export { selectMemoryBriefingForPod } from './admission-memory-briefing.js';
+
 import { createAdmissionAnalysisWorkspaces } from './admission-analysis-workspaces.js';
 import { createAdmissionDependents } from './admission-dependents.js';
 import { createAdmissionExecutionContext } from './admission-execution-context.js';
@@ -186,15 +181,17 @@ import { createAdmissionQueries } from './admission-queries.js';
 import { createAdmissionResolved } from './admission-resolved.js';
 import { createAdmissionSeriesDeletion } from './admission-series-deletion.js';
 import type { PodManager, PodManagerDependencies } from './pod-manager-contracts.js';
+
 export type {
   ContainerManagerFactory,
   PodManager,
   PodManagerDependencies,
 } from './pod-manager-contracts.js';
+
 import { createPodManagerFacade } from './pod-manager-facade.js';
 import { createTerminationReconciliation } from './termination-reconciliation.js';
 
-export type { ApproveSessionOptions, ApproveAllSkippedPod } from './approval-contracts.js';
+export type { ApproveAllSkippedPod, ApproveSessionOptions } from './approval-contracts.js';
 
 const execFileAsync = promisify(execFile);
 

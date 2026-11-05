@@ -1,8 +1,8 @@
 import {
   type EffectiveLaunchConfig,
+  outputModeFromPodOptions,
   type RepositorySetup,
   type ValidationPhase,
-  outputModeFromPodOptions,
 } from '@autopod/shared';
 import { cliToolInstructions, frozenCliTools } from '../images/cli-tools.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';

@@ -1,6 +1,6 @@
 import { AutopodError } from '@autopod/shared';
-import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ScheduledJobManager } from '../../scheduled-jobs/scheduled-job-manager.js';
 import { errorHandler } from '../error-handler.js';

@@ -6,8 +6,8 @@ import { AuthError } from '@autopod/shared';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AuthModule } from '../../interfaces/index.js';
-import { createScreenshotStore } from '../../pods/screenshot-store.js';
 import type { ScreenshotStore } from '../../pods/screenshot-store.js';
+import { createScreenshotStore } from '../../pods/screenshot-store.js';
 import { authPlugin } from '../plugins/auth.js';
 import { screenshotRoutes } from './screenshots.js';
 

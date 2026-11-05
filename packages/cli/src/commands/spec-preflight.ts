@@ -1,13 +1,13 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import {
   type BriefFile,
   CONTRACT_DIAGNOSTICS_VERSION,
   type ContractDiagnostic,
-  type SpecContract,
   inspectSpecContractYaml,
   numericPrefix,
   parseBriefs,
+  type SpecContract,
 } from '@autopod/shared';
 
 export interface SeriesPreflight {

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createResourceFixture } from '../test-utils/resource-helpers.js';
 import { createResourceAuxiliary } from './resource-auxiliary.js';
+
 const transport = vi.hoisted(() =>
   vi.fn(
     async (

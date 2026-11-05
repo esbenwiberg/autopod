@@ -2,7 +2,7 @@ import type { DiffResponse, Pod } from '@autopod/shared';
 import { Command } from 'commander';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AutopodClient } from '../api/client.js';
-import { FIXTURE_TOKEN, createCliFixture } from '../test-utils/cli-executable.js';
+import { createCliFixture, FIXTURE_TOKEN } from '../test-utils/cli-executable.js';
 import { registerValidateCommands } from './validate.js';
 
 const patch =
@@ -78,56 +78,56 @@ describe('ap diff', () => {
     expect(client.getPodDiff).toHaveBeenCalledExactlyOnceWith('12345678');
   });
 
-  it.each([false, true])(
-    'does not replace a successful empty diff with stale review data (json=%s)',
-    async (json) => {
-      const empty = { ...response, files: [], stats: { added: 0, removed: 0, changed: 0 } };
-      vi.mocked(client.getPodDiff).mockResolvedValue(empty);
-      vi.mocked(client.getSession).mockResolvedValue(storedReview(patch));
-      await program.parseAsync(args(json), { from: 'user' });
-      expect(client.getSession).not.toHaveBeenCalled();
-      expect(process.stdout.write).not.toHaveBeenCalled();
+  it.each([
+    false,
+    true,
+  ])('does not replace a successful empty diff with stale review data (json=%s)', async (json) => {
+    const empty = { ...response, files: [], stats: { added: 0, removed: 0, changed: 0 } };
+    vi.mocked(client.getPodDiff).mockResolvedValue(empty);
+    vi.mocked(client.getSession).mockResolvedValue(storedReview(patch));
+    await program.parseAsync(args(json), { from: 'user' });
+    expect(client.getSession).not.toHaveBeenCalled();
+    expect(process.stdout.write).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledExactlyOnceWith(
+      json
+        ? JSON.stringify(empty, null, 2)
+        : expect.stringContaining('No changes in the pod diff.'),
+    );
+  });
+
+  it.each([
+    false,
+    true,
+  ])('falls back to the stored review only on endpoint failure (json=%s)', async (json) => {
+    vi.mocked(client.getPodDiff).mockRejectedValue(new Error('Route unavailable'));
+    vi.mocked(client.getSession).mockResolvedValue(storedReview(patch + removedPatch));
+    await program.parseAsync(args(json), { from: 'user' });
+    expect(client.getSession).toHaveBeenCalledExactlyOnceWith('12345678');
+    if (json) {
       expect(console.log).toHaveBeenCalledExactlyOnceWith(
-        json
-          ? JSON.stringify(empty, null, 2)
-          : expect.stringContaining('No changes in the pod diff.'),
+        JSON.stringify(
+          { files: response.files, stats: response.stats, source: 'task-review' },
+          null,
+          2,
+        ),
       );
-    },
-  );
-
-  it.each([false, true])(
-    'falls back to the stored review only on endpoint failure (json=%s)',
-    async (json) => {
-      vi.mocked(client.getPodDiff).mockRejectedValue(new Error('Route unavailable'));
-      vi.mocked(client.getSession).mockResolvedValue(storedReview(patch + removedPatch));
-      await program.parseAsync(args(json), { from: 'user' });
-      expect(client.getSession).toHaveBeenCalledExactlyOnceWith('12345678');
-      if (json) {
-        expect(console.log).toHaveBeenCalledExactlyOnceWith(
-          JSON.stringify(
-            { files: response.files, stats: response.stats, source: 'task-review' },
-            null,
-            2,
-          ),
-        );
-        expect(process.stdout.write).not.toHaveBeenCalled();
-      } else {
-        expect(process.stdout.write).toHaveBeenCalledExactlyOnceWith(patch + removedPatch);
-        expect(console.log).not.toHaveBeenCalled();
-      }
-    },
-  );
-
-  it.each([false, true])(
-    'preserves failure when neither source has a diff (json=%s)',
-    async (json) => {
-      const error = new Error('Diff unavailable');
-      vi.mocked(client.getPodDiff).mockRejectedValue(error);
-      await expect(program.parseAsync(args(json), { from: 'user' })).rejects.toBe(error);
-      expect(console.log).not.toHaveBeenCalled();
       expect(process.stdout.write).not.toHaveBeenCalled();
-    },
-  );
+    } else {
+      expect(process.stdout.write).toHaveBeenCalledExactlyOnceWith(patch + removedPatch);
+      expect(console.log).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    false,
+    true,
+  ])('preserves failure when neither source has a diff (json=%s)', async (json) => {
+    const error = new Error('Diff unavailable');
+    vi.mocked(client.getPodDiff).mockRejectedValue(error);
+    await expect(program.parseAsync(args(json), { from: 'user' })).rejects.toBe(error);
+    expect(console.log).not.toHaveBeenCalled();
+    expect(process.stdout.write).not.toHaveBeenCalled();
+  });
 
   it('propagates failure to fetch the fallback pod', async () => {
     vi.mocked(client.getPodDiff).mockRejectedValue(new Error('Diff unavailable'));
@@ -138,39 +138,39 @@ describe('ap diff', () => {
 });
 
 describe('built ap diff', () => {
-  it.each([false, true])(
-    'emits parseable JSON through authenticated HTTP (fallback=%s)',
-    async (fallback) => {
-      const fixture = await createCliFixture({
-        respond: (reply, requestNumber) => {
-          reply.setHeader('content-type', 'application/json');
-          if (fallback && requestNumber === 1) {
-            reply.statusCode = 404;
-            reply.end(JSON.stringify({ message: 'Route unavailable' }));
-          } else {
-            reply.end(JSON.stringify(fallback ? storedReview(patch + removedPatch) : response));
-          }
-        },
-      });
-      try {
-        const result = await fixture.start(['diff', '12345678', '--json']).result;
-        expect(result.code).toBe(0);
-        expect(result.stderr).toBe('');
-        expect(JSON.parse(result.stdout)).toEqual(
-          fallback
-            ? { files: response.files, stats: response.stats, source: 'task-review' }
-            : response,
-        );
-        expect(fixture.requests).toEqual(
-          ['/pods/12345678/diff', ...(fallback ? ['/pods/12345678'] : [])].map((url) => ({
-            method: 'GET',
-            url,
-            authorization: `Bearer ${FIXTURE_TOKEN}`,
-          })),
-        );
-      } finally {
-        await fixture.dispose();
-      }
-    },
-  );
+  it.each([
+    false,
+    true,
+  ])('emits parseable JSON through authenticated HTTP (fallback=%s)', async (fallback) => {
+    const fixture = await createCliFixture({
+      respond: (reply, requestNumber) => {
+        reply.setHeader('content-type', 'application/json');
+        if (fallback && requestNumber === 1) {
+          reply.statusCode = 404;
+          reply.end(JSON.stringify({ message: 'Route unavailable' }));
+        } else {
+          reply.end(JSON.stringify(fallback ? storedReview(patch + removedPatch) : response));
+        }
+      },
+    });
+    try {
+      const result = await fixture.start(['diff', '12345678', '--json']).result;
+      expect(result.code).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(JSON.parse(result.stdout)).toEqual(
+        fallback
+          ? { files: response.files, stats: response.stats, source: 'task-review' }
+          : response,
+      );
+      expect(fixture.requests).toEqual(
+        ['/pods/12345678/diff', ...(fallback ? ['/pods/12345678'] : [])].map((url) => ({
+          method: 'GET',
+          url,
+          authorization: `Bearer ${FIXTURE_TOKEN}`,
+        })),
+      );
+    } finally {
+      await fixture.dispose();
+    }
+  });
 });

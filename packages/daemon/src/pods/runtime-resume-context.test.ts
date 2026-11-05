@@ -16,8 +16,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveLaunchCredentialReferences } from '../configuration/credential-references.js';
 import { createConfigurationCredentialStore } from '../configuration/credential-store.js';
 import {
-  type LaunchExecutionCredentials,
   createLaunchExecutionCredentials,
+  type LaunchExecutionCredentials,
 } from '../configuration/execution-credentials.js';
 import { resolveLaunch } from '../configuration/launch-resolver.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
@@ -263,76 +263,77 @@ describe('runtime resume context contracts', () => {
     expect(f.runtime.abort).not.toHaveBeenCalled();
   });
 
-  it.each(['absent', 'empty', 'present'] as const)(
-    'preserves %s token headers, shared header identity and encoded proxy names',
-    async (token) => {
-      const f = await fixture();
-      if (token === 'absent') f.live.sessionTokenIssuer = undefined;
-      if (token === 'empty') f.issuer.generate.mockReturnValue('');
-      const list = await f.run();
-      expect(list.slice(0, 3)).toEqual([
-        {
-          type: 'http',
-          name: 'escalation',
-          url: 'http://daemon:3100/mcp/resume',
-          headers: token === 'present' ? { Authorization: 'Bearer pod-token' } : undefined,
-        },
-        {
-          type: 'http',
-          name: 'shared / tool',
-          url: 'http://daemon:3100/mcp-proxy/shared%20%2F%20tool/resume',
-          headers: token === 'present' ? { Authorization: 'Bearer pod-token' } : undefined,
-        },
-        {
-          type: 'http',
-          name: 'daemon-only',
-          url: 'http://daemon:3100/mcp-proxy/daemon-only/resume',
-          headers: token === 'present' ? { Authorization: 'Bearer pod-token' } : undefined,
-        },
-      ]);
-      expect(JSON.stringify(list)).not.toContain('remote-fixture');
-      expect(JSON.stringify(list)).not.toContain('profile.example.test');
-      const headers = list
-        .slice(0, 3)
-        .map((server) => ('headers' in server ? server.headers : undefined));
-      expect(headers[1]).toBe(headers[0]);
-      expect(headers[2]).toBe(headers[0]);
-      expect(list.slice(0, 3).every((server) => Object.hasOwn(server, 'headers'))).toBe(true);
-    },
-  );
+  it.each([
+    'absent',
+    'empty',
+    'present',
+  ] as const)('preserves %s token headers, shared header identity and encoded proxy names', async (token) => {
+    const f = await fixture();
+    if (token === 'absent') f.live.sessionTokenIssuer = undefined;
+    if (token === 'empty') f.issuer.generate.mockReturnValue('');
+    const list = await f.run();
+    expect(list.slice(0, 3)).toEqual([
+      {
+        type: 'http',
+        name: 'escalation',
+        url: 'http://daemon:3100/mcp/resume',
+        headers: token === 'present' ? { Authorization: 'Bearer pod-token' } : undefined,
+      },
+      {
+        type: 'http',
+        name: 'shared / tool',
+        url: 'http://daemon:3100/mcp-proxy/shared%20%2F%20tool/resume',
+        headers: token === 'present' ? { Authorization: 'Bearer pod-token' } : undefined,
+      },
+      {
+        type: 'http',
+        name: 'daemon-only',
+        url: 'http://daemon:3100/mcp-proxy/daemon-only/resume',
+        headers: token === 'present' ? { Authorization: 'Bearer pod-token' } : undefined,
+      },
+    ]);
+    expect(JSON.stringify(list)).not.toContain('remote-fixture');
+    expect(JSON.stringify(list)).not.toContain('profile.example.test');
+    const headers = list
+      .slice(0, 3)
+      .map((server) => ('headers' in server ? server.headers : undefined));
+    expect(headers[1]).toBe(headers[0]);
+    expect(headers[2]).toBe(headers[0]);
+    expect(list.slice(0, 3).every((server) => Object.hasOwn(server, 'headers'))).toBe(true);
+  });
 
-  it.each([true, false])(
-    'keeps legacy/launch stdio inclusion launch=%s and exact property presence',
-    async (launch) => {
-      const f = await fixture();
-      if (!launch) f.live.launchConfiguration = undefined;
-      f.intel.mockReturnValue([
-        { type: 'stdio', name: 'intel', command: 'intel-tool' },
-        { type: 'stdio', name: 'with-values', command: 'local', args: [], env: {} },
-      ]);
-      const list = await f.run();
-      const locals = list.filter((server) => server.type === 'stdio');
-      expect(locals).toEqual([
-        { type: 'stdio', name: 'intel', command: 'intel-tool' },
-        { type: 'stdio', name: 'with-values', command: 'local', args: [], env: {} },
-        ...(launch
-          ? [
-              {
-                type: 'stdio',
-                name: 'stdio',
-                command: 'local-tool',
-                args: undefined,
-                env: undefined,
-              },
-            ]
-          : []),
-      ]);
-      expect(Object.hasOwn(locals[0] ?? {}, 'args')).toBe(false);
-      expect(Object.hasOwn(locals[0] ?? {}, 'env')).toBe(false);
-      expect(f.service.assertCurrentCapabilities).toHaveBeenCalledTimes(launch ? 2 : 0);
-      expect(f.resolve).toHaveBeenCalledTimes(launch ? 1 : 0);
-    },
-  );
+  it.each([
+    true,
+    false,
+  ])('keeps legacy/launch stdio inclusion launch=%s and exact property presence', async (launch) => {
+    const f = await fixture();
+    if (!launch) f.live.launchConfiguration = undefined;
+    f.intel.mockReturnValue([
+      { type: 'stdio', name: 'intel', command: 'intel-tool' },
+      { type: 'stdio', name: 'with-values', command: 'local', args: [], env: {} },
+    ]);
+    const list = await f.run();
+    const locals = list.filter((server) => server.type === 'stdio');
+    expect(locals).toEqual([
+      { type: 'stdio', name: 'intel', command: 'intel-tool' },
+      { type: 'stdio', name: 'with-values', command: 'local', args: [], env: {} },
+      ...(launch
+        ? [
+            {
+              type: 'stdio',
+              name: 'stdio',
+              command: 'local-tool',
+              args: undefined,
+              env: undefined,
+            },
+          ]
+        : []),
+    ]);
+    expect(Object.hasOwn(locals[0] ?? {}, 'args')).toBe(false);
+    expect(Object.hasOwn(locals[0] ?? {}, 'env')).toBe(false);
+    expect(f.service.assertCurrentCapabilities).toHaveBeenCalledTimes(launch ? 2 : 0);
+    expect(f.resolve).toHaveBeenCalledTimes(launch ? 1 : 0);
+  });
 
   it('preserves name overrides, insertion order and cross-category collisions without mutating inputs', async () => {
     const f = await fixture();
@@ -452,63 +453,59 @@ describe('runtime resume context contracts', () => {
       expect(f.runtime.setCodexResumeConfig).toHaveBeenCalledWith(f.pod.id, list, 'xhigh');
   });
 
-  it.each(['claude', 'codex'] as const)(
-    'returns config when guarded %s setter is absent',
-    async (kind) => {
-      const f = await fixture(kind);
-      const {
-        setClaudeResumeConfig: _claude,
-        setCodexResumeConfig: _codex,
-        ...runtime
-      } = f.runtime;
-      const list = await createRuntimeResumeContext(f.live, f.captured).primeRuntimeForResume(
+  it.each([
+    'claude',
+    'codex',
+  ] as const)('returns config when guarded %s setter is absent', async (kind) => {
+    const f = await fixture(kind);
+    const { setClaudeResumeConfig: _claude, setCodexResumeConfig: _codex, ...runtime } = f.runtime;
+    const list = await createRuntimeResumeContext(f.live, f.captured).primeRuntimeForResume(
+      f.pod,
+      runtime,
+      'container',
+      f.env,
+    );
+    expect(list.length).toBeGreaterThan(0);
+    expect(f.runtime.setClaudeSessionId).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'pi',
+    'claude',
+  ] as const)('retains earlier %s session restore when config setter throws', async (kind) => {
+    const f = await fixture(kind);
+    const error = new Error('Controlled setter');
+    if (kind === 'pi')
+      f.runtime.setPiResumeConfig.mockImplementation(() => {
+        throw error;
+      });
+    else
+      f.runtime.setClaudeResumeConfig.mockImplementation(() => {
+        throw error;
+      });
+    await expect(f.run()).rejects.toBe(error);
+    expect(
+      kind === 'pi' ? f.runtime.setPiSessionId : f.runtime.setClaudeSessionId,
+    ).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    'pi',
+    'claude',
+  ] as const)('keeps unchecked %s missing-session-setter failure', async (kind) => {
+    const f = await fixture(kind);
+    const { setPiSessionId: _pi, setClaudeSessionId: _claude, ...runtime } = f.runtime;
+    await expect(
+      createRuntimeResumeContext(f.live, f.captured).primeRuntimeForResume(
         f.pod,
         runtime,
         'container',
         f.env,
-      );
-      expect(list.length).toBeGreaterThan(0);
-      expect(f.runtime.setClaudeSessionId).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each(['pi', 'claude'] as const)(
-    'retains earlier %s session restore when config setter throws',
-    async (kind) => {
-      const f = await fixture(kind);
-      const error = new Error('Controlled setter');
-      if (kind === 'pi')
-        f.runtime.setPiResumeConfig.mockImplementation(() => {
-          throw error;
-        });
-      else
-        f.runtime.setClaudeResumeConfig.mockImplementation(() => {
-          throw error;
-        });
-      await expect(f.run()).rejects.toBe(error);
-      expect(
-        kind === 'pi' ? f.runtime.setPiSessionId : f.runtime.setClaudeSessionId,
-      ).toHaveBeenCalledOnce();
-    },
-  );
-
-  it.each(['pi', 'claude'] as const)(
-    'keeps unchecked %s missing-session-setter failure',
-    async (kind) => {
-      const f = await fixture(kind);
-      const { setPiSessionId: _pi, setClaudeSessionId: _claude, ...runtime } = f.runtime;
-      await expect(
-        createRuntimeResumeContext(f.live, f.captured).primeRuntimeForResume(
-          f.pod,
-          runtime,
-          'container',
-          f.env,
-        ),
-      ).rejects.toBeInstanceOf(TypeError);
-      expect(f.runtime.setPiResumeConfig).not.toHaveBeenCalled();
-      expect(f.runtime.setClaudeResumeConfig).not.toHaveBeenCalled();
-    },
-  );
+      ),
+    ).rejects.toBeInstanceOf(TypeError);
+    expect(f.runtime.setPiResumeConfig).not.toHaveBeenCalled();
+    expect(f.runtime.setClaudeResumeConfig).not.toHaveBeenCalled();
+  });
 
   it('Pi config setter remains mandatory even with absent session id', async () => {
     const f = await fixture();
@@ -524,65 +521,65 @@ describe('runtime resume context contracts', () => {
     ).rejects.toBeInstanceOf(TypeError);
   });
 
-  it.each(['first check', 'agent'] as const)(
-    'observes live launch and issuer replacement/removal across held %s',
-    async (stage) => {
-      for (const remove of [false, true]) {
-        const f = await fixture();
-        const hold = gate();
-        const entered = gate();
-        if (stage === 'first check')
-          f.service.assertCurrentCapabilities.mockImplementationOnce(async () => {
-            entered.release();
-            await hold.promise;
-          });
-        else
-          f.agent.mockImplementationOnce(async () => {
-            entered.release();
-            await hold.promise;
-            return f.material;
-          });
-        const next = {
-          read: vi.fn(() => {
-            throw new Error('Unexpected reread');
-          }),
-          assertCurrentCapabilities: vi.fn(async function (
-            this: unknown,
-            cfg: EffectiveLaunchConfig,
-          ) {
-            expect(this).toBe(next);
-            expect(cfg).toBe(f.config);
-          }),
-        };
-        const issuer = {
-          generate: vi.fn(function (this: unknown, id: string) {
-            expect(this).toBe(issuer);
-            expect(id).toBe(f.pod.id);
-            return 'late-token';
-          }),
-        };
-        let operation: ReturnType<typeof f.run> | undefined;
-        try {
-          operation = f.run();
-          await entered.promise;
-          f.live.launchConfiguration = remove ? undefined : next;
-          f.live.sessionTokenIssuer = remove ? undefined : issuer;
-          hold.release();
-          const list = await operation;
-          expect(f.service.read).toHaveBeenCalledOnce();
-          expect(next.read).not.toHaveBeenCalled();
-          expect(next.assertCurrentCapabilities).toHaveBeenCalledTimes(remove ? 0 : 1);
-          expect(f.issuer.generate).not.toHaveBeenCalled();
-          expect(list[0]).toMatchObject({
-            headers: remove ? undefined : { Authorization: 'Bearer late-token' },
-          });
-        } finally {
-          hold.release();
-          await operation?.catch(() => {});
-        }
+  it.each([
+    'first check',
+    'agent',
+  ] as const)('observes live launch and issuer replacement/removal across held %s', async (stage) => {
+    for (const remove of [false, true]) {
+      const f = await fixture();
+      const hold = gate();
+      const entered = gate();
+      if (stage === 'first check')
+        f.service.assertCurrentCapabilities.mockImplementationOnce(async () => {
+          entered.release();
+          await hold.promise;
+        });
+      else
+        f.agent.mockImplementationOnce(async () => {
+          entered.release();
+          await hold.promise;
+          return f.material;
+        });
+      const next = {
+        read: vi.fn(() => {
+          throw new Error('Unexpected reread');
+        }),
+        assertCurrentCapabilities: vi.fn(async function (
+          this: unknown,
+          cfg: EffectiveLaunchConfig,
+        ) {
+          expect(this).toBe(next);
+          expect(cfg).toBe(f.config);
+        }),
+      };
+      const issuer = {
+        generate: vi.fn(function (this: unknown, id: string) {
+          expect(this).toBe(issuer);
+          expect(id).toBe(f.pod.id);
+          return 'late-token';
+        }),
+      };
+      let operation: ReturnType<typeof f.run> | undefined;
+      try {
+        operation = f.run();
+        await entered.promise;
+        f.live.launchConfiguration = remove ? undefined : next;
+        f.live.sessionTokenIssuer = remove ? undefined : issuer;
+        hold.release();
+        const list = await operation;
+        expect(f.service.read).toHaveBeenCalledOnce();
+        expect(next.read).not.toHaveBeenCalled();
+        expect(next.assertCurrentCapabilities).toHaveBeenCalledTimes(remove ? 0 : 1);
+        expect(f.issuer.generate).not.toHaveBeenCalled();
+        expect(list[0]).toMatchObject({
+          headers: remove ? undefined : { Authorization: 'Bearer late-token' },
+        });
+      } finally {
+        hold.release();
+        await operation?.catch(() => {});
       }
-    },
-  );
+    }
+  });
 
   it('holds the initial profile but reads current pod/snapshot/late collaborators after awaited material', async () => {
     const f = await fixture();

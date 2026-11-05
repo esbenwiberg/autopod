@@ -4,8 +4,8 @@ import {
   lstat,
   mkdir,
   mkdtemp,
-  readFile,
   readdir,
+  readFile,
   realpath,
   rm,
   writeFile,
@@ -16,8 +16,8 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockContainerManager, logger } from '../test-utils/mock-helpers.js';
 import {
-  ValidationWorkspaceReconcileError,
   createValidationWorkspace,
+  ValidationWorkspaceReconcileError,
 } from './validation-workspace.js';
 import { createWorkspaceTransfer } from './workspace-transfer.js';
 
@@ -304,36 +304,36 @@ describe('validation workspace material boundary', () => {
     await cleanResources(f, 'equal-tree');
   });
 
-  it.each(['upload', 'fetch'] as const)(
-    'does not reset to an unavailable target after %s failure, and retains the completed graft',
-    async (failure) => {
-      const f = await fixture(root);
-      const { hostHead, containerHead, hostTree } = await diverge(f);
-      if (failure === 'upload')
-        vi.mocked(f.cm.writeFile).mockRejectedValue(new Error('upload failed'));
-      else {
-        const execute = vi.mocked(f.cm.execInContainer).getMockImplementation();
-        vi.mocked(f.cm.execInContainer).mockImplementation(async (id, command, options) => {
-          if (command.includes('fetch')) return { stdout: '', stderr: 'fetch failed', exitCode: 1 };
-          if (!execute) throw new Error('missing container execution');
-          return execute(id, command, options);
-        });
-      }
+  it.each([
+    'upload',
+    'fetch',
+  ] as const)('does not reset to an unavailable target after %s failure, and retains the completed graft', async (failure) => {
+    const f = await fixture(root);
+    const { hostHead, containerHead, hostTree } = await diverge(f);
+    if (failure === 'upload')
+      vi.mocked(f.cm.writeFile).mockRejectedValue(new Error('upload failed'));
+    else {
+      const execute = vi.mocked(f.cm.execInContainer).getMockImplementation();
+      vi.mocked(f.cm.execInContainer).mockImplementation(async (id, command, options) => {
+        if (command.includes('fetch')) return { stdout: '', stderr: 'fetch failed', exitCode: 1 };
+        if (!execute) throw new Error('missing container execution');
+        return execute(id, command, options);
+      });
+    }
 
-      await expect(prepare(f, 'sandbox', `failed-${failure}`)).rejects.toBeInstanceOf(
-        ValidationWorkspaceReconcileError,
-      );
+    await expect(prepare(f, 'sandbox', `failed-${failure}`)).rejects.toBeInstanceOf(
+      ValidationWorkspaceReconcileError,
+    );
 
-      const graft = await git(f.host, ['rev-parse', 'HEAD']);
-      expect(graft).not.toBe(hostHead);
-      expect(await git(f.host, ['rev-parse', 'HEAD^'])).toBe(containerHead);
-      expect(await git(f.host, ['rev-parse', 'HEAD^{tree}'])).toBe(hostTree);
-      expect(await git(f.workspace, ['rev-parse', 'HEAD'])).toBe(containerHead);
-      await expect(git(f.workspace, ['cat-file', '-e', `${graft}^{commit}`])).rejects.toThrow();
-      expect(resetCalls(f)).toEqual([]);
-      await cleanResources(f, `failed-${failure}`);
-    },
-  );
+    const graft = await git(f.host, ['rev-parse', 'HEAD']);
+    expect(graft).not.toBe(hostHead);
+    expect(await git(f.host, ['rev-parse', 'HEAD^'])).toBe(containerHead);
+    expect(await git(f.host, ['rev-parse', 'HEAD^{tree}'])).toBe(hostTree);
+    expect(await git(f.workspace, ['rev-parse', 'HEAD'])).toBe(containerHead);
+    await expect(git(f.workspace, ['cat-file', '-e', `${graft}^{commit}`])).rejects.toThrow();
+    expect(resetCalls(f)).toEqual([]);
+    await cleanResources(f, `failed-${failure}`);
+  });
 
   it('refuses a missing container object from mismatched alternates without moving unrelated refs', async () => {
     const f = await fixture(root);

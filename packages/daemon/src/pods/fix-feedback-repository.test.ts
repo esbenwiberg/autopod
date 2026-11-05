@@ -1,8 +1,8 @@
 import type Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
-import { createFixFeedbackRepository } from './fix-feedback-repository.js';
 import type { FixFeedbackRepository } from './fix-feedback-repository.js';
+import { createFixFeedbackRepository } from './fix-feedback-repository.js';
 
 function insertTestPod(db: Database.Database, id: string) {
   db.prepare(

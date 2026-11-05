@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+
 const p = JSON.parse(
   fs.readFileSync(
     '/private/tmp/autopod-durable-execution/docs/analysis/2026-09-07/execution/fixtures/canary-126-contract.json',

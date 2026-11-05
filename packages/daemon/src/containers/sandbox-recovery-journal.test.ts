@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  TEST_WAKEUP_ID,
-  TEST_WAKEUP_KEY,
   createSandboxWakeupFixture,
   createTestWakeupClient,
+  TEST_WAKEUP_ID,
+  TEST_WAKEUP_KEY,
 } from '../test-utils/sandbox-wakeup-helpers.js';
 
 describe('exact-resource abandonment capability at Azure transport', () => {

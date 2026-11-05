@@ -89,22 +89,22 @@ it('does not treat truncated stderr as definitive provider failure evidence', as
   expect(events.some((event) => event.type === 'complete')).toBe(false);
 });
 
-it.each(['close', 'error'] as const)(
-  'marks stderr %s without EOF as incomplete despite observed nonzero process exit',
-  async (ending) => {
-    const { stdout, stderr, ready, events, consume } = fixture(1);
-    await ready;
-    await Promise.resolve();
-    stderr.write('You have exhausted your premium requests.\n');
-    if (ending === 'error') stderr.emit('error', new Error('Diagnostic channel failed'));
-    else stderr.destroy();
-    stdout.end('Retain output\n');
-    await consume;
-    expect(events.find((event) => event.type === 'error' && event.fatal)).toMatchObject({
-      classification: { category: 'unknown', definitive: false },
-    });
-    expect(stderr.listenerCount('data')).toBe(0);
-    expect(() => stderr.emit('error', new Error('Late diagnostic transport error'))).not.toThrow();
-    stderr.destroy();
-  },
-);
+it.each([
+  'close',
+  'error',
+] as const)('marks stderr %s without EOF as incomplete despite observed nonzero process exit', async (ending) => {
+  const { stdout, stderr, ready, events, consume } = fixture(1);
+  await ready;
+  await Promise.resolve();
+  stderr.write('You have exhausted your premium requests.\n');
+  if (ending === 'error') stderr.emit('error', new Error('Diagnostic channel failed'));
+  else stderr.destroy();
+  stdout.end('Retain output\n');
+  await consume;
+  expect(events.find((event) => event.type === 'error' && event.fatal)).toMatchObject({
+    classification: { category: 'unknown', definitive: false },
+  });
+  expect(stderr.listenerCount('data')).toBe(0);
+  expect(() => stderr.emit('error', new Error('Late diagnostic transport error'))).not.toThrow();
+  stderr.destroy();
+});

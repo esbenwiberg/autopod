@@ -190,7 +190,9 @@ describe('computeModelsAnalytics', () => {
       .prepare(`SELECT id FROM pods WHERE model='claude-opus-4-7' AND status='complete' LIMIT 5`)
       .all() as Array<{ id: string }>;
     const scores = [70, 80, 80, 80, 90];
-    podIds.forEach((r, i) => insertQuality(db, r.id, expectDefined(scores[i])));
+    podIds.forEach((r, i) => {
+      insertQuality(db, r.id, expectDefined(scores[i]));
+    });
 
     const result = computeModelsAnalytics(db, 30);
 

@@ -4,6 +4,7 @@ import {
   createWorkspaceLeaseState,
   createWorkspaceRecoveryState,
 } from './workspace-recovery-state.js';
+
 describe('workspace state and completion coordinator', () => {
   it('creates distinct maps/Set per manager while retaining returned identities', () => {
     const a = createWorkspaceRecoveryState();

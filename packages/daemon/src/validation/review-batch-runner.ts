@@ -13,10 +13,10 @@ import { structuredFindingSourceId } from './finding-fingerprint.js';
 import { CodexReviewError } from './review-codex-runner.js';
 import { filterOutOfDiffFindings } from './review-finding-filter.js';
 import {
-  REVIEW_VALIDATION_CODE,
-  ReviewStructuredOutputError,
-  type ReviewerOutputContract,
   parseAxisResponse,
+  REVIEW_VALIDATION_CODE,
+  type ReviewerOutputContract,
+  ReviewStructuredOutputError,
   reviewAxisOutputContract,
   reviewSynthesisOutputContract,
 } from './review-structured-output.js';

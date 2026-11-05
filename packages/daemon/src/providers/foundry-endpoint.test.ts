@@ -93,12 +93,13 @@ describe('foundryCodexConfigArgs', () => {
     ]);
   });
 
-  it.each([undefined, {}, { OPENAI_BASE_URL: 'https://openrouter.ai/api/v1' }])(
-    'adds nothing for non-Foundry env %o',
-    (env) => {
-      expect(foundryCodexConfigArgs(env)).toEqual([]);
-    },
-  );
+  it.each([
+    undefined,
+    {},
+    { OPENAI_BASE_URL: 'https://openrouter.ai/api/v1' },
+  ])('adds nothing for non-Foundry env %o', (env) => {
+    expect(foundryCodexConfigArgs(env)).toEqual([]);
+  });
 
   it('refuses the Foundry marker without a base URL', () => {
     expect(() => foundryCodexConfigArgs({ AUTOPOD_CODEX_MODEL_PROVIDER: 'azure-foundry' })).toThrow(

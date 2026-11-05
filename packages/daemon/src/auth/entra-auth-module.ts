@@ -1,5 +1,5 @@
 import { type AppRole, AuthError, type JwtPayload } from '@autopod/shared';
-import { type JWTPayload, type JWTVerifyGetKey, createRemoteJWKSet, jwtVerify } from 'jose';
+import { createRemoteJWKSet, type JWTPayload, type JWTVerifyGetKey, jwtVerify } from 'jose';
 import type { Logger } from 'pino';
 
 const APP_ROLES = new Set<AppRole>(['admin', 'operator', 'viewer']);

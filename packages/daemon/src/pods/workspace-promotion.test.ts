@@ -3,6 +3,7 @@ import { createConfigurationStore } from '../configuration/configuration-store.j
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
 import { insertTestProfile } from '../test-utils/mock-helpers.js';
 import { createWorkspaceFixture } from '../test-utils/workspace-recovery-helpers.js';
+
 describe('workspace promotion lifetime', () => {
   it('requires interactive promotability and a meaningful skip-agent target', async () => {
     const f = createWorkspaceFixture();

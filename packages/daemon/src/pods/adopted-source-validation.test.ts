@@ -66,15 +66,15 @@ describe('source-bound checks-only revalidation', () => {
     expect(s.verifySource).not.toHaveBeenCalled();
     expect(s.captured.validateWithInfrastructureRetries).not.toHaveBeenCalled();
   });
-  it.each([{ disabled: true }, { waived: true }])(
-    'does not carry validation bypasses into a new source pass (%j)',
-    async (options) => {
-      const s = createAdoptedSourceValidationFixture(false, options);
-      await expect(s.run()).rejects.toMatchObject({ code: 'SOURCE_CHECKS_BYPASSED' });
-      expect(s.verifySource).not.toHaveBeenCalled();
-      expect(s.captured.publishValidationResult).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    { disabled: true },
+    { waived: true },
+  ])('does not carry validation bypasses into a new source pass (%j)', async (options) => {
+    const s = createAdoptedSourceValidationFixture(false, options);
+    await expect(s.run()).rejects.toMatchObject({ code: 'SOURCE_CHECKS_BYPASSED' });
+    expect(s.verifySource).not.toHaveBeenCalled();
+    expect(s.captured.publishValidationResult).not.toHaveBeenCalled();
+  });
   it('refuses an old canonical pass which mutation admission did not invalidate', async () => {
     const s = createAdoptedSourceValidationFixture();
     s.journal.owned('source-checks', () =>

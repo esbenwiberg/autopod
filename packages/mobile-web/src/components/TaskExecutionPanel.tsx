@@ -1,6 +1,7 @@
 import type { TaskExecutionSummary } from '@autopod/shared';
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../lib/api.js';
+import { withOccurrenceKeys } from '../lib/occurrence-keys.js';
 
 export function TaskExecutionPanel({ podId, revision }: { podId: string; revision: string }) {
   const [data, setData] = useState<TaskExecutionSummary | null>(null);
@@ -84,11 +85,13 @@ export function TaskExecutionPanel({ podId, revision }: { podId: string; revisio
                 {data.costEvidence.unavailablePhaseCount} identified phases with unavailable cost ·{' '}
                 {data.costEvidence.conflictingPodCount} pods with conflicting attribution
               </p>
-              {data.costEvidence.diagnostics.map((item, index) => (
-                <p key={`${item.podId}:${item.code}:${index}`} className="muted">
-                  {item.podId}: {item.message}
-                </p>
-              ))}
+              {withOccurrenceKeys(data.costEvidence.diagnostics, JSON.stringify).map(
+                ({ item, key }) => (
+                  <p key={key} className="muted">
+                    {item.podId}: {item.message}
+                  </p>
+                ),
+              )}
               {data.costEvidence.omittedDiagnosticCount > 0 && (
                 <p>
                   {data.costEvidence.omittedDiagnosticCount} additional cost diagnostics omitted.

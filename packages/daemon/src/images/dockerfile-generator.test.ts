@@ -629,25 +629,28 @@ describe('generateDockerfile', () => {
     expect(df).not.toContain('dl.dagger.io');
   });
 
-  it.each(['dotnet9', 'dotnet10', 'dotnet10-go', 'go124', 'go124-pw'] as const)(
-    'skips the per-pod Dagger CLI install on %s (pre-installed in base image)',
-    (template) => {
-      const df = generateDockerfile({
-        profile: mockProfile({
-          template,
-          sidecars: {
-            dagger: {
-              enabled: true,
-              engineImageDigest: `registry.dagger.io/engine@sha256:${'a'.repeat(64)}`,
-              engineVersion: 'v0.12.0',
-            },
+  it.each([
+    'dotnet9',
+    'dotnet10',
+    'dotnet10-go',
+    'go124',
+    'go124-pw',
+  ] as const)('skips the per-pod Dagger CLI install on %s (pre-installed in base image)', (template) => {
+    const df = generateDockerfile({
+      profile: mockProfile({
+        template,
+        sidecars: {
+          dagger: {
+            enabled: true,
+            engineImageDigest: `registry.dagger.io/engine@sha256:${'a'.repeat(64)}`,
+            engineVersion: 'v0.12.0',
           },
-        }),
-        gitCredentials: 'none',
-      });
-      expect(df).not.toContain('dl.dagger.io');
-    },
-  );
+        },
+      }),
+      gitCredentials: 'none',
+    });
+    expect(df).not.toContain('dl.dagger.io');
+  });
 
   it('snapshot: full Dockerfile with npm + nuget registries and PAT git', () => {
     const df = generateDockerfile({

@@ -12,8 +12,8 @@ import {
   checkpointError,
   retainedCheckpointNetworkIdentities,
 } from '../pods/retained-checkpoint-repository.js';
-import { DOCKER_CALL_TIMEOUTS, boundedDockerCall } from './docker-bounds.js';
-import { HAPROXY_LISTEN_PORT, generateHaproxyConfig } from './haproxy-config.js';
+import { boundedDockerCall, DOCKER_CALL_TIMEOUTS } from './docker-bounds.js';
+import { generateHaproxyConfig, HAPROXY_LISTEN_PORT } from './haproxy-config.js';
 
 // Defense-in-depth: only allow hostnames/IPs that are safe to interpolate into shell scripts.
 // Blocks shell metacharacters even if an unsafe value somehow bypassed schema validation.

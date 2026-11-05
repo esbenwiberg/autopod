@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createTestDb } from '../test-utils/mock-helpers.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 import {
+  createQualityScoreRepository,
   QUALITY_SCORE_ALGORITHM_VERSION,
   type QualityScoreRepository,
-  createQualityScoreRepository,
 } from './quality-score-repository.js';
 
 function baseScore(overrides: Partial<PodQualityScore> = {}): PodQualityScore {

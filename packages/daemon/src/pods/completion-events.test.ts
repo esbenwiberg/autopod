@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCompletionFixture } from '../test-utils/completion-helpers.js';
+
 const fixtures: ReturnType<typeof createCompletionFixture>[] = [];
 function fixture(disk = false) {
   const f = createCompletionFixture(disk);

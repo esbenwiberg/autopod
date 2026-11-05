@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createAdmissionFixture } from '../test-utils/admission-queries-helpers.js';
 import type { AdmissionCreateCalls } from './admission-contracts.js';
+
 describe('analysis workspace admission', () => {
   it('encodes the complete history query and preserves creator on actual receiver', () => {
     const f = createAdmissionFixture();

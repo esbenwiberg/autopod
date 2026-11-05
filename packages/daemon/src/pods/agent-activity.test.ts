@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAgentExecutionFixture } from '../test-utils/agent-execution-helpers.js';
 import { createAgentActivity } from './agent-activity.js';
+
 const fixtures: ReturnType<typeof createAgentExecutionFixture>[] = [];
 function fixture(disk = false) {
   const f = createAgentExecutionFixture(disk);

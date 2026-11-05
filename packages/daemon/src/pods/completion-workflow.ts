@@ -4,9 +4,9 @@ import { createCompletionHumanGate } from './completion-human-gate.js';
 import type {
   CompletionCalls,
   CompletionLiveDependencies,
+  CompletionOwnersCaptured,
   CompletionWorkflowCaptured,
 } from './completion-ports.js';
-import type { CompletionOwnersCaptured } from './completion-ports.js';
 import { createCompletionSource } from './completion-source.js';
 import { REWORK_IN_PROGRESS_PREFIX } from './continuation-policy.js';
 import { isTerminalState } from './state-machine.js';

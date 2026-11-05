@@ -3,7 +3,7 @@ import type { Logger } from 'pino';
 import type { DaemonGitHubAuth } from '../github/daemon-github-auth.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { AzureDevOpsAuth } from '../providers/azure-devops-auth.js';
-import type { ImageBuildResult, ImageBuilder } from './image-builder.js';
+import type { ImageBuilder, ImageBuildResult } from './image-builder.js';
 
 export const DEFAULT_WARM_IMAGE_MAINTENANCE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 

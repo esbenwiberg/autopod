@@ -110,20 +110,20 @@ describe('SandboxTerminalReaper', () => {
     expect(failed.preSubmitReview).toEqual({ status: 'pass' });
   });
 
-  it.each(['complete', 'killed'] as const)(
-    'retains %s resources until original task execution settles',
-    async (status) => {
-      const terminal = pod(status);
-      const deps = build([terminal]);
-      deps.taskExecutions.hasActiveRun.mockReturnValue(true);
-      await deps.reaper.runSweep();
-      expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
-      expect(terminal.containerId).toBe('sandbox-pod-1');
-      deps.taskExecutions.hasActiveRun.mockReturnValue(false);
-      await deps.reaper.runSweep();
-      expect(deps.sandboxContainerManager.kill).toHaveBeenCalledOnce();
-    },
-  );
+  it.each([
+    'complete',
+    'killed',
+  ] as const)('retains %s resources until original task execution settles', async (status) => {
+    const terminal = pod(status);
+    const deps = build([terminal]);
+    deps.taskExecutions.hasActiveRun.mockReturnValue(true);
+    await deps.reaper.runSweep();
+    expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
+    expect(terminal.containerId).toBe('sandbox-pod-1');
+    deps.taskExecutions.hasActiveRun.mockReturnValue(false);
+    await deps.reaper.runSweep();
+    expect(deps.sandboxContainerManager.kill).toHaveBeenCalledOnce();
+  });
 
   it('retains terminal resources with an unverified validation exit', async () => {
     const terminal = pod('complete');

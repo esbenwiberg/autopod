@@ -61,50 +61,50 @@ function noMergeOrCleanup(f: ReturnType<typeof fixture>) {
 }
 
 describe('human PR-only publication', () => {
-  it.each([true, false])(
-    'publishes only, with no transient merging state (existing PR: %s)',
-    async (existingPr) => {
-      const f = fixture(existingPr);
-      const transition = f.captured.transition;
-      const original = f.pod();
-      f.provider.getPrStatus.mockResolvedValue(
-        validStatus({ mergeBlocked: true, reviewDecision: 'REVIEW_REQUIRED' }),
-      );
-      await f.workflow.approveSession('prepare', f.options);
-      expect(f.pod().prUrl).toBe('https://github.com/org/repo/pull/27');
-      expect(f.pod().containerId).toBe(original.containerId);
-      expect(f.pod().worktreePath).toBe(original.worktreePath);
-      expect(f.pod().validationAttempts).toBe(original.validationAttempts);
-      expect(f.pod().lifecycleGeneration).toBe(original.lifecycleGeneration);
-      expect(f.provider.createPr).toHaveBeenCalledTimes(existingPr ? 0 : 1);
-      expect(f.worktreeManager.pushBranch).toHaveBeenCalledOnce();
-      expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
-      expect(transition).not.toHaveBeenCalled();
-      noMergeOrCleanup(f);
-    },
-  );
-  it.each(['target', 'head'] as const)(
-    'refuses mismatched PR %s without merging or cleanup',
-    async (kind) => {
-      const f = fixture();
-      f.provider.getPrStatus.mockResolvedValue(
-        kind === 'target'
-          ? validStatus({
-              sourceTarget: {
-                repository: 'https://github.com/org/repo',
-                branch: 'another',
-                baseBranch: 'main',
-              },
-            })
-          : validStatus({ headSha: 'f'.repeat(40) }),
-      );
-      await expect(f.workflow.approveSession('prepare', f.options)).rejects.toMatchObject({
-        code: 'DELIVERY_RECONCILIATION_REQUIRED',
-      });
-      if (kind === 'target') expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
-      noMergeOrCleanup(f);
-    },
-  );
+  it.each([
+    true,
+    false,
+  ])('publishes only, with no transient merging state (existing PR: %s)', async (existingPr) => {
+    const f = fixture(existingPr);
+    const transition = f.captured.transition;
+    const original = f.pod();
+    f.provider.getPrStatus.mockResolvedValue(
+      validStatus({ mergeBlocked: true, reviewDecision: 'REVIEW_REQUIRED' }),
+    );
+    await f.workflow.approveSession('prepare', f.options);
+    expect(f.pod().prUrl).toBe('https://github.com/org/repo/pull/27');
+    expect(f.pod().containerId).toBe(original.containerId);
+    expect(f.pod().worktreePath).toBe(original.worktreePath);
+    expect(f.pod().validationAttempts).toBe(original.validationAttempts);
+    expect(f.pod().lifecycleGeneration).toBe(original.lifecycleGeneration);
+    expect(f.provider.createPr).toHaveBeenCalledTimes(existingPr ? 0 : 1);
+    expect(f.worktreeManager.pushBranch).toHaveBeenCalledOnce();
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(transition).not.toHaveBeenCalled();
+    noMergeOrCleanup(f);
+  });
+  it.each([
+    'target',
+    'head',
+  ] as const)('refuses mismatched PR %s without merging or cleanup', async (kind) => {
+    const f = fixture();
+    f.provider.getPrStatus.mockResolvedValue(
+      kind === 'target'
+        ? validStatus({
+            sourceTarget: {
+              repository: 'https://github.com/org/repo',
+              branch: 'another',
+              baseBranch: 'main',
+            },
+          })
+        : validStatus({ headSha: 'f'.repeat(40) }),
+    );
+    await expect(f.workflow.approveSession('prepare', f.options)).rejects.toMatchObject({
+      code: 'DELIVERY_RECONCILIATION_REQUIRED',
+    });
+    if (kind === 'target') expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
+    noMergeOrCleanup(f);
+  });
   it('leaves a stalled source publication validated, not resumable as a merge', async () => {
     const f = fixture();
     let release!: () => void;
@@ -142,25 +142,26 @@ describe('human PR-only publication', () => {
     expect(f.pod().validationAttempts).toBe(original.validationAttempts);
     noMergeOrCleanup(f);
   });
-  it.each(['automation', 'unchecked', 'reason'] as const)(
-    'refuses %s before provider/source mutation',
-    async (kind) => {
-      const f = fixture(true, kind !== 'unchecked');
-      const options = {
-        ...f.options,
-        ...(kind === 'automation'
-          ? { actor: { type: 'automation' as const, id: 'unattended' } }
-          : {}),
-        ...(kind === 'reason' ? { reason: '' } : {}),
-      };
-      await expect(f.workflow.approveSession('prepare', options)).rejects.toMatchObject({
-        code: 'PR_PUBLICATION_APPROVAL_REQUIRED',
-      });
-      expect(f.provider.getPrStatus).not.toHaveBeenCalled();
-      expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
-      noMergeOrCleanup(f);
-    },
-  );
+  it.each([
+    'automation',
+    'unchecked',
+    'reason',
+  ] as const)('refuses %s before provider/source mutation', async (kind) => {
+    const f = fixture(true, kind !== 'unchecked');
+    const options = {
+      ...f.options,
+      ...(kind === 'automation'
+        ? { actor: { type: 'automation' as const, id: 'unattended' } }
+        : {}),
+      ...(kind === 'reason' ? { reason: '' } : {}),
+    };
+    await expect(f.workflow.approveSession('prepare', options)).rejects.toMatchObject({
+      code: 'PR_PUBLICATION_APPROVAL_REQUIRED',
+    });
+    expect(f.provider.getPrStatus).not.toHaveBeenCalled();
+    expect(f.worktreeManager.pushBranch).not.toHaveBeenCalled();
+    noMergeOrCleanup(f);
+  });
   it('does not complete no-change source or trigger dependents as a substitute for publication', async () => {
     const f = fixture(false);
     vi.mocked(f.worktreeManager.getDiffStats).mockResolvedValue({

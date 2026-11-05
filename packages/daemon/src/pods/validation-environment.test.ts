@@ -8,9 +8,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveLaunchCredentialReferences } from '../configuration/credential-references.js';
 import { createConfigurationCredentialStore } from '../configuration/credential-store.js';
 import {
+  createLaunchExecutionCredentials,
   type LaunchExecutionCredentials,
   type LaunchRegistryMaterial,
-  createLaunchExecutionCredentials,
 } from '../configuration/execution-credentials.js';
 import { resolveLaunch } from '../configuration/launch-resolver.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
@@ -158,53 +158,55 @@ describe('validation environment contracts', () => {
     expect(f.resolver).toHaveBeenCalledWith(f.config);
   });
 
-  it.each([null, undefined, 'fixture-pat'])(
-    'legacy PAT=%s preserves env overrides and performs no writes',
-    async (pat) => {
-      const f = await fixture();
-      f.live.launchConfiguration = undefined;
-      f.pod.launchConfigDigest = 'missing-launch';
-      const profile = {
-        ...f.profile,
-        registryPat: pat ?? null,
-        privateRegistries: [{ type: 'nuget' as const, url: 'https://nuget.example.test' }],
-        buildEnv: { DO_NOT_TRACK: 'override', CUSTOM: 'kept' },
-      };
-      // Exercise an absent runtime field without weakening the production type.
-      if (pat === undefined) Object.defineProperty(profile, 'registryPat', { value: undefined });
-      const env = await createValidationEnvironment(f.live, f.captured).validationEnvironmentForPod(
-        f.pod,
-        profile,
-      );
-      expect(env).toEqual({
-        ...RUNTIME_TELEMETRY_OPT_OUT_ENV,
-        DO_NOT_TRACK: 'override',
-        CUSTOM: 'kept',
-        ...(pat ? { VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE: '/run/autopod/nuget-endpoints' } : {}),
-      });
-      expect(f.events).toEqual([]);
-      expect(f.resolver).not.toHaveBeenCalled();
-      expect(f.cm.writeFile).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    null,
+    undefined,
+    'fixture-pat',
+  ])('legacy PAT=%s preserves env overrides and performs no writes', async (pat) => {
+    const f = await fixture();
+    f.live.launchConfiguration = undefined;
+    f.pod.launchConfigDigest = 'missing-launch';
+    const profile = {
+      ...f.profile,
+      registryPat: pat ?? null,
+      privateRegistries: [{ type: 'nuget' as const, url: 'https://nuget.example.test' }],
+      buildEnv: { DO_NOT_TRACK: 'override', CUSTOM: 'kept' },
+    };
+    // Exercise an absent runtime field without weakening the production type.
+    if (pat === undefined) Object.defineProperty(profile, 'registryPat', { value: undefined });
+    const env = await createValidationEnvironment(f.live, f.captured).validationEnvironmentForPod(
+      f.pod,
+      profile,
+    );
+    expect(env).toEqual({
+      ...RUNTIME_TELEMETRY_OPT_OUT_ENV,
+      DO_NOT_TRACK: 'override',
+      CUSTOM: 'kept',
+      ...(pat ? { VSS_NUGET_EXTERNAL_FEED_ENDPOINTS_FILE: '/run/autopod/nuget-endpoints' } : {}),
+    });
+    expect(f.events).toEqual([]);
+    expect(f.resolver).not.toHaveBeenCalled();
+    expect(f.cm.writeFile).not.toHaveBeenCalled();
+  });
 
-  it.each([null, undefined, {}])(
-    'legacy absent build env=%s retains telemetry defaults',
-    async (buildEnv) => {
-      const f = await fixture();
-      f.service.read.mockReturnValue(null);
-      const profile = { ...f.profile, buildEnv: buildEnv ?? null };
-      if (buildEnv === undefined) Object.defineProperty(profile, 'buildEnv', { value: undefined });
-      const env = await createValidationEnvironment(f.live, f.captured).validationEnvironmentForPod(
-        f.pod,
-        profile,
-      );
-      expect(env).toEqual(RUNTIME_TELEMETRY_OPT_OUT_ENV);
-      expect(f.events).toEqual([]); // mocked read no longer appends an event
-      expect(f.service.read).toHaveBeenCalledOnce();
-      expect(f.resolver).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    null,
+    undefined,
+    {},
+  ])('legacy absent build env=%s retains telemetry defaults', async (buildEnv) => {
+    const f = await fixture();
+    f.service.read.mockReturnValue(null);
+    const profile = { ...f.profile, buildEnv: buildEnv ?? null };
+    if (buildEnv === undefined) Object.defineProperty(profile, 'buildEnv', { value: undefined });
+    const env = await createValidationEnvironment(f.live, f.captured).validationEnvironmentForPod(
+      f.pod,
+      profile,
+    );
+    expect(env).toEqual(RUNTIME_TELEMETRY_OPT_OUT_ENV);
+    expect(f.events).toEqual([]); // mocked read no longer appends an event
+    expect(f.service.read).toHaveBeenCalledOnce();
+    expect(f.resolver).not.toHaveBeenCalled();
+  });
 
   it('legacy explicit build env wins over the inferred NuGet pointer', async () => {
     const f = await fixture();
@@ -231,48 +233,50 @@ describe('validation environment contracts', () => {
     expect(f.cm.writeFile).not.toHaveBeenCalled();
   });
 
-  it.each(['empty', 'npm', 'nuget', 'mixed'] as const)(
-    'writes %s material in exact order and applies env precedence',
-    async (kind) => {
-      const f = await fixture();
-      if (kind === 'empty') {
-        f.material.files = [];
-        f.material.nugetSecret = null;
-      }
-      if (kind === 'npm') {
-        f.material.files = f.material.files.slice(0, 1);
-        f.material.nugetSecret = null;
-      }
-      if (kind === 'nuget') f.material.files = f.material.files.slice(1);
-      const files = [
-        ...f.material.files,
-        ...(f.material.nugetSecret ? [f.material.nugetSecret] : []),
-      ];
-      expect(await f.run()).toEqual({
-        ...RUNTIME_TELEMETRY_OPT_OUT_ENV,
-        FIXTURE_BUILD: 'ready',
-        DO_NOT_TRACK: 'custom',
-        NU_FILE: f.material.nugetSecret?.path ?? 'wrong',
-      });
-      expect(f.events).toEqual([
-        'read',
-        'resolve',
-        'check',
-        'build',
-        'registries',
-        'get',
-        ...files.map((file) => file.path),
-        'check',
-      ]);
-      expect(f.get).toHaveBeenCalledWith('local');
-      expect(vi.mocked(f.cm.writeFile).mock.calls).toEqual(
-        files.map((file) => ['container', file.path, file.content, { mode: 0o600 }]),
-      );
-      expect(f.cm.execInContainer).not.toHaveBeenCalled();
-      expect(f.build).toHaveBeenCalledWith(f.config);
-      expect(f.registries).toHaveBeenCalledWith(f.config);
-    },
-  );
+  it.each([
+    'empty',
+    'npm',
+    'nuget',
+    'mixed',
+  ] as const)('writes %s material in exact order and applies env precedence', async (kind) => {
+    const f = await fixture();
+    if (kind === 'empty') {
+      f.material.files = [];
+      f.material.nugetSecret = null;
+    }
+    if (kind === 'npm') {
+      f.material.files = f.material.files.slice(0, 1);
+      f.material.nugetSecret = null;
+    }
+    if (kind === 'nuget') f.material.files = f.material.files.slice(1);
+    const files = [
+      ...f.material.files,
+      ...(f.material.nugetSecret ? [f.material.nugetSecret] : []),
+    ];
+    expect(await f.run()).toEqual({
+      ...RUNTIME_TELEMETRY_OPT_OUT_ENV,
+      FIXTURE_BUILD: 'ready',
+      DO_NOT_TRACK: 'custom',
+      NU_FILE: f.material.nugetSecret?.path ?? 'wrong',
+    });
+    expect(f.events).toEqual([
+      'read',
+      'resolve',
+      'check',
+      'build',
+      'registries',
+      'get',
+      ...files.map((file) => file.path),
+      'check',
+    ]);
+    expect(f.get).toHaveBeenCalledWith('local');
+    expect(vi.mocked(f.cm.writeFile).mock.calls).toEqual(
+      files.map((file) => ['container', file.path, file.content, { mode: 0o600 }]),
+    );
+    expect(f.cm.execInContainer).not.toHaveBeenCalled();
+    expect(f.build).toHaveBeenCalledWith(f.config);
+    expect(f.registries).toHaveBeenCalledWith(f.config);
+  });
 
   it('without a container still resolves both materials, checks twice and returns the pointer', async () => {
     const f = await fixture();
@@ -285,149 +289,148 @@ describe('validation environment contracts', () => {
     expect(f.get).not.toHaveBeenCalled();
   });
 
-  it.each(['read', 'resolver', 'first check', 'lookup', 'final check'] as const)(
-    'preserves exact %s error identity and effect prefix',
-    async (where) => {
-      const f = await fixture();
-      const error = new Error(`Controlled ${where}`);
-      if (where === 'read')
-        f.service.read.mockImplementation(() => {
-          throw error;
-        });
-      if (where === 'resolver')
-        f.resolver.mockImplementation(() => {
-          throw error;
-        });
-      if (where === 'first check') f.service.assertCurrentCapabilities.mockRejectedValueOnce(error);
-      if (where === 'lookup')
-        f.get.mockImplementation(() => {
-          throw error;
-        });
-      if (where === 'final check')
-        f.service.assertCurrentCapabilities
-          .mockResolvedValueOnce(undefined)
-          .mockRejectedValueOnce(error);
-      await expect(f.run()).rejects.toBe(error);
-      if (['read', 'resolver', 'first check'].includes(where))
-        expect(f.build).not.toHaveBeenCalled();
-      expect(f.cm.writeFile).toHaveBeenCalledTimes(where === 'final check' ? 3 : 0);
-      expect(f.service.assertCurrentCapabilities).toHaveBeenCalledTimes(
-        where === 'read' || where === 'resolver' ? 0 : where === 'final check' ? 2 : 1,
-      );
-    },
-  );
-
-  it.each([1, 2, 3])(
-    'stops after write failure %s with exact completed prefix',
-    async (failure) => {
-      const f = await fixture();
-      const error = new Error('Controlled write');
-      const files = [
-        ...f.material.files,
-        ...(f.material.nugetSecret ? [f.material.nugetSecret] : []),
-      ];
-      const completed: string[] = [];
-      vi.mocked(f.cm.writeFile).mockImplementation(async (_id, file) => {
-        if (vi.mocked(f.cm.writeFile).mock.calls.length === failure) throw error;
-        completed.push(file);
+  it.each([
+    'read',
+    'resolver',
+    'first check',
+    'lookup',
+    'final check',
+  ] as const)('preserves exact %s error identity and effect prefix', async (where) => {
+    const f = await fixture();
+    const error = new Error(`Controlled ${where}`);
+    if (where === 'read')
+      f.service.read.mockImplementation(() => {
+        throw error;
       });
-      await expect(f.run()).rejects.toBe(error);
-      expect(vi.mocked(f.cm.writeFile).mock.calls.map((call) => call[1])).toEqual(
-        files.slice(0, failure).map((file) => file.path),
+    if (where === 'resolver')
+      f.resolver.mockImplementation(() => {
+        throw error;
+      });
+    if (where === 'first check') f.service.assertCurrentCapabilities.mockRejectedValueOnce(error);
+    if (where === 'lookup')
+      f.get.mockImplementation(() => {
+        throw error;
+      });
+    if (where === 'final check')
+      f.service.assertCurrentCapabilities
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(error);
+    await expect(f.run()).rejects.toBe(error);
+    if (['read', 'resolver', 'first check'].includes(where)) expect(f.build).not.toHaveBeenCalled();
+    expect(f.cm.writeFile).toHaveBeenCalledTimes(where === 'final check' ? 3 : 0);
+    expect(f.service.assertCurrentCapabilities).toHaveBeenCalledTimes(
+      where === 'read' || where === 'resolver' ? 0 : where === 'final check' ? 2 : 1,
+    );
+  });
+
+  it.each([
+    1, 2, 3,
+  ])('stops after write failure %s with exact completed prefix', async (failure) => {
+    const f = await fixture();
+    const error = new Error('Controlled write');
+    const files = [
+      ...f.material.files,
+      ...(f.material.nugetSecret ? [f.material.nugetSecret] : []),
+    ];
+    const completed: string[] = [];
+    vi.mocked(f.cm.writeFile).mockImplementation(async (_id, file) => {
+      if (vi.mocked(f.cm.writeFile).mock.calls.length === failure) throw error;
+      completed.push(file);
+    });
+    await expect(f.run()).rejects.toBe(error);
+    expect(vi.mocked(f.cm.writeFile).mock.calls.map((call) => call[1])).toEqual(
+      files.slice(0, failure).map((file) => file.path),
+    );
+    expect(completed).toEqual(files.slice(0, failure - 1).map((file) => file.path));
+    expect(f.service.assertCurrentCapabilities).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    'build',
+    'registries',
+  ] as const)('starts both material promises before either finishes; waits for %s', async (last) => {
+    const f = await fixture();
+    const build = deferred<Record<string, string>>();
+    const registry = deferred<LaunchRegistryMaterial>();
+    f.build.mockReturnValue(build.promise);
+    f.registries.mockReturnValue(registry.promise);
+    let operation: ReturnType<typeof f.run> | undefined;
+    try {
+      operation = f.run();
+      await vi.waitFor(() => expect(f.registries).toHaveBeenCalledOnce());
+      expect(f.build.mock.invocationCallOrder[0]).toBeLessThan(
+        f.registries.mock.invocationCallOrder[0] ?? 0,
       );
-      expect(completed).toEqual(files.slice(0, failure - 1).map((file) => file.path));
+      if (last === 'build') registry.resolve(f.material);
+      else build.resolve({ FINISHED: 'yes' });
+      await Promise.resolve();
+      expect(f.get).not.toHaveBeenCalled();
+      build.resolve({ FINISHED: 'yes' });
+      registry.resolve(f.material);
+      expect(await operation).toMatchObject({ FINISHED: 'yes' });
+    } finally {
+      build.resolve({ FINISHED: 'yes' });
+      registry.resolve(f.material);
+      await operation?.catch(() => {});
+    }
+  });
+
+  it.each([
+    'build',
+    'registries',
+  ] as const)('keeps %s rejection and does not cancel its already started sibling', async (failed) => {
+    const f = await fixture();
+    const error = new Error('Controlled material rejection');
+    const build = deferred<Record<string, string>>();
+    const registry = deferred<LaunchRegistryMaterial>();
+    f.build.mockImplementation(() => (failed === 'build' ? Promise.reject(error) : build.promise));
+    f.registries.mockImplementation(() =>
+      failed === 'registries' ? Promise.reject(error) : registry.promise,
+    );
+    const operation = f.run();
+    try {
+      await expect(operation).rejects.toBe(error);
+      expect(f.build).toHaveBeenCalledOnce();
+      expect(f.registries).toHaveBeenCalledOnce();
+      expect(f.get).not.toHaveBeenCalled();
+      expect(f.cm.writeFile).not.toHaveBeenCalled();
       expect(f.service.assertCurrentCapabilities).toHaveBeenCalledOnce();
-    },
-  );
+    } finally {
+      build.resolve({});
+      registry.resolve(f.material);
+      await Promise.all([build.promise, registry.promise, operation.catch(() => {})]);
+    }
+  });
 
-  it.each(['build', 'registries'] as const)(
-    'starts both material promises before either finishes; waits for %s',
-    async (last) => {
-      const f = await fixture();
-      const build = deferred<Record<string, string>>();
-      const registry = deferred<LaunchRegistryMaterial>();
-      f.build.mockReturnValue(build.promise);
-      f.registries.mockReturnValue(registry.promise);
-      let operation: ReturnType<typeof f.run> | undefined;
-      try {
-        operation = f.run();
-        await vi.waitFor(() => expect(f.registries).toHaveBeenCalledOnce());
-        expect(f.build.mock.invocationCallOrder[0]).toBeLessThan(
-          f.registries.mock.invocationCallOrder[0] ?? 0,
-        );
-        if (last === 'build') registry.resolve(f.material);
-        else build.resolve({ FINISHED: 'yes' });
-        await Promise.resolve();
-        expect(f.get).not.toHaveBeenCalled();
-        build.resolve({ FINISHED: 'yes' });
-        registry.resolve(f.material);
-        expect(await operation).toMatchObject({ FINISHED: 'yes' });
-      } finally {
-        build.resolve({ FINISHED: 'yes' });
-        registry.resolve(f.material);
-        await operation?.catch(() => {});
-      }
-    },
-  );
-
-  it.each(['build', 'registries'] as const)(
-    'keeps %s rejection and does not cancel its already started sibling',
-    async (failed) => {
-      const f = await fixture();
-      const error = new Error('Controlled material rejection');
-      const build = deferred<Record<string, string>>();
-      const registry = deferred<LaunchRegistryMaterial>();
-      f.build.mockImplementation(() =>
-        failed === 'build' ? Promise.reject(error) : build.promise,
-      );
-      f.registries.mockImplementation(() =>
-        failed === 'registries' ? Promise.reject(error) : registry.promise,
-      );
-      const operation = f.run();
-      try {
-        await expect(operation).rejects.toBe(error);
-        expect(f.build).toHaveBeenCalledOnce();
-        expect(f.registries).toHaveBeenCalledOnce();
-        expect(f.get).not.toHaveBeenCalled();
-        expect(f.cm.writeFile).not.toHaveBeenCalled();
-        expect(f.service.assertCurrentCapabilities).toHaveBeenCalledOnce();
-      } finally {
-        build.resolve({});
-        registry.resolve(f.material);
-        await Promise.all([build.promise, registry.promise, operation.catch(() => {})]);
-      }
-    },
-  );
-
-  it.each(['build', 'registries'] as const)(
-    'retains synchronous %s throw evaluation order',
-    async (failed) => {
-      const f = await fixture();
-      const error = new Error('Controlled synchronous material throw');
-      const sibling = deferred<Record<string, string>>();
-      if (failed === 'build')
-        f.build.mockImplementation(() => {
-          throw error;
-        });
-      else {
-        f.build.mockReturnValue(sibling.promise);
-        f.registries.mockImplementation(() => {
-          throw error;
-        });
-      }
-      const operation = f.run();
-      try {
-        await expect(operation).rejects.toBe(error);
-        expect(f.build).toHaveBeenCalledOnce();
-        expect(f.registries).toHaveBeenCalledTimes(failed === 'build' ? 0 : 1);
-        expect(f.get).not.toHaveBeenCalled();
-      } finally {
-        sibling.resolve({});
-        await sibling.promise;
-        await operation.catch(() => {});
-      }
-    },
-  );
+  it.each([
+    'build',
+    'registries',
+  ] as const)('retains synchronous %s throw evaluation order', async (failed) => {
+    const f = await fixture();
+    const error = new Error('Controlled synchronous material throw');
+    const sibling = deferred<Record<string, string>>();
+    if (failed === 'build')
+      f.build.mockImplementation(() => {
+        throw error;
+      });
+    else {
+      f.build.mockReturnValue(sibling.promise);
+      f.registries.mockImplementation(() => {
+        throw error;
+      });
+    }
+    const operation = f.run();
+    try {
+      await expect(operation).rejects.toBe(error);
+      expect(f.build).toHaveBeenCalledOnce();
+      expect(f.registries).toHaveBeenCalledTimes(failed === 'build' ? 0 : 1);
+      expect(f.get).not.toHaveBeenCalled();
+    } finally {
+      sibling.resolve({});
+      await sibling.promise;
+      await operation.catch(() => {});
+    }
+  });
 
   it('uses the original selected adapter and its late methods after a held first check', async () => {
     const f = await fixture();
@@ -464,55 +467,56 @@ describe('validation environment contracts', () => {
     }
   });
 
-  it.each(['first check', 'material', 'write'] as const)(
-    'observes live service replacement/removal across %s',
-    async (stage) => {
-      for (const remove of [false, true]) {
-        const f = await fixture();
-        const hold = deferred<void>();
-        const entered = deferred<void>();
-        const pause = async () => {
-          entered.resolve();
-          await hold.promise;
-        };
-        if (stage === 'first check')
-          f.service.assertCurrentCapabilities.mockImplementationOnce(pause);
-        if (stage === 'material')
-          f.build.mockImplementationOnce(async () => {
-            await pause();
-            return { HELD: 'yes' };
-          });
-        if (stage === 'write') vi.mocked(f.cm.writeFile).mockImplementationOnce(pause);
-        const next = {
-          read: vi.fn(() => {
-            throw new Error('Must not reread launch');
-          }),
-          assertCurrentCapabilities: vi.fn(async function (
-            this: unknown,
-            launch: EffectiveLaunchConfig,
-          ) {
-            expect(this).toBe(next);
-            expect(launch).toBe(f.config);
-          }),
-        };
-        let operation: ReturnType<typeof f.run> | undefined;
-        try {
-          operation = f.run();
-          await entered.promise;
-          f.live.launchConfiguration = remove ? undefined : next;
-          hold.resolve();
-          await operation;
-          expect(f.service.read).toHaveBeenCalledOnce();
-          expect(f.service.assertCurrentCapabilities).toHaveBeenCalledOnce();
-          expect(next.read).not.toHaveBeenCalled();
-          expect(next.assertCurrentCapabilities).toHaveBeenCalledTimes(remove ? 0 : 1);
-        } finally {
-          hold.resolve();
-          await operation?.catch(() => {});
-        }
+  it.each([
+    'first check',
+    'material',
+    'write',
+  ] as const)('observes live service replacement/removal across %s', async (stage) => {
+    for (const remove of [false, true]) {
+      const f = await fixture();
+      const hold = deferred<void>();
+      const entered = deferred<void>();
+      const pause = async () => {
+        entered.resolve();
+        await hold.promise;
+      };
+      if (stage === 'first check')
+        f.service.assertCurrentCapabilities.mockImplementationOnce(pause);
+      if (stage === 'material')
+        f.build.mockImplementationOnce(async () => {
+          await pause();
+          return { HELD: 'yes' };
+        });
+      if (stage === 'write') vi.mocked(f.cm.writeFile).mockImplementationOnce(pause);
+      const next = {
+        read: vi.fn(() => {
+          throw new Error('Must not reread launch');
+        }),
+        assertCurrentCapabilities: vi.fn(async function (
+          this: unknown,
+          launch: EffectiveLaunchConfig,
+        ) {
+          expect(this).toBe(next);
+          expect(launch).toBe(f.config);
+        }),
+      };
+      let operation: ReturnType<typeof f.run> | undefined;
+      try {
+        operation = f.run();
+        await entered.promise;
+        f.live.launchConfiguration = remove ? undefined : next;
+        hold.resolve();
+        await operation;
+        expect(f.service.read).toHaveBeenCalledOnce();
+        expect(f.service.assertCurrentCapabilities).toHaveBeenCalledOnce();
+        expect(next.read).not.toHaveBeenCalled();
+        expect(next.assertCurrentCapabilities).toHaveBeenCalledTimes(remove ? 0 : 1);
+      } finally {
+        hold.resolve();
+        await operation?.catch(() => {});
       }
-    },
-  );
+    }
+  });
 
   it('uses current pod fields and late methods on the captured factory across material awaits', async () => {
     const f = await fixture();
@@ -746,48 +750,50 @@ describe('validation environment with real persisted credentials', () => {
     expect(JSON.stringify(reopened.snapshots.get(f.pod.id))).toBe(snapshot);
   });
 
-  it.each(['build', 'npm', 'nuget'] as const)(
-    'rejects revoked %s without writing and leaves saved state untouched',
-    async (id) => {
-      const f = await durableFixture();
-      f.credentials.revoke(id, 1);
-      const before = f.rows();
-      await expect(f.run()).rejects.toMatchObject({ code: 'CONFIG_CREDENTIAL_REVOKED' });
-      expect(f.cm.writeFile).not.toHaveBeenCalled();
-      expect(f.check).toHaveBeenCalledOnce();
-      // Each sibling is local and has no mutation; yield so its resolution finishes before close.
-      await new Promise<void>((done) => setImmediate(done));
-      expect(f.rows()).toEqual(before);
-      expect(f.reopen().rows).toEqual(before);
-    },
-  );
+  it.each([
+    'build',
+    'npm',
+    'nuget',
+  ] as const)('rejects revoked %s without writing and leaves saved state untouched', async (id) => {
+    const f = await durableFixture();
+    f.credentials.revoke(id, 1);
+    const before = f.rows();
+    await expect(f.run()).rejects.toMatchObject({ code: 'CONFIG_CREDENTIAL_REVOKED' });
+    expect(f.cm.writeFile).not.toHaveBeenCalled();
+    expect(f.check).toHaveBeenCalledOnce();
+    // Each sibling is local and has no mutation; yield so its resolution finishes before close.
+    await new Promise<void>((done) => setImmediate(done));
+    expect(f.rows()).toEqual(before);
+    expect(f.reopen().rows).toEqual(before);
+  });
 
-  it.each(['purpose', 'origin', 'identity'] as const)(
-    'rejects changed credential %s under saved launch scope',
-    async (kind) => {
-      const f = await durableFixture();
-      if (kind === 'purpose')
-        f.db
-          .prepare('UPDATE configuration_credentials SET purposes=? WHERE id=?')
-          .run(JSON.stringify(['mcp-env']), 'npm');
-      if (kind === 'origin')
-        f.db
-          .prepare('UPDATE configuration_credentials SET origins=? WHERE id=?')
-          .run(JSON.stringify(['https://other.example.test']), 'npm');
-      if (kind === 'identity')
-        f.db
-          .prepare('UPDATE configuration_credentials SET created_at=? WHERE id=?')
-          .run('2000-01-01T00:00:00Z', 'npm');
-      const before = f.rows();
-      await expect(f.run()).rejects.toMatchObject({
-        code: kind === 'identity' ? 'CONFIG_CREDENTIAL_REVOKED' : 'CONFIG_CREDENTIAL_SCOPE',
-      });
-      await new Promise<void>((done) => setImmediate(done));
-      expect(f.cm.writeFile).not.toHaveBeenCalled();
-      expect(f.rows()).toEqual(before);
-      expect(f.reopen().rows).toEqual(before);
-    },
-  );
+  it.each([
+    'purpose',
+    'origin',
+    'identity',
+  ] as const)('rejects changed credential %s under saved launch scope', async (kind) => {
+    const f = await durableFixture();
+    if (kind === 'purpose')
+      f.db
+        .prepare('UPDATE configuration_credentials SET purposes=? WHERE id=?')
+        .run(JSON.stringify(['mcp-env']), 'npm');
+    if (kind === 'origin')
+      f.db
+        .prepare('UPDATE configuration_credentials SET origins=? WHERE id=?')
+        .run(JSON.stringify(['https://other.example.test']), 'npm');
+    if (kind === 'identity')
+      f.db
+        .prepare('UPDATE configuration_credentials SET created_at=? WHERE id=?')
+        .run('2000-01-01T00:00:00Z', 'npm');
+    const before = f.rows();
+    await expect(f.run()).rejects.toMatchObject({
+      code: kind === 'identity' ? 'CONFIG_CREDENTIAL_REVOKED' : 'CONFIG_CREDENTIAL_SCOPE',
+    });
+    await new Promise<void>((done) => setImmediate(done));
+    expect(f.cm.writeFile).not.toHaveBeenCalled();
+    expect(f.rows()).toEqual(before);
+    expect(f.reopen().rows).toEqual(before);
+  });
 
   it('retains actual credential rows and completed writes when the final capability check rejects', async () => {
     const f = await durableFixture();

@@ -101,40 +101,41 @@ it('publishes a private pre-cutover WAL snapshot with a receipt that passes isol
   });
 });
 
-it.each(['same-connection', 'other-connection', 'migration-source'] as const)(
-  'refuses migration when %s changes during backup',
-  async (change) => {
-    await fixture(async ({ db, dbPath, migrations }) => {
-      const backup = db.backup.bind(db);
-      vi.spyOn(db, 'backup').mockImplementation(async (file, options) => {
-        const result = await backup(file, options);
-        if (change === 'migration-source')
-          fs.appendFileSync(
-            path.join(migrations, '099_cutover.sql'),
-            '\nCREATE TABLE replacement(id INTEGER);',
-          );
-        else if (change === 'same-connection')
-          db.prepare("UPDATE payloads SET body='new' WHERE id='latest'").run();
-        else {
-          const other = new Database(dbPath);
-          try {
-            other.prepare("UPDATE payloads SET body='new' WHERE id='latest'").run();
-          } finally {
-            other.close();
-          }
+it.each([
+  'same-connection',
+  'other-connection',
+  'migration-source',
+] as const)('refuses migration when %s changes during backup', async (change) => {
+  await fixture(async ({ db, dbPath, migrations }) => {
+    const backup = db.backup.bind(db);
+    vi.spyOn(db, 'backup').mockImplementation(async (file, options) => {
+      const result = await backup(file, options);
+      if (change === 'migration-source')
+        fs.appendFileSync(
+          path.join(migrations, '099_cutover.sql'),
+          '\nCREATE TABLE replacement(id INTEGER);',
+        );
+      else if (change === 'same-connection')
+        db.prepare("UPDATE payloads SET body='new' WHERE id='latest'").run();
+      else {
+        const other = new Database(dbPath);
+        try {
+          other.prepare("UPDATE payloads SET body='new' WHERE id='latest'").run();
+        } finally {
+          other.close();
         }
-        return result;
-      });
-      await expect(runMigrationsWithBackups(db, migrations, logger, dbPath)).rejects.toThrow(
-        'changed during cutover backup',
-      );
-      expect(db.prepare('SELECT COUNT(*) AS count FROM payloads').get()).toEqual({ count: 2 });
-      expect(db.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({
-        version: 98,
-      });
+      }
+      return result;
     });
-  },
-);
+    await expect(runMigrationsWithBackups(db, migrations, logger, dbPath)).rejects.toThrow(
+      'changed during cutover backup',
+    );
+    expect(db.prepare('SELECT COUNT(*) AS count FROM payloads').get()).toEqual({ count: 2 });
+    expect(db.prepare('SELECT MAX(version) AS version FROM schema_version').get()).toEqual({
+      version: 98,
+    });
+  });
+});
 
 it('refuses a populated synchronous cutover without taking an unsafe file copy', async () => {
   await fixture(async ({ db, dbPath, migrations, backups }) => {

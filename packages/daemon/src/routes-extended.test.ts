@@ -608,18 +608,18 @@ describe('Extended Route Tests', () => {
       expect(res.json().error).toContain('limit');
     });
 
-    it.each(['last-week', '2026-02-30'])(
-      'rejects malformed since %s with a dedicated error code',
-      async (since) => {
-        const res = await app.inject({
-          method: 'GET',
-          url: `/pods?since=${since}`,
-          headers: authHeaders,
-        });
-        expect(res.statusCode).toBe(400);
-        expect(res.json()).toMatchObject({ code: 'invalid_since' });
-      },
-    );
+    it.each([
+      'last-week',
+      '2026-02-30',
+    ])('rejects malformed since %s with a dedicated error code', async (since) => {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/pods?since=${since}`,
+        headers: authHeaders,
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ code: 'invalid_since' });
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -920,123 +920,125 @@ describe('Extended Route Tests', () => {
   // -------------------------------------------------------------------------
 
   describe('POST /pods/:id/approve', () => {
-    it.each(['no-changes', 'branch', 'missing-worktree', 'existing-pr-push'] as const)(
-      'returns an actionable error for %s without cleanup and accepts a later explicit approval retry',
-      async (delivery) => {
-        if (delivery === 'existing-pr-push') {
-          approvalPrManager = {
-            createPr: vi.fn(),
-            mergePr: vi.fn().mockImplementation(mockPrMerge),
-            getPrStatus: vi.fn().mockResolvedValue({
-              open: true,
-              merged: false,
-              reviewDecision: 'APPROVED',
-              blockReason: null,
-              ciFailures: [],
-              reviewComments: [],
-            }),
-          };
-          vi.mocked(worktreeManager.rebaseOntoBase).mockResolvedValue({
-            rebased: true,
-            alreadyUpToDate: true,
-            conflicts: [],
-          });
-        }
-        const repo = createPodRepository(db);
-        repo.insert({
-          id: 'approval-preserved',
-          profileName: 'test-app',
-          task: 'Preserve branch',
-          status: 'validated',
-          model: 'model',
-          runtime: 'codex',
-          executionTarget: 'local',
-          branch: 'preserved-branch',
-          userId: 'user-1',
-          maxValidationAttempts: 3,
-          skipValidation: false,
-          outputMode: 'pr',
-          options: {
-            agentMode: 'auto',
-            output: delivery === 'branch' ? 'branch' : 'pr',
-            validate: true,
-            promotable: false,
+    it.each([
+      'no-changes',
+      'branch',
+      'missing-worktree',
+      'existing-pr-push',
+    ] as const)('returns an actionable error for %s without cleanup and accepts a later explicit approval retry', async (delivery) => {
+      if (delivery === 'existing-pr-push') {
+        approvalPrManager = {
+          createPr: vi.fn(),
+          mergePr: vi.fn().mockImplementation(mockPrMerge),
+          getPrStatus: vi.fn().mockResolvedValue({
+            open: true,
+            merged: false,
+            reviewDecision: 'APPROVED',
+            blockReason: null,
+            ciFailures: [],
+            reviewComments: [],
+          }),
+        };
+        vi.mocked(worktreeManager.rebaseOntoBase).mockResolvedValue({
+          rebased: true,
+          alreadyUpToDate: true,
+          conflicts: [],
+        });
+      }
+      const repo = createPodRepository(db);
+      repo.insert({
+        id: 'approval-preserved',
+        profileName: 'test-app',
+        task: 'Preserve branch',
+        status: 'validated',
+        model: 'model',
+        runtime: 'codex',
+        executionTarget: 'local',
+        branch: 'preserved-branch',
+        userId: 'user-1',
+        maxValidationAttempts: 3,
+        skipValidation: false,
+        outputMode: 'pr',
+        options: {
+          agentMode: 'auto',
+          output: delivery === 'branch' ? 'branch' : 'pr',
+          validate: true,
+          promotable: false,
+        },
+      });
+      repo.update('approval-preserved', {
+        ...(delivery === 'existing-pr-push'
+          ? { prUrl: 'https://github.com/org/repo/pull/42' }
+          : {}),
+        containerId: 'preserved-container',
+        worktreePath: delivery === 'missing-worktree' ? null : '/tmp/preserved-approval',
+        filesChanged: delivery === 'no-changes' ? 0 : 1,
+        lastValidationResult: {
+          podId: 'approval-preserved',
+          attempt: 1,
+          timestamp: new Date().toISOString(),
+          overall: 'pass',
+          duration: 1,
+          taskReview: null,
+          smoke: {
+            status: 'pass',
+            build: { status: 'pass', output: 'ok', duration: 1 },
+            health: { status: 'pass', url: 'http://localhost', responseCode: 200, duration: 1 },
+            pages: [],
           },
-        });
-        repo.update('approval-preserved', {
-          ...(delivery === 'existing-pr-push'
-            ? { prUrl: 'https://github.com/org/repo/pull/42' }
-            : {}),
-          containerId: 'preserved-container',
-          worktreePath: delivery === 'missing-worktree' ? null : '/tmp/preserved-approval',
-          filesChanged: delivery === 'no-changes' ? 0 : 1,
-          lastValidationResult: {
-            podId: 'approval-preserved',
-            attempt: 1,
-            timestamp: new Date().toISOString(),
-            overall: 'pass',
-            duration: 1,
-            taskReview: null,
-            smoke: {
-              status: 'pass',
-              build: { status: 'pass', output: 'ok', duration: 1 },
-              health: { status: 'pass', url: 'http://localhost', responseCode: 200, duration: 1 },
-              pages: [],
-            },
-          },
-        });
-        vi.mocked(worktreeManager.getDiffStats).mockResolvedValue({
-          filesChanged: delivery === 'no-changes' ? 0 : 1,
-          linesAdded: 0,
-          linesRemoved: 0,
-        });
-        (worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(true);
-        if (delivery !== 'missing-worktree')
-          vi.mocked(
-            delivery === 'branch' ? worktreeManager.mergeBranch : worktreeManager.pushBranch,
-          ).mockRejectedValueOnce(new Error('remote unavailable'));
-        const first = await app.inject({
-          method: 'POST',
-          url: '/pods/approval-preserved/approve',
-          headers: authHeaders,
-          payload: { reason: 'Reviewed local fixture evidence' },
-        });
-        expect(first.statusCode, first.body).toBe(delivery === 'missing-worktree' ? 409 : 502);
-        expect(first.json()).toMatchObject({
-          error:
-            delivery === 'missing-worktree'
-              ? 'DELIVERY_RECONCILIATION_REQUIRED'
-              : delivery === 'branch' || delivery === 'existing-pr-push'
-                ? 'APPROVAL_DELIVERY_FAILED'
-                : 'BRANCH_PRESERVATION_FAILED',
-          message: expect.stringContaining('retry approval'),
-        });
-        expect(repo.getOrThrow('approval-preserved')).toMatchObject({
-          status: 'validated',
-          containerId: 'preserved-container',
-          worktreePath: delivery === 'missing-worktree' ? null : '/tmp/preserved-approval',
-        });
-        expect(containerManager.kill).not.toHaveBeenCalled();
-        if (delivery === 'missing-worktree')
-          repo.update('approval-preserved', { worktreePath: '/tmp/preserved-approval' });
-        const retry = await app.inject({
-          method: 'POST',
-          url: '/pods/approval-preserved/approve',
-          headers: authHeaders,
-          payload: { reason: 'Remote repaired; retry reviewed local fixture' },
-        });
-        expect(retry.statusCode, retry.body).toBe(200);
-        expect(repo.getOrThrow('approval-preserved')).toMatchObject({
-          status: 'complete',
-          failureReason: null,
-        });
-        expect(
-          delivery === 'no-changes' || delivery === 'existing-pr-push'
-            ? worktreeManager.pushBranch
-            : worktreeManager.mergeBranch,
-        ).toHaveBeenCalledTimes(delivery === 'missing-worktree' ? 1 : 2);
-      },
-    );
+        },
+      });
+      vi.mocked(worktreeManager.getDiffStats).mockResolvedValue({
+        filesChanged: delivery === 'no-changes' ? 0 : 1,
+        linesAdded: 0,
+        linesRemoved: 0,
+      });
+      (worktreeManager.hasChangesAgainstBase as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+      if (delivery !== 'missing-worktree')
+        vi.mocked(
+          delivery === 'branch' ? worktreeManager.mergeBranch : worktreeManager.pushBranch,
+        ).mockRejectedValueOnce(new Error('remote unavailable'));
+      const first = await app.inject({
+        method: 'POST',
+        url: '/pods/approval-preserved/approve',
+        headers: authHeaders,
+        payload: { reason: 'Reviewed local fixture evidence' },
+      });
+      expect(first.statusCode, first.body).toBe(delivery === 'missing-worktree' ? 409 : 502);
+      expect(first.json()).toMatchObject({
+        error:
+          delivery === 'missing-worktree'
+            ? 'DELIVERY_RECONCILIATION_REQUIRED'
+            : delivery === 'branch' || delivery === 'existing-pr-push'
+              ? 'APPROVAL_DELIVERY_FAILED'
+              : 'BRANCH_PRESERVATION_FAILED',
+        message: expect.stringContaining('retry approval'),
+      });
+      expect(repo.getOrThrow('approval-preserved')).toMatchObject({
+        status: 'validated',
+        containerId: 'preserved-container',
+        worktreePath: delivery === 'missing-worktree' ? null : '/tmp/preserved-approval',
+      });
+      expect(containerManager.kill).not.toHaveBeenCalled();
+      if (delivery === 'missing-worktree')
+        repo.update('approval-preserved', { worktreePath: '/tmp/preserved-approval' });
+      const retry = await app.inject({
+        method: 'POST',
+        url: '/pods/approval-preserved/approve',
+        headers: authHeaders,
+        payload: { reason: 'Remote repaired; retry reviewed local fixture' },
+      });
+      expect(retry.statusCode, retry.body).toBe(200);
+      expect(repo.getOrThrow('approval-preserved')).toMatchObject({
+        status: 'complete',
+        failureReason: null,
+      });
+      expect(
+        delivery === 'no-changes' || delivery === 'existing-pr-push'
+          ? worktreeManager.pushBranch
+          : worktreeManager.mergeBranch,
+      ).toHaveBeenCalledTimes(delivery === 'missing-worktree' ? 1 : 2);
+    });
 
     it('returns 409 when pod is not in validated state', async () => {
       // Hold provisioning so the request tests a known, non-actionable state.

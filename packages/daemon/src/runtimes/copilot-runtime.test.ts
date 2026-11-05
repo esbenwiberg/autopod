@@ -310,35 +310,36 @@ describe('CopilotRuntime', () => {
         category: 'unknown',
         definitive: false,
       },
-    ])(
-      'classifies non-zero exit $name evidence conservatively',
-      async ({ stderr, category, definitive }) => {
-        const handle = createMockHandle({ exitCode: 1 });
-        const runtime = new CopilotRuntime(logger, createMockContainerManager(handle));
-        setTimeout(() => {
-          (handle.stderr as PassThrough).write(`${stderr}\n`);
-          (handle as { finish?: (code?: number) => void }).finish?.(1);
-        }, 10);
+    ])('classifies non-zero exit $name evidence conservatively', async ({
+      stderr,
+      category,
+      definitive,
+    }) => {
+      const handle = createMockHandle({ exitCode: 1 });
+      const runtime = new CopilotRuntime(logger, createMockContainerManager(handle));
+      setTimeout(() => {
+        (handle.stderr as PassThrough).write(`${stderr}\n`);
+        (handle as { finish?: (code?: number) => void }).finish?.(1);
+      }, 10);
 
-        const events: AgentEvent[] = [];
-        for await (const event of runtime.spawn({
-          podId: `copilot-${category}`,
-          task: 'fail',
-          model: 'sonnet',
-          reasoningEffort: 'auto',
-          workDir: '/workspace',
-          containerId: 'container-123',
-          env: {},
-        })) {
-          events.push(event);
-        }
+      const events: AgentEvent[] = [];
+      for await (const event of runtime.spawn({
+        podId: `copilot-${category}`,
+        task: 'fail',
+        model: 'sonnet',
+        reasoningEffort: 'auto',
+        workDir: '/workspace',
+        containerId: 'container-123',
+        env: {},
+      })) {
+        events.push(event);
+      }
 
-        expect(events.find((event) => event.type === 'error')).toMatchObject({
-          classification: { category, definitive },
-        });
-        expect(events.some((event) => event.type === 'complete')).toBe(false);
-      },
-    );
+      expect(events.find((event) => event.type === 'error')).toMatchObject({
+        classification: { category, definitive },
+      });
+      expect(events.some((event) => event.type === 'complete')).toBe(false);
+    });
 
     it('does not classify quota-like stdout when Copilot exits successfully', async () => {
       const handle = createMockHandle({ exitCode: 0 });

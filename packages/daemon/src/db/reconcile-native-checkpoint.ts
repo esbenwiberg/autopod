@@ -6,8 +6,8 @@ import {
   linkSync,
   lstatSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statfsSync,
 } from 'node:fs';

@@ -1,6 +1,6 @@
 import type { AgentEvent } from '@autopod/shared';
 import { act } from 'react';
-import { type Root, createRoot } from 'react-dom/client';
+import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ActivityList, isOverviewActivity } from './ActivityList.js';
 

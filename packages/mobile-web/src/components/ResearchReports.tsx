@@ -7,7 +7,10 @@ import { apiFetch } from '../lib/api.js';
 export function ResearchReports({
   podId,
   findings,
-}: { podId: string; findings: ResearchFindings }): JSX.Element {
+}: {
+  podId: string;
+  findings: ResearchFindings;
+}): JSX.Element {
   return (
     <ReceiptReports
       key={`${podId}:${findings.generation}:${findings.cycle}:${findings.evidenceHash}`}
@@ -20,7 +23,10 @@ export function ResearchReports({
 function ReceiptReports({
   podId,
   findings,
-}: { podId: string; findings: ResearchFindings }): JSX.Element {
+}: {
+  podId: string;
+  findings: ResearchFindings;
+}): JSX.Element {
   const [files, setFiles] = useState<Array<{ path: string }>>([]);
   const [content, setContent] = useState('');
   const [pdf, setPdf] = useState<string | null>(null);

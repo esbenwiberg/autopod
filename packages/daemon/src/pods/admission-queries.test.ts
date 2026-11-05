@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { LaunchExecutionCredentials } from '../configuration/execution-credentials.js';
 import { createAdmissionFixture, deferred } from '../test-utils/admission-queries-helpers.js';
 import type { AdmissionMcpCalls } from './admission-contracts.js';
+
 describe('admission read and capability projections', () => {
   it('projects stored filters/stats/series and validates existence before history fallback', () => {
     const f = createAdmissionFixture();

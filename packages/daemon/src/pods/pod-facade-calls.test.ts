@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { deferred } from '../test-utils/resource-helpers.js';
 import { createValidationTriggerCalls } from './pod-facade-calls.js';
 import type { ValidationWorkflowCalls } from './validation-workflow-ports.js';
+
 function receiver(): ValidationWorkflowCalls {
   return {
     triggerValidation: vi.fn(async () => {}),

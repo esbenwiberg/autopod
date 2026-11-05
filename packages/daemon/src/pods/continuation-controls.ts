@@ -16,8 +16,8 @@ import {
   assertValidationExecutionSettled,
 } from './validation-recovery-policy.js';
 import {
-  WORKER_RETRY_BACKOFFS_MS,
   unavailableWorkerInputs,
+  WORKER_RETRY_BACKOFFS_MS,
   workerBindingHash,
 } from './worker-retry-history.js';
 

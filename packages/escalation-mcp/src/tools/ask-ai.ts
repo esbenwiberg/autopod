@@ -1,5 +1,5 @@
-import { generateId } from '@autopod/shared';
 import type { EscalationRequest } from '@autopod/shared';
+import { generateId } from '@autopod/shared';
 import type { PodBridge } from '../pod-bridge.js';
 
 export interface AskAiInput {

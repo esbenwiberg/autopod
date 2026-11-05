@@ -7,116 +7,118 @@ afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
 });
-it.each(['validation', 'sandbox_startup', 'codex_interruption', 'worker'] as const)(
-  'preserves one %s authorization through lost response and reload without implicitly resuming',
-  async (stage) => {
-    const input = { requestKey: 'durable-key', reason: 'External prerequisite checked' };
-    const key = `autopod.retry-authorization.fix${stage === 'validation' ? '' : `.${stage}`}`;
-    localStorage.setItem(key, JSON.stringify(input));
-    const state = {
-      taskId: 'task',
-      authorizationRequired: stage === 'worker',
-      retryFailure: stage === 'worker' ? 'unknown' : null,
-      admissionCount: 4,
-      executedCount: 3,
-      transientRetryCount: 2,
-      backoffsMs: [0, 0],
-      measuredDurationMs: 15,
-      interruptedCount: 1,
-      latest: {
-        id: 'failure',
-        providerRetryNotBefore: stage === 'worker' ? '2026-09-09T12:00:00.000Z' : null,
-        outcome: stage === 'codex_interruption' ? 'pass' : 'unknown',
-      },
-      authorizations: [] as Array<{
-        id: string;
-        failureId: string;
-        reason: string;
-        usedByAttemptId: string | null;
-      }>,
-    };
-    const bodies: unknown[] = [];
-    let resumes = 0;
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
-      if (String(url).endsWith('retry-authorizations')) {
-        bodies.push(JSON.parse(String(init?.body)));
-        state.authorizations = [
-          { id: 'grant', failureId: 'failure', reason: input.reason, usedByAttemptId: null },
-        ];
-        if (bodies.length === 1) throw new Error('Response lost after commit');
-        return new Response(JSON.stringify(state.authorizations[0]));
-      }
-      if (String(url).endsWith(stage === 'worker' ? '/validate' : '/resume')) {
-        resumes++;
-        return new Response(JSON.stringify({ ok: true, action: 'revalidate' }));
-      }
-      return new Response(JSON.stringify(state));
-    });
-    const container = document.createElement('div');
-    document.body.append(container);
-    let root = createRoot(container);
-    const render = () =>
-      act(async () => {
-        root.render(<TaskRetryPanel podId="fix" revision="failed" status="failed" stage={stage} />);
-      });
-    const click = (label: string) =>
-      act(async () => {
-        const button = [...container.querySelectorAll('button')].find(
-          (entry) => entry.textContent === label,
-        );
-        expect(button).toBeTruthy();
-        button?.click();
-      });
-    try {
-      await render();
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        expect.stringContaining(
-          stage === 'validation' ? '/retry-state' : `/retry-state?stage=${stage}`,
-        ),
-        expect.anything(),
-      );
-      expect(container.textContent).toContain('3 executed / 4 admitted');
-      if (stage === 'worker') {
-        expect(container.textContent).toContain('unknown causes');
-        expect(container.textContent).toContain(
-          'Provider retry not before: 2026-09-09T12:00:00.000Z',
-        );
-      }
-      expect(container.textContent).toContain('1 interrupted with unknown duration');
-      await click('Retry recording the same authorization');
-      expect(resumes).toBe(0);
-      await act(async () => root.unmount());
-      root = createRoot(container);
-      await render();
-      expect(container.querySelector('textarea')?.value).toBe(input.reason);
-      await click('Retry recording the same authorization');
-      const sent = { ...input, ...(stage === 'validation' ? {} : { stage }) };
-      expect(bodies).toEqual([sent, sent]);
-      if (stage === 'codex_interruption') {
-        expect(container.textContent).toContain('Available for latest recovery');
-        expect(container.textContent).toContain('Latest outcome: pass');
-      }
-      expect(resumes).toBe(0);
-      expect(localStorage.getItem(key)).toBeNull();
-      await click(
-        stage === 'codex_interruption'
-          ? 'Resume task'
-          : stage === 'validation'
-            ? 'Resume validation'
-            : stage === 'worker'
-              ? 'Rework worker'
-              : 'Resume sandbox startup',
-      );
-      expect(resumes).toBe(1);
-      expect(container.textContent).toContain(
-        stage === 'worker' ? 'Rework requested.' : 'Resume requested.',
-      );
-    } finally {
-      act(() => root.unmount());
-      container.remove();
+it.each([
+  'validation',
+  'sandbox_startup',
+  'codex_interruption',
+  'worker',
+] as const)('preserves one %s authorization through lost response and reload without implicitly resuming', async (stage) => {
+  const input = { requestKey: 'durable-key', reason: 'External prerequisite checked' };
+  const key = `autopod.retry-authorization.fix${stage === 'validation' ? '' : `.${stage}`}`;
+  localStorage.setItem(key, JSON.stringify(input));
+  const state = {
+    taskId: 'task',
+    authorizationRequired: stage === 'worker',
+    retryFailure: stage === 'worker' ? 'unknown' : null,
+    admissionCount: 4,
+    executedCount: 3,
+    transientRetryCount: 2,
+    backoffsMs: [0, 0],
+    measuredDurationMs: 15,
+    interruptedCount: 1,
+    latest: {
+      id: 'failure',
+      providerRetryNotBefore: stage === 'worker' ? '2026-09-09T12:00:00.000Z' : null,
+      outcome: stage === 'codex_interruption' ? 'pass' : 'unknown',
+    },
+    authorizations: [] as Array<{
+      id: string;
+      failureId: string;
+      reason: string;
+      usedByAttemptId: string | null;
+    }>,
+  };
+  const bodies: unknown[] = [];
+  let resumes = 0;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+    if (String(url).endsWith('retry-authorizations')) {
+      bodies.push(JSON.parse(String(init?.body)));
+      state.authorizations = [
+        { id: 'grant', failureId: 'failure', reason: input.reason, usedByAttemptId: null },
+      ];
+      if (bodies.length === 1) throw new Error('Response lost after commit');
+      return new Response(JSON.stringify(state.authorizations[0]));
     }
-  },
-);
+    if (String(url).endsWith(stage === 'worker' ? '/validate' : '/resume')) {
+      resumes++;
+      return new Response(JSON.stringify({ ok: true, action: 'revalidate' }));
+    }
+    return new Response(JSON.stringify(state));
+  });
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root = createRoot(container);
+  const render = () =>
+    act(async () => {
+      root.render(<TaskRetryPanel podId="fix" revision="failed" status="failed" stage={stage} />);
+    });
+  const click = (label: string) =>
+    act(async () => {
+      const button = [...container.querySelectorAll('button')].find(
+        (entry) => entry.textContent === label,
+      );
+      expect(button).toBeTruthy();
+      button?.click();
+    });
+  try {
+    await render();
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining(
+        stage === 'validation' ? '/retry-state' : `/retry-state?stage=${stage}`,
+      ),
+      expect.anything(),
+    );
+    expect(container.textContent).toContain('3 executed / 4 admitted');
+    if (stage === 'worker') {
+      expect(container.textContent).toContain('unknown causes');
+      expect(container.textContent).toContain(
+        'Provider retry not before: 2026-09-09T12:00:00.000Z',
+      );
+    }
+    expect(container.textContent).toContain('1 interrupted with unknown duration');
+    await click('Retry recording the same authorization');
+    expect(resumes).toBe(0);
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render();
+    expect(container.querySelector('textarea')?.value).toBe(input.reason);
+    await click('Retry recording the same authorization');
+    const sent = { ...input, ...(stage === 'validation' ? {} : { stage }) };
+    expect(bodies).toEqual([sent, sent]);
+    if (stage === 'codex_interruption') {
+      expect(container.textContent).toContain('Available for latest recovery');
+      expect(container.textContent).toContain('Latest outcome: pass');
+    }
+    expect(resumes).toBe(0);
+    expect(localStorage.getItem(key)).toBeNull();
+    await click(
+      stage === 'codex_interruption'
+        ? 'Resume task'
+        : stage === 'validation'
+          ? 'Resume validation'
+          : stage === 'worker'
+            ? 'Rework worker'
+            : 'Resume sandbox startup',
+    );
+    expect(resumes).toBe(1);
+    expect(container.textContent).toContain(
+      stage === 'worker' ? 'Rework requested.' : 'Resume requested.',
+    );
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});
 
 it('shows accounting without retry controls while a separate human decision is pending', async () => {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -196,52 +198,50 @@ it('shows remaining worker cooldown allowance with Resume and no required permis
   }
 });
 
-it.each([false, true])(
-  'shows duration coverage including missing completed records (legacy daemon: %s)',
-  async (legacy) => {
-    const state = {
-      taskId: 'task',
-      stage: 'worker',
-      admissionCount: 1,
-      executedCount: 1,
-      transientRetryCount: 0,
-      backoffsMs: [],
-      measuredDurationMs: legacy ? 0 : null,
-      interruptedCount: 0,
-      latest: { id: 'old', outcome: 'pass' },
-      authorizations: [],
-      telemetry: 'partial',
-      ...(!legacy
-        ? {
-            durationEvidence: {
-              measuredRecordCount: 0,
-              unavailableRecordCount: 1,
-              pendingRecordCount: 0,
-              basis: 'stage_elapsed_subtotal',
-              additiveAcrossStages: false,
-            },
-          }
-        : {}),
-    };
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(state)));
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    try {
-      await act(async () =>
-        root.render(
-          <TaskRetryPanel podId="old" revision="failed" status="failed" stage="worker" />,
-        ),
-      );
-      expect(container.textContent).toContain(
-        legacy ? 'Duration coverage unavailable from this daemon.' : '1 records without duration',
-      );
-      if (!legacy) expect(container.textContent).toContain('Measured duration unavailable');
-      expect(container.textContent).toContain('Stage durations can overlap; do not add them.');
-      expect(container.textContent).not.toContain('null ms');
-    } finally {
-      act(() => root.unmount());
-      container.remove();
-    }
-  },
-);
+it.each([
+  false,
+  true,
+])('shows duration coverage including missing completed records (legacy daemon: %s)', async (legacy) => {
+  const state = {
+    taskId: 'task',
+    stage: 'worker',
+    admissionCount: 1,
+    executedCount: 1,
+    transientRetryCount: 0,
+    backoffsMs: [],
+    measuredDurationMs: legacy ? 0 : null,
+    interruptedCount: 0,
+    latest: { id: 'old', outcome: 'pass' },
+    authorizations: [],
+    telemetry: 'partial',
+    ...(!legacy
+      ? {
+          durationEvidence: {
+            measuredRecordCount: 0,
+            unavailableRecordCount: 1,
+            pendingRecordCount: 0,
+            basis: 'stage_elapsed_subtotal',
+            additiveAcrossStages: false,
+          },
+        }
+      : {}),
+  };
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(state)));
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(<TaskRetryPanel podId="old" revision="failed" status="failed" stage="worker" />),
+    );
+    expect(container.textContent).toContain(
+      legacy ? 'Duration coverage unavailable from this daemon.' : '1 records without duration',
+    );
+    if (!legacy) expect(container.textContent).toContain('Measured duration unavailable');
+    expect(container.textContent).toContain('Stage durations can overlap; do not add them.');
+    expect(container.textContent).not.toContain('null ms');
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});

@@ -8,7 +8,12 @@ export function TaskRetryPanel({
   revision,
   status,
   stage = 'validation',
-}: { podId: string; revision: string; status: string; stage?: TaskRetryStage }) {
+}: {
+  podId: string;
+  revision: string;
+  status: string;
+  stage?: TaskRetryStage;
+}) {
   const [state, setState] = useState<TaskRetryState | null>(null);
   const [reason, setReason] = useState('');
   const [pending, setPending] = useState<Draft | null>(null);

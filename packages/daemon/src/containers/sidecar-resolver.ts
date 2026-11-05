@@ -1,7 +1,7 @@
 import {
   DAGGER_RUNNER_HOST_ENV,
-  DEFAULT_DAGGER_ENGINE_PORT,
   type DaggerSidecarConfig,
+  DEFAULT_DAGGER_ENGINE_PORT,
   type SidecarSpec,
 } from '@autopod/shared';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';

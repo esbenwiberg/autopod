@@ -500,12 +500,16 @@ describe('Node worker template contract', () => {
     expect(updateProfileSchema.parse({})).not.toHaveProperty('template');
     expect(environmentPresetSchema.safeParse({}).success).toBe(false);
   });
-  it.each(['node22', 'node22-pw', 'node22-pw-pg', 'node24', 'node24-pw', 'node24-pw-pg'])(
-    'round trips explicit %s in profile and composable environment schemas',
-    (template) => {
-      expect(createProfileSchema.parse({ name: 'explicit', template }).template).toBe(template);
-      expect(updateProfileSchema.parse({ template }).template).toBe(template);
-      expect(environmentPresetSchema.parse({ template }).template).toBe(template);
-    },
-  );
+  it.each([
+    'node22',
+    'node22-pw',
+    'node22-pw-pg',
+    'node24',
+    'node24-pw',
+    'node24-pw-pg',
+  ])('round trips explicit %s in profile and composable environment schemas', (template) => {
+    expect(createProfileSchema.parse({ name: 'explicit', template }).template).toBe(template);
+    expect(updateProfileSchema.parse({ template }).template).toBe(template);
+    expect(environmentPresetSchema.parse({ template }).template).toBe(template);
+  });
 });

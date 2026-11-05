@@ -1,11 +1,11 @@
-export { sanitize, sanitizeDeep, getPresetConfig } from './sanitize.js';
-export { quarantine, type QuarantineResult, type ThreatIndicator } from './quarantine.js';
+export { collectPiiPatternNames } from './collect-pii.js';
+export type { InjectionPattern, PiiPattern } from './patterns.js';
+export { INJECTION_PATTERNS, PII_PATTERNS, REDACT_FIELD_NAMES } from './patterns.js';
 export {
+  type ProcessContentConfig,
+  type ProcessedContent,
   processContent,
   processContentDeep,
-  type ProcessedContent,
-  type ProcessContentConfig,
 } from './processor.js';
-export { PII_PATTERNS, INJECTION_PATTERNS, REDACT_FIELD_NAMES } from './patterns.js';
-export type { PiiPattern, InjectionPattern } from './patterns.js';
-export { collectPiiPatternNames } from './collect-pii.js';
+export { type QuarantineResult, quarantine, type ThreatIndicator } from './quarantine.js';
+export { getPresetConfig, sanitize, sanitizeDeep } from './sanitize.js';

@@ -3,8 +3,8 @@ import {
   type AgentRoute,
   CONTAINER_HOME_DIR,
   type EffectiveLaunchConfig,
-  PROVIDER_CATALOG,
   type Pod,
+  PROVIDER_CATALOG,
 } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { withAbort } from '../actions/handlers/handler.js';
@@ -25,10 +25,10 @@ import {
 import { CodexReviewError, type CodexReviewTokenUsage } from './review-codex-runner.js';
 import { MAX_ISOLATED_REVIEW_INPUT_BYTES } from './reviewer-input-bounds.js';
 import {
+  hasMeasuredReviewerUsage,
   type ReviewerRunRecord,
   type ReviewerRunRepository,
   type ReviewerRunRow,
-  hasMeasuredReviewerUsage,
 } from './reviewer-run-repository.js';
 
 export interface IsolatedReviewerOptions {

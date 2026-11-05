@@ -8,8 +8,8 @@ import pino from 'pino';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createPodRepository } from '../pods/pod-repository.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
-import { databaseWatermark, verifyBackupRestore } from './backup-verification.js';
 import { createDbBackupManager } from './backup.js';
+import { databaseWatermark, verifyBackupRestore } from './backup-verification.js';
 
 const logger = pino({ level: 'silent' });
 const cleanups: (() => void)[] = [];

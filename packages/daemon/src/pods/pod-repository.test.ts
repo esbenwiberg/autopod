@@ -7,7 +7,7 @@ import {
 } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { type NewPod, type PodRepository, createPodRepository } from './pod-repository.js';
+import { createPodRepository, type NewPod, type PodRepository } from './pod-repository.js';
 
 const migrationsDir = path.resolve(import.meta.dirname, '../db/migrations');
 const MIGRATION_FILES = fs

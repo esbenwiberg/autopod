@@ -4,6 +4,7 @@ import { createResourceFixture, deferred } from '../test-utils/resource-helpers.
 import { createAdvisoryValidation } from './advisory-validation.js';
 import { createResourceAdvisoryCleanup, createResourceAdvisoryState } from './resource-advisory.js';
 import { createValidationProgress } from './validation-progress.js';
+
 describe('resource advisory ownership', () => {
   it('owns one instance map and transfers a single FIFO slot without opening capacity early', async () => {
     const a = createResourceAdvisoryState();
@@ -48,28 +49,28 @@ describe('resource advisory ownership', () => {
     expect(() => owner.cleanupContainerAfterAdvisorySettles(f.pod(), 'blocked')).toThrow();
     expect(cleanup).toHaveBeenCalledOnce();
   });
-  it.each(['resolve', 'reject'] as const)(
-    'defers cleanup until tracked advisory %s while returning immediately',
-    async (outcome) => {
-      const f = createResourceFixture();
-      const gate = deferred<ValidationResult>();
-      f.advisory.advisoryRuns.set('prepare', gate.promise);
-      const cleanup = vi.fn(async () => {});
-      const owner = createResourceAdvisoryCleanup({
-        ...f.core,
-        ...f.advisory,
-        cleanupContainer: cleanup,
-      });
-      const captured = f.pod();
-      await owner.cleanupContainerAfterAdvisorySettles(captured, 'deferred', 'stop');
-      expect(cleanup).not.toHaveBeenCalled();
-      if (outcome === 'resolve') gate.resolve(f.pod().lastValidationResult as ValidationResult);
-      else gate.reject(new Error('Synthetic advisory failure'));
-      await vi.waitFor(() =>
-        expect(cleanup).toHaveBeenCalledWith(captured, 'deferred', 'stop', undefined),
-      );
-    },
-  );
+  it.each([
+    'resolve',
+    'reject',
+  ] as const)('defers cleanup until tracked advisory %s while returning immediately', async (outcome) => {
+    const f = createResourceFixture();
+    const gate = deferred<ValidationResult>();
+    f.advisory.advisoryRuns.set('prepare', gate.promise);
+    const cleanup = vi.fn(async () => {});
+    const owner = createResourceAdvisoryCleanup({
+      ...f.core,
+      ...f.advisory,
+      cleanupContainer: cleanup,
+    });
+    const captured = f.pod();
+    await owner.cleanupContainerAfterAdvisorySettles(captured, 'deferred', 'stop');
+    expect(cleanup).not.toHaveBeenCalled();
+    if (outcome === 'resolve') gate.resolve(f.pod().lastValidationResult as ValidationResult);
+    else gate.reject(new Error('Synthetic advisory failure'));
+    await vi.waitFor(() =>
+      expect(cleanup).toHaveBeenCalledWith(captured, 'deferred', 'stop', undefined),
+    );
+  });
   it('catches detached cleanup failure and the slot is reusable after failure release', async () => {
     const f = createResourceFixture();
     const gate = deferred<ValidationResult>();

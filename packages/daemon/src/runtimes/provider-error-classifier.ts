@@ -1,8 +1,8 @@
 import {
   type ProviderFailureCategory,
   type ProviderFailureClassification,
-  type RuntimeType,
   processContent,
+  type RuntimeType,
 } from '@autopod/shared';
 
 export interface ProviderErrorEvidence {

@@ -2,8 +2,8 @@ import type { Pod } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import {
-  type WorkspaceCheckpointResult,
   checkpointSandboxWorkspace,
+  type WorkspaceCheckpointResult,
 } from '../worktrees/sandbox-workspace-checkpoint.js';
 import type { WorkspaceCheckpointController } from './workspace-checkpoint-controller.js';
 

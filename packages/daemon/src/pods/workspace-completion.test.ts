@@ -3,6 +3,7 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createPimClient } from '../actions/handlers/azure-pim-handler.js';
 import { createWorkspaceFixture, deferred } from '../test-utils/workspace-recovery-helpers.js';
+
 const pim = vi.hoisted(() => ({ deactivate: vi.fn(async () => {}) }));
 vi.mock('../actions/handlers/azure-pim-handler.js', () => ({ createPimClient: vi.fn(() => pim) }));
 describe('complete workspace completion lifetime', () => {

@@ -51,38 +51,34 @@ describe('package feed authenticated read probe', () => {
       ['8.8.8.8'],
     );
   });
-  it.each([200, 404, 302])(
-    'does not send a PAT or claim validation when anonymous endpoint returns %s',
-    async (status) => {
-      const f = fixture([
-        new Response('{}', { status, headers: { location: 'https://elsewhere.example.com' } }),
-      ]);
-      expect((await probePackageFeed(npm, token, f)).status).toBe('unverified');
-      expect(f.transport).toHaveBeenCalledOnce();
-      expect(JSON.stringify(f.transport.mock.calls)).not.toContain(token);
-    },
-  );
+  it.each([
+    200, 404, 302,
+  ])('does not send a PAT or claim validation when anonymous endpoint returns %s', async (status) => {
+    const f = fixture([
+      new Response('{}', { status, headers: { location: 'https://elsewhere.example.com' } }),
+    ]);
+    expect((await probePackageFeed(npm, token, f)).status).toBe('unverified');
+    expect(f.transport).toHaveBeenCalledOnce();
+    expect(JSON.stringify(f.transport.mock.calls)).not.toContain(token);
+  });
   it.each([
     [401, 'rejected'],
     [403, 'forbidden'],
     [302, 'unavailable'],
     [404, 'unverified'],
-  ] as const)(
-    'classifies authenticated HTTP %s without reflecting errors',
-    async (status, expected) => {
-      const f = fixture([
-        new Response('', { status: 401 }),
-        new Response(`error ${token}`, {
-          status,
-          headers: { location: 'https://elsewhere.example.com' },
-        }),
-      ]);
-      const result = await probePackageFeed(npm, token, f);
-      expect(result.status).toBe(expected);
-      expect(JSON.stringify(result)).not.toContain(token);
-      expect(f.transport).toHaveBeenCalledTimes(2);
-    },
-  );
+  ] as const)('classifies authenticated HTTP %s without reflecting errors', async (status, expected) => {
+    const f = fixture([
+      new Response('', { status: 401 }),
+      new Response(`error ${token}`, {
+        status,
+        headers: { location: 'https://elsewhere.example.com' },
+      }),
+    ]);
+    const result = await probePackageFeed(npm, token, f);
+    expect(result.status).toBe(expected);
+    expect(JSON.stringify(result)).not.toContain(token);
+    expect(f.transport).toHaveBeenCalledTimes(2);
+  });
   it('refuses a destination rejected by SSRF policy and redacts transport exceptions', async () => {
     const f = fixture([]);
     const result = await probePackageFeed(npm, token, {

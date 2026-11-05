@@ -62,49 +62,49 @@ describe('runClaudeCli', () => {
     }
   });
 
-  it.each([false, true])(
-    'records observed host CLI version before dispatch; receipt rejection=%s',
-    async (rejectReceipt) => {
-      const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-host-reviewer-'));
-      const command = path.join(directory, 'claude');
-      const dispatch = path.join(directory, 'dispatch.txt');
-      await fs.writeFile(
+  it.each([
+    false,
+    true,
+  ])('records observed host CLI version before dispatch; receipt rejection=%s', async (rejectReceipt) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'autopod-host-reviewer-'));
+    const command = path.join(directory, 'claude');
+    const dispatch = path.join(directory, 'dispatch.txt');
+    await fs.writeFile(
+      command,
+      '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.9.1 (fixture)"; exit 0; fi\necho dispatched > dispatch.txt\necho fixture-verdict\n',
+      { mode: 0o700 },
+    );
+    const recordHostDispatch = vi.fn(() => {
+      if (rejectReceipt) throw new Error('fixture receipt rejected');
+    });
+    try {
+      const result = runClaudeCli({
+        model: MODEL,
+        input: 'review',
+        timeout: 1000,
         command,
-        '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.9.1 (fixture)"; exit 0; fi\necho dispatched > dispatch.txt\necho fixture-verdict\n',
-        { mode: 0o700 },
-      );
-      const recordHostDispatch = vi.fn(() => {
-        if (rejectReceipt) throw new Error('fixture receipt rejected');
+        spawnOptions: { cwd: directory },
+        recordHostDispatch,
       });
-      try {
-        const result = runClaudeCli({
-          model: MODEL,
-          input: 'review',
-          timeout: 1000,
-          command,
-          spawnOptions: { cwd: directory },
-          recordHostDispatch,
-        });
-        if (rejectReceipt) {
-          await expect(result).rejects.toThrow('fixture receipt rejected');
-          await expect(fs.stat(dispatch)).rejects.toMatchObject({ code: 'ENOENT' });
-        } else {
-          expect((await result).stdout.trim()).toBe('fixture-verdict');
-          expect(await fs.readFile(dispatch, 'utf8')).toBe('dispatched\n');
-        }
-        expect(recordHostDispatch).toHaveBeenCalledWith(
-          expect.objectContaining({
-            model: MODEL,
-            cliPath: await fs.realpath(command),
-            cliVersion: '2.9.1',
-            status: 'checked',
-          }),
-        );
-      } finally {
-        await fs.rm(directory, { recursive: true, force: true });
+      if (rejectReceipt) {
+        await expect(result).rejects.toThrow('fixture receipt rejected');
+        await expect(fs.stat(dispatch)).rejects.toMatchObject({ code: 'ENOENT' });
+      } else {
+        expect((await result).stdout.trim()).toBe('fixture-verdict');
+        expect(await fs.readFile(dispatch, 'utf8')).toBe('dispatched\n');
       }
-    },
-  );
+      expect(recordHostDispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: MODEL,
+          cliPath: await fs.realpath(command),
+          cliVersion: '2.9.1',
+          status: 'checked',
+        }),
+      );
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
 
   it('checks reviewer ownership immediately before host spawn', async () => {
     const { child } = createMockChildProcess();
@@ -125,36 +125,36 @@ describe('runClaudeCli', () => {
     expect(result).toMatchObject({ message: 'review ownership lost' });
   });
 
-  it.each(['timeout', 'maxbuffer'])(
-    'waits for observed exit after %s cancellation',
-    async (kind) => {
-      vi.useFakeTimers();
-      try {
-        const { child, kill } = createMockChildProcess();
-        let result: unknown;
-        const pending = runClaudeCli({
-          model: MODEL,
-          input: '',
-          timeout: 100,
-          maxBuffer: 4,
-          spawnImpl: () => child,
-        }).catch((error: unknown) => {
-          result = error;
-        });
-        if (kind === 'maxbuffer') child.stdout?.emit('data', Buffer.from('too much'));
-        else await vi.advanceTimersByTimeAsync(100);
-        await Promise.resolve();
-        expect(kill).toHaveBeenCalledWith('SIGTERM');
-        expect(result).toBeUndefined();
-        child.emit('exit', null, 'SIGTERM');
-        child.emit('close', null, 'SIGTERM');
-        await pending;
-        expect(result).toMatchObject({ kind });
-      } finally {
-        vi.useRealTimers();
-      }
-    },
-  );
+  it.each([
+    'timeout',
+    'maxbuffer',
+  ])('waits for observed exit after %s cancellation', async (kind) => {
+    vi.useFakeTimers();
+    try {
+      const { child, kill } = createMockChildProcess();
+      let result: unknown;
+      const pending = runClaudeCli({
+        model: MODEL,
+        input: '',
+        timeout: 100,
+        maxBuffer: 4,
+        spawnImpl: () => child,
+      }).catch((error: unknown) => {
+        result = error;
+      });
+      if (kind === 'maxbuffer') child.stdout?.emit('data', Buffer.from('too much'));
+      else await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+      expect(kill).toHaveBeenCalledWith('SIGTERM');
+      expect(result).toBeUndefined();
+      child.emit('exit', null, 'SIGTERM');
+      child.emit('close', null, 'SIGTERM');
+      await pending;
+      expect(result).toMatchObject({ kind });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('reports unconfirmed termination after bounded signal escalation', async () => {
     vi.useFakeTimers();

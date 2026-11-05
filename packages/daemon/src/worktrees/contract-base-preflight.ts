@@ -1,7 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { AutopodError, type RequiredFact } from '@autopod/shared';
+
 const execFileAsync = promisify(execFile);
+
 import type { ContractBaseEvidence } from '../interfaces/worktree-manager.js';
 
 export async function inspectContractBase(

@@ -8,11 +8,11 @@ import {
   applyLegacyMemoryMigration,
   previewLegacyMemoryMigration,
 } from './legacy-memory-migration.js';
-import { applyLegacyProfileMigration } from './legacy-profile-migration-apply.js';
 import {
   type LegacyMigrationBindings,
   previewLegacyProfileMigration,
 } from './legacy-profile-migration.js';
+import { applyLegacyProfileMigration } from './legacy-profile-migration-apply.js';
 import {
   applyLegacyScheduleMigration,
   previewLegacyScheduleMigration,

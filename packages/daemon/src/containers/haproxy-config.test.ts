@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  generateHaproxyConfig,
   HAPROXY_CONNECT_TIMEOUT,
   HAPROXY_LISTEN_PORT,
   HAPROXY_LOG_PORT,
   HAPROXY_TCP_IDLE_TIMEOUT,
-  generateHaproxyConfig,
 } from './haproxy-config.js';
 
 describe('generateHaproxyConfig', () => {

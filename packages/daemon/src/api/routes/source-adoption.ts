@@ -2,6 +2,7 @@ import { AutopodError } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { PodManager } from '../../pods/pod-manager-contracts.js';
+
 const head = z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/);
 /** Durable status survives HTTP loss; repeating POST observes the original request, never relaunches. */
 export function sourceAdoptionRoutes(

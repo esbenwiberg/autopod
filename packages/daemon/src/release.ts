@@ -1,4 +1,5 @@
 import type { DaemonReleaseInfo } from '@autopod/shared';
+
 // Embedded at build time. Never infer a release from the daemon's cwd: deployments
 // can run from a copied directory while that directory's git checkout moves.
 declare const __AUTOPOD_RELEASE__: DaemonReleaseInfo | undefined;

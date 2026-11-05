@@ -4,11 +4,11 @@ import { rowToProfile } from '../profiles/profile-store.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { createConfigurationStore } from './configuration-store.js';
 import { configurationDigest } from './launch-resolver.js';
-import { applyLegacyProfileMigration } from './legacy-profile-migration-apply.js';
 import {
   LEGACY_PROFILE_FIELD_OWNERS,
   previewLegacyProfileMigration,
 } from './legacy-profile-migration.js';
+import { applyLegacyProfileMigration } from './legacy-profile-migration-apply.js';
 
 describe('legacy profile conversion preview', () => {
   let db: Database.Database;

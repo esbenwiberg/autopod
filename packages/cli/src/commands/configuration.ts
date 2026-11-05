@@ -2,10 +2,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import {
   type ConfigurationKind,
-  type LaunchProfile,
   configurationPayloadSchemas,
   deploymentRequestSchema,
   issueWatcherBindingSchema,
+  type LaunchProfile,
 } from '@autopod/shared';
 import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';

@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { TokenCacheContext } from '@azure/msal-node';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MsalFileCachePlugin, deleteMsalCache } from './msal-cache.js';
+import { deleteMsalCache, MsalFileCachePlugin } from './msal-cache.js';
 
 const temporaryDirectories: string[] = [];
 

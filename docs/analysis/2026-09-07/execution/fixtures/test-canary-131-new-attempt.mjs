@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { AzureSandboxApiClient as ActualClient } from '/private/tmp/autopod-canary-127-candidate.mjs';
+
 const p = JSON.parse(
   fs.readFileSync(
     '/private/tmp/autopod-durable-execution/docs/analysis/2026-09-07/execution/fixtures/canary-131-contract.json',

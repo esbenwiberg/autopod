@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { join, relative } from 'node:path';
@@ -14,14 +14,14 @@ import {
   insertTestProfile,
 } from '../../packages/daemon/src/test-utils/mock-helpers.ts';
 import {
+  assertPageBudget,
+  assertTraversal,
   PAGE_SIZE,
   ROUNDS,
   SIZES,
+  summarize,
   TIE_SIZE,
   UNRELATED_MARKER,
-  assertPageBudget,
-  assertTraversal,
-  summarize,
 } from './fleet-list-protocol.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));

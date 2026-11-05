@@ -8,6 +8,7 @@ import {
   selectMemoryBriefingForPod,
 } from './admission-memory-briefing.js';
 import { createMemoryUsageRepository } from './memory-usage-repository.js';
+
 describe('complete original memory briefing', () => {
   it('uses the actual default factory binding and forwards a usable reviewer to memory ranking', async () => {
     const s = createMemoryBriefingSdkFixture();

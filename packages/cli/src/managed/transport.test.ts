@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { managedRequest } from './transport.js';
+
 const binding = {
   endpoint: 'https://daemon.test',
   issuer: 'https://issuer/tenant/',

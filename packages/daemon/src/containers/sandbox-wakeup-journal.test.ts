@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import {
+  createSandboxWakeupFixture,
   TEST_WAKEUP_ID as ID,
   TEST_WAKEUP_KEY as KEY,
-  createSandboxWakeupFixture,
 } from '../test-utils/sandbox-wakeup-helpers.js';
 import { createSandboxWakeupJournal } from './sandbox-wakeup-journal.js';
 

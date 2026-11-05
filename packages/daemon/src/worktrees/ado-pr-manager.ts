@@ -30,10 +30,10 @@ import {
 } from './merge-source-identity.js';
 import { buildPrBody } from './pr-body-builder.js';
 import {
-  type PrNarrativeResult,
-  type PrTitleResult,
   generatePrNarrative,
   generatePrTitle,
+  type PrNarrativeResult,
+  type PrTitleResult,
 } from './pr-description-generator.js';
 
 /**

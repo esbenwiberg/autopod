@@ -7,8 +7,8 @@ import type {
   ProvisioningResult,
 } from './provisioning-ports.js';
 import { createProvisioningSessionMaterials } from './provisioning-session-materials.js';
-import { createProvisioningWorkspacePopulation } from './provisioning-workspace-population.js';
 import { createProvisioningWorkspace } from './provisioning-workspace.js';
+import { createProvisioningWorkspacePopulation } from './provisioning-workspace-population.js';
 
 type Captured = Pick<
   ProvisioningCaptured,

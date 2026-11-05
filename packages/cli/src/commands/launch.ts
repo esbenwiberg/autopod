@@ -6,7 +6,7 @@ import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { saveLaunchReceipt } from '../config/launch-store.js';
 import { parseTokenBudget } from './budget.js';
-import { type LaunchFlags, buildLaunchRequest } from './launch-request.js';
+import { buildLaunchRequest, type LaunchFlags } from './launch-request.js';
 import { validateEffectiveLaunchSources, validateLaunchSources } from './launch-sources.js';
 import { type LaunchTaskFlags, readLaunchTask } from './launch-task.js';
 

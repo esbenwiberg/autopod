@@ -314,7 +314,7 @@ const createProfileBaseSchema = z.object({
     .string()
     .min(1)
     .max(64)
-    .regex(/^[a-z0-9\-]+$/, 'Profile name must be lowercase alphanumeric with hyphens'),
+    .regex(/^[a-z0-9-]+$/, 'Profile name must be lowercase alphanumeric with hyphens'),
   repoUrl: z.string().url().nullable().default(null),
   defaultBranch: z.string().nullable().default('main'),
   template: z
@@ -428,7 +428,7 @@ const createProfileBaseSchema = z.object({
     .string()
     .min(1)
     .max(64)
-    .regex(/^[a-z0-9\-]+$/, 'Label prefix must be lowercase alphanumeric with hyphens')
+    .regex(/^[a-z0-9-]+$/, 'Label prefix must be lowercase alphanumeric with hyphens')
     .nullable()
     .default('autopod'),
   pimActivations: z.array(pimActivationConfigSchema).nullable().default(null),

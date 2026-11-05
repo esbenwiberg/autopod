@@ -7,8 +7,8 @@ import {
 } from '../test-utils/termination-reconciliation-helpers.js';
 import { assertTaskExecutionTerminationVerified } from './task-execution-ledger.js';
 import {
-  WORKER_RETRY_BACKOFFS_MS,
   unavailableWorkerInputs,
+  WORKER_RETRY_BACKOFFS_MS,
   workerBindingHash,
 } from './worker-retry-history.js';
 
@@ -75,18 +75,19 @@ describe('operator termination reconciliation', () => {
     ).toThrow('immutable');
   });
 
-  it.each(['running', 'stopped', 'unknown'] as const)(
-    'refuses %s (not proof of exit)',
-    async (status) => {
-      const ctx = fixture();
-      vi.mocked(ctx.containerManager.getStatus).mockResolvedValue(status);
-      await expect(
-        ctx.service.reconcileTermination(ctx.podId, ctx.runId, RECOVERY_REASON, RECOVERY_ACTOR),
-      ).rejects.toThrow('only confirmed deletion');
-      expect(ctx.ledger.terminationReconciliations(ctx.podId).receipts).toEqual([]);
-      expect(ctx.ledger.hasActiveRun(ctx.podId)).toBe(true);
-    },
-  );
+  it.each([
+    'running',
+    'stopped',
+    'unknown',
+  ] as const)('refuses %s (not proof of exit)', async (status) => {
+    const ctx = fixture();
+    vi.mocked(ctx.containerManager.getStatus).mockResolvedValue(status);
+    await expect(
+      ctx.service.reconcileTermination(ctx.podId, ctx.runId, RECOVERY_REASON, RECOVERY_ACTOR),
+    ).rejects.toThrow('only confirmed deletion');
+    expect(ctx.ledger.terminationReconciliations(ctx.podId).receipts).toEqual([]);
+    expect(ctx.ledger.hasActiveRun(ctx.podId)).toBe(true);
+  });
 
   it('refuses backend failure and bounded lookup timeout without releasing ownership', async () => {
     const ctx = fixture();
@@ -105,25 +106,26 @@ describe('operator termination reconciliation', () => {
     expect(ctx.ledger.terminationReconciliations(ctx.podId).receipts).toEqual([]);
   });
 
-  it.each(['generation', 'resource', 'status', 'active'] as const)(
-    'rechecks %s after async deletion observation',
-    async (change) => {
-      const ctx = fixture();
-      vi.mocked(ctx.containerManager.getStatus).mockImplementation(async () => {
-        if (change === 'generation') ctx.podRepo.incrementLifecycleGeneration(ctx.podId);
-        if (change === 'resource')
-          ctx.podRepo.update(ctx.podId, { containerId: 'another-resource' });
-        if (change === 'status') ctx.podRepo.update(ctx.podId, { status: 'running' });
-        if (change === 'active') ctx.isAgentActive.mockReturnValue(true);
-        return 'deleted';
-      });
-      await expect(
-        ctx.service.reconcileTermination(ctx.podId, ctx.runId, RECOVERY_REASON, RECOVERY_ACTOR),
-      ).rejects.toThrow();
-      expect(ctx.ledger.hasActiveRun(ctx.podId)).toBe(true);
-      expect(ctx.ledger.terminationReconciliations(ctx.podId).receipts).toEqual([]);
-    },
-  );
+  it.each([
+    'generation',
+    'resource',
+    'status',
+    'active',
+  ] as const)('rechecks %s after async deletion observation', async (change) => {
+    const ctx = fixture();
+    vi.mocked(ctx.containerManager.getStatus).mockImplementation(async () => {
+      if (change === 'generation') ctx.podRepo.incrementLifecycleGeneration(ctx.podId);
+      if (change === 'resource') ctx.podRepo.update(ctx.podId, { containerId: 'another-resource' });
+      if (change === 'status') ctx.podRepo.update(ctx.podId, { status: 'running' });
+      if (change === 'active') ctx.isAgentActive.mockReturnValue(true);
+      return 'deleted';
+    });
+    await expect(
+      ctx.service.reconcileTermination(ctx.podId, ctx.runId, RECOVERY_REASON, RECOVERY_ACTOR),
+    ).rejects.toThrow();
+    expect(ctx.ledger.hasActiveRun(ctx.podId)).toBe(true);
+    expect(ctx.ledger.terminationReconciliations(ctx.podId).receipts).toEqual([]);
+  });
 
   it('refuses automation, weak reasons and live in-memory workers before probing', async () => {
     const ctx = fixture();

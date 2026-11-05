@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createConfigurationStore } from '../configuration/configuration-store.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
 import { createAdmissionFixture, flushAdmission } from '../test-utils/admission-queries-helpers.js';
+
 describe('resolved launch admission owner', () => {
   it('stores immutable configuration and creation metadata, publishing only after commit and retaining it through SQLite reopen', async () => {
     const f = createAdmissionFixture(true);

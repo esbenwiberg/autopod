@@ -130,10 +130,7 @@ describe('read-only settled artifact resume observation', () => {
       ),
       false,
     ],
-  ] as const)(
-    'refuses %s rather than inventing a completed effect',
-    (_label, value, history, active) => {
-      expect(observeArtifactResume(value, [...history], active).state).toBe('unavailable');
-    },
-  );
+  ] as const)('refuses %s rather than inventing a completed effect', (_label, value, history, active) => {
+    expect(observeArtifactResume(value, [...history], active).state).toBe('unavailable');
+  });
 });

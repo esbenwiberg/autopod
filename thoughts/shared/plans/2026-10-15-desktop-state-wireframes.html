@@ -1,5 +1,5 @@
 <div id="autopod-reliability-wireframes">
-  <div class="viz-controls" aria-label="Wireframe preview controls">
+  <section class="viz-controls" aria-label="Wireframe preview controls">
     <label class="form-label">Scenario
       <select class="form-select" id="ap-preview-state">
         <option value="live">Connected</option>
@@ -11,15 +11,15 @@
         <option value="reply">Reply draft while disconnected</option>
       </select>
     </label>
-  </div>
-  <div class="viz-carousel" aria-label="Autopod state wireframes">
+  </section>
+  <section class="viz-carousel" aria-label="Autopod state wireframes">
     <section data-variant="Inline status" aria-label="Inline status wireframe">
       <div class="ap-window" data-layout="inline"></div>
     </section>
     <section data-variant="Action panel" aria-label="Action panel wireframe" hidden>
       <div class="ap-window" data-layout="panel"></div>
     </section>
-  </div>
+  </section>
   <template id="ap-window-template">
     <div class="ap-titlebar"><span aria-hidden="true">● ● ●</span><span>Autopod</span><span class="ap-subtle">Wireframe</span></div>
     <div class="ap-shell">
@@ -33,7 +33,7 @@
         <div class="ap-heading"><div><div class="ap-subtle">autopod · steady-otter</div><h2>Restore interrupted checkout</h2><div class="ap-statusline"><span class="ap-status">Running</span><span class="ap-freshness">Confirmed just now</span></div></div><button class="ap-action cursor-interaction" type="button">Pause</button></div>
         <div class="ap-body-grid">
           <div class="ap-content">
-            <div class="ap-tabs" aria-label="Existing detail tabs"><span class="ap-current-tab">Overview</span><span>Work</span><span>Validation</span><span>Readiness</span><span>Evidence</span><span>Diff</span><span>Logs</span></div>
+            <section class="ap-tabs" aria-label="Existing detail tabs"><span class="ap-current-tab">Overview</span><span>Work</span><span>Validation</span><span>Readiness</span><span>Evidence</span><span>Diff</span><span>Logs</span></section>
             <section class="ap-situation" aria-live="polite"><div class="ap-situation-title">Implementing the requested repair</div><p class="ap-situation-detail">The worker is updating recovery behavior. No input is needed.</p></section>
             <dl class="ap-facts"><div><dt>Work</dt><dd>Branch created · changes in progress</dd></div><div><dt>Validation</dt><dd class="ap-validation">Not started for this attempt</dd></div><div><dt>Last observed activity</dt><dd>Editing the recovery handler</dd></div></dl>
             <section class="ap-reply" hidden><label>Reply to the pending question<textarea rows="3" aria-label="Reply draft">Keep the existing approval requirement.</textarea></label><div class="ap-reply-footer"><span>Draft retained on this device</span><button type="button" disabled>Send when connected</button></div></section>
@@ -119,10 +119,12 @@
       windows.forEach(other => { if(other !== surface) other.querySelector('textarea').value = draft; });
       persist();
     });
-    surface.querySelectorAll('.ap-action,.ap-panel-action').forEach(button => button.addEventListener('click', () => {
-      select.value = select.value === 'confirmed' ? 'resumePending' : 'pending';
-      render(); persist();
-    }));
+    surface.querySelectorAll('.ap-action,.ap-panel-action').forEach(button => {
+      button.addEventListener('click', () => {
+        select.value = select.value === 'confirmed' ? 'resumePending' : 'pending';
+        render(); persist();
+      });
+    });
   });
   function render() {
     const s = states[select.value] || states.live;

@@ -5,6 +5,7 @@ import {
   AzureSandboxApiClient,
   validateRegistryFiles,
 } from './autopod-canary-nuget-131-candidate.mjs';
+
 const root = '/private/tmp/autopod-durable-execution';
 if (process.argv[2] !== '--execute-approved-nuget131')
   throw new Error('explicit_execution_flag_required');

@@ -160,41 +160,41 @@ describe('reviewer launch ownership', () => {
     }
   });
 
-  it.each(['probe-rejected', 'ownership-lost'] as const)(
-    'does not launch Claude after %s',
-    async (failure) => {
-      const cm = containerManager();
-      const beforeLaunch = vi.fn(async () => {
-        expect(cm.writeFile).toHaveBeenCalled();
-        if (failure === 'probe-rejected') throw new Error('review probe rejected');
-        return () => {
-          throw new Error('review ownership lost');
-        };
-      });
-      await expect(
-        runContainerReviewer({
-          podId: 'pod',
-          containerId: 'container',
-          containerManager: cm,
-          profile: profile({}),
-          model: 'review-model',
-          prompt: 'review',
-          timeout: 1000,
-          beforeLaunch,
-        }),
-      ).rejects.toThrow(/review probe rejected|review ownership lost/);
-      expect(beforeLaunch).toHaveBeenCalledWith({
+  it.each([
+    'probe-rejected',
+    'ownership-lost',
+  ] as const)('does not launch Claude after %s', async (failure) => {
+    const cm = containerManager();
+    const beforeLaunch = vi.fn(async () => {
+      expect(cm.writeFile).toHaveBeenCalled();
+      if (failure === 'probe-rejected') throw new Error('review probe rejected');
+      return () => {
+        throw new Error('review ownership lost');
+      };
+    });
+    await expect(
+      runContainerReviewer({
         podId: 'pod',
         containerId: 'container',
-        runtime: 'claude',
+        containerManager: cm,
+        profile: profile({}),
         model: 'review-model',
-      });
-      expect(cm.execStreaming).not.toHaveBeenCalled();
-      expect(vi.mocked(cm.execInContainer).mock.calls.every((call) => call[1][0] === 'rm')).toBe(
-        true,
-      );
-    },
-  );
+        prompt: 'review',
+        timeout: 1000,
+        beforeLaunch,
+      }),
+    ).rejects.toThrow(/review probe rejected|review ownership lost/);
+    expect(beforeLaunch).toHaveBeenCalledWith({
+      podId: 'pod',
+      containerId: 'container',
+      runtime: 'claude',
+      model: 'review-model',
+    });
+    expect(cm.execStreaming).not.toHaveBeenCalled();
+    expect(vi.mocked(cm.execInContainer).mock.calls.every((call) => call[1][0] === 'rm')).toBe(
+      true,
+    );
+  });
 });
 
 describe('resolveContainerReviewer', () => {

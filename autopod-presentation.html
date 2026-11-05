@@ -1332,10 +1332,10 @@
   </p>
 
   <div class="hero-cta">
-    <button class="btn-primary" onclick="document.getElementById('lifecycle').scrollIntoView({behavior:'smooth'})">
+    <button type="button" class="btn-primary" onclick="document.getElementById('lifecycle').scrollIntoView({behavior:'smooth'})">
       See how it works
     </button>
-    <button class="btn-ghost" onclick="document.getElementById('compare').scrollIntoView({behavior:'smooth'})">
+    <button type="button" class="btn-ghost" onclick="document.getElementById('compare').scrollIntoView({behavior:'smooth'})">
       Compare vs. alternatives
     </button>
   </div>
@@ -2222,7 +2222,7 @@
     });
   }, { threshold: 0.4 });
 
-  sections.forEach(s => sectionObserver.observe(s));
+  sections.forEach(s => { sectionObserver.observe(s); });
 
   // State bubble interactive hover labels
   const stateInfo = {

@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { aggregateCost, parseDays } from './cost-aggregation.js';
 import { computePodCostBreakdown } from './pod-cost-breakdown.js';
-import { createPodRepository } from './pod-repository.js';
 import type { PodRepository } from './pod-repository.js';
+import { createPodRepository } from './pod-repository.js';
 
 // ---------------------------------------------------------------------------
 // Helper to insert a minimal terminal pod directly via SQL
@@ -551,21 +551,23 @@ describe('aggregateCost', () => {
     { currentCost: 103, priorCost: 100, direction: 'flat' as const, value: 3 },
     { currentCost: 0, priorCost: 0, direction: 'flat' as const, value: 0 },
     { currentCost: 50, priorCost: 0, direction: 'up' as const, value: 50 },
-  ])(
-    'prior=$priorCost, current=$currentCost → direction=$direction',
-    ({ currentCost, priorCost, direction, value }) => {
-      // Insert prior pod in prior window (just before windowStart)
-      if (priorCost > 0) {
-        insertPod(db, { costUsd: priorCost, completedAt: msToIso(WINDOW_START_MS - 1) });
-      }
-      if (currentCost > 0) {
-        insertPod(db, { costUsd: currentCost, completedAt: msToIso(WINDOW_START_MS + 1) });
-      }
-      const result = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
-      expect(result.deltaVsPrior.direction).toBe(direction);
-      expect(result.deltaVsPrior.value).toBeCloseTo(value);
-    },
-  );
+  ])('prior=$priorCost, current=$currentCost → direction=$direction', ({
+    currentCost,
+    priorCost,
+    direction,
+    value,
+  }) => {
+    // Insert prior pod in prior window (just before windowStart)
+    if (priorCost > 0) {
+      insertPod(db, { costUsd: priorCost, completedAt: msToIso(WINDOW_START_MS - 1) });
+    }
+    if (currentCost > 0) {
+      insertPod(db, { costUsd: currentCost, completedAt: msToIso(WINDOW_START_MS + 1) });
+    }
+    const result = aggregateCost({ podRepo, now: nowFn }, { days: 30 });
+    expect(result.deltaVsPrior.direction).toBe(direction);
+    expect(result.deltaVsPrior.value).toBeCloseTo(value);
+  });
 });
 
 describe('computePodCostBreakdown', () => {

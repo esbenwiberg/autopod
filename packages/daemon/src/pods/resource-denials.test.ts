@@ -1,6 +1,7 @@
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { createResourceFixture, deferred } from '../test-utils/resource-helpers.js';
+
 describe('resource denial receiver', () => {
   it('uses the real stream parser to persist denial events and deletes handle authority before stopping', async () => {
     const f = createResourceFixture();

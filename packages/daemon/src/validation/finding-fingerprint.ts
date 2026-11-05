@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { ValidationFinding, ValidationResult } from '@autopod/shared';
-import type { StructuredReviewFinding } from '@autopod/shared';
+import type { StructuredReviewFinding, ValidationFinding, ValidationResult } from '@autopod/shared';
 
 /**
  * Normalizes text and produces a stable 12-hex-char fingerprint.

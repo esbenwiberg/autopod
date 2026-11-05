@@ -4,11 +4,13 @@ import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-help
 import { createEscalationRepository } from './escalation-repository.js';
 import { createEventBus } from './event-bus.js';
 import { createEventRepository } from './event-repository.js';
-import { type NewPod, createPodRepository } from './pod-repository.js';
+import { createPodRepository, type NewPod } from './pod-repository.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 import { createQualityScoreRecorder } from './quality-score-recorder.js';
-import { createQualityScoreRepository } from './quality-score-repository.js';
-import { QUALITY_SCORE_ALGORITHM_VERSION } from './quality-score-repository.js';
+import {
+  createQualityScoreRepository,
+  QUALITY_SCORE_ALGORITHM_VERSION,
+} from './quality-score-repository.js';
 
 const POD_ID = 'pod-rec-01';
 

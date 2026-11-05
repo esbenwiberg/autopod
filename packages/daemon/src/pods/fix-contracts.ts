@@ -1,5 +1,6 @@
 import type { EffectiveLaunchConfig, Pod, PodStatus } from '@autopod/shared';
 import type { Logger } from 'pino';
+import type { DerivedLaunchInput } from '../configuration/derive-launch.js';
 import type { PrManager, PrMergeStatus, WorktreeManager } from '../interfaces/index.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { GitCredentialError } from '../worktrees/local-worktree-manager.js';
@@ -8,8 +9,6 @@ import type { EventBus } from './event-bus.js';
 import type { FixFeedbackRepository } from './fix-feedback-repository.js';
 import type { PodRepository, PodUpdates } from './pod-repository.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
-
-import type { DerivedLaunchInput } from '../configuration/derive-launch.js';
 
 export interface FixProviderLiveDependencies {
   providerAttemptRepo?: Pick<ProviderAttemptRepository, 'list'>;

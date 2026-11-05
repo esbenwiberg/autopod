@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApprovalFixture } from '../test-utils/approval-helpers.js';
 import { createPassingValidationResult } from '../test-utils/mock-helpers.js';
 import { createEventRepository } from './event-repository.js';
+
 const fixtures: ReturnType<typeof createApprovalFixture>[] = [];
 function fixture(disk = false) {
   const f = createApprovalFixture(disk);

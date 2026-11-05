@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { type Dirent, createReadStream } from 'node:fs';
+import { createReadStream, type Dirent } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { AutopodError, CONTAINER_HOME_DIR } from '@autopod/shared';
 import type {
   AgentEvent,
   ExecutionTarget,
@@ -15,6 +14,7 @@ import type {
   SpawnConfig,
   TaskRetryOutcome,
 } from '@autopod/shared';
+import { AutopodError, CONTAINER_HOME_DIR } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import type { EventBus } from '../pods/event-bus.js';

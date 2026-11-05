@@ -1,5 +1,5 @@
 import type { DataSanitizationConfig, QuarantineConfig } from '../types/actions.js';
-import { type ThreatIndicator, quarantine } from './quarantine.js';
+import { quarantine, type ThreatIndicator } from './quarantine.js';
 import { sanitize, sanitizeDeep } from './sanitize.js';
 
 export interface ProcessedContent {

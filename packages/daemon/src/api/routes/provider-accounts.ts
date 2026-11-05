@@ -1,9 +1,9 @@
 import {
   AutopodError,
-  PROVIDER_CATALOG,
-  type PublicProviderCatalog,
   createProviderAccountSchemas,
   importProviderAccountFromProfileSchema,
+  PROVIDER_CATALOG,
+  type PublicProviderCatalog,
   providerAccountIdSchema,
 } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';

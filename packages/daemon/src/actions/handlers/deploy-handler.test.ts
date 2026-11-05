@@ -3,7 +3,7 @@ import type { ActionDefinition, Pod, Profile } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { PodRepository } from '../../pods/pod-repository.js';
 import type { ProfileStore } from '../../profiles/index.js';
-import { type DeployScriptRunner, createDeployHandler } from './deploy-handler.js';
+import { createDeployHandler, type DeployScriptRunner } from './deploy-handler.js';
 
 function sha256(content: string) {
   return createHash('sha256').update(content, 'utf8').digest('hex');

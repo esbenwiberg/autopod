@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createWorkspaceFixture } from '../test-utils/workspace-recovery-helpers.js';
+
 describe('workspace read-only artifact observation', () => {
   it('returns unavailable with missing evidence or pending guidance and never resumes', () => {
     const f = createWorkspaceFixture();

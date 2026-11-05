@@ -1,15 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  allocateHostPort,
   COMMIT_POLL_INTERVAL_MS,
   CONTAINER_APP_PORT,
   CONTAINER_CLEANUP_TIMEOUT_MS,
-  PREVIEW_AUTO_STOP_MS,
-  allocateHostPort,
   hostnameFromUrl,
   nativePreviewEmails,
+  PREVIEW_AUTO_STOP_MS,
   parsePreviewPort,
   portFromUrl,
 } from './resource-policy.js';
+
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();

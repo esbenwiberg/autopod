@@ -4,13 +4,13 @@ import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ProfileStore } from '../profiles/index.js';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
+import type { MaxCredentialLineage, ProviderEnvResult } from '../providers/index.js';
 import {
   buildProviderEnv,
   persistOpenAiAuthJson,
   persistPiAuthJson,
   persistRefreshedCredentials,
 } from '../providers/index.js';
-import type { MaxCredentialLineage, ProviderEnvResult } from '../providers/index.js';
 import type { PodRepository } from './pod-repository.js';
 
 interface WorkerRuntimeCredentialLiveDependencies {

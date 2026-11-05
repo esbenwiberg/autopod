@@ -2,20 +2,20 @@ import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   renameSync,
   rmSync,
-  statSync,
   statfsSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import type { Logger } from 'pino';
 import {
-  type BackupReceipt,
   assertBackupIntegrity,
+  type BackupReceipt,
   databaseIdentity,
   databaseWatermark,
   fileChecksum,

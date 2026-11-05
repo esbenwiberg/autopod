@@ -14,6 +14,7 @@ import { TaskMarkdownCards } from '../components/TaskMarkdownCards.js';
 import { TaskRetryPanel } from '../components/TaskRetryPanel.js';
 import { type StoredValidation, ValidationSummary } from '../components/ValidationSummary.js';
 import { ApiError, AuthRequiredError, apiFetch } from '../lib/api.js';
+import { withOccurrenceKeys } from '../lib/occurrence-keys.js';
 import { progressDetail, progressLabel, taskTitle } from '../lib/pod-display.js';
 import { ACTIVITY_LIMIT, usePodsStore } from '../store/pods.js';
 
@@ -250,8 +251,8 @@ function ProgressPlan({ pod }: { pod: Pod }): JSX.Element | null {
           <div className="info-title">{pod.plan.summary}</div>
           {pod.plan.steps.length > 0 ? (
             <ol className="plan-steps">
-              {pod.plan.steps.map((step, index) => (
-                <li key={`${index}-${step}`}>{step.replace(/^\d+\.\s*/, '')}</li>
+              {withOccurrenceKeys(pod.plan.steps, String).map(({ item: step, key }) => (
+                <li key={key}>{step.replace(/^\d+\.\s*/, '')}</li>
               ))}
             </ol>
           ) : null}

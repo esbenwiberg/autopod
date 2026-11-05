@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
-import { SOURCE_GIT_INSPECTION, parseInspectedSource } from './source-git-inspection.js';
+import { parseInspectedSource, SOURCE_GIT_INSPECTION } from './source-git-inspection.js';
+
 const exec = promisify(execFile);
 const roots: string[] = [];
 afterEach(async () => {
@@ -61,14 +62,14 @@ describe('fixed source Git inspection', () => {
     await writeFile(path.join(f.root, 'source.txt'), 'human work');
     expect((await f.inspect()).worktreeClean).toBe(false);
   });
-  it.each(['--assume-unchanged', '--skip-worktree'])(
-    'refuses hidden index flags %s',
-    async (flag) => {
-      const f = await fixture();
-      await f.git('update-index', flag, 'source.txt');
-      await expect(f.inspect()).rejects.toThrow();
-    },
-  );
+  it.each([
+    '--assume-unchanged',
+    '--skip-worktree',
+  ])('refuses hidden index flags %s', async (flag) => {
+    const f = await fixture();
+    await f.git('update-index', flag, 'source.txt');
+    await expect(f.inspect()).rejects.toThrow();
+  });
   it('refuses sparse configuration even before skip-worktree flags are materialized', async () => {
     const f = await fixture();
     await f.git('config', 'core.sparseCheckout', 'true');

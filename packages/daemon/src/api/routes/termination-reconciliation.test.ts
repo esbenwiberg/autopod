@@ -49,19 +49,19 @@ describe('termination reconciliation routes', () => {
     expect(ctx.containerManager.getStatus).toHaveBeenCalledTimes(1);
   });
 
-  it.each([undefined, 'Bearer worker-hmac-token'])(
-    'refuses absent/worker credentials: %s',
-    async (authorization) => {
-      const result = await app.inject({
-        method: 'POST',
-        url: path(ctx.podId),
-        headers: authorization ? { authorization } : {},
-        payload: { runId: ctx.runId, reason: RECOVERY_REASON },
-      });
-      expect(result.statusCode).toBe(401);
-      expect(ctx.containerManager.getStatus).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    undefined,
+    'Bearer worker-hmac-token',
+  ])('refuses absent/worker credentials: %s', async (authorization) => {
+    const result = await app.inject({
+      method: 'POST',
+      url: path(ctx.podId),
+      headers: authorization ? { authorization } : {},
+      payload: { runId: ctx.runId, reason: RECOVERY_REASON },
+    });
+    expect(result.statusCode).toBe(401);
+    expect(ctx.containerManager.getStatus).not.toHaveBeenCalled();
+  });
 
   it.each([
     { actor: { type: 'human', userId: 'spoofed-operator' } },

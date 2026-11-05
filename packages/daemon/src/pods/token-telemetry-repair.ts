@@ -1,4 +1,4 @@
-import { type Dirent, createReadStream } from 'node:fs';
+import { createReadStream, type Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';

@@ -38,51 +38,51 @@ it('reports missing duration for a completed legacy worker instead of implying c
   }
 });
 
-it.each([false, true])(
-  'keeps duration coverage through deletion and disk reopen (unsafe sum: %s)',
-  (overflow) => {
-    const ctx = createTestContext();
-    const dir = mkdtempSync(join(tmpdir(), 'duration-evidence-'));
-    let reopened: Database.Database | undefined;
-    try {
-      const manager = createPodManager(ctx.deps);
-      const pod = manager.createSession(
-        { profileName: 'test-profile', task: 'Keep time evidence' },
-        'operator',
-      );
-      const values = overflow
-        ? [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER]
-        : [10, 0, null, -2, 'corrupt', 1.5, 1e200];
-      values.forEach((value, index) =>
-        ctx.db
-          .prepare(`INSERT INTO task_retry_attempts(id,task_id,pod_id,execution_id,generation,stage,identity,binding_hash,admitted_at,not_before,started_at,ended_at,outcome,measured_duration_ms)
+it.each([
+  false,
+  true,
+])('keeps duration coverage through deletion and disk reopen (unsafe sum: %s)', (overflow) => {
+  const ctx = createTestContext();
+  const dir = mkdtempSync(join(tmpdir(), 'duration-evidence-'));
+  let reopened: Database.Database | undefined;
+  try {
+    const manager = createPodManager(ctx.deps);
+    const pod = manager.createSession(
+      { profileName: 'test-profile', task: 'Keep time evidence' },
+      'operator',
+    );
+    const values = overflow
+      ? [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER]
+      : [10, 0, null, -2, 'corrupt', 1.5, 1e200];
+    values.forEach((value, index) => {
+      ctx.db
+        .prepare(`INSERT INTO task_retry_attempts(id,task_id,pod_id,execution_id,generation,stage,identity,binding_hash,admitted_at,not_before,started_at,ended_at,outcome,measured_duration_ms)
       SELECT ?,task_id,pod_id,execution_id,1,'validation','{}','binding','2026-09-08','2026-09-08','2026-09-08','2026-09-08','pass',? FROM task_executions WHERE pod_id=?`)
-          .run(`duration-${index}`, value, pod.id),
-      );
-      const before = ctx.podRepo.taskRetries?.state(pod.id);
-      expect(before).toMatchObject({
-        measuredDurationMs: overflow ? null : 10,
-        durationEvidence: {
-          measuredRecordCount: 2,
-          unavailableRecordCount: overflow ? 0 : 5,
-          pendingRecordCount: 0,
-          additiveAcrossStages: false,
-        },
-      });
-      if (!overflow) expect(before?.latest?.measuredDurationMs).toBeNull();
-      ctx.podRepo.delete(pod.id);
-      const file = join(dir, 'state.db');
-      writeFileSync(file, ctx.db.serialize());
-      reopened = new Database(file);
-      expect(createPodRepository(reopened).taskRetries?.state(pod.id)).toEqual(before);
-      expect(reopened.pragma('integrity_check', { simple: true })).toBe('ok');
-    } finally {
-      reopened?.close();
-      ctx.db.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  },
-);
+        .run(`duration-${index}`, value, pod.id);
+    });
+    const before = ctx.podRepo.taskRetries?.state(pod.id);
+    expect(before).toMatchObject({
+      measuredDurationMs: overflow ? null : 10,
+      durationEvidence: {
+        measuredRecordCount: 2,
+        unavailableRecordCount: overflow ? 0 : 5,
+        pendingRecordCount: 0,
+        additiveAcrossStages: false,
+      },
+    });
+    if (!overflow) expect(before?.latest?.measuredDurationMs).toBeNull();
+    ctx.podRepo.delete(pod.id);
+    const file = join(dir, 'state.db');
+    writeFileSync(file, ctx.db.serialize());
+    reopened = new Database(file);
+    expect(createPodRepository(reopened).taskRetries?.state(pod.id)).toEqual(before);
+    expect(reopened.pragma('integrity_check', { simple: true })).toBe('ok');
+  } finally {
+    reopened?.close();
+    ctx.db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 it('separates a pending reservation from measured zero and unavailable settled evidence', () => {
   const ctx = createTestContext();

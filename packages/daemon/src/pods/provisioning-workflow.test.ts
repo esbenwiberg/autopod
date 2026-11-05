@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createProvisioningFixture } from '../test-utils/provisioning-helpers.js';
 import { AGENT_ENV_PATH, AGENT_SHIM_PATH } from './provisioning-runtime-files.js';
+
 const fixtures: ReturnType<typeof createProvisioningFixture>[] = [];
 function fixture(disk = false) {
   const f = createProvisioningFixture(disk);

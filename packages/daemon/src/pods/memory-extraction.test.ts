@@ -3,9 +3,9 @@ import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MemoryReviewer } from '../providers/memory-reviewer.js';
 import {
-  LESSON_POTENTIAL_THRESHOLD,
   computeLessonPotential,
   extractCandidate,
+  LESSON_POTENTIAL_THRESHOLD,
 } from './memory-extraction.js';
 
 const logger = pino({ level: 'silent' });

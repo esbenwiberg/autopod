@@ -124,38 +124,38 @@ describe('explicit already-completed checkpoint failure reconciliation', () => {
     ).rejects.toThrow();
     expect(f.recovery.list(f.podId)[0]?.reconciled).toBeNull();
   });
-  it.each(['pass', 'unverified-exit'] as const)(
-    'does not reinterpret %s evidence as a failed completed outcome',
-    async (kind) => {
-      const f = await fixture();
-      const result = { ...f.pod().lastValidationResult! };
-      if (kind === 'pass') result.overall = 'pass';
-      else
-        result.infrastructureFailure = {
-          phase: 'test',
-          code: 'EXEC_EXIT_UNVERIFIED',
-          retryable: false,
-          message: 'Unknown replacement exit',
-          execution: { cause: 'timeout', cleanup: 'failed', timeoutMs: 900000 },
-        };
-      // Simulate projection drift; immutable dispatch/result rows remain untouched.
-      f.ctx.db
-        .prepare('UPDATE pods SET last_validation_result=? WHERE id=?')
-        .run(JSON.stringify(result), f.podId);
-      await expect(
-        f.recovery.reconcileOutcome(
-          f.podId,
-          f.input.id,
-          {
-            ...f.reconciliation,
-            expectedResultHash: checkpointHash(result),
-          },
-          f.actor,
-        ),
-      ).rejects.toThrow();
-      expect(f.recovery.list(f.podId)[0]?.reconciled).toBeNull();
-    },
-  );
+  it.each([
+    'pass',
+    'unverified-exit',
+  ] as const)('does not reinterpret %s evidence as a failed completed outcome', async (kind) => {
+    const f = await fixture();
+    const result = { ...f.pod().lastValidationResult! };
+    if (kind === 'pass') result.overall = 'pass';
+    else
+      result.infrastructureFailure = {
+        phase: 'test',
+        code: 'EXEC_EXIT_UNVERIFIED',
+        retryable: false,
+        message: 'Unknown replacement exit',
+        execution: { cause: 'timeout', cleanup: 'failed', timeoutMs: 900000 },
+      };
+    // Simulate projection drift; immutable dispatch/result rows remain untouched.
+    f.ctx.db
+      .prepare('UPDATE pods SET last_validation_result=? WHERE id=?')
+      .run(JSON.stringify(result), f.podId);
+    await expect(
+      f.recovery.reconcileOutcome(
+        f.podId,
+        f.input.id,
+        {
+          ...f.reconciliation,
+          expectedResultHash: checkpointHash(result),
+        },
+        f.actor,
+      ),
+    ).rejects.toThrow();
+    expect(f.recovery.list(f.podId)[0]?.reconciled).toBeNull();
+  });
   it('rejects frozen configuration drift and a missing exact immutable dispatch', async () => {
     const f = await fixture();
     const execution = f.deps.executionForPod;

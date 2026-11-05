@@ -16,8 +16,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ExecOptions, ExecResult } from '../interfaces/container-manager.js';
 import { createMockContainerManager } from '../test-utils/mock-helpers.js';
 import {
-  FILE_OBSERVATION_INTERVAL_MS,
   createWorkspaceFileObserver,
+  FILE_OBSERVATION_INTERVAL_MS,
 } from './workspace-file-observer.js';
 
 const directories: string[] = [];
@@ -266,31 +266,31 @@ describe('workspace file observation', () => {
     expect(f.unavailable).toHaveBeenCalledOnce();
   });
 
-  it.each(['supersede', 'stop'] as const)(
-    'does not publish an in-flight scan after %s',
-    async (action) => {
-      vi.useFakeTimers();
-      const f = repository();
-      vi.mocked(f.cm.execInContainer).mockResolvedValueOnce(manifest([]));
-      await f.observer.start();
-      let resolve!: (value: ExecResult) => void;
-      let options: ExecOptions | undefined;
-      vi.mocked(f.cm.execInContainer).mockImplementationOnce(async (_id, _cmd, opts) => {
-        options = opts;
-        return new Promise((done) => {
-          resolve = done;
-        });
+  it.each([
+    'supersede',
+    'stop',
+  ] as const)('does not publish an in-flight scan after %s', async (action) => {
+    vi.useFakeTimers();
+    const f = repository();
+    vi.mocked(f.cm.execInContainer).mockResolvedValueOnce(manifest([]));
+    await f.observer.start();
+    let resolve!: (value: ExecResult) => void;
+    let options: ExecOptions | undefined;
+    vi.mocked(f.cm.execInContainer).mockImplementationOnce(async (_id, _cmd, opts) => {
+      options = opts;
+      return new Promise((done) => {
+        resolve = done;
       });
-      await tick();
-      const stopped = action === 'stop' ? f.observer.stop() : undefined;
-      if (action === 'supersede') f.supersede();
-      expect(() => options?.assertCurrent?.()).toThrow();
-      resolve(manifest([['late.ts', fingerprint('a')]]));
-      await stopped;
-      await f.observer.stop();
-      expect(f.events).toEqual([]);
-    },
-  );
+    });
+    await tick();
+    const stopped = action === 'stop' ? f.observer.stop() : undefined;
+    if (action === 'supersede') f.supersede();
+    expect(() => options?.assertCurrent?.()).toThrow();
+    resolve(manifest([['late.ts', fingerprint('a')]]));
+    await stopped;
+    await f.observer.stop();
+    expect(f.events).toEqual([]);
+  });
 
   it('serializes scans and takes a fresh terminal snapshot after an older scan drains', async () => {
     vi.useFakeTimers();
@@ -330,17 +330,14 @@ describe('workspace file observation', () => {
       ],
       [['bad', 'invalid']],
     ].map((entries) => ({ entries })),
-  )(
-    'rejects unsafe/incomplete manifest entries %# without inferring deletions',
-    async ({ entries }) => {
-      const f = repository();
-      await f.observer.start();
-      vi.mocked(f.cm.execInContainer).mockResolvedValueOnce(
-        manifest(entries as [string, string][]),
-      );
-      await f.observer.finish();
-      expect(f.events).toEqual([]);
-      expect(f.unavailable).toHaveBeenCalledOnce();
-    },
-  );
+  )('rejects unsafe/incomplete manifest entries %# without inferring deletions', async ({
+    entries,
+  }) => {
+    const f = repository();
+    await f.observer.start();
+    vi.mocked(f.cm.execInContainer).mockResolvedValueOnce(manifest(entries as [string, string][]));
+    await f.observer.finish();
+    expect(f.events).toEqual([]);
+    expect(f.unavailable).toHaveBeenCalledOnce();
+  });
 });

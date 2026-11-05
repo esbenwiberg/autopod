@@ -1,6 +1,6 @@
 import type { PimSelection } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
-import { type PimApiClient, createPimApiClient, pimPages } from './api-client.js';
+import { createPimApiClient, type PimApiClient, pimPages } from './api-client.js';
 import { createPimEligibilityService } from './eligibility-service.js';
 import { createPimPolicyReader, pimMaximumDuration } from './policy-reader.js';
 

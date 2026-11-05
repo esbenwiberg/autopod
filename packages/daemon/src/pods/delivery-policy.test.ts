@@ -5,6 +5,7 @@ import {
   isSinglePrSeriesPod,
   resolvePrBaseBranch,
 } from './delivery-policy.js';
+
 describe('delivery policy', () => {
   it('bounds conflict details and retains the empty diagnostic', () => {
     expect(formatRebaseConflictReason('main', [])).toBe('Rebase conflicts on main: (see logs)');

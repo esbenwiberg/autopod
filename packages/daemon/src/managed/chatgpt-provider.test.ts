@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { fixture } from '../test-utils/managed-fixture.js';
 import { MANAGED_PROVIDER_ABORT_TIMEOUT } from './bounded-provider.js';
 import { type ChatGptFailureDiagnostic, ChatGptReportTransport } from './chatgpt-provider.js';
+
 function setup() {
   const f = fixture();
   const route = f.request.route;
@@ -214,45 +215,51 @@ it.each(['identity', 'mode', 'token'])('rejects credential %s before HTTP', asyn
   await expect(x.call()).rejects.toThrow('unavailable');
   expect(x.fetcher).not.toHaveBeenCalled();
 });
-it.each(['tool', 'usage', 'missing-usage', 'model', 'duplicate', 'failure', 'oversize', 'http'])(
-  'rejects %s output without retry or leaking errors',
-  async (kind) => {
-    const x = setup();
-    if (kind === 'tool')
-      Object.assign(x.response, { output: [{ type: 'function_call', name: 'evil' }] });
-    if (kind === 'usage') x.response.usage.total_tokens = 1;
-    if (kind === 'missing-usage') Object.assign(x.response, { usage: null });
-    if (kind === 'model') x.response.model = 'other';
-    if (kind === 'oversize') x.response.output[0]!.content[0]!.text = 'x'.repeat(16385);
-    if (['duplicate', 'failure', 'http'].includes(kind))
-      x.fetcher.mockImplementation(
-        async () =>
-          new Response(
-            kind === 'http'
-              ? 'secret-error'
-              : `data: ${JSON.stringify({ type: kind === 'failure' ? 'response.failed' : 'response.completed', response: x.response })}\n\ndata: ${JSON.stringify({ type: 'response.completed', response: x.response })}\n\n`,
-            {
-              status: kind === 'http' ? 401 : 200,
-              headers: { 'content-type': 'text/event-stream' },
-            },
-          ),
-      );
-    await expect(x.call()).rejects.toThrow('managed-chatgpt-request-unavailable');
-    expect(x.fetcher).toHaveBeenCalledTimes(1);
-    const phases: Record<string, string> = {
-      tool: 'response-schema',
-      usage: 'usage',
-      'missing-usage': 'response-schema',
-      model: 'model',
-      duplicate: 'stream',
-      failure: 'stream',
-      oversize: 'artifact',
-      http: 'http',
-    };
-    expect(x.diagnostic.mock.calls[0]?.[0].phase).toBe(phases[kind]);
-    expect(JSON.stringify(x.diagnostic.mock.calls)).not.toContain('secret-error');
-  },
-);
+it.each([
+  'tool',
+  'usage',
+  'missing-usage',
+  'model',
+  'duplicate',
+  'failure',
+  'oversize',
+  'http',
+])('rejects %s output without retry or leaking errors', async (kind) => {
+  const x = setup();
+  if (kind === 'tool')
+    Object.assign(x.response, { output: [{ type: 'function_call', name: 'evil' }] });
+  if (kind === 'usage') x.response.usage.total_tokens = 1;
+  if (kind === 'missing-usage') Object.assign(x.response, { usage: null });
+  if (kind === 'model') x.response.model = 'other';
+  if (kind === 'oversize') x.response.output[0]!.content[0]!.text = 'x'.repeat(16385);
+  if (['duplicate', 'failure', 'http'].includes(kind))
+    x.fetcher.mockImplementation(
+      async () =>
+        new Response(
+          kind === 'http'
+            ? 'secret-error'
+            : `data: ${JSON.stringify({ type: kind === 'failure' ? 'response.failed' : 'response.completed', response: x.response })}\n\ndata: ${JSON.stringify({ type: 'response.completed', response: x.response })}\n\n`,
+          {
+            status: kind === 'http' ? 401 : 200,
+            headers: { 'content-type': 'text/event-stream' },
+          },
+        ),
+    );
+  await expect(x.call()).rejects.toThrow('managed-chatgpt-request-unavailable');
+  expect(x.fetcher).toHaveBeenCalledTimes(1);
+  const phases: Record<string, string> = {
+    tool: 'response-schema',
+    usage: 'usage',
+    'missing-usage': 'response-schema',
+    model: 'model',
+    duplicate: 'stream',
+    failure: 'stream',
+    oversize: 'artifact',
+    http: 'http',
+  };
+  expect(x.diagnostic.mock.calls[0]?.[0].phase).toBe(phases[kind]);
+  expect(JSON.stringify(x.diagnostic.mock.calls)).not.toContain('secret-error');
+});
 it('rejects revoked authority and wrong token mode before credential resolution', async () => {
   const x = setup();
   await expect(
@@ -298,41 +305,47 @@ it('validates the full bounded stream when the pinned endpoint omits Content-Typ
   expect((await x.call()).consumedTokens).toBe(5010);
   expect(x.fetcher).toHaveBeenCalledTimes(1);
 });
-it.each(['html', 'json', 'incomplete', 'model', 'missing-usage', 'duplicate'])(
-  'missing Content-Type still rejects %s without fallback or retry',
-  async (kind) => {
-    const x = setup();
-    if (kind === 'model') x.response.model = 'other';
-    if (kind === 'missing-usage') Object.assign(x.response, { usage: null });
-    let body = `data: ${JSON.stringify({ type: kind === 'incomplete' ? 'response.incomplete' : 'response.completed', response: x.response })}\n\n`;
-    if (kind === 'html') body = '<html>not a response</html>';
-    if (kind === 'json') body = JSON.stringify(x.response);
-    if (kind === 'duplicate') body += body;
-    x.fetcher.mockImplementation(async () => {
-      const response = new Response(body);
-      response.headers.delete('content-type');
-      return response;
-    });
-    await expect(x.call()).rejects.toThrow('managed-chatgpt-request-unavailable');
-    expect(x.fetcher).toHaveBeenCalledTimes(1);
-  },
-);
-it.each(['application/json', 'text/html', 'text/event-stream-malformed', ''])(
-  'rejects declared incompatible media type %s even with a completed SSE body',
-  async (type) => {
-    const x = setup();
-    x.fetcher.mockImplementation(
-      async () =>
-        new Response(
-          `data: ${JSON.stringify({ type: 'response.completed', response: x.response })}\n\n`,
-          { headers: { 'content-type': type } },
-        ),
-    );
-    await expect(x.call()).rejects.toThrow('managed-chatgpt-request-unavailable');
-    expect(x.diagnostic.mock.calls[0]?.[0].phase).toBe('http');
-    expect(x.diagnostic.mock.calls[0]?.[0].httpStatus).toBe(200);
-  },
-);
+it.each([
+  'html',
+  'json',
+  'incomplete',
+  'model',
+  'missing-usage',
+  'duplicate',
+])('missing Content-Type still rejects %s without fallback or retry', async (kind) => {
+  const x = setup();
+  if (kind === 'model') x.response.model = 'other';
+  if (kind === 'missing-usage') Object.assign(x.response, { usage: null });
+  let body = `data: ${JSON.stringify({ type: kind === 'incomplete' ? 'response.incomplete' : 'response.completed', response: x.response })}\n\n`;
+  if (kind === 'html') body = '<html>not a response</html>';
+  if (kind === 'json') body = JSON.stringify(x.response);
+  if (kind === 'duplicate') body += body;
+  x.fetcher.mockImplementation(async () => {
+    const response = new Response(body);
+    response.headers.delete('content-type');
+    return response;
+  });
+  await expect(x.call()).rejects.toThrow('managed-chatgpt-request-unavailable');
+  expect(x.fetcher).toHaveBeenCalledTimes(1);
+});
+it.each([
+  'application/json',
+  'text/html',
+  'text/event-stream-malformed',
+  '',
+])('rejects declared incompatible media type %s even with a completed SSE body', async (type) => {
+  const x = setup();
+  x.fetcher.mockImplementation(
+    async () =>
+      new Response(
+        `data: ${JSON.stringify({ type: 'response.completed', response: x.response })}\n\n`,
+        { headers: { 'content-type': type } },
+      ),
+  );
+  await expect(x.call()).rejects.toThrow('managed-chatgpt-request-unavailable');
+  expect(x.diagnostic.mock.calls[0]?.[0].phase).toBe('http');
+  expect(x.diagnostic.mock.calls[0]?.[0].httpStatus).toBe(200);
+});
 it('accepts case-insensitive SSE media type with parameters', async () => {
   const x = setup();
   x.fetcher.mockImplementation(

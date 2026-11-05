@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { access, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
-import { type ServerResponse, createServer } from 'node:http';
+import { createServer, type ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

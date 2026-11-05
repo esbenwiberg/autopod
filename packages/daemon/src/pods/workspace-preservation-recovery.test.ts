@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPassingValidationResult } from '../test-utils/mock-helpers.js';
 import { createWorkspaceFixture } from '../test-utils/workspace-recovery-helpers.js';
+
 describe('workspace preservation recovery', () => {
   it('keeps the original reports even after successful tracked-source preservation', async () => {
     const f = createWorkspaceFixture();

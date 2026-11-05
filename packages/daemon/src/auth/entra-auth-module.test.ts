@@ -1,5 +1,5 @@
 import { AuthError } from '@autopod/shared';
-import { type JWK, SignJWT, createLocalJWKSet, exportJWK, generateKeyPair } from 'jose';
+import { createLocalJWKSet, exportJWK, generateKeyPair, type JWK, SignJWT } from 'jose';
 import { describe, expect, it } from 'vitest';
 import {
   createEntraAuthModule,

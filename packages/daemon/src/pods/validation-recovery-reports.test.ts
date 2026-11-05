@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { createFailingValidationResult } from '../test-utils/mock-helpers.js';
 import { verifyValidationRecoveryReports } from './validation-recovery-reports.js';
+
 const roots: string[] = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });

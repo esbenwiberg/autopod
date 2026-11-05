@@ -1,7 +1,7 @@
 import { access } from 'node:fs/promises';
 import type { ServerResponse } from 'node:http';
 import { describe, expect, it } from 'vitest';
-import { FIXTURE_TOKEN, createCliFixture } from './test-utils/cli-executable.js';
+import { createCliFixture, FIXTURE_TOKEN } from './test-utils/cli-executable.js';
 
 const args = ['ls', '--compact', '--json', '--limit', '1'];
 const expectedRequest = {

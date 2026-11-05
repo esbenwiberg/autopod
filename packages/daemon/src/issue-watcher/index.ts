@@ -1,4 +1,10 @@
 export {
+  createIssueClient,
+  type IssueClient,
+  stripHtml,
+  type WatchedIssueCandidate,
+} from './issue-client.js';
+export {
   createIssueWatcherRepository,
   type IssueWatcherRepository,
 } from './issue-watcher-repository.js';
@@ -7,9 +13,3 @@ export {
   type IssueWatcherService,
   type IssueWatcherServiceDependencies,
 } from './issue-watcher-service.js';
-export {
-  type IssueClient,
-  type WatchedIssueCandidate,
-  createIssueClient,
-  stripHtml,
-} from './issue-client.js';

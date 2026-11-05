@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { fixture } from '../test-utils/managed-fixture.js';
 import { BoundedResponsesTransport } from './bounded-provider.js';
 import { codexInput, codexSse } from './codex-wire.js';
+
 function setup() {
   const f = fixture();
   const route = { ...f.request.route, reasoning: 'low' as const };
@@ -29,23 +30,27 @@ it('preserves the full message input and removes client routing/cache metadata',
   expect(input).not.toHaveProperty('client_metadata');
   expect(input.tools).toEqual([]);
 });
-it.each(['model', 'reasoning', 'runtime', 'image', 'continuation', 'endpoint'])(
-  'rejects %s expansion',
-  (kind) => {
-    const { route, request } = setup();
-    const body: Record<string, unknown> = { ...request };
-    if (kind === 'model') body.model = 'other';
-    if (kind === 'reasoning') body.reasoning = { effort: 'high' };
-    if (kind === 'runtime') route.runtime = 'claude';
-    if (kind === 'image')
-      body.input = [
-        { role: 'user', content: [{ type: 'input_image', image_url: 'https://other.invalid' }] },
-      ];
-    if (kind === 'continuation') body.previous_response_id = 'unbound';
-    if (kind === 'endpoint') body.base_url = 'https://other.invalid';
-    expect(() => codexInput(route, JSON.stringify(body))).toThrow();
-  },
-);
+it.each([
+  'model',
+  'reasoning',
+  'runtime',
+  'image',
+  'continuation',
+  'endpoint',
+])('rejects %s expansion', (kind) => {
+  const { route, request } = setup();
+  const body: Record<string, unknown> = { ...request };
+  if (kind === 'model') body.model = 'other';
+  if (kind === 'reasoning') body.reasoning = { effort: 'high' };
+  if (kind === 'runtime') route.runtime = 'claude';
+  if (kind === 'image')
+    body.input = [
+      { role: 'user', content: [{ type: 'input_image', image_url: 'https://other.invalid' }] },
+    ];
+  if (kind === 'continuation') body.previous_response_id = 'unbound';
+  if (kind === 'endpoint') body.base_url = 'https://other.invalid';
+  expect(() => codexInput(route, JSON.stringify(body))).toThrow();
+});
 it('emits deterministic SSE with the validated usage rather than synthesized token accounting', () => {
   const response = {
     model: 'fixture',

@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
-import { canonicalModelKey, computeCostWithCache } from '@autopod/shared';
 import type { AgentErrorEvent, AgentEvent } from '@autopod/shared';
+import { canonicalModelKey, computeCostWithCache } from '@autopod/shared';
 import type { Logger } from 'pino';
 import { classifyProviderError } from './provider-error-classifier.js';
 

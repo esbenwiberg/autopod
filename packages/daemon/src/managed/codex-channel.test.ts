@@ -19,6 +19,7 @@ import type { ContainerManager } from '../interfaces/container-manager.js';
 import { fixture } from '../test-utils/managed-fixture.js';
 import { sha256 } from './canonical.js';
 import { ContainerCodexChannel, codexAgentCommand, codexReportCommand } from './codex-channel.js';
+
 const exec = promisify(execFile);
 function setup() {
   const f = fixture();
@@ -31,20 +32,22 @@ function setup() {
   const manager = { execInContainer: exec } as unknown as ContainerManager;
   return { request, exec, channel: new ContainerCodexChannel(manager, request.route, 4095) };
 }
-it.each(['network', 'identity', 'duration', 'model', 'source'])(
-  'fails %s preflight before any exec',
-  async (kind) => {
-    const { request, exec, channel } = setup();
-    if (kind === 'network')
-      request.effectiveGrant.scope.network.destinations.push('api.openai.com');
-    if (kind === 'identity') request.effectiveGrant.scope.identityBindings.push({} as never);
-    if (kind === 'duration') request.effectiveGrant.budget.maxDurationSeconds = 181;
-    if (kind === 'model') request.route.model = 'other';
-    if (kind === 'source') request.outputs.source.mode = 'branch';
-    await expect(channel.preflight(request)).rejects.toThrow();
-    expect(exec).not.toHaveBeenCalled();
-  },
-);
+it.each([
+  'network',
+  'identity',
+  'duration',
+  'model',
+  'source',
+])('fails %s preflight before any exec', async (kind) => {
+  const { request, exec, channel } = setup();
+  if (kind === 'network') request.effectiveGrant.scope.network.destinations.push('api.openai.com');
+  if (kind === 'identity') request.effectiveGrant.scope.identityBindings.push({} as never);
+  if (kind === 'duration') request.effectiveGrant.budget.maxDurationSeconds = 181;
+  if (kind === 'model') request.route.model = 'other';
+  if (kind === 'source') request.outputs.source.mode = 'branch';
+  await expect(channel.preflight(request)).rejects.toThrow();
+  expect(exec).not.toHaveBeenCalled();
+});
 it('rejects an incompatible immutable-image Codex CLI before installing helpers', async () => {
   const { request, exec, channel } = setup();
   await channel.preflight(request);
@@ -691,98 +694,97 @@ it('retries a transient sandbox control exec instead of closing the live channel
   }
 });
 
-it.each(['local', 'sandbox'] as const)(
-  'publishes a large %s response through the files data plane instead of argv',
-  async (target) => {
-    vi.useFakeTimers();
-    const { request, exec } = setup();
-    request.route.executionTarget = target;
-    const raw = JSON.stringify({
-      model: request.route.model,
-      input: [{ role: 'user', content: 'Fact.' }],
-      reasoning: { effort: request.route.reasoning },
-      stream: true,
-      store: false,
-    });
-    let read = false;
-    exec.mockImplementation(async (_ref, argv) => {
-      if (argv[0] === 'codex')
-        return {
-          exitCode: 0,
-          stdout: '--ephemeral --output-last-message --sandbox --last',
-          stderr: '',
-        };
-      const code = argv[2] ?? '';
-      if (code.includes('urllib.request')) return { exitCode: 0, stdout: '204', stderr: '' };
-      if (code.includes('p.stat().st_size')) {
-        if (read) return { exitCode: 0, stdout: '', stderr: '' };
-        read = true;
-        return {
-          exitCode: 0,
-          stdout: JSON.stringify({
-            body: raw,
-            digest: sha256(raw).slice(7),
-            ticket: 'a'.repeat(36),
-          }),
-          stderr: '',
-        };
-      }
-      return { exitCode: 0, stdout: '', stderr: '' };
-    });
-    const writeFile = vi.fn<ContainerManager['writeFile']>().mockResolvedValue();
-    const response = `data: ${'x'.repeat(400 * 1024)}\n\n`;
-    const channel = new ContainerCodexChannel(
-      { execInContainer: exec, writeFile } as unknown as ContainerManager,
-      request.route,
-      4095,
-    );
-    let close: (() => void) | undefined;
-    try {
-      close = await channel.attach({
-        podId: 'managed-one',
-        runtimeRef: 'ref',
-        stateRoot: '/run/dispatcher-managed-one',
-        invoke: vi.fn(async () => ({ state: 'observed' as const, value: response })),
-      });
-      await vi.advanceTimersByTimeAsync(2_500);
-      if (target === 'sandbox') {
-        expect(writeFile).toHaveBeenCalledTimes(1);
-        expect(writeFile.mock.calls[0]?.slice(0, 2)).toEqual([
-          'ref',
-          '/run/dispatcher-managed-one/channel-response.tmp',
-        ]);
-        expect(JSON.parse(String(writeFile.mock.calls[0]?.[2]))).toMatchObject({ body: response });
-      } else {
-        expect(writeFile).not.toHaveBeenCalled();
-        const chunks = exec.mock.calls.filter((call) =>
-          String(call[1][2]).includes('base64.b64decode'),
-        );
-        expect(chunks.length).toBeGreaterThan(1);
-        expect(chunks[0]?.[1][5]).toBe('true');
-        expect(chunks.slice(1).every((call) => call[1][5] === 'false')).toBe(true);
-        expect(
-          chunks.every(
-            (call) =>
-              call[2]?.user === 'root' &&
-              call[1].every((arg) => Buffer.byteLength(arg) < 128 * 1024),
-          ),
-        ).toBe(true);
-        const payload = Buffer.concat(
-          chunks.map((call) => Buffer.from(call[1][6] ?? '', 'base64')),
-        ).toString('utf8');
-        expect(JSON.parse(payload)).toMatchObject({ body: response, ticket: 'a'.repeat(36) });
-      }
-      const publication = exec.mock.calls.find((call) =>
-        String(call[1][2] ?? '').includes('staged-response'),
-      );
-      expect(publication?.[1]).not.toContain(response);
-      expect(publication?.[1].at(-1)).toBe('a'.repeat(36));
-    } finally {
-      close?.();
-      vi.useRealTimers();
+it.each([
+  'local',
+  'sandbox',
+] as const)('publishes a large %s response through the files data plane instead of argv', async (target) => {
+  vi.useFakeTimers();
+  const { request, exec } = setup();
+  request.route.executionTarget = target;
+  const raw = JSON.stringify({
+    model: request.route.model,
+    input: [{ role: 'user', content: 'Fact.' }],
+    reasoning: { effort: request.route.reasoning },
+    stream: true,
+    store: false,
+  });
+  let read = false;
+  exec.mockImplementation(async (_ref, argv) => {
+    if (argv[0] === 'codex')
+      return {
+        exitCode: 0,
+        stdout: '--ephemeral --output-last-message --sandbox --last',
+        stderr: '',
+      };
+    const code = argv[2] ?? '';
+    if (code.includes('urllib.request')) return { exitCode: 0, stdout: '204', stderr: '' };
+    if (code.includes('p.stat().st_size')) {
+      if (read) return { exitCode: 0, stdout: '', stderr: '' };
+      read = true;
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          body: raw,
+          digest: sha256(raw).slice(7),
+          ticket: 'a'.repeat(36),
+        }),
+        stderr: '',
+      };
     }
-  },
-);
+    return { exitCode: 0, stdout: '', stderr: '' };
+  });
+  const writeFile = vi.fn<ContainerManager['writeFile']>().mockResolvedValue();
+  const response = `data: ${'x'.repeat(400 * 1024)}\n\n`;
+  const channel = new ContainerCodexChannel(
+    { execInContainer: exec, writeFile } as unknown as ContainerManager,
+    request.route,
+    4095,
+  );
+  let close: (() => void) | undefined;
+  try {
+    close = await channel.attach({
+      podId: 'managed-one',
+      runtimeRef: 'ref',
+      stateRoot: '/run/dispatcher-managed-one',
+      invoke: vi.fn(async () => ({ state: 'observed' as const, value: response })),
+    });
+    await vi.advanceTimersByTimeAsync(2_500);
+    if (target === 'sandbox') {
+      expect(writeFile).toHaveBeenCalledTimes(1);
+      expect(writeFile.mock.calls[0]?.slice(0, 2)).toEqual([
+        'ref',
+        '/run/dispatcher-managed-one/channel-response.tmp',
+      ]);
+      expect(JSON.parse(String(writeFile.mock.calls[0]?.[2]))).toMatchObject({ body: response });
+    } else {
+      expect(writeFile).not.toHaveBeenCalled();
+      const chunks = exec.mock.calls.filter((call) =>
+        String(call[1][2]).includes('base64.b64decode'),
+      );
+      expect(chunks.length).toBeGreaterThan(1);
+      expect(chunks[0]?.[1][5]).toBe('true');
+      expect(chunks.slice(1).every((call) => call[1][5] === 'false')).toBe(true);
+      expect(
+        chunks.every(
+          (call) =>
+            call[2]?.user === 'root' && call[1].every((arg) => Buffer.byteLength(arg) < 128 * 1024),
+        ),
+      ).toBe(true);
+      const payload = Buffer.concat(
+        chunks.map((call) => Buffer.from(call[1][6] ?? '', 'base64')),
+      ).toString('utf8');
+      expect(JSON.parse(payload)).toMatchObject({ body: response, ticket: 'a'.repeat(36) });
+    }
+    const publication = exec.mock.calls.find((call) =>
+      String(call[1][2] ?? '').includes('staged-response'),
+    );
+    expect(publication?.[1]).not.toContain(response);
+    expect(publication?.[1].at(-1)).toBe('a'.repeat(36));
+  } finally {
+    close?.();
+    vi.useRealTimers();
+  }
+});
 
 async function waitForJson(path: string): Promise<Record<string, unknown>> {
   const deadline = Date.now() + 5_000;
