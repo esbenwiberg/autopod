@@ -57,6 +57,10 @@ and decision receipt atomically with leaving the answered-question state. A curr
 report leaves unknown execution running/held and lets positive settlement park it,
 never an empty `awaiting_input` decision. It prevents both fetch/worker queueing and
 push/PR/auto-approval dispatch. Delivery rechecks ownership after awaited boundaries.
+An existing validation-override question can also be answered under a report: its
+actor/answer and exit from the question state are atomic, but findings, overrides,
+budgets and validation authority are unchanged. This also applies when the report
+arrives during Goal preparation; replacement questions/resources keep ownership.
 Override guidance and other reply error paths retain shared settlement, unknown exits
 and the original error rather than overwriting them with a generic failure.
 Provider recovery (including profile-primary and automatic failover) cannot authorize,

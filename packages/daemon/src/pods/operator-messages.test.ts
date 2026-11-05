@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createOperatorFixture } from '../test-utils/operator-helpers.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
+import { persistCompletionReply, persistEscalation } from './escalation-coordinator.js';
 import { createEscalationRepository } from './escalation-repository.js';
 import { createNudgeRepository } from './nudge-repository.js';
 describe('complete operator message lifetime', () => {
@@ -288,20 +289,113 @@ describe('complete operator message lifetime', () => {
     expect(f.cm.writeFile).not.toHaveBeenCalled();
     expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
   });
-  it('does not turn a validation override into infrastructure repair or erase its decision', async () => {
-    const f = createOperatorFixture();
-    f.infrastructure();
-    const request = f.awaiting('validation_override', { findings: [], attempt: 1, maxAttempts: 3 });
-    const before = f.pod();
-    await expect(
-      f.messages().sendMessage.call(f.calls, 'prepare', 'dismiss all'),
-    ).rejects.toMatchObject({ code: 'INFRASTRUCTURE_BLOCKED' });
-    expect(f.pod()).toEqual(before);
-    expect(f.deps.escalationRepo.getOrThrow(request.id).response).toBeNull();
-    expect(f.calls.triggerValidation).not.toHaveBeenCalled();
-    expect(f.messagesCaptured.beginGoalTaskRework).not.toHaveBeenCalled();
-    expect(f.messagesCaptured.taskFeedbackEvents).not.toHaveBeenCalled();
-  });
+  it.each(['before', 'during', 'failure'] as const)(
+    'records a validation override answer without a waiver under infrastructure: %s',
+    async (arrival) => {
+      const f = createOperatorFixture(true);
+      const request = f.awaiting('validation_override', {
+        findings: [{ id: 'review:bounded', source: 'task_review', description: 'Bounded finding' }],
+        attempt: 1,
+        maxAttempts: 3,
+      });
+      const before = f.pod();
+      const queued = [...f.ctx.enqueuedSessions];
+      const failure = new Error('Goal preparation failed');
+      if (arrival === 'before') f.infrastructure();
+      else
+        f.messagesCaptured.beginGoalTaskRework.mockImplementationOnce(async () => {
+          f.infrastructure();
+          if (arrival === 'failure') throw failure;
+          return false;
+        });
+      const actor = { type: 'human' as const, userId: 'override-owner' };
+      const message =
+        arrival === 'before' ? 'dismiss all' : 'Keep protections and repair the finding';
+      const operation = f.messages().sendMessage.call(f.calls, 'prepare', message, actor);
+      if (arrival === 'failure') await expect(operation).rejects.toBe(failure);
+      else await operation;
+      expect(f.pod()).toMatchObject({
+        status: 'running',
+        pendingEscalation: null,
+        validationOverrides: before.validationOverrides,
+        validationAttempts: before.validationAttempts,
+        budgetExtensionsUsed: before.budgetExtensionsUsed,
+        containerId: before.containerId,
+        worktreePath: before.worktreePath,
+        lifecycleGeneration: before.lifecycleGeneration,
+      });
+      expect(f.deps.escalationRepo.getOrThrow(request.id).response).toMatchObject({
+        actor,
+        response: message,
+      });
+      expect(f.calls.triggerValidation).not.toHaveBeenCalled();
+      expect(f.messagesCaptured.beginGoalTaskRework).toHaveBeenCalledTimes(
+        arrival === 'before' ? 0 : 1,
+      );
+      expect(f.messagesCaptured.taskFeedbackEvents).not.toHaveBeenCalled();
+      expect(f.messagesCaptured.reconcileInfrastructureBlocker).toHaveBeenCalledExactlyOnceWith(
+        'prepare',
+      );
+      expect(f.ctx.enqueuedSessions).toEqual(queued);
+      const saved = f.pod();
+      const reopened = f.reopen();
+      expect(reopened.pods.getOrThrow('prepare')).toEqual(saved);
+      expect(createEscalationRepository(f.db).getOrThrow(request.id).response).toMatchObject({
+        actor,
+        response: message,
+      });
+      expect(reopened.pods.hasInfrastructureBlocker?.('prepare')).toBe(true);
+    },
+  );
+  it.each(['generation', 'decision'] as const)(
+    'does not record a held validation answer over a replacement %s',
+    async (replacement) => {
+      const f = createOperatorFixture(true);
+      const request = f.awaiting('validation_override', {
+        findings: [{ id: 'review:bounded', source: 'task_review', description: 'Bounded finding' }],
+        attempt: 1,
+        maxAttempts: 3,
+      });
+      let current = f.pod();
+      f.messagesCaptured.beginGoalTaskRework.mockImplementationOnce(async () => {
+        if (replacement === 'generation') f.podRepo.incrementLifecycleGeneration('prepare');
+        else {
+          persistCompletionReply(
+            f.podRepo,
+            f.pod(),
+            'answered elsewhere',
+            { type: 'human', userId: 'other-operator' },
+            () => {
+              f.podRepo.update('prepare', { status: 'running', pendingEscalation: null });
+            },
+          );
+          const next = { ...request, id: 'replacement-question' };
+          persistEscalation(f.podRepo, f.deps.escalationRepo, next, () => {
+            f.podRepo.update('prepare', { status: 'awaiting_input', pendingEscalation: next });
+          });
+        }
+        f.infrastructure();
+        current = f.pod();
+        return false;
+      });
+      await expect(
+        f.messages().sendMessage.call(f.calls, 'prepare', 'Repair the finding'),
+      ).rejects.toMatchObject({ code: 'STALE_VALIDATION_EXECUTION' });
+      expect(f.pod()).toEqual(current);
+      if (replacement === 'generation')
+        expect(f.deps.escalationRepo.getOrThrow(request.id).response).toBeNull();
+      else {
+        expect(f.deps.escalationRepo.getOrThrow(request.id).response).toMatchObject({
+          response: 'answered elsewhere',
+          actor: { type: 'human', userId: 'other-operator' },
+        });
+        expect(f.deps.escalationRepo.getOrThrow('replacement-question').response).toBeNull();
+      }
+      expect(f.messagesCaptured.reconcileInfrastructureBlocker).not.toHaveBeenCalled();
+      expect(f.messagesCaptured.taskFeedbackEvents).not.toHaveBeenCalled();
+      expect(f.calls.triggerValidation).not.toHaveBeenCalled();
+    },
+  );
   it('routes dismissals to validation without starting another agent turn', async () => {
     const f = createOperatorFixture();
     f.awaiting('validation_override', { findings: [], attempt: 1, maxAttempts: 3 });

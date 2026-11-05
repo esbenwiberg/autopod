@@ -378,11 +378,12 @@ it.each(
 });
 
 it.each(
-  (['host_fetch', 'host_push'] as const).flatMap((source) =>
-    (['settled', 'unverified'] as const).map((termination) => ({ source, termination })),
+  (['host_fetch', 'host_push', 'override_dismiss', 'override_guidance'] as const).flatMap(
+    (source) =>
+      (['settled', 'unverified'] as const).map((termination) => ({ source, termination })),
   ),
 )(
-  'routes an answered host credential decision through real ownership: %j',
+  'routes an answered daemon decision through real ownership: %j',
   async ({ source, termination }) => {
     const ctx = createTestContext();
     ctx.deps.githubAuth = {
@@ -396,7 +397,7 @@ it.each(
     try {
       const manager = createPodManager(ctx.deps);
       const created = manager.createSession(
-        { profileName: 'test-profile', task: 'Retain answered credential custody' },
+        { profileName: 'test-profile', task: 'Retain answered daemon decision custody' },
         'operator',
       );
       await new Promise<void>((resolve) => setImmediate(resolve));
@@ -405,6 +406,15 @@ it.each(
         containerId: 'container-123',
         worktreePath: '/tmp/worktrees/test',
         validationAttempts: 2,
+        validationOverrides: [
+          {
+            findingId: 'existing',
+            description: 'Prior decision',
+            action: 'dismiss',
+            reason: 'Previously authorized',
+            createdAt: new Date().toISOString(),
+          },
+        ],
       });
       ctx.podRepo.completionJournal?.begin(ctx.podRepo.getOrThrow(created.id));
       const pod = ctx.podRepo.getOrThrow(created.id);
@@ -420,12 +430,28 @@ it.each(
       if (termination === 'unverified') ledger.retainUnverifiedRun(run);
       else ledger.finishRun(run, 'completed', null);
       const request: EscalationRequest = {
-        id: 'host-credential',
+        id: 'daemon-decision',
         podId: pod.id,
-        type: 'request_credential',
+        type:
+          source === 'host_fetch' || source === 'host_push'
+            ? 'request_credential'
+            : 'validation_override',
         timestamp: new Date().toISOString(),
         response: null,
-        payload: { service: 'github', reason: 'Daemon identity needs repair', source },
+        payload:
+          source === 'host_fetch' || source === 'host_push'
+            ? { service: 'github', reason: 'Daemon identity needs repair', source }
+            : {
+                findings: [
+                  {
+                    id: 'review:bounded',
+                    source: 'task_review',
+                    description: 'Address the bounded defect',
+                  },
+                ],
+                attempt: 2,
+                maxAttempts: 3,
+              },
       };
       persistEscalation(ctx.podRepo, ctx.escalationRepo, request, () => {
         ctx.podRepo.update(pod.id, { status: 'awaiting_input', pendingEscalation: request });
@@ -445,21 +471,34 @@ it.each(
         },
       });
       const queued = [...ctx.enqueuedSessions];
-      const actor = { type: 'human' as const, userId: 'credential-owner' };
-      await manager.sendMessage(pod.id, 'repaired', actor);
+      const actor = { type: 'human' as const, userId: 'decision-owner' };
+      const message =
+        source === 'override_dismiss'
+          ? 'dismiss all'
+          : source === 'override_guidance'
+            ? 'Keep the protections and fix the finding'
+            : 'repaired';
+      await manager.sendMessage(pod.id, message, actor);
       expect(manager.getSession(pod.id)).toMatchObject({
         status: termination === 'settled' ? 'failed' : 'running',
         pendingEscalation: null,
         containerId: pod.containerId,
         worktreePath: pod.worktreePath,
         validationAttempts: 2,
+        validationOverrides: pod.validationOverrides,
+        budgetExtensionsUsed: pod.budgetExtensionsUsed,
         lifecycleGeneration: pod.lifecycleGeneration,
         finalization: { sourcePreservedAt: termination === 'settled' ? expect.any(String) : null },
       });
       expect(ledger.hasUnverifiedTermination(pod.id)).toBe(termination === 'unverified');
       expect(ctx.escalationRepo.getOrThrow(request.id).response).toMatchObject({
         actor,
-        response: source === 'host_push' ? 'daemon_auth_repaired' : 'credential_repaired',
+        response:
+          source === 'host_push'
+            ? 'daemon_auth_repaired'
+            : source === 'host_fetch'
+              ? 'credential_repaired'
+              : message,
       });
       expect(ctx.escalationRepo.getOrThrow('host-reply-infra').response).toBeNull();
       expect(ctx.enqueuedSessions).toEqual(queued);

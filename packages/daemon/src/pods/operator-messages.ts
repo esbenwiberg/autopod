@@ -431,13 +431,65 @@ export function createOperatorMessages(
 
     // ── Validation override responses ─────────────────────────────────
     if (pod.pendingEscalation?.type === 'validation_override') {
-      assertNoInfrastructureBlocker(podRepo, podId);
-      const payload = pod.pendingEscalation.payload as ValidationOverridePayload;
+      const request = pod.pendingEscalation;
+      const recordHeldAnswer = async () => {
+        // Information custody, not permission to waive findings or execute. A
+        // Goal preparation may change its profile, but must still own this
+        // exact question, resource, generation and completion cycle.
+        const assertReplyOwner = () => {
+          const current = podRepo.getOrThrow(podId);
+          if (
+            current.status !== pod.status ||
+            current.lifecycleGeneration !== pod.lifecycleGeneration ||
+            current.containerId !== pod.containerId ||
+            current.executionTarget !== pod.executionTarget ||
+            current.worktreePath !== pod.worktreePath ||
+            current.finalization?.cycle !== pod.finalization?.cycle ||
+            current.pendingEscalation?.id !== request.id ||
+            current.pendingEscalation?.type !== 'validation_override' ||
+            JSON.stringify(current.pendingEscalation.payload) !== JSON.stringify(request.payload)
+          )
+            throw new ValidationSupersededError();
+          return current;
+        };
+        const current = assertReplyOwner();
+        persistCompletionReply(podRepo, current, message, actor, () => {
+          transition(assertReplyOwner(), 'running', { pendingEscalation: null });
+        });
+        emitActivityStatus(
+          podId,
+          'Validation answer recorded; infrastructure remains held. No waiver or execution authorized.',
+        );
+        await retainReportedFailure(current);
+      };
+      if (podRepo.hasInfrastructureBlocker?.(podId)) {
+        await recordHeldAnswer();
+        return;
+      }
+      const payload = request.payload as ValidationOverridePayload;
       const overrides = parseValidationOverrideResponse(message, payload.findings);
-      const goalRework = overrides.some((item) => item.action === 'guidance')
-        ? await beginGoalTaskRework(pod, `Apply reviewed validation guidance: ${message}`)
-        : false;
-      assertNoInfrastructureBlocker(podRepo, podId);
+      let goalRework = false;
+      try {
+        goalRework = overrides.some((item) => item.action === 'guidance')
+          ? await beginGoalTaskRework(pod, `Apply reviewed validation guidance: ${message}`)
+          : false;
+      } catch (err) {
+        if (podRepo.hasInfrastructureBlocker?.(podId)) {
+          try {
+            await recordHeldAnswer();
+          } catch (recordError) {
+            logger.warn(
+              { err: recordError, podId },
+              'Reply custody could not be recorded after preparation failure; ownership retained',
+            );
+          }
+        }
+        throw err;
+      }
+      if (podRepo.hasInfrastructureBlocker?.(podId)) {
+        await recordHeldAnswer();
+        return;
+      }
 
       // Resolve the escalation in the DB
       escalationRepo.update(pod.pendingEscalation.id, {
