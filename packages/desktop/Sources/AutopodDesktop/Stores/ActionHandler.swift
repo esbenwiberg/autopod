@@ -241,6 +241,18 @@ public final class ActionHandler {
         $0.linkedSessionId == id || $0.id == source.fixPodId || (source.seriesId != nil && $0.seriesId == source.seriesId)
       })
     })
+    result.repair.loadReworkEligibility = { [weak self] id in
+      guard let self else { throw DaemonError.networkError("Connection is unavailable") }
+      return try await self.perform { try await self.api.getReworkEligibility(id) }
+    }
+    result.repair.submitRework = { [weak self] id, input in
+      guard let self else { throw DaemonError.networkError("Connection is unavailable") }
+      return try await self.perform { try await self.api.requestRework(id, input: input) }
+    }
+    result.repair.inspectRework = { [weak self] id, key in
+      guard let self else { throw DaemonError.networkError("Connection is unavailable") }
+      return try await self.perform { try await self.api.getReworkRequest(id, requestKey: key) }
+    }
     result.taskBudget = TaskBudgetActions(scope: replyContextID.uuidString, load: { [weak self] id in
       guard let self else { throw DaemonError.networkError("Connection is unavailable") }
       return try await self.perform { try await self.api.getTaskExecution(id) }
@@ -272,6 +284,7 @@ public final class ActionHandler {
       podStore.upsertSession(PodMapper.map(workspace))
       return PodRepairReceipt(message: "Linked workspace admitted. Follow its observed state as it provisions.", podID: workspace.id)
     case .rework:
+      guard message == nil else { throw DaemonError.badRequest("Use the versioned Rework handoff to retain continuation guidance.") }
       try await perform { try await api.triggerValidation(id) }
       return PodRepairReceipt(message: "Request accepted. Waiting for the pod’s observed execution state.")
     case .revalidate:

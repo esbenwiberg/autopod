@@ -13,8 +13,7 @@ struct TaskRetryCard: View {
   @State private var error = ""
   @State private var message = ""
   private var draftKey: String {
-    "autopod.retry-authorization.\(actions.retryDraftScope).\(podId)"
-      + (stage == "validation" ? "" : ".\(stage)")
+    RetryAuthorizationDraft.key(scope: actions.retryDraftScope, podId: podId, stage: stage)
   }
   private var stageLabel: String { stage == "codex_interruption" ? "Codex interruption recovery" : stage == "validation" ? "Validation" : stage == "worker" ? "Worker" : "Sandbox startup" }
   private var title: String {
@@ -114,13 +113,10 @@ struct TaskRetryCard: View {
       reason = ""
       error = ""
       message = ""
-      if let data = UserDefaults.standard.data(forKey: draftKey) {
-        do {
-          let draft = try JSONDecoder().decode(TaskRetryAuthorizationRequest.self, from: data)
-          pending = draft
-          reason = draft.reason
-        } catch { self.error = "Saved retry draft is unreadable." }
-      }
+      do {
+        pending = try RetryAuthorizationDraft.load(draftKey)
+        reason = pending?.reason ?? ""
+      } catch { self.error = "Saved retry draft is unreadable." }
       await refresh()
     }
   }
@@ -140,10 +136,10 @@ struct TaskRetryCard: View {
           requestKey: UUID().uuidString,
           reason: reason.trimmingCharacters(in: .whitespacesAndNewlines),
           stage: stage == "validation" ? nil : stage)
-      UserDefaults.standard.set(try JSONEncoder().encode(draft), forKey: draftKey)
+      try RetryAuthorizationDraft.save(draft, key: draftKey)
       pending = draft
       _ = try await actions.authorizeRetry(podId, draft)
-      UserDefaults.standard.removeObject(forKey: draftKey)
+      RetryAuthorizationDraft.clear(draftKey)
       pending = nil
       reason = ""
       await refresh()
