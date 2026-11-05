@@ -22,6 +22,9 @@ describe('human-only retained checkpoint selection', () => {
     app.setErrorHandler(errorHandler);
     authPlugin(app, terminationAuth());
     checkpointRecoveryRoutes(app, {
+      prepareRewriteRepair: f.recovery.prepareRewriteRepair,
+      checkRewriteRepair: f.recovery.checkRewriteRepair,
+      getApprovalSourceRewrite: f.manager.getApprovalSourceRewrite,
       recoverCheckpoint: f.recovery.submit,
       getCheckpointRecoveries: f.recovery.list,
       reconcileCheckpointOutcome: f.recovery.reconcileOutcome,

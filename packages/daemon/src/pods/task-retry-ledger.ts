@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   AutopodError,
   type OperatorActor,
+  type RewriteRepairRetryTarget,
   type TaskRetryAttempt,
   type TaskRetryAuthorization,
   type TaskRetryIdentity,
@@ -12,6 +13,10 @@ import {
 import type Database from 'better-sqlite3';
 import { hasUnansweredDecision } from './decision-admission.js';
 import { createDeletionOwnership } from './deletion-ownership.js';
+import {
+  createRetainedCheckpointRepository,
+  rewriteRepairRetryBinding,
+} from './retained-checkpoint-repository.js';
 import { createValidationExecutionLedger } from './validation-execution-ledger.js';
 import { retainWorkerRetryHistory, workerRetryFailure } from './worker-retry-history.js';
 
@@ -62,7 +67,7 @@ export interface TaskRetryLedger {
     reason: string,
     actor: OperatorActor,
     targetBindingHash?: string,
-    expectedFailureId?: string,
+    failureOrRepair?: string | RewriteRepairRetryTarget,
   ): TaskRetryAuthorization;
 }
 const keys: Array<keyof TaskRetryIdentity> = [
@@ -149,6 +154,7 @@ export function createTaskRetryLedger(
     reason: row.reason as string,
     createdAt: row.created_at as string,
     usedByAttemptId: (row.attempt_id as string | null) ?? null,
+    ...(row.rewrite_repair ? { rewriteRepair: JSON.parse(String(row.rewrite_repair)) } : {}),
     ...(row.target_binding_hash ? { targetBindingHash: row.target_binding_hash as string } : {}),
   });
   const authorizationSelect =
@@ -254,6 +260,29 @@ export function createTaskRetryLedger(
       task.backoffsMs ??
       (stage === 'worker' && task.admissionCount > 0 ? [] : backoffs.slice(legacyUsed));
     const prior = latest(member.taskId);
+    const repair =
+      stage === 'validation' ? createRetainedCheckpointRepository(db).latest(podId) : null;
+    const repairSelection =
+      repair?.binding.approvalRewrite && repair.activated?.generation === generation
+        ? repair
+        : null;
+    if (
+      repairSelection &&
+      (repairSelection.activated?.generation !== generation ||
+        !repairSelection.selected ||
+        !repairSelection.checking ||
+        repairSelection.checked ||
+        repairSelection.blocked ||
+        db
+          .prepare(
+            "SELECT 1 FROM task_retry_attempts WHERE pod_id=? AND generation=? AND stage='validation'",
+          )
+          .get(podId, generation))
+    )
+      throw new TaskRetryBlockedError(
+        'Rewrite repair admits one source-bound validation only; observe the retained invocation',
+      );
+
     let retryKind: TaskRetryAttempt['retryKind'] = null;
     let useAuthorization: string | undefined;
     let notBefore = Date.now();
@@ -271,6 +300,8 @@ export function createTaskRetryLedger(
         `A ${label} admission is already active for this logical task`,
         'TASK_RETRY_IN_PROGRESS',
       );
+    if (repairSelection && (!prior || prior.outcome === 'pass'))
+      throw new TaskRetryBlockedError('Failed rewrite retry admission evidence is unavailable');
     const workerFailure = stage === 'worker' && prior ? workerRetryFailure(db, prior.id) : null;
     if (
       prior &&
@@ -285,11 +316,25 @@ export function createTaskRetryLedger(
         .prepare(
           `${authorizationSelect} WHERE a.pod_id = ? AND a.failure_id = ? AND u.attempt_id IS NULL
           AND ((a.target_binding_hash IS NULL AND ? = ?) OR (a.stage = 'worker' AND a.target_binding_hash = ?))
+          AND a.rewrite_repair IS ?
           ORDER BY a.created_at, a.id LIMIT 1`,
         )
-        .get(podId, prior.id, prior.binding_hash, bindingHash, bindingHash) as
-        | Record<string, unknown>
-        | undefined;
+        .get(
+          podId,
+          prior.id,
+          prior.binding_hash,
+          bindingHash,
+          bindingHash,
+          repairSelection?.selected
+            ? JSON.stringify(
+                rewriteRepairRetryBinding(repairSelection, {
+                  recoveryId: repairSelection.id,
+                  candidateHead: repairSelection.selected.head,
+                  candidateTree: repairSelection.selected.tree,
+                }),
+              )
+            : null,
+        ) as Record<string, unknown> | undefined;
       if (prior.binding_hash !== bindingHash && grant?.target_binding_hash !== bindingHash)
         throw new TaskRetryBlockedError(
           `${label} provider binding changed; explicitly reconcile the authorized provider before retrying`,
@@ -298,6 +343,10 @@ export function createTaskRetryLedger(
       if (grant) {
         retryKind = 'override';
         useAuthorization = grant.id as string;
+      } else if (repairSelection) {
+        throw new TaskRetryBlockedError(
+          'Rewrite repair requires a separate authenticated retry authorization for this selected checks invocation',
+        );
       } else if (stage === 'worker' && workerFailure === 'auth') {
         throw new TaskRetryBlockedError(
           'Unchanged or unverified worker authentication failure; reconcile credentials and record a human retry authorization before another worker execution.',
@@ -503,9 +552,16 @@ export function createTaskRetryLedger(
         reason: string,
         actor: OperatorActor,
         targetBindingHash?: string,
-        expectedFailureId?: string,
+        failureOrRepair?: string | RewriteRepairRetryTarget,
       ) => {
+        const expectedFailureId = typeof failureOrRepair === 'string' ? failureOrRepair : undefined;
+        const targetRepair = typeof failureOrRepair === 'string' ? undefined : failureOrRepair;
         if (
+          (targetRepair !== undefined &&
+            (stage !== 'validation' ||
+              !/^[a-zA-Z0-9-]{1,64}$/.test(targetRepair.recoveryId) ||
+              !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(targetRepair.candidateHead) ||
+              !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(targetRepair.candidateTree))) ||
           (targetBindingHash !== undefined &&
             (stage !== 'worker' || !validHash(targetBindingHash))) ||
           actor.type !== 'human' ||
@@ -522,6 +578,20 @@ export function createTaskRetryLedger(
           );
         const member = membership(podId);
         if (stage === 'worker') retainWorkerRetryHistory(db, member.taskId);
+        const recovery = targetRepair
+          ? createRetainedCheckpointRepository(db).get(targetRepair.recoveryId)
+          : null;
+        if (
+          targetRepair &&
+          (!recovery ||
+            recovery.podId !== podId ||
+            recovery.taskId !== member.taskId ||
+            !recovery.binding.approvalRewrite)
+        )
+          throw new TaskRetryBlockedError('Exact rewrite repair target is unavailable');
+        const repairTarget =
+          recovery && targetRepair ? rewriteRepairRetryBinding(recovery, targetRepair) : undefined;
+
         const existing = db
           .prepare(`${authorizationSelect} WHERE a.request_key = ?`)
           .get(requestKey) as Record<string, unknown> | undefined;
@@ -532,6 +602,7 @@ export function createTaskRetryLedger(
             recorded.podId !== podId ||
             recorded.stage !== stage ||
             recorded.targetBindingHash !== targetBindingHash ||
+            JSON.stringify(recorded.rewriteRepair) !== JSON.stringify(repairTarget) ||
             recorded.reason !== reason ||
             JSON.stringify(recorded.actor) !== JSON.stringify(actor)
           )
@@ -542,6 +613,17 @@ export function createTaskRetryLedger(
             );
           return recorded;
         }
+        if (
+          recovery &&
+          (!recovery.prepared ||
+            recovery.activated ||
+            recovery.blocked ||
+            recovery.checked ||
+            recovery.generation !== member.generation)
+        )
+          throw new TaskRetryBlockedError(
+            'Authorize the exact committed repair after preparation and before selection',
+          );
         const failure = latest(member.taskId);
         if (expectedFailureId !== undefined && failure?.id !== expectedFailureId)
           throw new TaskRetryBlockedError(
@@ -558,7 +640,7 @@ export function createTaskRetryLedger(
           );
         const id = randomUUID();
         db.prepare(
-          `INSERT INTO task_retry_authorizations(id,request_key,task_id,pod_id,stage,failure_id,actor,reason,created_at,target_binding_hash) VALUES (?,?,?,?,'${stage}',?,?,?,?,?)`,
+          `INSERT INTO task_retry_authorizations(id,request_key,task_id,pod_id,stage,failure_id,actor,reason,created_at,target_binding_hash,rewrite_repair) VALUES (?,?,?,?,'${stage}',?,?,?,?,?,?)`,
         ).run(
           id,
           requestKey,
@@ -569,6 +651,7 @@ export function createTaskRetryLedger(
           reason,
           new Date().toISOString(),
           targetBindingHash ?? null,
+          repairTarget ? JSON.stringify(repairTarget) : null,
         );
         return authorization(
           db.prepare(`${authorizationSelect} WHERE a.id = ?`).get(id) as Record<string, unknown>,

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { AutopodError, type Pod } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { BranchPublicationReceipt } from '../interfaces/worktree-manager.js';
+import { createRetainedCheckpointRepository } from './retained-checkpoint-repository.js';
 
 export const rewriteHash = (value: unknown) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -34,6 +35,8 @@ export interface ApprovalRewrite {
   activated?: { generation: number };
   checked?: { head: string; tree: string; validationHash: string };
   aborted?: { reason: string };
+  /** Current selection projection; get(id) always returns the unchanged original facts. */
+  repairId?: string;
 }
 /** Append-only facts. Neither a checked candidate nor a failed push changes the original lease. */
 export function createApprovalSourceRewriteRepository(db: Database.Database) {
@@ -63,10 +66,44 @@ export function createApprovalSourceRewriteRepository(db: Database.Database) {
         ORDER BY rowid DESC LIMIT 1`)
       .get(pod.id) as { id: string } | undefined;
     const record = row ? get(row.id) : null;
-    return record &&
-      !record.aborted &&
-      (record.generation === pod.lifecycleGeneration ||
-        record.activated?.generation === pod.lifecycleGeneration)
+    if (!record || record.aborted) return null;
+    const repair = createRetainedCheckpointRepository(db).latest(pod.id);
+    if (repair?.binding.approvalRewrite?.id === record.id && repair.activated) {
+      if (
+        repair.activated.generation !== pod.lifecycleGeneration ||
+        !repair.prepared ||
+        !repair.selected
+      )
+        rewriteError('Repair selection is inconsistent with the current lifecycle.');
+      if (repair.binding.approvalRewrite.evidenceHash !== rewriteHash(record))
+        rewriteError('Original rewrite evidence changed after repair admission.');
+      // Preserve the immutable predecessor/base/configuration. Only CURRENT source
+      // projection changes; no old prepared/checked event becomes a writable slot.
+      return {
+        ...record,
+        repairId: repair.id,
+        prepared: {
+          worktreePath: repair.prepared.worktree,
+          head: repair.selected.head,
+          tree: repair.selected.tree,
+        },
+        activated: repair.activated,
+        checked:
+          repair.checked?.result.overall === 'pass' &&
+          repair.checked.result.taskReview?.status === 'pass' &&
+          repair.checked.snapshot &&
+          repair.checked.source &&
+          !repair.blocked
+            ? {
+                head: repair.checked.source.head,
+                tree: repair.checked.source.tree,
+                validationHash: repair.checked.resultHash,
+              }
+            : undefined,
+      };
+    }
+    return record.generation === pod.lifecycleGeneration ||
+      record.activated?.generation === pod.lifecycleGeneration
       ? record
       : null;
   };
@@ -145,19 +182,86 @@ export function createApprovalSourceRewriteRepository(db: Database.Database) {
   const retainedSandboxIds = () =>
     (
       db
-        .prepare(
-          `SELECT DISTINCT json_extract(binding,'$.containerId') AS id FROM approval_source_rewrites r
-          WHERE json_extract(binding,'$.containerId') IS NOT NULL
-          AND NOT EXISTS(SELECT 1 FROM approval_source_rewrite_events e WHERE e.rewrite_id=r.id AND e.kind='aborted')`,
-        )
+        .prepare(`SELECT DISTINCT json_extract(binding,'$.containerId') AS id FROM approval_source_rewrites r
+      WHERE json_extract(binding,'$.containerId') IS NOT NULL
+      AND NOT EXISTS(SELECT 1 FROM approval_source_rewrite_events e WHERE e.rewrite_id=r.id AND e.kind='aborted')
+      UNION
+      SELECT json_extract(d.binding,'$.containerId') AS id FROM validation_dispatches d
+      JOIN validation_dispatch_results v ON v.dispatch_id=d.id
+      WHERE json_extract(v.result,'$.overall')='fail' AND (
+        EXISTS(SELECT 1 FROM approval_source_rewrites r JOIN approval_source_rewrite_events e
+          ON e.rewrite_id=r.id AND e.kind='activated'
+          WHERE r.pod_id=d.pod_id AND json_extract(e.evidence,'$.generation')=d.generation)
+        OR EXISTS(SELECT 1 FROM retained_checkpoint_recoveries r JOIN retained_checkpoint_recovery_events e
+          ON e.recovery_id=r.id AND e.kind='activated'
+          WHERE r.pod_id=d.pod_id AND json_extract(r.binding,'$.approvalRewrite.id') IS NOT NULL
+          AND json_extract(e.evidence,'$.generation')=d.generation))`)
         .all() as { id: string }[]
     ).map((row) => row.id);
+
   return {
     get,
     has: (podId: string) =>
       Boolean(db.prepare('SELECT 1 FROM approval_source_rewrites WHERE pod_id=?').get(podId)),
     latest,
     append,
+    /** Only a chain of independently checked approval rewrites can inherit
+     * CURRENT control/delivery from a completed repair. Every hop advances one epoch. */
+    isRepairSuccessor(pod: Pick<Pod, 'id' | 'lifecycleGeneration'>, checkedHash?: string) {
+      const repair = createRetainedCheckpointRepository(db).latest(pod.id);
+      const owner = repair?.binding.approvalRewrite;
+      const current = latest(pod);
+      if (
+        !owner ||
+        !repair?.checked?.source ||
+        repair.checked.result.overall !== 'pass' ||
+        !repair.activated ||
+        !repair.prepared ||
+        !current ||
+        current.id === owner.id
+      )
+        return false;
+      return Boolean(
+        db
+          .prepare(`WITH RECURSIVE ancestry(generation,worktree,result_hash,head) AS (
+        SELECT ?,?,?,?
+        UNION ALL
+        SELECT json_extract(a.evidence,'$.generation'),json_extract(s.evidence,'$.worktreePath'),
+          json_extract(c.evidence,'$.validationHash'),json_extract(c.evidence,'$.head')
+        FROM ancestry prior JOIN approval_source_rewrites r ON r.pod_id=? AND r.generation=prior.generation
+          AND json_extract(r.binding,'$.worktreePath')=prior.worktree
+          AND json_extract(r.binding,'$.validationHash')=prior.result_hash
+          AND json_extract(r.binding,'$.predecessor.commitSha')=prior.head
+        JOIN approval_source_rewrite_events a ON a.rewrite_id=r.id AND a.kind='activated'
+        JOIN approval_source_rewrite_events s ON s.rewrite_id=r.id AND s.kind='prepared'
+        JOIN approval_source_rewrite_events c ON c.rewrite_id=r.id AND c.kind='checked'
+        WHERE json_extract(a.evidence,'$.generation')=r.generation+1
+          AND NOT EXISTS(SELECT 1 FROM approval_source_rewrite_events e WHERE e.rewrite_id=r.id AND e.kind='aborted')
+      ) SELECT 1 FROM ancestry prior JOIN approval_source_rewrites r ON r.id=? AND r.generation=prior.generation
+        AND json_extract(r.binding,'$.worktreePath')=prior.worktree
+        AND json_extract(r.binding,'$.validationHash')=prior.result_hash
+        AND json_extract(r.binding,'$.predecessor.commitSha')=prior.head
+      JOIN approval_source_rewrite_events a ON a.rewrite_id=r.id AND a.kind='activated'
+      JOIN approval_source_rewrite_events s ON s.rewrite_id=r.id AND s.kind='prepared'
+      LEFT JOIN approval_source_rewrite_events c ON c.rewrite_id=r.id AND c.kind='checked'
+      JOIN pods p ON p.id=r.pod_id
+      WHERE json_extract(a.evidence,'$.generation')=r.generation+1
+        AND p.lifecycle_generation=? AND p.lifecycle_generation=json_extract(a.evidence,'$.generation')
+        AND p.worktree_path=json_extract(s.evidence,'$.worktreePath')
+        AND (? IS NULL OR json_extract(c.evidence,'$.validationHash')=?) LIMIT 1`)
+          .get(
+            repair.activated.generation,
+            repair.prepared.worktree,
+            repair.checked.resultHash,
+            repair.checked.source.head,
+            pod.id,
+            current.id,
+            pod.lifecycleGeneration,
+            checkedHash ?? null,
+            checkedHash ?? null,
+          ),
+      );
+    },
     retainedSandboxIds,
     retains: (id: string) => retainedSandboxIds().includes(id),
     assertReleasable(id: string) {
@@ -233,6 +337,11 @@ export function createApprovalSourceRewriteRepository(db: Database.Database) {
     assertDelivery(pod: Pod, allowPrepared = false) {
       const row = latest(pod);
       if (!row) return null;
+      if (row.repairId) {
+        const repair = createRetainedCheckpointRepository(db).get(row.repairId);
+        if (repair?.binding.approvalRewrite?.taskHash !== rewriteHash(pod.task))
+          rewriteError('Repair task authority changed.');
+      }
       if (
         allowPrepared &&
         row.prepared &&

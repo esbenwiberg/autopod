@@ -85,6 +85,7 @@ export interface ValidationExecutionLedger {
     binding: ValidationExecutionBinding;
     intent: ValidationRecoveryIntent | null;
   } | null;
+  assertFailedChecksSelection(pod: Pod, dispatchId: string): void;
   intent(id: string): ValidationRecoveryIntent | null;
   unsettled(podId: string): UnsettledValidationDispatch | null;
   assertNoPendingRecovery(podId: string): void;
@@ -244,6 +245,30 @@ export function createValidationExecutionLedger(db: Database.Database): Validati
       };
     },
     find,
+    assertFailedChecksSelection(pod, dispatchId) {
+      const exact = find(pod);
+      if (
+        !exact ||
+        exact.id !== dispatchId ||
+        pod.lastValidationResult?.overall !== 'fail' ||
+        !db
+          .prepare(`SELECT 1 FROM task_retry_attempts WHERE id=? AND pod_id=? AND task_id=? AND generation=?
+          AND stage='validation' AND started_at IS NOT NULL AND ended_at IS NOT NULL
+          AND outcome IN ('nonretryable','transient')`)
+          .get(exact.binding.admissionId, pod.id, exact.binding.taskId, pod.lifecycleGeneration) ||
+        !db
+          .prepare(
+            'SELECT 1 FROM validation_logical_publications WHERE dispatch_id=? AND result_hash=?',
+          )
+          .get(dispatchId, validationResultHash(pod.lastValidationResult)) ||
+        db
+          .prepare('SELECT 1 FROM task_agent_runs WHERE pod_id=? AND generation=?')
+          .get(pod.id, pod.lifecycleGeneration)
+      )
+        validationRecoveryError('Published failed checks-only dispatch ownership is unavailable');
+      ledger.assertNoActiveTaskExecution(pod.id);
+      ledger.assertTaskSettled(pod.id);
+    },
     intent,
     unsettled(podId) {
       return unsettledDispatches(db, taskId(podId))[0] ?? null;

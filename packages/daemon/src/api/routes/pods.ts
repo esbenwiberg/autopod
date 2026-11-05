@@ -976,6 +976,38 @@ export function podRoutes(
     return result;
   });
 
+  // A distinct transport makes unsupported daemons refuse before creating any grant.
+  app.post('/pods/:podId/retry-authorizations/rewrite-repair', async (request, reply) => {
+    if (!request.user?.oid)
+      throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
+    const input = z
+      .object({
+        requestKey: z.string().min(1).max(200),
+        reason: z.string().trim().min(1).max(4000),
+        rewriteRepair: z
+          .object({
+            recoveryId: z.string().regex(/^[a-zA-Z0-9-]{1,64}$/),
+            candidateHead: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
+            candidateTree: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
+          })
+          .strict(),
+      })
+      .strict()
+      .parse(request.body);
+    if (!podRepo?.taskRetries)
+      throw new AutopodError('Task retry accounting unavailable', 'TASK_IDENTITY_UNAVAILABLE', 503);
+    const result = podRepo.taskRetries.authorize(
+      (request.params as { podId: string }).podId,
+      input.requestKey,
+      input.reason,
+      humanActor(request),
+      undefined,
+      input.rewriteRepair,
+    );
+    reply.header('Cache-Control', 'no-store');
+    return reply.code(201).send(result);
+  });
+
   // POST /pods/:podId/message — send message
   app.post('/pods/:podId/message', async (request) => {
     const { podId } = request.params as { podId: string };

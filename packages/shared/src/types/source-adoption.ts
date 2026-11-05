@@ -41,5 +41,10 @@ export interface SourceAdoptionList {
     checks: 'pending' | 'pass' | 'stale';
     originalResources: 'retained';
     requiresHumanApproval: true;
+    repair?: {
+      id: string;
+      phase: 'preparing' | 'prepared' | 'checking' | 'held' | 'checked';
+      failedDispatchId: string;
+    };
   };
 }

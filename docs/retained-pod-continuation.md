@@ -5,6 +5,11 @@ repair but ordinary Rework would replace/delete the original resource. It reuses
 the retained-checkpoint ledger, credential epochs and task accounting. It does
 **not** broaden legacy checkpoint recovery or in-place source adoption.
 
+A failed approval rewrite retains its own publication/source authority. Use the
+[dedicated rewrite-owned repair continuation](approval-rewrite-repair.md) for an
+eligible settled sandbox selection; these ordinary continuation operations remain
+refused while a rewrite owns source.
+
 ## Authority and limits
 
 - Only idle ordinary automatic PR/branch tasks in failed/review-required/validated states,
