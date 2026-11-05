@@ -1,6 +1,6 @@
 import type Dockerode from 'dockerode';
 import type { Logger } from 'pino';
-import { DOCKER_CALL_TIMEOUTS, boundedDockerCall } from './docker-bounds.js';
+import { boundedDockerCall, DOCKER_CALL_TIMEOUTS } from './docker-bounds.js';
 
 /**
  * Check whether a Dockerode error matches one of the expected HTTP status

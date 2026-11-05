@@ -639,25 +639,25 @@ describe('task-wide execution accounting', () => {
     }
   });
 
-  it.each(['broken', 'x'.repeat(65537)])(
-    'keeps archived malformed phase accounting unavailable %#',
-    (raw) => {
-      const { db, repo } = fixture();
-      try {
-        db.prepare("UPDATE pods SET phase_token_usage = ? WHERE id = 'root'").run(raw);
-        repo.delete('root');
-        const summary = repo.taskExecutions?.snapshot('fix');
-        expect(summary?.budgetCheck.status).toBe('unavailable');
-        expect(JSON.stringify(summary).length).toBeLessThan(16384);
-        expect(
-          db.prepare("SELECT phase_token_usage FROM task_history_pods WHERE id = 'root'").get(),
-        ).toEqual({ phase_token_usage: raw });
-        expect(() => repo.taskExecutions?.beginRun('fix', 1, 1, binding)).toThrow(/incomplete/);
-      } finally {
-        db.close();
-      }
-    },
-  );
+  it.each([
+    'broken',
+    'x'.repeat(65537),
+  ])('keeps archived malformed phase accounting unavailable %#', (raw) => {
+    const { db, repo } = fixture();
+    try {
+      db.prepare("UPDATE pods SET phase_token_usage = ? WHERE id = 'root'").run(raw);
+      repo.delete('root');
+      const summary = repo.taskExecutions?.snapshot('fix');
+      expect(summary?.budgetCheck.status).toBe('unavailable');
+      expect(JSON.stringify(summary).length).toBeLessThan(16384);
+      expect(
+        db.prepare("SELECT phase_token_usage FROM task_history_pods WHERE id = 'root'").get(),
+      ).toEqual({ phase_token_usage: raw });
+      expect(() => repo.taskExecutions?.beginRun('fix', 1, 1, binding)).toThrow(/incomplete/);
+    } finally {
+      db.close();
+    }
+  });
 
   it('does not turn an archived zero-use open provider segment into a fresh task budget', () => {
     const { db, repo } = fixture();
@@ -786,70 +786,69 @@ describe('task-wide execution accounting', () => {
     }
   });
 
-  it.each([139, 141, 152, 164, 176])(
-    'upgrades schema %s with existing linked work and unresolved legacy lineage',
-    (version) => {
-      const dir = mkdtempSync(path.join(tmpdir(), 'task-upgrade-'));
-      const migrations = path.resolve(import.meta.dirname, '../db/migrations');
-      for (const file of readdirSync(migrations)) {
-        if (Number.parseInt(file, 10) <= version)
-          copyFileSync(path.join(migrations, file), path.join(dir, file));
+  it.each([
+    139, 141, 152, 164, 176,
+  ])('upgrades schema %s with existing linked work and unresolved legacy lineage', (version) => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'task-upgrade-'));
+    const migrations = path.resolve(import.meta.dirname, '../db/migrations');
+    for (const file of readdirSync(migrations)) {
+      if (Number.parseInt(file, 10) <= version)
+        copyFileSync(path.join(migrations, file), path.join(dir, file));
+    }
+    const db = new Database(':memory:');
+    try {
+      runMigrations(db, dir, logger);
+      insertTestProfile(db);
+      for (const [id, parent] of [
+        ['root', null],
+        ['fix', 'root'],
+        ['orphan', 'orphan'],
+      ] as const) {
+        db.prepare(`INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id, linked_pod_id, input_tokens)
+          VALUES (?, 'test-profile', 'original', 'failed', 'model', 'codex', 'branch', 'user', ?, 10)`).run(
+          id,
+          parent,
+        );
       }
-      const db = new Database(':memory:');
-      try {
-        runMigrations(db, dir, logger);
-        insertTestProfile(db);
+      if (version >= 165) {
+        db.prepare(
+          "INSERT INTO logical_tasks(id,root_pod_id,created_at) VALUES ('original-task','root','2026-09-07')",
+        ).run();
         for (const [id, parent] of [
           ['root', null],
           ['fix', 'root'],
-          ['orphan', 'orphan'],
-        ] as const) {
-          db.prepare(`INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id, linked_pod_id, input_tokens)
-          VALUES (?, 'test-profile', 'original', 'failed', 'model', 'codex', 'branch', 'user', ?, 10)`).run(
-            id,
-            parent,
-          );
-        }
-        if (version >= 165) {
+        ])
           db.prepare(
-            "INSERT INTO logical_tasks(id,root_pod_id,created_at) VALUES ('original-task','root','2026-09-07')",
-          ).run();
-          for (const [id, parent] of [
-            ['root', null],
-            ['fix', 'root'],
-          ])
-            db.prepare(
-              "INSERT INTO task_executions(pod_id,execution_id,task_id,parent_pod_id,created_at) VALUES (?,?,'original-task',?,'2026-09-07')",
-            ).run(id, `original-${id}`, parent);
-        }
-        runMigrations(db, migrations, logger);
-        const repo = createPodRepository(db);
-        const root = repo.taskExecutions?.snapshot('root');
-        expect(repo.taskExecutions?.snapshot('fix')).toMatchObject({
-          taskId: root?.taskId,
-          podCount: 2,
-          recordedInputTokens: 20,
-          agentRunCount: 0,
-        });
-        expect(() => repo.taskExecutions?.snapshot('orphan')).toThrow('identity is unavailable');
-        repo.update('root', { tokenBudget: 20 });
-        repo.delete('root');
-        expect(repo.taskExecutions?.snapshot('fix')).toMatchObject({
-          taskId: root?.taskId,
-          rootPodId: 'root',
-          podCount: 2,
-          recordedInputTokens: 20,
-          tokenBudget: 20,
-        });
-        expect(repo.getOrThrow('fix').linkedPodId).toBeNull();
-        expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
-        expect(db.pragma('foreign_key_check')).toEqual([]);
-      } finally {
-        db.close();
-        rmSync(dir, { recursive: true, force: true });
+            "INSERT INTO task_executions(pod_id,execution_id,task_id,parent_pod_id,created_at) VALUES (?,?,'original-task',?,'2026-09-07')",
+          ).run(id, `original-${id}`, parent);
       }
-    },
-  );
+      runMigrations(db, migrations, logger);
+      const repo = createPodRepository(db);
+      const root = repo.taskExecutions?.snapshot('root');
+      expect(repo.taskExecutions?.snapshot('fix')).toMatchObject({
+        taskId: root?.taskId,
+        podCount: 2,
+        recordedInputTokens: 20,
+        agentRunCount: 0,
+      });
+      expect(() => repo.taskExecutions?.snapshot('orphan')).toThrow('identity is unavailable');
+      repo.update('root', { tokenBudget: 20 });
+      repo.delete('root');
+      expect(repo.taskExecutions?.snapshot('fix')).toMatchObject({
+        taskId: root?.taskId,
+        rootPodId: 'root',
+        podCount: 2,
+        recordedInputTokens: 20,
+        tokenBudget: 20,
+      });
+      expect(repo.getOrThrow('fix').linkedPodId).toBeNull();
+      expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
+      expect(db.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   it('rejects stale duplicate run reservations after lifecycle replacement', () => {
     const { db, repo } = fixture();

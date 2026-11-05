@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import { createWorkspaceFixture, deferred } from '../test-utils/workspace-recovery-helpers.js';
 import { sandboxStartupRetryInput } from './sandbox-startup-admission.js';
+
 const error = () => new SandboxInfrastructureError(403, { requestId: 'synthetic' });
 function fresh(f: ReturnType<typeof createWorkspaceFixture>) {
   f.sandbox();

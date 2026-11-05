@@ -16,9 +16,8 @@ import {
   mergeReconciliation,
 } from '../worktrees/merge-source-identity.js';
 import { ensureMergeIdentityProjection } from './merge-identity-projection.js';
-import { createSourcePublicationLedger } from './source-publication-ledger.js';
-
 import { assertSourceDeliveryAllowed } from './source-custody-guards.js';
+import { createSourcePublicationLedger } from './source-publication-ledger.js';
 
 export interface BoundMergeConfig {
   prUrl: string;

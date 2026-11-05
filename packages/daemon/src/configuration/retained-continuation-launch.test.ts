@@ -266,17 +266,19 @@ describe('retained execution selection', () => {
     expect(f.recovery.list(f.podId)).toEqual([]);
   });
 
-  it.each(['parent', 'digest', 'sidecars', 'resources', 'image'] as const)(
-    'refuses inconsistent %s evidence',
-    async (kind) => {
-      const { f, parent, selection } = await fixture();
-      if (kind === 'parent') selection.parentDigest = 'f'.repeat(64);
-      if (kind === 'digest') selection.digest = 'f'.repeat(64);
-      if (kind === 'sidecars') selection.resolvedExecution.sidecars = { unsafe: selection.main };
-      if (kind === 'resources')
-        selection.resolvedExecution.main = { ...selection.main, memoryGb: 4 };
-      if (kind === 'image') selection.resolvedEnvironment.imageKey = 'f'.repeat(64);
-      expect(() => retainedContinuationLaunch(parent, f.podId, selection)).toThrow();
-    },
-  );
+  it.each([
+    'parent',
+    'digest',
+    'sidecars',
+    'resources',
+    'image',
+  ] as const)('refuses inconsistent %s evidence', async (kind) => {
+    const { f, parent, selection } = await fixture();
+    if (kind === 'parent') selection.parentDigest = 'f'.repeat(64);
+    if (kind === 'digest') selection.digest = 'f'.repeat(64);
+    if (kind === 'sidecars') selection.resolvedExecution.sidecars = { unsafe: selection.main };
+    if (kind === 'resources') selection.resolvedExecution.main = { ...selection.main, memoryGb: 4 };
+    if (kind === 'image') selection.resolvedEnvironment.imageKey = 'f'.repeat(64);
+    expect(() => retainedContinuationLaunch(parent, f.podId, selection)).toThrow();
+  });
 });

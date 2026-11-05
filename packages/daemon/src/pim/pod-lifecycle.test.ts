@@ -2,7 +2,7 @@ import type { EffectiveLaunchConfig, PimEligibility, PimSelection, Pod } from '@
 import { describe, expect, it, vi } from 'vitest';
 import { createTestDb } from '../test-utils/mock-helpers.js';
 import { createPimActivationRepository } from './activation-repository.js';
-import { type PimActivationProvider, createPimActivationService } from './activation-service.js';
+import { createPimActivationService, type PimActivationProvider } from './activation-service.js';
 import { createPimPodLifecycle } from './pod-lifecycle.js';
 
 function fixture() {

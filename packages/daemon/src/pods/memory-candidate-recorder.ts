@@ -1,8 +1,8 @@
-import type { Pod } from '@autopod/shared';
 import type {
   AgentActivityEvent,
   AgentTaskSummaryEvent,
   EscalationType,
+  Pod,
   PodCompletedEvent,
   PodStatus,
   PodStatusChangedEvent,
@@ -19,12 +19,12 @@ import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { EventRepository } from './event-repository.js';
 import type { MemoryCandidateRepository } from './memory-candidate-repository.js';
-import type { MemoryExtractionAttemptRepository } from './memory-extraction-attempt-repository.js';
 import {
-  LESSON_POTENTIAL_THRESHOLD,
   computeLessonPotential,
   extractCandidate,
+  LESSON_POTENTIAL_THRESHOLD,
 } from './memory-extraction.js';
+import type { MemoryExtractionAttemptRepository } from './memory-extraction-attempt-repository.js';
 import type { MemoryRepository } from './memory-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import { memoryMatchesProjectSetup } from './project-memory-scope.js';

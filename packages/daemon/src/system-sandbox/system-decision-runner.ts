@@ -22,9 +22,9 @@ import {
 } from '../runtimes/provider-error-classifier.js';
 import { DecisionOutputError, parseSystemDecisionOutput } from './decision-output.js';
 import {
+  buildSystemRuntimeInvocation,
   SYSTEM_CREDENTIAL_SHIM,
   SYSTEM_CREDENTIAL_SHIM_PATH,
-  buildSystemRuntimeInvocation,
 } from './runtime-adapters.js';
 
 const MAX_PROMPT_BYTES = 256_000;

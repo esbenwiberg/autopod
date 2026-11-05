@@ -38,10 +38,7 @@ human_review:
 `;
 
 function createApp(
-  params: {
-    profileStore?: Partial<ProfileStore>;
-    worktreeManager?: Partial<WorktreeManager>;
-  } = {},
+  params: { profileStore?: Partial<ProfileStore>; worktreeManager?: Partial<WorktreeManager> } = {},
 ) {
   const app = Fastify();
   seriesRoutes(

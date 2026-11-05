@@ -4,8 +4,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -1001,26 +1001,26 @@ describe('SandboxContainerManager', () => {
       await expect(readStream(stream.stdout)).resolves.toBe('retained output');
     });
 
-    it.each(['confirmed', 'failed'] as const)(
-      'preserves timeout cause with %s cleanup without inventing an exit',
-      async (cleanup) => {
-        const client = new StreamingFakeClient();
-        vi.spyOn(client, 'execStream').mockImplementation(async function* () {
-          yield { stdout: 'FAIL observed test case\n' };
-          throw Object.assign(new AutopodError('timed out', 'AZURE_SANDBOX_TIMEOUT', 504), {
-            execution: { cause: 'timeout', timeoutMs: 600_000, cleanup },
-          });
-        });
-        const mgr = new SandboxContainerManager(client, logger);
-        const id = await mgr.spawn(baseConfig);
-        const stream = await mgr.execStreaming(id, ['cmd']);
-        await expect(stream.exitCode).rejects.toMatchObject({
-          code: 'EXEC_EXIT_UNVERIFIED',
+    it.each([
+      'confirmed',
+      'failed',
+    ] as const)('preserves timeout cause with %s cleanup without inventing an exit', async (cleanup) => {
+      const client = new StreamingFakeClient();
+      vi.spyOn(client, 'execStream').mockImplementation(async function* () {
+        yield { stdout: 'FAIL observed test case\n' };
+        throw Object.assign(new AutopodError('timed out', 'AZURE_SANDBOX_TIMEOUT', 504), {
           execution: { cause: 'timeout', timeoutMs: 600_000, cleanup },
         });
-        await expect(readStream(stream.stdout)).resolves.toContain('FAIL observed test case');
-      },
-    );
+      });
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      const stream = await mgr.execStreaming(id, ['cmd']);
+      await expect(stream.exitCode).rejects.toMatchObject({
+        code: 'EXEC_EXIT_UNVERIFIED',
+        execution: { cause: 'timeout', timeoutMs: 600_000, cleanup },
+      });
+      await expect(readStream(stream.stdout)).resolves.toContain('FAIL observed test case');
+    });
 
     it('execStreaming exposes writable stdin for native streams', async () => {
       const client = new StreamingFakeClient();
@@ -1184,50 +1184,50 @@ describe('SandboxContainerManager', () => {
       }
     });
 
-    it.each(['abort', 'supersede'] as const)(
-      'does not publish an extracted snapshot after %s',
-      async (reason) => {
-        const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-owned-extract-'));
-        const client = new FakeSandboxApiClient();
-        const mgr = new SandboxContainerManager(client, logger);
-        const id = await mgr.spawn(baseConfig);
-        const controller = new AbortController();
-        let current = true;
-        let release!: () => void;
-        let started!: () => void;
-        const pending = new Promise<void>((resolve) => {
-          release = resolve;
+    it.each([
+      'abort',
+      'supersede',
+    ] as const)('does not publish an extracted snapshot after %s', async (reason) => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-owned-extract-'));
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const id = await mgr.spawn(baseConfig);
+      const controller = new AbortController();
+      let current = true;
+      let release!: () => void;
+      let started!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const entered = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const read = client.readFile.bind(client);
+      vi.spyOn(client, 'readFile').mockImplementationOnce(async (...args) => {
+        started();
+        await pending;
+        return read(...args);
+      });
+      try {
+        writeFileSync(join(hostDir, 'session.jsonl'), 'current history');
+        client.seedFile(id, '/state/session.jsonl', Buffer.from('late history'));
+        const extraction = mgr.extractDirectoryFromContainer(id, '/state', hostDir, undefined, {
+          signal: controller.signal,
+          assertCurrent() {
+            if (!current) throw new Error('superseded extraction');
+          },
         });
-        const entered = new Promise<void>((resolve) => {
-          started = resolve;
-        });
-        const read = client.readFile.bind(client);
-        vi.spyOn(client, 'readFile').mockImplementationOnce(async (...args) => {
-          started();
-          await pending;
-          return read(...args);
-        });
-        try {
-          writeFileSync(join(hostDir, 'session.jsonl'), 'current history');
-          client.seedFile(id, '/state/session.jsonl', Buffer.from('late history'));
-          const extraction = mgr.extractDirectoryFromContainer(id, '/state', hostDir, undefined, {
-            signal: controller.signal,
-            assertCurrent() {
-              if (!current) throw new Error('superseded extraction');
-            },
-          });
-          await entered;
-          if (reason === 'abort') controller.abort(new Error('aborted extraction'));
-          else current = false;
-          release();
-          await expect(extraction).rejects.toThrow(/aborted extraction|superseded extraction/);
-          expect(readFileSync(join(hostDir, 'session.jsonl'), 'utf-8')).toBe('current history');
-        } finally {
-          release();
-          rmSync(hostDir, { recursive: true, force: true });
-        }
-      },
-    );
+        await entered;
+        if (reason === 'abort') controller.abort(new Error('aborted extraction'));
+        else current = false;
+        release();
+        await expect(extraction).rejects.toThrow(/aborted extraction|superseded extraction/);
+        expect(readFileSync(join(hostDir, 'session.jsonl'), 'utf-8')).toBe('current history');
+      } finally {
+        release();
+        rmSync(hostDir, { recursive: true, force: true });
+      }
+    });
 
     it('retains a newer published snapshot while a superseded collector is still writing', async () => {
       const root = mkdtempSync(join(tmpdir(), 'sandbox-overlap-extract-'));
@@ -1325,39 +1325,39 @@ describe('SandboxContainerManager', () => {
       }
     });
 
-    it.each([false, true])(
-      'round-trips runtime state through extract and next spawn guarded=%s',
-      async (guarded) => {
-        const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-runtime-state-'));
-        const client = new FakeSandboxApiClient();
-        const mgr = new SandboxContainerManager(client, logger);
-        const firstId = await mgr.spawn(baseConfig);
-        const containerPath = '/home/autopod/.codex/sessions';
-        const rolloutPath = `${containerPath}/2026/07/12/rollout-thread-123.jsonl`;
+    it.each([
+      false,
+      true,
+    ])('round-trips runtime state through extract and next spawn guarded=%s', async (guarded) => {
+      const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-runtime-state-'));
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      const firstId = await mgr.spawn(baseConfig);
+      const containerPath = '/home/autopod/.codex/sessions';
+      const rolloutPath = `${containerPath}/2026/07/12/rollout-thread-123.jsonl`;
 
-        try {
-          client.seedFile(firstId, rolloutPath, Buffer.from('{"type":"session_meta"}\n'));
+      try {
+        client.seedFile(firstId, rolloutPath, Buffer.from('{"type":"session_meta"}\n'));
 
-          await mgr.extractDirectoryFromContainer(
-            firstId,
-            containerPath,
-            hostDir,
-            undefined,
-            guarded ? { signal: new AbortController().signal, assertCurrent() {} } : undefined,
-          );
-          const secondId = await mgr.spawn({
-            ...baseConfig,
-            volumes: [{ host: hostDir, container: containerPath }],
-          });
+        await mgr.extractDirectoryFromContainer(
+          firstId,
+          containerPath,
+          hostDir,
+          undefined,
+          guarded ? { signal: new AbortController().signal, assertCurrent() {} } : undefined,
+        );
+        const secondId = await mgr.spawn({
+          ...baseConfig,
+          volumes: [{ host: hostDir, container: containerPath }],
+        });
 
-          expect(client.sandboxes.get(secondId)?.files.get(rolloutPath)?.toString('utf-8')).toBe(
-            '{"type":"session_meta"}\n',
-          );
-        } finally {
-          rmSync(hostDir, { recursive: true, force: true });
-        }
-      },
-    );
+        expect(client.sandboxes.get(secondId)?.files.get(rolloutPath)?.toString('utf-8')).toBe(
+          '{"type":"session_meta"}\n',
+        );
+      } finally {
+        rmSync(hostDir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('withAzureClient', () => {
@@ -1451,36 +1451,36 @@ it('reads the observed sandbox allocation after restart when the VM has no cgrou
   expect(requests.some((request) => request.endsWith('/sandboxes/sandbox-observed'))).toBe(true);
 });
 
-it.each([false, true])(
-  'retains stricter cgroup limits when allocation lookup fails=%s',
-  async (fails) => {
-    const client = Object.assign(
-      new FakeSandboxApiClient(() => ({
-        exitCode: 0,
-        stdout: '{"memoryLimitBytes":2147483648,"cpuLimit":0.5}',
-        stderr: '',
-      })),
-      {
-        getResourceAllocation: async () => {
-          if (fails) throw new Error('provider unavailable');
-          return { memoryLimitBytes: 4294967296, cpuLimit: 2 };
-        },
+it.each([
+  false,
+  true,
+])('retains stricter cgroup limits when allocation lookup fails=%s', async (fails) => {
+  const client = Object.assign(
+    new FakeSandboxApiClient(() => ({
+      exitCode: 0,
+      stdout: '{"memoryLimitBytes":2147483648,"cpuLimit":0.5}',
+      stderr: '',
+    })),
+    {
+      getResourceAllocation: async () => {
+        if (fails) throw new Error('provider unavailable');
+        return { memoryLimitBytes: 4294967296, cpuLimit: 2 };
       },
-    );
-    const manager = new SandboxContainerManager(client, logger);
-    const id = await manager.spawn({
-      image: 'example.azurecr.io/test:latest',
-      podId: 'strict-limits',
-      env: {},
-    });
-    expect(await manager.getExecutionMetadata(id)).toEqual({
-      imageDigest: null,
-      memoryLimitBytes: 2147483648,
-      cpuLimit: 0.5,
-      networkMode: null,
-    });
-  },
-);
+    },
+  );
+  const manager = new SandboxContainerManager(client, logger);
+  const id = await manager.spawn({
+    image: 'example.azurecr.io/test:latest',
+    podId: 'strict-limits',
+    env: {},
+  });
+  expect(await manager.getExecutionMetadata(id)).toEqual({
+    imageDigest: null,
+    memoryLimitBytes: 2147483648,
+    cpuLimit: 0.5,
+    networkMode: null,
+  });
+});
 
 it.each([
   'pinned',

@@ -9,6 +9,7 @@ export function createResourceCommitPollingState(captured: ResourceCommitStateCa
 
   return { commitPolling };
 }
+
 import type { Pod } from '@autopod/shared';
 import type {
   ResourceCommitCaptured,

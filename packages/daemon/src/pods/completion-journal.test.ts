@@ -164,32 +164,31 @@ describe('durable completion journal', () => {
     }
   });
 
-  it.each([139, 141])(
-    'upgrades an existing schema %s database without losing its unanswered decision',
-    async (version) => {
-      const dir = mkdtempSync(path.join(tmpdir(), 'completion-upgrade-'));
-      const migrations = path.resolve(import.meta.dirname, '../db/migrations');
-      for (const file of readdirSync(migrations)) {
-        if (Number.parseInt(file, 10) <= version)
-          copyFileSync(path.join(migrations, file), path.join(dir, file));
-      }
-      const db = new Database(':memory:');
-      try {
-        runMigrations(db, dir, logger);
-        insertPod(db);
-        await runMigrationsWithBackups(db, migrations, logger);
-        const repo = createPodRepository(db);
-        const pod = repo.getOrThrow('settled');
-        expect(pod.pendingEscalation?.id).toBe('decision');
-        expect(pod.status).toBe('awaiting_input');
-        repo.completionJournal?.settle(pod, 'Retained report');
-        expect(repo.getOrThrow('settled').finalization?.phase).toBe('awaiting_human');
-        expect(db.pragma('foreign_key_check')).toEqual([]);
-        expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
-      } finally {
-        db.close();
-        rmSync(dir, { recursive: true, force: true });
-      }
-    },
-  );
+  it.each([
+    139, 141,
+  ])('upgrades an existing schema %s database without losing its unanswered decision', async (version) => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'completion-upgrade-'));
+    const migrations = path.resolve(import.meta.dirname, '../db/migrations');
+    for (const file of readdirSync(migrations)) {
+      if (Number.parseInt(file, 10) <= version)
+        copyFileSync(path.join(migrations, file), path.join(dir, file));
+    }
+    const db = new Database(':memory:');
+    try {
+      runMigrations(db, dir, logger);
+      insertPod(db);
+      await runMigrationsWithBackups(db, migrations, logger);
+      const repo = createPodRepository(db);
+      const pod = repo.getOrThrow('settled');
+      expect(pod.pendingEscalation?.id).toBe('decision');
+      expect(pod.status).toBe('awaiting_input');
+      repo.completionJournal?.settle(pod, 'Retained report');
+      expect(repo.getOrThrow('settled').finalization?.phase).toBe('awaiting_human');
+      expect(db.pragma('foreign_key_check')).toEqual([]);
+      expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -13,10 +13,10 @@ import type { EventRepository } from './event-repository.js';
 import type { PodRepository } from './pod-repository.js';
 import type { QualityScoreRepository } from './quality-score-repository.js';
 import {
-  type ReadinessInputs,
   createReadinessService,
   deriveReadinessReview,
   deriveSeriesReadiness,
+  type ReadinessInputs,
 } from './readiness-review.js';
 import type { ValidationRepository } from './validation-repository.js';
 

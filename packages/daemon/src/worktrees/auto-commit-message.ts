@@ -1,13 +1,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ContentBlock } from '@anthropic-ai/sdk/resources/messages.js';
-import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
-
 import type { Logger } from 'pino';
+import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import {
+  createProfileAnthropicClient,
   type ProfileLlmClientDeps,
   type ProfileLlmClientUnavailableReason,
-  createProfileAnthropicClient,
 } from '../providers/llm-client.js';
 
 const execFileAsync = promisify(execFile);

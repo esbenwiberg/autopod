@@ -1,4 +1,4 @@
-import { type SpecContract, parseSpecContract } from '@autopod/shared';
+import { parseSpecContract, type SpecContract } from '@autopod/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';

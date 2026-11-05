@@ -20,10 +20,10 @@ import { buildValidationContextEnv } from '../validation/validation-context-env.
 import { mergeMcpServers } from './injection-merger.js';
 import { resolvePodSpawnImage, verifySandboxWarmImageAccess } from './provisioning-image-policy.js';
 import {
-  POD_ARTIFACTS_CONTAINER_DIR,
-  SPEC_CONTEXT_CONTAINER_DIR,
   ensureSeriesArtifactsDir,
   materializeSpecContextFiles,
+  POD_ARTIFACTS_CONTAINER_DIR,
+  SPEC_CONTEXT_CONTAINER_DIR,
 } from './provisioning-materials.js';
 import type { ProvisioningCaptured, ProvisioningLiveDependencies } from './provisioning-ports.js';
 import type { WorkspacePrepared } from './provisioning-workspace.js';

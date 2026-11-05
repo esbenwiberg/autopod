@@ -1,5 +1,7 @@
 import type { OperatorFailurePhase } from './completion-diagnostics.js';
+
 export type { OperatorFailurePhase } from './completion-diagnostics.js';
+
 import type {
   AgentEvent,
   EffectiveLaunchConfig,

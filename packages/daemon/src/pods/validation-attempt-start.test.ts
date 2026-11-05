@@ -273,35 +273,35 @@ describe('validation attempt start persisted effects', () => {
     }
   });
 
-  it.each([false, true])(
-    'returns the exact transition snapshot before the wake/counter update, wake=%s',
-    async (wake) => {
-      const f = fixture({ marker: wake ? 'wake' : undefined });
-      try {
-        const body = f.transition.getMockImplementation();
-        if (!body) throw new Error('Missing transition');
-        f.transition.mockImplementationOnce((p, to) => ({
-          ...body(p, to),
-          task: 'distinct returned snapshot',
-        }));
-        const result = await f.run();
-        expect(result.s1).toBe(f.transition.mock.results[0]?.value);
-        expect(result.s1).toMatchObject({
-          task: 'distinct returned snapshot',
-          validationAttempts: 2,
-          lastRecoveryTrigger: wake ? 'wake' : null,
-        });
-        expect(f.suite.mock.calls[0]?.[0]).toBe(result.s1);
-        expect(f.reopen().pod).toMatchObject({
-          task: 'Start validation',
-          validationAttempts: wake ? 2 : 3,
-          lastRecoveryTrigger: null,
-        });
-      } finally {
-        f.close();
-      }
-    },
-  );
+  it.each([
+    false,
+    true,
+  ])('returns the exact transition snapshot before the wake/counter update, wake=%s', async (wake) => {
+    const f = fixture({ marker: wake ? 'wake' : undefined });
+    try {
+      const body = f.transition.getMockImplementation();
+      if (!body) throw new Error('Missing transition');
+      f.transition.mockImplementationOnce((p, to) => ({
+        ...body(p, to),
+        task: 'distinct returned snapshot',
+      }));
+      const result = await f.run();
+      expect(result.s1).toBe(f.transition.mock.results[0]?.value);
+      expect(result.s1).toMatchObject({
+        task: 'distinct returned snapshot',
+        validationAttempts: 2,
+        lastRecoveryTrigger: wake ? 'wake' : null,
+      });
+      expect(f.suite.mock.calls[0]?.[0]).toBe(result.s1);
+      expect(f.reopen().pod).toMatchObject({
+        task: 'Start validation',
+        validationAttempts: wake ? 2 : 3,
+        lastRecoveryTrigger: null,
+      });
+    } finally {
+      f.close();
+    }
+  });
 
   it('holds the scan before resets, status changes or start publication', async () => {
     const f = fixture({ status: 'failed', count: 4 });

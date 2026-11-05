@@ -1,5 +1,5 @@
-import { PROVIDER_CATALOG, createProviderCatalog } from '@autopod/shared';
 import type { Profile, ProviderAccount, PublicProviderCatalog } from '@autopod/shared';
+import { createProviderCatalog, PROVIDER_CATALOG } from '@autopod/shared';
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 import { redactProviderAccountSecrets } from '../api/provider-account-redaction.js';

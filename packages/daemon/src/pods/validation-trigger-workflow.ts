@@ -5,14 +5,6 @@ import type { ValidationEngine } from '../interfaces/index.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
 import { addTokenUsage } from '../validation/review-synthesizer.js';
-import {
-  assertValidationExecutionSettled,
-  assertValidationMutationSettled,
-  captureValidationDispatchGuard,
-  guardValidationContainer,
-  requiresValidationSettlement,
-} from './validation-recovery-policy.js';
-
 import { AgentContinuationSupersededError } from './continuation-preflight.js';
 import { buildCorrectionMessage } from './correction-context.js';
 import { assertNoInfrastructureBlocker, persistEscalation } from './escalation-coordinator.js';
@@ -24,7 +16,14 @@ import {
   isValidationInfrastructureOnlyFailure,
   reviewInfrastructureFailureLabel,
 } from './validation-infrastructure.js';
-import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
+import { captureValidationOwnership, ValidationSupersededError } from './validation-ownership.js';
+import {
+  assertValidationExecutionSettled,
+  assertValidationMutationSettled,
+  captureValidationDispatchGuard,
+  guardValidationContainer,
+  requiresValidationSettlement,
+} from './validation-recovery-policy.js';
 import {
   failedValidationPhases,
   hasPendingFactDecision,

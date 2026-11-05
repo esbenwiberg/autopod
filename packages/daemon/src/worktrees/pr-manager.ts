@@ -29,13 +29,15 @@ import {
   mergeReconciliation,
   sourceCommit,
 } from './merge-source-identity.js';
+
 export { parseGitHubRepoUrl } from './github-url-identity.js';
+
 import { buildPrBody } from './pr-body-builder.js';
 import {
-  type PrNarrativeResult,
-  type PrTitleResult,
   generatePrNarrative,
   generatePrTitle,
+  type PrNarrativeResult,
+  type PrTitleResult,
 } from './pr-description-generator.js';
 
 const execFileAsync = promisify(execFile);

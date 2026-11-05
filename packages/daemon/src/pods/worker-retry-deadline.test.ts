@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { workerRetryDeadline } from './worker-retry-deadline.js';
+
 const observed = Date.parse('2026-09-08T10:00:00.000Z');
 it('anchors relative hints to error observation and preserves valid absolute deadlines', () => {
   expect(workerRetryDeadline('3600', observed)).toBe('2026-09-08T11:00:00.000Z');

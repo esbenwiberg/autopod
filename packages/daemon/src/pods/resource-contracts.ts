@@ -1,10 +1,11 @@
-import type { DaemonConfig, PublicProviderCatalog } from '@autopod/shared';
 import type {
+  DaemonConfig,
   ExecutionTarget,
   InjectedMcpServer,
   NetworkPolicy,
   Pod,
   PrivateRegistry,
+  PublicProviderCatalog,
   ValidationResult,
 } from '@autopod/shared';
 import type { Logger } from 'pino';

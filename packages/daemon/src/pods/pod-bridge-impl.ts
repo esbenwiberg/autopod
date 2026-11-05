@@ -1,4 +1,5 @@
 import type {
+  PendingRequests,
   PodBridge,
   PreSubmitReviewInput,
   PreSubmitReviewToolResult,
@@ -6,7 +7,6 @@ import type {
   ValidationPhaseName,
   ValidationPhaseResult,
 } from '@autopod/escalation-mcp';
-import type { PendingRequests } from '@autopod/escalation-mcp';
 import type {
   ActionDefinition,
   ActionResponse,
@@ -24,7 +24,7 @@ import type {
   Pod,
   ReviewFeedbackResponseItem,
 } from '@autopod/shared';
-import { AutopodError, MAX_DIFF_LENGTH, generateId } from '@autopod/shared';
+import { AutopodError, generateId, MAX_DIFF_LENGTH } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ActionEngine } from '../actions/action-engine.js';
 import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';

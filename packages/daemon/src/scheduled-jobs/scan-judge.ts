@@ -5,9 +5,9 @@ import { assertLaunchAgentAccount } from '../configuration/agent-route-resolutio
 import type { ProviderAccountStore } from '../provider-accounts/index.js';
 import { resolveProviderAccountAuth, resolveProviderAuth } from '../providers/auth-resolution.js';
 import {
+  createProviderAnthropicClient,
   type ProfileLlmClientDeps,
   type ProfileLlmClientResult,
-  createProviderAnthropicClient,
   resolveAnthropicModelId,
 } from '../providers/llm-client.js';
 import { ReviewerApiDeadlineError, reviewerApiBudget } from '../validation/reviewer-api-budget.js';

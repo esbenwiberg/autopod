@@ -9,6 +9,7 @@ import {
   inspectAdoptionGit,
   preparePinnedAdoption,
 } from './source-adoption-git.js';
+
 const exec = promisify(execFile);
 const roots: string[] = [];
 afterEach(async () => {

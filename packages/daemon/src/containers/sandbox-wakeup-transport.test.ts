@@ -1,11 +1,11 @@
 import { AutopodError } from '@autopod/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  TEST_WAKEUP_ID as ID,
-  TEST_WAKEUP_KEY as KEY,
   createDelayedWakeupCredential,
   createSandboxWakeupFixture,
   createTestWakeupClient,
+  TEST_WAKEUP_ID as ID,
+  TEST_WAKEUP_KEY as KEY,
 } from '../test-utils/sandbox-wakeup-helpers.js';
 
 const state = (value: string) => new Response(JSON.stringify({ state: value }));

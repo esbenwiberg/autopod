@@ -83,20 +83,20 @@ describe('AGENT_SHIM_SCRIPT — runtime behaviour', () => {
     expect(fileVar).toBe('unset');
   });
 
-  it.each(['ANTHROPIC_FOUNDRY_API_KEY', 'ANTHROPIC_FOUNDRY_AUTH_TOKEN'])(
-    'expands the Foundry %s secret file for Claude Code',
-    (variable) => {
-      const stdout = execFileSync(
-        'sh',
-        [shimPath, 'sh', '-c', `printf "%s|%s" "\${${variable}}" "\${${variable}_FILE:-unset}"`],
-        {
-          env: { ...process.env, [`${variable}_FILE`]: credPath, AUTOPOD_AGENT_PID_PATH: pidPath },
-          encoding: 'utf8',
-        },
-      );
-      expect(stdout).toBe('sk-test-secret-value|unset');
-    },
-  );
+  it.each([
+    'ANTHROPIC_FOUNDRY_API_KEY',
+    'ANTHROPIC_FOUNDRY_AUTH_TOKEN',
+  ])('expands the Foundry %s secret file for Claude Code', (variable) => {
+    const stdout = execFileSync(
+      'sh',
+      [shimPath, 'sh', '-c', `printf "%s|%s" "\${${variable}}" "\${${variable}_FILE:-unset}"`],
+      {
+        env: { ...process.env, [`${variable}_FILE`]: credPath, AUTOPOD_AGENT_PID_PATH: pidPath },
+        encoding: 'utf8',
+      },
+    );
+    expect(stdout).toBe('sk-test-secret-value|unset');
+  });
 
   it('is a no-op when no *_FILE env vars are set', () => {
     const stdout = execFileSync(

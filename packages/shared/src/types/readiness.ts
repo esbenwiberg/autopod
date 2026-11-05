@@ -67,4 +67,5 @@ export interface ReadinessReview {
   findings: ReadinessFinding[];
   approval?: ReadinessApproval | null;
 }
+
 import type { OperatorActor } from './podsitter.js';

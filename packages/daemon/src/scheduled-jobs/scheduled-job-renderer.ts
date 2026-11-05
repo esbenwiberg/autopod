@@ -1,5 +1,5 @@
-import { AutopodError } from '@autopod/shared';
 import type { ScheduledJobTemplateField } from '@autopod/shared';
+import { AutopodError } from '@autopod/shared';
 
 const FIELD_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const PLACEHOLDER_PATTERN = /\{\{\s*([^}]+?)\s*\}\}/g;

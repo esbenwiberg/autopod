@@ -8,7 +8,7 @@ import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 import type { Detector } from '../security/detectors/detector.js';
 import { createTestDb } from '../test-utils/mock-helpers.js';
-import { type ScheduledCollectorDeps, collectScheduledScan } from './scan-collector.js';
+import { collectScheduledScan, type ScheduledCollectorDeps } from './scan-collector.js';
 import { createScanCoordinator } from './scan-coordinator.js';
 import { createScanReportRepository } from './scan-report-repository.js';
 
@@ -188,53 +188,51 @@ describe('scheduled scan complete-review regressions', () => {
     }
   });
 
-  it.each([100, 10001])(
-    'roundtrips %i real tracked paths without losing identities or partial findings',
-    async (count) => {
-      const f = treeFixture();
-      try {
-        const sha = f.blob('{}');
-        f.head(
-          f.tree([
-            { name: '000-package', sha: f.tree([{ name: 'package-lock.json', sha }]), tree: true },
-            ...Array.from({ length: count - 1 }, (_, i) => ({ name: `file-${i}`, sha })),
-          ]),
-        );
-        await roundtrip(f, { auditLockfile }, count > 10000 ? 'incomplete' : 'complete');
-      } finally {
-        rmSync(f.dir, { recursive: true, force: true });
-      }
-    },
-  );
-
-  it.each([400, 800, 1300])(
-    'roundtrips %i escaped long paths with the actual serialized budget',
-    async (count) => {
-      const f = treeFixture();
-      try {
-        const sha = f.blob('{}');
-        let subtree = f.tree(Array.from({ length: count }, (_, i) => ({ name: `file-${i}`, sha })));
-        for (let i = 0; i < 6; i++) {
-          subtree = f.tree([{ name: '"'.repeat(180), sha: subtree, tree: true }]);
-        }
-        const root = f.tree([
+  it.each([
+    100, 10001,
+  ])('roundtrips %i real tracked paths without losing identities or partial findings', async (count) => {
+    const f = treeFixture();
+    try {
+      const sha = f.blob('{}');
+      f.head(
+        f.tree([
           { name: '000-package', sha: f.tree([{ name: 'package-lock.json', sha }]), tree: true },
-          { name: 'long', sha: subtree, tree: true },
-        ]);
-        f.head(root);
-        const paths = Array.from(
-          { length: count },
-          (_, i) => `long/${Array.from({ length: 6 }, () => '"'.repeat(180)).join('/')}/file-${i}`,
-        );
-        expect(Buffer.byteLength(paths.join('\0'))).toBeLessThan(2 * 1024 * 1024);
-        if (count === 1300)
-          expect(Buffer.byteLength(JSON.stringify(paths))).toBeGreaterThan(2 * 1024 * 1024);
-        await roundtrip(f, { auditLockfile }, count === 1300 ? 'incomplete' : 'complete');
-      } finally {
-        rmSync(f.dir, { recursive: true, force: true });
+          ...Array.from({ length: count - 1 }, (_, i) => ({ name: `file-${i}`, sha })),
+        ]),
+      );
+      await roundtrip(f, { auditLockfile }, count > 10000 ? 'incomplete' : 'complete');
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    400, 800, 1300,
+  ])('roundtrips %i escaped long paths with the actual serialized budget', async (count) => {
+    const f = treeFixture();
+    try {
+      const sha = f.blob('{}');
+      let subtree = f.tree(Array.from({ length: count }, (_, i) => ({ name: `file-${i}`, sha })));
+      for (let i = 0; i < 6; i++) {
+        subtree = f.tree([{ name: '"'.repeat(180), sha: subtree, tree: true }]);
       }
-    },
-  );
+      const root = f.tree([
+        { name: '000-package', sha: f.tree([{ name: 'package-lock.json', sha }]), tree: true },
+        { name: 'long', sha: subtree, tree: true },
+      ]);
+      f.head(root);
+      const paths = Array.from(
+        { length: count },
+        (_, i) => `long/${Array.from({ length: 6 }, () => '"'.repeat(180)).join('/')}/file-${i}`,
+      );
+      expect(Buffer.byteLength(paths.join('\0'))).toBeLessThan(2 * 1024 * 1024);
+      if (count === 1300)
+        expect(Buffer.byteLength(JSON.stringify(paths))).toBeGreaterThan(2 * 1024 * 1024);
+      await roundtrip(f, { auditLockfile }, count === 1300 ? 'incomplete' : 'complete');
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
 
   it('bounds serialized findings during collection and preserves every earlier accepted finding', async () => {
     const f = treeFixture();

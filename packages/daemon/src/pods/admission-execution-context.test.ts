@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createAdmissionFixture } from '../test-utils/admission-queries-helpers.js';
+
 describe('admission execution context', () => {
   it('uses captured legacy profile and isolates frozen daemon injections', () => {
     const f = createAdmissionFixture();

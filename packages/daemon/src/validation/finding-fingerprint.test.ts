@@ -5,8 +5,8 @@ import {
   extractFindings,
   findingId,
   fingerprintText,
+  structuredFindingId,
 } from './finding-fingerprint.js';
-import { structuredFindingId } from './finding-fingerprint.js';
 
 describe('structuredFindingId', () => {
   it('is stable when reviewer evidence wording changes', () => {

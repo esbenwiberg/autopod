@@ -12,11 +12,13 @@ export function createDeliveryProvider(
       : rawPrManagerFactory;
   return { prManagerFactory };
 }
+
 import { MergeQueue } from '../worktrees/merge-queue.js';
 export function createDeliveryMergeQueue() {
   const mergeQueue = new MergeQueue();
   return { mergeQueue };
 }
+
 import { createPollingCoordinator } from './polling-coordinator.js';
 export function createDeliveryPollingState(logger: Logger) {
   const mergePolling = createPollingCoordinator((err, podId) =>

@@ -1,5 +1,5 @@
 import { act } from 'react';
-import { type Root, createRoot } from 'react-dom/client';
+import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App.js';
 import { useManagedPodsStore } from './store/managed-pods.js';

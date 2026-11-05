@@ -1,7 +1,7 @@
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
-import { Readable, pipeline } from 'node:stream';
+import { pipeline, Readable } from 'node:stream';
 import { createGunzip, createInflate } from 'node:zlib';
 
 import { ActionBoundaryError } from './action-diagnostics.js';

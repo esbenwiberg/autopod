@@ -228,57 +228,57 @@ describe('native Goal pod lifecycle binding', () => {
     });
     return { ...f, restarted, terminate, inspect, processes, owner, identity };
   }
-  it.each(['local', 'sandbox'] as const)(
-    'recovers a lost %s process before inspecting native state and settling the durable attempt',
-    async (target) => {
-      const f = await interrupted(target);
-      try {
-        const goal = await f.restarted.recover('pod');
-        expect(goal).toMatchObject({
-          state: 'paused',
-          executionStopped: true,
-          observedTokens: 110,
-        });
-        expect(f.terminate).toHaveBeenCalledWith(
-          expect.objectContaining({ execId: f.identity.execId }),
-        );
-        expect(f.pods.taskExecutions?.hasUnverifiedTermination('pod')).toBe(false);
-        expect(
-          f.db
-            .prepare('SELECT outcome,failure_category FROM task_agent_runs WHERE id=?')
-            .get(f.input.fence.attemptId),
-        ).toEqual({ outcome: 'paused', failure_category: 'native_goal_recovered' });
-        await f.restarted.recover('pod');
-        expect(f.inspect).toHaveBeenCalledOnce();
-        expect(f.restarted.get('pod')?.observedTokens).toBe(110);
-      } finally {
-        f.db.close();
-      }
-    },
-  );
-  it.each(['local', 'sandbox'] as const)(
-    'does not inspect, release the task budget, or confirm cancellation after uncertain %s termination',
-    async (target) => {
-      const f = await interrupted(target);
-      try {
-        f.terminate.mockRejectedValue(new Error('Disconnected'));
-        await expect(f.restarted.control('pod', 'cancel')).rejects.toThrow('Disconnected');
-        expect(f.inspect).not.toHaveBeenCalled();
-        expect(f.restarted.get('pod')).toMatchObject({
-          executionStopped: false,
-          controlIntent: 'cancel',
-        });
-        expect(f.pods.taskExecutions?.hasUnverifiedTermination('pod')).toBe(true);
-        f.terminate.mockResolvedValue(137);
-        expect(await f.restarted.recover('pod')).toMatchObject({
-          state: 'cancelled',
-          executionStopped: true,
-        });
-      } finally {
-        f.db.close();
-      }
-    },
-  );
+  it.each([
+    'local',
+    'sandbox',
+  ] as const)('recovers a lost %s process before inspecting native state and settling the durable attempt', async (target) => {
+    const f = await interrupted(target);
+    try {
+      const goal = await f.restarted.recover('pod');
+      expect(goal).toMatchObject({
+        state: 'paused',
+        executionStopped: true,
+        observedTokens: 110,
+      });
+      expect(f.terminate).toHaveBeenCalledWith(
+        expect.objectContaining({ execId: f.identity.execId }),
+      );
+      expect(f.pods.taskExecutions?.hasUnverifiedTermination('pod')).toBe(false);
+      expect(
+        f.db
+          .prepare('SELECT outcome,failure_category FROM task_agent_runs WHERE id=?')
+          .get(f.input.fence.attemptId),
+      ).toEqual({ outcome: 'paused', failure_category: 'native_goal_recovered' });
+      await f.restarted.recover('pod');
+      expect(f.inspect).toHaveBeenCalledOnce();
+      expect(f.restarted.get('pod')?.observedTokens).toBe(110);
+    } finally {
+      f.db.close();
+    }
+  });
+  it.each([
+    'local',
+    'sandbox',
+  ] as const)('does not inspect, release the task budget, or confirm cancellation after uncertain %s termination', async (target) => {
+    const f = await interrupted(target);
+    try {
+      f.terminate.mockRejectedValue(new Error('Disconnected'));
+      await expect(f.restarted.control('pod', 'cancel')).rejects.toThrow('Disconnected');
+      expect(f.inspect).not.toHaveBeenCalled();
+      expect(f.restarted.get('pod')).toMatchObject({
+        executionStopped: false,
+        controlIntent: 'cancel',
+      });
+      expect(f.pods.taskExecutions?.hasUnverifiedTermination('pod')).toBe(true);
+      f.terminate.mockResolvedValue(137);
+      expect(await f.restarted.recover('pod')).toMatchObject({
+        state: 'cancelled',
+        executionStopped: true,
+      });
+    } finally {
+      f.db.close();
+    }
+  });
   it('retains an interrupted inspection process and terminates it before a replacement inspector', async () => {
     const f = await interrupted();
     try {

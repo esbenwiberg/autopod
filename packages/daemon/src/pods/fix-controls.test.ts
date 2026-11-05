@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createFixCycleFixture } from '../test-utils/fix-cycle-helpers.js';
+
 describe('fix operator controls', () => {
   it('requires failed exhausted-attempt state and enforces the twenty-attempt ceiling', async () => {
     const f = createFixCycleFixture();

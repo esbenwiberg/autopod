@@ -2,9 +2,9 @@ import type { Readable } from 'node:stream';
 import type { AgentEvent } from '@autopod/shared';
 import type { Logger } from 'pino';
 import {
-  type ProviderErrorEvidence,
   classifyProviderError,
   classifySettledPiProviderError,
+  type ProviderErrorEvidence,
   sanitizeProviderMessage,
 } from './provider-error-classifier.js';
 

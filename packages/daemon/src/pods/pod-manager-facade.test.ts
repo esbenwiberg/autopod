@@ -6,9 +6,10 @@ import {
   deferred,
   flushAdmission,
 } from '../test-utils/admission-queries-helpers.js';
-import { createPodManagerFacade } from './pod-manager-facade.js';
 import { createPodManager } from './pod-manager.js';
+import { createPodManagerFacade } from './pod-manager-facade.js';
 import type { ValidationWorkflowCalls } from './validation-workflow-ports.js';
+
 vi.mock('./pod-manager-facade.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('./pod-manager-facade.js')>();
   return { ...original, createPodManagerFacade: vi.fn(original.createPodManagerFacade) };

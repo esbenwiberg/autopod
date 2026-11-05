@@ -29,11 +29,11 @@ it('rechecks ownership after an early wake before waiting again', async () => {
   expect(delay).toHaveBeenCalledTimes(1);
 });
 
-it.each(['invalid', new Date(Date.now() + 900_000).toISOString()])(
-  'refuses missing or excessive cooldown identity without a timer: %s',
-  async (deadline) => {
-    const delay = vi.fn(async () => undefined);
-    await expect(waitForRetryBackoff(deadline, delay, () => undefined)).rejects.toThrow();
-    expect(delay).not.toHaveBeenCalled();
-  },
-);
+it.each([
+  'invalid',
+  new Date(Date.now() + 900_000).toISOString(),
+])('refuses missing or excessive cooldown identity without a timer: %s', async (deadline) => {
+  const delay = vi.fn(async () => undefined);
+  await expect(waitForRetryBackoff(deadline, delay, () => undefined)).rejects.toThrow();
+  expect(delay).not.toHaveBeenCalled();
+});

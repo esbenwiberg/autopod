@@ -7,7 +7,7 @@ import { MemoryArtifactStore } from './artifact-store.js';
 import { digest } from './canonical.js';
 import { composeManagedCatalog } from './catalog.js';
 import { admitManagedRequest, validateManagedRequest } from './grants.js';
-import type { ManagedProfileSetConfig, composeManagedProfileSet } from './profile-set-config.js';
+import type { composeManagedProfileSet, ManagedProfileSetConfig } from './profile-set-config.js';
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {

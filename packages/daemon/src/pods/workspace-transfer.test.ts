@@ -6,8 +6,8 @@ import {
   lstat,
   mkdir,
   mkdtemp,
-  readFile,
   readdir,
+  readFile,
   readlink,
   realpath,
   rm,
@@ -22,9 +22,9 @@ import { createMockContainerManager, logger } from '../test-utils/mock-helpers.j
 import { shellQuote } from '../util/shell-quote.js';
 import { autopodStagingRef } from '../worktrees/bare-push.js';
 import {
+  buildWorkspaceMirrorCopyScript,
   WORKSPACE_RUNTIME_CACHE_EXCLUDES,
   WORKSPACE_SYNC_EXCLUDES,
-  buildWorkspaceMirrorCopyScript,
 } from './workspace-mirror.js';
 import { createWorkspaceTransfer } from './workspace-transfer.js';
 
@@ -297,35 +297,35 @@ describe('workspace transfer material boundary', () => {
     expect(f.cm.extractDirectoryFromContainer).toHaveBeenCalledOnce();
   });
 
-  it.each(['local', 'sandbox'] as const)(
-    'recovers real Git through the %s archive route and removes temporary Git',
-    async (target) => {
-      const f = await fixture(root);
-      const before = await sourceIdentity(f.workspace);
-      const gitlink = await readFile(path.join(f.host, '.git'), 'utf8');
-      vi.mocked(f.cm.execInContainer).mockRejectedValue(new Error('exec unavailable'));
+  it.each([
+    'local',
+    'sandbox',
+  ] as const)('recovers real Git through the %s archive route and removes temporary Git', async (target) => {
+    const f = await fixture(root);
+    const before = await sourceIdentity(f.workspace);
+    const gitlink = await readFile(path.join(f.host, '.git'), 'utf8');
+    vi.mocked(f.cm.execInContainer).mockRejectedValue(new Error('exec unavailable'));
 
-      await expect(
-        createWorkspaceTransfer({ logger, captureAuthority: () => () => {} }).syncWorkspaceBack(
-          'container',
-          f.host,
-          f.cm,
-          'pod-archive',
-          target,
-        ),
-      ).resolves.toEqual({ pushed: true });
+    await expect(
+      createWorkspaceTransfer({ logger, captureAuthority: () => () => {} }).syncWorkspaceBack(
+        'container',
+        f.host,
+        f.cm,
+        'pod-archive',
+        target,
+      ),
+    ).resolves.toEqual({ pushed: true });
 
-      await assertPublished(f, 'pod-archive');
-      const calls = vi.mocked(f.cm.extractDirectoryFromContainer).mock.calls;
-      expect(calls.map(([, source]) => source)).toEqual(['/workspace', '/workspace/.git']);
-      const temporaryGit = calls[1]?.[2];
-      expect(temporaryGit).toMatch(/autopod-git-\d+$/);
-      await expect(lstat(temporaryGit ?? '')).rejects.toThrow();
-      expect(await readFile(path.join(f.host, '.git'), 'utf8')).toBe(gitlink);
-      expect(await sourceIdentity(f.workspace)).toEqual(before);
-      if (target === 'sandbox') expect(f.cm.execInContainer).not.toHaveBeenCalled();
-    },
-  );
+    await assertPublished(f, 'pod-archive');
+    const calls = vi.mocked(f.cm.extractDirectoryFromContainer).mock.calls;
+    expect(calls.map(([, source]) => source)).toEqual(['/workspace', '/workspace/.git']);
+    const temporaryGit = calls[1]?.[2];
+    expect(temporaryGit).toMatch(/autopod-git-\d+$/);
+    await expect(lstat(temporaryGit ?? '')).rejects.toThrow();
+    expect(await readFile(path.join(f.host, '.git'), 'utf8')).toBe(gitlink);
+    expect(await sourceIdentity(f.workspace)).toEqual(before);
+    if (target === 'sandbox') expect(f.cm.execInContainer).not.toHaveBeenCalled();
+  });
 
   it('retains archived files and removes temporary Git when detached publication is refused', async () => {
     const f = await fixture(root);
@@ -368,28 +368,28 @@ describe('workspace transfer material boundary', () => {
     expect(await sourceIdentity(f.workspace)).toEqual(before);
   });
 
-  it.each(['provisioning', 'sync'] as const)(
-    'executes shared mirror quoting and %s Git exclusions',
-    async (mode) => {
-      const source = path.join(root, "worker's source");
-      const target = path.join(root, "host's destination");
-      await mkdir(path.join(source, '.git'), { recursive: true });
-      await mkdir(path.join(source, 'node_modules'));
-      await mkdir(target);
-      await writeFile(path.join(source, '.git/HEAD'), 'source Git');
-      await writeFile(path.join(source, 'node_modules/platform'), 'container cache');
-      await writeFile(path.join(source, "file's name.txt"), 'copied');
-      const excludes =
-        mode === 'provisioning' ? WORKSPACE_RUNTIME_CACHE_EXCLUDES : WORKSPACE_SYNC_EXCLUDES;
-      const script = buildWorkspaceMirrorCopyScript(source, shellQuote(target), excludes);
+  it.each([
+    'provisioning',
+    'sync',
+  ] as const)('executes shared mirror quoting and %s Git exclusions', async (mode) => {
+    const source = path.join(root, "worker's source");
+    const target = path.join(root, "host's destination");
+    await mkdir(path.join(source, '.git'), { recursive: true });
+    await mkdir(path.join(source, 'node_modules'));
+    await mkdir(target);
+    await writeFile(path.join(source, '.git/HEAD'), 'source Git');
+    await writeFile(path.join(source, 'node_modules/platform'), 'container cache');
+    await writeFile(path.join(source, "file's name.txt"), 'copied');
+    const excludes =
+      mode === 'provisioning' ? WORKSPACE_RUNTIME_CACHE_EXCLUDES : WORKSPACE_SYNC_EXCLUDES;
+    const script = buildWorkspaceMirrorCopyScript(source, shellQuote(target), excludes);
 
-      await run('sh', ['-ceu', script], { env: environment(), timeout: 5_000 });
+    await run('sh', ['-ceu', script], { env: environment(), timeout: 5_000 });
 
-      expect(await readFile(path.join(target, "file's name.txt"), 'utf8')).toBe('copied');
-      await expect(lstat(path.join(target, 'node_modules'))).rejects.toThrow();
-      if (mode === 'provisioning')
-        expect(await readFile(path.join(target, '.git/HEAD'), 'utf8')).toBe('source Git');
-      else await expect(lstat(path.join(target, '.git'))).rejects.toThrow();
-    },
-  );
+    expect(await readFile(path.join(target, "file's name.txt"), 'utf8')).toBe('copied');
+    await expect(lstat(path.join(target, 'node_modules'))).rejects.toThrow();
+    if (mode === 'provisioning')
+      expect(await readFile(path.join(target, '.git/HEAD'), 'utf8')).toBe('source Git');
+    else await expect(lstat(path.join(target, '.git'))).rejects.toThrow();
+  });
 });

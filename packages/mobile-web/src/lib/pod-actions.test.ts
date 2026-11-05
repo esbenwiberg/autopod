@@ -130,7 +130,7 @@ describe('runAction', () => {
     const spy = mockFetch();
     await runAction('pod-1', 'pause');
     expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/pause');
-    expect((spy.mock.calls[0]?.[1] as RequestInit).method).toBe('POST');
+    expect(spy.mock.calls[0]?.[1]?.method).toBe('POST');
   });
 
   it('Rework posts once to the existing terminal rework endpoint', async () => {
@@ -162,7 +162,7 @@ describe('runAction', () => {
     const spy = mockFetch();
     await runAction('pod-1', 'resume');
     expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/nudge');
-    const body = (spy.mock.calls[0]?.[1] as RequestInit).body;
+    const body = spy.mock.calls[0]?.[1]?.body;
     expect(body).toBe(JSON.stringify({ message: 'continue' }));
   });
 
@@ -170,7 +170,7 @@ describe('runAction', () => {
     const spy = mockFetch();
     await runAction('pod-1', 'nudge', 'try the other config');
     expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/nudge');
-    const body = (spy.mock.calls[0]?.[1] as RequestInit).body;
+    const body = spy.mock.calls[0]?.[1]?.body;
     expect(body).toBe(JSON.stringify({ message: 'try the other config' }));
   });
 
@@ -178,20 +178,20 @@ describe('runAction', () => {
     const spy = mockFetch();
     await runAction('pod-1', 'approve');
     expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/approve');
-    expect((spy.mock.calls[0]?.[1] as RequestInit).body).toBe('{}');
+    expect(spy.mock.calls[0]?.[1]?.body).toBe('{}');
   });
 
   it('reject without feedback posts an empty body', async () => {
     const spy = mockFetch();
     await runAction('pod-1', 'reject');
     expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/reject');
-    expect((spy.mock.calls[0]?.[1] as RequestInit).body).toBe('{}');
+    expect(spy.mock.calls[0]?.[1]?.body).toBe('{}');
   });
 
   it('reject with feedback puts it under `feedback`', async () => {
     const spy = mockFetch();
     await runAction('pod-1', 'reject', 'try again with stricter facts');
-    const body = (spy.mock.calls[0]?.[1] as RequestInit).body;
+    const body = spy.mock.calls[0]?.[1]?.body;
     expect(body).toBe(JSON.stringify({ feedback: 'try again with stricter facts' }));
   });
 
@@ -199,7 +199,7 @@ describe('runAction', () => {
     const spy = mockFetch();
     await runAction('pod-1', 'extend_attempts');
     expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/extend-attempts');
-    const body = (spy.mock.calls[0]?.[1] as RequestInit).body;
+    const body = spy.mock.calls[0]?.[1]?.body;
     expect(body).toBe(JSON.stringify({ additionalAttempts: 3 }));
   });
 
@@ -213,14 +213,14 @@ describe('runAction', () => {
     const spy = mockFetch();
     await runAction('pod-1', 'update_from_base');
     expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/update-from-base');
-    expect((spy.mock.calls[0]?.[1] as RequestInit).body).toBeUndefined();
+    expect(spy.mock.calls[0]?.[1]?.body).toBeUndefined();
   });
 
   it('spawn_fix posts the supplied message', async () => {
     const spy = mockFetch();
     await runAction('pod-1', 'spawn_fix', 'fix the lint regression');
     expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/spawn-fix');
-    const body = (spy.mock.calls[0]?.[1] as RequestInit).body;
+    const body = spy.mock.calls[0]?.[1]?.body;
     expect(body).toBe(JSON.stringify({ message: 'fix the lint regression' }));
   });
 
@@ -228,7 +228,7 @@ describe('runAction', () => {
     const spy = mockFetch();
     await runAction('pod-1', 'force_complete', 'merge conflict resolved by hand');
     expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/force-complete');
-    const body = (spy.mock.calls[0]?.[1] as RequestInit).body;
+    const body = spy.mock.calls[0]?.[1]?.body;
     expect(body).toBe(JSON.stringify({ reason: 'merge conflict resolved by hand' }));
   });
 
@@ -236,7 +236,7 @@ describe('runAction', () => {
     const spy = mockFetch();
     await toggleSkipValidation('pod-1', true);
     expect(spy.mock.calls[0]?.[0]).toBe('/pods/pod-1/skip-validation');
-    const body = (spy.mock.calls[0]?.[1] as RequestInit).body;
+    const body = spy.mock.calls[0]?.[1]?.body;
     expect(body).toBe(JSON.stringify({ skip: true }));
   });
 });

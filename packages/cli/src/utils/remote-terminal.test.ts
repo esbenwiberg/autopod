@@ -2,10 +2,10 @@ import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
 import {
+  runRemoteTerminalSession,
   type TerminalStdin,
   type TerminalStdout,
   type TerminalWebSocket,
-  runRemoteTerminalSession,
 } from './remote-terminal.js';
 
 class FakeWebSocket extends EventEmitter implements TerminalWebSocket {

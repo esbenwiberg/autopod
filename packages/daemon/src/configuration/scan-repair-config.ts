@@ -1,7 +1,7 @@
 import {
   type EffectiveLaunchConfig,
-  type ScheduledScanReport,
   launchWorkSchema,
+  type ScheduledScanReport,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { configurationDigest } from './configuration-digest.js';

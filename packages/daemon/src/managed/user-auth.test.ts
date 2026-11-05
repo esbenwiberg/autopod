@@ -1,6 +1,6 @@
 import type { JwtPayload } from '@autopod/shared';
-import Fastify from 'fastify';
 import type { FastifyRequest } from 'fastify';
+import Fastify from 'fastify';
 import { expect, it, vi } from 'vitest';
 import { fixture } from '../test-utils/managed-fixture.js';
 import { MemoryArtifactStore } from './artifact-store.js';
@@ -10,6 +10,7 @@ import {
   registerManagedUserComponentRoutes,
   registerManagedUserRoutes,
 } from './user-auth.js';
+
 const binding = {
   issuer: 'https://issuer/tenant/',
   audience: 'api://autopod',
@@ -192,6 +193,7 @@ it('mounts one supplied component service without rebuilding its runtime', async
     rmSync(stateRoot, { recursive: true, force: true });
   }
 });
+
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';

@@ -235,30 +235,32 @@ describe('review tool runner - Anthropic request shape', () => {
     for (const [, options] of create.mock.calls) expect(options).toMatchObject({ maxRetries: 0 });
   });
 
-  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
-    'rejects invalid tool budgets before dispatch: %s',
-    async (maxToolCalls) => {
-      const create = vi.fn().mockResolvedValue({
-        content: [{ type: 'text', text: '{}' }],
-        stop_reason: 'end_turn',
-        usage: { input_tokens: 0, output_tokens: 0 },
-      });
-      const { runToolUseReview } = await import('./review-tool-runner.js');
-      const result = await runToolUseReview({
+  it.each([
+    -1,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+  ])('rejects invalid tool budgets before dispatch: %s', async (maxToolCalls) => {
+    const create = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: '{}' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 0, output_tokens: 0 },
+    });
+    const { runToolUseReview } = await import('./review-tool-runner.js');
+    const result = await runToolUseReview({
+      model: 'selected',
+      prompt: 'review',
+      worktreePath: process.cwd(),
+      timeout: 1000,
+      maxToolCalls,
+      providerClient: {
         model: 'selected',
-        prompt: 'review',
-        worktreePath: process.cwd(),
-        timeout: 1000,
-        maxToolCalls,
-        providerClient: {
-          model: 'selected',
-          client: { messages: { create } } as unknown as Anthropic,
-        },
-      }).catch((error: unknown) => error);
-      expect(result).toMatchObject({ message: expect.stringMatching(/tool budget/i) });
-      expect(create).not.toHaveBeenCalled();
-    },
-  );
+        client: { messages: { create } } as unknown as Anthropic,
+      },
+    }).catch((error: unknown) => error);
+    expect(result).toMatchObject({ message: expect.stringMatching(/tool budget/i) });
+    expect(create).not.toHaveBeenCalled();
+  });
 
   it('retains a late response measurement but does not accept a verdict after the deadline', async () => {
     vi.useFakeTimers({ toFake: ['performance', 'setTimeout', 'clearTimeout'] });

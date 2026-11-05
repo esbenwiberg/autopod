@@ -67,47 +67,45 @@ describe('explicit retention-safe continuation', () => {
     expect(createRetainedCheckpointRepository(f.ctx.db).get(f.input.id)?.containerId).toBe(id);
   });
 
-  it.each([false, true])(
-    'continues an ordinary retained custom workflow, local=%s, without a worker or budget reset',
-    async (local) => {
-      const f = await fixture(local);
-      const before = f.pod();
-      const retries = f.ctx.podRepo.taskRetries!.state(f.podId);
-      const task = f.ctx.podRepo.taskExecutions!.snapshot(f.podId);
-      await f.recovery.continueRetained(f.podId, f.input, f.actor);
-      await f.recovery.wait(f.input.id);
-      const op = f.recovery.list(f.podId)[0]!;
-      expect(op.blocked, JSON.stringify(vi.mocked(f.deps.logger.error).mock.calls)).toBeNull();
-      expect(op.binding.continuation).toEqual({ prepareOnly: false });
-      expect(op.containerId).toBe(before.containerId);
-      expect(f.pod()).toMatchObject({
-        status: 'queued',
-        skipAgent: true,
-        autoApprove: false,
-        validationAttempts: before.validationAttempts,
-        maxValidationAttempts: before.maxValidationAttempts,
-        containerId: null,
-        options: before.options,
-      });
-      expect(f.ctx.podRepo.taskRetries!.state(f.podId)).toEqual(retries);
-      expect(f.ctx.podRepo.taskExecutions!.snapshot(f.podId).taskId).toBe(task.taskId);
-      expect(f.ctx.podRepo.taskExecutions!.snapshot(f.podId).agentRunCount).toBe(
-        task.agentRunCount,
-      );
-      expect(() => assertCheckpointResourceNotRetained(f.ctx.db, op.containerId)).toThrow(
-        'retains source/report',
-      );
-      for (const method of [
-        f.cm.start,
-        f.cm.stop,
-        f.cm.kill,
-        f.cm.spawn,
-        f.cm.execInContainer,
-        f.cm.extractDirectoryFromContainer,
-      ])
-        expect(method).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    false,
+    true,
+  ])('continues an ordinary retained custom workflow, local=%s, without a worker or budget reset', async (local) => {
+    const f = await fixture(local);
+    const before = f.pod();
+    const retries = f.ctx.podRepo.taskRetries!.state(f.podId);
+    const task = f.ctx.podRepo.taskExecutions!.snapshot(f.podId);
+    await f.recovery.continueRetained(f.podId, f.input, f.actor);
+    await f.recovery.wait(f.input.id);
+    const op = f.recovery.list(f.podId)[0]!;
+    expect(op.blocked, JSON.stringify(vi.mocked(f.deps.logger.error).mock.calls)).toBeNull();
+    expect(op.binding.continuation).toEqual({ prepareOnly: false });
+    expect(op.containerId).toBe(before.containerId);
+    expect(f.pod()).toMatchObject({
+      status: 'queued',
+      skipAgent: true,
+      autoApprove: false,
+      validationAttempts: before.validationAttempts,
+      maxValidationAttempts: before.maxValidationAttempts,
+      containerId: null,
+      options: before.options,
+    });
+    expect(f.ctx.podRepo.taskRetries!.state(f.podId)).toEqual(retries);
+    expect(f.ctx.podRepo.taskExecutions!.snapshot(f.podId).taskId).toBe(task.taskId);
+    expect(f.ctx.podRepo.taskExecutions!.snapshot(f.podId).agentRunCount).toBe(task.agentRunCount);
+    expect(() => assertCheckpointResourceNotRetained(f.ctx.db, op.containerId)).toThrow(
+      'retains source/report',
+    );
+    for (const method of [
+      f.cm.start,
+      f.cm.stop,
+      f.cm.kill,
+      f.cm.spawn,
+      f.cm.execInContainer,
+      f.cm.extractDirectoryFromContainer,
+    ])
+      expect(method).not.toHaveBeenCalled();
+  });
 
   it('keeps legacy checkpoint admission unchanged for an ordinary settled task', async () => {
     const f = await fixture();
@@ -281,35 +279,39 @@ describe('explicit retention-safe continuation', () => {
     expect(f.deps.enqueue).toHaveBeenCalledTimes(1);
   });
 
-  it.each([0, -1, 1.5, 3601, Number.POSITIVE_INFINITY, 900])(
-    'rejects invalid/non-extending test allowance %s before activation',
-    async (seconds) => {
-      const f = await fixture(true);
-      const profile = f.deps.executionForPod(f.pod());
-      f.deps.executionForPod = () => ({ ...profile, testTimeout: 900 });
-      await f.recovery.continueRetained(f.podId, { ...f.input, prepareOnly: true }, f.actor);
-      await f.recovery.wait(f.input.id);
-      await expect(
-        f.recovery.checkCandidate(
-          f.podId,
-          f.input.id,
-          {
-            expectedGeneration: f.input.expectedGeneration,
-            expectedResultHash: f.input.expectedResultHash,
-            candidateHead: f.prepared.head,
-            reason: 'Select exact source for independent validation',
-            testBudget: {
-              seconds,
-              reason: 'Finite one-shot test allowance with no workflow edits',
-            },
+  it.each([
+    0,
+    -1,
+    1.5,
+    3601,
+    Number.POSITIVE_INFINITY,
+    900,
+  ])('rejects invalid/non-extending test allowance %s before activation', async (seconds) => {
+    const f = await fixture(true);
+    const profile = f.deps.executionForPod(f.pod());
+    f.deps.executionForPod = () => ({ ...profile, testTimeout: 900 });
+    await f.recovery.continueRetained(f.podId, { ...f.input, prepareOnly: true }, f.actor);
+    await f.recovery.wait(f.input.id);
+    await expect(
+      f.recovery.checkCandidate(
+        f.podId,
+        f.input.id,
+        {
+          expectedGeneration: f.input.expectedGeneration,
+          expectedResultHash: f.input.expectedResultHash,
+          candidateHead: f.prepared.head,
+          reason: 'Select exact source for independent validation',
+          testBudget: {
+            seconds,
+            reason: 'Finite one-shot test allowance with no workflow edits',
           },
-          f.actor,
-        ),
-      ).rejects.toThrow();
-      expect(f.recovery.list(f.podId)[0]?.selected).toBeNull();
-      expect(f.deps.enqueue).not.toHaveBeenCalled();
-    },
-  );
+        },
+        f.actor,
+      ),
+    ).rejects.toThrow();
+    expect(f.recovery.list(f.podId)[0]?.selected).toBeNull();
+    expect(f.deps.enqueue).not.toHaveBeenCalled();
+  });
 
   it('does not extend sandbox budgets through the Docker-only candidate path', async () => {
     const f = await fixture();

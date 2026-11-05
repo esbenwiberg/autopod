@@ -115,63 +115,63 @@ it('keeps a timed-out call exclusive until settlement and reuses its late succes
   }
 });
 
-it.each(['worktree', 'archive'] as const)(
-  'reopens a settled %s failure and resumes only unfinished cleanup',
-  async (fault) => {
-    const ctx = createTestContext();
-    const manager = createPodManager(ctx.deps);
-    const pod = manager.createSession(
-      { profileName: 'test-profile', task: 'Reopen cleanup' },
-      'operator',
+it.each([
+  'worktree',
+  'archive',
+] as const)('reopens a settled %s failure and resumes only unfinished cleanup', async (fault) => {
+  const ctx = createTestContext();
+  const manager = createPodManager(ctx.deps);
+  const pod = manager.createSession(
+    { profileName: 'test-profile', task: 'Reopen cleanup' },
+    'operator',
+  );
+  ctx.podRepo.update(pod.id, {
+    status: 'failed',
+    runtime: 'copilot',
+    containerId: 'owned',
+    worktreePath: '/tmp/owned',
+  });
+  if (fault === 'worktree')
+    vi.mocked(ctx.worktreeManager.cleanup).mockRejectedValueOnce(
+      new Error('transport unavailable'),
     );
-    ctx.podRepo.update(pod.id, {
-      status: 'failed',
-      runtime: 'copilot',
-      containerId: 'owned',
-      worktreePath: '/tmp/owned',
-    });
-    if (fault === 'worktree')
-      vi.mocked(ctx.worktreeManager.cleanup).mockRejectedValueOnce(
-        new Error('transport unavailable'),
-      );
-    else
-      ctx.db.exec(
-        "CREATE TRIGGER fail_archive BEFORE INSERT ON task_history_deletions BEGIN SELECT RAISE(ABORT,'fixture archive failure'); END",
-      );
-    await expect(manager.deleteSession(pod.id)).rejects.toThrow();
-    expect(ctx.db.prepare('SELECT completed_at FROM deletion_cleanup_intents').get()).toEqual({
-      completed_at: null,
-    });
-    const dir = mkdtempSync(join(tmpdir(), 'deletion-reopen-'));
-    const file = join(dir, 'state.db');
-    writeFileSync(file, ctx.db.serialize());
-    const reopened = createDatabase(file, logger);
-    try {
-      reopened.pragma('foreign_keys = ON');
-      if (fault === 'archive') reopened.exec('DROP TRIGGER fail_archive');
-      vi.mocked(ctx.containerManager.kill).mockRejectedValue(
-        new Error('completed container step must not run again'),
-      );
-      const repo = createPodRepository(reopened);
-      const other = createPodManager({ ...ctx.deps, podRepo: repo });
-      await other.deleteSession(pod.id);
-      expect(ctx.containerManager.kill).toHaveBeenCalledOnce();
-      expect(ctx.worktreeManager.cleanup).toHaveBeenCalledTimes(fault === 'worktree' ? 2 : 1);
-      expect(
-        reopened.prepare('SELECT count(*) AS count FROM retained_pods WHERE id=?').get(pod.id),
-      ).toEqual({ count: 1 });
-      expect(() =>
-        reopened.prepare("UPDATE deletion_cleanup_steps SET name='network'").run(),
-      ).toThrow('immutable');
-      expect(reopened.pragma('integrity_check', { simple: true })).toBe('ok');
-      expect(reopened.pragma('foreign_key_check')).toEqual([]);
-    } finally {
-      reopened.close();
-      ctx.db.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  },
-);
+  else
+    ctx.db.exec(
+      "CREATE TRIGGER fail_archive BEFORE INSERT ON task_history_deletions BEGIN SELECT RAISE(ABORT,'fixture archive failure'); END",
+    );
+  await expect(manager.deleteSession(pod.id)).rejects.toThrow();
+  expect(ctx.db.prepare('SELECT completed_at FROM deletion_cleanup_intents').get()).toEqual({
+    completed_at: null,
+  });
+  const dir = mkdtempSync(join(tmpdir(), 'deletion-reopen-'));
+  const file = join(dir, 'state.db');
+  writeFileSync(file, ctx.db.serialize());
+  const reopened = createDatabase(file, logger);
+  try {
+    reopened.pragma('foreign_keys = ON');
+    if (fault === 'archive') reopened.exec('DROP TRIGGER fail_archive');
+    vi.mocked(ctx.containerManager.kill).mockRejectedValue(
+      new Error('completed container step must not run again'),
+    );
+    const repo = createPodRepository(reopened);
+    const other = createPodManager({ ...ctx.deps, podRepo: repo });
+    await other.deleteSession(pod.id);
+    expect(ctx.containerManager.kill).toHaveBeenCalledOnce();
+    expect(ctx.worktreeManager.cleanup).toHaveBeenCalledTimes(fault === 'worktree' ? 2 : 1);
+    expect(
+      reopened.prepare('SELECT count(*) AS count FROM retained_pods WHERE id=?').get(pod.id),
+    ).toEqual({ count: 1 });
+    expect(() =>
+      reopened.prepare("UPDATE deletion_cleanup_steps SET name='network'").run(),
+    ).toThrow('immutable');
+    expect(reopened.pragma('integrity_check', { simple: true })).toBe('ok');
+    expect(reopened.pragma('foreign_key_check')).toEqual([]);
+  } finally {
+    reopened.close();
+    ctx.db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 it('upgrades schema 181 and keeps abandoned ownership fenced across disk reopen and elapsed time', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'deletion-upgrade-'));

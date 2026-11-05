@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApprovalFixture } from '../test-utils/approval-helpers.js';
 import { createSourcePublicationLedger } from './source-publication-ledger.js';
+
 const fixtures: ReturnType<typeof createApprovalFixture>[] = [];
 function fixture(disk = false) {
   const f = createApprovalFixture(disk);

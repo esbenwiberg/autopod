@@ -76,28 +76,29 @@ describe('log follow lifecycle', () => {
     expect(socket.terminate).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['send throws', 'send callback', 'open callback'])(
-    'settles %s failures on close',
-    async (mode) => {
-      const failure = new Error('subscription setup failed');
-      const { socket, outcome, onOpen } = setup();
-      if (mode === 'send throws')
-        socket.send.mockImplementation(() => {
-          throw failure;
-        });
-      if (mode === 'send callback')
-        socket.send.mockImplementation((_data, callback) => callback(failure));
-      if (mode === 'open callback')
-        onOpen.mockImplementation(() => {
-          throw failure;
-        });
-      socket.emit('open');
-      expect(socket.terminate).toHaveBeenCalledTimes(1);
-      socket.emit('close', 1006);
-      expect(await outcome).toBeInstanceOf(Error);
-      expect(((await outcome) as Error).message).toContain(failure.message);
-    },
-  );
+  it.each([
+    'send throws',
+    'send callback',
+    'open callback',
+  ])('settles %s failures on close', async (mode) => {
+    const failure = new Error('subscription setup failed');
+    const { socket, outcome, onOpen } = setup();
+    if (mode === 'send throws')
+      socket.send.mockImplementation(() => {
+        throw failure;
+      });
+    if (mode === 'send callback')
+      socket.send.mockImplementation((_data, callback) => callback(failure));
+    if (mode === 'open callback')
+      onOpen.mockImplementation(() => {
+        throw failure;
+      });
+    socket.emit('open');
+    expect(socket.terminate).toHaveBeenCalledTimes(1);
+    socket.emit('close', 1006);
+    expect(await outcome).toBeInstanceOf(Error);
+    expect(((await outcome) as Error).message).toContain(failure.message);
+  });
 
   it('ignores malformed frames and acknowledgements without losing a later valid event', async () => {
     const { socket, signals, outcome, onEvent } = setup();

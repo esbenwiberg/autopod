@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { SystemEvent } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { type EventRepository, createEventRepository } from './event-repository.js';
+import { createEventRepository, type EventRepository } from './event-repository.js';
 
 const MIGRATIONS_DIR = path.resolve(import.meta.dirname, '../db/migrations');
 const MIGRATION_FILES = fs

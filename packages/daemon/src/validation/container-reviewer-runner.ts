@@ -8,7 +8,7 @@ import type { BeforeReviewerLaunch } from '../interfaces/reviewer-launch.js';
 import { parseClaudeCliStdout } from '../runtimes/run-claude-cli.js';
 import { type CodexReviewTokenUsage, runCodexReview } from './review-codex-runner.js';
 import type { ReviewerOutputContract } from './review-structured-output.js';
-import { ReviewerLaunchTimeoutError, prepareReviewerLaunch } from './reviewer-launch-preflight.js';
+import { prepareReviewerLaunch, ReviewerLaunchTimeoutError } from './reviewer-launch-preflight.js';
 
 export class ContainerReviewerUnavailableError extends Error {
   readonly kind:

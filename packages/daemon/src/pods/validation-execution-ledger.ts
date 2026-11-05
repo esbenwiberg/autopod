@@ -15,9 +15,9 @@ import { createExternalDeliveryRepository } from './external-delivery-repository
 import { createSourceAdoptionRepository } from './source-adoption-repository.js';
 import { ownsValidationAbandonment } from './validation-abandonment-authority.js';
 import {
-  type UnsettledValidationDispatch,
   assertTaskValidationSettled,
   assertValidationScreenshotEnrichment,
+  type UnsettledValidationDispatch,
   unsettledDispatches,
   validationResultHash,
 } from './validation-execution-evidence.js';
@@ -25,9 +25,10 @@ import {
   assertValidationFinalContentSupported,
   requiresValidationSettlement,
 } from './validation-recovery-policy.js';
+
 export {
-  validationResultHash,
   listValidationExecutionResourceIds,
+  validationResultHash,
 } from './validation-execution-evidence.js';
 
 export const validationProviderBinding = (pod: Pod) =>

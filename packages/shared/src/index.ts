@@ -1,47 +1,35 @@
+// Constants (runtime values)
+export {
+  AUTOPOD_INSTRUCTIONS_PATH,
+  CHROMIUM_LAUNCH_ARGS,
+  CONTAINER_HOME_DIR,
+  CONTAINER_USER,
+  DEFAULT_AUTO_PAUSE_AFTER,
+  DEFAULT_CONTAINER_CPUS,
+  DEFAULT_CONTAINER_MEMORY_GB,
+  DEFAULT_HEALTH_TIMEOUT,
+  DEFAULT_HUMAN_RESPONSE_TIMEOUT,
+  DEFAULT_MAX_AI_ESCALATIONS,
+  DEFAULT_MAX_PR_FIX_ATTEMPTS,
+  DEFAULT_MAX_VALIDATION_ATTEMPTS,
+  EVENT_LOG_RETENTION_DAYS,
+  MAX_BUILD_LOG_LENGTH,
+  MAX_DIFF_LENGTH,
+  MAX_HANDOFF_INSTRUCTIONS_LENGTH,
+  MAX_PROVIDER_FAILOVER_HANDOFF_LENGTH,
+  POD_ID_LENGTH,
+  PROVIDER_FAILOVER_HANDOFF_CONTAINER_PATH,
+  PROVIDER_FAILOVER_HANDOFF_PATH,
+  resolveContainerNanoCpus,
+  SCREENSHOT_QUALITY,
+  VALID_STATUS_TRANSITIONS,
+  WORKSPACE_PI_HANDOFF_PATH,
+} from './constants.js';
 export type {
-  ValidationRecoveryBudgetReceipt,
-  ValidationExecutionBinding,
-  ValidationSettlementReceipt,
-  ValidationExecutionRecoveryState,
-  ValidationExecutionRecoveryRequest,
-} from './types/validation-execution-recovery.js';
-// Types
-export type {
-  ApprovalRewriteRepairRequest,
-  ApprovalRewriteRepairCheckRequest,
-  CheckpointRecoveryRequest,
-  RetainedContinuationRequest,
-  RetainedContinuationCheckRequest,
-} from './types/checkpoint-recovery.js';
-export type { ExternalDeliveryReceipt } from './types/external-delivery.js';
-export type {
-  ValidationRecoveryAction,
-  ValidationRecoveryAvailability,
-  ValidationRecoveryState,
-} from './types/validation-recovery.js';
-export type {
-  UnverifiedTaskRun,
-  TerminationReconciliationReceipt,
-  TerminationReconciliationState,
-} from './types/termination-reconciliation.js';
-export type {
-  SourceAdoptionRequest,
-  SourceAdoptionStage,
-  SourceAdoptionState,
-  SourceAdoptionList,
-} from './types/source-adoption.js';
-export { deploymentRequestSchema } from './schemas/deployment.schema.js';
-export type { DeploymentRequest } from './schemas/deployment.schema.js';
-export type {
-  ContractScenario,
-  ExecutionRequirements,
-  ValidationEvidenceManifest,
-  FactArtifactChange,
-  FactEvidence,
-  HumanReviewItem,
-  RequiredFact,
-  SpecContract,
-} from './types/contract.js';
+  ContractDiagnostic,
+  ContractDiagnosticEnvelope,
+  ContractInspection,
+} from './contract.js';
 export {
   CONTRACT_DIAGNOSTICS_VERSION,
   inspectSpecContract,
@@ -50,137 +38,368 @@ export {
   specContractV1Schema,
   validateSpecContract,
 } from './contract.js';
-export type {
-  ContractDiagnostic,
-  ContractDiagnosticEnvelope,
-  ContractInspection,
-} from './contract.js';
+export { parseDiff, statsForFiles } from './diff.js';
+// Errors (runtime values, not just types)
+export {
+  AuthError,
+  AutopodError,
+  BriefParseError,
+  ContainerError,
+  EscalationNotFoundError,
+  ForbiddenError,
+  InvalidStateTransitionError,
+  PodNotFoundError,
+  ProfileExistsError,
+  ProfileNotFoundError,
+  RuntimeError,
+  ValidationError,
+} from './errors.js';
 export { buildEvidenceDocument, renderEvidenceYaml } from './evidence.js';
-
+// ID generation utility
+export { generateId, generatePodId } from './id.js';
+export * from './managed-protocol.js';
+// Model pricing helpers
+export * from './pricing/index.js';
+export {
+  COMPILED_PROVIDER_MANIFEST,
+  createProviderCatalog,
+  PROVIDER_CATALOG,
+  validateProviderManifest,
+} from './provider-catalog/index.js';
 export type {
+  InjectionPattern,
+  PiiPattern,
+  ProcessContentConfig,
+  ProcessedContent,
+  QuarantineResult,
+  ThreatIndicator,
+} from './sanitize/index.js';
+// Sanitize + quarantine pipeline
+export {
+  collectPiiPatternNames,
+  getPresetConfig,
+  INJECTION_PATTERNS,
+  PII_PATTERNS,
+  processContent,
+  processContentDeep,
+  quarantine,
+  REDACT_FIELD_NAMES,
+  sanitize,
+  sanitizeDeep,
+} from './sanitize/index.js';
+export {
+  actionDefinitionSchema,
+  actionGroupSchema,
+  actionHandlerSchema,
+  actionOverrideSchema,
+  actionPolicySchema,
+  authConfigSchema,
+  dataSanitizationConfigSchema,
+  outputModeSchema,
+  paramDefSchema,
+  quarantineConfigSchema,
+  sanitizationPresetSchema,
+} from './schemas/action-definition.schema.js';
+export * from './schemas/cli-tool.schema.js';
+export {
+  type DaemonConfig,
+  daemonConfigSchema,
+} from './schemas/config.schema.js';
+export type { DeploymentRequest } from './schemas/deployment.schema.js';
+export { deploymentRequestSchema } from './schemas/deployment.schema.js';
+export * from './schemas/github-operation.schema.js';
+export * from './schemas/github-read.schema.js';
+export {
+  injectedClaudeMdSectionSchema,
+  injectedMcpServerSchema,
+  injectedSkillSchema,
+} from './schemas/injection.schema.js';
+export * from './schemas/issue-watcher-binding.schema.js';
+export * from './schemas/launch-config.schema.js';
+export * from './schemas/launch-work.schema.js';
+// Schemas (runtime values — Zod objects)
+export {
+  createPodRequestSchema,
+  nullableReadinessReviewSchema,
+  podResponseSchema,
+  podStatusSchema,
+  readinessApprovalSchema,
+  readinessAreaReviewSchema,
+  readinessAreaSchema,
+  readinessAreaStatusSchema,
+  readinessFindingSchema,
+  readinessReviewSchema,
+  readinessSourceRefSchema,
+  readinessStatusSchema,
+  sendMessageSchema,
+} from './schemas/pod.schema.js';
+export {
+  operatorActorSchema,
+  podsitterActionArgumentsSchemas,
+  podsitterActivationSchema,
+  podsitterBudgetsSchema,
+  podsitterConfigurationInputSchema,
+  podsitterDecisionSchema,
+  podsitterDecisionTargetSchema,
+} from './schemas/podsitter.schema.js';
+export {
+  createProfileSchema,
+  escalationConfigSchema,
+  mergeStrategySchema,
+  modelProviderSchema,
+  pimActivationConfigSchema,
+  providerCredentialsSchema,
+  reasoningEffortSchema,
+  updateProfileSchema,
+} from './schemas/profile.schema.js';
+export {
+  createProviderAccountSchema,
+  createProviderAccountSchemas,
+  genericApiKeyCredentialsSchema,
+  importProviderAccountFromProfileSchema,
+  linkProviderAccountSchema,
+  providerAccountIdSchema,
+  providerAccountNameSchema,
+  providerAccountProviderSchema,
+  providerFailoverPolicySchema,
+  providerFailoverTargetSchema,
+  updateProviderAccountSchema,
+} from './schemas/provider-account.schema.js';
+export * from './schemas/series-launch.schema.js';
+export * from './schemas/service-access.schema.js';
+// Series brief parsing (CLI + daemon share this)
+export type { BriefFile, BriefFrontmatter, ParsedBrief } from './series/parse-briefs.js';
+export {
+  inspectSeriesBriefGraph,
+  numericPrefix,
+  orderSeriesBriefs,
+  parseBriefFrontmatter,
+  parseBriefs,
+} from './series/parse-briefs.js';
+export type { SkillFrontmatter } from './skills/skill-frontmatter.js';
+export {
+  extractSkillDescription,
+  parseSkillFrontmatter,
+} from './skills/skill-frontmatter.js';
+export type {
+  ActionAuditEntry,
+  ActionDefinition,
+  ActionGroup,
+  ActionHandler,
+  ActionOverride,
+  ActionPolicy,
+  ActionRequest,
+  ActionResponse,
+  AuthConfig,
+  DataSanitizationConfig,
+  OutputMode,
+  ParamDef,
+  QuarantineConfig,
+  SanitizationPreset,
+} from './types/actions.js';
+// Analytics response types
+export type {
+  AskHumanTtr,
+  AskHumanTtrBucket,
+  AuditChainVerifyResponse,
+  BlockerPattern,
+  CostAnalyticsResponse,
+  EscalationsAnalyticsResponse,
+  EscalationsSummary,
+  FailureStageCell,
+  FailureStageRow,
+  HumanAttentionKind,
+  LoadBearingStatus,
+  MemoryAnalyticsResponse,
+  ModelsAnalyticsResponse,
+  ModelsSummary,
+  NetworkPolicyBucket,
+  PerModelAggregate,
+  PerProfileEscalation,
+  PerRuntimeAggregate,
+  QualityAnalyticsResponse,
+  QueueDepthBucket,
+  SafetyAnalyticsResponse,
+  SafetyEventKind,
+  SafetyEventSource,
+  ThroughputAnalyticsResponse,
+  ThroughputCohortPod,
+  TimeInStatusBox,
+  UnknownModelSample,
+  ValidationStage,
+} from './types/analytics.js';
+export type {
+  AppRole,
+  AuthToken,
+  DaemonConnection,
+  JwtPayload,
+} from './types/auth.js';
+// Types
+export type {
+  ApprovalRewriteRepairCheckRequest,
+  ApprovalRewriteRepairRequest,
+  CheckpointRecoveryRequest,
+  RetainedContinuationCheckRequest,
+  RetainedContinuationRequest,
+} from './types/checkpoint-recovery.js';
+export * from './types/configuration-credential.js';
+export type {
+  ContractScenario,
+  ExecutionRequirements,
+  FactArtifactChange,
+  FactEvidence,
+  HumanReviewItem,
+  RequiredFact,
+  SpecContract,
+  ValidationEvidenceManifest,
+} from './types/contract.js';
+export type { DiffCommit, DiffFile, DiffResponse, DiffStats } from './types/diff.js';
+export type { DispatchPreflightEvidence, IntentionalRerun } from './types/dispatch-preflight.js';
+export type {
+  ActionApprovalPayload,
+  AskAiPayload,
+  AskHumanPayload,
+  EscalationRequest,
+  EscalationResponse,
+  EscalationType,
+  ReportBlockerPayload,
+  RequestCredentialPayload,
+  ValidationOverridePayload,
+} from './types/escalation.js';
+export type {
+  AgentActivityEvent,
+  EscalationCreatedEvent,
+  EscalationResolvedEvent,
+  FirewallDeniedEvent,
+  HostResumedEvent,
+  IssueWatcherCompletedEvent,
+  IssueWatcherErrorEvent,
+  IssueWatcherPickedUpEvent,
+  MemoryCandidateCreatedEvent,
+  MemoryCandidateUpdatedEvent,
+  MemorySuggestionCreatedEvent,
+  PodCompletedEvent,
+  PodCreatedEvent,
+  PodPreflightOverlapEvent,
+  PodStatusChangedEvent,
+  PodsitterActionExecutedEvent,
+  PodsitterActionRejectedEvent,
+  PodsitterActivationChangedEvent,
+  PodsitterAttentionQueuedEvent,
+  PodsitterDecisionCompletedEvent,
+  PodsitterDecisionFailedEvent,
+  PodsitterDecisionStartedEvent,
+  PodsitterProviderLimitedEvent,
+  PodsitterProviderRecoveredEvent,
+  PodsitterSandboxCleanupFailedEvent,
+  PreflightConflict,
+  ScheduledJobCatchupRequestedEvent,
+  ScheduledJobFiredEvent,
+  SystemEvent,
+  TokenBudgetExceededEvent,
+  TokenBudgetWarningEvent,
+  ValidationCompletedEvent,
+  ValidationOverrideQueuedEvent,
+  ValidationPhase,
+  ValidationPhaseCompletedEvent,
+  ValidationPhaseStartedEvent,
+  ValidationStartedEvent,
+} from './types/events.js';
+export type {
+  ExecutionProvenance,
+  ExecutionProvenanceInput,
+} from './types/execution-provenance.js';
+export type { ExternalDeliveryReceipt } from './types/external-delivery.js';
+export * from './types/github-access.js';
+export * from './types/goal.js';
+export type { HistoryExportStats, HistoryQuery } from './types/history.js';
+export type {
+  BuiltinSkillSource,
+  GithubSkillSource,
+  HttpInjectedMcpServer,
+  InjectedClaudeMdSection,
+  InjectedMcpServer,
+  InjectedSkill,
+  LocalSkillSource,
+  StdioInjectedMcpServer,
+} from './types/injection.js';
+export type { WatchedIssue, WatchedIssueStatus } from './types/issue-watcher.js';
+// Composable configuration contracts (the legacy launch path remains until cutover).
+export * from './types/launch-config.js';
+export * from './types/managed-pod.js';
+export type {
+  MemoryCandidate,
+  MemoryCandidateAction,
+  MemoryCandidateStatus,
+  MemoryEntry,
+  MemoryExtractionAttempt,
+  MemoryExtractionAttemptStatus,
+  MemoryKind,
+  MemoryScope,
+  MemorySourceEvidence,
+  MemoryUsageEvent,
+  MemoryUsageKind,
+  MemoryUsageOutcome,
+} from './types/memory.js';
+export type {
+  AnthropicCredentials,
+  CopilotCredentials,
+  FoundryApiSurface,
+  FoundryCredentials,
+  GenericApiKeyCredentials,
+  MaxCredentials,
+  MaxRefreshCredentials,
+  MaxSetupTokenCredentials,
+  ModelProvider,
+  OpenAiCredentials,
+  OpenRouterCredentials,
+  PiOAuthCredentials,
+  PiOAuthProviderId,
+  ProviderCredentials,
+} from './types/model-provider.js';
+export type {
+  NotificationPayload,
+  NotificationType,
+  PodErrorNotification,
+  PodFailedNotification,
+  PodNeedsInputNotification,
+  PodValidatedNotification,
+} from './types/notification.js';
+export type { OperatorGuidanceDelivery } from './types/operator-guidance.js';
+export * from './types/pim.js';
+export type {
+  CompactPod,
+  CompactPodPage,
+  CostEvidence,
+  CreatePodRequest,
+  FixFeedback,
   PhaseTokenUsage,
-  TokenTelemetryAccuracy,
+  Pod,
   PodCostBreakdownResponse,
   PodCostBucket,
   PodCostSegment,
-  CostEvidence,
+  PodFleetDisplay,
+  PodInfrastructureFailure,
+  PodQualityScore,
+  PodRepositoryDisplay,
+  PodStatus,
+  PodSummary,
+  PreSubmitReviewSnapshot,
   ProviderAttempt,
   ProviderAttemptOutcome,
-  PodStatus,
-  ResearchFindings,
-  Pod,
-  PodInfrastructureFailure,
-  CreatePodRequest,
-  PodSummary,
-  CompactPod,
-  CompactPodPage,
-  PodRepositoryDisplay,
-  PodFleetDisplay,
-  ReferenceRepo,
-  SpecFile,
-  PreSubmitReviewSnapshot,
-  ValidationWaiver,
   QualityGrade,
   QualityInspectionAvailability,
   QualityInspectionUnavailableReason,
   QualitySignals,
-  PodQualityScore,
   QualityTrend,
-  FixFeedback,
+  ReferenceRepo,
+  ResearchFindings,
   SpawnFixResponse,
+  SpecFile,
+  TokenTelemetryAccuracy,
   UpdateFromBaseResponse,
+  ValidationWaiver,
 } from './types/pod.js';
-
-export type {
-  ProviderFailureCategory,
-  ProviderFailureClassification,
-} from './types/runtime.js';
-
-export type {
-  ReadinessApproval,
-  ReadinessArea,
-  ReadinessAreaReview,
-  ReadinessAreaStatus,
-  ReadinessFinding,
-  ReadinessFindingSeverity,
-  ReadinessReview,
-  ReadinessSourceRef,
-  ReadinessSourceRefKind,
-  ReadinessStatus,
-} from './types/readiness.js';
-
-export type {
-  Profile,
-  PublicProfile,
-  ProfileEditorPayload,
-  ProviderFailoverPolicySource,
-  ResolvedProviderFailoverPolicy,
-  StackTemplate,
-  ExecutionTarget,
-  ReasoningEffort,
-  SmokePage,
-  PageAssertion,
-  EscalationConfig,
-  NetworkPolicy,
-  NetworkPolicyMode,
-  PimGroupConfig,
-  PimActivationConfig,
-  PrivateRegistry,
-  RegistryType,
-  MergeableField,
-  MergeMode,
-  MergeStrategy,
-  TestPipelineConfig,
-  CodeIntelligenceConfig,
-  DeploymentConfig,
-} from './types/profile.js';
-
-export type {
-  SecurityScanPolicy,
-  SecurityScanDetectors,
-  CheckpointPolicy,
-  ScanOutcome,
-  ScanCheckpoint,
-  ScanDecision,
-  ScanDetectorName,
-  ScanSeverity,
-  ScanFinding,
-} from './types/security-scan.js';
-
-export type {
-  SidecarType,
-  SidecarHealthCheck,
-  SidecarResources,
-  SidecarSpec,
-  DaggerSidecarConfig,
-  SidecarsConfig,
-} from './types/sidecar.js';
-export {
-  DEFAULT_DAGGER_ENGINE_PORT,
-  DAGGER_RUNNER_HOST_ENV,
-  SIDECAR_LABEL_POD_ID,
-  SIDECAR_LABEL_NAME,
-  SIDECAR_LABEL_TYPE,
-  SIDECAR_CONTAINER_LABEL,
-} from './types/sidecar.js';
-
-export type {
-  ActionGroup,
-  ActionHandler,
-  AuthConfig,
-  ParamDef,
-  ActionDefinition,
-  ActionOverride,
-  SanitizationPreset,
-  DataSanitizationConfig,
-  QuarantineConfig,
-  ActionPolicy,
-  OutputMode,
-  ActionRequest,
-  ActionResponse,
-  ActionAuditEntry,
-} from './types/actions.js';
-
 export type {
   AgentMode,
   OutputTarget,
@@ -188,199 +407,14 @@ export type {
   ValidationSuite,
 } from './types/pod-options.js';
 export {
-  VALIDATION_SUITES,
   isValidationSuite,
   mergeValidationPhaseSkips,
-  podOptionsFromOutputMode,
   outputModeFromPodOptions,
+  podOptionsFromOutputMode,
   resolvePodOptions,
   skippedPhasesForValidationSuite,
+  VALIDATION_SUITES,
 } from './types/pod-options.js';
-
-export type {
-  InjectedMcpServer,
-  HttpInjectedMcpServer,
-  StdioInjectedMcpServer,
-  InjectedClaudeMdSection,
-  InjectedSkill,
-  LocalSkillSource,
-  GithubSkillSource,
-  BuiltinSkillSource,
-} from './types/injection.js';
-
-export type {
-  ModelProvider,
-  PiOAuthProviderId,
-  ProviderCredentials,
-  GenericApiKeyCredentials,
-  AnthropicCredentials,
-  OpenAiCredentials,
-  MaxCredentials,
-  MaxRefreshCredentials,
-  MaxSetupTokenCredentials,
-  FoundryCredentials,
-  FoundryApiSurface,
-  CopilotCredentials,
-  OpenRouterCredentials,
-  PiOAuthCredentials,
-} from './types/model-provider.js';
-
-export {
-  PROVIDER_MANIFEST_VERSION,
-  type CompiledProvider,
-  type CompiledProviderManifest,
-  type CompiledProviderModel,
-  type GenericPiProviderImplementation,
-  type LegacyProviderImplementation,
-  type PiCatalogCompatibility,
-  type ProviderAuthorizationState,
-  type ProviderCaveat,
-  type ProviderCaveatKind,
-  type ProviderCaveatSeverity,
-  type ProviderCredentialKind,
-  type ProviderCredentialOption,
-  type ProviderImplementation,
-  type ProviderImplementationKind,
-  type ProviderLifecycleState,
-  type ProviderManifestVersion,
-  type ProviderModelLifecycleState,
-  type ProviderPolicy,
-  type PublicProviderCatalog,
-} from './types/provider-catalog.js';
-export {
-  COMPILED_PROVIDER_MANIFEST,
-  PROVIDER_CATALOG,
-  createProviderCatalog,
-  validateProviderManifest,
-} from './provider-catalog/index.js';
-
-export type {
-  ProviderAccount,
-  PublicProviderAccount,
-  PublicProviderCredentials,
-  ProviderAccountProvider,
-  ProviderFailoverPolicy,
-  ProviderFailoverTarget,
-  ProviderAuthSource,
-} from './types/provider-account.js';
-
-export type {
-  RuntimeType,
-  Runtime,
-  SpawnConfig,
-  McpServerConfig,
-  HttpMcpServerConfig,
-  StdioMcpServerConfig,
-  AgentEvent,
-  AgentStatusEvent,
-  AgentToolUseEvent,
-  AgentFileChangeEvent,
-  AgentCompleteEvent,
-  AgentErrorEvent,
-  AgentEscalationEvent,
-  AgentPlanEvent,
-  AgentProgressEvent,
-  AgentTaskSummaryEvent,
-  AgentReasoningEvent,
-} from './types/runtime.js';
-
-export type {
-  ValidationInfrastructureFailure,
-  ValidationResult,
-  SetupResult,
-  SmokeResult,
-  BuildResult,
-  FactCheckResult,
-  FactValidationResult,
-  LintResult,
-  SastResult,
-  HealthResult,
-  PageResult,
-  AssertionResult,
-  TaskReviewResult,
-  ReviewAxis,
-  StructuredReviewFinding,
-  InitialReviewFinding,
-  ReviewFindingCandidate,
-  ReviewAxisRun,
-  ReviewFailure,
-  ReviewFailureKind,
-  ReviewBatchResult,
-  ReviewProgressSnapshot,
-  ReviewProgressAxis,
-  ReviewAdjudication,
-  ReviewFindingLedgerEntry,
-  ReviewRepairDelta,
-  ReviewClosureVerification,
-  AdvisoryBrowserQaObservation,
-  AdvisoryBrowserQaResult,
-  RequirementsCheckItem,
-  ValidationFinding,
-  ValidationOverride,
-  ScreenshotRef,
-  ScreenshotSource,
-} from './types/validation.js';
-
-export type {
-  DeviationItem,
-  TaskSummary,
-  DeviationsAssessment,
-  MemoryOutcomeItem,
-  ReviewFeedbackResponseItem,
-} from './types/task-summary.js';
-
-export type {
-  EscalationType,
-  EscalationRequest,
-  AskHumanPayload,
-  AskAiPayload,
-  ReportBlockerPayload,
-  ActionApprovalPayload,
-  ValidationOverridePayload,
-  RequestCredentialPayload,
-  EscalationResponse,
-} from './types/escalation.js';
-
-export type {
-  SystemEvent,
-  ValidationPhase,
-  PodCreatedEvent,
-  PodStatusChangedEvent,
-  AgentActivityEvent,
-  ValidationStartedEvent,
-  ValidationCompletedEvent,
-  ValidationPhaseStartedEvent,
-  ValidationPhaseCompletedEvent,
-  EscalationCreatedEvent,
-  EscalationResolvedEvent,
-  PodCompletedEvent,
-  MemorySuggestionCreatedEvent,
-  MemoryCandidateCreatedEvent,
-  MemoryCandidateUpdatedEvent,
-  ValidationOverrideQueuedEvent,
-  TokenBudgetWarningEvent,
-  TokenBudgetExceededEvent,
-  ScheduledJobCatchupRequestedEvent,
-  ScheduledJobFiredEvent,
-  IssueWatcherPickedUpEvent,
-  IssueWatcherCompletedEvent,
-  IssueWatcherErrorEvent,
-  PodPreflightOverlapEvent,
-  PreflightConflict,
-  HostResumedEvent,
-  FirewallDeniedEvent,
-  PodsitterAttentionQueuedEvent,
-  PodsitterDecisionStartedEvent,
-  PodsitterDecisionCompletedEvent,
-  PodsitterDecisionFailedEvent,
-  PodsitterActionExecutedEvent,
-  PodsitterActionRejectedEvent,
-  PodsitterProviderLimitedEvent,
-  PodsitterProviderRecoveredEvent,
-  PodsitterActivationChangedEvent,
-  PodsitterSandboxCleanupFailedEvent,
-} from './types/events.js';
-
 export type {
   OperatorActor,
   PodsitterAction,
@@ -403,321 +437,233 @@ export type {
   SystemSandboxRunOutcome,
 } from './types/podsitter.js';
 export { PODSITTER_ACTIONS } from './types/podsitter.js';
-export {
-  operatorActorSchema,
-  podsitterActivationSchema,
-  podsitterActionArgumentsSchemas,
-  podsitterBudgetsSchema,
-  podsitterConfigurationInputSchema,
-  podsitterDecisionSchema,
-  podsitterDecisionTargetSchema,
-} from './schemas/podsitter.schema.js';
-
-export type { WatchedIssue, WatchedIssueStatus } from './types/issue-watcher.js';
-
 export type {
-  ScheduledJob,
-  ScheduledJobTemplateField,
-  ScheduledJobTemplate,
+  CodeIntelligenceConfig,
+  DeploymentConfig,
+  EscalationConfig,
+  ExecutionTarget,
+  MergeableField,
+  MergeMode,
+  MergeStrategy,
+  NetworkPolicy,
+  NetworkPolicyMode,
+  PageAssertion,
+  PimActivationConfig,
+  PimGroupConfig,
+  PrivateRegistry,
+  Profile,
+  ProfileEditorPayload,
+  ProviderFailoverPolicySource,
+  PublicProfile,
+  ReasoningEffort,
+  RegistryType,
+  ResolvedProviderFailoverPolicy,
+  SmokePage,
+  StackTemplate,
+  TestPipelineConfig,
+} from './types/profile.js';
+export type {
+  ProviderAccount,
+  ProviderAccountProvider,
+  ProviderAuthSource,
+  ProviderFailoverPolicy,
+  ProviderFailoverTarget,
+  PublicProviderAccount,
+  PublicProviderCredentials,
+} from './types/provider-account.js';
+export {
+  type CompiledProvider,
+  type CompiledProviderManifest,
+  type CompiledProviderModel,
+  type GenericPiProviderImplementation,
+  type LegacyProviderImplementation,
+  type PiCatalogCompatibility,
+  PROVIDER_MANIFEST_VERSION,
+  type ProviderAuthorizationState,
+  type ProviderCaveat,
+  type ProviderCaveatKind,
+  type ProviderCaveatSeverity,
+  type ProviderCredentialKind,
+  type ProviderCredentialOption,
+  type ProviderImplementation,
+  type ProviderImplementationKind,
+  type ProviderLifecycleState,
+  type ProviderManifestVersion,
+  type ProviderModelLifecycleState,
+  type ProviderPolicy,
+  type PublicProviderCatalog,
+} from './types/provider-catalog.js';
+export type {
+  ReadinessApproval,
+  ReadinessArea,
+  ReadinessAreaReview,
+  ReadinessAreaStatus,
+  ReadinessFinding,
+  ReadinessFindingSeverity,
+  ReadinessReview,
+  ReadinessSourceRef,
+  ReadinessSourceRefKind,
+  ReadinessStatus,
+} from './types/readiness.js';
+export type { BackupHealth, DaemonHealthSummary, DaemonReleaseInfo } from './types/release.js';
+export type {
+  AgentCompleteEvent,
+  AgentErrorEvent,
+  AgentEscalationEvent,
+  AgentEvent,
+  AgentFileChangeEvent,
+  AgentPlanEvent,
+  AgentProgressEvent,
+  AgentReasoningEvent,
+  AgentStatusEvent,
+  AgentTaskSummaryEvent,
+  AgentToolUseEvent,
+  HttpMcpServerConfig,
+  McpServerConfig,
+  ProviderFailureCategory,
+  ProviderFailureClassification,
+  Runtime,
+  RuntimeType,
+  SpawnConfig,
+  StdioMcpServerConfig,
+} from './types/runtime.js';
+export type {
   CreateScheduledJobRequest,
   CreateScheduledJobTemplateRequest,
+  ScheduledJob,
+  ScheduledJobTemplate,
+  ScheduledJobTemplateField,
   UpdateScheduledJobRequest,
   UpdateScheduledJobTemplateRequest,
 } from './types/scheduled-job.js';
-
 export type {
-  NotificationType,
-  NotificationPayload,
-  PodValidatedNotification,
-  PodFailedNotification,
-  PodNeedsInputNotification,
-  PodErrorNotification,
-} from './types/notification.js';
-
-export type {
-  AuthToken,
-  AppRole,
-  JwtPayload,
-  DaemonConnection,
-} from './types/auth.js';
-
-export type { HistoryQuery, HistoryExportStats } from './types/history.js';
-
-export type {
-  MemoryScope,
-  MemoryKind,
-  MemorySourceEvidence,
-  MemoryEntry,
-  MemoryCandidateStatus,
-  MemoryCandidateAction,
-  MemoryCandidate,
-  MemoryExtractionAttemptStatus,
-  MemoryExtractionAttempt,
-  MemoryUsageKind,
-  MemoryUsageOutcome,
-  MemoryUsageEvent,
-} from './types/memory.js';
-
-// Errors (runtime values, not just types)
-export {
-  AutopodError,
-  AuthError,
-  ForbiddenError,
-  PodNotFoundError,
-  InvalidStateTransitionError,
-  ProfileNotFoundError,
-  ProfileExistsError,
-  ContainerError,
-  ValidationError,
-  EscalationNotFoundError,
-  RuntimeError,
-  BriefParseError,
-} from './errors.js';
-
-// Constants (runtime values)
-export {
-  POD_ID_LENGTH,
-  DEFAULT_MAX_VALIDATION_ATTEMPTS,
-  DEFAULT_MAX_PR_FIX_ATTEMPTS,
-  DEFAULT_HEALTH_TIMEOUT,
-  DEFAULT_HUMAN_RESPONSE_TIMEOUT,
-  DEFAULT_MAX_AI_ESCALATIONS,
-  DEFAULT_AUTO_PAUSE_AFTER,
-  MAX_BUILD_LOG_LENGTH,
-  MAX_DIFF_LENGTH,
-  MAX_HANDOFF_INSTRUCTIONS_LENGTH,
-  MAX_PROVIDER_FAILOVER_HANDOFF_LENGTH,
-  PROVIDER_FAILOVER_HANDOFF_PATH,
-  PROVIDER_FAILOVER_HANDOFF_CONTAINER_PATH,
-  WORKSPACE_PI_HANDOFF_PATH,
-  SCREENSHOT_QUALITY,
-  EVENT_LOG_RETENTION_DAYS,
-  DEFAULT_CONTAINER_MEMORY_GB,
-  DEFAULT_CONTAINER_CPUS,
-  resolveContainerNanoCpus,
-  CHROMIUM_LAUNCH_ARGS,
-  VALID_STATUS_TRANSITIONS,
-  CONTAINER_USER,
-  CONTAINER_HOME_DIR,
-  AUTOPOD_INSTRUCTIONS_PATH,
-} from './constants.js';
-
-// Schemas (runtime values — Zod objects)
-export {
-  createPodRequestSchema,
-  nullableReadinessReviewSchema,
-  podResponseSchema,
-  podStatusSchema,
-  readinessAreaReviewSchema,
-  readinessAreaSchema,
-  readinessAreaStatusSchema,
-  readinessApprovalSchema,
-  readinessFindingSchema,
-  readinessReviewSchema,
-  readinessSourceRefSchema,
-  readinessStatusSchema,
-  sendMessageSchema,
-} from './schemas/pod.schema.js';
-
-export {
-  createProfileSchema,
-  updateProfileSchema,
-  escalationConfigSchema,
-  mergeStrategySchema,
-  modelProviderSchema,
-  reasoningEffortSchema,
-  providerCredentialsSchema,
-  pimActivationConfigSchema,
-} from './schemas/profile.schema.js';
-
-export {
-  createProviderAccountSchemas,
-  createProviderAccountSchema,
-  genericApiKeyCredentialsSchema,
-  importProviderAccountFromProfileSchema,
-  linkProviderAccountSchema,
-  providerAccountIdSchema,
-  providerAccountNameSchema,
-  providerAccountProviderSchema,
-  providerFailoverPolicySchema,
-  providerFailoverTargetSchema,
-  updateProviderAccountSchema,
-} from './schemas/provider-account.schema.js';
-
-export {
-  actionDefinitionSchema,
-  actionPolicySchema,
-  actionOverrideSchema,
-  actionGroupSchema,
-  actionHandlerSchema,
-  authConfigSchema,
-  paramDefSchema,
-  dataSanitizationConfigSchema,
-  quarantineConfigSchema,
-  outputModeSchema,
-  sanitizationPresetSchema,
-} from './schemas/action-definition.schema.js';
-
-export {
-  injectedSkillSchema,
-  injectedMcpServerSchema,
-  injectedClaudeMdSectionSchema,
-} from './schemas/injection.schema.js';
-
-export {
-  daemonConfigSchema,
-  type DaemonConfig,
-} from './schemas/config.schema.js';
-
-// Sanitize + quarantine pipeline
-export {
-  sanitize,
-  sanitizeDeep,
-  getPresetConfig,
-  quarantine,
-  processContent,
-  processContentDeep,
-  PII_PATTERNS,
-  INJECTION_PATTERNS,
-  REDACT_FIELD_NAMES,
-  collectPiiPatternNames,
-} from './sanitize/index.js';
-
-export type {
-  PiiPattern,
-  InjectionPattern,
-  QuarantineResult,
-  ThreatIndicator,
-  ProcessedContent,
-  ProcessContentConfig,
-} from './sanitize/index.js';
-
-// ID generation utility
-export { generateId, generatePodId } from './id.js';
-
-// Series brief parsing (CLI + daemon share this)
-export type { BriefFrontmatter, ParsedBrief, BriefFile } from './series/parse-briefs.js';
-export {
-  parseBriefFrontmatter,
-  numericPrefix,
-  inspectSeriesBriefGraph,
-  orderSeriesBriefs,
-  parseBriefs,
-} from './series/parse-briefs.js';
-
-export type { SkillFrontmatter } from './skills/skill-frontmatter.js';
-export {
-  parseSkillFrontmatter,
-  extractSkillDescription,
-} from './skills/skill-frontmatter.js';
-
-// Model pricing helpers
-export * from './pricing/index.js';
-
-// Analytics response types
-export type {
-  CostAnalyticsResponse,
-  QualityAnalyticsResponse,
-  SafetyEventKind,
-  SafetyEventSource,
-  NetworkPolicyBucket,
-  SafetyAnalyticsResponse,
-  AuditChainVerifyResponse,
-  LoadBearingStatus,
-  ThroughputCohortPod,
-  QueueDepthBucket,
-  TimeInStatusBox,
-  ThroughputAnalyticsResponse,
-  HumanAttentionKind,
-  EscalationsSummary,
-  AskHumanTtrBucket,
-  AskHumanTtr,
-  PerProfileEscalation,
-  BlockerPattern,
-  EscalationsAnalyticsResponse,
-  ValidationStage,
-  FailureStageCell,
-  FailureStageRow,
-  PerModelAggregate,
-  PerRuntimeAggregate,
-  UnknownModelSample,
-  ModelsSummary,
-  ModelsAnalyticsResponse,
-  MemoryAnalyticsResponse,
-} from './types/analytics.js';
-
-export type { BackupHealth, DaemonHealthSummary, DaemonReleaseInfo } from './types/release.js';
-
-export type { TaskExecutionSummary } from './types/task-execution.js';
-
-export type {
-  ReusedValidationEvidence,
-  ValidationInputIdentity,
-} from './types/validation-evidence.js';
-
+  ScanDecisionPage,
+  ScanFindingPage,
+  ScanRecordDiagnostic,
+  ScanRepairDispatch,
+  ScanReportDetail,
+  ScanReportPage,
+  ScanReportSummary,
+  ScanReportView,
+  ScanTriageDecision,
+  ScanTriageRequest,
+  ScheduledScanCollection,
+  ScheduledScanFinding,
+  ScheduledScannerResult,
+  ScheduledScanPolicy,
+  ScheduledScanReport,
+} from './types/scheduled-scan.js';
 export {
   scheduledScanPolicyInputSchema,
   scheduledScanPolicySchema,
 } from './types/scheduled-scan.js';
 export type {
-  ScheduledScanPolicy,
-  ScheduledScanReport,
-  ScheduledScanCollection,
-  ScheduledScanFinding,
-  ScheduledScannerResult,
-} from './types/scheduled-scan.js';
-
+  CheckpointPolicy,
+  ScanCheckpoint,
+  ScanDecision,
+  ScanDetectorName,
+  ScanFinding,
+  ScanOutcome,
+  ScanSeverity,
+  SecurityScanDetectors,
+  SecurityScanPolicy,
+} from './types/security-scan.js';
 export type {
-  ScanTriageDecision,
-  ScanReportDetail,
-  ScanReportView,
-  ScanRecordDiagnostic,
-  ScanReportSummary,
-  ScanReportPage,
-  ScanFindingPage,
-  ScanDecisionPage,
-  ScanTriageRequest,
-  ScanRepairDispatch,
-} from './types/scheduled-scan.js';
-
+  DaggerSidecarConfig,
+  SidecarHealthCheck,
+  SidecarResources,
+  SidecarSpec,
+  SidecarsConfig,
+  SidecarType,
+} from './types/sidecar.js';
+export {
+  DAGGER_RUNNER_HOST_ENV,
+  DEFAULT_DAGGER_ENGINE_PORT,
+  SIDECAR_CONTAINER_LABEL,
+  SIDECAR_LABEL_NAME,
+  SIDECAR_LABEL_POD_ID,
+  SIDECAR_LABEL_TYPE,
+} from './types/sidecar.js';
+export type {
+  SourceAdoptionList,
+  SourceAdoptionRequest,
+  SourceAdoptionStage,
+  SourceAdoptionState,
+} from './types/source-adoption.js';
+export type { TaskExecutionSummary } from './types/task-execution.js';
 export type {
   ReworkEligibility,
   ReworkRequestInput,
   ReworkRequestReceipt,
-  TaskRetryIdentity,
-  TaskRetryOutcome,
+  RewriteRepairRetryTarget,
   TaskRetryAttempt,
   TaskRetryAuthorization,
-  RewriteRepairRetryTarget,
-  TaskRetryState,
+  TaskRetryIdentity,
+  TaskRetryOutcome,
   TaskRetryStage,
+  TaskRetryState,
 } from './types/task-retry.js';
-
-export type { IntentionalRerun, DispatchPreflightEvidence } from './types/dispatch-preflight.js';
-
 export type {
-  ExecutionProvenance,
-  ExecutionProvenanceInput,
-} from './types/execution-provenance.js';
-export * from './types/managed-pod.js';
-export * from './managed-protocol.js';
-
-export type { OperatorGuidanceDelivery } from './types/operator-guidance.js';
-
-// Composable configuration contracts (the legacy launch path remains until cutover).
-export * from './types/launch-config.js';
-export * from './types/github-access.js';
-export * from './schemas/github-operation.schema.js';
-export * from './schemas/launch-config.schema.js';
-export * from './schemas/cli-tool.schema.js';
-export * from './schemas/service-access.schema.js';
-export * from './types/goal.js';
-export * from './types/pim.js';
-export * from './schemas/issue-watcher-binding.schema.js';
-export * from './schemas/launch-work.schema.js';
-export * from './types/configuration-credential.js';
-export * from './schemas/github-read.schema.js';
-export * from './schemas/series-launch.schema.js';
-
-export type { DiffFile, DiffCommit, DiffStats, DiffResponse } from './types/diff.js';
-export { parseDiff, statsForFiles } from './diff.js';
+  DeviationItem,
+  DeviationsAssessment,
+  MemoryOutcomeItem,
+  ReviewFeedbackResponseItem,
+  TaskSummary,
+} from './types/task-summary.js';
+export type {
+  TerminationReconciliationReceipt,
+  TerminationReconciliationState,
+  UnverifiedTaskRun,
+} from './types/termination-reconciliation.js';
+export type {
+  AdvisoryBrowserQaObservation,
+  AdvisoryBrowserQaResult,
+  AssertionResult,
+  BuildResult,
+  FactCheckResult,
+  FactValidationResult,
+  HealthResult,
+  InitialReviewFinding,
+  LintResult,
+  PageResult,
+  RequirementsCheckItem,
+  ReviewAdjudication,
+  ReviewAxis,
+  ReviewAxisRun,
+  ReviewBatchResult,
+  ReviewClosureVerification,
+  ReviewFailure,
+  ReviewFailureKind,
+  ReviewFindingCandidate,
+  ReviewFindingLedgerEntry,
+  ReviewProgressAxis,
+  ReviewProgressSnapshot,
+  ReviewRepairDelta,
+  SastResult,
+  ScreenshotRef,
+  ScreenshotSource,
+  SetupResult,
+  SmokeResult,
+  StructuredReviewFinding,
+  TaskReviewResult,
+  ValidationFinding,
+  ValidationInfrastructureFailure,
+  ValidationOverride,
+  ValidationResult,
+} from './types/validation.js';
+export type {
+  ReusedValidationEvidence,
+  ValidationInputIdentity,
+} from './types/validation-evidence.js';
+export type {
+  ValidationExecutionBinding,
+  ValidationExecutionRecoveryRequest,
+  ValidationExecutionRecoveryState,
+  ValidationRecoveryBudgetReceipt,
+  ValidationSettlementReceipt,
+} from './types/validation-execution-recovery.js';
+export type {
+  ValidationRecoveryAction,
+  ValidationRecoveryAvailability,
+  ValidationRecoveryState,
+} from './types/validation-recovery.js';

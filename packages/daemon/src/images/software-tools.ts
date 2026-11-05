@@ -25,7 +25,7 @@ export function softwareToolInstallCommands(tools: EnvironmentPreset['tools']): 
       return `python3 -m pip install --user --index-url https://pypi.org/simple '${name.slice(4)}==${version}'`;
     if (name.startsWith('dotnet:') && /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name.slice(7)))
       return `dotnet tool install --global '${name.slice(7)}' --version '${version}'`;
-    configurationError(
+    return configurationError(
       `Unsupported software tool ${name}. Select a template, pnpm, playwright, npm:package, pip:package or dotnet:package.`,
       'ENVIRONMENT_TOOL_UNSUPPORTED',
     );

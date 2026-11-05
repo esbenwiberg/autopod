@@ -5,9 +5,9 @@ import type { TaskSummary } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import {
+  createProfileAnthropicClient,
   type ProfileLlmClientDeps,
   type ProfileLlmClientUnavailableReason,
-  createProfileAnthropicClient,
 } from '../providers/llm-client.js';
 import { buildPrTitle } from './pr-body-builder.js';
 

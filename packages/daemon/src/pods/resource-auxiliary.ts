@@ -6,6 +6,7 @@ import type {
   ResourceAuxiliaryCaptured,
   ResourceAuxiliaryLiveDependencies,
 } from './resource-contracts.js';
+
 const execFileAsync = promisify(execFile);
 export function createResourceAuxiliary(
   deps: ResourceAuxiliaryLiveDependencies,

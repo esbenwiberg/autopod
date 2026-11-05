@@ -27,16 +27,16 @@ import type {
   DirectoryExtractionOptions,
   ExecOptions,
   ExecResult,
-  ExposePortOptions,
   ExposedPort,
+  ExposePortOptions,
   FileWriteOptions,
   StreamingExecResult,
   TerminalSession,
   TerminalSessionOptions,
 } from '../interfaces/container-manager.js';
 import {
-  SANDBOX_OUTPUT_INVENTORY,
   extractManagedSandboxOutput,
+  SANDBOX_OUTPUT_INVENTORY,
 } from '../managed/output-extraction.js';
 import { assertSourceResourceReleasable } from '../pods/source-custody-guards.js';
 import { assertValidationResourceSettled } from '../pods/validation-execution-evidence.js';
@@ -49,14 +49,14 @@ import { assertDirectoryExtractionCurrent } from './directory-extraction-ownersh
 import { isObservedExitCode, unverifiedExecExit } from './exec-exit-evidence.js';
 import type { SandboxPortAuth } from './sandbox-api-client.js';
 import {
+  egressPolicyForMode,
+  pickSandboxTier,
   SANDBOX_TIER_MEMORY_BYTES,
   type SandboxApiClient,
   type SandboxDescriptor,
   type SandboxExecOptions,
   type SandboxRegistryCredentials,
   type SandboxResourceTier,
-  egressPolicyForMode,
-  pickSandboxTier,
 } from './sandbox-api-client.js';
 import type { SandboxWakeupJournal } from './sandbox-wakeup-journal.js';
 import { exportSandboxWorkspace, isExcludedPath } from './sandbox-workspace-export.js';

@@ -24,6 +24,7 @@ import {
   summarizeValidationPhases,
 } from './validation-workflow-policy.js';
 import { createValidationWorkflowState } from './validation-workflow-state.js';
+
 type FactCheckResult = NonNullable<ValidationResult['factValidation']>['results'][number];
 const roots: string[] = [];
 afterEach(async () => {
@@ -126,15 +127,16 @@ describe('validation workflow policy and state', () => {
     expect(failedFactIds(null)).toEqual([]);
     expect(summarizeValidationPhases(r)).toContain('build: skip');
   });
-  it.each([undefined, 0, 127])(
-    'distinguishes human fact decisions from a missing command (exit=%s)',
-    (exitCode) => {
-      const r = result();
-      r.factValidation = { status: 'pending_human', results: [fact('pending_human', exitCode)] };
-      expect(hasPendingFactDecision(r)).toBe(exitCode !== 127);
-      expect(hasPendingFactDecision(null)).toBe(false);
-    },
-  );
+  it.each([
+    undefined,
+    0,
+    127,
+  ])('distinguishes human fact decisions from a missing command (exit=%s)', (exitCode) => {
+    const r = result();
+    r.factValidation = { status: 'pending_human', results: [fact('pending_human', exitCode)] };
+    expect(hasPendingFactDecision(r)).toBe(exitCode !== 127);
+    expect(hasPendingFactDecision(null)).toBe(false);
+  });
   it.each([
     '.mcp.json',
     '.husky/pre-commit',
@@ -184,35 +186,36 @@ describe('validation workflow policy and state', () => {
       }),
     ).toBe('off');
   });
-  it.each(['message', 'status', 'ordinary'] as const)(
-    'keeps unexpected validation errors classified by %s',
-    (kind) => {
-      const error =
-        kind === 'message'
-          ? new Error('container stopped/paused')
-          : kind === 'status'
-            ? Object.assign(new Error('Conflict'), { statusCode: 409 })
-            : new Error('Ordinary failure');
-      const r = makeUnexpectedValidationFailureResult('pod', 3, error);
-      expect(r).toMatchObject({
-        podId: 'pod',
-        attempt: 3,
-        overall: 'fail',
-        duration: 0,
-        smoke: {
-          build: { status: 'fail', duration: 0 },
-          health: { status: 'fail', responseCode: null },
-          pages: [],
-        },
-        taskReview: null,
-      });
-      expect(r.smoke.build.output).toBe(
-        kind === 'ordinary'
-          ? 'Error: Ordinary failure'
-          : 'Container exited before validation could run — check agent logs for errors',
-      );
-    },
-  );
+  it.each([
+    'message',
+    'status',
+    'ordinary',
+  ] as const)('keeps unexpected validation errors classified by %s', (kind) => {
+    const error =
+      kind === 'message'
+        ? new Error('container stopped/paused')
+        : kind === 'status'
+          ? Object.assign(new Error('Conflict'), { statusCode: 409 })
+          : new Error('Ordinary failure');
+    const r = makeUnexpectedValidationFailureResult('pod', 3, error);
+    expect(r).toMatchObject({
+      podId: 'pod',
+      attempt: 3,
+      overall: 'fail',
+      duration: 0,
+      smoke: {
+        build: { status: 'fail', duration: 0 },
+        health: { status: 'fail', responseCode: null },
+        pages: [],
+      },
+      taskReview: null,
+    });
+    expect(r.smoke.build.output).toBe(
+      kind === 'ordinary'
+        ? 'Error: Ordinary failure'
+        : 'Container exited before validation could run — check agent logs for errors',
+    );
+  });
   it('loads preferred or fallback review skills and leaves an absent skill optional', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'validation-policy-'));
     roots.push(root);

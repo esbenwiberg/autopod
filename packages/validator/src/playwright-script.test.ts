@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type PlaywrightScriptConfig, generateValidationScript } from './playwright-script.js';
+import { generateValidationScript, type PlaywrightScriptConfig } from './playwright-script.js';
 
 function makeConfig(overrides: Partial<PlaywrightScriptConfig> = {}): PlaywrightScriptConfig {
   return {

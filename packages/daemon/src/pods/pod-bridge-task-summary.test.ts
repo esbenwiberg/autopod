@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import { createMemoryRepository } from './memory-repository.js';
 import { createMemoryUsageRepository } from './memory-usage-repository.js';
-import { type SessionBridgeDependencies, createSessionBridge } from './pod-bridge-impl.js';
+import { createSessionBridge, type SessionBridgeDependencies } from './pod-bridge-impl.js';
 import { createPodRepository } from './pod-repository.js';
 
 type Deps = SessionBridgeDependencies;

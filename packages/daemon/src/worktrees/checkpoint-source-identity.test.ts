@@ -95,21 +95,22 @@ describe('selected checkpoint source identity', () => {
     expect(await f.git('rev-parse', 'HEAD')).toBe(second);
     expect(await f.git('show-ref')).toBe(refs);
   });
-  it.each(['other-pod', 'unowned', 'agent-commit'])(
-    'rejects an equal-tree %s commit',
-    async (kind) => {
-      const f = await fixture();
-      const commit = await f.checkpoint(
-        kind === 'other-pod' ? 'other-pod' : 'pod',
-        kind === 'agent-commit' ? 'agent no-op' : undefined,
-      );
-      if (kind === 'unowned') await f.git('update-ref', '-d', 'refs/autopod-quarantine/pod/1');
-      await expect(inspectCheckpointSource(f.input)).rejects.toMatchObject({
-        code: 'CHECKPOINT_SOURCE_CHANGED',
-      });
-      expect(await f.git('rev-parse', 'HEAD')).toBe(commit);
-    },
-  );
+  it.each([
+    'other-pod',
+    'unowned',
+    'agent-commit',
+  ])('rejects an equal-tree %s commit', async (kind) => {
+    const f = await fixture();
+    const commit = await f.checkpoint(
+      kind === 'other-pod' ? 'other-pod' : 'pod',
+      kind === 'agent-commit' ? 'agent no-op' : undefined,
+    );
+    if (kind === 'unowned') await f.git('update-ref', '-d', 'refs/autopod-quarantine/pod/1');
+    await expect(inspectCheckpointSource(f.input)).rejects.toMatchObject({
+      code: 'CHECKPOINT_SOURCE_CHANGED',
+    });
+    expect(await f.git('rev-parse', 'HEAD')).toBe(commit);
+  });
   it('rejects a content change even when a later owned checkpoint restores the original tree', async () => {
     const f = await fixture();
     await writeFile(path.join(f.root, 'source.ts'), 'changed\n');

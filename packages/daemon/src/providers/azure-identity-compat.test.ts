@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createIdentityCompatibilityFixture,
   IDENTITY_FIXTURE_SCOPE,
   IDENTITY_FIXTURE_TENANT,
-  createIdentityCompatibilityFixture,
 } from '../test-utils/azure-identity-compat-helpers.js';
 
 describe('actual Azure Identity/MSAL compatibility (in-memory HTTP only)', () => {

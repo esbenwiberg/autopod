@@ -233,9 +233,9 @@ export function reconcileReviewLedger(
       : [],
   );
   const out: ReviewFindingLedgerEntry[] = [];
-  const migrateByProvenance = (now: { sourceIds: string[] }):
-    | ReviewFindingLedgerEntry
-    | undefined => {
+  const migrateByProvenance = (now: {
+    sourceIds: string[];
+  }): ReviewFindingLedgerEntry | undefined => {
     const matches = prior.filter((entry) => {
       const known = new Set([...entry.priorSourceIds, ...entry.currentSourceIds]);
       return now.sourceIds.some((id) => known.has(id));

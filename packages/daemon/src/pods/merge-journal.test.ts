@@ -80,78 +80,83 @@ function fixture(
 }
 
 describe('durable merge journal', () => {
-  it.each(['valid', 'stale', 'wrong-head', 'scheduled', 'dirty', 'recent', 'other-attempt'])(
-    'requires explicit source-bound operator recovery (%s)',
-    (scenario) => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2026-10-26T09:00:00Z'));
-      const f = fixture(undefined, true, 'https://dev.azure.com/org/Project/_git/Repo');
-      try {
-        const attemptId = f.journal.claim(f.pod, f.publicationPod, f.publicationId, f.config);
-        const before = f.db.prepare('SELECT * FROM merge_attempts').all();
-        f.repo.update(f.pod.id, { status: 'validated' });
-        vi.setSystemTime(
-          new Date(scenario === 'recent' ? '2026-10-26T09:01:00Z' : '2026-10-26T10:00:00Z'),
-        );
-        const input: MergeRecoveryInput = {
-          podId: f.pod.id,
-          attemptId: scenario === 'other-attempt' ? 'different' : attemptId,
-          headSha: f.proof.commitSha,
-          actor: 'operator',
-          reason: 'Explicitly accept unknown request outcome after checking provider and source',
-          local: { headSha: f.proof.commitSha, branch: 'feature', clean: scenario !== 'dirty' },
-          evidence: {
-            observedAt: scenario === 'stale' ? '2026-10-26T08:00:00Z' : new Date().toISOString(),
-            prUrl: f.config.prUrl,
-            pr: {
-              pullRequestId: 42,
-              status: 'active',
-              mergeStatus: 'succeeded',
-              repository: { webUrl: f.proof.repository },
-              sourceRefName: 'refs/heads/feature',
-              targetRefName: 'refs/heads/main',
-              lastMergeSourceCommit: {
-                commitId: scenario === 'wrong-head' ? 'c'.repeat(40) : f.proof.commitSha,
-              },
-              autoCompleteSetBy: scenario === 'scheduled' ? { id: 'user' } : null,
+  it.each([
+    'valid',
+    'stale',
+    'wrong-head',
+    'scheduled',
+    'dirty',
+    'recent',
+    'other-attempt',
+  ])('requires explicit source-bound operator recovery (%s)', (scenario) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-26T09:00:00Z'));
+    const f = fixture(undefined, true, 'https://dev.azure.com/org/Project/_git/Repo');
+    try {
+      const attemptId = f.journal.claim(f.pod, f.publicationPod, f.publicationId, f.config);
+      const before = f.db.prepare('SELECT * FROM merge_attempts').all();
+      f.repo.update(f.pod.id, { status: 'validated' });
+      vi.setSystemTime(
+        new Date(scenario === 'recent' ? '2026-10-26T09:01:00Z' : '2026-10-26T10:00:00Z'),
+      );
+      const input: MergeRecoveryInput = {
+        podId: f.pod.id,
+        attemptId: scenario === 'other-attempt' ? 'different' : attemptId,
+        headSha: f.proof.commitSha,
+        actor: 'operator',
+        reason: 'Explicitly accept unknown request outcome after checking provider and source',
+        local: { headSha: f.proof.commitSha, branch: 'feature', clean: scenario !== 'dirty' },
+        evidence: {
+          observedAt: scenario === 'stale' ? '2026-10-26T08:00:00Z' : new Date().toISOString(),
+          prUrl: f.config.prUrl,
+          pr: {
+            pullRequestId: 42,
+            status: 'active',
+            mergeStatus: 'succeeded',
+            repository: { webUrl: f.proof.repository },
+            sourceRefName: 'refs/heads/feature',
+            targetRefName: 'refs/heads/main',
+            lastMergeSourceCommit: {
+              commitId: scenario === 'wrong-head' ? 'c'.repeat(40) : f.proof.commitSha,
             },
+            autoCompleteSetBy: scenario === 'scheduled' ? { id: 'user' } : null,
           },
-        };
-        if (scenario !== 'valid') {
-          expect(() => recoverUncertainMerge(f.db, input, true)).toThrow('refused');
-          expect(f.journal.find(f.repo.getOrThrow(f.pod.id))?.state).toBe('admitted');
-        } else {
-          expect(recoverUncertainMerge(f.db, input, false).applied).toBe(false);
-          expect(f.journal.find(f.repo.getOrThrow(f.pod.id))?.state).toBe('admitted');
-          expect(recoverUncertainMerge(f.db, input, true).applied).toBe(true);
-          expect(createMergeJournal(f.db).find(f.repo.getOrThrow(f.pod.id))?.state).toBe('planned');
-          expect(f.db.prepare('SELECT * FROM merge_observations').all()).toEqual([]);
-          expect(f.db.prepare('SELECT * FROM merge_attempts').all()).toEqual(before);
-          expect(f.repo.getOrThrow(f.pod.id).status).toBe('validated');
-          expect(() => f.db.prepare('DELETE FROM merge_operator_recoveries').run()).toThrow(
-            'immutable',
-          );
-          f.repo.update(f.pod.id, { status: 'merging' });
-          const next = f.journal.claim(
-            f.repo.getOrThrow(f.pod.id),
-            f.publicationPod,
-            f.publicationId,
-            { ...f.config, squash: true },
-          );
-          expect(next).not.toBe(attemptId);
-          expect(() =>
-            f.journal.claim(f.repo.getOrThrow(f.pod.id), f.publicationPod, f.publicationId, {
-              ...f.config,
-              squash: true,
-            }),
-          ).toThrow('ambiguous');
-        }
-      } finally {
-        f.db.close();
-        vi.useRealTimers();
+        },
+      };
+      if (scenario !== 'valid') {
+        expect(() => recoverUncertainMerge(f.db, input, true)).toThrow('refused');
+        expect(f.journal.find(f.repo.getOrThrow(f.pod.id))?.state).toBe('admitted');
+      } else {
+        expect(recoverUncertainMerge(f.db, input, false).applied).toBe(false);
+        expect(f.journal.find(f.repo.getOrThrow(f.pod.id))?.state).toBe('admitted');
+        expect(recoverUncertainMerge(f.db, input, true).applied).toBe(true);
+        expect(createMergeJournal(f.db).find(f.repo.getOrThrow(f.pod.id))?.state).toBe('planned');
+        expect(f.db.prepare('SELECT * FROM merge_observations').all()).toEqual([]);
+        expect(f.db.prepare('SELECT * FROM merge_attempts').all()).toEqual(before);
+        expect(f.repo.getOrThrow(f.pod.id).status).toBe('validated');
+        expect(() => f.db.prepare('DELETE FROM merge_operator_recoveries').run()).toThrow(
+          'immutable',
+        );
+        f.repo.update(f.pod.id, { status: 'merging' });
+        const next = f.journal.claim(
+          f.repo.getOrThrow(f.pod.id),
+          f.publicationPod,
+          f.publicationId,
+          { ...f.config, squash: true },
+        );
+        expect(next).not.toBe(attemptId);
+        expect(() =>
+          f.journal.claim(f.repo.getOrThrow(f.pod.id), f.publicationPod, f.publicationId, {
+            ...f.config,
+            squash: true,
+          }),
+        ).toThrow('ambiguous');
       }
-    },
-  );
+    } finally {
+      f.db.close();
+      vi.useRealTimers();
+    }
+  });
 
   it('keeps historical alias admission and accounting consistent across a real database reopen', () => {
     const dir = mkdtempSync(join(tmpdir(), 'autopod-historical-merge-'));
@@ -199,75 +204,76 @@ describe('durable merge journal', () => {
     }
   });
 
-  it.each(['ambiguous', 'scheduled', 'merged', 'closed'] as const)(
-    'reconciles historical ADO aliases before admitting a %s duplicate',
-    (disposition) => {
-      const f = fixture(undefined, true, 'https://dev.azure.com/org/Project/_git/Repo');
-      try {
-        const current = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
-        // Seed the immutable row as an older writer did, without updating a receipt.
-        f.db
-          .prepare(`INSERT INTO merge_intents
+  it.each([
+    'ambiguous',
+    'scheduled',
+    'merged',
+    'closed',
+  ] as const)('reconciles historical ADO aliases before admitting a %s duplicate', (disposition) => {
+    const f = fixture(undefined, true, 'https://dev.azure.com/org/Project/_git/Repo');
+    try {
+      const current = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
+      // Seed the immutable row as an older writer did, without updating a receipt.
+      f.db
+        .prepare(`INSERT INTO merge_intents
           SELECT 'historical', 'historical-identity', publication_id, pod_id, task_id,
             generation, ?, request, created_at FROM merge_intents WHERE id = ?`)
-          .run('https://org.visualstudio.com/%50roject/_git/Repo/pullrequest/42', current.id);
-        const before = f.db.prepare('SELECT * FROM merge_intents ORDER BY id').all();
-        if (disposition === 'closed') {
-          f.journal.observeStatus('historical', {
-            merged: false,
-            open: false,
-            headSha: f.proof.commitSha,
-            sourceTarget: f.config.expectedTarget,
-            blockReason: null,
-            ciFailures: [],
-            reviewComments: [],
-          });
-        } else {
-          f.db
-            .prepare(
-              "INSERT INTO merge_attempts(id, intent_id, admitted_at) VALUES ('old-attempt', 'historical', ?)",
-            )
-            .run(new Date().toISOString());
-          if (disposition === 'scheduled')
-            f.journal.observe(
-              'old-attempt',
-              { merged: false, autoMergeScheduled: true },
-              'merge_response',
-            );
-          if (disposition === 'merged')
-            f.journal.observe('old-attempt', f.result, 'provider_lookup');
-        }
-        const restarted = createMergeJournal(f.db);
-        expect(() => restarted.claim(f.pod, f.publicationPod, f.publicationId, f.config)).toThrow(
-          disposition === 'merged' ? 'confirmed' : disposition,
-        );
-        expect(f.repo.taskExecutions?.snapshot(f.pod.id).merge).toMatchObject({
-          prCount: 1,
-          requestCount: disposition === 'closed' ? 0 : 1,
-          mergedPrCount: disposition === 'merged' ? 1 : 0,
-          mergedWithoutRecordedRequestCount: 0,
-          closedPrCount: disposition === 'closed' ? 1 : 0,
+        .run('https://org.visualstudio.com/%50roject/_git/Repo/pullrequest/42', current.id);
+      const before = f.db.prepare('SELECT * FROM merge_intents ORDER BY id').all();
+      if (disposition === 'closed') {
+        f.journal.observeStatus('historical', {
+          merged: false,
+          open: false,
+          headSha: f.proof.commitSha,
+          sourceTarget: f.config.expectedTarget,
+          blockReason: null,
+          ciFailures: [],
+          reviewComments: [],
         });
-        if (disposition === 'closed') {
-          expect(restarted.find(f.pod)?.prDisposition).toBe('closed');
-          restarted.observeStatus(current.id, {
-            merged: false,
-            open: true,
-            headSha: f.proof.commitSha,
-            sourceTarget: f.config.expectedTarget,
-            blockReason: null,
-            ciFailures: [],
-            reviewComments: [],
-          });
-          expect(restarted.find(f.pod)?.prDisposition).toBe('open');
-          restarted.claim(f.pod, f.publicationPod, f.publicationId, f.config);
-        }
-        expect(f.db.prepare('SELECT * FROM merge_intents ORDER BY id').all()).toEqual(before);
-      } finally {
-        f.db.close();
+      } else {
+        f.db
+          .prepare(
+            "INSERT INTO merge_attempts(id, intent_id, admitted_at) VALUES ('old-attempt', 'historical', ?)",
+          )
+          .run(new Date().toISOString());
+        if (disposition === 'scheduled')
+          f.journal.observe(
+            'old-attempt',
+            { merged: false, autoMergeScheduled: true },
+            'merge_response',
+          );
+        if (disposition === 'merged') f.journal.observe('old-attempt', f.result, 'provider_lookup');
       }
-    },
-  );
+      const restarted = createMergeJournal(f.db);
+      expect(() => restarted.claim(f.pod, f.publicationPod, f.publicationId, f.config)).toThrow(
+        disposition === 'merged' ? 'confirmed' : disposition,
+      );
+      expect(f.repo.taskExecutions?.snapshot(f.pod.id).merge).toMatchObject({
+        prCount: 1,
+        requestCount: disposition === 'closed' ? 0 : 1,
+        mergedPrCount: disposition === 'merged' ? 1 : 0,
+        mergedWithoutRecordedRequestCount: 0,
+        closedPrCount: disposition === 'closed' ? 1 : 0,
+      });
+      if (disposition === 'closed') {
+        expect(restarted.find(f.pod)?.prDisposition).toBe('closed');
+        restarted.observeStatus(current.id, {
+          merged: false,
+          open: true,
+          headSha: f.proof.commitSha,
+          sourceTarget: f.config.expectedTarget,
+          blockReason: null,
+          ciFailures: [],
+          reviewComments: [],
+        });
+        expect(restarted.find(f.pod)?.prDisposition).toBe('open');
+        restarted.claim(f.pod, f.publicationPod, f.publicationId, f.config);
+      }
+      expect(f.db.prepare('SELECT * FROM merge_intents ORDER BY id').all()).toEqual(before);
+    } finally {
+      f.db.close();
+    }
+  });
 
   it('reports unsupported historical identities as unavailable and retains them before any admission', () => {
     const f = fixture();
@@ -522,28 +528,31 @@ describe('durable merge journal', () => {
     }
   });
 
-  it.each(['missing-source', 'wrong-head', 'wrong-target', 'pending', 'admitted'] as const)(
-    'rejects unproven or misclassified planned disposition (%s)',
-    (change) => {
-      const f = fixture();
-      try {
-        const planned = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
-        if (change === 'admitted')
-          f.journal.claim(f.pod, f.publicationPod, f.publicationId, f.config);
-        const result = structuredClone(f.result);
-        if (change === 'missing-source') result.source = undefined;
-        if (change === 'wrong-head' && result.source) result.source.headSha = 'c'.repeat(40);
-        if (change === 'wrong-target' && result.source) result.source.target.baseBranch = 'other';
-        if (change === 'pending') result.merged = false;
-        expect(() => f.journal.observeDisposition(planned.id, result)).toThrow();
-        expect(
-          f.db.prepare('SELECT count(*) AS n FROM merge_disposition_observations').get(),
-        ).toEqual({ n: 0 });
-      } finally {
-        f.db.close();
-      }
-    },
-  );
+  it.each([
+    'missing-source',
+    'wrong-head',
+    'wrong-target',
+    'pending',
+    'admitted',
+  ] as const)('rejects unproven or misclassified planned disposition (%s)', (change) => {
+    const f = fixture();
+    try {
+      const planned = f.journal.plan(f.pod, f.publicationPod, f.publicationId, f.config);
+      if (change === 'admitted')
+        f.journal.claim(f.pod, f.publicationPod, f.publicationId, f.config);
+      const result = structuredClone(f.result);
+      if (change === 'missing-source') result.source = undefined;
+      if (change === 'wrong-head' && result.source) result.source.headSha = 'c'.repeat(40);
+      if (change === 'wrong-target' && result.source) result.source.target.baseBranch = 'other';
+      if (change === 'pending') result.merged = false;
+      expect(() => f.journal.observeDisposition(planned.id, result)).toThrow();
+      expect(
+        f.db.prepare('SELECT count(*) AS n FROM merge_disposition_observations').get(),
+      ).toEqual({ n: 0 });
+    } finally {
+      f.db.close();
+    }
+  });
 
   it('persists a planned source binding without inventing an attempt, then admits exactly one request', () => {
     const f = fixture();
@@ -621,28 +630,31 @@ describe('durable merge journal', () => {
     }
   });
 
-  it.each(['generation', 'decision', 'wrong-source', 'unconfirmed', 'outer-transaction'] as const)(
-    'refuses unproven or stale admission (%s)',
-    (change) => {
-      const f = fixture(undefined, change !== 'unconfirmed');
-      try {
-        if (change === 'generation') f.repo.incrementLifecycleGeneration(f.pod.id);
-        if (change === 'decision')
-          f.db.prepare("UPDATE pods SET pending_escalation = '{}' WHERE id = ?").run(f.pod.id);
-        const claim = () =>
-          f.journal.claim(
-            f.pod,
-            f.publicationPod,
-            f.publicationId,
-            change === 'wrong-source' ? { ...f.config, expectedHeadSha: 'c'.repeat(40) } : f.config,
-          );
-        expect(change === 'outer-transaction' ? () => f.db.transaction(claim)() : claim).toThrow();
-        expect(f.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 0 });
-      } finally {
-        f.db.close();
-      }
-    },
-  );
+  it.each([
+    'generation',
+    'decision',
+    'wrong-source',
+    'unconfirmed',
+    'outer-transaction',
+  ] as const)('refuses unproven or stale admission (%s)', (change) => {
+    const f = fixture(undefined, change !== 'unconfirmed');
+    try {
+      if (change === 'generation') f.repo.incrementLifecycleGeneration(f.pod.id);
+      if (change === 'decision')
+        f.db.prepare("UPDATE pods SET pending_escalation = '{}' WHERE id = ?").run(f.pod.id);
+      const claim = () =>
+        f.journal.claim(
+          f.pod,
+          f.publicationPod,
+          f.publicationId,
+          change === 'wrong-source' ? { ...f.config, expectedHeadSha: 'c'.repeat(40) } : f.config,
+        );
+      expect(change === 'outer-transaction' ? () => f.db.transaction(claim)() : claim).toThrow();
+      expect(f.db.prepare('SELECT count(*) AS n FROM merge_attempts').get()).toEqual({ n: 0 });
+    } finally {
+      f.db.close();
+    }
+  });
 
   it('requires reconciliation of an already scheduled merge before another admission', () => {
     const f = fixture();
@@ -746,35 +758,36 @@ describe('durable merge journal', () => {
     }
   });
 
-  it.each(['missing', 'head', 'target'] as const)(
-    'does not record an unconfirmed merge result (%s)',
-    (change) => {
-      const f = fixture();
-      try {
-        const attempt = f.journal.claim(f.pod, f.publicationPod, f.publicationId, f.config);
-        const source = {
-          headSha: change === 'head' ? 'c'.repeat(40) : f.config.expectedHeadSha,
-          target: {
-            ...f.config.expectedTarget,
-            baseBranch: change === 'target' ? 'release' : 'main',
+  it.each([
+    'missing',
+    'head',
+    'target',
+  ] as const)('does not record an unconfirmed merge result (%s)', (change) => {
+    const f = fixture();
+    try {
+      const attempt = f.journal.claim(f.pod, f.publicationPod, f.publicationId, f.config);
+      const source = {
+        headSha: change === 'head' ? 'c'.repeat(40) : f.config.expectedHeadSha,
+        target: {
+          ...f.config.expectedTarget,
+          baseBranch: change === 'target' ? 'release' : 'main',
+        },
+        observedAt: '2026-09-08T00:01:00Z',
+      };
+      expect(() =>
+        f.journal.observe(
+          attempt,
+          {
+            merged: true,
+            autoMergeScheduled: false,
+            ...(change === 'missing' ? {} : { source }),
           },
-          observedAt: '2026-09-08T00:01:00Z',
-        };
-        expect(() =>
-          f.journal.observe(
-            attempt,
-            {
-              merged: true,
-              autoMergeScheduled: false,
-              ...(change === 'missing' ? {} : { source }),
-            },
-            'merge_response',
-          ),
-        ).toThrow();
-        expect(f.journal.find(f.pod)?.state).toBe('admitted');
-      } finally {
-        f.db.close();
-      }
-    },
-  );
+          'merge_response',
+        ),
+      ).toThrow();
+      expect(f.journal.find(f.pod)?.state).toBe('admitted');
+    } finally {
+      f.db.close();
+    }
+  });
 });

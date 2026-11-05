@@ -7,6 +7,7 @@ import { Command } from 'commander';
 import { afterEach, expect, it, vi } from 'vitest';
 import { type AutopodClient, DaemonUnreachableError } from '../api/client.js';
 import { registerSourceRecoveryCommand } from './source-recovery.js';
+
 afterEach(() => vi.restoreAllMocks());
 const request: SourceAdoptionRequest = {
   id: 'source-once',

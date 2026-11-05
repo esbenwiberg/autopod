@@ -2,8 +2,8 @@ import {
   AutopodError,
   type ExecutionTarget,
   type OperatorActor,
-  PROVIDER_CATALOG,
   type PodsitterConfiguration,
+  PROVIDER_CATALOG,
   podsitterConfigurationInputSchema,
 } from '@autopod/shared';
 import type { FastifyInstance, FastifyRequest } from 'fastify';

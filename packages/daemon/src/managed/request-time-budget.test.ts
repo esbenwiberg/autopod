@@ -5,6 +5,7 @@ import { digest } from './canonical.js';
 import { ManagedControls } from './managed-controls.js';
 import { ManagedProviderGateway } from './provider-gateway.js';
 import { ManagedQuotaBroker } from './quota-broker.js';
+
 let f: ManagedFixture;
 const gateways: ManagedProviderGateway[] = [];
 afterEach(() => {
@@ -107,19 +108,21 @@ it('claims one concurrent operation and preserves unknown usage after failure an
   });
   expect(x.transport.generate).toHaveBeenCalledTimes(1);
 });
-it.each(['revocation', 'expiry', 'duration', 'revision'])(
-  'denies cached delivery after %s',
-  async (kind) => {
-    const x = await setup();
-    await x.call();
-    if (kind === 'revocation') f.db.prepare('UPDATE managed_pods SET revoked=1').run();
-    if (kind === 'expiry') f.advance(401);
-    if (kind === 'duration') f.advance(281);
-    if (kind === 'revision') f.db.prepare('UPDATE managed_pods SET grant_revision=2').run();
-    await expect(x.call()).rejects.toThrow();
-    expect(x.transport.generate).toHaveBeenCalledTimes(1);
-  },
-);
+it.each([
+  'revocation',
+  'expiry',
+  'duration',
+  'revision',
+])('denies cached delivery after %s', async (kind) => {
+  const x = await setup();
+  await x.call();
+  if (kind === 'revocation') f.db.prepare('UPDATE managed_pods SET revoked=1').run();
+  if (kind === 'expiry') f.advance(401);
+  if (kind === 'duration') f.advance(281);
+  if (kind === 'revision') f.db.prepare('UPDATE managed_pods SET grant_revision=2').run();
+  await expect(x.call()).rejects.toThrow();
+  expect(x.transport.generate).toHaveBeenCalledTimes(1);
+});
 it('rejects mode substitution, token reservation and unmigrated usage before provider calls', async () => {
   const x = await setup();
   await expect(

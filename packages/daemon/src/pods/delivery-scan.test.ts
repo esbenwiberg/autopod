@@ -1,9 +1,10 @@
 import { AutopodError } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
-import type { RepoScanResult, RepoScanner } from '../security/index.js';
+import type { RepoScanner, RepoScanResult } from '../security/index.js';
 import { createScanRepository } from '../security/scan-repository.js';
 import { createDeliveryFixture } from '../test-utils/delivery-helpers.js';
 import { createDeliveryScan } from './delivery-scan.js';
+
 function scannerFixture() {
   const f = createDeliveryFixture();
   const result: RepoScanResult = {

@@ -7,8 +7,8 @@ import { promisify } from 'node:util';
 import type {
   ScheduledScanCollection,
   ScheduledScanFinding,
-  ScheduledScanPolicy,
   ScheduledScannerResult,
+  ScheduledScanPolicy,
 } from '@autopod/shared';
 import type { Detector } from '../security/detectors/detector.js';
 import { createSecretlintDetector } from '../security/detectors/secretlint-detector.js';

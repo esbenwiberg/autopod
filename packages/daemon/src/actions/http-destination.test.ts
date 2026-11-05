@@ -1,4 +1,4 @@
-import { type RequestListener, createServer } from 'node:http';
+import { createServer, type RequestListener } from 'node:http';
 import type { ActionDefinition } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -62,28 +62,28 @@ describe('generic HTTP destination boundary', () => {
     expect(transport).not.toHaveBeenCalled();
   });
 
-  it.each(['bearer', 'custom-header'] as const)(
-    'never follows a redirect with %s credentials',
-    async (type) => {
-      const target = vi.fn<RequestListener>((_req, res) => res.end('{"ok":true}'));
-      const destination = await serve(target);
-      const origin = await serve((_req, res) => {
-        res.writeHead(302, { Location: destination.url });
-        res.end();
-      });
-      const handler = createGenericHttpHandler({
-        logger: pino({ level: 'silent' }),
-        getSecret: () => 'synthetic-only',
-        ssrfGuard: async () => ({ ok: true, resolvedIps: ['127.0.0.1'] }),
-      });
-      const auth =
-        type === 'bearer'
-          ? { type, secret: '${KEY}' }
-          : { type, name: 'X-Private-Key', value: '${KEY}' };
-      await expect(handler.execute(action(origin.url, auth), {})).rejects.toThrow(/redirect/i);
-      expect(target).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'bearer',
+    'custom-header',
+  ] as const)('never follows a redirect with %s credentials', async (type) => {
+    const target = vi.fn<RequestListener>((_req, res) => res.end('{"ok":true}'));
+    const destination = await serve(target);
+    const origin = await serve((_req, res) => {
+      res.writeHead(302, { Location: destination.url });
+      res.end();
+    });
+    const handler = createGenericHttpHandler({
+      logger: pino({ level: 'silent' }),
+      getSecret: () => 'synthetic-only',
+      ssrfGuard: async () => ({ ok: true, resolvedIps: ['127.0.0.1'] }),
+    });
+    const auth =
+      type === 'bearer'
+        ? { type, secret: '${KEY}' }
+        : { type, name: 'X-Private-Key', value: '${KEY}' };
+    await expect(handler.execute(action(origin.url, auth), {})).rejects.toThrow(/redirect/i);
+    expect(target).not.toHaveBeenCalled();
+  });
 
   it('connects using the validated address without resolving the hostname again', async () => {
     let host: string | undefined;

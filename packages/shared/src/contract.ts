@@ -265,7 +265,7 @@ export function inspectSpecContract(input: unknown, source = 'contract'): Contra
   });
   commands.forEach((indices, cmd) => {
     if (indices.length > 1 && !narrowed(cmd))
-      indices.forEach((i) =>
+      indices.forEach((i) => {
         diagnostics.push(
           issue(
             `requiredFacts[${i}].command`,
@@ -274,8 +274,8 @@ export function inspectSpecContract(input: unknown, source = 'contract'): Contra
             'Split the command or narrow it with --grep/-g.',
             source,
           ),
-        ),
-      );
+        );
+      });
   });
   scenarios.forEach((v, i) => {
     const id = v && typeof v === 'object' ? (v as Record<string, unknown>).id : undefined;

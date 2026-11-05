@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createResourceFixture, result } from '../test-utils/resource-helpers.js';
+
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();

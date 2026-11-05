@@ -5,7 +5,7 @@ import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.
 import type { MemoryReviewer } from '../providers/memory-reviewer.js';
 import type { MemoryRepository } from './memory-repository.js';
 import type { MemoryUsageRepository } from './memory-usage-repository.js';
-import { type ProjectMemoryScope, memoryMatchesProjectSetup } from './project-memory-scope.js';
+import { memoryMatchesProjectSetup, type ProjectMemoryScope } from './project-memory-scope.js';
 
 export const MAX_RELEVANT_MEMORY_ENTRIES = 5;
 const PREFILTER_LIMIT = 20;

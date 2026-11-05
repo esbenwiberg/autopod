@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createWorkspaceFixture } from '../test-utils/workspace-recovery-helpers.js';
 import { GitTransientFetchError } from '../worktrees/local-worktree-manager.js';
+
 describe('workspace host-fetch retry timers', () => {
   it('persists30/120/300second retry identity, replaces timer and enqueues only latest deadline', async () => {
     vi.useFakeTimers();

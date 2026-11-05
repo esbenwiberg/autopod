@@ -1,8 +1,9 @@
 import type { CSSProperties, JSX, ReactNode } from 'react';
+import { withOccurrenceKeys } from '../lib/occurrence-keys.js';
 import {
+  parseTaskMarkdown,
   type TaskMarkdownSection,
   type TaskMarkdownSectionKind,
-  parseTaskMarkdown,
 } from '../lib/task-markdown.js';
 
 interface Props {
@@ -104,16 +105,16 @@ function MarkdownBlocks({ markdown }: { markdown: string }): JSX.Element {
           case 'unordered-list':
             return (
               <ul key={block.id}>
-                {block.items.map((item, itemIndex) => (
-                  <li key={`${itemIndex}-${item}`}>{renderInline(item)}</li>
+                {withOccurrenceKeys(block.items, String).map(({ item, key }) => (
+                  <li key={key}>{renderInline(item)}</li>
                 ))}
               </ul>
             );
           case 'ordered-list':
             return (
               <ol key={block.id}>
-                {block.items.map((item, itemIndex) => (
-                  <li key={`${itemIndex}-${item}`}>{renderInline(item)}</li>
+                {withOccurrenceKeys(block.items, String).map(({ item, key }) => (
+                  <li key={key}>{renderInline(item)}</li>
                 ))}
               </ol>
             );
@@ -133,6 +134,7 @@ function MarkdownBlocks({ markdown }: { markdown: string }): JSX.Element {
               </pre>
             );
         }
+        return null;
       })}
     </div>
   );

@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { profileRoutes } from '../api/routes/profiles.js';
 import { providerAccountRoutes } from '../api/routes/provider-accounts.js';
 import type { CredentialsCipher } from '../crypto/credentials-cipher.js';
-import { type ProfileStore, createProfileStore } from '../profiles/index.js';
+import { createProfileStore, type ProfileStore } from '../profiles/index.js';
 import { createTestDb } from '../test-utils/mock-helpers.js';
-import { createProviderAccountStore } from './provider-account-store.js';
 import type { ProviderAccountStore } from './provider-account-store.js';
+import { createProviderAccountStore } from './provider-account-store.js';
 
 const rawKey = 'fixture-generic-api-key';
 

@@ -9,9 +9,9 @@ import {
 } from '../validation/container-reviewer-runner.js';
 import { getAzureToken } from './azure-token.js';
 import {
+  createProfileAnthropicClient,
   type ProfileLlmClient,
   type ProfileLlmClientUnavailableReason,
-  createProfileAnthropicClient,
 } from './llm-client.js';
 
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -108,11 +108,7 @@ async function fetchChatCompletion(input: {
   return content;
 }
 
-function openAiReviewer(input: {
-  model: string;
-  token: string;
-  baseUrl?: string;
-}): MemoryReviewer {
+function openAiReviewer(input: { model: string; token: string; baseUrl?: string }): MemoryReviewer {
   const baseUrl = trimTrailingSlash(input.baseUrl ?? DEFAULT_OPENAI_BASE_URL);
   const model = input.model === 'auto' ? DEFAULT_OPENAI_REVIEWER_MODEL : input.model;
   return {

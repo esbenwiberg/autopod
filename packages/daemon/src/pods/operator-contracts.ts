@@ -23,6 +23,7 @@ import type { EscalationRepository } from './escalation-repository.js';
 import type { EventBus } from './event-bus.js';
 import type { createFixDelivery } from './fix-delivery.js';
 import type { NudgeRepository } from './nudge-repository.js';
+import type { PodGoalService } from './pod-goal-service.js';
 import type { PodRepository } from './pod-repository.js';
 import type { createProviderAttemptContext } from './provider-attempt-context.js';
 import type { ProviderAttemptRepository } from './provider-attempt-repository.js';
@@ -30,8 +31,6 @@ import type { createProvisioningToolInstallation } from './provisioning-tool-ins
 import type { createRuntimeResumeContext } from './runtime-resume-context.js';
 import type { createValidationWorkflowState } from './validation-workflow-state.js';
 import type { createWorkerRuntimeCredentials } from './worker-runtime-credentials.js';
-
-import type { PodGoalService } from './pod-goal-service.js';
 
 export interface OperatorWorkflowCalls {
   handleCompletion(podId: string): Promise<void>;

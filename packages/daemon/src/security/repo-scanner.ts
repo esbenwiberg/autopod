@@ -11,7 +11,7 @@ import { createInjectionDetector } from './detectors/injection-detector.js';
 import { createPiiDetector } from './detectors/pii-detector.js';
 import { createSecretlintDetector } from './detectors/secretlint-detector.js';
 import type { ModelManager } from './model-manager.js';
-import { type RepoScanResult, type ScanEngine, createScanEngine } from './scan-engine.js';
+import { createScanEngine, type RepoScanResult, type ScanEngine } from './scan-engine.js';
 import { resolvePolicy } from './scan-policy.js';
 import type { ScanRepository } from './scan-repository.js';
 
@@ -97,4 +97,4 @@ function defaultDetectors(deps: RepoScannerDeps): Detector[] {
   return list;
 }
 
-export type { RepoScanResult, ScanCheckpoint, ScanDecision, ScanFinding, InjectedClaudeMdSection };
+export type { InjectedClaudeMdSection, RepoScanResult, ScanCheckpoint, ScanDecision, ScanFinding };

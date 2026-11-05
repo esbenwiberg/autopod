@@ -338,37 +338,37 @@ describe('deleted canonical fix admission composition', () => {
     ['PR URL', { prUrl: 'https://github.com/org/repo-a/pull/2' }],
     ['provider', { providerAccountIdSnapshot: 'changed' }],
   ];
-  it.each(changes)(
-    'fences %s changes during async preflight and retains queued feedback',
-    async (_name, changes) => {
-      const f = await fixture();
-      vi.mocked(f.services.assertCapabilities).mockImplementationOnce(async () => {
-        f.podRepo.update('root', changes);
-      });
-      const response = await f.request();
-      expect(response.statusCode, response.body).toBe(409);
-      expect(response.json().code).toBe('CONFIG_SOURCE_CHANGED');
-      expect(f.enqueuedSessions).toEqual([]);
-      expect(f.fixFeedbackRepo.count('root')).toBe(1);
-      expect(f.podRepo.list().filter((p) => p.linkedPodId === 'root')).toEqual([]);
-      expect(f.receipts()).toHaveLength(1);
-    },
-  );
+  it.each(
+    changes,
+  )('fences %s changes during async preflight and retains queued feedback', async (_name, changes) => {
+    const f = await fixture();
+    vi.mocked(f.services.assertCapabilities).mockImplementationOnce(async () => {
+      f.podRepo.update('root', changes);
+    });
+    const response = await f.request();
+    expect(response.statusCode, response.body).toBe(409);
+    expect(response.json().code).toBe('CONFIG_SOURCE_CHANGED');
+    expect(f.enqueuedSessions).toEqual([]);
+    expect(f.fixFeedbackRepo.count('root')).toBe(1);
+    expect(f.podRepo.list().filter((p) => p.linkedPodId === 'root')).toEqual([]);
+    expect(f.receipts()).toHaveLength(1);
+  });
 
-  it.each(['launch_config_digest', 'branch', 'user_id'])(
-    'fences a changed %s in the current parent after preflight',
-    async (column) => {
-      const f = await fixture();
-      vi.mocked(f.services.assertCapabilities).mockImplementationOnce(async () => {
-        f.db.prepare(`UPDATE pods SET ${column}=? WHERE id='root'`).run('changed');
-      });
-      const response = await f.request();
-      expect(response.statusCode, response.body).toBe(409);
-      expect(response.json().code).toBe('CONFIG_SOURCE_CHANGED');
-      expect(f.fixFeedbackRepo.count('root')).toBe(1);
-      expect(f.enqueuedSessions).toEqual([]);
-    },
-  );
+  it.each([
+    'launch_config_digest',
+    'branch',
+    'user_id',
+  ])('fences a changed %s in the current parent after preflight', async (column) => {
+    const f = await fixture();
+    vi.mocked(f.services.assertCapabilities).mockImplementationOnce(async () => {
+      f.db.prepare(`UPDATE pods SET ${column}=? WHERE id='root'`).run('changed');
+    });
+    const response = await f.request();
+    expect(response.statusCode, response.body).toBe(409);
+    expect(response.json().code).toBe('CONFIG_SOURCE_CHANGED');
+    expect(f.fixFeedbackRepo.count('root')).toBe(1);
+    expect(f.enqueuedSessions).toEqual([]);
+  });
 
   it('fences lifecycle generation changes during async preflight', async () => {
     const f = await fixture();

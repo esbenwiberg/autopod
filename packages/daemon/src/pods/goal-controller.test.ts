@@ -126,43 +126,43 @@ describe('native Goal controller', () => {
       f.db.close();
     }
   });
-  it.each(['pause', 'cancel'] as const)(
-    'settles an active %s without losing the saved native identity',
-    async (intent) => {
-      const f = fixture();
-      let release!: () => void;
-      const exited = new Promise<void>((resolve) => {
-        release = resolve;
+  it.each([
+    'pause',
+    'cancel',
+  ] as const)('settles an active %s without losing the saved native identity', async (intent) => {
+    const f = fixture();
+    let release!: () => void;
+    const exited = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const native = session();
+    native.observations = async function* () {
+      await exited;
+      yield* [];
+    };
+    vi.mocked(native.stop).mockImplementation(async () => {
+      release();
+    });
+    try {
+      const running = f.controller.run('pod', f.goal.revision, f.fence, native);
+      await vi.waitFor(() => expect(native.start).toHaveBeenCalledOnce());
+      vi.mocked(native.get).mockResolvedValue(observation(2));
+      const latest = f.repository.get('pod');
+      if (!latest) throw new Error('Missing fixture Goal');
+      const controlled = await f.controller.control('pod', latest.revision, intent);
+      expect(controlled).toMatchObject({
+        state: intent === 'cancel' ? 'cancelled' : 'paused',
+        executionStopped: true,
+        nativeSessionId: 'native',
       });
-      const native = session();
-      native.observations = async function* () {
-        await exited;
-        yield* [];
-      };
-      vi.mocked(native.stop).mockImplementation(async () => {
-        release();
-      });
-      try {
-        const running = f.controller.run('pod', f.goal.revision, f.fence, native);
-        await vi.waitFor(() => expect(native.start).toHaveBeenCalledOnce());
-        vi.mocked(native.get).mockResolvedValue(observation(2));
-        const latest = f.repository.get('pod');
-        if (!latest) throw new Error('Missing fixture Goal');
-        const controlled = await f.controller.control('pod', latest.revision, intent);
-        expect(controlled).toMatchObject({
-          state: intent === 'cancel' ? 'cancelled' : 'paused',
-          executionStopped: true,
-          nativeSessionId: 'native',
-        });
-        expect(await running).toMatchObject({ state: controlled.state, executionStopped: true });
-        expect(native.stop).toHaveBeenCalledOnce();
-        expect(f.repository.canComplete('pod')).toBe(false);
-      } finally {
-        release();
-        f.db.close();
-      }
-    },
-  );
+      expect(await running).toMatchObject({ state: controlled.state, executionStopped: true });
+      expect(native.stop).toHaveBeenCalledOnce();
+      expect(f.repository.canComplete('pod')).toBe(false);
+    } finally {
+      release();
+      f.db.close();
+    }
+  });
   it('stops at the whole-pod budget and reports exhaustion distinctly from a user pause', async () => {
     const f = fixture();
     const native = session();

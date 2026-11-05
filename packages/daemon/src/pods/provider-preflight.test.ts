@@ -1,9 +1,9 @@
 import {
   type CompiledProviderManifest,
+  createProviderCatalog,
   type Profile,
   type ProviderAccount,
   type ProviderCredentials,
-  createProviderCatalog,
 } from '@autopod/shared';
 import { describe, expect, it } from 'vitest';
 import type { ProviderAccountStore } from '../provider-accounts/index.js';

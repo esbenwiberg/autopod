@@ -1,6 +1,6 @@
 import { rm } from 'node:fs/promises';
 import type { AgentEvent, EscalationRequest } from '@autopod/shared';
-import { AutopodError, PROVIDER_FAILOVER_HANDOFF_PATH, generateId } from '@autopod/shared';
+import { AutopodError, generateId, PROVIDER_FAILOVER_HANDOFF_PATH } from '@autopod/shared';
 import { SandboxInfrastructureError } from '../containers/sandbox-api-client.js';
 import { type ClaudeRuntime, ResumeSessionNotFoundError } from '../runtimes/claude-runtime.js';
 import type { CodexRuntime } from '../runtimes/codex-runtime.js';
@@ -9,11 +9,11 @@ import {
   GitMissingRemoteBranchError,
   GitTransientFetchError,
 } from '../worktrees/local-worktree-manager.js';
-import type { OperatorFailurePhase } from './agent-execution-contracts.js';
 import type {
   AgentExecutionLiveDependencies,
   AgentProcessCalls,
   AgentProcessCaptured,
+  OperatorFailurePhase,
 } from './agent-execution-contracts.js';
 import {
   deriveAgentAttempt,

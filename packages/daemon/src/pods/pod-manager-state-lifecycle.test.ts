@@ -57,44 +57,43 @@ function instance(status: 'running' | 'failed' | 'review_required') {
 
 describe('final composed validation state lifetime', () => {
   for (const entry of ['trigger', 'revalidate'] as const) {
-    it.each(['success', 'superseded', 'replacement'] as const)(
-      `${entry} releases only its own controller on %s settlement`,
-      async (outcome) => {
-        const f = instance(entry === 'trigger' ? 'running' : 'failed');
-        const gate = deferred<ValidationResult>();
-        vi.mocked(f.execution.validateWithInfrastructureRetries).mockReturnValueOnce(gate.promise);
-        const pending =
-          entry === 'trigger'
-            ? f.manager.triggerValidation(f.pod.id)
-            : f.manager.revalidateSession(f.pod.id, { force: true });
-        await vi.waitFor(() =>
-          expect(f.execution.validateWithInfrastructureRetries).toHaveBeenCalledOnce(),
-        );
-        const original = f.state.validationAbortControllers.get(f.pod.id);
-        expect(original).toBeInstanceOf(AbortController);
-        const replacement = new AbortController();
-        if (outcome === 'replacement') {
-          f.state.validationAbortControllers.set(f.pod.id, replacement);
-        }
-        if (outcome === 'superseded') gate.reject(new ValidationSupersededError());
-        else {
-          const config = vi.mocked(f.execution.validateWithInfrastructureRetries).mock
-            .calls[0]?.[0];
-          if (!config) throw new Error('Missing actual validation configuration');
-          gate.resolve(await f.context.validationEngine.validate(config));
-        }
-        await pending;
-        if (outcome === 'replacement') {
-          expect(f.state.validationAbortControllers.get(f.pod.id)).toBe(replacement);
-          expect(replacement.signal.aborted).toBe(false);
-          expect(f.manager.getSession(f.pod.id).status).toBe('validating');
-        } else {
-          expect(f.state.validationAbortControllers.has(f.pod.id)).toBe(false);
-          if (outcome === 'success')
-            expect(f.manager.getSession(f.pod.id).status).toBe('validated');
-        }
-      },
-    );
+    it.each([
+      'success',
+      'superseded',
+      'replacement',
+    ] as const)(`${entry} releases only its own controller on %s settlement`, async (outcome) => {
+      const f = instance(entry === 'trigger' ? 'running' : 'failed');
+      const gate = deferred<ValidationResult>();
+      vi.mocked(f.execution.validateWithInfrastructureRetries).mockReturnValueOnce(gate.promise);
+      const pending =
+        entry === 'trigger'
+          ? f.manager.triggerValidation(f.pod.id)
+          : f.manager.revalidateSession(f.pod.id, { force: true });
+      await vi.waitFor(() =>
+        expect(f.execution.validateWithInfrastructureRetries).toHaveBeenCalledOnce(),
+      );
+      const original = f.state.validationAbortControllers.get(f.pod.id);
+      expect(original).toBeInstanceOf(AbortController);
+      const replacement = new AbortController();
+      if (outcome === 'replacement') {
+        f.state.validationAbortControllers.set(f.pod.id, replacement);
+      }
+      if (outcome === 'superseded') gate.reject(new ValidationSupersededError());
+      else {
+        const config = vi.mocked(f.execution.validateWithInfrastructureRetries).mock.calls[0]?.[0];
+        if (!config) throw new Error('Missing actual validation configuration');
+        gate.resolve(await f.context.validationEngine.validate(config));
+      }
+      await pending;
+      if (outcome === 'replacement') {
+        expect(f.state.validationAbortControllers.get(f.pod.id)).toBe(replacement);
+        expect(replacement.signal.aborted).toBe(false);
+        expect(f.manager.getSession(f.pod.id).status).toBe('validating');
+      } else {
+        expect(f.state.validationAbortControllers.has(f.pod.id)).toBe(false);
+        if (outcome === 'success') expect(f.manager.getSession(f.pod.id).status).toBe('validated');
+      }
+    });
   }
   it('releases accepted attempt-extension state after its deferred recovery fails', async () => {
     const f = instance('review_required');

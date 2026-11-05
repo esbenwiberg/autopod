@@ -1,4 +1,3 @@
-import { CONTAINER_HOME_DIR } from '@autopod/shared';
 import type {
   MaxCredentials,
   MaxRefreshCredentials,
@@ -7,6 +6,7 @@ import type {
   PiOAuthProviderId,
   ProviderCredentials,
 } from '@autopod/shared';
+import { CONTAINER_HOME_DIR } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ProfileStore } from '../profiles/index.js';

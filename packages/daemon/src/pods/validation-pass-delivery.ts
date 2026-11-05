@@ -9,8 +9,8 @@ import {
   needsApprovalReportSnapshot,
   preserveApprovalReportSnapshot,
 } from './approval-report-snapshot.js';
-import { rewriteError, rewriteHash } from './approval-source-rewrite-repository.js';
 import { verifyApprovalRewriteSource } from './approval-source-rewrite.js';
+import { rewriteError, rewriteHash } from './approval-source-rewrite-repository.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
 import { checkpointError } from './retained-checkpoint-repository.js';
 import { isTerminalState } from './state-machine.js';

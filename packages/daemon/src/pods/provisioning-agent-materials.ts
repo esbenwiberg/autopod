@@ -16,9 +16,9 @@ import {
   AGENT_ENV_PATH,
   AGENT_SHIM_PATH,
   AGENT_SHIM_SCRIPT,
-  MCP_INIT_PROBE_SCRIPT,
   buildAgentEnvFile,
   buildCodeIntelligenceServers,
+  MCP_INIT_PROBE_SCRIPT,
   repairSandboxAgentHomeOwnership,
 } from './provisioning-runtime-files.js';
 import type { SessionMaterials } from './provisioning-session-materials.js';

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { pendingFact } from '../test-utils/approval-helpers.js';
-import { createApprovalFixture } from '../test-utils/approval-helpers.js';
+import { createApprovalFixture, pendingFact } from '../test-utils/approval-helpers.js';
 import { createFailingValidationResult } from '../test-utils/mock-helpers.js';
 import { createEscalationRepository } from './escalation-repository.js';
+
 const fixtures: ReturnType<typeof createApprovalFixture>[] = [];
 function fixture(disk = false) {
   const f = createApprovalFixture(disk);
@@ -158,45 +158,45 @@ describe('approval controls', () => {
 });
 
 describe('settled fact waiver safety', () => {
-  it.each(['guidance', 'termination'] as const)(
-    'records without revalidation when %s is unresolved',
-    async (blocking) => {
-      const f = fixture();
-      f.validated();
-      f.podRepo.update('prepare', {
-        status: 'failed',
-        lastValidationResult: {
-          ...createFailingValidationResult('prepare'),
-          factValidation: { status: 'pending_human', results: [pendingFact] },
-        },
+  it.each([
+    'guidance',
+    'termination',
+  ] as const)('records without revalidation when %s is unresolved', async (blocking) => {
+    const f = fixture();
+    f.validated();
+    f.podRepo.update('prepare', {
+      status: 'failed',
+      lastValidationResult: {
+        ...createFailingValidationResult('prepare'),
+        factValidation: { status: 'pending_human', results: [pendingFact] },
+      },
+    });
+    if (blocking === 'guidance') f.deps.nudgeRepo.queue('prepare', 'Saved correction');
+    else {
+      const tasks = f.podRepo.taskExecutions;
+      const pod = f.pod();
+      const cycle = f.podRepo.completionJournal?.get('prepare', pod.lifecycleGeneration)?.cycle;
+      if (!tasks || cycle === undefined) throw new Error('Missing task/journal fixture');
+      tasks.register('prepare');
+      const run = tasks.beginRun('prepare', pod.lifecycleGeneration, cycle, {
+        runtime: 'claude',
+        model: pod.model,
+        providerAccountId: 'account',
+        resource: { containerId: pod.containerId, executionTarget: pod.executionTarget },
       });
-      if (blocking === 'guidance') f.deps.nudgeRepo.queue('prepare', 'Saved correction');
-      else {
-        const tasks = f.podRepo.taskExecutions;
-        const pod = f.pod();
-        const cycle = f.podRepo.completionJournal?.get('prepare', pod.lifecycleGeneration)?.cycle;
-        if (!tasks || cycle === undefined) throw new Error('Missing task/journal fixture');
-        tasks.register('prepare');
-        const run = tasks.beginRun('prepare', pod.lifecycleGeneration, cycle, {
-          runtime: 'claude',
-          model: pod.model,
-          providerAccountId: 'account',
-          resource: { containerId: pod.containerId, executionTarget: pod.executionTarget },
-        });
-        tasks.retainUnverifiedRun(run);
-      }
-      expect(await f.controls().approveFactWaiver.call(f.calls, 'prepare', 'fact-one')).toEqual({
-        newCommits: false,
-        result: 'fail',
-      });
-      expect(f.calls.revalidateSession).not.toHaveBeenCalled();
-      expect(f.pod().taskSummary?.factDeviations).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ factId: 'fact-one', decision: 'approved_waive' }),
-        ]),
-      );
-      if (blocking === 'guidance') expect(f.deps.nudgeRepo.hasPending('prepare')).toBe(true);
-      else expect(f.podRepo.taskExecutions?.hasUnverifiedTermination('prepare')).toBe(true);
-    },
-  );
+      tasks.retainUnverifiedRun(run);
+    }
+    expect(await f.controls().approveFactWaiver.call(f.calls, 'prepare', 'fact-one')).toEqual({
+      newCommits: false,
+      result: 'fail',
+    });
+    expect(f.calls.revalidateSession).not.toHaveBeenCalled();
+    expect(f.pod().taskSummary?.factDeviations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ factId: 'fact-one', decision: 'approved_waive' }),
+      ]),
+    );
+    if (blocking === 'guidance') expect(f.deps.nudgeRepo.hasPending('prepare')).toBe(true);
+    else expect(f.podRepo.taskExecutions?.hasUnverifiedTermination('prepare')).toBe(true);
+  });
 });

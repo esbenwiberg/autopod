@@ -54,14 +54,15 @@ describe('resolvePodRuntime', () => {
     ).toThrow('authenticate this profile with auth-pi');
   });
 
-  it.each(['max', 'copilot', 'foundry'] as const)(
-    'rejects Pi selection with legacy %s provider credentials',
-    (modelProvider) => {
-      expect(() => resolvePodRuntime(profile({ modelProvider }), 'pi')).toThrow(
-        'does not support legacy',
-      );
-    },
-  );
+  it.each([
+    'max',
+    'copilot',
+    'foundry',
+  ] as const)('rejects Pi selection with legacy %s provider credentials', (modelProvider) => {
+    expect(() => resolvePodRuntime(profile({ modelProvider }), 'pi')).toThrow(
+      'does not support legacy',
+    );
+  });
 
   it('forces Codex for OpenAI profiles even when the stored default is Claude', () => {
     expect(resolvePodRuntime(profile({ modelProvider: 'openai' }), undefined)).toBe('codex');

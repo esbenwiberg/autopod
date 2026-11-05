@@ -11,7 +11,7 @@ import { createAdvisoryValidation } from './advisory-validation.js';
 import { createEventBus } from './event-bus.js';
 import { createEventRepository } from './event-repository.js';
 import { createNudgeRepository } from './nudge-repository.js';
-import { type PodUpdates, createPodRepository } from './pod-repository.js';
+import { createPodRepository, type PodUpdates } from './pod-repository.js';
 import { createReadinessService } from './readiness-review.js';
 import { ValidationSupersededError } from './validation-ownership.js';
 import { createValidationProgress } from './validation-progress.js';
@@ -269,23 +269,27 @@ describe('advisory validation ownership contract', () => {
     expect(ownership.isCurrent()).toBe(false);
     expect(() => ownership.assertCurrent()).toThrow(ValidationSupersededError);
   });
-  it.each(['attempt', 'history', 'invocation', 'nudge', 'decision', 'deleted'] as const)(
-    'rejects %s supersession',
-    (kind) => {
-      const f = fixture();
-      const ownership = f.ownership(() => kind !== 'invocation');
-      if (kind === 'attempt') f.state.pod.lastValidationResult = { ...f.blocking, attempt: 2 };
-      if (kind === 'history') f.state.latest = false;
-      if (kind === 'nudge') f.state.pending = true;
-      if (kind === 'decision') f.state.unanswered = true;
-      if (kind === 'deleted')
-        f.get.mockImplementation(() => {
-          throw new Error('Missing');
-        });
-      expect(ownership.isCurrent()).toBe(false);
-      expect(() => ownership.assertCurrent()).toThrow(ValidationSupersededError);
-    },
-  );
+  it.each([
+    'attempt',
+    'history',
+    'invocation',
+    'nudge',
+    'decision',
+    'deleted',
+  ] as const)('rejects %s supersession', (kind) => {
+    const f = fixture();
+    const ownership = f.ownership(() => kind !== 'invocation');
+    if (kind === 'attempt') f.state.pod.lastValidationResult = { ...f.blocking, attempt: 2 };
+    if (kind === 'history') f.state.latest = false;
+    if (kind === 'nudge') f.state.pending = true;
+    if (kind === 'decision') f.state.unanswered = true;
+    if (kind === 'deleted')
+      f.get.mockImplementation(() => {
+        throw new Error('Missing');
+      });
+    expect(ownership.isCurrent()).toBe(false);
+    expect(() => ownership.assertCurrent()).toThrow(ValidationSupersededError);
+  });
   it('catches an attempt lookup failure after the initial current-pod read', () => {
     const f = fixture();
     f.get.mockReturnValueOnce(f.state.pod).mockImplementationOnce(() => {
@@ -308,24 +312,25 @@ describe('advisory validation ownership contract', () => {
         .isCurrent(),
     ).toBe(true);
   });
-  it.each(['absent', 'nullish', 'false'] as const)(
-    'uses the pending escalation fallback only for %s unanswered support',
-    (mode) => {
-      const f = fixture();
-      f.state.pod.pendingEscalation = {
-        id: 'decision',
-        podId: f.pod.id,
-        type: 'ask_human',
-        timestamp: '2026-10-18T12:00:00Z',
-        payload: { question: 'Keep decision pending' },
-        response: null,
-      };
-      if (mode === 'absent') f.deps.podRepo.hasUnansweredDecision = undefined;
-      if (mode === 'nullish')
-        Object.assign(f.deps.podRepo, { hasUnansweredDecision: () => undefined });
-      expect(f.ownership().isCurrent()).toBe(mode === 'false');
-    },
-  );
+  it.each([
+    'absent',
+    'nullish',
+    'false',
+  ] as const)('uses the pending escalation fallback only for %s unanswered support', (mode) => {
+    const f = fixture();
+    f.state.pod.pendingEscalation = {
+      id: 'decision',
+      podId: f.pod.id,
+      type: 'ask_human',
+      timestamp: '2026-10-18T12:00:00Z',
+      payload: { question: 'Keep decision pending' },
+      response: null,
+    };
+    if (mode === 'absent') f.deps.podRepo.hasUnansweredDecision = undefined;
+    if (mode === 'nullish')
+      Object.assign(f.deps.podRepo, { hasUnansweredDecision: () => undefined });
+    expect(f.ownership().isCurrent()).toBe(mode === 'false');
+  });
 });
 
 describe('advisory validation execution contract', () => {
@@ -411,36 +416,36 @@ describe('advisory validation execution contract', () => {
     expect(f.warn).not.toHaveBeenCalled();
     expect(f.runs.size).toBe(0);
   });
-  it.each(['null', 'failure'] as const)(
-    'returns the same blocking result for current %s completion',
-    async (mode) => {
-      const f = fixture();
-      const error = new Error('Engine failed');
-      if (mode === 'null') f.runner.mockResolvedValueOnce(null);
-      else f.runner.mockRejectedValueOnce(error);
-      expect(await f.run()).toBe(f.blocking);
-      expect(f.release).toHaveBeenCalledOnce();
-      expect(f.history).not.toHaveBeenCalled();
-      expect(f.update).not.toHaveBeenCalled();
-      expect(f.warn).toHaveBeenCalledTimes(mode === 'failure' ? 1 : 0);
-      expect(f.runs.size).toBe(0);
-    },
-  );
-  it.each(['null', 'failure'] as const)(
-    'propagates stale ownership after superseded %s completion',
-    async (mode) => {
-      const f = fixture();
-      f.runner.mockImplementationOnce(async () => {
-        f.state.pending = true;
-        if (mode === 'failure') throw new Error('Engine failed');
-        return null;
-      });
-      await expect(f.run()).rejects.toThrow(ValidationSupersededError);
-      expect(f.release).toHaveBeenCalledOnce();
-      expect(f.warn).not.toHaveBeenCalled();
-      expect(f.runs.size).toBe(0);
-    },
-  );
+  it.each([
+    'null',
+    'failure',
+  ] as const)('returns the same blocking result for current %s completion', async (mode) => {
+    const f = fixture();
+    const error = new Error('Engine failed');
+    if (mode === 'null') f.runner.mockResolvedValueOnce(null);
+    else f.runner.mockRejectedValueOnce(error);
+    expect(await f.run()).toBe(f.blocking);
+    expect(f.release).toHaveBeenCalledOnce();
+    expect(f.history).not.toHaveBeenCalled();
+    expect(f.update).not.toHaveBeenCalled();
+    expect(f.warn).toHaveBeenCalledTimes(mode === 'failure' ? 1 : 0);
+    expect(f.runs.size).toBe(0);
+  });
+  it.each([
+    'null',
+    'failure',
+  ] as const)('propagates stale ownership after superseded %s completion', async (mode) => {
+    const f = fixture();
+    f.runner.mockImplementationOnce(async () => {
+      f.state.pending = true;
+      if (mode === 'failure') throw new Error('Engine failed');
+      return null;
+    });
+    await expect(f.run()).rejects.toThrow(ValidationSupersededError);
+    expect(f.release).toHaveBeenCalledOnce();
+    expect(f.warn).not.toHaveBeenCalled();
+    expect(f.runs.size).toBe(0);
+  });
   it('merges callback evidence before emitting and preserves duplicate final writes and usage', async () => {
     const f = fixture();
     const value = qa();
@@ -512,40 +517,41 @@ describe('advisory validation execution contract', () => {
     expect(f.release).toHaveBeenCalledOnce();
     expect(f.runs.size).toBe(0);
   });
-  it.each(['callback-history', 'final-history', 'usage'] as const)(
-    'retains prior effects and error timing for %s failure',
-    async (mode) => {
-      const f = fixture();
-      const error = new Error(mode);
-      const value = qa();
-      if (mode === 'usage')
-        f.update.mockImplementationOnce(() => {
-          throw error;
-        });
-      else
-        f.history.mockImplementationOnce(() => {
-          throw error;
-        });
-      f.runner.mockImplementationOnce(async (_cfg, _blocking, _progress, _signal, callbacks) => {
-        if (mode === 'callback-history') callbacks?.onPhaseCompleted?.('advisory', 'pass', value);
-        return value;
+  it.each([
+    'callback-history',
+    'final-history',
+    'usage',
+  ] as const)('retains prior effects and error timing for %s failure', async (mode) => {
+    const f = fixture();
+    const error = new Error(mode);
+    const value = qa();
+    if (mode === 'usage')
+      f.update.mockImplementationOnce(() => {
+        throw error;
       });
-      if (mode === 'callback-history') {
-        expect(await f.run()).toBe(f.blocking);
-        expect(f.warn).toHaveBeenCalledOnce();
-        expect(f.update).not.toHaveBeenCalled();
-      } else {
-        await expect(f.run()).rejects.toBe(error);
-        expect(f.warn).not.toHaveBeenCalled();
-        expect(f.update).toHaveBeenCalledTimes(1);
-      }
-      expect(f.release).toHaveBeenCalledOnce();
-      expect(f.runs.size).toBe(0);
-      if (mode === 'final-history')
-        expect(f.state.pod.phaseTokenUsage?.advisory).toEqual(value.tokenUsage);
-      if (mode === 'usage') expect(f.history).not.toHaveBeenCalled();
-    },
-  );
+    else
+      f.history.mockImplementationOnce(() => {
+        throw error;
+      });
+    f.runner.mockImplementationOnce(async (_cfg, _blocking, _progress, _signal, callbacks) => {
+      if (mode === 'callback-history') callbacks?.onPhaseCompleted?.('advisory', 'pass', value);
+      return value;
+    });
+    if (mode === 'callback-history') {
+      expect(await f.run()).toBe(f.blocking);
+      expect(f.warn).toHaveBeenCalledOnce();
+      expect(f.update).not.toHaveBeenCalled();
+    } else {
+      await expect(f.run()).rejects.toBe(error);
+      expect(f.warn).not.toHaveBeenCalled();
+      expect(f.update).toHaveBeenCalledTimes(1);
+    }
+    expect(f.release).toHaveBeenCalledOnce();
+    expect(f.runs.size).toBe(0);
+    if (mode === 'final-history')
+      expect(f.state.pod.phaseTokenUsage?.advisory).toEqual(value.tokenUsage);
+    if (mode === 'usage') expect(f.history).not.toHaveBeenCalled();
+  });
   it('swallows a current completed-event callback failure only after its persistence effects', async () => {
     const f = fixture();
     const error = new Error('Event failed');
@@ -565,33 +571,32 @@ describe('advisory validation execution contract', () => {
     expect(f.warn).toHaveBeenCalledOnce();
     expect(f.release).toHaveBeenCalledOnce();
   });
-  it.each([0, 2] as const)(
-    'adds usage and retains optional cached/cost keys only for positive totals (%s)',
-    async (optional) => {
-      const f = fixture();
-      f.state.pod.phaseTokenUsage = {
-        agent_initial: { inputTokens: 7, outputTokens: 1 },
-        advisory: { inputTokens: 4, outputTokens: 2 },
-      };
-      const value = qa();
-      value.tokenUsage = {
-        inputTokens: 3,
-        outputTokens: 5,
-        cachedInputTokens: optional,
-        costUsd: optional,
-      };
-      f.runner.mockResolvedValueOnce(value);
-      await f.run();
-      expect(f.state.pod.phaseTokenUsage).toEqual({
-        agent_initial: { inputTokens: 7, outputTokens: 1 },
-        advisory: {
-          inputTokens: 7,
-          outputTokens: 7,
-          ...(optional > 0 ? { cachedInputTokens: optional, costUsd: optional } : {}),
-        },
-      });
-    },
-  );
+  it.each([
+    0, 2,
+  ] as const)('adds usage and retains optional cached/cost keys only for positive totals (%s)', async (optional) => {
+    const f = fixture();
+    f.state.pod.phaseTokenUsage = {
+      agent_initial: { inputTokens: 7, outputTokens: 1 },
+      advisory: { inputTokens: 4, outputTokens: 2 },
+    };
+    const value = qa();
+    value.tokenUsage = {
+      inputTokens: 3,
+      outputTokens: 5,
+      cachedInputTokens: optional,
+      costUsd: optional,
+    };
+    f.runner.mockResolvedValueOnce(value);
+    await f.run();
+    expect(f.state.pod.phaseTokenUsage).toEqual({
+      agent_initial: { inputTokens: 7, outputTokens: 1 },
+      advisory: {
+        inputTokens: 7,
+        outputTokens: 7,
+        ...(optional > 0 ? { cachedInputTokens: optional, costUsd: optional } : {}),
+      },
+    });
+  });
   it('adds prior cached/cost usage and does not write usage when it was not reported', async () => {
     const f = fixture();
     f.state.pod.phaseTokenUsage = {
@@ -657,79 +662,79 @@ describe('advisory validation execution contract', () => {
       await Promise.allSettled([old, replacement]);
     }
   });
-  it.each(['replace', 'remove'] as const)(
-    'keeps the live optional method lookup after the slot wait (%s)',
-    async (mode) => {
-      const f = fixture();
-      const hold = deferred<void>();
-      f.acquire.mockImplementationOnce(() => hold.promise);
-      const next = vi.fn<Runner>(async function (this: unknown) {
-        expect(this).toBe(f.deps.validationEngine);
-        return null;
+  it.each([
+    'replace',
+    'remove',
+  ] as const)('keeps the live optional method lookup after the slot wait (%s)', async (mode) => {
+    const f = fixture();
+    const hold = deferred<void>();
+    f.acquire.mockImplementationOnce(() => hold.promise);
+    const next = vi.fn<Runner>(async function (this: unknown) {
+      expect(this).toBe(f.deps.validationEngine);
+      return null;
+    });
+    const operation = f.run();
+    f.deps.validationEngine.runAdvisoryBrowserQa = mode === 'replace' ? next : undefined;
+    hold.resolve();
+    expect(await operation).toBe(f.blocking);
+    expect(f.runner).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(mode === 'replace' ? 1 : 0);
+    expect(f.warn).toHaveBeenCalledTimes(mode === 'remove' ? 1 : 0);
+    expect(f.release).toHaveBeenCalledOnce();
+  });
+  it.each([
+    false,
+    true,
+  ])('forwards review progress only while current (stale=%s)', async (stale) => {
+    const f = fixture();
+    const review = {
+      attempt: 1,
+      startedAt: '2026-10-18T12:00:00Z',
+      updatedAt: '2026-10-18T12:00:01Z',
+      elapsedMs: 1000,
+      guardrailMs: 5000,
+      stage: 'axes' as const,
+      axes: [],
+    };
+    f.runner.mockImplementationOnce(async (_cfg, _blocking, _progress, _signal, callbacks) => {
+      f.state.pending = stale;
+      callbacks?.onReviewProgress?.(review);
+      return null;
+    });
+    if (stale) await expect(f.run()).rejects.toThrow(ValidationSupersededError);
+    else expect(await f.run()).toBe(f.blocking);
+    expect(f.event).toHaveBeenCalledTimes(stale ? 0 : 1);
+    if (!stale)
+      expect(f.event).toHaveBeenCalledWith({
+        type: 'pod.review_progress',
+        timestamp: review.updatedAt,
+        podId: f.pod.id,
+        progress: review,
       });
-      const operation = f.run();
-      f.deps.validationEngine.runAdvisoryBrowserQa = mode === 'replace' ? next : undefined;
-      hold.resolve();
-      expect(await operation).toBe(f.blocking);
-      expect(f.runner).not.toHaveBeenCalled();
-      expect(next).toHaveBeenCalledTimes(mode === 'replace' ? 1 : 0);
-      expect(f.warn).toHaveBeenCalledTimes(mode === 'remove' ? 1 : 0);
-      expect(f.release).toHaveBeenCalledOnce();
-    },
-  );
-  it.each([false, true])(
-    'forwards review progress only while current (stale=%s)',
-    async (stale) => {
-      const f = fixture();
-      const review = {
-        attempt: 1,
-        startedAt: '2026-10-18T12:00:00Z',
-        updatedAt: '2026-10-18T12:00:01Z',
-        elapsedMs: 1000,
-        guardrailMs: 5000,
-        stage: 'axes' as const,
-        axes: [],
-      };
-      f.runner.mockImplementationOnce(async (_cfg, _blocking, _progress, _signal, callbacks) => {
-        f.state.pending = stale;
-        callbacks?.onReviewProgress?.(review);
-        return null;
-      });
-      if (stale) await expect(f.run()).rejects.toThrow(ValidationSupersededError);
-      else expect(await f.run()).toBe(f.blocking);
-      expect(f.event).toHaveBeenCalledTimes(stale ? 0 : 1);
-      if (!stale)
-        expect(f.event).toHaveBeenCalledWith({
-          type: 'pod.review_progress',
-          timestamp: review.updatedAt,
-          podId: f.pod.id,
-          progress: review,
-        });
-      expect(f.release).toHaveBeenCalledOnce();
-    },
-  );
-  it.each(['id', 'repository'] as const)(
-    'runs without optional history %s and skips persistence',
-    async (missing) => {
-      const f = fixture();
-      if (missing === 'repository') f.deps.validationRepo = undefined;
-      const owner = createAdvisoryValidation(f.deps);
-      const value = qa();
-      f.runner.mockResolvedValueOnce(value);
-      expect(
-        await owner.runAdvisoryAfterValidation(
-          f.pod.id,
-          f.cfg,
-          f.blocking,
-          missing === 'id' ? undefined : 'history',
-          f.pod,
-        ),
-      ).toEqual({ ...f.blocking, advisoryBrowserQa: value });
-      expect(f.history).not.toHaveBeenCalled();
-      expect(f.state.pod.phaseTokenUsage?.advisory).toEqual(value.tokenUsage);
-      expect(f.readiness).toHaveBeenCalledOnce();
-    },
-  );
+    expect(f.release).toHaveBeenCalledOnce();
+  });
+  it.each([
+    'id',
+    'repository',
+  ] as const)('runs without optional history %s and skips persistence', async (missing) => {
+    const f = fixture();
+    if (missing === 'repository') f.deps.validationRepo = undefined;
+    const owner = createAdvisoryValidation(f.deps);
+    const value = qa();
+    f.runner.mockResolvedValueOnce(value);
+    expect(
+      await owner.runAdvisoryAfterValidation(
+        f.pod.id,
+        f.cfg,
+        f.blocking,
+        missing === 'id' ? undefined : 'history',
+        f.pod,
+      ),
+    ).toEqual({ ...f.blocking, advisoryBrowserQa: value });
+    expect(f.history).not.toHaveBeenCalled();
+    expect(f.state.pod.phaseTokenUsage?.advisory).toEqual(value.tokenUsage);
+    expect(f.readiness).toHaveBeenCalledOnce();
+  });
   it('keeps callback evidence when the engine ultimately returns null without adding final usage', async () => {
     const f = fixture();
     const value = qa();

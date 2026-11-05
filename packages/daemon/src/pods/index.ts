@@ -1,75 +1,25 @@
 export {
-  createPodManager,
-  type ContainerManagerFactory,
-  type PodManager,
-  type PodManagerDependencies,
-} from './pod-manager.js';
+  createEscalationRepository,
+  type EscalationRepository,
+  type EscalationRow,
+} from './escalation-repository.js';
 export { createEventBus, type EventBus, type EventSubscriber } from './event-bus.js';
-export { createPodQueue, type PodQueue } from './pod-queue.js';
-export {
-  createPodRepository,
-  type PodRepository,
-  type PodStats,
-  type NewPod,
-  type PodUpdates,
-  type PodFilters,
-} from './pod-repository.js';
-export {
-  createProviderAttemptRepository,
-  type ProviderAttemptRepository,
-  type OpenProviderAttempt,
-  type CloseProviderAttempt,
-  type ProviderAttemptTotals,
-  type UpdateActiveProviderAttempt,
-} from './provider-attempt-repository.js';
 export {
   createEventRepository,
   type EventRepository,
   type StoredEvent,
 } from './event-repository.js';
 export {
-  createEscalationRepository,
-  type EscalationRepository,
-  type EscalationRow,
-} from './escalation-repository.js';
-export {
-  createNudgeRepository,
-  type NudgeRepository,
-  type NudgeMessage,
-} from './nudge-repository.js';
-export {
   createFixFeedbackRepository,
-  type FixFeedbackRepository,
   type FixFeedback,
+  type FixFeedbackRepository,
 } from './fix-feedback-repository.js';
+export { mergeClaudeMdSections, mergeMcpServers } from './injection-merger.js';
 export {
-  createValidationRepository,
-  type ValidationRepository,
-  type StoredValidation,
-} from './validation-repository.js';
-export {
-  createProgressEventRepository,
-  type ProgressEventRepository,
-  type ProgressEventRecord,
-} from './progress-event-repository.js';
-export {
-  validateTransition,
-  isTerminalState,
-  canReceiveMessage,
-  canKill,
-  canPause,
-  canNudge,
-} from './state-machine.js';
-export {
-  generateSystemInstructions,
-  type SystemInstructionsOptions,
-} from './system-instructions-generator.js';
-export { mergeMcpServers, mergeClaudeMdSections } from './injection-merger.js';
-export { resolveSections, type ResolvedSection } from './section-resolver.js';
-export {
-  createMemoryRepository,
-  type MemoryRepository,
-} from './memory-repository.js';
+  createMemoryCandidateRecorder,
+  type MemoryCandidateRecorder,
+  type MemoryCandidateRecorderDeps,
+} from './memory-candidate-recorder.js';
 export {
   createMemoryCandidateRepository,
   type MemoryCandidateRepository,
@@ -79,33 +29,83 @@ export {
   type MemoryExtractionAttemptRepository,
 } from './memory-extraction-attempt-repository.js';
 export {
+  createMemoryRepository,
+  type MemoryRepository,
+} from './memory-repository.js';
+export {
+  MAX_RELEVANT_MEMORY_ENTRIES,
+  type MemorySelectionResult,
+  prefilterMemories,
+  type RelevantMemory,
+  selectRelevantMemories,
+} from './memory-selector.js';
+export {
   createMemoryUsageRepository,
   type MemoryUsageRepository,
 } from './memory-usage-repository.js';
 export {
-  MAX_RELEVANT_MEMORY_ENTRIES,
-  prefilterMemories,
-  selectRelevantMemories,
-  type MemorySelectionResult,
-  type RelevantMemory,
-} from './memory-selector.js';
+  createNudgeRepository,
+  type NudgeMessage,
+  type NudgeRepository,
+} from './nudge-repository.js';
 export {
   createPendingOverrideRepository,
   type PendingOverrideRepository,
 } from './pending-override-repository.js';
 export {
-  createQualityScoreRepository,
-  type QualityScoreRepository,
-  type QualityScoreFilters,
-} from './quality-score-repository.js';
+  type ContainerManagerFactory,
+  createPodManager,
+  type PodManager,
+  type PodManagerDependencies,
+} from './pod-manager.js';
+export { createPodQueue, type PodQueue } from './pod-queue.js';
+export {
+  createPodRepository,
+  type NewPod,
+  type PodFilters,
+  type PodRepository,
+  type PodStats,
+  type PodUpdates,
+} from './pod-repository.js';
+export {
+  createProgressEventRepository,
+  type ProgressEventRecord,
+  type ProgressEventRepository,
+} from './progress-event-repository.js';
+export {
+  type CloseProviderAttempt,
+  createProviderAttemptRepository,
+  type OpenProviderAttempt,
+  type ProviderAttemptRepository,
+  type ProviderAttemptTotals,
+  type UpdateActiveProviderAttempt,
+} from './provider-attempt-repository.js';
+export { computeScore } from './quality-score.js';
 export {
   createQualityScoreRecorder,
   type QualityScoreRecorder,
 } from './quality-score-recorder.js';
 export {
-  createMemoryCandidateRecorder,
-  type MemoryCandidateRecorder,
-  type MemoryCandidateRecorderDeps,
-} from './memory-candidate-recorder.js';
+  createQualityScoreRepository,
+  type QualityScoreFilters,
+  type QualityScoreRepository,
+} from './quality-score-repository.js';
 export { computeQualitySignals } from './quality-signals.js';
-export { computeScore } from './quality-score.js';
+export { type ResolvedSection, resolveSections } from './section-resolver.js';
+export {
+  canKill,
+  canNudge,
+  canPause,
+  canReceiveMessage,
+  isTerminalState,
+  validateTransition,
+} from './state-machine.js';
+export {
+  generateSystemInstructions,
+  type SystemInstructionsOptions,
+} from './system-instructions-generator.js';
+export {
+  createValidationRepository,
+  type StoredValidation,
+  type ValidationRepository,
+} from './validation-repository.js';

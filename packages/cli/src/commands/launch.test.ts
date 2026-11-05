@@ -3,17 +3,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   type ConfigurationEntity,
+  configurationPayloadSchemas,
   type EffectiveLaunchConfig,
   type LaunchRequest,
-  configurationPayloadSchemas,
   launchRequestSchema,
 } from '@autopod/shared';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
 import { saveLaunchReceipt } from '../config/launch-store.js';
-import { buildLaunchRequest } from './launch-request.js';
 import { registerLaunchCommand } from './launch.js';
+import { buildLaunchRequest } from './launch-request.js';
 
 function entity(
   kind: ConfigurationEntity['kind'],
@@ -69,55 +69,55 @@ describe('shared launch request CLI', () => {
     expect(help).toContain('Output branch');
     expect(help).not.toContain('branch or revision');
   });
-  it.each(['startBranch', 'baseBranch'] as const)(
-    'rejects invalid %s before preview or admission',
-    async (field) => {
-      for (const value of [
-        'a'.repeat(40),
-        'B'.repeat(64),
-        'main~1',
-        'main^',
-        'main@{1}',
-        'main..other',
-      ]) {
-        for (const preview of [false, true]) {
-          for (const fileInput of [false, true]) {
-            const client = {
-              listConfigurations: lookup,
-              resolveLaunch: vi.fn(),
-              launchPod: vi.fn(),
-            };
-            const save = vi.fn();
-            const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-            const program = new Command().exitOverride();
-            registerLaunchCommand(program, () => client as unknown as AutopodClient, save);
-            const file = join(temporary(), 'request.json');
-            writeFileSync(
-              file,
-              JSON.stringify({ repositoryId: 'repo', task: 'Task', work: { [field]: value } }),
-            );
-            const args = fileInput
-              ? ['--config', file]
-              : [
-                  '--repo',
-                  'Project',
-                  '--task',
-                  'Task',
-                  field === 'startBranch' ? '--start-branch' : '--base-branch',
-                  value,
-                ];
-            await expect(
-              program.parseAsync(['node', 'ap', 'run', ...args, ...(preview ? ['--preview'] : [])]),
-            ).rejects.toThrow(`work.${field}`);
-            expect(save).not.toHaveBeenCalled();
-            expect(client.launchPod).not.toHaveBeenCalled();
-            expect(client.resolveLaunch).not.toHaveBeenCalled();
-            expect(log).not.toHaveBeenCalled();
-          }
+  it.each([
+    'startBranch',
+    'baseBranch',
+  ] as const)('rejects invalid %s before preview or admission', async (field) => {
+    for (const value of [
+      'a'.repeat(40),
+      'B'.repeat(64),
+      'main~1',
+      'main^',
+      'main@{1}',
+      'main..other',
+    ]) {
+      for (const preview of [false, true]) {
+        for (const fileInput of [false, true]) {
+          const client = {
+            listConfigurations: lookup,
+            resolveLaunch: vi.fn(),
+            launchPod: vi.fn(),
+          };
+          const save = vi.fn();
+          const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+          const program = new Command().exitOverride();
+          registerLaunchCommand(program, () => client as unknown as AutopodClient, save);
+          const file = join(temporary(), 'request.json');
+          writeFileSync(
+            file,
+            JSON.stringify({ repositoryId: 'repo', task: 'Task', work: { [field]: value } }),
+          );
+          const args = fileInput
+            ? ['--config', file]
+            : [
+                '--repo',
+                'Project',
+                '--task',
+                'Task',
+                field === 'startBranch' ? '--start-branch' : '--base-branch',
+                value,
+              ];
+          await expect(
+            program.parseAsync(['node', 'ap', 'run', ...args, ...(preview ? ['--preview'] : [])]),
+          ).rejects.toThrow(`work.${field}`);
+          expect(save).not.toHaveBeenCalled();
+          expect(client.launchPod).not.toHaveBeenCalled();
+          expect(client.resolveLaunch).not.toHaveBeenCalled();
+          expect(log).not.toHaveBeenCalled();
         }
       }
-    },
-  );
+    }
+  });
   it.each([false, true])('checks inherited effective sources (preview=%s)', async (preview) => {
     const client = {
       getPodLaunchConfiguration: vi.fn(async () => ({

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCompletionFixture } from '../test-utils/completion-helpers.js';
 import { createCompletionWorkflow } from './completion-workflow.js';
 import { createGoalRepository } from './goal-repository.js';
+
 const fixtures: ReturnType<typeof createCompletionFixture>[] = [];
 function fixture(disk = false) {
   const f = createCompletionFixture(disk);
@@ -102,34 +103,35 @@ describe('completion Goal and artifact boundaries', () => {
     { state: 'achieved', stopped: 0, allowed: false },
     { state: 'achieved', stopped: 1, allowed: true },
     { state: 'failed', stopped: 1, allowed: false },
-  ])(
-    'requires persisted Goal achievement and confirmed stop: $state/$stopped',
-    async ({ state, stopped, allowed }) => {
-      const f = fixture();
-      f.running();
-      const goals = createGoalRepository(f.db);
-      goals.create('prepare', 'Synthetic native objective', 'claude');
-      f.db
-        .prepare('UPDATE pod_goals SET state=?, execution_stopped=? WHERE pod_id=?')
-        .run(state, stopped, 'prepare');
-      // This controlled launch callback supplies only the intent read by this entry.
-      const intent = { intent: 'goal' } as EffectiveLaunchConfig;
-      const owner = createCompletionWorkflow(
-        { launchConfiguration: { read: () => intent, goals } },
-        f.workflowCaptured,
-      );
-      if (allowed) {
-        await owner.handleCompletion.call(f.calls, 'prepare');
-        expect(f.calls.triggerValidation).toHaveBeenCalledExactlyOnceWith('prepare');
-      } else {
-        await expect(owner.handleCompletion.call(f.calls, 'prepare')).rejects.toMatchObject({
-          code: 'GOAL_NOT_ACHIEVED',
-        });
-        expect(f.worktreeManager.getDiffStats).not.toHaveBeenCalled();
-        expect(f.calls.triggerValidation).not.toHaveBeenCalled();
-      }
-    },
-  );
+  ])('requires persisted Goal achievement and confirmed stop: $state/$stopped', async ({
+    state,
+    stopped,
+    allowed,
+  }) => {
+    const f = fixture();
+    f.running();
+    const goals = createGoalRepository(f.db);
+    goals.create('prepare', 'Synthetic native objective', 'claude');
+    f.db
+      .prepare('UPDATE pod_goals SET state=?, execution_stopped=? WHERE pod_id=?')
+      .run(state, stopped, 'prepare');
+    // This controlled launch callback supplies only the intent read by this entry.
+    const intent = { intent: 'goal' } as EffectiveLaunchConfig;
+    const owner = createCompletionWorkflow(
+      { launchConfiguration: { read: () => intent, goals } },
+      f.workflowCaptured,
+    );
+    if (allowed) {
+      await owner.handleCompletion.call(f.calls, 'prepare');
+      expect(f.calls.triggerValidation).toHaveBeenCalledExactlyOnceWith('prepare');
+    } else {
+      await expect(owner.handleCompletion.call(f.calls, 'prepare')).rejects.toMatchObject({
+        code: 'GOAL_NOT_ACHIEVED',
+      });
+      expect(f.worktreeManager.getDiffStats).not.toHaveBeenCalled();
+      expect(f.calls.triggerValidation).not.toHaveBeenCalled();
+    }
+  });
   it('does not coalesce separate artifact generations or clear unrelated entries', async () => {
     const f = fixture();
     f.running();

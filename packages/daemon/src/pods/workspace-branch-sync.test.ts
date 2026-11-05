@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { describe, expect, it, vi } from 'vitest';
 import { createWorkspaceFixture } from '../test-utils/workspace-recovery-helpers.js';
 import { LocalWorktreeManager } from '../worktrees/local-worktree-manager.js';
+
 const exec = promisify(execFile);
 describe('workspace document branch sync', () => {
   it('uses actual Git path discovery and commitFiles while preserving unrelated staged code', async () => {

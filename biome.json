@@ -1,12 +1,10 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
-  "organizeImports": {
-    "enabled": true
-  },
+  "$schema": "https://biomejs.dev/schemas/2.5.3/schema.json",
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "complexity": {
         "noForEach": "off"
       },
@@ -34,24 +32,25 @@
   },
   "files": {
     "maxSize": 2097152,
-    "ignore": [
-      "packages/desktop/Sources/AutopodUI/Resources/Village/renderer/**",
-      "**/dist/**",
-      "**/node_modules/**",
-      "**/.turbo/**",
-      "**/.pnpm-store/**",
-      "**/pnpm-lock.yaml",
-      "**/.autopod-data/**",
-      "**/.agentry/**",
-      "**/.claude/worktrees/**",
-      ".clawpatch/project.json",
-      ".clawpatch/features/**",
-      ".clawpatch/findings/**",
-      "**/.speclint-cache/**",
-      "packages/desktop/.build/**",
-      "packages/desktop/build/**",
-      "packages/desktop/build-preview/**",
-      "tmp/**"
+    "includes": [
+      "**",
+      "!**/packages/desktop/Sources/AutopodUI/Resources/Village/renderer",
+      "!**/dist",
+      "!**/node_modules",
+      "!**/.turbo",
+      "!**/.pnpm-store",
+      "!**/pnpm-lock.yaml",
+      "!**/.autopod-data",
+      "!**/.agentry",
+      "!**/.claude/worktrees",
+      "!**/.clawpatch/project.json",
+      "!**/.clawpatch/features",
+      "!**/.clawpatch/findings",
+      "!**/.speclint-cache",
+      "!**/packages/desktop/.build",
+      "!**/packages/desktop/build",
+      "!**/packages/desktop/build-preview",
+      "!**/tmp"
     ]
   }
 }

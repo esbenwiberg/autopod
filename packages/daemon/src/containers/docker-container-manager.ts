@@ -5,8 +5,8 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -34,9 +34,9 @@ import { extractManagedDockerOutput } from '../managed/output-extraction.js';
 import { assertCheckpointResourceNotRetained } from '../pods/retained-checkpoint-repository.js';
 import { assertDirectoryExtractionCurrent } from './directory-extraction-ownership.js';
 import {
+  boundedDockerCall,
   DOCKER_CALL_TIMEOUTS,
   DockerCallTimeoutError,
-  boundedDockerCall,
 } from './docker-bounds.js';
 import {
   alignMemoryToPageSize,

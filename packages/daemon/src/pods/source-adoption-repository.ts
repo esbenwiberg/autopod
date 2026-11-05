@@ -2,12 +2,13 @@ import type { OperatorActor, Pod, ValidationResult } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { sourceAdoptionError, sourceHash } from './source-adoption-identity.js';
 import type { SourceAdoptionStage, SourceAdoptionState } from './source-adoption-types.js';
-import { type SourceCommandJournal, createSourceCommandJournal } from './source-command-journal.js';
+import { createSourceCommandJournal, type SourceCommandJournal } from './source-command-journal.js';
 import {
   assertSourceAvailable,
   assertSourceDeliveryAllowed,
   sourceOwnerScope,
 } from './source-custody-guards.js';
+
 export { sourceAdoptionError, sourceHash } from './source-adoption-identity.js';
 export function sourcePodFingerprint(pod: Pod): string {
   return sourceHash([

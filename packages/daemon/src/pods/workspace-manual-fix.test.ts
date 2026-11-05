@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createConfigurationStore } from '../configuration/configuration-store.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
 import { createWorkspaceFixture } from '../test-utils/workspace-recovery-helpers.js';
+
 describe('workspace manual-fix admission', () => {
   it('requires eligible failed/review/validated worker and carries actor/creator into legacy workspace request', async () => {
     const f = createWorkspaceFixture();

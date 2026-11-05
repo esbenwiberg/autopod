@@ -3,9 +3,9 @@ import {
   type FinalizeSourceDeliveryResponse,
   type ManagedPodEvent,
   type ManagedPodRequest,
+  parseManagedRecord,
   type SourceCandidateReceipt,
   type SourceDeliveryReceipt,
-  parseManagedRecord,
 } from '@autopod/shared';
 import { canonical, digest, sha256 } from './canonical.js';
 import { ManagedControls } from './managed-controls.js';

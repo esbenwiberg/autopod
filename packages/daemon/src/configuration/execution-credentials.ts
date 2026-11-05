@@ -1,11 +1,11 @@
 import type { DeploymentConfig, EffectiveLaunchConfig, InjectedMcpServer } from '@autopod/shared';
 import {
-  NPM_RC_PATH,
-  NUGET_CONFIG_PATH,
-  type RegistryFile,
   buildNuGetSecretFile,
   generateNpmrc,
   generateNuGetConfig,
+  NPM_RC_PATH,
+  NUGET_CONFIG_PATH,
+  type RegistryFile,
 } from '../pods/registry-injector.js';
 import { configurationError } from './configuration-store.js';
 import { resolveLaunchValues } from './credential-references.js';

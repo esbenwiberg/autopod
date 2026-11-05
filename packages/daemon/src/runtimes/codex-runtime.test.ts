@@ -15,8 +15,8 @@ import pino from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager, StreamingExecResult } from '../interfaces/container-manager.js';
 import type { EventBus } from '../pods/event-bus.js';
-import { createPodRepository } from '../pods/pod-repository.js';
 import type { PodRepository } from '../pods/pod-repository.js';
+import { createPodRepository } from '../pods/pod-repository.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { CodexRuntime } from './codex-runtime.js';
 
@@ -172,91 +172,91 @@ describe('CodexRuntime', () => {
     vi.restoreAllMocks();
   });
 
-  it.each(['local', 'sandbox'] as const)(
-    'opens a lazy %s native Goal process with persisted SQLite state and never falls back to exec',
-    async (target) => {
-      const handle = createMockHandle();
-      const stdin = new PassThrough();
-      handle.stdin = stdin;
-      const requests: Array<{ id?: number; method: string; params?: unknown }> = [];
-      stdin.on('data', (chunk) => {
-        const request = JSON.parse(chunk.toString()) as {
-          id?: number;
-          method: string;
-          params?: unknown;
-        };
-        requests.push(request);
-        if (!request.id) return;
-        const result =
-          request.method === 'initialize'
-            ? {}
-            : request.method === 'thread/start'
-              ? { thread: { id: 'native-thread' } }
-              : { goal: null };
-        (handle.stdout as PassThrough).write(`${JSON.stringify({ id: request.id, result })}\n`);
-      });
-      const cm = createMockContainerManager(handle);
-      const repo = createMockPodRepo(null, {
-        lifecycleGeneration: 1,
-        launchConfigDigest: 'a'.repeat(64),
-      });
-      const runtime = new CodexRuntime(logger, cm, repo);
-      const config: SpawnConfig = {
-        podId: 'pod',
-        containerId: 'container-123',
-        task: 'Objective',
-        model: 'gpt-5.5',
-        reasoningEffort: 'high',
-        workDir: '/workspace',
-        env: {},
-        customInstructions: 'Daemon instructions',
-        mcpServers: [{ name: 'escalation', url: 'http://daemon/mcp' }],
+  it.each([
+    'local',
+    'sandbox',
+  ] as const)('opens a lazy %s native Goal process with persisted SQLite state and never falls back to exec', async (target) => {
+    const handle = createMockHandle();
+    const stdin = new PassThrough();
+    handle.stdin = stdin;
+    const requests: Array<{ id?: number; method: string; params?: unknown }> = [];
+    stdin.on('data', (chunk) => {
+      const request = JSON.parse(chunk.toString()) as {
+        id?: number;
+        method: string;
+        params?: unknown;
       };
-      config.executionTarget = target;
-      Object.assign(cm, { supportsExecRecovery: true });
-      const hooks = { processCreated: vi.fn(), processStarted: vi.fn() };
-      const session = runtime.nativeGoalSession(config, hooks);
-      expect(cm.execStreaming).not.toHaveBeenCalled();
-      expect(await session.open(null)).toBe('native-thread');
-      expect(requests.find((request) => request.method === 'thread/start')?.params).toMatchObject({
-        sandbox: target === 'sandbox' ? 'danger-full-access' : 'workspace-write',
-      });
-      expect(cm.execStreaming).toHaveBeenCalledWith(
-        'container-123',
-        [
-          'sh',
-          '/run/autopod/agent-shim.sh',
-          'codex',
-          '-c',
-          'sqlite_home="/home/autopod/.codex/sessions/.autopod-goal-state"',
-          'app-server',
-        ],
-        {
-          cwd: '/workspace',
-          env: {},
-          stdin: true,
-          onProcessCreated: expect.any(Function),
-          onProcessStarted: expect.any(Function),
-        },
-      );
-      expect(repo.update).toHaveBeenCalledWith('pod', { codexSessionId: 'native-thread' });
-      expect(requests.map((request) => request.method)).toEqual([
-        'initialize',
-        'initialized',
-        'thread/start',
-      ]);
-      const other = runtime.nativeGoalSession(config, hooks);
-      await expect(other.open(null)).rejects.toThrow('active process');
-      await other.stop();
-      await expect(runtime.spawn(config)[Symbol.asyncIterator]().next()).rejects.toThrow(
-        'native Goal',
-      );
-      expect(await session.get()).toBeNull();
-      await session.stop();
-      expect(handle.kill).toHaveBeenCalledTimes(1);
-      expect(cm.execStreaming).toHaveBeenCalledTimes(1);
-    },
-  );
+      requests.push(request);
+      if (!request.id) return;
+      const result =
+        request.method === 'initialize'
+          ? {}
+          : request.method === 'thread/start'
+            ? { thread: { id: 'native-thread' } }
+            : { goal: null };
+      (handle.stdout as PassThrough).write(`${JSON.stringify({ id: request.id, result })}\n`);
+    });
+    const cm = createMockContainerManager(handle);
+    const repo = createMockPodRepo(null, {
+      lifecycleGeneration: 1,
+      launchConfigDigest: 'a'.repeat(64),
+    });
+    const runtime = new CodexRuntime(logger, cm, repo);
+    const config: SpawnConfig = {
+      podId: 'pod',
+      containerId: 'container-123',
+      task: 'Objective',
+      model: 'gpt-5.5',
+      reasoningEffort: 'high',
+      workDir: '/workspace',
+      env: {},
+      customInstructions: 'Daemon instructions',
+      mcpServers: [{ name: 'escalation', url: 'http://daemon/mcp' }],
+    };
+    config.executionTarget = target;
+    Object.assign(cm, { supportsExecRecovery: true });
+    const hooks = { processCreated: vi.fn(), processStarted: vi.fn() };
+    const session = runtime.nativeGoalSession(config, hooks);
+    expect(cm.execStreaming).not.toHaveBeenCalled();
+    expect(await session.open(null)).toBe('native-thread');
+    expect(requests.find((request) => request.method === 'thread/start')?.params).toMatchObject({
+      sandbox: target === 'sandbox' ? 'danger-full-access' : 'workspace-write',
+    });
+    expect(cm.execStreaming).toHaveBeenCalledWith(
+      'container-123',
+      [
+        'sh',
+        '/run/autopod/agent-shim.sh',
+        'codex',
+        '-c',
+        'sqlite_home="/home/autopod/.codex/sessions/.autopod-goal-state"',
+        'app-server',
+      ],
+      {
+        cwd: '/workspace',
+        env: {},
+        stdin: true,
+        onProcessCreated: expect.any(Function),
+        onProcessStarted: expect.any(Function),
+      },
+    );
+    expect(repo.update).toHaveBeenCalledWith('pod', { codexSessionId: 'native-thread' });
+    expect(requests.map((request) => request.method)).toEqual([
+      'initialize',
+      'initialized',
+      'thread/start',
+    ]);
+    const other = runtime.nativeGoalSession(config, hooks);
+    await expect(other.open(null)).rejects.toThrow('active process');
+    await other.stop();
+    await expect(runtime.spawn(config)[Symbol.asyncIterator]().next()).rejects.toThrow(
+      'native Goal',
+    );
+    expect(await session.get()).toBeNull();
+    await session.stop();
+    expect(handle.kill).toHaveBeenCalledTimes(1);
+    expect(cm.execStreaming).toHaveBeenCalledTimes(1);
+  });
 
   describe('buildSpawnArgs', () => {
     it('builds correct args from config', () => {
@@ -830,168 +830,166 @@ describe('CodexRuntime', () => {
       { timing: 'after-start', operation: 'spawn' },
       { timing: 'during-launch', operation: 'spawn' },
       { timing: 'during-launch', operation: 'resume' },
-    ] as const)(
-      'recovers sandbox completion after final task summary when stdout stalls ($operation, $timing)',
-      async ({ timing, operation }) => {
-        const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
-        const previousSummaryGrace = process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS;
-        const previousExitTimeout = process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
-        const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-summary-recovery-'));
-        process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
-        process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS = '20';
-        process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '20';
+    ] as const)('recovers sandbox completion after final task summary when stdout stalls ($operation, $timing)', async ({
+      timing,
+      operation,
+    }) => {
+      const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
+      const previousSummaryGrace = process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS;
+      const previousExitTimeout = process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+      const tmpRoot = await mkdtemp(join(tmpdir(), 'autopod-codex-summary-recovery-'));
+      process.env.AUTOPOD_CODEX_STATE_DIR = tmpRoot;
+      process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS = '20';
+      process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = '20';
+
+      try {
+        const podId = 'summary-recovery';
+        const handle = createMockHandle();
+        const cm = createMockContainerManager(handle);
+        const extract = vi.mocked(cm.extractDirectoryFromContainer);
+        extract.mockImplementation(async (_containerId, _containerPath, hostPath) => {
+          const rolloutDir = join(hostPath, '2026', '07', '13');
+          await mkdir(rolloutDir, { recursive: true });
+          await writeFile(
+            join(rolloutDir, 'rollout-2026-07-13T18-00-00-thread-summary.jsonl'),
+            [
+              JSON.stringify({
+                timestamp: '2026-07-13T18:00:00.000Z',
+                type: 'event_msg',
+                payload: {
+                  type: 'task_complete',
+                  last_agent_message: 'Recovered from sandbox rollout.',
+                },
+              }),
+            ].join('\n'),
+          );
+        });
+        const summaryEvents = createTaskSummaryEventBus();
+        const runtime = new CodexRuntime(
+          logger,
+          cm,
+          createMockPodRepo(null, { executionTarget: 'sandbox', model: 'gpt-5.5' }),
+          summaryEvents.eventBus,
+        );
+
+        const reportSummary = () => {
+          (handle.stdout as PassThrough).write(
+            `${JSON.stringify({
+              type: 'thread.started',
+              thread_id: 'thread-summary',
+            })}\n`,
+          );
+          summaryEvents.emitTaskSummary(podId);
+        };
+        if (timing === 'during-launch') {
+          vi.mocked(cm.execStreaming).mockImplementationOnce(async () => {
+            reportSummary();
+            return handle;
+          });
+        } else void summaryEvents.whenSubscribed.then(() => setTimeout(reportSummary, 10));
+
+        const events: AgentEvent[] = [];
+        const run = (async () => {
+          const spawnConfig: SpawnConfig = {
+            podId,
+            task: 'Finish after the summary.',
+            model: 'gpt-5.5',
+            reasoningEffort: 'auto',
+            workDir: '/workspace',
+            containerId: 'container-123',
+            executionTarget: 'sandbox',
+            env: {},
+          };
+          const invocation =
+            operation === 'resume'
+              ? runtime.resume(podId, spawnConfig.task, spawnConfig.containerId, {})
+              : runtime.spawn(spawnConfig);
+          for await (const event of invocation) {
+            events.push(event);
+          }
+        })();
 
         try {
-          const podId = 'summary-recovery';
-          const handle = createMockHandle();
-          const cm = createMockContainerManager(handle);
-          const extract = vi.mocked(cm.extractDirectoryFromContainer);
-          extract.mockImplementation(async (_containerId, _containerPath, hostPath) => {
-            const rolloutDir = join(hostPath, '2026', '07', '13');
-            await mkdir(rolloutDir, { recursive: true });
-            await writeFile(
-              join(rolloutDir, 'rollout-2026-07-13T18-00-00-thread-summary.jsonl'),
-              [
-                JSON.stringify({
-                  timestamp: '2026-07-13T18:00:00.000Z',
-                  type: 'event_msg',
-                  payload: {
-                    type: 'task_complete',
-                    last_agent_message: 'Recovered from sandbox rollout.',
-                  },
-                }),
-              ].join('\n'),
-            );
-          });
-          const summaryEvents = createTaskSummaryEventBus();
-          const runtime = new CodexRuntime(
-            logger,
-            cm,
-            createMockPodRepo(null, { executionTarget: 'sandbox', model: 'gpt-5.5' }),
-            summaryEvents.eventBus,
-          );
+          await withTimeout(run, 250);
+        } finally {
+          // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
+          (handle as any).finish(0);
+        }
 
-          const reportSummary = () => {
-            (handle.stdout as PassThrough).write(
-              `${JSON.stringify({
-                type: 'thread.started',
-                thread_id: 'thread-summary',
-              })}\n`,
-            );
-            summaryEvents.emitTaskSummary(podId);
-          };
-          if (timing === 'during-launch') {
-            vi.mocked(cm.execStreaming).mockImplementationOnce(async () => {
-              reportSummary();
-              return handle;
-            });
-          } else void summaryEvents.whenSubscribed.then(() => setTimeout(reportSummary, 10));
+        expect(extract).toHaveBeenCalledWith(
+          'container-123',
+          '/home/autopod/.codex/sessions',
+          join(tmpRoot, podId),
+        );
+        expect(events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              type: 'complete',
+              result: 'Recovered from sandbox rollout.',
+            }),
+          ]),
+        );
+        expect(events.filter((event) => event.type === 'complete')).toHaveLength(1);
+        expect(
+          vi.mocked(summaryEvents.eventBus.subscribeToSession).mock.results[0]?.value,
+        ).toHaveBeenCalledOnce();
+      } finally {
+        if (previousStateDir === undefined) {
+          // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
+          delete process.env.AUTOPOD_CODEX_STATE_DIR;
+        } else {
+          process.env.AUTOPOD_CODEX_STATE_DIR = previousStateDir;
+        }
+        if (previousSummaryGrace === undefined) {
+          // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
+          delete process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS;
+        } else {
+          process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS = previousSummaryGrace;
+        }
+        if (previousExitTimeout === undefined) {
+          // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
+          delete process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
+        } else {
+          process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = previousExitTimeout;
+        }
+        await rm(tmpRoot, { recursive: true, force: true });
+      }
+    });
 
-          const events: AgentEvent[] = [];
-          const run = (async () => {
-            const spawnConfig: SpawnConfig = {
-              podId,
-              task: 'Finish after the summary.',
+    it.each([
+      'spawn',
+      'resume',
+    ] as const)('disposes the summary listener when %s launch fails', async (operation) => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      vi.mocked(cm.execStreaming).mockRejectedValueOnce(new Error('Launch unavailable'));
+      const summaries = createTaskSummaryEventBus();
+      const runtime = new CodexRuntime(
+        logger,
+        cm,
+        createMockPodRepo(null, { executionTarget: 'sandbox' }),
+        summaries.eventBus,
+      );
+      const invocation =
+        operation === 'resume'
+          ? runtime.resume('launch-failure', 'Continue', 'container-123', {})
+          : runtime.spawn({
+              podId: 'launch-failure',
+              task: 'Start',
               model: 'gpt-5.5',
               reasoningEffort: 'auto',
               workDir: '/workspace',
               containerId: 'container-123',
               executionTarget: 'sandbox',
               env: {},
-            };
-            const invocation =
-              operation === 'resume'
-                ? runtime.resume(podId, spawnConfig.task, spawnConfig.containerId, {})
-                : runtime.spawn(spawnConfig);
-            for await (const event of invocation) {
-              events.push(event);
-            }
-          })();
-
-          try {
-            await withTimeout(run, 250);
-          } finally {
-            // biome-ignore lint/suspicious/noExplicitAny: accessing test helper method
-            (handle as any).finish(0);
-          }
-
-          expect(extract).toHaveBeenCalledWith(
-            'container-123',
-            '/home/autopod/.codex/sessions',
-            join(tmpRoot, podId),
-          );
-          expect(events).toEqual(
-            expect.arrayContaining([
-              expect.objectContaining({
-                type: 'complete',
-                result: 'Recovered from sandbox rollout.',
-              }),
-            ]),
-          );
-          expect(events.filter((event) => event.type === 'complete')).toHaveLength(1);
-          expect(
-            vi.mocked(summaryEvents.eventBus.subscribeToSession).mock.results[0]?.value,
-          ).toHaveBeenCalledOnce();
-        } finally {
-          if (previousStateDir === undefined) {
-            // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
-            delete process.env.AUTOPOD_CODEX_STATE_DIR;
-          } else {
-            process.env.AUTOPOD_CODEX_STATE_DIR = previousStateDir;
-          }
-          if (previousSummaryGrace === undefined) {
-            // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
-            delete process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS;
-          } else {
-            process.env.AUTOPOD_CODEX_SUMMARY_GRACE_MS = previousSummaryGrace;
-          }
-          if (previousExitTimeout === undefined) {
-            // biome-ignore lint/performance/noDelete: tests must restore absent env vars exactly
-            delete process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS;
-          } else {
-            process.env.AUTOPOD_EXIT_CODE_TIMEOUT_MS = previousExitTimeout;
-          }
-          await rm(tmpRoot, { recursive: true, force: true });
-        }
-      },
-    );
-
-    it.each(['spawn', 'resume'] as const)(
-      'disposes the summary listener when %s launch fails',
-      async (operation) => {
-        const handle = createMockHandle();
-        const cm = createMockContainerManager(handle);
-        vi.mocked(cm.execStreaming).mockRejectedValueOnce(new Error('Launch unavailable'));
-        const summaries = createTaskSummaryEventBus();
-        const runtime = new CodexRuntime(
-          logger,
-          cm,
-          createMockPodRepo(null, { executionTarget: 'sandbox' }),
-          summaries.eventBus,
-        );
-        const invocation =
-          operation === 'resume'
-            ? runtime.resume('launch-failure', 'Continue', 'container-123', {})
-            : runtime.spawn({
-                podId: 'launch-failure',
-                task: 'Start',
-                model: 'gpt-5.5',
-                reasoningEffort: 'auto',
-                workDir: '/workspace',
-                containerId: 'container-123',
-                executionTarget: 'sandbox',
-                env: {},
-              });
-        await expect(invocation[Symbol.asyncIterator]().next()).rejects.toThrow(
-          'Launch unavailable',
-        );
-        expect(summaries.eventBus.subscribeToSession).toHaveBeenCalledOnce();
-        expect(
-          vi.mocked(summaries.eventBus.subscribeToSession).mock.results[0]?.value,
-        ).toHaveBeenCalledOnce();
-        expect(handle.kill).not.toHaveBeenCalled();
-      },
-    );
+            });
+      await expect(invocation[Symbol.asyncIterator]().next()).rejects.toThrow('Launch unavailable');
+      expect(summaries.eventBus.subscribeToSession).toHaveBeenCalledOnce();
+      expect(
+        vi.mocked(summaries.eventBus.subscribeToSession).mock.results[0]?.value,
+      ).toHaveBeenCalledOnce();
+      expect(handle.kill).not.toHaveBeenCalled();
+    });
 
     it('fails bounded when final task summary has no terminal proof', async () => {
       const previousStateDir = process.env.AUTOPOD_CODEX_STATE_DIR;
@@ -1862,221 +1860,224 @@ describe('CodexRuntime', () => {
   });
 
   describe('resume', () => {
-    it.each(['root', 'fix'])(
-      'does not reset automatic interruption recovery after disk restart for %s',
-      async (nextPodId) => {
-        const db = createTestDb();
-        insertTestProfile(db);
-        const repo = createPodRepository(db);
-        for (const [id, parent] of [
-          ['root', null],
-          ['fix', 'root'],
-        ] as const) {
-          repo.insert({
-            id,
-            profileName: 'test-profile',
-            task: 'Recover',
-            status: 'running',
-            model: 'model',
-            runtime: 'codex',
-            executionTarget: 'local',
-            branch: id,
-            userId: 'user',
-            maxValidationAttempts: 3,
-            skipValidation: false,
-            outputMode: 'pr',
-            linkedPodId: parent,
-          });
-          repo.update(id, { containerId: 'container-123', codexSessionId: `session-${id}` });
-        }
-        const interrupted = () => {
-          const handle = createMockHandle();
-          (handle.stdout as PassThrough).end(
-            `${JSON.stringify({ id: 'abort', msg: { type: 'turn_aborted', reason: 'interrupted', turn_id: 'turn' } })}\n`,
-          );
-          (handle as StreamingExecResult & { finish(code: number): void }).finish(0);
-          return handle;
-        };
-        const complete = () => {
-          const handle = createMockHandle();
-          (handle.stdout as PassThrough).end(
-            `${JSON.stringify({ id: 'complete', msg: { type: 'task_complete', turn_id: 'recovered', last_agent_message: 'Recovered' } })}\n`,
-          );
-          (handle as StreamingExecResult & { finish(code: number): void }).finish(0);
-          return handle;
-        };
-        const cm = createMockContainerManager(interrupted());
-        vi.mocked(cm.execStreaming)
-          .mockResolvedValueOnce(interrupted())
-          .mockResolvedValueOnce(complete());
-        const collect = async (runtime: CodexRuntime, podId: string) => {
-          const events: AgentEvent[] = [];
-          for await (const event of runtime.resume(podId, 'Continue', 'container-123'))
-            events.push(event);
-          return events;
-        };
-        const directory = await mkdtemp(join(tmpdir(), 'codex-task-recovery-'));
-        let reopened: Database.Database | undefined;
-        try {
-          expect(await collect(new CodexRuntime(logger, cm, repo), 'root')).toEqual(
-            expect.arrayContaining([expect.objectContaining({ type: 'complete' })]),
-          );
-          expect(cm.execStreaming).toHaveBeenCalledTimes(2);
-          await writeFile(join(directory, 'state.db'), db.serialize());
-          db.close();
-          reopened = new Database(join(directory, 'state.db'));
-          const nextRepo = createPodRepository(reopened);
-          vi.mocked(cm.execStreaming)
-            .mockResolvedValueOnce(interrupted())
-            .mockResolvedValueOnce(complete());
-          const events = await collect(new CodexRuntime(logger, cm, nextRepo), nextPodId);
-          expect(cm.execStreaming).toHaveBeenCalledTimes(3);
-          expect(events).toEqual(
-            expect.arrayContaining([
-              expect.objectContaining({
-                type: 'error',
-                fatal: true,
-                message: expect.stringContaining('task-wide Codex interruption recovery'),
-              }),
-            ]),
-          );
-          const ledger = nextRepo.codexInterruptionRetries;
-          if (!ledger) throw new Error('Missing durable recovery ledger');
-          ledger.authorize(
-            nextPodId,
-            'extend-recovery',
-            'Inspected prior work and response before another inner recovery',
-            { type: 'human', userId: 'operator' },
-          );
-          vi.mocked(cm.execStreaming)
-            .mockReset()
-            .mockResolvedValueOnce(interrupted())
-            .mockResolvedValueOnce(complete());
-          expect(await collect(new CodexRuntime(logger, cm, nextRepo), nextPodId)).toEqual(
-            expect.arrayContaining([expect.objectContaining({ type: 'complete' })]),
-          );
-          expect(cm.execStreaming).toHaveBeenCalledTimes(2);
-          expect(ledger.state(nextPodId)).toMatchObject({
-            admissionCount: 2,
-            executedCount: 2,
-            latest: { retryKind: 'override', outcome: 'pass' },
-          });
-          expect(ledger.state(nextPodId).authorizations[0]?.usedByAttemptId).toBeTruthy();
-          expect(reopened.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
-          expect(reopened.pragma('foreign_key_check')).toEqual([]);
-        } finally {
-          if (db.open) db.close();
-          reopened?.close();
-          await rm(directory, { recursive: true, force: true });
-        }
-      },
-    );
-
-    it.each(['generation', 'binding', 'question', 'session', 'budget'] as const)(
-      'fences an inner recovery when %s changes during config preparation',
-      async (change) => {
+    it.each([
+      'root',
+      'fix',
+    ])('does not reset automatic interruption recovery after disk restart for %s', async (nextPodId) => {
+      const db = createTestDb();
+      insertTestProfile(db);
+      const repo = createPodRepository(db);
+      for (const [id, parent] of [
+        ['root', null],
+        ['fix', 'root'],
+      ] as const) {
+        repo.insert({
+          id,
+          profileName: 'test-profile',
+          task: 'Recover',
+          status: 'running',
+          model: 'model',
+          runtime: 'codex',
+          executionTarget: 'local',
+          branch: id,
+          userId: 'user',
+          maxValidationAttempts: 3,
+          skipValidation: false,
+          outputMode: 'pr',
+          linkedPodId: parent,
+        });
+        repo.update(id, { containerId: 'container-123', codexSessionId: `session-${id}` });
+      }
+      const interrupted = () => {
         const handle = createMockHandle();
         (handle.stdout as PassThrough).end(
           `${JSON.stringify({ id: 'abort', msg: { type: 'turn_aborted', reason: 'interrupted', turn_id: 'turn' } })}\n`,
         );
         (handle as StreamingExecResult & { finish(code: number): void }).finish(0);
-        const cm = createMockContainerManager(handle);
-        const repo = createMockPodRepo('session-123', { model: 'model', lifecycleGeneration: 1 });
-        const current = repo.getOrThrow('pod');
-        vi.mocked(repo.getOrThrow).mockImplementation(() => current);
-        let calls = 0;
-        // Local config preparation is the 0600 config upload; change state during the recovery's.
-        vi.mocked(cm.writeFile).mockImplementation(async () => {
-          calls++;
-          if (calls === 2) {
-            if (change === 'generation') current.lifecycleGeneration++;
-            if (change === 'binding') current.model = 'replacement';
-            if (change === 'question') current.status = 'awaiting_input';
-            if (change === 'session') current.codexSessionId = 'replacement-session';
-            if (change === 'budget')
-              repo.taskExecutions = {
-                snapshot: () => ({
-                  budgetCheck: { status: 'exhausted', reason: 'Task budget exhausted' },
-                }),
-              } as unknown as NonNullable<PodRepository['taskExecutions']>;
-          }
-        });
-        const events: AgentEvent[] = [];
-        for await (const event of new CodexRuntime(logger, cm, repo).spawn({
-          podId: 'pod',
-          task: 'Continue',
-          containerId: 'container-123',
-          model: 'model',
-          reasoningEffort: 'auto',
-          workDir: '/workspace',
-          env: {},
-          mcpServers: [{ name: 'synthetic', url: 'http://fixture.invalid' }],
-        }))
-          events.push(event);
-        expect(calls).toBe(2);
-        expect(cm.execStreaming).toHaveBeenCalledTimes(1);
-        expect(repo.codexInterruptionRetries?.start).not.toHaveBeenCalled();
-        expect(repo.codexInterruptionRetries?.finish).toHaveBeenCalledWith(
-          'recovery',
-          'cancelled',
-          null,
+        return handle;
+      };
+      const complete = () => {
+        const handle = createMockHandle();
+        (handle.stdout as PassThrough).end(
+          `${JSON.stringify({ id: 'complete', msg: { type: 'task_complete', turn_id: 'recovered', last_agent_message: 'Recovered' } })}\n`,
         );
+        (handle as StreamingExecResult & { finish(code: number): void }).finish(0);
+        return handle;
+      };
+      const cm = createMockContainerManager(interrupted());
+      vi.mocked(cm.execStreaming)
+        .mockResolvedValueOnce(interrupted())
+        .mockResolvedValueOnce(complete());
+      const collect = async (runtime: CodexRuntime, podId: string) => {
+        const events: AgentEvent[] = [];
+        for await (const event of runtime.resume(podId, 'Continue', 'container-123'))
+          events.push(event);
+        return events;
+      };
+      const directory = await mkdtemp(join(tmpdir(), 'codex-task-recovery-'));
+      let reopened: Database.Database | undefined;
+      try {
+        expect(await collect(new CodexRuntime(logger, cm, repo), 'root')).toEqual(
+          expect.arrayContaining([expect.objectContaining({ type: 'complete' })]),
+        );
+        expect(cm.execStreaming).toHaveBeenCalledTimes(2);
+        await writeFile(join(directory, 'state.db'), db.serialize());
+        db.close();
+        reopened = new Database(join(directory, 'state.db'));
+        const nextRepo = createPodRepository(reopened);
+        vi.mocked(cm.execStreaming)
+          .mockResolvedValueOnce(interrupted())
+          .mockResolvedValueOnce(complete());
+        const events = await collect(new CodexRuntime(logger, cm, nextRepo), nextPodId);
+        expect(cm.execStreaming).toHaveBeenCalledTimes(3);
         expect(events).toEqual(
-          expect.arrayContaining([expect.objectContaining({ type: 'error', fatal: true })]),
+          expect.arrayContaining([
+            expect.objectContaining({
+              type: 'error',
+              fatal: true,
+              message: expect.stringContaining('task-wide Codex interruption recovery'),
+            }),
+          ]),
         );
-      },
-    );
-    it.each([true, false])(
-      'requires verified kill before recovering an unobserved exit (verified=%s)',
-      async (verified) => {
-        const first = createMockHandle();
-        first.exitCode = Promise.reject(
-          new AutopodError('Unobserved exit', 'EXEC_EXIT_UNVERIFIED', 409),
+        const ledger = nextRepo.codexInterruptionRetries;
+        if (!ledger) throw new Error('Missing durable recovery ledger');
+        ledger.authorize(
+          nextPodId,
+          'extend-recovery',
+          'Inspected prior work and response before another inner recovery',
+          { type: 'human', userId: 'operator' },
         );
-        void first.exitCode.catch(() => {});
-        vi.mocked(first.kill).mockImplementation(async () => {
-          if (!verified) throw new Error('termination unverified');
+        vi.mocked(cm.execStreaming)
+          .mockReset()
+          .mockResolvedValueOnce(interrupted())
+          .mockResolvedValueOnce(complete());
+        expect(await collect(new CodexRuntime(logger, cm, nextRepo), nextPodId)).toEqual(
+          expect.arrayContaining([expect.objectContaining({ type: 'complete' })]),
+        );
+        expect(cm.execStreaming).toHaveBeenCalledTimes(2);
+        expect(ledger.state(nextPodId)).toMatchObject({
+          admissionCount: 2,
+          executedCount: 2,
+          latest: { retryKind: 'override', outcome: 'pass' },
         });
-        (first.stdout as PassThrough).end(
-          `${JSON.stringify({ id: 'abort', msg: { type: 'turn_aborted', reason: 'interrupted', turn_id: 't1' } })}\n`,
-        );
-        const second = createMockHandle();
-        (second.stdout as PassThrough).end(
-          `${JSON.stringify({ id: 'complete', msg: { type: 'task_complete', turn_id: 't2', last_agent_message: 'Recovered' } })}\n`,
-        );
-        (second as StreamingExecResult & { finish(code: number): void }).finish(0);
-        const cm = createMockContainerManager(first);
-        vi.mocked(cm.execStreaming).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
-        const repo = createMockPodRepo('session-123');
-        const events: AgentEvent[] = [];
-        for await (const event of new CodexRuntime(logger, cm, repo).resume(
-          'pod',
-          'Continue',
-          'container-123',
-        ))
-          events.push(event);
-        expect(first.kill).toHaveBeenCalledTimes(1);
-        expect(cm.execStreaming).toHaveBeenCalledTimes(verified ? 2 : 1);
-        if (verified)
-          expect(events).toEqual(
-            expect.arrayContaining([
-              expect.objectContaining({ type: 'complete', result: 'Recovered' }),
-            ]),
-          );
-        else {
-          expect(events).toEqual(
-            expect.arrayContaining([
-              expect.objectContaining({
-                type: 'error',
-                fatal: true,
-                message: expect.stringContaining('could not be terminated safely'),
+        expect(ledger.state(nextPodId).authorizations[0]?.usedByAttemptId).toBeTruthy();
+        expect(reopened.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }]);
+        expect(reopened.pragma('foreign_key_check')).toEqual([]);
+      } finally {
+        if (db.open) db.close();
+        reopened?.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it.each([
+      'generation',
+      'binding',
+      'question',
+      'session',
+      'budget',
+    ] as const)('fences an inner recovery when %s changes during config preparation', async (change) => {
+      const handle = createMockHandle();
+      (handle.stdout as PassThrough).end(
+        `${JSON.stringify({ id: 'abort', msg: { type: 'turn_aborted', reason: 'interrupted', turn_id: 'turn' } })}\n`,
+      );
+      (handle as StreamingExecResult & { finish(code: number): void }).finish(0);
+      const cm = createMockContainerManager(handle);
+      const repo = createMockPodRepo('session-123', { model: 'model', lifecycleGeneration: 1 });
+      const current = repo.getOrThrow('pod');
+      vi.mocked(repo.getOrThrow).mockImplementation(() => current);
+      let calls = 0;
+      // Local config preparation is the 0600 config upload; change state during the recovery's.
+      vi.mocked(cm.writeFile).mockImplementation(async () => {
+        calls++;
+        if (calls === 2) {
+          if (change === 'generation') current.lifecycleGeneration++;
+          if (change === 'binding') current.model = 'replacement';
+          if (change === 'question') current.status = 'awaiting_input';
+          if (change === 'session') current.codexSessionId = 'replacement-session';
+          if (change === 'budget')
+            repo.taskExecutions = {
+              snapshot: () => ({
+                budgetCheck: { status: 'exhausted', reason: 'Task budget exhausted' },
               }),
-            ]),
-          );
-          expect(repo.codexInterruptionRetries?.admit).not.toHaveBeenCalled();
+            } as unknown as NonNullable<PodRepository['taskExecutions']>;
         }
-      },
-    );
+      });
+      const events: AgentEvent[] = [];
+      for await (const event of new CodexRuntime(logger, cm, repo).spawn({
+        podId: 'pod',
+        task: 'Continue',
+        containerId: 'container-123',
+        model: 'model',
+        reasoningEffort: 'auto',
+        workDir: '/workspace',
+        env: {},
+        mcpServers: [{ name: 'synthetic', url: 'http://fixture.invalid' }],
+      }))
+        events.push(event);
+      expect(calls).toBe(2);
+      expect(cm.execStreaming).toHaveBeenCalledTimes(1);
+      expect(repo.codexInterruptionRetries?.start).not.toHaveBeenCalled();
+      expect(repo.codexInterruptionRetries?.finish).toHaveBeenCalledWith(
+        'recovery',
+        'cancelled',
+        null,
+      );
+      expect(events).toEqual(
+        expect.arrayContaining([expect.objectContaining({ type: 'error', fatal: true })]),
+      );
+    });
+    it.each([
+      true,
+      false,
+    ])('requires verified kill before recovering an unobserved exit (verified=%s)', async (verified) => {
+      const first = createMockHandle();
+      first.exitCode = Promise.reject(
+        new AutopodError('Unobserved exit', 'EXEC_EXIT_UNVERIFIED', 409),
+      );
+      void first.exitCode.catch(() => {});
+      vi.mocked(first.kill).mockImplementation(async () => {
+        if (!verified) throw new Error('termination unverified');
+      });
+      (first.stdout as PassThrough).end(
+        `${JSON.stringify({ id: 'abort', msg: { type: 'turn_aborted', reason: 'interrupted', turn_id: 't1' } })}\n`,
+      );
+      const second = createMockHandle();
+      (second.stdout as PassThrough).end(
+        `${JSON.stringify({ id: 'complete', msg: { type: 'task_complete', turn_id: 't2', last_agent_message: 'Recovered' } })}\n`,
+      );
+      (second as StreamingExecResult & { finish(code: number): void }).finish(0);
+      const cm = createMockContainerManager(first);
+      vi.mocked(cm.execStreaming).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+      const repo = createMockPodRepo('session-123');
+      const events: AgentEvent[] = [];
+      for await (const event of new CodexRuntime(logger, cm, repo).resume(
+        'pod',
+        'Continue',
+        'container-123',
+      ))
+        events.push(event);
+      expect(first.kill).toHaveBeenCalledTimes(1);
+      expect(cm.execStreaming).toHaveBeenCalledTimes(verified ? 2 : 1);
+      if (verified)
+        expect(events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: 'complete', result: 'Recovered' }),
+          ]),
+        );
+      else {
+        expect(events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              type: 'error',
+              fatal: true,
+              message: expect.stringContaining('could not be terminated safely'),
+            }),
+          ]),
+        );
+        expect(repo.codexInterruptionRetries?.admit).not.toHaveBeenCalled();
+      }
+    });
 
     it('automatically resumes one interrupted Codex turn', async () => {
       const firstHandle = createMockHandle();
@@ -3049,29 +3050,29 @@ describe('CodexRuntime', () => {
       expect(lastWrittenContent(cm)).not.toContain('model_provider =');
     });
 
-    it.each([undefined, 'sandbox'] as const)(
-      'routes Foundry Codex through the Azure v1 provider (target %s)',
-      async (target) => {
-        const handle = createMockHandle();
-        const cm = createMockContainerManager(handle);
-        const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+    it.each([
+      undefined,
+      'sandbox',
+    ] as const)('routes Foundry Codex through the Azure v1 provider (target %s)', async (target) => {
+      const handle = createMockHandle();
+      const cm = createMockContainerManager(handle);
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
 
-        await callWriteMcpConfig(runtime)('c1', [], target, undefined, {
-          AUTOPOD_CODEX_MODEL_PROVIDER: 'azure-foundry',
-          OPENAI_BASE_URL: 'https://res.services.ai.azure.com/openai/v1',
-          OPENAI_API_KEY_FILE: '/run/autopod/foundry-openai-key',
-        });
+      await callWriteMcpConfig(runtime)('c1', [], target, undefined, {
+        AUTOPOD_CODEX_MODEL_PROVIDER: 'azure-foundry',
+        OPENAI_BASE_URL: 'https://res.services.ai.azure.com/openai/v1',
+        OPENAI_API_KEY_FILE: '/run/autopod/foundry-openai-key',
+      });
 
-        const written = lastWrittenContent(cm);
-        expect(written).toContain('model_provider = "azure-foundry"');
-        expect(written).toContain('[model_providers.azure-foundry]');
-        expect(written).toContain('base_url = "https://res.services.ai.azure.com/openai/v1"');
-        expect(written).toContain('env_key = "OPENAI_API_KEY"');
-        expect(written).toContain('wire_api = "responses"');
-        expect(written).toContain('supports_websockets = false');
-        expect(written).not.toContain('chatgpt');
-      },
-    );
+      const written = lastWrittenContent(cm);
+      expect(written).toContain('model_provider = "azure-foundry"');
+      expect(written).toContain('[model_providers.azure-foundry]');
+      expect(written).toContain('base_url = "https://res.services.ai.azure.com/openai/v1"');
+      expect(written).toContain('env_key = "OPENAI_API_KEY"');
+      expect(written).toContain('wire_api = "responses"');
+      expect(written).toContain('supports_websockets = false');
+      expect(written).not.toContain('chatgpt');
+    });
 
     it('refuses a Foundry provider marker without a base URL', async () => {
       const handle = createMockHandle();
@@ -3240,22 +3241,21 @@ describe('CodexRuntime', () => {
       return (runtime as unknown as { writeMcpConfig: WriteConfig }).writeMcpConfig.bind(runtime);
     }
 
-    it.each(efforts)(
-      'writes exact %s effort without MCP servers and secures the file',
-      async (effort) => {
-        const cm = createMockContainerManager(createMockHandle());
-        const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
+    it.each(
+      efforts,
+    )('writes exact %s effort without MCP servers and secures the file', async (effort) => {
+      const cm = createMockContainerManager(createMockHandle());
+      const runtime = new CodexRuntime(logger, cm, createMockPodRepo());
 
-        await writer(runtime)('c1', [], undefined, effort);
+      await writer(runtime)('c1', [], undefined, effort);
 
-        expect(cm.writeFile).toHaveBeenCalledWith(
-          'c1',
-          '/home/autopod/.codex/config.toml',
-          `model_reasoning_effort = "${effort}"\n`,
-          { mode: 0o600 },
-        );
-      },
-    );
+      expect(cm.writeFile).toHaveBeenCalledWith(
+        'c1',
+        '/home/autopod/.codex/config.toml',
+        `model_reasoning_effort = "${effort}"\n`,
+        { mode: 0o600 },
+      );
+    });
 
     it('omits auto and does not create an empty config', async () => {
       const cm = createMockContainerManager(createMockHandle());

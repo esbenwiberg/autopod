@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { insertConfigurationTestPod } from '../test-utils/configuration-helpers.js';
 import { createTestDb } from '../test-utils/mock-helpers.js';
 import { GitHubDiscovery } from './discovery.js';
-import { type GitHubMutationClient, createGitHubMutationBroker } from './mutation-broker.js';
+import { createGitHubMutationBroker, type GitHubMutationClient } from './mutation-broker.js';
 import { createGitHubOperationLedger } from './operation-ledger.js';
 
 function fixture() {

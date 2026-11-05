@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   CLAUDE_DEFAULT_MODEL,
   CLAUDE_REVIEWER_MODEL,
-  MODEL_CANONICAL,
-  MODEL_PRICING,
   canonicalModelKey,
   computeCost,
   computeCostWithCache,
   effectiveCostUsd,
+  MODEL_CANONICAL,
+  MODEL_PRICING,
 } from './index.js';
 
 describe('MODEL_PRICING', () => {

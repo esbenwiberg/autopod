@@ -76,4 +76,5 @@ export interface DeviationsAssessment {
   /** Deviations the reviewer detected in the diff that were NOT disclosed by the agent */
   undisclosedDeviations: string[];
 }
+
 import type { FactEvidence } from './contract.js';

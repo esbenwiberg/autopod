@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { createControlOperationRegistry } from './control-operation-registry.js';
+
 it('keeps immutable validation evidence readable while mutations are fenced', async () => {
   const assertMutationAllowed = vi.fn(() => {
     throw new Error('Recovery owns mutation custody');

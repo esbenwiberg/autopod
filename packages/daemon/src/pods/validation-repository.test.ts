@@ -88,34 +88,36 @@ describe('ValidationRepository', () => {
     }
   });
 
-  it.each(['{broken', 'null', '[]', '42'])(
-    'leaves unsupported legacy validation payload %s untouched when attaching advisory evidence',
-    (legacy) => {
-      const db = setupDb();
-      try {
-        db.prepare(`INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
+  it.each([
+    '{broken',
+    'null',
+    '[]',
+    '42',
+  ])('leaves unsupported legacy validation payload %s untouched when attaching advisory evidence', (legacy) => {
+    const db = setupDb();
+    try {
+      db.prepare(`INSERT INTO pods (id, profile_name, task, model, runtime, branch, user_id)
           VALUES ('legacy-advisory', 'test-profile', 'test task', 'opus', 'claude', 'main', 'user-1')`).run();
-        const repo = createValidationRepository(db);
-        const record = repo.insert('legacy-advisory', 1, makeResult('legacy-advisory', 1));
-        db.prepare('UPDATE validations SET result = ? WHERE id = ?').run(legacy, record.id);
-        expect(repo.isLatestForPod('legacy-advisory', record.id)).toBe(true);
-        expect(
-          repo.updateAdvisoryResult('legacy-advisory', record.id, {
-            status: 'pass',
-            reasoning: 'No fabricated replacement',
-            observations: [],
-            screenshots: [],
-            durationMs: 10,
-          }),
-        ).toBe(false);
-        expect(db.prepare('SELECT result FROM validations WHERE id = ?').get(record.id)).toEqual({
-          result: legacy,
-        });
-      } finally {
-        db.close();
-      }
-    },
-  );
+      const repo = createValidationRepository(db);
+      const record = repo.insert('legacy-advisory', 1, makeResult('legacy-advisory', 1));
+      db.prepare('UPDATE validations SET result = ? WHERE id = ?').run(legacy, record.id);
+      expect(repo.isLatestForPod('legacy-advisory', record.id)).toBe(true);
+      expect(
+        repo.updateAdvisoryResult('legacy-advisory', record.id, {
+          status: 'pass',
+          reasoning: 'No fabricated replacement',
+          observations: [],
+          screenshots: [],
+          durationMs: 10,
+        }),
+      ).toBe(false);
+      expect(db.prepare('SELECT result FROM validations WHERE id = ?').get(record.id)).toEqual({
+        result: legacy,
+      });
+    } finally {
+      db.close();
+    }
+  });
 
   it('finds the latest prior review batch across intervening no-review attempts', () => {
     const db = setupDb();

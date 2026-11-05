@@ -11,6 +11,7 @@ import {
   redactedProfileSnapshot,
   resolvedReasoningEffort,
 } from './provider-attempt-policy.js';
+
 function fixture() {
   const db = createTestDb();
   insertTestProfile(db);
@@ -100,48 +101,55 @@ describe('provider attempt snapshot policy', () => {
     expect(reference).toMatch(/^pod:policy@profile-snapshot#[a-f0-9]{16}$/);
     expect(profileReferenceForAttempt(pod, { ...snapshot, name: 'changed' })).not.toBe(reference);
   });
-  it.each(['claude', 'codex', 'pi', 'copilot'] as const)(
-    'selects the %s native session',
-    (runtime) => {
-      const { pod } = fixture();
-      expect(
-        nativeSessionId({
-          ...pod,
-          runtime,
-          claudeSessionId: 'claude',
-          codexSessionId: 'codex',
-          piSessionId: 'pi',
-        }),
-      ).toBe(runtime === 'copilot' ? null : runtime);
-    },
-  );
-  it.each(['auto', 'low', 'medium', 'high', 'xhigh'] as const)(
-    'retains valid %s snapshot reasoning over defaults',
-    (effort) => {
-      const { profile } = fixture();
-      expect(reasoningEffortFromSnapshot({ reasoningEffort: effort })).toBe(effort);
-      expect(
-        resolvedReasoningEffort(
-          { ...profile, reasoningEffort: 'low' },
-          { reasoningEffort: effort },
-        ),
-      ).toBe(effort);
-    },
-  );
-  it.each([undefined, null, '', 'max', 3, false, {}])(
-    'falls back from invalid snapshot reasoning %j',
-    (effort) => {
-      const { profile } = fixture();
-      expect(reasoningEffortFromSnapshot({ reasoningEffort: effort })).toBeNull();
-      expect(
-        resolvedReasoningEffort(
-          { ...profile, reasoningEffort: 'medium' },
-          { reasoningEffort: effort },
-        ),
-      ).toBe('medium');
-      expect(
-        resolvedReasoningEffort({ ...profile, reasoningEffort: null as ReasoningEffort | null }),
-      ).toBe('auto');
-    },
-  );
+  it.each([
+    'claude',
+    'codex',
+    'pi',
+    'copilot',
+  ] as const)('selects the %s native session', (runtime) => {
+    const { pod } = fixture();
+    expect(
+      nativeSessionId({
+        ...pod,
+        runtime,
+        claudeSessionId: 'claude',
+        codexSessionId: 'codex',
+        piSessionId: 'pi',
+      }),
+    ).toBe(runtime === 'copilot' ? null : runtime);
+  });
+  it.each([
+    'auto',
+    'low',
+    'medium',
+    'high',
+    'xhigh',
+  ] as const)('retains valid %s snapshot reasoning over defaults', (effort) => {
+    const { profile } = fixture();
+    expect(reasoningEffortFromSnapshot({ reasoningEffort: effort })).toBe(effort);
+    expect(
+      resolvedReasoningEffort({ ...profile, reasoningEffort: 'low' }, { reasoningEffort: effort }),
+    ).toBe(effort);
+  });
+  it.each([
+    undefined,
+    null,
+    '',
+    'max',
+    3,
+    false,
+    {},
+  ])('falls back from invalid snapshot reasoning %j', (effort) => {
+    const { profile } = fixture();
+    expect(reasoningEffortFromSnapshot({ reasoningEffort: effort })).toBeNull();
+    expect(
+      resolvedReasoningEffort(
+        { ...profile, reasoningEffort: 'medium' },
+        { reasoningEffort: effort },
+      ),
+    ).toBe('medium');
+    expect(
+      resolvedReasoningEffort({ ...profile, reasoningEffort: null as ReasoningEffort | null }),
+    ).toBe('auto');
+  });
 });

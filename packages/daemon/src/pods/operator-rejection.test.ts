@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createPassingValidationResult } from '../test-utils/mock-helpers.js';
 import { createOperatorFixture } from '../test-utils/operator-helpers.js';
 import { AgentContinuationSupersededError } from './continuation-preflight.js';
+
 describe('operator rejection lifetime', () => {
   it('retains infrastructure reports and counters before any rejection rework or dispatch', async () => {
     const f = createOperatorFixture();

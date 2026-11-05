@@ -5,8 +5,8 @@ import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ContainerManager, ContainerSpawnConfig } from '../interfaces/container-manager.js';
 import {
-  type ManagedFixture,
   fixture,
+  type ManagedFixture,
   requestTimeFixture,
   resign,
 } from '../test-utils/managed-fixture.js';
@@ -14,10 +14,11 @@ import { MemoryArtifactStore } from './artifact-store.js';
 import { type BoundedProviderTransport, BoundedResponsesTransport } from './bounded-provider.js';
 import { digest } from './canonical.js';
 import {
+  composeManagedRuntime,
   type ManagedRuntimeCompositionConfig,
   type ManagedWorkerProviderChannel,
-  composeManagedRuntime,
 } from './runtime-composition.js';
+
 let f: ManagedFixture;
 let root: string;
 const instances: ReturnType<typeof composeManagedRuntime>[] = [];
@@ -194,50 +195,50 @@ it('advertises deterministic validation only for an explicitly reviewed binding'
   instances.push(result);
   expect(result.service.health().capabilities).toContain('managed-validation-v1');
 });
-it.each(['local', 'sandbox'] as const)(
-  'wires %s workspaces, bounded requests and quota; restart never reallocates',
-  async (target) => {
-    const x = setup(target);
-    const c = x.create(true);
-    const handle = await c.service.start('installation', x.request);
-    const volumes = x.ensure.mock.calls[0]![0].volumes!;
-    expect(volumes.find((v) => v.container === '/repositories/fixture-repo')?.readOnly).toBe(true);
+it.each([
+  'local',
+  'sandbox',
+] as const)('wires %s workspaces, bounded requests and quota; restart never reallocates', async (target) => {
+  const x = setup(target);
+  const c = x.create(true);
+  const handle = await c.service.start('installation', x.request);
+  const volumes = x.ensure.mock.calls[0]![0].volumes!;
+  expect(volumes.find((v) => v.container === '/repositories/fixture-repo')?.readOnly).toBe(true);
+  expect(
+    readFileSync(path.join(c.workspaces.path(handle.podId, 'fixture-repo'), 'README.md'), 'utf8'),
+  ).toBe('A frozen fact.\n');
+  expect(await x.attached().invoke('one', 'Read README', 100)).toEqual({
+    state: 'observed',
+    value: 'A frozen fact.',
+  });
+  expect(c.service.row('installation', handle.podId).consumed_tokens).toBe(30);
+  if (target === 'sandbox') {
+    expect(x.writeFile.mock.calls.some((call) => call[1].endsWith('/quota.json'))).toBe(true);
     expect(
-      readFileSync(path.join(c.workspaces.path(handle.podId, 'fixture-repo'), 'README.md'), 'utf8'),
-    ).toBe('A frozen fact.\n');
-    expect(await x.attached().invoke('one', 'Read README', 100)).toEqual({
-      state: 'observed',
-      value: 'A frozen fact.',
-    });
-    expect(c.service.row('installation', handle.podId).consumed_tokens).toBe(30);
-    if (target === 'sandbox') {
-      expect(x.writeFile.mock.calls.some((call) => call[1].endsWith('/quota.json'))).toBe(true);
-      expect(
-        x.exec.mock.calls.some((call) => call[1].some((arg) => arg.endsWith('/quota.json'))),
-      ).toBe(false);
-    } else {
-      expect(
-        x.exec.mock.calls.some((call) => call[1].some((arg) => arg.endsWith('/quota.json'))),
-      ).toBe(true);
-      expect(x.writeFile).not.toHaveBeenCalled();
-    }
-    expect(JSON.stringify(x.exec.mock.calls)).not.toContain('fixture-secret');
-    expect(JSON.stringify(x.ensure.mock.calls)).not.toContain('fixture-secret');
-    c.close();
-    f.restart();
-    const reopened = x.create(true);
-    await reopened.resume();
-    await reopened.resume();
-    expect(await x.attached().invoke('one', 'Read README', 100)).toEqual({
-      state: 'observed',
-      value: 'A frozen fact.',
-    });
-    expect(x.fetcher).toHaveBeenCalledTimes(2);
-    expect(x.ensure).toHaveBeenCalledTimes(1);
-    expect(x.channel.attach).toHaveBeenCalledTimes(2);
-    expect(readFileSync(path.join(x.mirror, 'README.md'), 'utf8')).toBe('A frozen fact.\n');
-  },
-);
+      x.exec.mock.calls.some((call) => call[1].some((arg) => arg.endsWith('/quota.json'))),
+    ).toBe(false);
+  } else {
+    expect(
+      x.exec.mock.calls.some((call) => call[1].some((arg) => arg.endsWith('/quota.json'))),
+    ).toBe(true);
+    expect(x.writeFile).not.toHaveBeenCalled();
+  }
+  expect(JSON.stringify(x.exec.mock.calls)).not.toContain('fixture-secret');
+  expect(JSON.stringify(x.ensure.mock.calls)).not.toContain('fixture-secret');
+  c.close();
+  f.restart();
+  const reopened = x.create(true);
+  await reopened.resume();
+  await reopened.resume();
+  expect(await x.attached().invoke('one', 'Read README', 100)).toEqual({
+    state: 'observed',
+    value: 'A frozen fact.',
+  });
+  expect(x.fetcher).toHaveBeenCalledTimes(2);
+  expect(x.ensure).toHaveBeenCalledTimes(1);
+  expect(x.channel.attach).toHaveBeenCalledTimes(2);
+  expect(readFileSync(path.join(x.mirror, 'README.md'), 'utf8')).toBe('A frozen fact.\n');
+});
 it('keeps the provider channel and skips the quota file for request-time workers', async () => {
   const x = setup('sandbox', 'chatgpt', 'request-time');
   const c = x.create(true);

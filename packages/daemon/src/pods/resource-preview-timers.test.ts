@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createResourceFixture } from '../test-utils/resource-helpers.js';
 import { createResourcePreviewTimers } from './resource-preview-timers.js';
+
 describe('preview timer ownership', () => {
   it('replaces and unrefs timers, stops the exact captured target once and leaves no timer', async () => {
     vi.useFakeTimers();

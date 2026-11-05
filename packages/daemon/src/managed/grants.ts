@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import {
   type ManagedPodRequest,
   type ProfileSnapshot,
-  type Scope,
   parseManagedRecord,
+  type Scope,
 } from '@autopod/shared';
 import { canonical, digest } from './canonical.js';
 

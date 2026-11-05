@@ -1,5 +1,5 @@
-import { RuntimeError } from '@autopod/shared';
 import type { Runtime } from '@autopod/shared';
+import { RuntimeError } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { createRuntimeRegistry } from './runtime-registry.js';
 

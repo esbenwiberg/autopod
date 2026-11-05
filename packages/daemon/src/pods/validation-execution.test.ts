@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { AutopodError } from '@autopod/shared';
 import type { TaskRetryIdentity, ValidationResult } from '@autopod/shared';
+import { AutopodError } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDatabase } from '../db/connection.js';
@@ -25,9 +25,9 @@ import { captureValidationRetryIdentity } from '../validation/retry-identity.js'
 import { createNudgeRepository } from './nudge-repository.js';
 import { createPodRepository } from './pod-repository.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
-import { createValidationExecutionRecovery } from './validation-execution-recovery.js';
 import { createValidationExecution } from './validation-execution.js';
-import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
+import { createValidationExecutionRecovery } from './validation-execution-recovery.js';
+import { captureValidationOwnership, ValidationSupersededError } from './validation-ownership.js';
 
 vi.mock('node:timers/promises', () => ({ setTimeout: vi.fn(() => Promise.resolve()) }));
 beforeEach(() => {
@@ -295,45 +295,45 @@ function fixture(sandbox = false) {
 }
 
 describe('validation execution durable effects', () => {
-  it.each(['pass', 'infra'] as const)(
-    'uses a retained outer-test allowance once, preserving frozen retry identity and the %s result',
-    async (kind) => {
-      const f = fixture();
-      try {
-        f.config.testTimeout = 900000;
-        vi.spyOn(f.repo.retainedCheckpoints!, 'testBudget').mockImplementation(() => ({
-          seconds: 1800,
-          frozenTimeoutSeconds: 900,
-          reason: 'One separately approved finite test allowance',
-          recoveryId: 'recovery',
-          used: f.ledger.state('worker').executedCount > 0,
-        }));
-        const inputs: number[] = [];
-        f.engine.mockImplementation(async (config) => {
-          inputs.push(config.outerTestTimeout!);
-          expect(config.testTimeout).toBe(900000);
-          return result(kind);
-        });
-        const captured: (number | undefined)[] = [];
-        f.capture.mockImplementation(async (config) => {
-          captured.push(config.testTimeout);
-          expect(config.outerTestTimeout).toBeUndefined();
-          return identity;
-        });
-        const value = await f.run();
-        expect(value.overall).toBe(kind === 'pass' ? 'pass' : 'fail');
-        expect(inputs).toEqual([1800000]);
-        expect(captured).toEqual([900000]);
-        expect(f.config.testTimeout).toBe(900000);
-        expect(f.config.outerTestTimeout).toBeUndefined();
-        expect(f.ledger.state('worker').executedCount).toBe(1);
-        await expect(f.run()).rejects.toThrow('no replay');
-        expect(f.engine).toHaveBeenCalledTimes(1);
-      } finally {
-        f.close();
-      }
-    },
-  );
+  it.each([
+    'pass',
+    'infra',
+  ] as const)('uses a retained outer-test allowance once, preserving frozen retry identity and the %s result', async (kind) => {
+    const f = fixture();
+    try {
+      f.config.testTimeout = 900000;
+      vi.spyOn(f.repo.retainedCheckpoints!, 'testBudget').mockImplementation(() => ({
+        seconds: 1800,
+        frozenTimeoutSeconds: 900,
+        reason: 'One separately approved finite test allowance',
+        recoveryId: 'recovery',
+        used: f.ledger.state('worker').executedCount > 0,
+      }));
+      const inputs: number[] = [];
+      f.engine.mockImplementation(async (config) => {
+        inputs.push(config.outerTestTimeout!);
+        expect(config.testTimeout).toBe(900000);
+        return result(kind);
+      });
+      const captured: (number | undefined)[] = [];
+      f.capture.mockImplementation(async (config) => {
+        captured.push(config.testTimeout);
+        expect(config.outerTestTimeout).toBeUndefined();
+        return identity;
+      });
+      const value = await f.run();
+      expect(value.overall).toBe(kind === 'pass' ? 'pass' : 'fail');
+      expect(inputs).toEqual([1800000]);
+      expect(captured).toEqual([900000]);
+      expect(f.config.testTimeout).toBe(900000);
+      expect(f.config.outerTestTimeout).toBeUndefined();
+      expect(f.ledger.state('worker').executedCount).toBe(1);
+      await expect(f.run()).rejects.toThrow('no replay');
+      expect(f.engine).toHaveBeenCalledTimes(1);
+    } finally {
+      f.close();
+    }
+  });
 
   it('does not treat a larger retained timeout as permission to repeat a nonretryable validation', async () => {
     const f = fixture();
@@ -554,92 +554,97 @@ describe('validation execution durable effects', () => {
     }
   });
 
-  it.each(['local', 'sandbox', 'fallback'] as const)(
-    'preserves container selection: %s',
-    async (target) => {
-      const f = fixture();
-      try {
-        f.config.executionTarget = target === 'fallback' ? undefined : target;
-        await f.run();
-        expect(f.containerFactory.get).toHaveBeenCalledWith(
-          target === 'sandbox' ? 'sandbox' : 'local',
-        );
-        expect(typeof f.config.captureEvidenceIdentity).toBe('function');
-        expect(f.cm.execInContainer).not.toHaveBeenCalled();
-      } finally {
-        f.close();
-      }
-    },
-  );
+  it.each([
+    'local',
+    'sandbox',
+    'fallback',
+  ] as const)('preserves container selection: %s', async (target) => {
+    const f = fixture();
+    try {
+      f.config.executionTarget = target === 'fallback' ? undefined : target;
+      await f.run();
+      expect(f.containerFactory.get).toHaveBeenCalledWith(
+        target === 'sandbox' ? 'sandbox' : 'local',
+      );
+      expect(typeof f.config.captureEvidenceIdentity).toBe('function');
+      expect(f.cm.execInContainer).not.toHaveBeenCalled();
+    } finally {
+      f.close();
+    }
+  });
 
-  it.each(['pass', 'fail', 'infra', 'review', 'throw', 'preflight', 'callbacks', 'abort'] as const)(
-    'persists the existing settlement for %s',
-    async (kind) => {
-      const f = fixture();
-      try {
-        f.retrySource.validationInfrastructureRetryBackoffMs = [];
-        const original = result(
-          kind === 'pass' || kind === 'abort'
+  it.each([
+    'pass',
+    'fail',
+    'infra',
+    'review',
+    'throw',
+    'preflight',
+    'callbacks',
+    'abort',
+  ] as const)('persists the existing settlement for %s', async (kind) => {
+    const f = fixture();
+    try {
+      f.retrySource.validationInfrastructureRetryBackoffMs = [];
+      const original = result(
+        kind === 'pass' || kind === 'abort'
+          ? 'pass'
+          : kind === 'infra'
+            ? 'infra'
+            : kind === 'review'
+              ? 'review'
+              : 'fail',
+      );
+      const fault = new Error(`synthetic-${kind}`);
+      f.engine.mockImplementationOnce(async () => {
+        if (kind === 'throw') throw fault;
+        if (kind === 'abort') f.controller.abort();
+        return original;
+      });
+      if (kind === 'preflight')
+        f.preflight.mockImplementationOnce(() => {
+          throw fault;
+        });
+      if (kind === 'callbacks')
+        f.owned.mockImplementationOnce(() => {
+          throw fault;
+        });
+      const out = await f.run('caller-specific log');
+      const converted = ['throw', 'preflight', 'callbacks'].includes(kind);
+      if (converted) {
+        expect(f.unexpected).toHaveBeenCalledWith('worker', 1, fault);
+        expect(out).toBe(f.unexpected.mock.results[0]?.value);
+        expect(f.errors).toHaveBeenCalledWith(
+          { err: fault, podId: 'worker', attempt: 1 },
+          'caller-specific log',
+        );
+      } else expect(out).toBe(original);
+      expect(f.engine).toHaveBeenCalledTimes(kind === 'preflight' || kind === 'callbacks' ? 0 : 1);
+      const settled =
+        kind === 'abort'
+          ? 'cancelled'
+          : kind === 'pass'
             ? 'pass'
-            : kind === 'infra'
-              ? 'infra'
-              : kind === 'review'
-                ? 'review'
-                : 'fail',
+            : kind === 'infra' || kind === 'review'
+              ? 'transient'
+              : 'nonretryable';
+      const stored = f.reopen();
+      expect(stored.state).toMatchObject({
+        admissionCount: 1,
+        executedCount: 1,
+        latest: { outcome: settled },
+      });
+      expect(stored.rows[0]?.started_at).not.toBeNull();
+      expect(stored.rows[0]?.measured_duration_ms).toBeGreaterThanOrEqual(0);
+      if (kind === 'review')
+        expect(f.activity).toHaveBeenCalledWith(
+          'worker',
+          'Review unavailable after one Review retry — needs human review',
         );
-        const fault = new Error(`synthetic-${kind}`);
-        f.engine.mockImplementationOnce(async () => {
-          if (kind === 'throw') throw fault;
-          if (kind === 'abort') f.controller.abort();
-          return original;
-        });
-        if (kind === 'preflight')
-          f.preflight.mockImplementationOnce(() => {
-            throw fault;
-          });
-        if (kind === 'callbacks')
-          f.owned.mockImplementationOnce(() => {
-            throw fault;
-          });
-        const out = await f.run('caller-specific log');
-        const converted = ['throw', 'preflight', 'callbacks'].includes(kind);
-        if (converted) {
-          expect(f.unexpected).toHaveBeenCalledWith('worker', 1, fault);
-          expect(out).toBe(f.unexpected.mock.results[0]?.value);
-          expect(f.errors).toHaveBeenCalledWith(
-            { err: fault, podId: 'worker', attempt: 1 },
-            'caller-specific log',
-          );
-        } else expect(out).toBe(original);
-        expect(f.engine).toHaveBeenCalledTimes(
-          kind === 'preflight' || kind === 'callbacks' ? 0 : 1,
-        );
-        const settled =
-          kind === 'abort'
-            ? 'cancelled'
-            : kind === 'pass'
-              ? 'pass'
-              : kind === 'infra' || kind === 'review'
-                ? 'transient'
-                : 'nonretryable';
-        const stored = f.reopen();
-        expect(stored.state).toMatchObject({
-          admissionCount: 1,
-          executedCount: 1,
-          latest: { outcome: settled },
-        });
-        expect(stored.rows[0]?.started_at).not.toBeNull();
-        expect(stored.rows[0]?.measured_duration_ms).toBeGreaterThanOrEqual(0);
-        if (kind === 'review')
-          expect(f.activity).toHaveBeenCalledWith(
-            'worker',
-            'Review unavailable after one Review retry — needs human review',
-          );
-      } finally {
-        f.close();
-      }
-    },
-  );
+    } finally {
+      f.close();
+    }
+  });
 
   it('persists transient then pass outcomes without changing the selected result identity', async () => {
     const f = fixture();
@@ -668,87 +673,89 @@ describe('validation execution durable effects', () => {
     }
   });
 
-  it.each([[], [0], [10], undefined])(
-    'pins the actual configured/default policy %s',
-    async (backoffs) => {
-      const f = fixture();
-      try {
-        f.retrySource.validationInfrastructureRetryBackoffMs = backoffs;
-        vi.useFakeTimers({ toFake: ['Date'] });
-        vi.mocked(sleep).mockImplementation(async (delay) => {
-          vi.setSystemTime(Date.now() + (typeof delay === 'number' ? delay : 0));
-        });
-        const failed = result('infra');
-        f.engine.mockResolvedValue(failed);
-        expect(await f.run()).toBe(failed);
-        const selected = backoffs ?? [1000, 5000];
-        expect(f.engine).toHaveBeenCalledTimes(1 + selected.length);
-        const stored = f.reopen();
-        expect(stored.state).toMatchObject({
-          backoffsMs: selected,
-          admissionCount: 1 + selected.length,
-          executedCount: 1 + selected.length,
-        });
-      } finally {
-        vi.useRealTimers();
-        f.close();
-      }
-    },
-  );
+  it.each([
+    [],
+    [0],
+    [10],
+    undefined,
+  ])('pins the actual configured/default policy %s', async (backoffs) => {
+    const f = fixture();
+    try {
+      f.retrySource.validationInfrastructureRetryBackoffMs = backoffs;
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.mocked(sleep).mockImplementation(async (delay) => {
+        vi.setSystemTime(Date.now() + (typeof delay === 'number' ? delay : 0));
+      });
+      const failed = result('infra');
+      f.engine.mockResolvedValue(failed);
+      expect(await f.run()).toBe(failed);
+      const selected = backoffs ?? [1000, 5000];
+      expect(f.engine).toHaveBeenCalledTimes(1 + selected.length);
+      const stored = f.reopen();
+      expect(stored.state).toMatchObject({
+        backoffsMs: selected,
+        admissionCount: 1 + selected.length,
+        executedCount: 1 + selected.length,
+      });
+    } finally {
+      vi.useRealTimers();
+      f.close();
+    }
+  });
 
-  it.each([[], [0], [5], undefined])(
-    'preserves no-ledger behavior for schedule %s',
-    async (backoffs) => {
-      const f = fixture();
-      try {
-        f.repo.taskRetries = undefined;
-        f.retrySource.validationInfrastructureRetryBackoffMs = backoffs;
-        const failed = result('infra');
-        f.engine.mockResolvedValue(failed);
-        expect(await f.run()).toBe(failed);
-        const selected = backoffs ?? [1000, 5000];
-        expect(f.engine).toHaveBeenCalledTimes(1 + selected.length);
-        expect(vi.mocked(sleep).mock.calls.map(([delay]) => delay)).toEqual(
-          selected.filter((n) => n > 0),
-        );
-        expect(f.capture).not.toHaveBeenCalled();
-        expect(f.admitted).not.toHaveBeenCalled();
-        expect(f.reopen().rows).toEqual([]);
-      } finally {
-        f.close();
-      }
-    },
-  );
+  it.each([
+    [],
+    [0],
+    [5],
+    undefined,
+  ])('preserves no-ledger behavior for schedule %s', async (backoffs) => {
+    const f = fixture();
+    try {
+      f.repo.taskRetries = undefined;
+      f.retrySource.validationInfrastructureRetryBackoffMs = backoffs;
+      const failed = result('infra');
+      f.engine.mockResolvedValue(failed);
+      expect(await f.run()).toBe(failed);
+      const selected = backoffs ?? [1000, 5000];
+      expect(f.engine).toHaveBeenCalledTimes(1 + selected.length);
+      expect(vi.mocked(sleep).mock.calls.map(([delay]) => delay)).toEqual(
+        selected.filter((n) => n > 0),
+      );
+      expect(f.capture).not.toHaveBeenCalled();
+      expect(f.admitted).not.toHaveBeenCalled();
+      expect(f.reopen().rows).toEqual([]);
+    } finally {
+      f.close();
+    }
+  });
 
-  it.each(['valid', 'unavailable'] as const)(
-    'uses the real retry identity fallback: %s',
-    async (probe) => {
-      const f = fixture();
-      try {
-        f.retrySource.captureRetryIdentity = undefined;
-        vi.mocked(f.cm.execInContainer).mockResolvedValueOnce({
-          exitCode: probe === 'valid' ? 0 : 1,
-          stdout:
-            probe === 'valid'
-              ? JSON.stringify({ source: 'e'.repeat(64), node: '22.23.3' })
-              : 'null',
-          stderr: '',
-        });
-        await f.run();
-        expect(f.capture).not.toHaveBeenCalled();
-        expect(f.cm.execInContainer).toHaveBeenCalledWith(
-          'execution-container',
-          ['node', '-e', expect.stringContaining('files.length > 100000')],
-          { cwd: '/workspace', timeout: 30000 },
-        );
-        expect(f.reopen().state.latest?.identity.source).toBe(
-          probe === 'valid' ? 'e'.repeat(64) : null,
-        );
-      } finally {
-        f.close();
-      }
-    },
-  );
+  it.each([
+    'valid',
+    'unavailable',
+  ] as const)('uses the real retry identity fallback: %s', async (probe) => {
+    const f = fixture();
+    try {
+      f.retrySource.captureRetryIdentity = undefined;
+      vi.mocked(f.cm.execInContainer).mockResolvedValueOnce({
+        exitCode: probe === 'valid' ? 0 : 1,
+        stdout:
+          probe === 'valid' ? JSON.stringify({ source: 'e'.repeat(64), node: '22.23.3' }) : 'null',
+        stderr: '',
+      });
+      await f.run();
+      expect(f.capture).not.toHaveBeenCalled();
+      expect(f.cm.execInContainer).toHaveBeenCalledWith(
+        'execution-container',
+        ['node', '-e', expect.stringContaining('files.length > 100000')],
+        { cwd: '/workspace', timeout: 30000 },
+      );
+      expect(f.reopen().state.latest?.identity.source).toBe(
+        probe === 'valid' ? 'e'.repeat(64) : null,
+      );
+    } finally {
+      f.close();
+    }
+  });
 
   it('reads the current optional capture callback after construction and each retry', async () => {
     const f = fixture();
@@ -816,47 +823,48 @@ describe('validation execution durable effects', () => {
     }
   });
 
-  it.each(['abort', 'replacement', 'stalled clock', 'early wake'] as const)(
-    'preserves persisted cooldown for %s',
-    async (mode) => {
-      const f = fixture();
-      try {
-        f.retrySource.validationInfrastructureRetryBackoffMs = [10];
-        vi.useFakeTimers({ toFake: ['Date'] });
-        let wakes = 0;
-        vi.mocked(sleep).mockImplementation(async (delay) => {
-          const ms = typeof delay === 'number' ? delay : 0;
-          if (mode === 'abort') f.controller.abort();
-          else if (mode === 'replacement') f.replace();
-          else if (mode === 'early wake')
-            vi.setSystemTime(Date.now() + ms - (wakes++ === 0 ? 1 : 0));
-        });
-        const failed = result('infra');
-        f.engine.mockResolvedValueOnce(failed).mockResolvedValueOnce(result());
-        if (mode === 'replacement')
-          await expect(f.run()).rejects.toBeInstanceOf(ValidationSupersededError);
-        else if (mode === 'early wake') expect((await f.run()).overall).toBe('pass');
-        else expect(await f.run()).toBe(failed);
-        expect(f.engine).toHaveBeenCalledTimes(mode === 'early wake' ? 2 : 1);
-        const stored = f.reopen();
-        expect(stored.state).toMatchObject({
-          admissionCount: 2,
-          executedCount: mode === 'early wake' ? 2 : 1,
-        });
-        expect(stored.rows[1]).toMatchObject(
-          mode === 'early wake'
-            ? { outcome: 'pass' }
-            : { outcome: 'cancelled', started_at: null, measured_duration_ms: null },
-        );
-        if (mode === 'early wake')
-          expect(vi.mocked(sleep).mock.calls.map(([delay]) => delay)).toEqual([10, 1]);
-        if (mode === 'stalled clock') expect(sleep).toHaveBeenCalledTimes(3);
-      } finally {
-        vi.useRealTimers();
-        f.close();
-      }
-    },
-  );
+  it.each([
+    'abort',
+    'replacement',
+    'stalled clock',
+    'early wake',
+  ] as const)('preserves persisted cooldown for %s', async (mode) => {
+    const f = fixture();
+    try {
+      f.retrySource.validationInfrastructureRetryBackoffMs = [10];
+      vi.useFakeTimers({ toFake: ['Date'] });
+      let wakes = 0;
+      vi.mocked(sleep).mockImplementation(async (delay) => {
+        const ms = typeof delay === 'number' ? delay : 0;
+        if (mode === 'abort') f.controller.abort();
+        else if (mode === 'replacement') f.replace();
+        else if (mode === 'early wake') vi.setSystemTime(Date.now() + ms - (wakes++ === 0 ? 1 : 0));
+      });
+      const failed = result('infra');
+      f.engine.mockResolvedValueOnce(failed).mockResolvedValueOnce(result());
+      if (mode === 'replacement')
+        await expect(f.run()).rejects.toBeInstanceOf(ValidationSupersededError);
+      else if (mode === 'early wake') expect((await f.run()).overall).toBe('pass');
+      else expect(await f.run()).toBe(failed);
+      expect(f.engine).toHaveBeenCalledTimes(mode === 'early wake' ? 2 : 1);
+      const stored = f.reopen();
+      expect(stored.state).toMatchObject({
+        admissionCount: 2,
+        executedCount: mode === 'early wake' ? 2 : 1,
+      });
+      expect(stored.rows[1]).toMatchObject(
+        mode === 'early wake'
+          ? { outcome: 'pass' }
+          : { outcome: 'cancelled', started_at: null, measured_duration_ms: null },
+      );
+      if (mode === 'early wake')
+        expect(vi.mocked(sleep).mock.calls.map(([delay]) => delay)).toEqual([10, 1]);
+      if (mode === 'stalled clock') expect(sleep).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+      f.close();
+    }
+  });
 
   it.each(
     (['provenance', 'identity', 'engine'] as const).flatMap((stage) =>
@@ -1004,23 +1012,23 @@ describe('validation execution durable effects', () => {
     }
   });
 
-  it.each(['replacement', 'invocation'] as const)(
-    'rejects initial stale %s ownership before container or ledger work',
-    async (mode) => {
-      const f = fixture();
-      try {
-        if (mode === 'replacement') f.replace();
-        else f.supersede();
-        await expect(f.run()).rejects.toBeInstanceOf(ValidationSupersededError);
-        expect(f.containerFactory.get).not.toHaveBeenCalled();
-        expect(f.provenance).not.toHaveBeenCalled();
-        expect(f.engine).not.toHaveBeenCalled();
-        expect(f.reopen().rows).toEqual([]);
-      } finally {
-        f.close();
-      }
-    },
-  );
+  it.each([
+    'replacement',
+    'invocation',
+  ] as const)('rejects initial stale %s ownership before container or ledger work', async (mode) => {
+    const f = fixture();
+    try {
+      if (mode === 'replacement') f.replace();
+      else f.supersede();
+      await expect(f.run()).rejects.toBeInstanceOf(ValidationSupersededError);
+      expect(f.containerFactory.get).not.toHaveBeenCalled();
+      expect(f.provenance).not.toHaveBeenCalled();
+      expect(f.engine).not.toHaveBeenCalled();
+      expect(f.reopen().rows).toEqual([]);
+    } finally {
+      f.close();
+    }
+  });
 
   it('propagates container selection failure before attaching a collector or admitting work', async () => {
     const f = fixture();
@@ -1063,64 +1071,65 @@ describe('validation execution durable effects', () => {
       f.close();
     }
   });
-  it.each(['AZURE_SANDBOX_EXEC_INVALID_RESPONSE', 'EXEC_EXIT_UNVERIFIED'])(
-    'never trusts a retryable flag on unknown termination (%s)',
-    async (code) => {
-      const f = fixture(true);
-      try {
-        const failed: ValidationResult = {
-          ...result('infra'),
-          infrastructureFailure: {
-            phase: 'test',
-            code,
-            message: 'No valid command exit',
-            retryable: true,
-          },
-        };
-        f.engine.mockResolvedValue(failed);
-        expect(await f.run()).toBe(failed);
-        expect(f.engine).toHaveBeenCalledOnce();
-        expect(f.capture).toHaveBeenCalledOnce();
-        expect(f.reopen().state).toMatchObject({
-          executedCount: 1,
-          latest: { outcome: 'nonretryable' },
-        });
-      } finally {
-        f.close();
-      }
-    },
-  );
+  it.each([
+    'AZURE_SANDBOX_EXEC_INVALID_RESPONSE',
+    'EXEC_EXIT_UNVERIFIED',
+  ])('never trusts a retryable flag on unknown termination (%s)', async (code) => {
+    const f = fixture(true);
+    try {
+      const failed: ValidationResult = {
+        ...result('infra'),
+        infrastructureFailure: {
+          phase: 'test',
+          code,
+          message: 'No valid command exit',
+          retryable: true,
+        },
+      };
+      f.engine.mockResolvedValue(failed);
+      expect(await f.run()).toBe(failed);
+      expect(f.engine).toHaveBeenCalledOnce();
+      expect(f.capture).toHaveBeenCalledOnce();
+      expect(f.reopen().state).toMatchObject({
+        executedCount: 1,
+        latest: { outcome: 'nonretryable' },
+      });
+    } finally {
+      f.close();
+    }
+  });
 
-  it.each(['confirmed', 'failed', 'unverified'] as const)(
-    'durably blocks repeated timeout after %s cleanup',
-    async (cleanup) => {
-      const f = fixture();
-      try {
-        const failed: ValidationResult = {
-          ...result('infra'),
-          test: { status: 'skip', duration: 600751, stdout: 'FAIL real test' },
-          infrastructureFailure: {
-            phase: 'test',
-            code: 'EXEC_EXIT_UNVERIFIED',
-            retryable: false,
-            message: 'Timeout; command exit is unverified',
-            execution: { cause: 'timeout', timeoutMs: 600_000, cleanup },
-          },
-        };
-        f.engine.mockResolvedValueOnce(failed);
-        expect(await f.run()).toBe(failed);
-        await expect(f.run()).rejects.toBeInstanceOf(TaskRetryBlockedError);
-        expect(f.engine).toHaveBeenCalledOnce();
-        expect(f.reopen().state).toMatchObject({
-          admissionCount: 1,
-          executedCount: 1,
-          latest: { outcome: 'nonretryable' },
-        });
-      } finally {
-        f.close();
-      }
-    },
-  );
+  it.each([
+    'confirmed',
+    'failed',
+    'unverified',
+  ] as const)('durably blocks repeated timeout after %s cleanup', async (cleanup) => {
+    const f = fixture();
+    try {
+      const failed: ValidationResult = {
+        ...result('infra'),
+        test: { status: 'skip', duration: 600751, stdout: 'FAIL real test' },
+        infrastructureFailure: {
+          phase: 'test',
+          code: 'EXEC_EXIT_UNVERIFIED',
+          retryable: false,
+          message: 'Timeout; command exit is unverified',
+          execution: { cause: 'timeout', timeoutMs: 600_000, cleanup },
+        },
+      };
+      f.engine.mockResolvedValueOnce(failed);
+      expect(await f.run()).toBe(failed);
+      await expect(f.run()).rejects.toBeInstanceOf(TaskRetryBlockedError);
+      expect(f.engine).toHaveBeenCalledOnce();
+      expect(f.reopen().state).toMatchObject({
+        admissionCount: 1,
+        executedCount: 1,
+        latest: { outcome: 'nonretryable' },
+      });
+    } finally {
+      f.close();
+    }
+  });
 
   it('retains the invocation ledger reference when its repository property changes during execution', async () => {
     const f = fixture();
@@ -1197,39 +1206,39 @@ describe('validation execution durable effects', () => {
       f.close();
     }
   });
-  it.each(['select-after-failure', 'revert-after-consumption'] as const)(
-    'timeout-only changes never grant a nonretryable replay: %s',
-    async (mode) => {
-      const f = fixture(true);
-      try {
-        const executions = f.repo.validationExecutions;
-        if (!executions) throw new Error('Missing execution ledger');
-        f.config.testTimeout = 600000;
-        f.capture.mockImplementation((config) => captureValidationRetryIdentity(f.cm, config));
-        const select = () =>
-          executions.authorizeBudget(f.repo.getOrThrow('worker'), 900, 'One measured bound only', {
-            type: 'human',
-            userId: 'operator',
-          });
-        f.repo.update('worker', { lastValidationResult: result('fail') });
-        if (mode === 'revert-after-consumption') select();
-        f.engine.mockResolvedValueOnce(result('fail'));
-        const failed = await f.run();
-        f.repo.update('worker', { lastValidationResult: failed });
-        if (mode === 'select-after-failure') select();
-        await expect(f.run()).rejects.toThrow();
-        expect(f.engine).toHaveBeenCalledOnce();
-        expect(f.ledger.state('worker')).toMatchObject({ executedCount: 1 });
-        expect(f.ledger.state('worker').authorizations).toHaveLength(0);
-        expect(executions.budgets('worker')[0]?.consumedByDispatchId === null).toBe(
-          mode === 'select-after-failure',
-        );
-        expect(f.config.testTimeout).toBe(600000);
-      } finally {
-        f.close();
-      }
-    },
-  );
+  it.each([
+    'select-after-failure',
+    'revert-after-consumption',
+  ] as const)('timeout-only changes never grant a nonretryable replay: %s', async (mode) => {
+    const f = fixture(true);
+    try {
+      const executions = f.repo.validationExecutions;
+      if (!executions) throw new Error('Missing execution ledger');
+      f.config.testTimeout = 600000;
+      f.capture.mockImplementation((config) => captureValidationRetryIdentity(f.cm, config));
+      const select = () =>
+        executions.authorizeBudget(f.repo.getOrThrow('worker'), 900, 'One measured bound only', {
+          type: 'human',
+          userId: 'operator',
+        });
+      f.repo.update('worker', { lastValidationResult: result('fail') });
+      if (mode === 'revert-after-consumption') select();
+      f.engine.mockResolvedValueOnce(result('fail'));
+      const failed = await f.run();
+      f.repo.update('worker', { lastValidationResult: failed });
+      if (mode === 'select-after-failure') select();
+      await expect(f.run()).rejects.toThrow();
+      expect(f.engine).toHaveBeenCalledOnce();
+      expect(f.ledger.state('worker')).toMatchObject({ executedCount: 1 });
+      expect(f.ledger.state('worker').authorizations).toHaveLength(0);
+      expect(executions.budgets('worker')[0]?.consumedByDispatchId === null).toBe(
+        mode === 'select-after-failure',
+      );
+      expect(f.config.testTimeout).toBe(600000);
+    } finally {
+      f.close();
+    }
+  });
 
   it('does not retain the consumed one-shot timeout when the same config object is reused', async () => {
     const f = fixture(true);

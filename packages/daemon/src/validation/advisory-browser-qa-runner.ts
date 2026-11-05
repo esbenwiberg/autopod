@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import type { ContentBlock, ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.js';
-import { CHROMIUM_LAUNCH_ARGS } from '@autopod/shared';
 import type {
   AdvisoryBrowserQaObservation,
   AdvisoryBrowserQaResult,
@@ -10,6 +9,7 @@ import type {
   ScreenshotRef,
   SpecContract,
 } from '@autopod/shared';
+import { CHROMIUM_LAUNCH_ARGS } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';

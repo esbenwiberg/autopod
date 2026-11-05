@@ -4,11 +4,10 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createDatabase } from '../db/connection.js';
 import { runMigrations, runMigrationsWithBackups } from '../db/migrate.js';
-import { logger } from '../test-utils/mock-helpers.js';
-import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
+import { createTestDb, insertTestProfile, logger } from '../test-utils/mock-helpers.js';
 import {
-  type ValidationInputIdentity,
   createValidationEvidenceCache,
+  type ValidationInputIdentity,
 } from './validation-evidence-cache.js';
 
 const identity: ValidationInputIdentity = {
@@ -31,39 +30,38 @@ function fixture() {
 }
 
 describe('exact-input validation evidence', () => {
-  it.each([139, 152])(
-    'upgrades schema %s and reuses immutable evidence after a real database close/reopen',
-    async (version) => {
-      const dir = mkdtempSync(join(tmpdir(), 'evidence-upgrade-'));
-      const migrations = new URL('../db/migrations', import.meta.url).pathname;
-      for (const file of readdirSync(migrations))
-        if (Number.parseInt(file, 10) <= version)
-          copyFileSync(join(migrations, file), join(dir, file));
-      let db = createDatabase(join(dir, 'test.db'), logger);
-      try {
-        runMigrations(db, dir, logger);
-        insertTestProfile(db);
-        db.prepare(`INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id)
+  it.each([
+    139, 152,
+  ])('upgrades schema %s and reuses immutable evidence after a real database close/reopen', async (version) => {
+    const dir = mkdtempSync(join(tmpdir(), 'evidence-upgrade-'));
+    const migrations = new URL('../db/migrations', import.meta.url).pathname;
+    for (const file of readdirSync(migrations))
+      if (Number.parseInt(file, 10) <= version)
+        copyFileSync(join(migrations, file), join(dir, file));
+    let db = createDatabase(join(dir, 'test.db'), logger);
+    try {
+      runMigrations(db, dir, logger);
+      insertTestProfile(db);
+      db.prepare(`INSERT INTO pods (id, profile_name, task, status, model, runtime, branch, user_id)
         VALUES ('original', 'test-profile', 'validate', 'validating', 'model', 'codex', 'branch', 'user')`).run();
-        await runMigrationsWithBackups(db, migrations, logger);
-        const receipt = createValidationEvidenceCache(db).record('original', 'test', identity, {
-          status: 'pass',
-          duration: 100,
-        });
-        db.close();
-        db = createDatabase(join(dir, 'test.db'), logger);
-        await runMigrationsWithBackups(db, migrations, logger);
-        expect(
-          createValidationEvidenceCache(db).get('test', identity)?.reusedEvidence.receiptId,
-        ).toBe(receipt);
-        expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
-        expect(db.pragma('foreign_key_check')).toEqual([]);
-      } finally {
-        db.close();
-        rmSync(dir, { recursive: true, force: true });
-      }
-    },
-  );
+      await runMigrationsWithBackups(db, migrations, logger);
+      const receipt = createValidationEvidenceCache(db).record('original', 'test', identity, {
+        status: 'pass',
+        duration: 100,
+      });
+      db.close();
+      db = createDatabase(join(dir, 'test.db'), logger);
+      await runMigrationsWithBackups(db, migrations, logger);
+      expect(
+        createValidationEvidenceCache(db).get('test', identity)?.reusedEvidence.receiptId,
+      ).toBe(receipt);
+      expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
+      expect(db.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   it('retains successful original evidence and exposes reuse separately from execution time', () => {
     const { db, cache } = fixture();

@@ -17,14 +17,15 @@ import { createTestConfiguration } from '../test-utils/configuration-helpers.js'
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
 import { createPodRepository } from './pod-repository.js';
 import {
+  createProviderAttemptContext,
   type ProviderAttemptCaptured,
   type ProviderAttemptLiveDependencies,
-  createProviderAttemptContext,
 } from './provider-attempt-context.js';
 import {
-  ProviderAttemptSupersededError,
   createProviderAttemptRepository,
+  ProviderAttemptSupersededError,
 } from './provider-attempt-repository.js';
+
 const cleanups: Array<() => void> = [];
 afterEach(() => {
   for (const cleanup of cleanups.splice(0).reverse()) cleanup();
@@ -205,24 +206,25 @@ describe('provider attempt context', () => {
     expect(calls).toEqual([replacement]);
     expect(f.repo.list(f.pod().id)).toHaveLength(1);
   });
-  it.each(['wrong-token', 'not-current', 'wrong-ordinal'] as const)(
-    'fences rotation by %s before any history write',
-    (mode) => {
-      const f = fixture();
-      const token = Symbol('owner');
-      const first = f.context.ensureProviderAttempt(f.pod(), f.profile());
-      f.activeAgentRuns.set('context', {
-        token: mode === 'wrong-token' ? Symbol('other') : token,
-        providerOrdinal: mode === 'wrong-ordinal' ? 99 : first?.ordinal,
-        isCurrent: () => mode !== 'not-current',
-      });
-      const before = f.repo.listRaw('context');
-      expect(() =>
-        f.context.rotateProviderAttemptForFreshSegment(f.pod(), f.profile(), true, token),
-      ).toThrow(ProviderAttemptSupersededError);
-      expect(f.repo.listRaw('context')).toEqual(before);
-    },
-  );
+  it.each([
+    'wrong-token',
+    'not-current',
+    'wrong-ordinal',
+  ] as const)('fences rotation by %s before any history write', (mode) => {
+    const f = fixture();
+    const token = Symbol('owner');
+    const first = f.context.ensureProviderAttempt(f.pod(), f.profile());
+    f.activeAgentRuns.set('context', {
+      token: mode === 'wrong-token' ? Symbol('other') : token,
+      providerOrdinal: mode === 'wrong-ordinal' ? 99 : first?.ordinal,
+      isCurrent: () => mode !== 'not-current',
+    });
+    const before = f.repo.listRaw('context');
+    expect(() =>
+      f.context.rotateProviderAttemptForFreshSegment(f.pod(), f.profile(), true, token),
+    ).toThrow(ProviderAttemptSupersededError);
+    expect(f.repo.listRaw('context')).toEqual(before);
+  });
   it('rotates by closing the old segment first and updates the same run owner object', () => {
     const f = fixture();
     const token = Symbol('owner');
@@ -526,85 +528,84 @@ describe('provider attempt context', () => {
       expect.objectContaining({ code: 'PROVIDER_BINDING_MISMATCH' }),
     );
   });
-  it.each(['legacy-close', 'target-snapshot', 'stale-rotation'] as const)(
-    'persists %s through a private encrypted SQLite close/reopen',
-    (scenario) => {
-      const f = fixture(true);
-      const p = f.pod();
-      const profile = f.profile();
-      const accountBefore = f.accounts.list();
-      const profileBefore = f.profile();
-      if (scenario === 'legacy-close') {
-        f.context.ensureProviderAttempt(
-          { ...p, inputTokens: 20, outputTokens: 5, costUsd: 0.4, claudeSessionId: 'legacy' },
-          profile,
-        );
-        f.repo.updateActive(p.id, {
-          nativeSessionId: 'new',
-          inputTokens: 3,
-          outputTokens: 2,
-          costUsd: 0.1,
-        });
-        f.podRepo.update(p.id, { claudeSessionId: 'new' });
-        f.context.closeProviderAttempt(p.id, 'completed', null, null, 2);
-        expect(f.repo.listRaw(p.id)).toMatchObject([
-          { ordinal: 1, outcome: 'completed', inputTokens: 20, nativeSessionId: 'legacy' },
-          { ordinal: 2, outcome: 'completed', inputTokens: 3, nativeSessionId: 'new' },
-        ]);
-        expect(f.repo.totals(p.id)).toEqual({ inputTokens: 23, outputTokens: 7, costUsd: 0.5 });
-      } else if (scenario === 'target-snapshot') {
-        f.podRepo.update(p.id, { profileSnapshot: { ...profile, reasoningEffort: 'xhigh' } });
-        f.context.openProviderTargetAttempt(f.pod(), target);
-        expect(f.repo.getActive(p.id)).toMatchObject({
-          ordinal: 1,
-          provider: 'openai',
-          runtime: 'codex',
-          model: 'gpt-5',
-          providerAccountId: 'backup',
-        });
-        expect(f.repo.getActiveProfileSnapshot(p.id)).toMatchObject({
-          reasoningEffort: 'xhigh',
-          providerCredentials: null,
-          defaultRuntime: 'codex',
-          defaultModel: 'gpt-5',
-        });
-      } else {
-        f.context.ensureProviderAttempt(p, profile);
-        f.context.rotateProviderAttemptForFreshSegment(p, profile, true);
-        const before = f.repo.listRaw(p.id);
-        expect(() => f.context.closeProviderAttempt(p.id, 'failed', null, null, 1)).toThrow(
-          ProviderAttemptSupersededError,
-        );
-        expect(f.repo.listRaw(p.id)).toEqual(before);
-      }
-      const history = f.repo.listRaw(p.id);
-      const activeSnapshot = f.repo.getActiveProfileSnapshot(p.id);
-      const totals = f.repo.totals(p.id);
-      const rawAccounts = f.db.prepare('SELECT * FROM provider_accounts ORDER BY id').all();
-      expect(JSON.stringify(rawAccounts)).not.toContain('synthetic-main');
-      const reopened = f.reopen();
-      expect(reopened.repo.listRaw(p.id)).toEqual(history);
-      expect(reopened.repo.totals(p.id)).toEqual(totals);
-      expect(reopened.repo.getActiveProfileSnapshot(p.id)).toEqual(activeSnapshot);
-      expect(reopened.accounts.list()).toEqual(accountBefore);
-      expect(reopened.profiles.get('test-profile')).toEqual(profileBefore);
-      expect(f.db.prepare('SELECT * FROM provider_accounts ORDER BY id').all()).toEqual(
-        rawAccounts,
+  it.each([
+    'legacy-close',
+    'target-snapshot',
+    'stale-rotation',
+  ] as const)('persists %s through a private encrypted SQLite close/reopen', (scenario) => {
+    const f = fixture(true);
+    const p = f.pod();
+    const profile = f.profile();
+    const accountBefore = f.accounts.list();
+    const profileBefore = f.profile();
+    if (scenario === 'legacy-close') {
+      f.context.ensureProviderAttempt(
+        { ...p, inputTokens: 20, outputTokens: 5, costUsd: 0.4, claudeSessionId: 'legacy' },
+        profile,
       );
-      if (scenario === 'stale-rotation') {
-        const live = { providerAttemptRepo: reopened.repo };
-        const c = createProviderAttemptContext(live, {
-          ...f.captured,
-          podRepo: reopened.pods,
-          providerAccountStore: reopened.accounts,
-          profileStore: reopened.profiles,
-          executionForPod: () => reopened.profiles.get('test-profile'),
-        });
-        expect(() => c.closeProviderAttempt(p.id, 'failed', null, null, 1)).toThrow(
-          ProviderAttemptSupersededError,
-        );
-        expect(reopened.repo.listRaw(p.id)).toEqual(history);
-      }
-    },
-  );
+      f.repo.updateActive(p.id, {
+        nativeSessionId: 'new',
+        inputTokens: 3,
+        outputTokens: 2,
+        costUsd: 0.1,
+      });
+      f.podRepo.update(p.id, { claudeSessionId: 'new' });
+      f.context.closeProviderAttempt(p.id, 'completed', null, null, 2);
+      expect(f.repo.listRaw(p.id)).toMatchObject([
+        { ordinal: 1, outcome: 'completed', inputTokens: 20, nativeSessionId: 'legacy' },
+        { ordinal: 2, outcome: 'completed', inputTokens: 3, nativeSessionId: 'new' },
+      ]);
+      expect(f.repo.totals(p.id)).toEqual({ inputTokens: 23, outputTokens: 7, costUsd: 0.5 });
+    } else if (scenario === 'target-snapshot') {
+      f.podRepo.update(p.id, { profileSnapshot: { ...profile, reasoningEffort: 'xhigh' } });
+      f.context.openProviderTargetAttempt(f.pod(), target);
+      expect(f.repo.getActive(p.id)).toMatchObject({
+        ordinal: 1,
+        provider: 'openai',
+        runtime: 'codex',
+        model: 'gpt-5',
+        providerAccountId: 'backup',
+      });
+      expect(f.repo.getActiveProfileSnapshot(p.id)).toMatchObject({
+        reasoningEffort: 'xhigh',
+        providerCredentials: null,
+        defaultRuntime: 'codex',
+        defaultModel: 'gpt-5',
+      });
+    } else {
+      f.context.ensureProviderAttempt(p, profile);
+      f.context.rotateProviderAttemptForFreshSegment(p, profile, true);
+      const before = f.repo.listRaw(p.id);
+      expect(() => f.context.closeProviderAttempt(p.id, 'failed', null, null, 1)).toThrow(
+        ProviderAttemptSupersededError,
+      );
+      expect(f.repo.listRaw(p.id)).toEqual(before);
+    }
+    const history = f.repo.listRaw(p.id);
+    const activeSnapshot = f.repo.getActiveProfileSnapshot(p.id);
+    const totals = f.repo.totals(p.id);
+    const rawAccounts = f.db.prepare('SELECT * FROM provider_accounts ORDER BY id').all();
+    expect(JSON.stringify(rawAccounts)).not.toContain('synthetic-main');
+    const reopened = f.reopen();
+    expect(reopened.repo.listRaw(p.id)).toEqual(history);
+    expect(reopened.repo.totals(p.id)).toEqual(totals);
+    expect(reopened.repo.getActiveProfileSnapshot(p.id)).toEqual(activeSnapshot);
+    expect(reopened.accounts.list()).toEqual(accountBefore);
+    expect(reopened.profiles.get('test-profile')).toEqual(profileBefore);
+    expect(f.db.prepare('SELECT * FROM provider_accounts ORDER BY id').all()).toEqual(rawAccounts);
+    if (scenario === 'stale-rotation') {
+      const live = { providerAttemptRepo: reopened.repo };
+      const c = createProviderAttemptContext(live, {
+        ...f.captured,
+        podRepo: reopened.pods,
+        providerAccountStore: reopened.accounts,
+        profileStore: reopened.profiles,
+        executionForPod: () => reopened.profiles.get('test-profile'),
+      });
+      expect(() => c.closeProviderAttempt(p.id, 'failed', null, null, 1)).toThrow(
+        ProviderAttemptSupersededError,
+      );
+      expect(reopened.repo.listRaw(p.id)).toEqual(history);
+    }
+  });
 });

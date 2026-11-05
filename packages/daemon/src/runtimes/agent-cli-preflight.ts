@@ -1,4 +1,4 @@
-import { AutopodError, type RuntimeType, processContent } from '@autopod/shared';
+import { AutopodError, processContent, type RuntimeType } from '@autopod/shared';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 
 const cliByRuntime: Record<RuntimeType, string> = {

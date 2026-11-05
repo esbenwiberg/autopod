@@ -1,4 +1,4 @@
-import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { AutopodError, type Pod } from '@autopod/shared';
 import type { FastifyInstance } from 'fastify';

@@ -130,23 +130,24 @@ describe('source-verified external delivery before sandbox preservation', () => 
         ),
     ).toHaveLength(1);
   });
-  it.each(['repository', 'branch', 'baseBranch'] as const)(
-    'rejects another %s before wakeup',
-    async (field) => {
-      const f = fixture();
-      f.provider.getPrStatus.mockResolvedValue({
-        ...f.status,
-        sourceTarget: {
-          ...f.target,
-          [field]: field === 'repository' ? 'https://github.com/other/repo' : 'other',
-        },
-      });
-      await expect(f.approve()).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
-      expect(f.pod().status).toBe('validated');
-      expect(f.podRepo.externalDeliveries?.get('prepare')).toBeNull();
-      noMutation(f);
-    },
-  );
+  it.each([
+    'repository',
+    'branch',
+    'baseBranch',
+  ] as const)('rejects another %s before wakeup', async (field) => {
+    const f = fixture();
+    f.provider.getPrStatus.mockResolvedValue({
+      ...f.status,
+      sourceTarget: {
+        ...f.target,
+        [field]: field === 'repository' ? 'https://github.com/other/repo' : 'other',
+      },
+    });
+    await expect(f.approve()).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+    expect(f.pod().status).toBe('validated');
+    expect(f.podRepo.externalDeliveries?.get('prepare')).toBeNull();
+    noMutation(f);
+  });
   it.each([
     'dirty',
     'different-head',
@@ -177,16 +178,16 @@ describe('source-verified external delivery before sandbox preservation', () => 
     await expect(f.approve()).rejects.toThrow('Provider unavailable');
     noMutation(f);
   });
-  it.each(['deleted', 'unknown'] as const)(
-    'does not claim a %s sandbox was retained',
-    async (state) => {
-      const f = fixture();
-      vi.mocked(f.cm.getStatus).mockResolvedValue(state);
-      await expect(f.approve()).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
-      expect(f.podRepo.externalDeliveries?.get('prepare')).toBeNull();
-      noMutation(f);
-    },
-  );
+  it.each([
+    'deleted',
+    'unknown',
+  ] as const)('does not claim a %s sandbox was retained', async (state) => {
+    const f = fixture();
+    vi.mocked(f.cm.getStatus).mockResolvedValue(state);
+    await expect(f.approve()).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+    expect(f.podRepo.externalDeliveries?.get('prepare')).toBeNull();
+    noMutation(f);
+  });
 
   it('records public repository identity without embedded legacy credentials', async () => {
     const f = fixture();
@@ -206,26 +207,27 @@ describe('source-verified external delivery before sandbox preservation', () => 
     ).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
     noMutation(f);
   });
-  it.each(['generation', 'pr', 'validation'] as const)(
-    'fences a changed %s during provider observation',
-    async (change) => {
-      const f = fixture();
-      f.provider.getPrStatus.mockImplementation(async () => {
-        if (change === 'generation') f.podRepo.incrementLifecycleGeneration('prepare');
-        if (change === 'pr')
-          f.podRepo.update('prepare', { prUrl: 'https://github.com/org/repo/pull/99' });
-        if (change === 'validation') {
-          const previous = f.pod().lastValidationResult;
-          if (!previous) throw new Error('Missing validation fixture');
-          f.podRepo.update('prepare', { lastValidationResult: { ...previous, overall: 'fail' } });
-        }
-        return f.status;
-      });
-      await expect(f.approve()).rejects.toThrow();
-      expect(f.podRepo.externalDeliveries?.get('prepare')).toBeNull();
-      noMutation(f);
-    },
-  );
+  it.each([
+    'generation',
+    'pr',
+    'validation',
+  ] as const)('fences a changed %s during provider observation', async (change) => {
+    const f = fixture();
+    f.provider.getPrStatus.mockImplementation(async () => {
+      if (change === 'generation') f.podRepo.incrementLifecycleGeneration('prepare');
+      if (change === 'pr')
+        f.podRepo.update('prepare', { prUrl: 'https://github.com/org/repo/pull/99' });
+      if (change === 'validation') {
+        const previous = f.pod().lastValidationResult;
+        if (!previous) throw new Error('Missing validation fixture');
+        f.podRepo.update('prepare', { lastValidationResult: { ...previous, overall: 'fail' } });
+      }
+      return f.status;
+    });
+    await expect(f.approve()).rejects.toThrow();
+    expect(f.podRepo.externalDeliveries?.get('prepare')).toBeNull();
+    noMutation(f);
+  });
   it('rolls back observation, approval and all status changes when settlement fails', async () => {
     const f = fixture();
     const transition = f.captured.transition;

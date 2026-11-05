@@ -2,8 +2,8 @@ import path from 'node:path';
 import type { OperatorActor } from '@autopod/shared';
 import { vi } from 'vitest';
 import {
-  type SourceAdoptionControllerDependencies,
   createSourceAdoptionController,
+  type SourceAdoptionControllerDependencies,
 } from '../pods/source-adoption-controller.js';
 import {
   applyPinnedAdoption,

@@ -73,22 +73,22 @@ describe('authenticated durable source recovery API', () => {
     expect(s.cm.getResourceKey).not.toHaveBeenCalled();
     expect(s.f.db.prepare('SELECT total_changes() AS n').get()).toEqual(before);
   });
-  it.each([undefined, 'Bearer worker-hmac-token'])(
-    'refuses missing or worker credentials before any source read/mutation (%s)',
-    async (authorization) => {
-      for (const method of ['GET', 'POST'] as const) {
-        const response = await app.inject({
-          method,
-          url: url(),
-          headers: authorization ? { authorization } : {},
-          ...(method === 'POST' ? { payload: s.input } : {}),
-        });
-        expect(response.statusCode).toBe(401);
-      }
-      expect(s.cm.getResourceKey).not.toHaveBeenCalled();
-      expect(s.cm.execStreaming).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    undefined,
+    'Bearer worker-hmac-token',
+  ])('refuses missing or worker credentials before any source read/mutation (%s)', async (authorization) => {
+    for (const method of ['GET', 'POST'] as const) {
+      const response = await app.inject({
+        method,
+        url: url(),
+        headers: authorization ? { authorization } : {},
+        ...(method === 'POST' ? { payload: s.input } : {}),
+      });
+      expect(response.statusCode).toBe(401);
+    }
+    expect(s.cm.getResourceKey).not.toHaveBeenCalled();
+    expect(s.cm.execStreaming).not.toHaveBeenCalled();
+  });
   it.each([
     { actor: { type: 'human', userId: 'spoof' } },
     { worktreePath: '/somewhere' },

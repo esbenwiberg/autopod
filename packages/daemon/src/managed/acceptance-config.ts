@@ -7,7 +7,7 @@ import type { ArtifactStore } from './artifact-store.js';
 import type { managedComponents } from './bootstrap.js';
 import { canonical } from './canonical.js';
 import { type ChatGptCredential, ChatGptReportTransport } from './chatgpt-provider.js';
-import { type ManagedCliConfig, createManagedArtifactStore } from './cli-config.js';
+import { createManagedArtifactStore, type ManagedCliConfig } from './cli-config.js';
 import { ContainerCodexChannel, codexReportCommand } from './codex-channel.js';
 import { REQUIRED_ENFORCEMENT, validateManagedRequest } from './grants.js';
 import { composeManagedRuntime } from './runtime-composition.js';

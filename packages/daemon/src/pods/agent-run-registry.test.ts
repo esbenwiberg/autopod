@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createAgentRunRegistry } from './agent-run-registry.js';
+
 describe('agent run registry', () => {
   it('isolates owner instances and exposes the original mutable map references', () => {
     const a = createAgentRunRegistry();

@@ -72,35 +72,32 @@ describe('ordinary sandbox approval report preservation', () => {
     ['validation', 'branch'],
     ['revalidation', 'pr'],
     ['revalidation', 'branch'],
-  ] as const)(
-    '%s (%s) saves reports before stop; approval never wakes/export again',
-    async (kind, output) => {
-      const f = fixture();
-      f.podRepo.update('prepare', { options: { ...f.pod().options, output } });
-      await f.passValidation(kind === 'revalidation');
-      const snapshot = f.pod().artifactsPath;
-      expect(snapshot).toBeTruthy();
-      expect(readFileSync(join(required(snapshot), 'ignored-report.txt'), 'utf8')).toContain(
-        'private validation',
-      );
-      expect(JSON.parse(readFileSync(`${snapshot}.receipt.json`, 'utf8')).approvalBinding).toMatch(
-        /^[a-f0-9]{64}$/,
-      );
-      expect(f.cm.extractDirectoryFromContainer).toHaveBeenCalledOnce();
-      expect(
-        vi.mocked(f.cm.extractDirectoryFromContainer).mock.invocationCallOrder[0],
-      ).toBeLessThan(required(vi.mocked(f.cm.stop).mock.invocationCallOrder[0]));
-      // Model the incident: this stopped sandbox cannot safely be woken again.
-      vi.mocked(f.cm.extractDirectoryFromContainer).mockRejectedValue(
-        new Error('resume outcome unknown'),
-      );
-      await f.workflow().approveSession('prepare');
-      expect(f.cm.extractDirectoryFromContainer).toHaveBeenCalledOnce();
-      expect(f.cm.start).not.toHaveBeenCalled();
-      expect(f.pod().status).toBe('complete');
-      expect(f.pod().artifactsPath).toBe(snapshot);
-    },
-  );
+  ] as const)('%s (%s) saves reports before stop; approval never wakes/export again', async (kind, output) => {
+    const f = fixture();
+    f.podRepo.update('prepare', { options: { ...f.pod().options, output } });
+    await f.passValidation(kind === 'revalidation');
+    const snapshot = f.pod().artifactsPath;
+    expect(snapshot).toBeTruthy();
+    expect(readFileSync(join(required(snapshot), 'ignored-report.txt'), 'utf8')).toContain(
+      'private validation',
+    );
+    expect(JSON.parse(readFileSync(`${snapshot}.receipt.json`, 'utf8')).approvalBinding).toMatch(
+      /^[a-f0-9]{64}$/,
+    );
+    expect(f.cm.extractDirectoryFromContainer).toHaveBeenCalledOnce();
+    expect(vi.mocked(f.cm.extractDirectoryFromContainer).mock.invocationCallOrder[0]).toBeLessThan(
+      required(vi.mocked(f.cm.stop).mock.invocationCallOrder[0]),
+    );
+    // Model the incident: this stopped sandbox cannot safely be woken again.
+    vi.mocked(f.cm.extractDirectoryFromContainer).mockRejectedValue(
+      new Error('resume outcome unknown'),
+    );
+    await f.workflow().approveSession('prepare');
+    expect(f.cm.extractDirectoryFromContainer).toHaveBeenCalledOnce();
+    expect(f.cm.start).not.toHaveBeenCalled();
+    expect(f.pod().status).toBe('complete');
+    expect(f.pod().artifactsPath).toBe(snapshot);
+  });
 
   it('auto-approval reuses the snapshot after stop', async () => {
     const f = fixture();
@@ -204,27 +201,25 @@ describe('ordinary sandbox approval report preservation', () => {
     expect(f.cm.extractDirectoryFromContainer).toHaveBeenCalledOnce();
   });
 
-  it.each(['validation', 'revalidation'])(
-    '%s preservation failure retains the running sandbox and prevents auto-approval',
-    async (kind) => {
-      const f = fixture();
-      f.podRepo.update('prepare', { autoApprove: true });
-      vi.mocked(f.cm.extractDirectoryFromContainer).mockRejectedValueOnce(
-        new Error('export failed'),
-      );
-      await f.passValidation(kind === 'revalidation');
-      await new Promise((resolve) => setImmediate(resolve));
-      expect(f.pod()).toMatchObject({
-        status: 'validated',
-        containerId: 'container-123',
-        artifactsPath: null,
-      });
-      expect(f.pod().failureReason).toContain('reports could not be preserved before stop');
-      expect(f.cm.stop).not.toHaveBeenCalled();
-      expect(f.cm.kill).not.toHaveBeenCalled();
-      expect(f.calls.approveSession).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'validation',
+    'revalidation',
+  ])('%s preservation failure retains the running sandbox and prevents auto-approval', async (kind) => {
+    const f = fixture();
+    f.podRepo.update('prepare', { autoApprove: true });
+    vi.mocked(f.cm.extractDirectoryFromContainer).mockRejectedValueOnce(new Error('export failed'));
+    await f.passValidation(kind === 'revalidation');
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(f.pod()).toMatchObject({
+      status: 'validated',
+      containerId: 'container-123',
+      artifactsPath: null,
+    });
+    expect(f.pod().failureReason).toContain('reports could not be preserved before stop');
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.cm.kill).not.toHaveBeenCalled();
+    expect(f.calls.approveSession).not.toHaveBeenCalled();
+  });
 
   it('preserves actionable unknown-resume evidence if the resource suspended before capture', async () => {
     const f = fixture();
@@ -255,36 +250,39 @@ describe('ordinary sandbox approval report preservation', () => {
     expect(f.mainCaptured.cleanupContainerAfterAdvisorySettles).not.toHaveBeenCalled();
   });
 
-  it.each(['resource', 'result', 'base-branch', 'source', 'options'] as const)(
-    'does not reuse reports after changing %s',
-    async (change) => {
-      const f = fixture();
-      await f.passValidation();
-      if (change === 'resource') f.podRepo.update('prepare', { containerId: 'replacement' });
-      if (change === 'result')
-        f.podRepo.update('prepare', {
-          lastValidationResult: { ...required(f.pod().lastValidationResult), attempt: 2 },
+  it.each([
+    'resource',
+    'result',
+    'base-branch',
+    'source',
+    'options',
+  ] as const)('does not reuse reports after changing %s', async (change) => {
+    const f = fixture();
+    await f.passValidation();
+    if (change === 'resource') f.podRepo.update('prepare', { containerId: 'replacement' });
+    if (change === 'result')
+      f.podRepo.update('prepare', {
+        lastValidationResult: { ...required(f.pod().lastValidationResult), attempt: 2 },
+      });
+    if (change === 'base-branch') f.podRepo.update('prepare', { baseBranch: 'replacement' });
+    if (change === 'options')
+      f.podRepo.update('prepare', { options: { ...f.pod().options, output: 'branch' } });
+    if (change === 'source')
+      vi.mocked(required(f.worktreeManager.inspectSource))
+        .mockResolvedValueOnce({
+          branch: f.pod().branch,
+          commitSha: 'b'.repeat(40),
+          treeSha: 'c'.repeat(40),
+          worktreeClean: true,
+        })
+        .mockResolvedValueOnce({
+          branch: f.pod().branch,
+          commitSha: 'b'.repeat(40),
+          treeSha: 'c'.repeat(40),
+          worktreeClean: true,
         });
-      if (change === 'base-branch') f.podRepo.update('prepare', { baseBranch: 'replacement' });
-      if (change === 'options')
-        f.podRepo.update('prepare', { options: { ...f.pod().options, output: 'branch' } });
-      if (change === 'source')
-        vi.mocked(required(f.worktreeManager.inspectSource))
-          .mockResolvedValueOnce({
-            branch: f.pod().branch,
-            commitSha: 'b'.repeat(40),
-            treeSha: 'c'.repeat(40),
-            worktreeClean: true,
-          })
-          .mockResolvedValueOnce({
-            branch: f.pod().branch,
-            commitSha: 'b'.repeat(40),
-            treeSha: 'c'.repeat(40),
-            worktreeClean: true,
-          });
-      await expect(verifiedApprovalReportSnapshot(f.input())).resolves.toBeNull();
-    },
-  );
+    await expect(verifiedApprovalReportSnapshot(f.input())).resolves.toBeNull();
+  });
 
   it('a new lifecycle cannot reuse an old receipt', async () => {
     const f = fixture();
@@ -382,25 +380,25 @@ describe('ordinary sandbox approval report preservation', () => {
     expect(f.cm.stop).not.toHaveBeenCalled();
   });
 
-  it.each(['validation', 'revalidation'])(
-    'a superseded %s copy cannot park or stop the replacement lifecycle',
-    async (kind) => {
-      const f = fixture();
-      vi.mocked(f.cm.extractDirectoryFromContainer).mockImplementationOnce(async () => {
-        f.podRepo.incrementLifecycleGeneration('prepare');
-        f.podRepo.update('prepare', {
-          lastValidationResult: { ...required(f.pod().lastValidationResult), attempt: 2 },
-        });
+  it.each([
+    'validation',
+    'revalidation',
+  ])('a superseded %s copy cannot park or stop the replacement lifecycle', async (kind) => {
+    const f = fixture();
+    vi.mocked(f.cm.extractDirectoryFromContainer).mockImplementationOnce(async () => {
+      f.podRepo.incrementLifecycleGeneration('prepare');
+      f.podRepo.update('prepare', {
+        lastValidationResult: { ...required(f.pod().lastValidationResult), attempt: 2 },
       });
-      await expect(f.passValidation(kind === 'revalidation')).rejects.toMatchObject({
-        code: 'STALE_VALIDATION_EXECUTION',
-      });
-      expect(f.pod().artifactsPath).toBeNull();
-      expect(f.pod().failureReason).toBeNull();
-      expect(f.cm.stop).not.toHaveBeenCalled();
-      expect(f.calls.approveSession).not.toHaveBeenCalled();
-    },
-  );
+    });
+    await expect(f.passValidation(kind === 'revalidation')).rejects.toMatchObject({
+      code: 'STALE_VALIDATION_EXECUTION',
+    });
+    expect(f.pod().artifactsPath).toBeNull();
+    expect(f.pod().failureReason).toBeNull();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.calls.approveSession).not.toHaveBeenCalled();
+  });
 
   it('a stale intact binding uses the ordinary guarded fresh collection path', async () => {
     const f = fixture();

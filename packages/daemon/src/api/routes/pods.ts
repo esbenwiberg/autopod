@@ -3,14 +3,14 @@ import {
   AutopodError,
   type CompactPod,
   type CompactPodPage,
+  collectPiiPatternNames,
+  createPodRequestSchema,
   type FirewallDeniedEvent,
   type OperatorActor,
   type PodStatus,
-  type ReviewProgressSnapshot,
-  collectPiiPatternNames,
-  createPodRequestSchema,
   podStatusSchema,
   processContent,
+  type ReviewProgressSnapshot,
   renderEvidenceYaml,
   sendMessageSchema,
 } from '@autopod/shared';
@@ -25,8 +25,8 @@ import { dispatchRerunRequest } from '../../pods/dispatch-rerun-request.js';
 import { escalationDisplaySummary } from '../../pods/escalation-display.js';
 import type { EscalationRepository } from '../../pods/escalation-repository.js';
 import {
-  type EscalationsAnalyticsScope,
   computeEscalationsAnalytics,
+  type EscalationsAnalyticsScope,
 } from '../../pods/escalations-aggregator.js';
 import type { EventRepository } from '../../pods/event-repository.js';
 import type { PodManager } from '../../pods/index.js';
@@ -36,8 +36,8 @@ import type { PendingOverrideRepository } from '../../pods/pending-override-repo
 import { computePodCostBreakdown } from '../../pods/pod-cost-breakdown.js';
 import type { PodRepository } from '../../pods/pod-repository.js';
 import {
-  type ProviderAttemptRepository,
   createProviderAttemptRepository,
+  type ProviderAttemptRepository,
 } from '../../pods/provider-attempt-repository.js';
 import type { QualityScoreRepository } from '../../pods/quality-score-repository.js';
 import { computeQualitySignals } from '../../pods/quality-signals.js';

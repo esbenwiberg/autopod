@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createWorkspaceFixture } from '../test-utils/workspace-recovery-helpers.js';
+
 describe('workspace operator escape controls', () => {
   it('clears stale queue entry and requeues with operator audit reason', async () => {
     const f = createWorkspaceFixture();

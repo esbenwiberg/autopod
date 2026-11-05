@@ -268,8 +268,8 @@ describe('SystemDecisionRunner', () => {
       .mocked(first.manager.execInContainer)
       .mock.calls.filter(([, command]) => !['chmod', 'chown'].includes(command[0] ?? ''));
     expect(inferenceCalls).toHaveLength(2);
-    expect((inferenceCalls[1]?.[2] as { timeout: number }).timeout).toBeLessThanOrEqual(
-      (inferenceCalls[0]?.[2] as { timeout: number }).timeout,
+    expect((inferenceCalls[1]![2] as { timeout: number }).timeout).toBeLessThanOrEqual(
+      (inferenceCalls[0]![2] as { timeout: number }).timeout,
     );
 
     const second = harness();

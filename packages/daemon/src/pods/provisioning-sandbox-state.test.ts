@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createProvisioningFixture } from '../test-utils/provisioning-helpers.js';
+
 const fixtures: ReturnType<typeof createProvisioningFixture>[] = [];
 function fixture() {
   const f = createProvisioningFixture();

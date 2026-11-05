@@ -6,6 +6,7 @@ import {
   createFixCyclePolicy,
   formatReviewFeedbackReply,
 } from './fix-policy.js';
+
 describe('fix task and cycle policy', () => {
   it('keeps per-instance predicates and the failed/merge_pending distinction', () => {
     const a = createFixCyclePolicy();

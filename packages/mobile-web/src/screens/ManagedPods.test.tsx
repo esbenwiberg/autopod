@@ -1,5 +1,5 @@
 import { act } from 'react';
-import { type Root, createRoot } from 'react-dom/client';
+import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { apiFetch } from '../lib/api.js';

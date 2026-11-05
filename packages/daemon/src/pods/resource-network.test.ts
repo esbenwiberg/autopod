@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createResourceFixture } from '../test-utils/resource-helpers.js';
+
 describe('resource network controls', () => {
   it('reads immutable launch refusal live before legacy mutation', async () => {
     const f = createResourceFixture();

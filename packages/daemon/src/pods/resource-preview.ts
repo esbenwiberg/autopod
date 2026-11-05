@@ -2,8 +2,8 @@ import type { Pod } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import type { ResourcePreviewCaptured } from './resource-contracts.js';
 import {
-  CONTAINER_APP_PORT,
   allocateHostPort,
+  CONTAINER_APP_PORT,
   nativePreviewEmails,
   parsePreviewPort,
 } from './resource-policy.js';

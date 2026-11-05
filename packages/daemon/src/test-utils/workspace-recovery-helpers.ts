@@ -1,4 +1,4 @@
-import { type EffectiveLaunchConfig, type Pod, outputModeFromPodOptions } from '@autopod/shared';
+import { type EffectiveLaunchConfig, outputModeFromPodOptions, type Pod } from '@autopod/shared';
 import { afterEach, vi } from 'vitest';
 import { configurationDigest } from '../configuration/configuration-digest.js';
 import { deriveLaunch } from '../configuration/derive-launch.js';
@@ -40,7 +40,9 @@ import { createWorkspaceWatchdog } from '../pods/workspace-watchdog.js';
 import { createTestConfiguration } from './configuration-helpers.js';
 import { insertTestProfile } from './mock-helpers.js';
 import { createResourceFixture, deferred, result } from './resource-helpers.js';
+
 export { deferred, result };
+
 const closes: Array<() => void> = [];
 afterEach(() => {
   for (const close of closes.splice(0).reverse()) close();

@@ -1,7 +1,7 @@
 import type { EscalationRequest } from '@autopod/shared';
 import { act } from 'react';
-import { type Root, createRoot } from 'react-dom/client';
-import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest';
 import { STORAGE_KEY } from '../lib/token.js';
 import { usePodsStore } from '../store/pods.js';
 import { EscalationCard } from './EscalationCard.js';

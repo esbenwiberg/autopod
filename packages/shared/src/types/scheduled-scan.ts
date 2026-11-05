@@ -9,7 +9,7 @@ const remoteBranch = z
     (value) =>
       !value.startsWith('-') &&
       !value.startsWith('/') &&
-      !/[\s~^:?*\[\\]/.test(value) &&
+      !/[\s~^:?*[\\]/.test(value) &&
       [...value].every(
         (character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127,
       ) &&

@@ -12,8 +12,8 @@ import type { ExecutionTarget } from '@autopod/shared';
 import { DEFAULT_CONTAINER_MEMORY_GB } from '@autopod/shared';
 import {
   MAX_SANDBOX_MEMORY_BYTES,
-  SANDBOX_TIER_MEMORY_BYTES,
   pickSandboxTier,
+  SANDBOX_TIER_MEMORY_BYTES,
 } from './sandbox-api-client.js';
 
 const BYTES_PER_GB = 1024 ** 3;

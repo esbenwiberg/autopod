@@ -1,10 +1,10 @@
 import {
   type ManagedPodRequest,
   type ManagedValidationReceipt,
+  parseManagedRecord,
   type SourceCandidateReceipt,
   type ValidationInfrastructureFailure,
   type ValidationPhase,
-  parseManagedRecord,
 } from '@autopod/shared';
 import type { ValidationPhaseCallbacks } from '../interfaces/validation-engine.js';
 import { canonical, digest } from './canonical.js';

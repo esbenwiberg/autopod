@@ -80,16 +80,17 @@ it('streams multiple bounded chunks and preserves executable modes and dependenc
   expect(fake.exec.mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining(['rm', '-rf', '--']));
 });
 
-it.each(['../escape', '/absolute', 'a/../../escape'])(
-  'rejects unsafe archive member %s and cleans remote chunks',
-  async (name) => {
-    const fake = clientFor(await archive([{ header: { name }, content: Buffer.from('unsafe') }]));
-    await expect(
-      exportSandboxWorkspace(fake.client, 'sandbox', '/workspace', root),
-    ).rejects.toThrow('Unsafe sandbox archive entry path');
-    expect(fake.exec).toHaveBeenCalledTimes(2);
-  },
-);
+it.each([
+  '../escape',
+  '/absolute',
+  'a/../../escape',
+])('rejects unsafe archive member %s and cleans remote chunks', async (name) => {
+  const fake = clientFor(await archive([{ header: { name }, content: Buffer.from('unsafe') }]));
+  await expect(exportSandboxWorkspace(fake.client, 'sandbox', '/workspace', root)).rejects.toThrow(
+    'Unsafe sandbox archive entry path',
+  );
+  expect(fake.exec).toHaveBeenCalledTimes(2);
+});
 
 it('rejects symlink parent traversal without writing through the link', async () => {
   const fake = clientFor(
@@ -220,15 +221,18 @@ it('passes excludes to tar as argv and drops excluded entries the remote tar kep
   await expect(stat(join(root, 'reports/raw'))).rejects.toThrow();
 });
 
-it.each(['*.log', '--checkpoint-action=exec=sh', 'a/../b', 'line\nbreak', '[ab]'])(
-  'rejects exclude %j before touching the sandbox',
-  async (exclude) => {
-    const fake = clientFor(await archive([]));
-    await expect(
-      exportSandboxWorkspace(fake.client, 'sandbox', '/workspace', root, undefined, undefined, [
-        exclude,
-      ]),
-    ).rejects.toThrow('Unsupported sandbox export exclude');
-    expect(fake.exec).not.toHaveBeenCalled();
-  },
-);
+it.each([
+  '*.log',
+  '--checkpoint-action=exec=sh',
+  'a/../b',
+  'line\nbreak',
+  '[ab]',
+])('rejects exclude %j before touching the sandbox', async (exclude) => {
+  const fake = clientFor(await archive([]));
+  await expect(
+    exportSandboxWorkspace(fake.client, 'sandbox', '/workspace', root, undefined, undefined, [
+      exclude,
+    ]),
+  ).rejects.toThrow('Unsupported sandbox export exclude');
+  expect(fake.exec).not.toHaveBeenCalled();
+});

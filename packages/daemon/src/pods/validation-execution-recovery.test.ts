@@ -527,23 +527,23 @@ describe('exact validation execution recovery', () => {
     expect(f.containerManager.kill).not.toHaveBeenCalled();
     expect(f.worktreeManager.cleanup).not.toHaveBeenCalled();
   });
-  it.each([undefined, 'AZURE_SANDBOX_EXEC_INVALID_RESPONSE'])(
-    'retains unpublished outcomes independently of termination classification (%s)',
-    (code) => {
-      const f = fixture(false, false, false);
-      f.ledger.recordOutcome(
-        {
-          ...f.result,
-          infrastructureFailure: code
-            ? { phase: 'test', code, message: 'No valid exit', retryable: false }
-            : undefined,
-        },
-        f.dispatch!,
-      );
-      expect(f.ledger.unsettled(f.podId)).not.toBeNull();
-      expect(() => f.ledger.assertTaskSettled(f.podId)).toThrow();
-    },
-  );
+  it.each([
+    undefined,
+    'AZURE_SANDBOX_EXEC_INVALID_RESPONSE',
+  ])('retains unpublished outcomes independently of termination classification (%s)', (code) => {
+    const f = fixture(false, false, false);
+    f.ledger.recordOutcome(
+      {
+        ...f.result,
+        infrastructureFailure: code
+          ? { phase: 'test', code, message: 'No valid exit', retryable: false }
+          : undefined,
+      },
+      f.dispatch!,
+    );
+    expect(f.ledger.unsettled(f.podId)).not.toBeNull();
+    expect(() => f.ledger.assertTaskSettled(f.podId)).toThrow();
+  });
   it('ordinary Delete/Kill and direct deletion admission cannot bypass source/report preservation', async () => {
     const f = fixture();
     await expect(f.manager.deleteSession(f.podId)).rejects.toMatchObject({
@@ -718,19 +718,19 @@ describe('exact validation execution recovery', () => {
     ).rejects.toMatchObject({ code: 'VALIDATION_DISPATCH_BINDING_CHANGED' });
     expect(f.containerManager.kill).not.toHaveBeenCalled();
   });
-  it.each(['unknown', 'deleted'] as const)(
-    'fails closed on %s before preservation',
-    async (status) => {
-      const f = fixture();
-      vi.mocked(f.containerManager.getStatus).mockResolvedValue(status);
-      await expect(
-        f.recovery.reconcileValidationExecution(f.podId, f.input, actor),
-      ).rejects.toMatchObject({ code: 'VALIDATION_FINAL_CONTENT_UNVERIFIED' });
-      expect(f.containerManager.kill).not.toHaveBeenCalled();
-      expect(f.containerManager.getStatus).not.toHaveBeenCalled();
-      expect(() => f.ledger.assertTaskSettled(f.podId)).toThrow();
-    },
-  );
+  it.each([
+    'unknown',
+    'deleted',
+  ] as const)('fails closed on %s before preservation', async (status) => {
+    const f = fixture();
+    vi.mocked(f.containerManager.getStatus).mockResolvedValue(status);
+    await expect(
+      f.recovery.reconcileValidationExecution(f.podId, f.input, actor),
+    ).rejects.toMatchObject({ code: 'VALIDATION_FINAL_CONTENT_UNVERIFIED' });
+    expect(f.containerManager.kill).not.toHaveBeenCalled();
+    expect(f.containerManager.getStatus).not.toHaveBeenCalled();
+    expect(() => f.ledger.assertTaskSettled(f.podId)).toThrow();
+  });
   it('does not treat stopped/suspended as termination or blindly resume for export', async () => {
     const f = fixture();
     vi.mocked(f.containerManager.getStatus).mockResolvedValue('stopped');

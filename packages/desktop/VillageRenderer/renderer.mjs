@@ -1,6 +1,6 @@
 import { actorAtScreen } from '@jsonl-village/camera.mjs';
 import { ROSTER } from '@jsonl-village/cast.mjs';
-import { VIEW, renderFrame } from '@jsonl-village/render.mjs';
+import { renderFrame, VIEW } from '@jsonl-village/render.mjs';
 import meta from '@jsonl-village/sprites.json';
 import { STATION_NAMES, stationRoute, stationSeat } from '@jsonl-village/world.mjs';
 import { presentation } from './live-scene.mjs';

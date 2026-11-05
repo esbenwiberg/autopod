@@ -27,17 +27,17 @@ import type {
 } from '@autopod/shared';
 import {
   DEFAULT_MAX_PR_FIX_ATTEMPTS,
-  PodNotFoundError,
   outputModeFromPodOptions,
+  PodNotFoundError,
   podOptionsFromOutputMode,
   readinessReviewSchema,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import {
-  type SandboxWakeupJournal,
   createSandboxWakeupJournal,
+  type SandboxWakeupJournal,
 } from '../containers/sandbox-wakeup-journal.js';
-import { type UnitOfWork, createUnitOfWork } from '../db/unit-of-work.js';
+import { createUnitOfWork, type UnitOfWork } from '../db/unit-of-work.js';
 import { extractFindings } from '../validation/finding-fingerprint.js';
 import {
   type ApprovalSourceRewriteRepository,
@@ -50,47 +50,47 @@ import {
 } from './compact-pod-projection.js';
 import { hasUnansweredDecision } from './decision-admission.js';
 import {
-  type DeletionOwnership,
   assertNoValidationRecovery,
   createDeletionOwnership,
+  type DeletionOwnership,
 } from './deletion-ownership.js';
 import { deliveryReadinessBlock, withDeliveryReadiness } from './delivery-readiness.js';
 import {
-  type DispatchPreflightLedger,
   createDispatchPreflightLedger,
+  type DispatchPreflightLedger,
 } from './dispatch-preflight-ledger.js';
 import { isDisplayEscalation } from './escalation-display.js';
 import {
-  type ExecutionProvenanceLedger,
   createExecutionProvenanceLedger,
+  type ExecutionProvenanceLedger,
 } from './execution-provenance-ledger.js';
 import {
-  type FleetArchiveRepository,
   createFleetArchiveRepository,
+  type FleetArchiveRepository,
 } from './fleet-archive-repository.js';
 import { displayRepository, repositoryDisplayColumns } from './pod-display-repository.js';
 import { type ProviderUsageProjection, readProviderUsage } from './provider-usage-projection.js';
 import { withLifecycleReadiness } from './readiness-projection.js';
 import {
-  type RetainedCheckpointRepository,
   checkpointError,
   createRetainedCheckpointRepository,
+  type RetainedCheckpointRepository,
 } from './retained-checkpoint-repository.js';
 import {
-  type SourceAdoptionRepository,
   createSourceAdoptionRepository,
+  type SourceAdoptionRepository,
 } from './source-adoption-repository.js';
 import { assertSourceAvailable, assertSourceDeliveryAllowed } from './source-custody-guards.js';
 import {
-  type SourcePublicationLedger,
   createSourcePublicationLedger,
+  type SourcePublicationLedger,
 } from './source-publication-ledger.js';
-import { type TaskRetryLedger, createTaskRetryLedger } from './task-retry-ledger.js';
+import { createTaskRetryLedger, type TaskRetryLedger } from './task-retry-ledger.js';
 import { assertTaskValidationDeletable } from './validation-execution-evidence.js';
 import {
-  type ValidationExecutionLedger,
   createValidationExecutionLedger,
   listValidationExecutionResourceIds,
+  type ValidationExecutionLedger,
 } from './validation-execution-ledger.js';
 
 export interface NewPod {
@@ -286,19 +286,17 @@ export interface PodStats {
   byStatus: Record<PodStatus, number>;
 }
 
-import { type CompletionJournal, createCompletionJournal } from './completion-journal.js';
-import { type DeliveryLedger, createDeliveryLedger } from './delivery-ledger.js';
-import { type MergeJournal, createMergeJournal } from './merge-journal.js';
-
 import { HISTORY_JSON_FIELDS, HISTORY_POD_COLUMNS } from '../history/history-pod-projection.js';
-import { type TaskExecutionLedger, createTaskExecutionLedger } from './task-execution-ledger.js';
-import { createTaskHistoryArchive } from './task-history-archive.js';
-
+import { type CompletionJournal, createCompletionJournal } from './completion-journal.js';
 import { COST_POD_COLUMNS, type PodCostSource } from './cost-pod-projection.js';
+import { createDeliveryLedger, type DeliveryLedger } from './delivery-ledger.js';
 import {
-  type ExternalDeliveryRepository,
   createExternalDeliveryRepository,
+  type ExternalDeliveryRepository,
 } from './external-delivery-repository.js';
+import { createMergeJournal, type MergeJournal } from './merge-journal.js';
+import { createTaskExecutionLedger, type TaskExecutionLedger } from './task-execution-ledger.js';
+import { createTaskHistoryArchive } from './task-history-archive.js';
 
 export interface PodRepository extends Partial<UnitOfWork> {
   taskRetries?: TaskRetryLedger;

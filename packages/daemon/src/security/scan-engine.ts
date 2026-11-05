@@ -8,13 +8,13 @@ import type {
 import type { Logger } from 'pino';
 import type { Detector } from './detectors/detector.js';
 import {
-  type ScanFile,
   listAlwaysScan,
   listDiffFiles,
   listTrackedFiles,
   loadScanFileAtRef,
   loadScanFiles,
   resolveBaseRef,
+  type ScanFile,
 } from './file-walker.js';
 import { decide } from './scan-policy.js';
 import { buildWarningSection } from './warning-section.js';

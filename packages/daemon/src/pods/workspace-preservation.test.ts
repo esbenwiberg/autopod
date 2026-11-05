@@ -62,173 +62,172 @@ function workspacePod(id: string, worktreePath: string): Pod {
 }
 
 describe('workspace preservation boundary', () => {
-  it.each(['controller', 'direct'] as const)(
-    'materializes actual dirty source through the %s checkpoint path',
-    async (routing) => {
-      const root = await mkdtemp(path.join(os.tmpdir(), 'autopod-preservation-'));
-      try {
-        const seed = path.join(root, 'seed');
-        const host = path.join(root, 'host');
-        const sandbox = path.join(root, 'sandbox');
-        const containerTmp = path.join(root, 'container-tmp');
-        await mkdir(containerTmp);
-        await git(root, ['init', '--initial-branch=main', seed]);
-        await writeFile(path.join(seed, 'tracked.txt'), 'baseline\n');
-        await git(seed, ['add', '.']);
-        await git(seed, ['commit', '-m', 'baseline']);
-        await git(root, ['clone', seed, host]);
-        await git(root, ['clone', seed, sandbox]);
-        await git(host, ['checkout', '-b', 'feature']);
-        await git(sandbox, ['checkout', '-b', 'feature']);
-        await writeFile(path.join(sandbox, 'tracked.txt'), 'changed by the worker\n');
-        await writeFile(path.join(sandbox, 'report.md'), '# Preserved report\n');
-        const sourceHead = await git(sandbox, ['rev-parse', 'HEAD']);
-        const sourceStatus = await git(sandbox, ['status', '--porcelain']);
-        const pod = workspacePod(path.basename(root), host);
-        const cm = createMockContainerManager();
-        cm.execInContainer = vi.fn(async (_containerId, command) => {
-          if (command[0] !== 'sh' || command[1] !== '-ceu' || !command[2])
-            throw new Error('Unexpected checkpoint command');
-          // Run the actual production shell script with only its two absolute
-          // container directories mapped into this test's private filesystem.
-          const script = command[2]
-            .replaceAll('/tmp/', `${containerTmp}/`)
-            .replace('cd /workspace', `cd '${sandbox.replaceAll("'", "'\\''")}'`);
-          try {
-            const output = await run('sh', ['-ceu', script], { env: gitEnv, timeout: 5_000 });
-            return { stdout: output.stdout, stderr: output.stderr, exitCode: 0 };
-          } catch (err) {
-            const failure = err as { stdout?: string; stderr?: string; code?: number };
-            return {
-              stdout: failure.stdout ?? '',
-              stderr: failure.stderr ?? String(err),
-              exitCode: typeof failure.code === 'number' ? failure.code : 1,
-            };
-          }
-        });
-        const localPath = (remote: string) => {
-          if (!remote.startsWith('/tmp/')) throw new Error('Unexpected checkpoint file');
-          return path.join(containerTmp, path.basename(remote));
-        };
-        cm.readFile = vi.fn(async (_containerId, remote) => readFile(localPath(remote), 'utf8'));
-        cm.readFileBinary = vi.fn(async (_containerId, remote) => readFile(localPath(remote)));
-        const records: CheckpointRecord[] = [];
-        const controller = new WorkspaceCheckpointController({
-          captureAuthority: () => () => {},
-          observe: async () => ({
-            head: await git(sandbox, ['rev-parse', 'HEAD']),
-            tree: await git(sandbox, ['rev-parse', 'HEAD^{tree}']),
-            dirty: (await git(sandbox, ['status', '--porcelain'])).length > 0,
-          }),
-          checkpoint: async (podId, _reason, sequence) =>
-            checkpointSandboxWorkspace({
-              assertCurrent: () => {},
-              containerManager: cm,
-              containerId: 'sandbox-source',
-              podId,
-              worktreePath: host,
-              sequence,
-            }),
-          records: {
-            save: async (record) => {
-              records.push(record);
-            },
-            latest: async () => records.at(-1) ?? null,
-            latestVerified: async () => records.findLast((record) => !!record.verifiedAt) ?? null,
-            incomplete: async () => records.filter((record) => !record.verifiedAt),
-          },
-          retryDelaysMs: [],
-        });
-        const activity = vi.fn();
-        const sync = vi.fn(async () => {
-          throw new Error('Unexpected local synchronization');
-        });
-        const preservation = createWorkspacePreservation({
-          captureAuthority: () => () => {},
-          getContainerManager: () => cm,
-          syncWorkspaceBack: sync,
-          ...(routing === 'controller' && { workspaceCheckpointController: controller }),
-          logger,
-          emitActivityStatus: activity,
-        });
-
-        await preservation.preservePodWorkspace(pod, 'boundary test');
-        const proof = await preservation.checkpointSandboxWorkspaceForPod(pod);
-
-        expect(proof).toMatchObject({
-          sourceHead,
-          transferVerified: true,
-          bundleVerified: true,
-          hostImported: true,
-          lineageVerified: true,
-          promoted: true,
-          materialized: true,
-        });
-        expect(proof.error).toBeUndefined();
-        expect(await git(host, ['rev-parse', 'HEAD'])).toBe(proof.snapshotCommit);
-        expect(await git(host, ['rev-parse', 'HEAD^{tree}'])).toBe(proof.snapshotTree);
-        expect(await git(host, ['rev-parse', proof.quarantineRef])).toBe(proof.snapshotCommit);
-        expect(await readFile(path.join(host, 'tracked.txt'), 'utf8')).toBe(
-          'changed by the worker\n',
-        );
-        expect(await readFile(path.join(host, 'report.md'), 'utf8')).toBe('# Preserved report\n');
-        expect(await git(host, ['status', '--porcelain'])).toBe('');
-        expect(await git(sandbox, ['rev-parse', 'HEAD'])).toBe(sourceHead);
-        expect(await git(sandbox, ['status', '--porcelain'])).toBe(sourceStatus);
-        expect(activity).toHaveBeenCalledExactlyOnceWith(
-          pod.id,
-          'Verified workspace checkpoint before boundary test.',
-        );
-        expect(sync).not.toHaveBeenCalled();
-        expect(cm.extractDirectoryFromContainer).not.toHaveBeenCalled();
-        expect(cm.kill).not.toHaveBeenCalled();
-        expect(pod.status).toBe('failed');
-        if (routing === 'controller') {
-          expect(records.map((record) => record.sequence)).toEqual([1, 2]);
-          expect(records[1]?.result).toBe(proof);
-          expect(records.every((record) => record.verifiedAt !== null)).toBe(true);
+  it.each([
+    'controller',
+    'direct',
+  ] as const)('materializes actual dirty source through the %s checkpoint path', async (routing) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'autopod-preservation-'));
+    try {
+      const seed = path.join(root, 'seed');
+      const host = path.join(root, 'host');
+      const sandbox = path.join(root, 'sandbox');
+      const containerTmp = path.join(root, 'container-tmp');
+      await mkdir(containerTmp);
+      await git(root, ['init', '--initial-branch=main', seed]);
+      await writeFile(path.join(seed, 'tracked.txt'), 'baseline\n');
+      await git(seed, ['add', '.']);
+      await git(seed, ['commit', '-m', 'baseline']);
+      await git(root, ['clone', seed, host]);
+      await git(root, ['clone', seed, sandbox]);
+      await git(host, ['checkout', '-b', 'feature']);
+      await git(sandbox, ['checkout', '-b', 'feature']);
+      await writeFile(path.join(sandbox, 'tracked.txt'), 'changed by the worker\n');
+      await writeFile(path.join(sandbox, 'report.md'), '# Preserved report\n');
+      const sourceHead = await git(sandbox, ['rev-parse', 'HEAD']);
+      const sourceStatus = await git(sandbox, ['status', '--porcelain']);
+      const pod = workspacePod(path.basename(root), host);
+      const cm = createMockContainerManager();
+      cm.execInContainer = vi.fn(async (_containerId, command) => {
+        if (command[0] !== 'sh' || command[1] !== '-ceu' || !command[2])
+          throw new Error('Unexpected checkpoint command');
+        // Run the actual production shell script with only its two absolute
+        // container directories mapped into this test's private filesystem.
+        const script = command[2]
+          .replaceAll('/tmp/', `${containerTmp}/`)
+          .replace('cd /workspace', `cd '${sandbox.replaceAll("'", "'\\''")}'`);
+        try {
+          const output = await run('sh', ['-ceu', script], { env: gitEnv, timeout: 5_000 });
+          return { stdout: output.stdout, stderr: output.stderr, exitCode: 0 };
+        } catch (err) {
+          const failure = err as { stdout?: string; stderr?: string; code?: number };
+          return {
+            stdout: failure.stdout ?? '',
+            stderr: failure.stderr ?? String(err),
+            exitCode: typeof failure.code === 'number' ? failure.code : 1,
+          };
         }
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
-    },
-    15_000,
-  );
-
-  it.each(['containerId', 'worktreePath'] as const)(
-    'returns the complete missing-workspace proof when %s is absent',
-    async (missing) => {
-      const pod = { ...workspacePod('missing-source', '/unused'), [missing]: null };
-      const getContainerManager = vi.fn(() => createMockContainerManager());
+      });
+      const localPath = (remote: string) => {
+        if (!remote.startsWith('/tmp/')) throw new Error('Unexpected checkpoint file');
+        return path.join(containerTmp, path.basename(remote));
+      };
+      cm.readFile = vi.fn(async (_containerId, remote) => readFile(localPath(remote), 'utf8'));
+      cm.readFileBinary = vi.fn(async (_containerId, remote) => readFile(localPath(remote)));
+      const records: CheckpointRecord[] = [];
+      const controller = new WorkspaceCheckpointController({
+        captureAuthority: () => () => {},
+        observe: async () => ({
+          head: await git(sandbox, ['rev-parse', 'HEAD']),
+          tree: await git(sandbox, ['rev-parse', 'HEAD^{tree}']),
+          dirty: (await git(sandbox, ['status', '--porcelain'])).length > 0,
+        }),
+        checkpoint: async (podId, _reason, sequence) =>
+          checkpointSandboxWorkspace({
+            assertCurrent: () => {},
+            containerManager: cm,
+            containerId: 'sandbox-source',
+            podId,
+            worktreePath: host,
+            sequence,
+          }),
+        records: {
+          save: async (record) => {
+            records.push(record);
+          },
+          latest: async () => records.at(-1) ?? null,
+          latestVerified: async () => records.findLast((record) => !!record.verifiedAt) ?? null,
+          incomplete: async () => records.filter((record) => !record.verifiedAt),
+        },
+        retryDelaysMs: [],
+      });
+      const activity = vi.fn();
+      const sync = vi.fn(async () => {
+        throw new Error('Unexpected local synchronization');
+      });
       const preservation = createWorkspacePreservation({
         captureAuthority: () => () => {},
-        getContainerManager,
-        syncWorkspaceBack: async () => ({ pushed: false }),
+        getContainerManager: () => cm,
+        syncWorkspaceBack: sync,
+        ...(routing === 'controller' && { workspaceCheckpointController: controller }),
         logger,
-        emitActivityStatus: vi.fn(),
+        emitActivityStatus: activity,
       });
 
-      await expect(preservation.checkpointSandboxWorkspaceForPod(pod)).resolves.toEqual({
-        sequence: 0,
-        sourceHead: '',
-        sourceTree: '',
-        snapshotCommit: '',
-        snapshotTree: '',
-        transferVerified: false,
-        bundleVerified: false,
-        hostImported: false,
-        lineageVerified: false,
-        promoted: false,
-        materialized: false,
-        quarantineRef: '',
-        error: {
-          phase: 'capture',
-          code: 'NO_WORKSPACE',
-          retryable: false,
-          message: 'Sandbox pod has no container or Git worktree',
-        },
+      await preservation.preservePodWorkspace(pod, 'boundary test');
+      const proof = await preservation.checkpointSandboxWorkspaceForPod(pod);
+
+      expect(proof).toMatchObject({
+        sourceHead,
+        transferVerified: true,
+        bundleVerified: true,
+        hostImported: true,
+        lineageVerified: true,
+        promoted: true,
+        materialized: true,
       });
-      expect(getContainerManager).not.toHaveBeenCalled();
-    },
-  );
+      expect(proof.error).toBeUndefined();
+      expect(await git(host, ['rev-parse', 'HEAD'])).toBe(proof.snapshotCommit);
+      expect(await git(host, ['rev-parse', 'HEAD^{tree}'])).toBe(proof.snapshotTree);
+      expect(await git(host, ['rev-parse', proof.quarantineRef])).toBe(proof.snapshotCommit);
+      expect(await readFile(path.join(host, 'tracked.txt'), 'utf8')).toBe(
+        'changed by the worker\n',
+      );
+      expect(await readFile(path.join(host, 'report.md'), 'utf8')).toBe('# Preserved report\n');
+      expect(await git(host, ['status', '--porcelain'])).toBe('');
+      expect(await git(sandbox, ['rev-parse', 'HEAD'])).toBe(sourceHead);
+      expect(await git(sandbox, ['status', '--porcelain'])).toBe(sourceStatus);
+      expect(activity).toHaveBeenCalledExactlyOnceWith(
+        pod.id,
+        'Verified workspace checkpoint before boundary test.',
+      );
+      expect(sync).not.toHaveBeenCalled();
+      expect(cm.extractDirectoryFromContainer).not.toHaveBeenCalled();
+      expect(cm.kill).not.toHaveBeenCalled();
+      expect(pod.status).toBe('failed');
+      if (routing === 'controller') {
+        expect(records.map((record) => record.sequence)).toEqual([1, 2]);
+        expect(records[1]?.result).toBe(proof);
+        expect(records.every((record) => record.verifiedAt !== null)).toBe(true);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it.each([
+    'containerId',
+    'worktreePath',
+  ] as const)('returns the complete missing-workspace proof when %s is absent', async (missing) => {
+    const pod = { ...workspacePod('missing-source', '/unused'), [missing]: null };
+    const getContainerManager = vi.fn(() => createMockContainerManager());
+    const preservation = createWorkspacePreservation({
+      captureAuthority: () => () => {},
+      getContainerManager,
+      syncWorkspaceBack: async () => ({ pushed: false }),
+      logger,
+      emitActivityStatus: vi.fn(),
+    });
+
+    await expect(preservation.checkpointSandboxWorkspaceForPod(pod)).resolves.toEqual({
+      sequence: 0,
+      sourceHead: '',
+      sourceTree: '',
+      snapshotCommit: '',
+      snapshotTree: '',
+      transferVerified: false,
+      bundleVerified: false,
+      hostImported: false,
+      lineageVerified: false,
+      promoted: false,
+      materialized: false,
+      quarantineRef: '',
+      error: {
+        phase: 'capture',
+        code: 'NO_WORKSPACE',
+        retryable: false,
+        message: 'Sandbox pod has no container or Git worktree',
+      },
+    });
+    expect(getContainerManager).not.toHaveBeenCalled();
+  });
 });

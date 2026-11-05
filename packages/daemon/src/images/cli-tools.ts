@@ -1,8 +1,8 @@
 import {
   type CliTool,
+  cliToolSchema,
   type EnvironmentPreset,
   type ToolPack,
-  cliToolSchema,
 } from '@autopod/shared';
 import { configurationDigest } from '../configuration/configuration-digest.js';
 import { configurationError } from '../configuration/configuration-store.js';

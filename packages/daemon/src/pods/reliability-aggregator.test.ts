@@ -155,16 +155,17 @@ describe('computeReliabilityAnalytics', () => {
     expect(computeReliabilityAnalytics(db, 30).firstPassRate).toBe(0);
   });
 
-  it.each([null, [], { overall: 'pass', sast: { status: 'skip' } }])(
-    'requires executed evidence for legacy %j',
-    (result) => {
-      const podId = insertPod(db);
-      db.prepare(
-        'INSERT INTO validations (id, pod_id, attempt, sequence, result) VALUES (?, ?, 1, 1, ?)',
-      ).run('legacy', podId, JSON.stringify(result));
-      expect(computeReliabilityAnalytics(db, 30).firstPassRate).toBe(0);
-    },
-  );
+  it.each([
+    null,
+    [],
+    { overall: 'pass', sast: { status: 'skip' } },
+  ])('requires executed evidence for legacy %j', (result) => {
+    const podId = insertPod(db);
+    db.prepare(
+      'INSERT INTO validations (id, pod_id, attempt, sequence, result) VALUES (?, ?, 1, 1, ?)',
+    ).run('legacy', podId, JSON.stringify(result));
+    expect(computeReliabilityAnalytics(db, 30).firstPassRate).toBe(0);
+  });
 
   // ── Empty cohort ────────────────────────────────────────────────────────────
 

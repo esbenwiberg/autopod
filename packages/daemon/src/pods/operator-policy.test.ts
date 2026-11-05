@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildDetachedMcpFallbackMessage } from './operator-policy.js';
+
 describe('detached MCP fallback text', () => {
   it('preserves the labelled response and duplicate guidance', () => {
     expect(buildDetachedMcpFallbackMessage('ask_human', 'Saved answer')).toBe(

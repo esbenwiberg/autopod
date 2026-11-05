@@ -4,7 +4,7 @@ import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SandboxDescriptor } from '../containers/sandbox-api-client.js';
 import { createTestDb, insertTestProfile } from '../test-utils/mock-helpers.js';
-import { type PodRepository, createPodRepository } from './pod-repository.js';
+import { createPodRepository, type PodRepository } from './pod-repository.js';
 import { SandboxOrphanReaper } from './sandbox-orphan-reaper.js';
 
 const logger = pino({ level: 'silent' });
@@ -103,18 +103,18 @@ describe('SandboxOrphanReaper', () => {
     expect(deps.sandboxContainerManager.kill).toHaveBeenCalledExactlyOnceWith('orphan');
   });
 
-  it.each(['failed', 'review_required'] as const)(
-    'retains possible source for a %s owner after container_id was cleared',
-    async (status) => {
-      const deps = build([
-        sandbox({ id: 'old-original', labels: { managedBy: 'autopod', podId: 'owner' } }),
-      ]);
-      insertOwner(deps.podRepo, 'owner', status);
-      expect(deps.podRepo.getOrThrow('owner').containerId).toBeNull();
-      await expect(deps.reaper.runSweep()).resolves.toMatchObject({ orphans: 0, deleted: 0 });
-      expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'failed',
+    'review_required',
+  ] as const)('retains possible source for a %s owner after container_id was cleared', async (status) => {
+    const deps = build([
+      sandbox({ id: 'old-original', labels: { managedBy: 'autopod', podId: 'owner' } }),
+    ]);
+    insertOwner(deps.podRepo, 'owner', status);
+    expect(deps.podRepo.getOrThrow('owner').containerId).toBeNull();
+    await expect(deps.reaper.runSweep()).resolves.toMatchObject({ orphans: 0, deleted: 0 });
+    expect(deps.sandboxContainerManager.kill).not.toHaveBeenCalled();
+  });
 
   it('retains a labelled owner with an unsettled original execution', async () => {
     const deps = build([
@@ -146,21 +146,22 @@ describe('SandboxOrphanReaper', () => {
     expect(result.deferred).toBe(1);
   });
 
-  it.each(['failed', 'review_required', 'unsettled'] as const)(
-    'rechecks a %s recovery owner after an earlier asynchronous deletion',
-    async (claim) => {
-      const deps = build([
-        sandbox({ id: 'first' }),
-        sandbox({ id: 'later-claimed', labels: { managedBy: 'autopod', podId: 'owner' } }),
-      ]);
-      deps.sandboxContainerManager.kill.mockImplementationOnce(async () => {
-        insertOwner(deps.podRepo, 'owner', claim === 'unsettled' ? 'running' : claim);
-        if (claim === 'unsettled') beginUnsettledRun(deps.podRepo, 'owner');
-      });
-      await expect(deps.reaper.runSweep()).resolves.toMatchObject({ deleted: 1, deferred: 1 });
-      expect(deps.sandboxContainerManager.kill).toHaveBeenCalledExactlyOnceWith('first');
-    },
-  );
+  it.each([
+    'failed',
+    'review_required',
+    'unsettled',
+  ] as const)('rechecks a %s recovery owner after an earlier asynchronous deletion', async (claim) => {
+    const deps = build([
+      sandbox({ id: 'first' }),
+      sandbox({ id: 'later-claimed', labels: { managedBy: 'autopod', podId: 'owner' } }),
+    ]);
+    deps.sandboxContainerManager.kill.mockImplementationOnce(async () => {
+      insertOwner(deps.podRepo, 'owner', claim === 'unsettled' ? 'running' : claim);
+      if (claim === 'unsettled') beginUnsettledRun(deps.podRepo, 'owner');
+    });
+    await expect(deps.reaper.runSweep()).resolves.toMatchObject({ deleted: 1, deferred: 1 });
+    expect(deps.sandboxContainerManager.kill).toHaveBeenCalledExactlyOnceWith('first');
+  });
 
   it('fails closed on unexpected owner lookup errors and allows a later sweep', async () => {
     const deps = build([

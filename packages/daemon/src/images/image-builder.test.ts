@@ -1,4 +1,4 @@
-import { type Profile, cliToolSchema, environmentPresetSchema } from '@autopod/shared';
+import { cliToolSchema, environmentPresetSchema, type Profile } from '@autopod/shared';
 import { extract as tarExtract } from 'tar-stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProfileStore } from '../profiles/index.js';
@@ -108,41 +108,41 @@ function createMockDeps() {
 }
 
 describe('ImageBuilder', () => {
-  it.each(['local', 'sandbox'] as const)(
-    'binds selected CLI installation to the %s software image',
-    async (target) => {
-      const deps = createMockDeps();
-      vi.mocked(deps.mockDocker.getImage('base').inspect).mockResolvedValue({
-        Id: `sha256:${'a'.repeat(64)}`,
-        Os: 'linux',
-        Architecture: 'arm64',
-      } as unknown as import('dockerode').ImageInspectInfo);
-      vi.mocked(deps.mockAcr.resolveTag).mockImplementation((tag) => tag);
-      const builder = new ImageBuilder({
-        docker: deps.mockDocker,
-        acr: deps.mockAcr,
-        profileStore: deps.mockProfileStore,
-      });
-      const environment = environmentPresetSchema.parse({
-        template: 'node22',
-        baseImage: `ewiacr.azurecr.io/base@sha256:${'b'.repeat(64)}`,
-      });
-      const cli = cliToolSchema.parse({
-        name: 'lesson',
-        description: 'Lessons',
-        instructions: 'lesson --help',
-        verifyArgs: ['--help'],
-        source: { type: 'npm', package: 'lesson', version: '1.2.3', executable: 'lesson' },
-      });
-      const plain = await builder.resolveEnvironment(environment, target);
-      const selected = await builder.resolveEnvironment(environment, target, [cli]);
-      expect(selected.cliInstallCommands?.join('\n')).toContain("'lesson@1.2.3'");
-      expect(selected.imageKey).not.toBe(plain.imageKey);
-      expect(selected.platform).toBe(target === 'sandbox' ? 'linux/amd64' : 'linux/arm64');
-      expect(deps.mockDocker.buildImage).not.toHaveBeenCalled();
-      expect(deps.mockAcr.push).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'local',
+    'sandbox',
+  ] as const)('binds selected CLI installation to the %s software image', async (target) => {
+    const deps = createMockDeps();
+    vi.mocked(deps.mockDocker.getImage('base').inspect).mockResolvedValue({
+      Id: `sha256:${'a'.repeat(64)}`,
+      Os: 'linux',
+      Architecture: 'arm64',
+    } as unknown as import('dockerode').ImageInspectInfo);
+    vi.mocked(deps.mockAcr.resolveTag).mockImplementation((tag) => tag);
+    const builder = new ImageBuilder({
+      docker: deps.mockDocker,
+      acr: deps.mockAcr,
+      profileStore: deps.mockProfileStore,
+    });
+    const environment = environmentPresetSchema.parse({
+      template: 'node22',
+      baseImage: `ewiacr.azurecr.io/base@sha256:${'b'.repeat(64)}`,
+    });
+    const cli = cliToolSchema.parse({
+      name: 'lesson',
+      description: 'Lessons',
+      instructions: 'lesson --help',
+      verifyArgs: ['--help'],
+      source: { type: 'npm', package: 'lesson', version: '1.2.3', executable: 'lesson' },
+    });
+    const plain = await builder.resolveEnvironment(environment, target);
+    const selected = await builder.resolveEnvironment(environment, target, [cli]);
+    expect(selected.cliInstallCommands?.join('\n')).toContain("'lesson@1.2.3'");
+    expect(selected.imageKey).not.toBe(plain.imageKey);
+    expect(selected.platform).toBe(target === 'sandbox' ? 'linux/amd64' : 'linux/arm64');
+    expect(deps.mockDocker.buildImage).not.toHaveBeenCalled();
+    expect(deps.mockAcr.push).not.toHaveBeenCalled();
+  });
   it('resolves software-only preview inputs without pulling, building or publishing', async () => {
     const deps = createMockDeps();
     const inspect = vi.mocked(deps.mockDocker.getImage('base').inspect);
@@ -274,47 +274,48 @@ describe('ImageBuilder', () => {
     expect(mockDocker.buildImage).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['success', 'unauthorized', 'changed'] as const)(
-    'authenticates a cold environment base pull: %s',
-    async (outcome) => {
-      const { mockDocker, mockAcr, mockProfileStore, dockerfiles } = createMockDeps();
-      const input = {
-        environment: environmentPresetSchema.parse({ template: 'node22' }),
-        pinnedBase: `ewiacr.azurecr.io/base@sha256:${'a'.repeat(64)}`,
-        platform: 'linux/amd64' as const,
-        agentToolingDigest: 'b'.repeat(64),
-        toolInstallCommands: [],
-      };
-      vi.mocked(mockDocker.getImage('image').inspect)
-        .mockRejectedValueOnce({ statusCode: 404 })
-        .mockResolvedValue({
-          Id: `sha256:${'c'.repeat(64)}`,
-          Size: 1,
-          Config: { Labels: { 'com.autopod.environment-key': environmentImageKey(input) } },
-        } as unknown as import('dockerode').ImageInspectInfo);
-      vi.mocked(mockAcr.pullPinned).mockImplementation(async () => {
-        expect(mockDocker.buildImage).not.toHaveBeenCalled();
-        if (outcome === 'unauthorized') throw new Error('unauthorized');
-        return outcome === 'changed' ? 'different' : input.pinnedBase;
-      });
-      const builder = new ImageBuilder({
-        docker: mockDocker,
-        acr: mockAcr,
-        profileStore: mockProfileStore,
-      });
-      if (outcome === 'success') {
-        await builder.buildEnvironmentImage(input);
-        await builder.buildEnvironmentImage(input);
-        expect(mockDocker.buildImage).toHaveBeenCalledTimes(1);
-        expect(dockerfiles[0]).toContain(`FROM ${input.pinnedBase}`);
-      } else {
-        await expect(builder.buildEnvironmentImage(input)).rejects.toThrow();
-        expect(mockDocker.buildImage).not.toHaveBeenCalled();
-      }
-      expect(mockAcr.pullPinned).toHaveBeenCalledExactlyOnceWith(input.pinnedBase);
-      expect(mockAcr.push).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    'success',
+    'unauthorized',
+    'changed',
+  ] as const)('authenticates a cold environment base pull: %s', async (outcome) => {
+    const { mockDocker, mockAcr, mockProfileStore, dockerfiles } = createMockDeps();
+    const input = {
+      environment: environmentPresetSchema.parse({ template: 'node22' }),
+      pinnedBase: `ewiacr.azurecr.io/base@sha256:${'a'.repeat(64)}`,
+      platform: 'linux/amd64' as const,
+      agentToolingDigest: 'b'.repeat(64),
+      toolInstallCommands: [],
+    };
+    vi.mocked(mockDocker.getImage('image').inspect)
+      .mockRejectedValueOnce({ statusCode: 404 })
+      .mockResolvedValue({
+        Id: `sha256:${'c'.repeat(64)}`,
+        Size: 1,
+        Config: { Labels: { 'com.autopod.environment-key': environmentImageKey(input) } },
+      } as unknown as import('dockerode').ImageInspectInfo);
+    vi.mocked(mockAcr.pullPinned).mockImplementation(async () => {
+      expect(mockDocker.buildImage).not.toHaveBeenCalled();
+      if (outcome === 'unauthorized') throw new Error('unauthorized');
+      return outcome === 'changed' ? 'different' : input.pinnedBase;
+    });
+    const builder = new ImageBuilder({
+      docker: mockDocker,
+      acr: mockAcr,
+      profileStore: mockProfileStore,
+    });
+    if (outcome === 'success') {
+      await builder.buildEnvironmentImage(input);
+      await builder.buildEnvironmentImage(input);
+      expect(mockDocker.buildImage).toHaveBeenCalledTimes(1);
+      expect(dockerfiles[0]).toContain(`FROM ${input.pinnedBase}`);
+    } else {
+      await expect(builder.buildEnvironmentImage(input)).rejects.toThrow();
+      expect(mockDocker.buildImage).not.toHaveBeenCalled();
+    }
+    expect(mockAcr.pullPinned).toHaveBeenCalledExactlyOnceWith(input.pinnedBase);
+    expect(mockAcr.push).not.toHaveBeenCalled();
+  });
 
   it('builds and pushes warm image', async () => {
     const { mockDocker, mockAcr, mockProfileStore } = createMockDeps();
@@ -364,23 +365,23 @@ describe('ImageBuilder', () => {
     );
   });
 
-  it.each([null, 'node24-pw-pg'] as const)(
-    'resolves %s through ACR to its immutable base',
-    async (template) => {
-      const { mockDocker, mockAcr, mockProfileStore, dockerfiles } = createMockDeps();
-      const builder = new ImageBuilder({
-        docker: mockDocker,
-        acr: mockAcr,
-        profileStore: mockProfileStore,
-      });
-      await builder.buildWarmImage(mockProfile({ template }));
-      const base = `autopod-${template ?? 'node24'}`;
-      expect(mockAcr.pullPinned).toHaveBeenCalledWith(`${base}:latest`);
-      expect(dockerfiles).toEqual([
-        expect.stringContaining(`FROM ewiacr.azurecr.io/${base}@sha256:base-digest`),
-      ]);
-    },
-  );
+  it.each([
+    null,
+    'node24-pw-pg',
+  ] as const)('resolves %s through ACR to its immutable base', async (template) => {
+    const { mockDocker, mockAcr, mockProfileStore, dockerfiles } = createMockDeps();
+    const builder = new ImageBuilder({
+      docker: mockDocker,
+      acr: mockAcr,
+      profileStore: mockProfileStore,
+    });
+    await builder.buildWarmImage(mockProfile({ template }));
+    const base = `autopod-${template ?? 'node24'}`;
+    expect(mockAcr.pullPinned).toHaveBeenCalledWith(`${base}:latest`);
+    expect(dockerfiles).toEqual([
+      expect.stringContaining(`FROM ewiacr.azurecr.io/${base}@sha256:base-digest`),
+    ]);
+  });
 
   it('unresolved-acr-base-fails-actionably', async () => {
     const { mockDocker, mockAcr, mockProfileStore } = createMockDeps();

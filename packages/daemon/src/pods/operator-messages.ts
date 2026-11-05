@@ -23,7 +23,7 @@ import type {
 import { buildDetachedMcpFallbackMessage } from './operator-policy.js';
 import { resolvedReasoningEffort } from './provider-attempt-policy.js';
 import { canReceiveMessage, isTerminalState } from './state-machine.js';
-import { ValidationSupersededError, captureValidationOwnership } from './validation-ownership.js';
+import { captureValidationOwnership, ValidationSupersededError } from './validation-ownership.js';
 import { captureValidationDispatchGuard } from './validation-recovery-policy.js';
 export function createOperatorMessages(
   deps: OperatorMessageLiveDependencies,

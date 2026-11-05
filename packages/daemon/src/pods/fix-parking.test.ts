@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createFixCycleFixture } from '../test-utils/fix-cycle-helpers.js';
 import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { FIX_DELIVERY_FAILED_PREFIX } from './fix-policy.js';
+
 describe('fix delivery parking', () => {
   it('forwards credential error identity into host-push escalation and retains resources', () => {
     const f = createFixCycleFixture();

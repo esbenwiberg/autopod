@@ -20,7 +20,7 @@
     "clean": "turbo run clean"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "2.5.3",
     "dependency-cruiser": "^17.0.0",
     "esbuild": "0.28.1",
     "knip": "^6.39.0",

@@ -2,8 +2,7 @@ import { type PublicProviderCatalog, updateProfileSchema } from '@autopod/shared
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
-import { resolveCatalogProfileSelection } from './profile.js';
-import { registerProfileCommands } from './profile.js';
+import { registerProfileCommands, resolveCatalogProfileSelection } from './profile.js';
 import { registerProviderAccountCommands } from './provider-account.js';
 
 vi.mock('ora', () => ({
@@ -14,6 +13,7 @@ vi.mock('ora', () => ({
     stop: vi.fn().mockReturnThis(),
   }),
 }));
+
 import {
   canSubmitGenericApiKey,
   catalogProviderModels,

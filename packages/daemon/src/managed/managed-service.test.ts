@@ -110,30 +110,25 @@ it.each([
   'agent-followup-channel-failed',
   'agent-output-invalid',
   'agent-cli-exit',
-] as const)(
-  'persists allowlisted runtime limitation %s before later cleanup',
-  async (limitation) => {
-    const f = fixture();
-    try {
-      const service = f.service();
-      const handle = await service.start('installation-one', f.request);
-      f.runtime.observe = async () => ({
-        state: 'stopped',
-        consumedTokens: 42,
-        exitCode: 1,
-        limitation,
-      });
-      await service.enforceExpiry();
-      expect(
-        f.db
-          .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
-          .get(handle.podId),
-      ).toEqual({ limitations_json: JSON.stringify([limitation]) });
-    } finally {
-      f.close();
-    }
-  },
-);
+] as const)('persists allowlisted runtime limitation %s before later cleanup', async (limitation) => {
+  const f = fixture();
+  try {
+    const service = f.service();
+    const handle = await service.start('installation-one', f.request);
+    f.runtime.observe = async () => ({
+      state: 'stopped',
+      consumedTokens: 42,
+      exitCode: 1,
+      limitation,
+    });
+    await service.enforceExpiry();
+    expect(
+      f.db.prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?').get(handle.podId),
+    ).toEqual({ limitations_json: JSON.stringify([limitation]) });
+  } finally {
+    f.close();
+  }
+});
 it('dark mode and unenforceable scope cause no effects', async () => {
   const f = fixture();
   try {
@@ -208,26 +203,26 @@ it('conflicting initial requests racing through separate services reserve one po
   }
 });
 
-it.each(['managed-git-operation-failed', 'Bearer reusable-secret'])(
-  'persists only safe launch failure categories for %s',
-  async (message) => {
-    const f = fixture();
-    try {
-      f.runtime.ensure = async () => {
-        throw new Error(message);
-      };
-      const service = f.service();
-      await expect(service.start('installation-one', f.request)).rejects.toThrow();
-      const row = service.lookup('installation-one', f.request.startKey);
-      const result = f.db
-        .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
-        .get(row?.pod_id) as { limitations_json: string };
-      expect(JSON.parse(result.limitations_json)).toEqual([
-        message === 'managed-git-operation-failed' ? message : 'managed-launch-unconfirmed',
-      ]);
-      expect(result.limitations_json).not.toContain('reusable-secret');
-    } finally {
-      f.close();
-    }
-  },
-);
+it.each([
+  'managed-git-operation-failed',
+  'Bearer reusable-secret',
+])('persists only safe launch failure categories for %s', async (message) => {
+  const f = fixture();
+  try {
+    f.runtime.ensure = async () => {
+      throw new Error(message);
+    };
+    const service = f.service();
+    await expect(service.start('installation-one', f.request)).rejects.toThrow();
+    const row = service.lookup('installation-one', f.request.startKey);
+    const result = f.db
+      .prepare('SELECT limitations_json FROM managed_results WHERE pod_id=?')
+      .get(row?.pod_id) as { limitations_json: string };
+    expect(JSON.parse(result.limitations_json)).toEqual([
+      message === 'managed-git-operation-failed' ? message : 'managed-launch-unconfirmed',
+    ]);
+    expect(result.limitations_json).not.toContain('reusable-secret');
+  } finally {
+    f.close();
+  }
+});

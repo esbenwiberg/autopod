@@ -1,5 +1,4 @@
-import type { OperatorActor } from '@autopod/shared';
-import type { Pod, PodStatus, ScanFinding } from '@autopod/shared';
+import type { OperatorActor, Pod, PodStatus, ScanFinding } from '@autopod/shared';
 import type { Logger } from 'pino';
 import type { PrManager, PrMergeStatus, WorktreeManager } from '../interfaces/index.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';

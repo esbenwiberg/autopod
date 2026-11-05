@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createAdmissionFixture, flushAdmission } from '../test-utils/admission-queries-helpers.js';
+
 describe('complete legacy admission', () => {
   it('persists creation metadata and safe interactive branch through real SQLite reopen', async () => {
     const f = createAdmissionFixture(true);

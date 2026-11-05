@@ -191,10 +191,7 @@ function renderStatus(status: RedactedPodsitterStatus) {
   );
 }
 
-function renderDecisions(result: {
-  items: RedactedPodsitterDecision[];
-  total: number;
-}): void {
+function renderDecisions(result: { items: RedactedPodsitterDecision[]; total: number }): void {
   if (result.items.length === 0) {
     console.log(chalk.dim('No daemon-native Podsitter decisions found.'));
     return;

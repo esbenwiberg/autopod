@@ -98,4 +98,5 @@ export interface EscalationResponse {
   /** Legacy alias for respondedAt; some call sites still emit this name. */
   timestamp?: string;
 }
+
 import type { OperatorActor } from './podsitter.js';

@@ -38,7 +38,7 @@ export function canonicalMergePrIdentity(raw: string): string {
         !org ||
         !project ||
         !repository ||
-        [org, project, repository].some((part) => /[\/\\\0\r\n]/.test(part))
+        [org, project, repository].some((part) => /[/\\\0\r\n]/.test(part))
       )
         return mergeReconciliation('The durable PR repository path is ambiguous.');
       return `https://dev.azure.com/${encodeURIComponent(org.toLowerCase())}/${encodeURIComponent(project)}/_git/${encodeURIComponent(repository)}/pullrequest/${Number(match[1])}`;

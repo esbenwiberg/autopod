@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { AuthError } from '@autopod/shared';
 import type { AuthToken } from '@autopod/shared';
+import { AuthError } from '@autopod/shared';
 import * as configStore from '../config/config-store.js';
 import {
   deleteCredentials,

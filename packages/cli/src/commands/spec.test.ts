@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { preflightSeriesFolder } from './spec-preflight.js';
 import { registerSpecCommands } from './spec.js';
+import { preflightSeriesFolder } from './spec-preflight.js';
 
 const contractYaml = `contract_version: 1
 title: "Check spec parser"

@@ -1,7 +1,7 @@
 import type { PodBridge, ValidationPhaseName, ValidationPhaseResult } from '../pod-bridge.js';
 import {
-  type OperatorMessageInterruption,
   consumeOperatorMessages,
+  type OperatorMessageInterruption,
 } from './operator-message-interlock.js';
 
 export interface ValidateLocallyInput {

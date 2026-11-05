@@ -4,7 +4,7 @@ import type { EscalationRequest, EscalationResponse } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { type EscalationRepository, createEscalationRepository } from './escalation-repository.js';
+import { createEscalationRepository, type EscalationRepository } from './escalation-repository.js';
 
 const MIGRATIONS_DIR = path.resolve(import.meta.dirname, '../db/migrations');
 const MIGRATION_FILES = fs

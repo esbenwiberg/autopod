@@ -11,7 +11,7 @@ import { memoryMatchesProjectSetup, projectMemoryScope } from './project-memory-
 import type { ProvisioningCaptured, ProvisioningLiveDependencies } from './provisioning-ports.js';
 import { buildCodeIntelligenceServers } from './provisioning-runtime-files.js';
 import type { PopulatedWorkspace } from './provisioning-workspace-population.js';
-import { CREDENTIAL_GUARD_HOOK, buildRegistryFiles } from './registry-injector.js';
+import { buildRegistryFiles, CREDENTIAL_GUARD_HOOK } from './registry-injector.js';
 import { resolveSkills } from './skill-resolver.js';
 import {
   buildBashrcHintBlock,
