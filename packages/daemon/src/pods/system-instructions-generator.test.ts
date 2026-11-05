@@ -643,7 +643,7 @@ human_review: []
     expect(md).toContain('Read files you are about to change with a native file-read tool');
   });
 
-  it('lists configured pre-completion commands in guidelines', () => {
+  it('lists configured commands as optional scope references', () => {
     const md = generateSystemInstructions(
       makeProfile({
         buildCommand: 'npm run build',
@@ -654,7 +654,7 @@ human_review: []
       'http://localhost:8080/mcp/x',
     );
 
-    expect(md).toContain('Run pre-completion checks before `report_task_summary`');
+    expect(md).toContain('not a mandatory pre-completion checklist');
     expect(md).toContain('lint: `biome check .`');
     expect(md).toContain('build: `npm run build`');
     expect(md).toContain('tests: `npm test`');
@@ -670,26 +670,62 @@ human_review: []
     expect(md).toContain('run from `/workspace/apps/web`');
   });
 
-  it('falls back to a generic build-passes hint when no commands are configured', () => {
+  it('uses affected-work guidance when no commands are configured', () => {
     const md = generateSystemInstructions(
       makeProfile({ buildCommand: null, testCommand: null, lintCommand: null }),
       makeSession(),
       'http://localhost:8080/mcp/x',
     );
 
-    expect(md).toContain('Ensure the build passes before completing');
+    expect(md).toContain('No profile lint/build/test commands are configured');
+    expect(md).toContain('choose meaningful checks for the affected work');
     expect(md).not.toContain('Run pre-completion checks');
   });
 
-  it('still tells the agent that validation also runs after finishing', () => {
+  it('describes independent configured enabled gates', () => {
     const md = generateSystemInstructions(
       makeProfile(),
       makeSession(),
       'http://localhost:8080/mcp/x',
     );
 
-    expect(md).toContain('Validation also runs after you finish');
+    expect(md).toContain('the daemon runs its configured enabled validation gates');
     expect(md).not.toContain('Validation is automatic');
+  });
+
+  it.each([
+    {},
+    { buildCommand: null, testCommand: null, lintCommand: null },
+    { buildWorkDir: 'apps/web' },
+    { outputMode: 'artifact' as const },
+  ])('keeps affected-work verification consistent for %j', (overrides) => {
+    const md = generateSystemInstructions(
+      makeProfile(overrides),
+      makeSession(),
+      'http://localhost:8080/mcp/x',
+    );
+    expect(md).toContain('smallest meaningful tests/checks');
+    expect(md).toContain('changed behavior, affected dependencies and contracts');
+    expect(md).toContain('Broaden verification for shared interfaces, migrations');
+    expect(md).toContain('dependency/build configuration changes or uncertain impact');
+    expect(md).toContain('documentation-only or non-code artifacts');
+    expect(md).toContain('Explicit task and contract checks still apply');
+    expect(md).toContain('configured preparation and the supported build path');
+    expect(md).toContain('Report exact commands, results, scope rationale and deferred checks');
+    expect(md).toContain('never conceal known failures or relabel them as passes');
+    expect(md).toContain('Run relevant Linux-compatible checks for affected work');
+    expect(md).toContain('deferred Mac/human verification');
+    if (overrides.outputMode !== 'artifact') {
+      expect(md).toContain('after relevant self-checks and diff self-review');
+      expect(md).toContain('a successful `validate_locally` call is not required');
+    }
+    expect(md).toContain('Worker self-checks do not replace or disable those gates');
+    expect(md).not.toContain('Run pre-completion checks');
+    expect(md).not.toContain('Always run the pre-completion checks');
+    expect(md).not.toContain('Ensure the build passes before completing');
+    expect(md).not.toContain('Run the configured Linux-compatible profile checks normally');
+    expect(md).not.toContain('the system independently re-runs build, tests');
+    expect(md).not.toContain('No build or validation will run');
   });
 
   it('mentions pre_submit_review in guidelines', () => {
