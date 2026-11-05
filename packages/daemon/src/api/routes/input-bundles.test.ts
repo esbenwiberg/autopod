@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
 import { AuthError, AutopodError, type InputBundleRef } from '@autopod/shared';
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -7,7 +8,7 @@ import { ReferencePreviewService } from '../../inputs/reference-preview-service.
 import { createTestDb } from '../../test-utils/mock-helpers.js';
 import { referencePreview } from '../../test-utils/reference-preview-helpers.js';
 import { errorHandler } from '../error-handler.js';
-import { authPlugin } from '../plugins/auth.js';
+import { authenticateOperatorRequest, authPlugin } from '../plugins/auth.js';
 import { inputBundleRoutes } from './input-bundles.js';
 
 const closers: Array<() => Promise<void>> = [];
@@ -22,14 +23,137 @@ async function fixture(previews?: (store: InputBundleStore) => ReferencePreviewS
   app.addHook('preHandler', async (request) => {
     request.user = { oid: String(request.headers['x-owner'] ?? 'owner') } as typeof request.user;
   });
-  await inputBundleRoutes(app, store, previews?.(store));
+  await inputBundleRoutes(app, store, previews?.(store), async (request) => {
+    request.user = { oid: String(request.headers['x-owner'] ?? 'owner') } as typeof request.user;
+  });
   closers.push(async () => {
     await app.close();
     db.close();
   });
   return { app, store };
 }
+async function authenticatedNetworkFixture(bodyTimeout = 30_000) {
+  const db = createTestDb();
+  const store = new InputBundleStore(db);
+  const app = Fastify();
+  const user = {
+    oid: 'owner',
+    preferred_username: 'owner',
+    name: 'Owner',
+    roles: [],
+    aud: '',
+    iss: '',
+    exp: 9999999999,
+    iat: 0,
+  };
+  const auth = {
+    validateToken: vi.fn(async (token: string) => {
+      if (token !== 'operator') throw new AuthError('Invalid token');
+      return user;
+    }),
+    validateTokenSync: () => user,
+  };
+  app.setErrorHandler(errorHandler);
+  authPlugin(app, auth);
+  await inputBundleRoutes(
+    app,
+    store,
+    undefined,
+    (request) => authenticateOperatorRequest(request, auth),
+    bodyTimeout,
+  );
+  const address = await app.listen({ host: '127.0.0.1', port: 0 });
+  closers.push(async () => {
+    await app.close();
+    db.close();
+  });
+  const bytes = Buffer.from('<p>Reference</p>');
+  const bundle = store.create(
+    {
+      requestKey: randomUUID(),
+      files: [
+        {
+          path: 'design.html',
+          mediaType: 'text/html',
+          byteLength: bytes.length,
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+        },
+      ],
+    },
+    'owner',
+  );
+  const url = `/input-bundles/${bundle.id}/files/0`;
+  function stalled(token?: string) {
+    const req = httpRequest(`${address}${url}`, {
+      method: 'PUT',
+      agent: false,
+      headers: {
+        'content-type': 'application/octet-stream',
+        'content-length': bytes.length,
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    const status = new Promise<number>((resolve, reject) => {
+      const deadline = setTimeout(() => reject(new Error('No early upload response')), 2000);
+      req.on('response', (response) => {
+        response.resume();
+        response.once('end', () => {
+          clearTimeout(deadline);
+          resolve(response.statusCode ?? 0);
+        });
+      });
+      req.on('error', (error) => {
+        clearTimeout(deadline);
+        reject(error);
+      });
+    });
+    void status.catch(() => {});
+    const closed = new Promise<void>((resolve) => req.once('close', () => resolve()));
+    req.write(bytes.subarray(0, 1));
+    return { req, status, closed };
+  }
+  return { app, store, auth, bytes, bundle, url, stalled };
+}
+
 describe('owner-scoped reference uploads', () => {
+  it('rejects four unauthenticated unfinished PUT bodies before reserving upload capacity', async () => {
+    const f = await authenticatedNetworkFixture();
+    const stalled = Array.from({ length: 4 }, () => f.stalled());
+    try {
+      expect(await Promise.all(stalled.map((entry) => entry.status))).toEqual([401, 401, 401, 401]);
+      const valid = await f.app.inject({
+        method: 'PUT',
+        url: f.url,
+        headers: { authorization: 'Bearer operator', 'content-type': 'application/octet-stream' },
+        payload: f.bytes,
+      });
+      expect(valid.statusCode).toBe(204);
+      f.store.seal(f.bundle.id, 'owner');
+      expect(f.store.read(f.bundle.id, 'owner', 0)).toEqual(f.bytes);
+    } finally {
+      for (const entry of stalled) entry.req.destroy();
+    }
+  });
+  it('expires authenticated stalled bodies and releases all four slots', async () => {
+    const f = await authenticatedNetworkFixture(500);
+    const stalled = Array.from({ length: 4 }, () => f.stalled('operator'));
+    try {
+      for (let count = 0; count < 30 && f.auth.validateToken.mock.calls.length < 4; count++)
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      await new Promise((resolve) => setImmediate(resolve));
+      const request = {
+        method: 'PUT' as const,
+        url: f.url,
+        headers: { authorization: 'Bearer operator', 'content-type': 'application/octet-stream' },
+        payload: f.bytes,
+      };
+      expect((await f.app.inject(request)).statusCode).toBe(429);
+      await Promise.all(stalled.map((entry) => entry.closed));
+      expect((await f.app.inject(request)).statusCode).toBe(204);
+    } finally {
+      for (const entry of stalled) entry.req.destroy();
+    }
+  });
   it('returns only owner-authorized source-bound raster previews, never active HTML', async () => {
     const image = `sha256:${'a'.repeat(64)}`;
     const render = vi.fn(async (ref: InputBundleRef, path: string) =>
@@ -131,14 +255,17 @@ describe('owner-scoped reference uploads', () => {
       iat: 0,
     };
     app.setErrorHandler(errorHandler);
-    authPlugin(app, {
-      validateToken: async (token) => {
+    const auth = {
+      validateToken: async (token: string) => {
         if (token !== 'operator') throw new AuthError('Invalid token');
         return user;
       },
       validateTokenSync: () => user,
-    });
-    await inputBundleRoutes(app, store);
+    };
+    authPlugin(app, auth);
+    await inputBundleRoutes(app, store, undefined, (request) =>
+      authenticateOperatorRequest(request, auth),
+    );
     closers.push(async () => {
       await app.close();
       db.close();
@@ -234,7 +361,7 @@ describe('owner-scoped reference uploads', () => {
   });
 
   it('rejects missing bytes, unsafe paths and invalid upload types', async () => {
-    const { app } = await fixture();
+    const { app, store } = await fixture();
     const created = await app.inject({
       method: 'POST',
       url: '/input-bundles',
@@ -251,11 +378,20 @@ describe('owner-scoped reference uploads', () => {
       },
     });
     expect(created.statusCode).toBe(400);
+    const admitted = store.create(
+      {
+        requestKey: randomUUID(),
+        files: [
+          { path: 'design.txt', mediaType: 'text/plain', byteLength: 1, sha256: '0'.repeat(64) },
+        ],
+      },
+      'owner',
+    );
     expect(
       (
         await app.inject({
           method: 'PUT',
-          url: '/input-bundles/missing/files/0',
+          url: `/input-bundles/${admitted.id}/files/0`,
           payload: { content: 'not raw bytes' },
         })
       ).statusCode,

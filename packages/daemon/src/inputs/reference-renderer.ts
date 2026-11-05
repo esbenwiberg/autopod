@@ -205,7 +205,7 @@ export class DockerReferenceRenderer implements ReferenceRenderer {
           diagnostic
             .toString('utf8')
             .match(
-              /REFERENCE_RENDER_(?:FAILED|TIMEOUT):(input|browser|context|navigation|screenshot|output|cleanup)\b/,
+              /REFERENCE_RENDER_(?:FAILED|TIMEOUT):(input|browser|context|navigation|images|screenshot|output|cleanup)\b/,
             )?.[1] ?? 'unknown';
         throw new AutopodError(
           `Isolated reference render failed (exit ${exit.StatusCode}, stage ${stage})`,

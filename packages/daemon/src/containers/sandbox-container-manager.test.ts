@@ -544,6 +544,28 @@ describe('SandboxContainerManager', () => {
       }
     });
 
+    it('preserves every admitted reference entry even when a path is named node_modules', async () => {
+      const directory = mkdtempSync(join(tmpdir(), 'sandbox-reference-exact-'));
+      try {
+        mkdirSync(join(directory, 'files/node_modules/assets'), { recursive: true });
+        writeFileSync(join(directory, 'manifest.json'), '{}');
+        writeFileSync(join(directory, 'files/node_modules/assets/design.html'), '<p>Reference</p>');
+        const client = new FakeSandboxApiClient();
+        const id = await new SandboxContainerManager(client, logger).spawn({
+          ...baseConfig,
+          volumes: [{ host: directory, container: '/autopod/inputs', readOnly: true }],
+        });
+        expect(
+          client.sandboxes
+            .get(id)
+            ?.files.get('/autopod/inputs/files/node_modules/assets/design.html')
+            ?.toString(),
+        ).toBe('<p>Reference</p>');
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+
     it('uploads host volumes because sandboxes have no bind mounts', async () => {
       const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-upload-'));
       try {

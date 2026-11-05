@@ -136,10 +136,22 @@ let browser;
     } else entrySeen = true;
   });
   stage = 'navigation';
-  await page.goto(entryUrl, { waitUntil: 'domcontentloaded', timeout: 8000 });
+  await page.goto(entryUrl, { waitUntil: 'load', timeout: 8000 });
   await page.evaluate(() =>
     Promise.race([document.fonts.ready, new Promise((resolve) => setTimeout(resolve, 1000))]),
   );
+  stage = 'images';
+  await page.evaluate(async (allowedOrigin) => {
+    const local = [...document.images].filter((image) => {
+      const source = image.currentSrc || image.src;
+      return (
+        source.startsWith(`${allowedOrigin}/`) ||
+        source.startsWith('data:') ||
+        source.startsWith('blob:')
+      );
+    });
+    await Promise.all(local.map((image) => image.decode()));
+  }, origin);
   stage = 'screenshot';
   const bytes = await page.screenshot({
     type: 'jpeg',

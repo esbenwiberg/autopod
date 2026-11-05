@@ -1,5 +1,5 @@
 import { AutopodError, inputPathSchema, MAX_INPUT_FILE_BYTES } from '@autopod/shared';
-import type { FastifyError, FastifyInstance } from 'fastify';
+import type { FastifyError, FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { InputBundleStore } from '../../inputs/input-bundle-store.js';
 import type { ReferencePreviewService } from '../../inputs/reference-preview-service.js';
@@ -9,8 +9,16 @@ import { errorHandler } from '../error-handler.js';
 export async function inputBundleRoutes(
   app: FastifyInstance,
   store: InputBundleStore,
-  previews?: ReferencePreviewService,
+  previews: ReferencePreviewService | undefined,
+  authenticateUpload: (request: FastifyRequest) => Promise<void>,
+  uploadBodyTimeoutMs = 30_000,
 ): Promise<void> {
+  if (
+    !Number.isSafeInteger(uploadBodyTimeoutMs) ||
+    uploadBodyTimeoutMs < 1 ||
+    uploadBodyTimeoutMs > 30_000
+  )
+    throw new Error('Invalid reference upload body deadline');
   await app.register(async (scope) => {
     scope.setErrorHandler<FastifyError>((error, request, reply) => {
       if (error.code === 'FST_ERR_CTP_BODY_TOO_LARGE')
@@ -20,11 +28,15 @@ export async function inputBundleRoutes(
         });
       return errorHandler(error, request, reply);
     });
-    // Bound buffering before body parsing, including unauthenticated requests.
+    // Authenticate before consuming any of the globally bounded body-buffer slots.
     let uploads = 0;
     const admitted = new WeakSet<object>();
+    const deadlines = new Map<object, ReturnType<typeof setTimeout>>();
     scope.addHook('onRequest', async (request) => {
       if (request.method !== 'PUT') return;
+      await authenticateUpload(request);
+      const { id } = request.params as { id: string };
+      store.get(id, request.user.oid);
       if (uploads >= 4)
         throw new AutopodError(
           'Too many attachment uploads; retry shortly',
@@ -33,9 +45,19 @@ export async function inputBundleRoutes(
         );
       admitted.add(request);
       uploads++;
+      const timer = setTimeout(() => {
+        // An absolute deadline, not an idle timeout a slow trickle can reset.
+        request.raw.destroy();
+        void release(request);
+      }, uploadBodyTimeoutMs);
+      timer.unref();
+      deadlines.set(request, timer);
     });
     const release = async (request: object) => {
       if (admitted.delete(request)) uploads--;
+      const timer = deadlines.get(request);
+      if (timer) clearTimeout(timer);
+      deadlines.delete(request);
     };
     scope.addHook('onResponse', release);
     scope.addHook('onRequestAbort', release);
@@ -113,6 +135,10 @@ export async function inputBundleRoutes(
       }
     }, 3600_000);
     timer.unref();
-    scope.addHook('onClose', async () => clearInterval(timer));
+    scope.addHook('onClose', async () => {
+      clearInterval(timer);
+      for (const deadline of deadlines.values()) clearTimeout(deadline);
+      deadlines.clear();
+    });
   });
 }

@@ -55,7 +55,9 @@ describe('runCodexReview', () => {
     const staged = writer.mock.calls.find(([, path]) => String(path).endsWith('.png'));
     expect(staged?.[2]).toEqual(image.bytes);
     expect(staged?.[3]).toEqual({ mode: 0o444 });
-    const command = harness.execs.find((entry) => entry.command.includes('bash'))?.command ?? [];
+    const command =
+      harness.execs.find((entry) => entry.command[0] === 'sh' && entry.command[1] === '-c')
+        ?.command ?? [];
     expect(command.join(' ')).toContain('--image');
     expect(command.join(' ')).toContain(String(staged?.[1]));
     expect(

@@ -124,7 +124,8 @@ attempted. `inputBundles.htmlRendering` reports configuration/availability.
   popups and main-frame escapes are denied. HTML scripts may run **inside this
   boundary**; application ports, runtime egress and validation policy are unchanged.
 - The initial view is fixed at **1280×900**, scale 1, light scheme, en-US/UTC,
-  reduced motion, JPEG quality 80. It is not a full-page/interactive/mobile capture
+  reduced motion, JPEG quality 80. It waits for page load, fonts and decoding of
+  supplied local images before caching a view. It is not a full-page/interactive/mobile capture
   or pixel-equality oracle. Missing remote assets/fonts may materially change it.
   Blocked resources and script errors are recorded as coverage limitations, never
   fidelity proof. User console/error contents are not written to renderer logs.
@@ -133,7 +134,7 @@ attempted. `inputBundles.htmlRendering` reports configuration/availability.
   deadline. A cancelled review does not schedule more reference renders.
   Unconfirmed cleanup blocks further allocations rather than pretending success.
 
-Migration 238 stores immutable raster derivatives and source/bundle/resource
+Migration 240 stores immutable raster derivatives and source/bundle/resource
 hashes, renderer image/protocol, browser version, viewport/quality and capture
 time. The **first successful view is canonical** for an entrypoint: retries,
 restarts and renderer-image upgrades cannot silently replace its pixels. Upload a
@@ -149,7 +150,7 @@ an actual rendered-application comparison.
 
 ## Identity, recovery, privacy, and retention
 
-Original bytes and manifests are stored in SQLite (migration 236) rather than
+Original bytes and manifests are stored in SQLite (migration 238) rather than
 large base64 strings in launch JSON. The existing verified SQLite backup therefore
 includes originals; filesystem worker copies can be re-created after restore.
 Ensure normal DB/WAL/backup disk headroom. Storage is bounded to 250 MiB and 100
@@ -199,7 +200,9 @@ Human/operator bearer authentication is required throughout:
    different content conflicts.
 2. `PUT /input-bundles/:id/files/:index`, with `Content-Type:
    application/octet-stream` and exact bytes (indices follow the returned manifest).
-   Body buffering is capped per file and concurrent uploads are bounded.
+   Operator authentication and ownership are checked before reserving a body-buffer
+   slot. Buffering is capped per file, four concurrent uploads are allowed, and an
+   absolute 30-second body deadline releases stalled requests.
 3. `POST /input-bundles/:id/seal`; missing or mismatched bytes fail closed.
 4. Include the sealed reference (without `status`) in `LaunchRequest.work.inputBundle`.
 5. `GET /input-bundles/:id` returns owner-scoped metadata;
