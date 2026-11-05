@@ -38,6 +38,11 @@ private final class ReworkFixtureProtocol: URLProtocol, @unchecked Sendable {
       status = 200
       if request.httpMethod == "POST" {
         #expect(path.hasSuffix("/rework-v1"))
+        do {
+          let data = try reworkRequestBody(request)
+          let input = try JSONDecoder().decode(ReworkRequest.self, from: data)
+          #expect(input.requestKey == "stable-key" && input.generation == 3 && input.guidance == "Retain edits")
+        } catch { Issue.record("Missing or invalid guidance-bearing request body: \(error)") }
       } else { #expect(path.hasSuffix("/requests/stable-key")) }
       body = #"{"requestKey":"stable-key","generation":3,"guidance":"Retain edits","settledAt":null,"error":null}"#
     }
@@ -46,4 +51,20 @@ private final class ReworkFixtureProtocol: URLProtocol, @unchecked Sendable {
     client?.urlProtocol(self, didLoad: Data(body.utf8)); client?.urlProtocolDidFinishLoading(self)
   }
   override func stopLoading() {}
+}
+
+private func reworkRequestBody(_ request: URLRequest) throws -> Data {
+  if let body = request.httpBody { return body }
+  guard let stream = request.httpBodyStream else { throw URLError(.badServerResponse) }
+  stream.open(); defer { stream.close() }
+  var data = Data()
+  let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 4096)
+  defer { buffer.deallocate() }
+  while stream.hasBytesAvailable {
+    let count = stream.read(buffer, maxLength: 4096)
+    if count < 0 { throw stream.streamError ?? URLError(.badServerResponse) }
+    if count == 0 { break }
+    data.append(buffer, count: count)
+  }
+  return data
 }
