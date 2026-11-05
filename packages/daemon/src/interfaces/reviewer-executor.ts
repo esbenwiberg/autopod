@@ -4,6 +4,8 @@ import type { ReviewerOutputContract } from '../validation/review-structured-out
 /** Daemon-owned inference. Input contains review context, never execution identity or credentials. */
 export type ReviewerExecutor = ((input: {
   prompt: string;
+  /** Native image content only; never arbitrary container/host file selectors. */
+  images?: readonly import('../inputs/reviewer-images.js').ReviewerImage[];
   timeout: number;
   outputContract?: ReviewerOutputContract;
 }) => Promise<{ stdout: string; tokenUsage?: CodexReviewTokenUsage; model?: string }>) & {

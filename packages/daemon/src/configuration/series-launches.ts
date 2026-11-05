@@ -88,7 +88,11 @@ export function createSeriesLaunches(options: {
           'SERIES_PREFLIGHT_FAILED',
         );
       const briefs = orderSeriesBriefs(request.briefs);
-      const base = await resolveLaunch({ ...request.launch, task: request.seriesName }, resolution);
+      const base = await resolveLaunch(
+        { ...request.launch, task: request.seriesName, work: { inputBundle: request.inputBundle } },
+        resolution,
+        owner,
+      );
       if (!base.repository || base.workflow.agentMode !== 'auto' || base.intent !== 'task')
         configurationError(
           'Series require a repository and an automatic Task workflow',
@@ -203,6 +207,7 @@ function seriesWork(
     baseBranch: request.baseBranch,
     specFiles: root ? request.specFiles : undefined,
     specContextFiles: request.specContextFiles,
+    inputBundle: request.inputBundle,
     seriesId,
     seriesName: request.seriesName,
     briefTitle: brief.title,

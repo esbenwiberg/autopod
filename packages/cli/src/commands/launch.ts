@@ -6,6 +6,7 @@ import type { Command } from 'commander';
 import type { AutopodClient } from '../api/client.js';
 import { saveLaunchReceipt } from '../config/launch-store.js';
 import { parseTokenBudget } from './budget.js';
+import { type AttachmentFlags, collectInputs, uploadInputs } from './input-attachments.js';
 import { buildLaunchRequest, type LaunchFlags } from './launch-request.js';
 import { validateEffectiveLaunchSources, validateLaunchSources } from './launch-sources.js';
 import { type LaunchTaskFlags, readLaunchTask } from './launch-task.js';
@@ -27,6 +28,12 @@ function summarize(config: EffectiveLaunchConfig): string {
     `Intent: ${config.intent}`,
     `Completion: ${config.workflow.completion}`,
     `Task token limit: ${config.workflow.tokenBudget ?? 'off'}`,
+    ...(config.work?.inputBundle
+      ? [
+          `Reference attachments: ${config.work.inputBundle.files.length} files (not added to source)`,
+          'Visual comparison: not automatically performed',
+        ]
+      : []),
     `Configuration: ${config.digest}`,
   ].join('\n');
 }
@@ -54,6 +61,16 @@ export function registerLaunchCommand(
     .option('--spec <folder>', 'Read a brief and contract, with runtime context files')
     .option('--include-specs', 'Commit the spec files on the new pod branch')
     .option('--no-spec-context', 'Omit spec files from runtime context')
+    .option(
+      '--attach <file>',
+      'Upload a reference file, never added to source; repeatable',
+      (value: string, previous: string[] = []) => [...previous, value],
+    )
+    .option(
+      '--attach-dir <folder>',
+      'Upload a reference folder with relative assets; repeatable',
+      (value: string, previous: string[] = []) => [...previous, value],
+    )
     .option('--branch <name>', 'Output branch name for this work')
     .option('--start-branch <name>', 'Start from a published remote branch name')
     .option('--base-branch <name>', 'Published remote base branch name')
@@ -83,7 +100,8 @@ export function registerLaunchCommand(
     async (
       legacy: string[],
       opts: LaunchFlags &
-        LaunchTaskFlags & {
+        LaunchTaskFlags &
+        AttachmentFlags & {
           config?: string;
           preview?: boolean;
           json?: boolean;
@@ -100,6 +118,9 @@ export function registerLaunchCommand(
           `Profile-first positional launches were removed. Use: ap ${mode.name} --repo <repository> --profile <profile> --task "Task"`,
         );
       const client = getClient();
+      if (opts.config && (opts.attach?.length || opts.attachDir?.length) && !opts.overrideConfig)
+        throw new Error('Attachments change --config. Use --override-config for a new request.');
+      const inputs = collectInputs(opts);
       const taskInput = readLaunchTask(opts);
       if (taskInput.requiredSidecarIds?.length) {
         if (opts.sidecars === false)
@@ -246,6 +267,11 @@ export function registerLaunchCommand(
               : {}),
           },
         };
+      }
+      if (inputs.length) {
+        request.work = { ...request.work, inputBundle: await uploadInputs(client, inputs) };
+        Reflect.deleteProperty(request, 'expectedDigest');
+        if (!opts.requestId) Reflect.deleteProperty(request, 'requestId');
       }
       if (opts.preview || !request.expectedDigest) validateLaunchSources(request.work);
       // An exact saved retry reaches admission before mutable preset/discovery reads.

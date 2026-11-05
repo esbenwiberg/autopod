@@ -298,6 +298,7 @@ export function createAdmissionLegacy(
             request.specContextFiles && request.specContextFiles.length > 0
               ? request.specContextFiles
               : null,
+          inputBundle: request.inputBundle ?? null,
           linkedPodId: request.linkedPodId ?? null,
           pimGroups: (() => {
             if (request.pimGroups != null) return request.pimGroups;

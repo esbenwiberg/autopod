@@ -10,6 +10,11 @@ export interface ReviewerRunRow {
   container_id: string | null;
 }
 
+export interface ReviewerInputEvidence {
+  promptSha256: string;
+  images: import('../inputs/reviewer-images.js').ReviewerImageEvidence[];
+}
+
 export interface ReviewerRunRecord {
   id: string;
   podId: string;
@@ -20,6 +25,8 @@ export interface ReviewerRunRecord {
   state: 'preparing' | 'running' | 'completed' | 'failed' | 'uncertain';
   cleanup: 'pending' | 'clean' | 'uncertain';
   failureKind: string | null;
+  /** Submitted native content; not proof that the model interpreted it correctly. */
+  inputEvidence: ReviewerInputEvidence | null;
   inputTokens: number | null;
   outputTokens: number | null;
   createdAt: string;
@@ -32,7 +39,8 @@ export interface ReviewerRunRecord {
   requiresReconciliation: boolean;
 }
 
-type ReviewerRunSqlRecord = Omit<ReviewerRunRecord, 'requiresReconciliation'> & {
+type ReviewerRunSqlRecord = Omit<ReviewerRunRecord, 'requiresReconciliation' | 'inputEvidence'> & {
+  inputEvidence: string | null;
   requiresReconciliation: number;
 };
 
@@ -42,11 +50,21 @@ export const UNRECONCILED_REVIEWER_RUN = `(state IN ('preparing','running')
 
 const RECORD_COLUMNS = `id, pod_id AS podId, execution_target AS executionTarget,
   container_id AS containerId, runtime, model,
-  state, cleanup, failure_kind AS failureKind, input_tokens AS inputTokens,
+  state, cleanup, failure_kind AS failureKind, input_evidence AS inputEvidence, input_tokens AS inputTokens,
   output_tokens AS outputTokens, created_at AS createdAt, updated_at AS updatedAt,
   reconciled_at AS reconciledAt, reconciled_by AS reconciledBy,
   reconciliation_note AS reconciliationNote, usage_basis AS usageBasis,
   ${UNRECONCILED_REVIEWER_RUN} AS requiresReconciliation`;
+
+function decodeReviewerRun(row: ReviewerRunSqlRecord): ReviewerRunRecord {
+  return {
+    ...row,
+    inputEvidence: row.inputEvidence
+      ? (JSON.parse(row.inputEvidence) as ReviewerInputEvidence)
+      : null,
+    requiresReconciliation: !!row.requiresReconciliation,
+  };
+}
 
 export function hasMeasuredReviewerUsage(
   usage?: CodexReviewTokenUsage,
@@ -72,6 +90,7 @@ export class ReviewerRunRepository {
     config: EffectiveLaunchConfig,
     route: AgentRoute,
     attempt?: { requestId: string; ordinal: number },
+    inputEvidence?: ReviewerInputEvidence,
   ): void {
     this.db.transaction(() => {
       // Serialize review against the pod budget. Unknown usage must be reconciled before retry.
@@ -114,8 +133,8 @@ export class ReviewerRunRepository {
       const now = new Date().toISOString();
       this.db
         .prepare(`INSERT INTO isolated_reviewer_runs
-        (id,pod_id,lifecycle_generation,configuration_digest,account_id,runtime,model,execution_target,state,cleanup,created_at,updated_at,request_id,ordinal)
-        VALUES(?,?,?,?,?,?,?,?,'preparing','pending',?,?,?,?)`)
+        (id,pod_id,lifecycle_generation,configuration_digest,account_id,runtime,model,execution_target,state,cleanup,created_at,updated_at,request_id,ordinal,input_evidence)
+        VALUES(?,?,?,?,?,?,?,?,'preparing','pending',?,?,?,?,?)`)
         .run(
           id,
           pod.id,
@@ -129,6 +148,7 @@ export class ReviewerRunRepository {
           now,
           attempt?.requestId ?? null,
           attempt?.ordinal ?? null,
+          inputEvidence ? JSON.stringify(inputEvidence) : null,
         );
     })();
   }
@@ -203,14 +223,14 @@ export class ReviewerRunRepository {
           `SELECT ${RECORD_COLUMNS} FROM isolated_reviewer_runs WHERE pod_id=? ORDER BY created_at DESC, id`,
         )
         .all(podId) as ReviewerRunSqlRecord[]
-    ).map((row) => ({ ...row, requiresReconciliation: !!row.requiresReconciliation }));
+    ).map(decodeReviewerRun);
   }
 
   get(podId: string, runId: string): ReviewerRunRecord | null {
     const row = this.db
       .prepare(`SELECT ${RECORD_COLUMNS} FROM isolated_reviewer_runs WHERE pod_id=? AND id=?`)
       .get(podId, runId) as ReviewerRunSqlRecord | undefined;
-    return row ? { ...row, requiresReconciliation: !!row.requiresReconciliation } : null;
+    return row ? decodeReviewerRun(row) : null;
   }
 
   /** Why an immediate re-review would be refused, or null when one may start. */

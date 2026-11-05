@@ -51,7 +51,7 @@ import type { ScheduledJobManager } from '../scheduled-jobs/scheduled-job-manage
 import { errorHandler } from './error-handler.js';
 import { mcpHandler } from './mcp-handler.js';
 import { mcpProxyHandler } from './mcp-proxy-handler.js';
-import { authPlugin } from './plugins/auth.js';
+import { authenticateOperatorRequest, authPlugin } from './plugins/auth.js';
 import { corsPlugin } from './plugins/cors.js';
 import { mobileStaticPlugin } from './plugins/mobile-static.js';
 import { rateLimitPlugin } from './plugins/rate-limit.js';
@@ -66,6 +66,7 @@ import { diffRoutes } from './routes/diff.js';
 import { filesRoutes } from './routes/files.js';
 import { healthRoutes } from './routes/health.js';
 import { historyRoutes } from './routes/history.js';
+import { inputBundleRoutes } from './routes/input-bundles.js';
 import { issueWatcherRoutes } from './routes/issue-watcher.js';
 import { memoryRoutes } from './routes/memory.js';
 import { memoryWorkspaceRoutes } from './routes/memory-workspace.js';
@@ -176,6 +177,13 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   await rateLimitPlugin(app);
   authPlugin(app, deps.authModule, deps.sessionTokenIssuer);
   requestLoggerPlugin(app);
+  const inputBundles = deps.configuration?.inputBundles;
+  if (inputBundles)
+    await app.register(async (scope) =>
+      inputBundleRoutes(scope, inputBundles, deps.configuration?.referencePreviews, (request) =>
+        authenticateOperatorRequest(request, deps.authModule),
+      ),
+    );
   const managed = deps.managed;
   if (managed) {
     await app.register(async (managedApp) => {

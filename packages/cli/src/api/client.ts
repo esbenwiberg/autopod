@@ -247,6 +247,18 @@ export class AutopodClient {
     });
   }
 
+  async createInputBundle(
+    request: import('@autopod/shared').CreateInputBundleRequest,
+  ): Promise<import('@autopod/shared').InputBundleResponse> {
+    return this.request('POST', '/input-bundles', request);
+  }
+  async uploadInputFile(id: string, index: number, bytes: Buffer): Promise<void> {
+    return this.request('PUT', `/input-bundles/${encodeURIComponent(id)}/files/${index}`, bytes);
+  }
+  async sealInputBundle(id: string): Promise<import('@autopod/shared').InputBundleResponse> {
+    return this.request('POST', `/input-bundles/${encodeURIComponent(id)}/seal`);
+  }
+
   async resolveLaunch(request: LaunchRequest): Promise<EffectiveLaunchConfig> {
     return this.request('POST', '/launch/resolve', request);
   }
@@ -1175,6 +1187,9 @@ export class AutopodClient {
   // Internal
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const url = `${this.baseUrl}${path}`;
+    const binary = Buffer.isBuffer(body);
+    const contentType = binary ? 'application/octet-stream' : 'application/json';
+    const payload = body === undefined ? undefined : binary ? body : JSON.stringify(body);
     let token: string;
 
     try {
@@ -1188,10 +1203,10 @@ export class AutopodClient {
       response = await fetch(url, {
         method,
         headers: {
-          ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+          ...(body !== undefined ? { 'Content-Type': contentType } : {}),
           Authorization: `Bearer ${token}`,
         },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
+        body: payload,
       });
     } catch {
       throw new DaemonUnreachableError(this.baseUrl);
@@ -1209,10 +1224,10 @@ export class AutopodClient {
         response = await fetch(url, {
           method,
           headers: {
-            ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+            ...(body !== undefined ? { 'Content-Type': contentType } : {}),
             Authorization: `Bearer ${token}`,
           },
-          body: body !== undefined ? JSON.stringify(body) : undefined,
+          body: payload,
         });
       } catch {
         throw new AuthError('Token refresh failed. Try: ap login');
@@ -1227,8 +1242,8 @@ export class AutopodClient {
       return undefined as T;
     }
 
-    const contentType = response.headers.get('content-type') ?? '';
-    if (contentType.includes('text/plain')) {
+    const responseContentType = response.headers.get('content-type') ?? '';
+    if (responseContentType.includes('text/plain')) {
       return (await response.text()) as T;
     }
 

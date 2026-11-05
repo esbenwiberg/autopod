@@ -55,12 +55,13 @@ export function deriveLaunch(
     : base.intent;
   const inheritedWork =
     input.source.kind === 'follow-up'
-      ? { specContextFiles: base.work.specContextFiles }
+      ? { specContextFiles: base.work.specContextFiles, inputBundle: base.work.inputBundle }
       : input.source.kind === 'manual-fix' || input.source.kind === 'spawn-worker'
         ? {
             contract: base.work.contract,
             handoffInstructions: base.work.handoffInstructions,
             specContextFiles: base.work.specContextFiles,
+            inputBundle: base.work.inputBundle,
           }
         : base.work;
   const request = launchRequestSchema.parse({
@@ -68,7 +69,12 @@ export function deriveLaunch(
     profileId: base.profileId,
     task: input.task,
     intent,
-    work: { ...inheritedWork, ...input.work },
+    work: {
+      ...inheritedWork,
+      // A worker preset selects execution, not a replacement for the workspace's references.
+      ...(parent.work.inputBundle !== undefined ? { inputBundle: parent.work.inputBundle } : {}),
+      ...input.work,
+    },
   });
   const { digest: _, ...body } = structuredClone(base);
   const derived = {

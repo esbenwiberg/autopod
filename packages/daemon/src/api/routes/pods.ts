@@ -868,6 +868,15 @@ export function podRoutes(
           'CONFIG_SOURCE_MISSING',
           409,
         );
+      if (source.work.inputBundle) {
+        if (!configuration.inputBundles)
+          throw new AutopodError(
+            'Reference input storage unavailable',
+            'INPUT_BUNDLES_UNAVAILABLE',
+            503,
+          );
+        configuration.inputBundles.assert(source.work.inputBundle, request.user.oid);
+      }
       return {
         ...(source.repository
           ? { repositoryId: source.repository.id, repositorySetupId: source.repository.setup.id }
@@ -880,6 +889,7 @@ export function podRoutes(
           handoffInstructions: source.work.handoffInstructions,
           specFiles: source.work.specFiles,
           specContextFiles: source.work.specContextFiles,
+          inputBundle: source.work.inputBundle,
           baseBranch: source.work.baseBranch,
           startBranch: source.work.startBranch,
           touches: source.work.touches,
@@ -887,7 +897,19 @@ export function podRoutes(
         },
       };
     }
-    return dispatchRerunRequest(podRepo.getOrThrow(podId));
+    if (!podRepo)
+      throw new AutopodError('Pod repository unavailable', 'TASK_IDENTITY_UNAVAILABLE', 503);
+    const sourcePod = podRepo.getOrThrow(podId);
+    if (sourcePod.inputBundle) {
+      if (!podRepo.inputBundles)
+        throw new AutopodError(
+          'Reference input storage unavailable',
+          'INPUT_BUNDLES_UNAVAILABLE',
+          503,
+        );
+      podRepo.inputBundles.assert(sourcePod.inputBundle, request.user.oid);
+    }
+    return dispatchRerunRequest(sourcePod);
   });
 
   app.get('/pods/:podId/dispatch-preflight', async (request) => {

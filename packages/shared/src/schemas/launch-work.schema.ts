@@ -15,6 +15,7 @@ export const launchWorkSchema = z
     handoffInstructions: true,
     specFiles: true,
     specContextFiles: true,
+    inputBundle: true,
     linkedPodId: true,
     dependsOnPodIds: true,
     seriesId: true,

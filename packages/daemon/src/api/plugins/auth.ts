@@ -67,13 +67,17 @@ export function authPlugin(
       }
     }
 
-    // Default: require Bearer token
-    const authHeader = request.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      throw new AuthError('Missing or invalid Authorization header');
-    }
-
-    const token = authHeader.slice(7);
-    request.user = await authModule.validateToken(token);
+    await authenticateOperatorRequest(request, authModule);
   });
+}
+
+/** Can run before body parsing for bounded operator-only binary admission. */
+export async function authenticateOperatorRequest(
+  request: FastifyRequest,
+  authModule: AuthModule,
+): Promise<void> {
+  const authHeader = request.headers.authorization;
+  if (!authHeader?.startsWith('Bearer '))
+    throw new AuthError('Missing or invalid Authorization header');
+  request.user = await authModule.validateToken(authHeader.slice(7));
 }

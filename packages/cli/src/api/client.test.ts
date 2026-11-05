@@ -139,6 +139,19 @@ describe('AutopodClient', () => {
     expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
+  it('replays the same raw attachment bytes after one auth refresh', async () => {
+    const bytes = Buffer.from([0x89, 0xff, 0, 0x50]);
+    mockFetch
+      .mockResolvedValueOnce(errorResponse(401))
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    await client.uploadInputFile('inputs-11111111-1111-4111-a111-111111111111', 0, bytes);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    for (const call of mockFetch.mock.calls) {
+      expect(call[1].headers['Content-Type']).toBe('application/octet-stream');
+      expect(call[1].body).toBe(bytes);
+    }
+  });
+
   describe('createSession', () => {
     it('sends POST to /pods', async () => {
       const pod = { id: 'abc12345', profileName: 'test', task: 'do stuff', status: 'queued' };

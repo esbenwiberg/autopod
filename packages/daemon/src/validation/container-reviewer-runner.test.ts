@@ -2,8 +2,10 @@ import { PassThrough } from 'node:stream';
 import type { Profile } from '@autopod/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import { referenceImage } from '../test-utils/reference-image-helpers.js';
 import {
   ContainerReviewerUnavailableError,
+  parseClaudeImageReview,
   resolveContainerReviewer,
   runContainerReviewer,
 } from './container-reviewer-runner.js';
@@ -53,6 +55,48 @@ function containerManager(
     getStatus: vi.fn().mockResolvedValue('running' as const),
   } as unknown as ContainerManager;
 }
+
+describe('native Claude image review', () => {
+  it('uses stream-json image input and recovers terminal usage/structured output', async () => {
+    const stream = [
+      JSON.stringify({ type: 'system', subtype: 'init' }),
+      JSON.stringify({
+        type: 'result',
+        result: 'ok',
+        structured_output: { findings: [] },
+        usage: { input_tokens: 10, output_tokens: 2 },
+      }),
+    ].join('\n');
+    const manager = containerManager({ stdout: stream, stderr: '', exitCode: 0 });
+    const result = await runContainerReviewer({
+      podId: 'pod',
+      containerId: 'reviewer',
+      containerManager: manager,
+      profile: profile({}),
+      model: 'sonnet',
+      prompt: 'Review',
+      timeout: 1000,
+      isolated: true,
+      images: [referenceImage()],
+    });
+    expect(result.stdout).toBe('{"findings":[]}');
+    expect(result.tokenUsage).toMatchObject({ inputTokens: 10, outputTokens: 2 });
+    const command = vi.mocked(manager.execStreaming).mock.calls[0]?.[1].join(' ') ?? '';
+    expect(command).toContain('--input-format stream-json --output-format stream-json --verbose');
+    expect(command).toContain("--tools ''");
+    const content = vi.mocked(manager.writeFile).mock.calls[0]?.[2];
+    expect(typeof content).toBe('string');
+    expect(JSON.parse(String(content)).message.content[1].type).toBe('image');
+  });
+  it('does not turn status/no-terminal or failed stream records into a passing review', () => {
+    expect(() => parseClaudeImageReview('{"type":"system"}')).toThrow('no terminal result');
+    expect(() =>
+      parseClaudeImageReview(
+        '{"type":"result","is_error":true,"usage":{"input_tokens":2,"output_tokens":1}}',
+      ),
+    ).toThrow('terminal failure');
+  });
+});
 
 describe('reviewer launch ownership', () => {
   it.each([30, 120])('keeps the Claude deadline after %sms streaming startup', async (delay) => {

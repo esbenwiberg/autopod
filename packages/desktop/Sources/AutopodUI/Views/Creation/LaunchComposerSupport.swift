@@ -223,6 +223,9 @@ internal struct LaunchComposerSummary: View {
       ForEach([LaunchConfigurationSection.ai, .execution, .workflow, .github, .tools, .pim]) { item in
         fact(item.rawValue, context.value(item), item == .ai ? [context.details(.ai)["main"]?["providerAccountId"]?.string, context.origin(item)].compactMap { $0 }.joined(separator: " · ") : context.origin(item))
       }
+      if let files = context.request.work?["inputBundle"]?["files"]?.array, !files.isEmpty {
+        fact("Reference attachments", "\(files.count) files", "Reference only · not added to source")
+      }
       if let seriesPlan { fact("Series plan", seriesPlan, "Inspect dependencies in Briefs") }
       Text(context.preview == nil ? "These choices are a draft. Preview resolves the effective values and their sources." : "This preview covers the reviewed configuration. Every edit requires a fresh preview.")
         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -249,6 +252,14 @@ internal struct LaunchResolvedReview: View {
       Text(series ? "Every brief has been checked. The daemon resolves the configuration again when admitting the series; edits require a fresh review." : "The preview pins the selected combination. Every edit requires a fresh preview.").font(.callout).foregroundStyle(.secondary)
       }
       HStack { Label(preview.mainModel, systemImage: "sparkles"); Spacer(); Text(preview.executionTarget == "local" ? "Docker" : preview.executionTarget) }
+      if let bundle = preview.fields["work"]?["inputBundle"], let files = bundle["files"]?.array, !files.isEmpty {
+        Text("Reference attachments · not added to source").font(.headline)
+        ForEach(Array(files.enumerated()), id: \.offset) { _, file in
+          Text("\(file["path"]?.string ?? "Reference") · \(file["mediaType"]?.string ?? "")").font(.caption.monospaced()).textSelection(.enabled)
+        }
+        Text("Bundle SHA-256: \(bundle["digest"]?.string ?? "")").font(.caption2.monospaced()).textSelection(.enabled)
+        Text("HTML rendering and independent visual comparison are not automatic.").font(.caption).foregroundStyle(.secondary)
+      }
       DisclosureGroup("Inspect complete resolved settings & value sources") {
         Text(ConfigurationJSON.object(preview.fields).formatted()).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
       }
