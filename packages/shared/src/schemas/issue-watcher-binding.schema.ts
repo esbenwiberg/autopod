@@ -1,9 +1,16 @@
 import { z } from 'zod';
 import { configurationIdSchema, savedLaunchSelectionSchema } from './launch-config.schema.js';
 
-const repositoryLaunch = savedLaunchSelectionSchema.refine(
-  (value): value is Extract<z.infer<typeof savedLaunchSelectionSchema>, { repositoryId: string }> =>
-    'repositoryId' in value && !!value.repositoryId,
+type RepositoryLaunch = Extract<
+  z.output<typeof savedLaunchSelectionSchema>,
+  { repositoryId: string }
+>;
+// Preserve Zod's exact refinement intersection, but name its parts so declaration
+// emit references the launch schema instead of repeatedly expanding its input/output.
+type RepositoryLaunchSchema = typeof savedLaunchSelectionSchema &
+  z.ZodType<RepositoryLaunch, z.input<typeof savedLaunchSelectionSchema>>;
+const repositoryLaunch: RepositoryLaunchSchema = savedLaunchSelectionSchema.refine(
+  (value): value is RepositoryLaunch => 'repositoryId' in value && !!value.repositoryId,
   'Issue watchers require an enrolled repository',
 );
 const suffix = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/);
