@@ -2,20 +2,25 @@
 import SwiftUI
 
 extension Theme {
-    @MainActor static let autopod = Theme()
+    @MainActor static var autopod: Theme {
+        // Rebuild from observed tokens so links/code blocks follow live palette changes.
+        let codeBackground = DesktopTheme.canvas
+        let linkColor = DesktopTheme.accent
+        let borderColor = DesktopTheme.line
+        return Theme()
         .text {
             ForegroundColor(.primary)
         }
         .code {
             FontFamilyVariant(.monospaced)
             FontSize(.em(0.85))
-            BackgroundColor(Color(nsColor: .controlBackgroundColor))
+            BackgroundColor(codeBackground)
         }
         .strong {
             FontWeight(.semibold)
         }
         .link {
-            ForegroundColor(.accentColor)
+            ForegroundColor(linkColor)
         }
         .heading1 { configuration in
             configuration.label
@@ -92,7 +97,7 @@ extension Theme {
                     }
                     .padding(12)
             }
-            .background(Color(nsColor: .controlBackgroundColor))
+            .background(codeBackground)
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .markdownMargin(top: 0, bottom: 10)
         }
@@ -102,9 +107,9 @@ extension Theme {
         .table { configuration in
             configuration.label
                 .fixedSize(horizontal: false, vertical: true)
-                .markdownTableBorderStyle(.init(color: Color(nsColor: .separatorColor)))
+                .markdownTableBorderStyle(.init(color: borderColor))
                 .markdownTableBackgroundStyle(
-                    .alternatingRows(Color.clear, Color(nsColor: .controlBackgroundColor))
+                    .alternatingRows(Color.clear, codeBackground)
                 )
                 .markdownMargin(top: 0, bottom: 10)
         }
@@ -124,4 +129,5 @@ extension Theme {
         .thematicBreak {
             Divider().markdownMargin(top: 16, bottom: 16)
         }
+    }
 }

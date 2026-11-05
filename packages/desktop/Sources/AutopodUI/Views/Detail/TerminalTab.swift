@@ -3,6 +3,8 @@ import SwiftUI
 /// Terminal tab — real xterm-compatible terminal via SwiftTerm.
 public struct TerminalTab: View {
   @Environment(\.desktopRedesign) private var redesign
+  @Environment(\.colorScheme) private var colorScheme
+  private var palette: DesktopPaletteColors { DesktopTheme.choice.colors(dark: colorScheme == .dark) }
   public let pod: Pod
   public var terminalState: String
   public var dataPipe: TerminalDataPipe?
@@ -50,7 +52,8 @@ public struct TerminalTab: View {
           TerminalEmulatorView(
             dataPipe: pipe,
             onSendData: { bytes in onSendData?(bytes) },
-            onResize: { cols, rows in onResize?(cols, rows) }
+            onResize: { cols, rows in onResize?(cols, rows) },
+            palette: palette
           )
         } else {
           // Not yet connected — auto-connect on appear, show manual button as fallback
@@ -70,7 +73,7 @@ public struct TerminalTab: View {
             .foregroundStyle(.secondary)
           }
           .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .background(Color(nsColor: NSColor(red: 0.12, green: 0.12, blue: 0.18, alpha: 1)))
+          .background(palette.color(\.canvas))
           .onAppear {
             // Only auto-connect when this tab is actually visible — connecting
             // while hidden causes tmux to render for hardcoded 120x40 into a
