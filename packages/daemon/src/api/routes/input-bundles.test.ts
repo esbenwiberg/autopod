@@ -326,7 +326,8 @@ describe('owner-scoped reference uploads', () => {
       method: 'GET',
       url: `/input-bundles/${bundle.id}/files/0`,
     });
-    expect(download.rawPayload).toEqual(bytes);
+    // Compare every byte natively, without a multi-million-element JS deep equality walk.
+    expect(download.rawPayload.equals(bytes)).toBe(true);
     expect(download.headers['content-disposition']).toContain('attachment');
     expect(download.headers['content-type']).toBe('application/octet-stream');
     expect(download.headers['content-security-policy']).toContain('sandbox');
