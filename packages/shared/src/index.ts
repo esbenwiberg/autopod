@@ -509,6 +509,12 @@ export type {
 } from './types/readiness.js';
 export type { BackupHealth, DaemonHealthSummary, DaemonReleaseInfo } from './types/release.js';
 export type {
+  RetainedFinalizationMode,
+  RetainedFinalizationReceipt,
+  RetainedFinalizationRequest,
+  RetainedFinalizationView,
+} from './types/retained-finalization.js';
+export type {
   AgentCompleteEvent,
   AgentErrorEvent,
   AgentEscalationEvent,

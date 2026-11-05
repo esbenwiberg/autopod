@@ -30,6 +30,7 @@ const custodyDatabases: Database.Database[] = [];
 function emptyCustodyDatabase() {
   const db = new Database(':memory:');
   db.exec('CREATE TABLE retained_checkpoint_recoveries(container_id TEXT, binding TEXT)');
+  db.exec('CREATE TABLE retained_finalization_resources(container_id TEXT)');
   custodyDatabases.push(db);
   return db;
 }

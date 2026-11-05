@@ -353,6 +353,12 @@ public struct DetailPanelView: View {
                     .id(actions.sandboxRecovery.scope + ":" + pod.id)
             }
 
+            if actions.retainedFinalization.available && !pod.isWorkspace &&
+                [.failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status) {
+                RetainedFinalizationCard(podId: pod.id, actions: actions.retainedFinalization)
+                    .id(actions.retainedFinalization.scope + ":" + pod.id)
+            }
+
             // Tab bar
             tabBar
 

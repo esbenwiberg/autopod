@@ -134,6 +134,11 @@ func withConfirmedActionFixture(
   let peer = ConfirmedActionPeer(immediateGETResponses: [
     "/pods/observed-pod/sandbox-recovery":
       #"{"podId":"observed-pod","generation":1,"resources":[],"operations":[],"wakeups":[]}"#,
+    "/pods/observed-pod/retained-finalization":
+      """
+      {"podId":"observed-pod","generation":1,"status":"running","binding":"\(String(repeating: "a", count: 64))",
+      "custody":[],"canStop":false,"canCompleteMerged":false,"blockers":["No retained custody"],"operation":null}
+      """,
   ])
   let store = PodStore()
   let handler: ActionHandler

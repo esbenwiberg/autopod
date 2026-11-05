@@ -180,6 +180,9 @@ export class SandboxOrphanReaper {
   private hasRecoveryOwner(sandbox: SandboxDescriptor): boolean {
     const podId = sandbox.labels.podId;
     if (!podId) return false;
+    // Lost spawn responses may leave evidence outside every recorded container pointer.
+    // A terminal receipt must not turn those pod-labelled resources into disposable orphans.
+    if (this.deps.podRepo.retainedFinalizations?.get(podId)) return true;
     let recoveryOwner: Pod;
     try {
       recoveryOwner = this.deps.podRepo.getOrThrow(podId);

@@ -88,6 +88,7 @@ export function createRetainedCheckpointRecovery(deps: {
     continuation = false,
     repair?: CheckpointRecoveryBinding['approvalRewrite'],
   ) {
+    deps.podRepo.retainedFinalizations?.assertAvailable(pod.id);
     if (
       continuation &&
       (!['pr', 'branch'].includes(pod.options.output ?? 'pr') ||
@@ -1060,6 +1061,8 @@ export function createRetainedCheckpointRecovery(deps: {
     });
   }
   return {
+    isActive: (podId: string) =>
+      executions.has(podId) || [...pending.keys()].some((id) => repo.get(id)?.podId === podId),
     submit,
     prepareRewriteRepair,
     checkRewriteRepair,

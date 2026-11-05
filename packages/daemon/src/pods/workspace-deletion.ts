@@ -27,6 +27,7 @@ export function createWorkspaceDeletion(captured: WorkspaceDeletionCaptured) {
   async function deleteSession(podId: string): Promise<void> {
     assertValidationDeletionAllowed(podRepo, podId);
     podRepo.taskExecutions?.assertCanDelete(podId);
+    podRepo.retainedFinalizations?.assertAvailable(podId);
     podRepo.sourceAdoptions?.assertDeletable(podId);
     podRepo.externalDeliveries?.assertDeletable(podId);
     podRepo.approvalRewrites?.assertDeletable(podId);
@@ -68,6 +69,7 @@ export function createWorkspaceDeletion(captured: WorkspaceDeletionCaptured) {
         );
       }
       podRepo.taskExecutions?.assertCanDelete(podId);
+      podRepo.retainedFinalizations?.assertAvailable(podId);
       podRepo.sourceAdoptions?.assertDeletable(podId);
       podRepo.externalDeliveries?.assertDeletable(podId);
       podRepo.approvalRewrites?.assertDeletable(podId);

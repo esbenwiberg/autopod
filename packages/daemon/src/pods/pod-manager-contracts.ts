@@ -191,6 +191,12 @@ export interface PodManagerDependencies {
 }
 
 export interface PodManager {
+  inspectRetainedFinalization(podId: string): import('@autopod/shared').RetainedFinalizationView;
+  finalizeRetained(
+    podId: string,
+    request: import('@autopod/shared').RetainedFinalizationRequest,
+    actor: OperatorActor,
+  ): Promise<import('@autopod/shared').RetainedFinalizationReceipt>;
   acceptFindings(
     podId: string,
     request: import('./research-findings.js').AcceptFindingsRequest,

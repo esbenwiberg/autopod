@@ -9,6 +9,11 @@ import {
   type TaskRetryAuthorization,
   type ValidationResult,
 } from '@autopod/shared';
+import {
+  assertFinalizationResourceAvailable,
+  createRetainedFinalizationRepository,
+  ownsRetainedFinalization,
+} from './retained-finalization-repository.js';
 
 export type { CheckpointRecoveryRequest } from '@autopod/shared';
 
@@ -29,7 +34,11 @@ export function retainedCheckpointNetworkIdentities(db: Database.Database): Set<
     .prepare(`SELECT r.id,r.pod_id AS podId,e.evidence FROM retained_checkpoint_recoveries r
     LEFT JOIN retained_checkpoint_recovery_events e ON e.recovery_id=r.id AND e.kind='activated'`)
     .all() as { id: string; podId: string; evidence: string | null }[];
-  const identities = new Set<string>();
+  const identities = new Set<string>(
+    (db.prepare('SELECT pod_id FROM retained_finalizations').all() as { pod_id: string }[]).map(
+      (row) => row.pod_id,
+    ),
+  );
   for (const row of rows) {
     identities.add(row.podId);
     if (row.evidence)
@@ -169,6 +178,7 @@ export function assertCheckpointResourceNotRetained(
   db: Database.Database,
   containerId: string,
 ): void {
+  assertFinalizationResourceAvailable(db, containerId);
   const retained = db
     .prepare('SELECT binding FROM retained_checkpoint_recoveries WHERE container_id=?')
     .get(containerId) as { binding: string } | undefined;
@@ -281,6 +291,8 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
     ).run(id, kind, JSON.stringify(evidence), new Date().toISOString());
   }
   function assertAvailable(podId: string) {
+    if (ownsRetainedFinalization(db, podId)) return;
+    createRetainedFinalizationRepository(db).assertAvailable(podId);
     const rows = db
       .prepare(`SELECT r.id,r.pod_id AS podId FROM retained_checkpoint_recoveries r
       WHERE (r.pod_id=? OR r.task_id=(SELECT task_id FROM task_executions WHERE pod_id=?))

@@ -391,6 +391,14 @@ public actor DaemonAPI {
     let _: OkResponse = try await request("POST", "/pods/\(id)/promote", body: body)
   }
 
+  public func inspectRetainedFinalization(_ id: String) async throws -> RetainedFinalizationView {
+    try await request("GET", "/pods/\(id)/retained-finalization")
+  }
+
+  public func finalizeRetained(_ id: String, input: RetainedFinalizationRequest) async throws -> RetainedFinalizationReceipt {
+    try await request("POST", "/pods/\(id)/retained-finalization", body: encode(input))
+  }
+
   public func getReworkEligibility(_ id: String) async throws -> ReworkEligibility {
     try await request("GET", "/pods/\(id)/rework-v1/eligibility")
   }

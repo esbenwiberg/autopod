@@ -41,6 +41,7 @@ public struct PodActions: Sendable {
   public var approvalPending: @MainActor @Sendable (String) -> Bool = { _ in false }
   public var repair: PodRepairActions = .unavailable
   public var taskBudget: TaskBudgetActions = .unavailable
+  public var retainedFinalization: RetainedFinalizationActions = .unavailable
   public var sandboxRecovery: SandboxRecoveryActions = .unavailable
   public var approve: @MainActor @Sendable (String, String?) async -> Void
   public var reject: @MainActor @Sendable (String, String?) async -> Void

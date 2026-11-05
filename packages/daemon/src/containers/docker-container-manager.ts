@@ -32,6 +32,7 @@ import type {
 } from '../interfaces/container-manager.js';
 import { extractManagedDockerOutput } from '../managed/output-extraction.js';
 import { assertCheckpointResourceNotRetained } from '../pods/retained-checkpoint-repository.js';
+import { ownsRetainedFinalizationStop } from '../pods/retained-finalization-repository.js';
 import { assertDirectoryExtractionCurrent } from './directory-extraction-ownership.js';
 import {
   boundedDockerCall,
@@ -520,7 +521,11 @@ export class DockerContainerManager implements ContainerManager {
   }
 
   async stop(containerId: string): Promise<void> {
-    this.assertNotRetained(containerId);
+    if (
+      !this.managedDatabase ||
+      !ownsRetainedFinalizationStop(this.managedDatabase, containerId, 'local')
+    )
+      this.assertNotRetained(containerId);
     try {
       const container = this.docker.getContainer(containerId);
       await boundedDockerCall(container.stop({ t: 10 }), {

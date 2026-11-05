@@ -27,6 +27,7 @@ export function createResourceCleanup(
     assertReleaseAllowed?: () => void,
     strict = false,
   ): Promise<void> {
+    podRepo.retainedFinalizations?.assertAvailable(pod.id);
     const targetContainerId = pod.containerId;
     if (targetContainerId && mode === 'kill')
       podRepo.approvalRewrites?.assertReleasable(targetContainerId);
@@ -93,6 +94,7 @@ export function createResourceCleanup(
     podRepo.sandboxWakeups?.assertReleasable(targetContainerId);
     podRepo.sourceAdoptions?.assertReleasable(targetContainerId);
     if (mode === 'kill') podRepo.approvalRewrites?.assertReleasable(targetContainerId);
+    podRepo.retainedFinalizations?.assertAvailable(pod.id);
     const op = mode === 'kill' ? cm.kill(targetContainerId) : cm.stop(targetContainerId);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deleted = await Promise.race([

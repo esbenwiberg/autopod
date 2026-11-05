@@ -109,6 +109,7 @@ export interface AzureSandboxApiClientConfig {
   /** Required to submit resume: durable per-resource claims survive daemon replacement. */
   wakeupJournal?: SandboxWakeupJournal;
   assertReleaseAllowed?: (sandboxId: string) => void;
+  assertStopAllowed?: (sandboxId: string) => void;
   assertWakeAllowed?: (sandboxId: string) => void;
   /**
    * Retry/backoff for the Azure Sandboxes data-plane rate limiter (HTTP 429,
@@ -217,6 +218,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
   private readonly resumeRequestTimeoutMs: number;
   private readonly wakeupJournal?: SandboxWakeupJournal;
   private readonly assertReleaseAllowed?: (sandboxId: string) => void;
+  private readonly assertStopAllowed?: (sandboxId: string) => void;
   private readonly assertWakeAllowed?: (sandboxId: string) => void;
   private readonly retryMaxAttempts: number;
   private readonly retryMaxDelayMs: number;
@@ -254,6 +256,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     this.resumeRequestTimeoutMs = config.resumeRequestTimeoutMs ?? 60_000;
     this.wakeupJournal = config.wakeupJournal;
     this.assertReleaseAllowed = config.assertReleaseAllowed;
+    this.assertStopAllowed = config.assertStopAllowed ?? config.assertReleaseAllowed;
     this.assertWakeAllowed = config.assertWakeAllowed;
     this.retryMaxAttempts = config.retry?.maxAttempts ?? 6;
     this.retryMaxDelayMs = config.retry?.maxDelayMs ?? 30_000;
@@ -1154,7 +1157,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
     await this.requestData('POST', `${this.sandboxPath(sandboxId)}/stop`, {
       okStatuses: [200, 202, 204],
       beforeSend: () => {
-        this.assertReleaseAllowed?.(sandboxId);
+        this.assertStopAllowed?.(sandboxId);
         this.wakeupJournal?.assertReleasable(sandboxId);
       },
     });
