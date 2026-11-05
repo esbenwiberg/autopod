@@ -13,7 +13,9 @@ export function createMockBridge(overrides: Partial<PodBridge> = {}): PodBridge 
     getHumanResponseOnTimeout: vi.fn().mockReturnValue('continue'),
     logEscalationAnswer: vi.fn(),
     getAdvisorModel: vi.fn().mockReturnValue('claude-sonnet-4-6'),
-    callAdvisorModel: vi.fn().mockResolvedValue('The AI says: proceed'),
+    callAdvisorModel: vi
+      .fn()
+      .mockResolvedValue({ response: 'The AI says: proceed', model: 'advisor-model' }),
     generateBrowserValidationScript: vi.fn(async () => {
       throw new Error('Browser script generation is not configured in this unit fixture');
     }),

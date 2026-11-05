@@ -231,7 +231,7 @@ describe('Integration', () => {
       getAutoPauseThreshold: vi.fn().mockReturnValue(3),
       getHumanResponseTimeout: vi.fn().mockReturnValue(3600),
       getAdvisorModel: vi.fn().mockReturnValue('sonnet'),
-      callAdvisorModel: vi.fn().mockResolvedValue('AI says yes'),
+      callAdvisorModel: vi.fn().mockResolvedValue({ response: 'AI says yes', model: 'advisor-model' }),
       incrementEscalationCount: vi.fn(),
     };
 

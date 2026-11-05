@@ -50,7 +50,11 @@ export interface PodBridge {
   getHumanResponseOnTimeout(podId: string): 'continue' | 'ask_ai';
   logEscalationAnswer(podId: string, who: 'human' | 'ai', answer: string): void;
   getAdvisorModel(podId: string): string;
-  callAdvisorModel(podId: string, question: string, context?: string): Promise<string>;
+  callAdvisorModel(
+    podId: string,
+    question: string,
+    context?: string,
+  ): Promise<{ response: string; model: string }>;
   /**
    * Generate the Playwright script for validate_in_browser through a live
    * pod-container reviewer path. This must not fall back to daemon-side SDK

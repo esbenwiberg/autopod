@@ -35,14 +35,14 @@ export async function askAi(podId: string, input: AskAiInput, bridge: PodBridge)
   bridge.createEscalation(escalation);
 
   // Call Advisor directly (no need to wait for human)
-  const response = await bridge.callAdvisorModel(podId, input.question, input.context);
+  const { response, model } = await bridge.callAdvisorModel(podId, input.question, input.context);
 
   // Resolve the escalation
   bridge.resolveEscalation(escalationId, {
     respondedAt: new Date().toISOString(),
     respondedBy: 'ai',
     response,
-    model: bridge.getAdvisorModel(podId),
+    model,
   });
 
   bridge.incrementEscalationCount(podId);

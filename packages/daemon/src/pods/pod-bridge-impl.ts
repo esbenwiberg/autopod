@@ -112,9 +112,6 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     screenshotStore,
   } = deps;
 
-  // Bounded, transient response metadata; durable evidence lives in isolated_reviewer_runs.
-  const advisorResponseModels = new Map<string, string>();
-
   function launchForPod(pod: Pod): EffectiveLaunchConfig | null {
     if (pod.launchConfigDigest) {
       const launch = podManager.getLaunchConfiguration?.(pod.id);
@@ -251,11 +248,6 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
     },
 
     getAdvisorModel(podId: string): string {
-      const recorded = advisorResponseModels.get(podId);
-      if (recorded) {
-        advisorResponseModels.delete(podId);
-        return recorded;
-      }
       const pod = podManager.getSession(podId);
       const profile = pod.launchConfigDigest
         ? podManager.getReviewerConfig(pod, 'advisor').profile
@@ -263,13 +255,16 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       return resolveReviewerModel(profile, logger);
     },
 
-    async callAdvisorModel(podId: string, question: string, context?: string): Promise<string> {
+    async callAdvisorModel(
+      podId: string,
+      question: string,
+      context?: string,
+    ): Promise<{ response: string; model: string }> {
       const pod = podManager.getSession(podId);
       const profile = pod.launchConfigDigest
         ? podManager.getReviewerConfig(pod, 'advisor').profile
         : reviewerProfileForPod(pod);
       const model = resolveReviewerModel(profile, logger);
-      advisorResponseModels.delete(podId);
 
       // Enrich the prompt with pod state so Advisor has full context
       // beyond what the agent manually passes.
@@ -315,12 +310,18 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
 
       try {
         if (!pod.containerId) {
-          return 'AI consultation failed: Advisor requires a live pod container';
+          return {
+            response: 'AI consultation failed: Advisor requires a live pod container',
+            model,
+          };
         }
         const cm = containerManagerFactory.get(pod.executionTarget);
         const containerStatus = await cm.getStatus(pod.containerId);
         if (containerStatus !== 'running') {
-          return 'AI consultation failed: Advisor requires a live pod container';
+          return {
+            response: 'AI consultation failed: Advisor requires a live pod container',
+            model,
+          };
         }
         const reviewerExecEnv = pod.launchConfigDigest
           ? undefined
@@ -339,12 +340,13 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           logger,
         });
 
-        if (advisorResponseModels.size >= 1000) advisorResponseModels.clear();
-        advisorResponseModels.set(podId, executedModel ?? model);
-        return stdout.trim();
+        return { response: stdout.trim(), model: executedModel ?? model };
       } catch (err) {
         logger.error({ err, podId }, 'Advisor model call failed');
-        return `AI consultation failed: ${err instanceof Error ? err.message : String(err)}`;
+        return {
+          response: `AI consultation failed: ${err instanceof Error ? err.message : String(err)}`,
+          model,
+        };
       }
     },
 

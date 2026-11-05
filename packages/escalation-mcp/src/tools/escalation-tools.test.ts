@@ -24,7 +24,9 @@ function makeBridge(overrides: Partial<PodBridge> = {}): PodBridge {
     getHumanResponseOnTimeout: vi.fn().mockReturnValue('continue'),
     logEscalationAnswer: vi.fn(),
     getAdvisorModel: vi.fn().mockReturnValue('claude-sonnet-4-6'),
-    callAdvisorModel: vi.fn().mockResolvedValue('The AI says: proceed'),
+    callAdvisorModel: vi
+      .fn()
+      .mockResolvedValue({ response: 'The AI says: proceed', model: 'advisor-model' }),
     incrementEscalationCount: vi.fn(),
     isAskHumanDisabled: vi.fn().mockReturnValue(false),
     reportPlan: vi.fn(),
@@ -46,7 +48,9 @@ function makeBridge(overrides: Partial<PodBridge> = {}): PodBridge {
 describe('askAi', () => {
   it('returns the AI response', async () => {
     const bridge = makeBridge({
-      callAdvisorModel: vi.fn().mockResolvedValue('Use dependency injection'),
+      callAdvisorModel: vi
+        .fn()
+        .mockResolvedValue({ response: 'Use dependency injection', model: 'advisor-model' }),
     });
 
     const result = await askAi('sess-1', { question: 'How should I structure this?' }, bridge);
@@ -76,7 +80,7 @@ describe('askAi', () => {
     );
     expect(bridge.resolveEscalation).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ respondedBy: 'ai' }),
+      expect.objectContaining({ respondedBy: 'ai', model: 'advisor-model' }),
     );
   });
 
@@ -208,7 +212,10 @@ describe('askHuman', () => {
       getHumanResponseOnTimeout: vi.fn().mockReturnValue('ask_ai'),
       callAdvisorModel: vi
         .fn()
-        .mockResolvedValue('AI consultation failed: Advisor requires a live pod container'),
+        .mockResolvedValue({
+          response: 'AI consultation failed: Advisor requires a live pod container',
+          model: 'advisor-model',
+        }),
     });
     const promise = askHuman('sess-1', { question: 'Slow?' }, bridge, pendingRequests);
     vi.advanceTimersByTime(1_500);
@@ -222,7 +229,10 @@ describe('askHuman', () => {
       isAskHumanDisabled: vi.fn().mockReturnValue(true),
       callAdvisorModel: vi
         .fn()
-        .mockResolvedValue('AI consultation failed: Advisor requires a live pod container'),
+        .mockResolvedValue({
+          response: 'AI consultation failed: Advisor requires a live pod container',
+          model: 'advisor-model',
+        }),
     });
 
     const result = await askHuman(

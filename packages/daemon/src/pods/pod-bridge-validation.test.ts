@@ -586,10 +586,11 @@ describe('PodBridge.callAdvisorModel', () => {
         },
         credentials: null,
       }));
-      await expect(f.bridge.callAdvisorModel(f.podId, 'Question', 'Context')).resolves.toBe(
-        'Advisor answer',
-      );
-      expect(f.bridge.getAdvisorModel(f.podId)).toBe('advisor-fallback-model');
+      expect(f.bridge.getAdvisorModel(f.podId)).toBe('advisor-model');
+      await expect(f.bridge.callAdvisorModel(f.podId, 'Question', 'Context')).resolves.toEqual({
+        response: 'Advisor answer',
+        model: 'advisor-fallback-model',
+      });
       expect(advisor).toHaveBeenCalledWith(
         expect.objectContaining({
           prompt: expect.stringContaining('Agent-provided context:\nContext'),
@@ -640,7 +641,7 @@ describe('PodBridge.callAdvisorModel', () => {
 
     const result = await bridge.callAdvisorModel(podId, 'Generate a browser QA script', 'ctx');
 
-    expect(result).toBe('generated playwright script');
+    expect(result.response).toBe('generated playwright script');
     expect(mockRunCodexReview).toHaveBeenCalledWith(
       expect.objectContaining({
         podId,
@@ -679,7 +680,7 @@ describe('PodBridge.callAdvisorModel', () => {
 
     const result = await bridge.callAdvisorModel(podId, 'Review this', 'ctx');
 
-    expect(result).toBe('advisor answer');
+    expect(result.response).toBe('advisor answer');
     expect(execMock).toHaveBeenCalledWith(
       'container-abc',
       [
@@ -732,7 +733,7 @@ describe('PodBridge.callAdvisorModel', () => {
 
     const result = await bridge.callAdvisorModel(podId, 'Review this');
 
-    expect(result).toBe('AI consultation failed: Advisor requires a live pod container');
+    expect(result.response).toBe('AI consultation failed: Advisor requires a live pod container');
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
     expect(mockRunCodexReview).not.toHaveBeenCalled();
   });
@@ -754,7 +755,7 @@ describe('PodBridge.callAdvisorModel', () => {
 
     const result = await bridge.callAdvisorModel(podId, 'Review this');
 
-    expect(result).toBe('AI consultation failed: Advisor requires a live pod container');
+    expect(result.response).toBe('AI consultation failed: Advisor requires a live pod container');
     expect(execMock).not.toHaveBeenCalled();
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
     expect(mockRunCodexReview).not.toHaveBeenCalled();
