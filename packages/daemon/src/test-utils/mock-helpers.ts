@@ -126,7 +126,26 @@ export const logger = pino({ level: 'silent' });
 // Database
 // ---------------------------------------------------------------------------
 
+let testDbTemplate: Buffer | undefined;
+
+/** Each caller owns a fresh database; only the empty, fully migrated image is cached. */
 export function createTestDb(): Database.Database {
+  if (!testDbTemplate) {
+    const migrated = createMigratedTestDb();
+    try {
+      testDbTemplate = migrated.serialize();
+    } finally {
+      migrated.close();
+    }
+  }
+  const db = new Database(Buffer.from(testDbTemplate));
+  // Foreign-key enforcement belongs to the connection, not the serialized image.
+  db.pragma('foreign_keys = ON');
+  return db;
+}
+
+/** Uncached migration path, also used to verify template/schema equivalence. */
+export function createMigratedTestDb(): Database.Database {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
 
