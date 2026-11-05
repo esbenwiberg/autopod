@@ -24,6 +24,7 @@ export function dispatchRerunRequest(pod: Pod): CreatePodRequest {
     options: { ...pod.options, validate: true },
     specFiles: pod.specFiles ?? undefined,
     specContextFiles: pod.specContextFiles ?? undefined,
+    inputBundle: pod.inputBundle ?? undefined,
     referenceRepos: pod.referenceRepos ?? undefined,
     handoffInstructions: pod.handoffInstructions ?? undefined,
     requireSidecars: pod.requireSidecars ?? undefined,

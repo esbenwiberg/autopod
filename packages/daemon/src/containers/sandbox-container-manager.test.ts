@@ -511,6 +511,39 @@ describe('SandboxContainerManager', () => {
       expect(client.created[0]?.egressPolicy).toEqual({ defaultAction: 'Allow', hostRules: [] });
     });
 
+    it.each([
+      false,
+      true,
+    ])('protects reference input snapshots before returning and cleans up protection failure=%s', async (failProtection) => {
+      const directory = mkdtempSync(join(tmpdir(), 'sandbox-inputs-'));
+      try {
+        writeFileSync(join(directory, 'manifest.json'), '{}');
+        const client = new FakeSandboxApiClient();
+        const exec = client.exec.bind(client);
+        vi.spyOn(client, 'exec').mockImplementation(async (id, command, options) => {
+          if (failProtection && command[0] === 'python3')
+            return { exitCode: 1, stdout: '', stderr: 'permission denied' };
+          return exec(id, command, options);
+        });
+        const promise = new SandboxContainerManager(client, logger).spawn({
+          ...baseConfig,
+          volumes: [{ host: directory, container: '/autopod/inputs', readOnly: true }],
+        });
+        if (failProtection) {
+          await expect(promise).rejects.toThrow('Cannot protect');
+          expect(client.sandboxes.size).toBe(0);
+        } else {
+          await promise;
+          const protection = client.execCalls.find((call) => call.command[0] === 'python3');
+          expect(protection?.options?.user).toBe('root');
+          expect(protection?.command.join(' ')).toContain("root='/autopod/inputs'");
+          expect(protection?.command.join(' ')).toContain('0o444');
+        }
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+
     it('uploads host volumes because sandboxes have no bind mounts', async () => {
       const hostDir = mkdtempSync(join(tmpdir(), 'sandbox-upload-'));
       try {

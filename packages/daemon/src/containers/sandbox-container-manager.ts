@@ -15,7 +15,12 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { createGzip } from 'node:zlib';
-import { type ArtifactOutput, AutopodError, type NativeGoalProcessIdentity } from '@autopod/shared';
+import {
+  type ArtifactOutput,
+  AutopodError,
+  INPUTS_CONTAINER_DIR,
+  type NativeGoalProcessIdentity,
+} from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { Logger } from 'pino';
 import { type Pack as TarPack, pack as tarPack } from 'tar-stream';
@@ -261,6 +266,34 @@ export class SandboxContainerManager implements ContainerManager {
       if (config.volumes?.length) {
         config.onProgress?.('Uploading workspace to sandbox…');
         await this.uploadVolumes(sandboxId, config.volumes);
+        if (
+          config.volumes.some(
+            (volume) => volume.container === INPUTS_CONTAINER_DIR && volume.readOnly,
+          )
+        ) {
+          const protectedInputs = await this.client.exec(
+            sandboxId,
+            [
+              'python3',
+              '-c',
+              `import os
+root='/autopod/inputs'
+if os.path.realpath(root) != root or not os.path.isdir(root): raise RuntimeError('unsafe input root')
+for directory, dirs, files in os.walk(root):
+ if os.path.islink(directory) or any(os.path.islink(os.path.join(directory,name)) for name in dirs): raise RuntimeError('unsafe input directory')
+ os.chown(directory,0,0);os.chmod(directory,0o555)
+ for name in files:
+  file=os.path.join(directory,name)
+  if os.path.islink(file): raise RuntimeError('unsafe input file')
+  os.chown(file,0,0);os.chmod(file,0o444)
+os.chown('/autopod',0,0);os.chmod('/autopod',0o755)
+`,
+            ],
+            { user: 'root' },
+          );
+          if (protectedInputs.exitCode !== 0)
+            throw new Error('Cannot protect sandbox reference inputs');
+        }
       }
     } catch (err) {
       await this.kill(sandboxId).catch((deleteErr) => {

@@ -1,3 +1,4 @@
+import type { InputBundleRef } from '../schemas/input-bundle.schema.js';
 import type { OutputMode } from './actions.js';
 import type { SpecContract } from './contract.js';
 import type { EscalationRequest } from './escalation.js';
@@ -346,6 +347,8 @@ export interface Pod {
    * committed to the pod branch and are stripped from API wire responses.
    */
   specContextFiles: SpecFile[] | null;
+  /** Immutable reference attachments, never materialized in source. */
+  inputBundle?: InputBundleRef | null;
   recoveryWorktreePath: string | null;
   reworkReason: string | null;
   reworkCount: number;
@@ -616,6 +619,8 @@ export interface CreatePodRequest {
   specFiles?: SpecFile[];
   /** Local spec files to expose as runtime-only context under /autopod/spec. */
   specContextFiles?: SpecFile[];
+  /** Sealed user-owned reference attachments; null explicitly clears inherited inputs. */
+  inputBundle?: InputBundleRef | null;
   linkedPodId?: string;
   /** PIM groups to activate for the duration of this pod */
   pimGroups?: PimGroupConfig[];

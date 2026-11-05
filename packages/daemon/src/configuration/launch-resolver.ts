@@ -35,6 +35,7 @@ import { environmentImageKey } from '../images/environment-image-key.js';
 import { configurationDigest } from './configuration-digest.js';
 export interface LaunchResolutionServices {
   deploymentAvailable?: boolean;
+  assertInputBundle?(ref: import('@autopod/shared').InputBundleRef, actorId?: string): void;
   readLaunch?(podId: string): EffectiveLaunchConfig | null;
   store: ConfigurationStore;
   resolveEnvironment(
@@ -82,8 +83,18 @@ export function assertFindingsWorkflow(
 export async function resolveLaunch(
   raw: unknown,
   services: LaunchResolutionServices,
+  actorId?: string,
 ): Promise<EffectiveLaunchConfig> {
   const config = await resolveLaunchRequest(raw, services);
+  if (config.work.inputBundle) {
+    if (!services.assertInputBundle)
+      configurationError(
+        'Reference attachment storage is unavailable',
+        'INPUT_BUNDLES_UNAVAILABLE',
+        503,
+      );
+    services.assertInputBundle(config.work.inputBundle, actorId);
+  }
   assertAnalysisWorkspace(config);
   assertFindingsWorkflow(config.workflow, config.intent);
   return config;
@@ -112,7 +123,13 @@ async function resolveLaunchRequest(
     );
   if (request.source.configuration === 'current') {
     const { digest: _, ...current } = await resolve(
-      { ...request, expectedDigest: undefined },
+      {
+        ...request,
+        ...(parent.work.inputBundle
+          ? { work: { inputBundle: parent.work.inputBundle, ...request.work } }
+          : {}),
+        expectedDigest: undefined,
+      },
       services,
       [],
     );

@@ -66,6 +66,7 @@ import { diffRoutes } from './routes/diff.js';
 import { filesRoutes } from './routes/files.js';
 import { healthRoutes } from './routes/health.js';
 import { historyRoutes } from './routes/history.js';
+import { inputBundleRoutes } from './routes/input-bundles.js';
 import { issueWatcherRoutes } from './routes/issue-watcher.js';
 import { memoryRoutes } from './routes/memory.js';
 import { memoryWorkspaceRoutes } from './routes/memory-workspace.js';
@@ -176,6 +177,8 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
   await rateLimitPlugin(app);
   authPlugin(app, deps.authModule, deps.sessionTokenIssuer);
   requestLoggerPlugin(app);
+  const inputBundles = deps.configuration?.inputBundles;
+  if (inputBundles) await app.register(async (scope) => inputBundleRoutes(scope, inputBundles));
   const managed = deps.managed;
   if (managed) {
     await app.register(async (managedApp) => {

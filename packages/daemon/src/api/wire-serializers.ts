@@ -98,6 +98,8 @@ export function serializePodForWire(pod: Pod): unknown {
   const hasProfileSnapshotField = Object.hasOwn(pod, 'profileSnapshot');
   const basePod = {
     ...pod,
+    // Filenames are private too; owner-scoped configuration/input APIs expose manifests.
+    inputBundle: undefined,
     ...(hasProfileSnapshotField
       ? { profileSnapshot: pod.profileSnapshot ? redactProfileSecrets(pod.profileSnapshot) : null }
       : {}),

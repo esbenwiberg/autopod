@@ -36,7 +36,7 @@ export async function admitLaunch(input: {
       return { podId, created: false, config };
     }
   }
-  let config = await resolveLaunch(request, input.services);
+  let config = await resolveLaunch(request, input.services, input.actorId);
   if (input.origin) {
     const { digest: _, ...resolved } = config;
     const frozen = { ...resolved, origin: input.origin };

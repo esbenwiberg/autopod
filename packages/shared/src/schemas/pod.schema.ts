@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { MAX_HANDOFF_INSTRUCTIONS_LENGTH } from '../constants.js';
 import { inspectSpecContract, specContractV1Schema } from '../contract.js';
 import { partialPodOptionsSchema } from './action-definition.schema.js';
+import { inputBundleRefSchema } from './input-bundle.schema.js';
 import { withCanonicalModelIdPolicy } from './model.schema.js';
 
 const canonicalModelIdSchema = withCanonicalModelIdPolicy(z.string().min(1).max(32));
@@ -122,6 +123,7 @@ export const createPodRequestSchema = z
       .optional(),
     specFiles: z.array(specFileSchema).max(200).optional(),
     specContextFiles: z.array(specFileSchema).max(200).optional(),
+    inputBundle: inputBundleRefSchema.nullable().optional(),
     linkedPodId: z.string().min(1).max(64).optional(),
     dependsOnPodId: z.string().min(1).max(64).optional(),
     dependsOnPodIds: z.array(z.string().min(1).max(64)).max(32).optional(),

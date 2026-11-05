@@ -114,6 +114,7 @@ export {
   injectedMcpServerSchema,
   injectedSkillSchema,
 } from './schemas/injection.schema.js';
+export * from './schemas/input-bundle.schema.js';
 export * from './schemas/issue-watcher-binding.schema.js';
 export * from './schemas/launch-config.schema.js';
 export * from './schemas/launch-work.schema.js';

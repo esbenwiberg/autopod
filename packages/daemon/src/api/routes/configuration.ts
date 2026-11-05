@@ -44,6 +44,7 @@ export interface ConfigurationRouteDependencies {
   series?: import('../../configuration/series-launches.js').SeriesLaunches;
   watchers?: import('../../issue-watcher/watcher-binding-repository.js').WatcherBindingRepository;
   resolution: LaunchResolutionServices;
+  inputBundles?: import('../../inputs/input-bundle-store.js').InputBundleStore;
   db: Database.Database;
   credentials?: ConfigurationCredentialStore;
   githubDiscovery?: import('../../github/discovery.js').GitHubDiscovery;
@@ -133,6 +134,15 @@ export function configurationRoutes(
     const config = deps.resolution.readLaunch?.(podId);
     if (!config)
       configurationError('Pod launch configuration is unavailable', 'CONFIG_SOURCE_MISSING', 404);
+    if (config.work.inputBundle) {
+      if (!deps.inputBundles)
+        configurationError(
+          'Reference attachment storage is unavailable',
+          'INPUT_BUNDLES_UNAVAILABLE',
+          503,
+        );
+      deps.inputBundles.assert(config.work.inputBundle, request.user.oid);
+    }
     return config;
   });
   app.get('/configuration/capabilities', async () => deps.capabilities());
@@ -302,7 +312,8 @@ export function configurationRoutes(
   }
   app.post(
     '/launch/resolve',
-    async (request): Promise<EffectiveLaunchConfig> => resolveLaunch(request.body, deps.resolution),
+    async (request): Promise<EffectiveLaunchConfig> =>
+      resolveLaunch(request.body, deps.resolution, request.user.oid),
   );
   app.post('/profiles/from-launch', async (request) => {
     const input = z
@@ -323,7 +334,7 @@ export function configurationRoutes(
       })
       .strict()
       .parse(request.body);
-    const config = await resolveLaunch(input.launch, deps.resolution);
+    const config = await resolveLaunch(input.launch, deps.resolution, request.user.oid);
     const proposal = proposeLaunchProfile(config, input.names, store);
     if (input.mode === 'preview') return proposal;
     if (!input.expectedDigest)

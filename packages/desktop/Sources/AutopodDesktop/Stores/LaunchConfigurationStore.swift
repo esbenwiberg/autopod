@@ -119,6 +119,7 @@ public final class LaunchConfigurationStore {
       saveWatcher: { try await self.connectedAPI().writeWatcherBinding($0) },
       readLaunch: { id in try await self.onConnection(owner) { try await $0.getLaunchConfiguration(id) } })
     actions.connectionID = owner.uuidString
+    actions.uploadInputs = { files in try await self.onConnection(owner) { try await $0.uploadInputs(files) } }
     actions.cachedPim = { self.pimDiscovery }
     actions.listRegistryCredentials = { try await self.connectedAPI().listRegistryCredentials() }
     actions.saveRegistryCredential = { try await self.connectedAPI().saveRegistryCredential($0, body: $1) }

@@ -174,6 +174,15 @@ describe('serializeValidationResult', () => {
 });
 
 describe('serializePodForWire', () => {
+  it('withholds private reference filenames from ordinary pod payloads', () => {
+    const pod = {
+      id: 'p1',
+      inputBundle: { id: 'private-bundle', files: [{ path: 'confidential-wireframe.html' }] },
+    } as unknown as Pod;
+    expect(JSON.stringify(serializePodForWire(pod))).not.toContain('confidential-wireframe');
+    expect(JSON.stringify(serializePodForWire(pod))).not.toContain('private-bundle');
+  });
+
   it('normalizes readinessReview to null when there is no validation result', () => {
     const pod = { id: 'p1', lastValidationResult: null } as unknown as Pod;
     expect(serializePodForWire(pod)).toEqual({

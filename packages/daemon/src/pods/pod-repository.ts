@@ -38,6 +38,7 @@ import {
   type SandboxWakeupJournal,
 } from '../containers/sandbox-wakeup-journal.js';
 import { createUnitOfWork, type UnitOfWork } from '../db/unit-of-work.js';
+import { InputBundleStore } from '../inputs/input-bundle-store.js';
 import { extractFindings } from '../validation/finding-fingerprint.js';
 import {
   type ApprovalSourceRewriteRepository,
@@ -128,6 +129,7 @@ export interface NewPod {
   specFiles?: SpecFile[] | null;
   /** Local spec files to expose as runtime-only context under /autopod/spec. */
   specContextFiles?: SpecFile[] | null;
+  inputBundle?: import('@autopod/shared').InputBundleRef | null;
   linkedPodId?: string | null;
   pimGroups?: PimGroupConfig[] | null;
   /** Existing PR URL (set at creation for fix pods to skip PR creation) */
@@ -299,6 +301,7 @@ import { createTaskExecutionLedger, type TaskExecutionLedger } from './task-exec
 import { createTaskHistoryArchive } from './task-history-archive.js';
 
 export interface PodRepository extends Partial<UnitOfWork> {
+  inputBundles?: InputBundleStore;
   taskRetries?: TaskRetryLedger;
   validationExecutions?: ValidationExecutionLedger;
   retainedCheckpoints?: RetainedCheckpointRepository;
@@ -521,6 +524,7 @@ function decodeSessionRow(row: Record<string, unknown>): Pod {
     specContextFiles: row.spec_context_files
       ? (JSON.parse(row.spec_context_files as string) as SpecFile[])
       : null,
+    inputBundle: row.input_bundle ? JSON.parse(row.input_bundle as string) : null,
     recoveryWorktreePath: (row.recovery_worktree_path as string) ?? null,
     reworkReason: (row.rework_reason as string) ?? null,
     reworkCount: (row.rework_count as number) ?? 0,
@@ -637,6 +641,7 @@ function decodeDisplaySessionRow(source: Record<string, unknown>): Pod {
     'deploy_baseline_hashes',
     'does_not_touch',
     'infrastructure_failure',
+    'input_bundle',
     'last_validation_result',
     'pending_escalation',
     'phase_token_usage',
@@ -743,6 +748,7 @@ function rowToCostSource(row: Record<string, unknown>): PodCostSource {
 }
 
 export function createPodRepository(db: Database.Database): PodRepository {
+  const inputBundles = new InputBundleStore(db);
   const completionJournal = createCompletionJournal(db);
   const externalDeliveries = createExternalDeliveryRepository(db);
   const sandboxWakeups = createSandboxWakeupJournal(db);
@@ -827,6 +833,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
 
   return {
     ...createUnitOfWork(db),
+    inputBundles,
     fleetArchives,
     afterInsertCommitted(id, effect) {
       if (!db.inTransaction) {
@@ -874,6 +881,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     taskExecutions,
     deletionOwnership,
     insert: db.transaction((pod: NewPod): void => {
+      if (pod.inputBundle) inputBundles.pin(pod.inputBundle, pod.userId, pod.id);
       // Keep legacy output_mode and new pod columns in sync.
       const podOpts: PodOptions = pod.options ?? podOptionsFromOutputMode(pod.outputMode);
       const legacyOutputMode: OutputMode = pod.options
@@ -893,7 +901,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           provider_account_id_snapshot, provider_id_snapshot, execution_target, branch,
           user_id, creator_email, creator_name, max_validation_attempts, skip_validation, contract,
           output_mode, agent_mode, output_target, validate, validation_suite, advisory_browser_qa_enabled, promotable,
-          start_branch, base_branch, handoff_instructions, spec_files, spec_context_files, linked_pod_id, pim_groups, pr_url,
+          start_branch, base_branch, handoff_instructions, spec_files, spec_context_files, input_bundle, linked_pod_id, pim_groups, pr_url,
           token_budget, reference_repos, scheduled_job_id,
           depends_on_pod_id, depends_on_pod_ids, series_id, series_name, series_description,
           series_design, brief_title, touches, does_not_touch, pr_mode, wait_for_merge,
@@ -903,7 +911,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           @providerAccountIdSnapshot, @providerIdSnapshot, @executionTarget, @branch,
           @userId, @creatorEmail, @creatorName, @maxValidationAttempts, @skipValidation, @contract,
           @outputMode, @agentMode, @outputTarget, @validate, @validationSuite, @advisoryBrowserQaEnabled, @promotable,
-          @startBranch, @baseBranch, @handoffInstructions, @specFiles, @specContextFiles, @linkedPodId, @pimGroups, @prUrl,
+          @startBranch, @baseBranch, @handoffInstructions, @specFiles, @specContextFiles, @inputBundle, @linkedPodId, @pimGroups, @prUrl,
           @tokenBudget, @referenceRepos, @scheduledJobId,
           @dependsOnPodId, @dependsOnPodIds, @seriesId, @seriesName, @seriesDescription,
           @seriesDesign, @briefTitle, @touches, @doesNotTouch, @prMode, @waitForMerge,
@@ -938,6 +946,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
         handoffInstructions: pod.handoffInstructions ?? null,
         specFiles: pod.specFiles ? JSON.stringify(pod.specFiles) : null,
         specContextFiles: pod.specContextFiles ? JSON.stringify(pod.specContextFiles) : null,
+        inputBundle: pod.inputBundle ? JSON.stringify(pod.inputBundle) : null,
         linkedPodId: pod.linkedPodId ?? null,
         pimGroups: pod.pimGroups ? JSON.stringify(pod.pimGroups) : null,
         prUrl: pod.prUrl ?? null,

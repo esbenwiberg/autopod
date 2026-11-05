@@ -8,6 +8,7 @@ export const seriesLaunchRequestSchema = launchWorkSchema
     baseBranch: true,
     specFiles: true,
     specContextFiles: true,
+    inputBundle: true,
     seriesDescription: true,
     seriesDesign: true,
   })
