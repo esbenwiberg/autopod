@@ -378,7 +378,12 @@ it('delivers Rework guidance through the replacement worker MCP receipt after SQ
     guidance: 'Retain previous edits and inspect the remaining test failure.',
   };
   requests.accept('worker', input, { type: 'human', userId: 'operator' }, () => {});
-  original.repo.incrementLifecycleGeneration('worker');
+  original.repo.update('worker', { status: 'failed' });
+  original.repo.atomically?.(() => {
+    original.repo.incrementLifecycleGeneration('worker');
+    original.repo.update('worker', { status: 'queued' });
+    requests.queueForGeneration('worker', input.requestKey, 2);
+  });
   original.repo.taskExecutions?.beginRun('worker', 2, 2, {
     runtime: 'codex',
     model: 'model',
@@ -392,7 +397,9 @@ it('delivers Rework guidance through the replacement worker MCP receipt after SQ
     const receipt = decode(
       await channel.client.callTool({ name: 'check_messages', arguments: {} }),
     );
-    expect(receipt.operatorMessages).toEqual([input.guidance]);
+    expect(receipt.operatorMessages).toHaveLength(1);
+    expect(receipt.operatorMessages[0]).toContain(input.guidance);
+    expect(receipt.operatorMessages[0]).toContain('request fixture-request, lifecycle 2');
     expect(createNudgeRepository(db).hasPending('worker')).toBe(true);
     expect(
       decode(await channel.client.callTool({ name: 'check_messages', arguments: {} })).deliveryId,

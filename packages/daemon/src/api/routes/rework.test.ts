@@ -4,6 +4,7 @@ import Fastify from 'fastify';
 import { expect, it, vi } from 'vitest';
 import { createNudgeRepository } from '../../pods/nudge-repository.js';
 import { createPodRepository } from '../../pods/pod-repository.js';
+import { TaskRetryBlockedError } from '../../pods/task-retry-ledger.js';
 import { createTestDb, insertTestProfile } from '../../test-utils/mock-helpers.js';
 import { reworkRoutes } from './rework.js';
 
@@ -28,7 +29,16 @@ async function fixture() {
   const manager = {
     getSession: (id: string) => repo.getOrThrow(id),
     assertCanRework: vi.fn(() => ({}) as { notBefore?: string; authorizationAvailable?: boolean }),
-    triggerValidation: vi.fn(async () => {}),
+    triggerValidation: vi.fn(
+      async (_id: string, options?: { onReworkQueued?: (generation: number) => void }) => {
+        if (options?.onReworkQueued)
+          repo.atomically?.(() => {
+            const generation = repo.incrementLifecycleGeneration('rework-fixture');
+            repo.update('rework-fixture', { status: 'queued' });
+            options.onReworkQueued?.(generation);
+          });
+      },
+    ),
   };
   const app = Fastify();
   app.addHook('preHandler', async (request) => {
@@ -97,6 +107,8 @@ it.each([
   const f = await fixture();
   try {
     f.manager.assertCanRework.mockImplementation(() => {
+      if (code === 'TASK_RETRY_AUTHORIZATION_REQUIRED')
+        throw new TaskRetryBlockedError('Inspect current facts', undefined, true);
       throw new AutopodError('Inspect current facts', code, 409);
     });
     const result = (
@@ -196,6 +208,32 @@ it('rejects actor injection, workspace restart and compromised source without qu
     ).toBe(false);
     expect(f.manager.triggerValidation).not.toHaveBeenCalled();
     expect(createNudgeRepository(f.db).hasPending('rework-fixture')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+it('retains an unresolved receipt on a failed settlement write without dispatching on replay', async () => {
+  const f = await fixture();
+  try {
+    f.db.exec(
+      "CREATE TRIGGER fixture_settlement_fault BEFORE UPDATE ON rework_requests WHEN NEW.settled_at IS NOT NULL BEGIN SELECT RAISE(ABORT,'fixture write fault'); END;",
+    );
+    const payload = {
+      requestKey: randomUUID(),
+      generation: 1,
+      guidance: 'Retain the saved guidance',
+    };
+    const send = () =>
+      f.app.inject({ method: 'POST' as const, url: '/pods/rework-fixture/rework-v1', payload });
+    expect((await send()).statusCode).toBe(202);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect((await send()).json()).toMatchObject({ settledAt: null, guidance: payload.guidance });
+    expect(f.manager.triggerValidation).toHaveBeenCalledTimes(1);
+    expect(createNudgeRepository(f.db).hasPending('rework-fixture')).toBe(true);
+    expect(
+      (await f.app.inject({ url: '/pods/rework-fixture/rework-v1/eligibility' })).json().eligible,
+    ).toBe(false);
   } finally {
     await f.close();
   }

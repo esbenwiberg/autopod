@@ -1,5 +1,6 @@
 import type { EscalationRequest, ReviewBatchResult, ValidationFinding } from '@autopod/shared';
 import { AutopodError, generateId } from '@autopod/shared';
+import { atomicPodChange } from '../db/unit-of-work.js';
 import type { ValidationEngine } from '../interfaces/index.js';
 import { detectRecurringFindings, extractFindings } from '../validation/finding-fingerprint.js';
 import { applyOverrides } from '../validation/override-applicator.js';
@@ -108,7 +109,11 @@ export function createValidationTriggerWorkflow(
       | 'handleCompletion'
     >,
     podId: string,
-    options?: { force?: boolean; validationOnly?: boolean },
+    options?: {
+      force?: boolean;
+      validationOnly?: boolean;
+      onReworkQueued?: (generation: number) => void;
+    },
   ): Promise<void> {
     assertExecutionTerminationVerified(podId);
     let pod = podRepo.getOrThrow(podId);
@@ -263,39 +268,44 @@ export function createValidationTriggerWorkflow(
       const reworkReason = isInteractive ? null : buildManualReworkReason(pod, blockedPushScan);
       const runtime = resolvePodRuntime(profile, pod.runtime, logger);
       const model = resolvePodModel(profile, pod.model, runtime, logger);
-      podRepo.update(podId, {
-        runtime,
-        model,
-        validationAttempts: 0,
-        lastValidationResult: null,
-        containerId: null,
-        worktreePath: recoveryWorktreePath,
-        claudeSessionId: null,
-        codexSessionId: null,
-        piSessionId: null,
-        recoveryWorktreePath,
-        reworkReason,
-        reworkCount: (pod.reworkCount ?? 0) + 1,
-        recoveryCount: 0,
-        preSubmitReview: null,
-        completedAt: null,
-        failureReason: null,
-        infrastructureFailure: null,
-        infrastructureRecoveryCount: pod.infrastructureRecoveryCount,
-        ...(failedBeforeAgentWork
-          ? {
-              filesChanged: 0,
-              linesAdded: 0,
-              linesRemoved: 0,
-              commitCount: 0,
-              lastCommitAt: null,
-              startCommitSha: null,
-            }
-          : {}),
-      });
-      transition(podRepo.getOrThrow(podId), 'queued');
-      enqueueSession(podId);
-
+      const queueRework = () => {
+        podRepo.update(podId, {
+          runtime,
+          model,
+          validationAttempts: 0,
+          lastValidationResult: null,
+          containerId: null,
+          worktreePath: recoveryWorktreePath,
+          claudeSessionId: null,
+          codexSessionId: null,
+          piSessionId: null,
+          recoveryWorktreePath,
+          reworkReason,
+          reworkCount: (pod.reworkCount ?? 0) + 1,
+          recoveryCount: 0,
+          preSubmitReview: null,
+          completedAt: null,
+          failureReason: null,
+          infrastructureFailure: null,
+          infrastructureRecoveryCount: pod.infrastructureRecoveryCount,
+          ...(failedBeforeAgentWork
+            ? {
+                filesChanged: 0,
+                linesAdded: 0,
+                linesRemoved: 0,
+                commitCount: 0,
+                lastCommitAt: null,
+                startCommitSha: null,
+              }
+            : {}),
+        });
+        transition(podRepo.getOrThrow(podId), 'queued');
+        options?.onReworkQueued?.(reworkGeneration);
+        if (podRepo.afterCommit) podRepo.afterCommit(() => enqueueSession(podId));
+        else enqueueSession(podId);
+      };
+      if (options?.onReworkQueued) atomicPodChange(podRepo, queueRework);
+      else queueRework();
       logger.info(
         {
           podId,

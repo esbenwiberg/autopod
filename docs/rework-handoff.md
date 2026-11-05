@@ -14,7 +14,8 @@ provider binding. It does not bypass cooldowns or other admission gates. Rework
 remains a separate explicit action. Consumed or superseded grants are not usable.
 
 Guidance is saved atomically with the authenticated human's Rework request, bounded
-to 16,000 characters, and delivered by the existing operator guidance queue to the
+to 16,000 characters. It enters the delivery queue atomically with the exact fresh
+lifecycle entering queued after successful preservation, and is delivered by the existing operator guidance queue to the
 current worker. Reading returns a durable receipt; acknowledgment records receipt,
 not proof that the guidance was applied. Unread guidance retains the existing
 completion hold. Rework does not depend on restoring the previous conversation.
@@ -63,9 +64,11 @@ pod may the operator deliberately review another attempt.
 
 ## Interrupted dispatch
 
-The request and queued guidance commit before asynchronous workspace preservation
-or teardown begins. A daemon crash can therefore leave an unresolved receipt,
-including a crash before dispatch starts. It is deliberately not a replayable
+The request and its guidance commit before asynchronous workspace preservation
+or teardown begins. Delivery is queued only with the successful fresh lifecycle;
+preservation failures retain guidance in the inspectable request without leaking
+it into another continuation. A daemon crash can therefore leave an unresolved receipt,
+including a crash before dispatch starts or before guidance is queued. It is deliberately not a replayable
 execution ticket. Reposting the same request only observes it, and other Rework
 requests remain blocked while it is unresolved. Inspect the receipt, lifecycle,
 worker/validation settlement and custody evidence before operator recovery. This

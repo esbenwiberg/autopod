@@ -6,10 +6,14 @@ import type { PodManager } from '../../pods/pod-manager-contracts.js';
 import type { PodRepository } from '../../pods/pod-repository.js';
 import { createReworkRequestRepository } from '../../pods/rework-request-repository.js';
 import { assertTaskExecutionTerminationVerified } from '../../pods/task-execution-ledger.js';
+import { TaskRetryBlockedError } from '../../pods/task-retry-ledger.js';
 
 export function reworkRoutes(
   app: FastifyInstance,
-  manager: Pick<PodManager, 'getSession' | 'assertCanRework' | 'triggerValidation'>,
+  manager: Pick<
+    PodManager,
+    'getSession' | 'assertCanRework' | 'triggerValidation' | 'getLaunchConfiguration'
+  >,
   repo: PodRepository | undefined,
   db: Database.Database | undefined,
   legacyActive: (podId: string) => boolean,
@@ -50,6 +54,14 @@ export function reworkRoutes(
           'REWORK_UNAVAILABLE',
           409,
         );
+      if (pod.launchConfigDigest && !manager.getLaunchConfiguration)
+        throw new AutopodError(
+          'Effective launch inspection unavailable',
+          'REWORK_UNAVAILABLE',
+          503,
+        );
+      if (manager.getLaunchConfiguration?.(podId)?.intent === 'goal')
+        throw new AutopodError('Use native Goal controls', 'GOAL_NATIVE_RESUME_REQUIRED', 409);
       const preview = manager.assertCanRework(podId);
       if (preview.notBefore && Date.parse(preview.notBefore) > Date.now())
         return {
@@ -73,7 +85,7 @@ export function reworkRoutes(
         ...base,
         eligible: false,
         status:
-          error.code === 'TASK_RETRY_AUTHORIZATION_REQUIRED'
+          error instanceof TaskRetryBlockedError && error.authorizationNeeded
             ? 'authorization_needed'
             : error.code === 'TASK_RETRY_BACKOFF_PENDING'
               ? 'cooldown'
@@ -108,26 +120,19 @@ export function reworkRoutes(
       .parse(request.body);
     if (!journal) throw new AutopodError('Durable Rework unavailable', 'REWORK_UNAVAILABLE', 503);
     const result = journal.accept(podId, input, human, () => {
-      if (
-        input.guidance &&
-        db
-          ?.prepare(
-            "SELECT 1 FROM pod_launch_snapshots WHERE pod_id=? AND json_extract(payload,'$.intent')='goal'",
-          )
-          .get(podId)
-      )
-        throw new AutopodError(
-          'Use native Goal controls for guidance',
-          'GOAL_NATIVE_RESUME_REQUIRED',
-          409,
-        );
       const eligibility = inspect(podId);
       if (!eligibility.eligible) throw new AutopodError(eligibility.reason, 'REWORK_BLOCKED', 409);
     });
     if (result.fresh) {
       // The journal is committed before any async preservation/teardown. Never dispatch on replay.
       void Promise.resolve()
-        .then(() => manager.triggerValidation(podId, { force: true }))
+        .then(() =>
+          manager.triggerValidation(podId, {
+            force: true,
+            onReworkQueued: (generation) =>
+              journal.queueForGeneration(podId, input.requestKey, generation),
+          }),
+        )
         .then(
           () => journal.settle(input.requestKey, null),
           (error: unknown) => {
@@ -140,7 +145,15 @@ export function reworkRoutes(
               'Durable Rework dispatch failed',
             );
           },
-        );
+        )
+        .catch((error: unknown) => {
+          // A failed settlement write leaves the committed request unresolved.
+          // Logging must not turn it into an unhandled rejection or a replay ticket.
+          app.log.error(
+            { error, podId, requestKey: input.requestKey },
+            'Rework settlement remains unresolved',
+          );
+        });
     }
     reply.code(result.fresh ? 202 : 200);
     return result.receipt;

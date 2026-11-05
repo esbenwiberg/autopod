@@ -21,6 +21,7 @@ export interface ReworkRequestRepository {
     actor: OperatorActor,
     admit: () => void,
   ): { receipt: ReworkRequestReceipt; fresh: boolean };
+  queueForGeneration(podId: string, requestKey: string, generation: number): void;
   settle(requestKey: string, error: string | null): void;
 }
 export function createReworkRequestRepository(db: Database.Database): ReworkRequestRepository {
@@ -95,11 +96,6 @@ export function createReworkRequestRepository(db: Database.Database): ReworkRequ
           );
         admit();
         const now = new Date().toISOString();
-        const messageId = input.guidance
-          ? db
-              .prepare('INSERT INTO nudge_messages(pod_id,message,created_at) VALUES (?,?,?)')
-              .run(podId, input.guidance, now).lastInsertRowid
-          : null;
         db.prepare(`INSERT INTO rework_requests(request_key,task_id,pod_id,generation,actor,guidance,message_id,created_at)
         VALUES (?,?,?,?,?,?,?,?)`).run(
           input.requestKey,
@@ -108,7 +104,7 @@ export function createReworkRequestRepository(db: Database.Database): ReworkRequ
           input.generation,
           JSON.stringify(actor),
           input.guidance,
-          messageId,
+          null,
           now,
         );
         const receipt = read(input.requestKey);
@@ -116,6 +112,36 @@ export function createReworkRequestRepository(db: Database.Database): ReworkRequ
         return { receipt, fresh: true };
       },
     ),
+    queueForGeneration: db.transaction((podId: string, requestKey: string, generation: number) => {
+      const request = read(requestKey);
+      const owner = db
+        .prepare(`SELECT e.task_id AS taskId,p.lifecycle_generation AS generation,p.status
+        FROM task_executions e JOIN pods p ON p.id=e.pod_id WHERE p.id=?`)
+        .get(podId) as { taskId: string; generation: number; status: string } | undefined;
+      if (
+        !request ||
+        request.podId !== podId ||
+        request.settledAt ||
+        request.generation + 1 !== generation ||
+        owner?.taskId !== request.taskId ||
+        owner.generation !== generation ||
+        owner.status !== 'queued'
+      )
+        throw new AutopodError(
+          'Rework guidance belongs to a different request or lifecycle',
+          'REWORK_LIFECYCLE_STALE',
+          409,
+        );
+      const prior = db
+        .prepare('SELECT message_id FROM rework_requests WHERE request_key=?')
+        .get(requestKey) as { message_id: number | null };
+      if (prior.message_id !== null || !request.guidance) return;
+      const message = `Guidance for Rework request ${requestKey}, lifecycle ${generation}. Supplements the frozen task; this is not scope, retry, approval or publication authority.\n\n${request.guidance}`;
+      const id = db
+        .prepare('INSERT INTO nudge_messages(pod_id,message,created_at) VALUES (?,?,?)')
+        .run(podId, message, new Date().toISOString()).lastInsertRowid;
+      db.prepare('UPDATE rework_requests SET message_id=? WHERE request_key=?').run(id, requestKey);
+    }),
     settle(requestKey: string, error: string | null) {
       db.prepare(
         'UPDATE rework_requests SET settled_at=?,error=? WHERE request_key=? AND settled_at IS NULL',

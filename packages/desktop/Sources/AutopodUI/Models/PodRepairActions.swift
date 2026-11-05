@@ -161,7 +161,7 @@ public struct PodRepairActions: Sendable {
         reworkDraft = draft; reworkRejected = false
         UserDefaults.standard.removeObject(forKey: draftKey + ".rejected")
         let result = try await actions.submitRework(id, draft)
-        receipt = PodRepairReceipt(message: result.error.map { "Request recorded; dispatch failed: \($0). Guidance remains saved." } ?? "Rework request accepted. Inspect observed state for provisioning and worker execution. Guidance remains queued until the worker acknowledges receipt; acknowledgment does not prove it was applied.")
+        receipt = PodRepairReceipt(message: result.error.map { "Request recorded; dispatch failed: \($0). Guidance remains saved." } ?? "Rework request accepted. Inspect observed state for provisioning and worker execution. Guidance is saved and enters delivery with the fresh lifecycle. Worker receipt acknowledgment does not prove it was applied.")
         return
       }
       receipt = try await actions.submit(id, kind, feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : feedback) }
@@ -169,6 +169,7 @@ public struct PodRepairActions: Sendable {
       uncertain = !FollowUpFailure.isDefiniteRejection(error)
       if ordinaryRework && kind == .rework, let draftKey {
         reworkRejected = !uncertain
+        eligibility = nil
         UserDefaults.standard.set(reworkRejected, forKey: draftKey + ".rejected")
       }
       self.error = error.localizedDescription

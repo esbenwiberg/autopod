@@ -42,7 +42,12 @@ it('retains exact guidance and no replay dispatch across response loss and SQLit
   const admission = vi.fn();
   const accepted = f.journal.accept('rework-fixture', input, actor, admission);
   expect(accepted.fresh).toBe(true);
-  expect(createNudgeRepository(f.db).hasPending('rework-fixture')).toBe(true);
+  expect(createNudgeRepository(f.db).hasPending('rework-fixture')).toBe(false);
+  f.repo.atomically?.(() => {
+    f.repo.incrementLifecycleGeneration('rework-fixture');
+    f.repo.update('rework-fixture', { status: 'queued' });
+    f.journal.queueForGeneration('rework-fixture', input.requestKey, 2);
+  });
   writeFileSync(file, f.db.serialize());
   f.db.close();
   const db = createDatabase(file, logger);
@@ -55,7 +60,6 @@ it('retains exact guidance and no replay dispatch across response loss and SQLit
       journal.accept('rework-fixture', { ...input, requestKey: randomUUID() }, actor, admission),
     ).toThrow('unresolved');
     const repo = createPodRepository(db);
-    repo.incrementLifecycleGeneration('rework-fixture');
     const run = repo.taskExecutions?.beginRun('rework-fixture', 2, 1, {
       runtime: 'codex',
       model: 'model',
@@ -64,7 +68,9 @@ it('retains exact guidance and no replay dispatch across response loss and SQLit
     expect(run).toBeTruthy();
     const nudges = createNudgeRepository(db);
     const receipt = nudges.readPending('rework-fixture');
-    expect(receipt?.messages).toEqual([input.guidance]);
+    expect(receipt?.messages).toHaveLength(1);
+    expect(receipt?.messages[0]).toContain(input.guidance);
+    expect(receipt?.messages[0]).toContain(`request ${input.requestKey}, lifecycle 2`);
     expect(nudges.readPending('rework-fixture')).toEqual(receipt);
     expect(nudges.hasPending('rework-fixture')).toBe(true);
     if (!receipt) throw new Error('Missing guidance receipt');
@@ -106,7 +112,11 @@ it('rejects changed payloads, actor and lifecycle; rejected admission queues not
     ).toThrow('different payload');
     journal.settle(input.requestKey, 'Preservation failed; original resource retained');
     expect(journal.read(input.requestKey)?.error).toContain('Preservation failed');
-    expect(createNudgeRepository(db).hasPending('rework-fixture')).toBe(true);
+    expect(createNudgeRepository(db).hasPending('rework-fixture')).toBe(false);
+    expect(journal.read(input.requestKey)?.guidance).toBe(input.guidance);
+    expect(() => journal.queueForGeneration('rework-fixture', input.requestKey, 2)).toThrow(
+      'different request or lifecycle',
+    );
   } finally {
     db.close();
   }
@@ -122,6 +132,42 @@ it('keeps empty guidance agent-free until the dispatcher and creates no message'
     );
     expect(createNudgeRepository(db).hasPending('rework-fixture')).toBe(false);
     expect(db.prepare('SELECT COUNT(*) AS count FROM task_agent_runs').get()).toEqual({ count: 0 });
+  } finally {
+    db.close();
+  }
+});
+
+it('retains failed-preservation guidance in its request without delivering it to a later continuation', () => {
+  const { db, repo, journal } = fixture();
+  try {
+    const first = {
+      requestKey: randomUUID(),
+      generation: 1,
+      guidance: 'Earlier continuation guidance',
+    };
+    journal.accept('rework-fixture', first, actor, () => {});
+    repo.incrementLifecycleGeneration('rework-fixture');
+    journal.settle(first.requestKey, 'Workspace preservation failed');
+    const later = {
+      requestKey: randomUUID(),
+      generation: 2,
+      guidance: 'Later reviewed continuation guidance',
+    };
+    journal.accept('rework-fixture', later, actor, () => {});
+    repo.atomically?.(() => {
+      repo.incrementLifecycleGeneration('rework-fixture');
+      repo.update('rework-fixture', { status: 'queued' });
+      expect(() => journal.queueForGeneration('rework-fixture', first.requestKey, 3)).toThrow(
+        'different request or lifecycle',
+      );
+      journal.queueForGeneration('rework-fixture', later.requestKey, 3);
+      journal.queueForGeneration('rework-fixture', later.requestKey, 3);
+    });
+    const pending = createNudgeRepository(db).listPending('rework-fixture');
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.message).toContain(later.guidance);
+    expect(pending[0]?.message).not.toContain(first.guidance);
+    expect(journal.read(first.requestKey)?.guidance).toBe(first.guidance);
   } finally {
     db.close();
   }

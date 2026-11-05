@@ -310,7 +310,11 @@ export interface PodManager {
   assertCanRetryValidation(podId: string): void;
   triggerValidation(
     podId: string,
-    options?: { force?: boolean; validationOnly?: boolean },
+    options?: {
+      force?: boolean;
+      validationOnly?: boolean;
+      onReworkQueued?: (generation: number) => void;
+    },
   ): Promise<void>;
   /** Pull latest from remote branch and re-run validation without agent rework on failure.
    *  Used after human fixes via a linked workspace pod.

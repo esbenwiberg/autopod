@@ -214,7 +214,11 @@ export interface ValidationWorkflowDependencies {
 export interface ValidationWorkflowCalls {
   triggerValidation(
     podId: string,
-    options?: { force?: boolean; validationOnly?: boolean },
+    options?: {
+      force?: boolean;
+      validationOnly?: boolean;
+      onReworkQueued?: (generation: number) => void;
+    },
   ): Promise<void>;
   assertCanRework(podId: string): { notBefore?: string; authorizationAvailable?: boolean };
   approveSession(

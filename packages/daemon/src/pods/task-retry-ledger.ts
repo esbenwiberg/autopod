@@ -16,7 +16,11 @@ import { createValidationExecutionLedger } from './validation-execution-ledger.j
 import { retainWorkerRetryHistory, workerRetryFailure } from './worker-retry-history.js';
 
 export class TaskRetryBlockedError extends AutopodError {
-  constructor(message: string, code = 'TASK_RETRY_RECONCILIATION_REQUIRED') {
+  constructor(
+    message: string,
+    code = 'TASK_RETRY_RECONCILIATION_REQUIRED',
+    public readonly authorizationNeeded = false,
+  ) {
     super(message, code, 409);
   }
 }
@@ -297,7 +301,8 @@ export function createTaskRetryLedger(
       } else if (stage === 'worker' && workerFailure === 'auth') {
         throw new TaskRetryBlockedError(
           'Unchanged or unverified worker authentication failure; reconcile credentials and record a human retry authorization before another worker execution.',
-          'TASK_RETRY_AUTHORIZATION_REQUIRED',
+          'TASK_RETRY_RECONCILIATION_REQUIRED',
+          true,
         );
       } else if (stage === 'codex_interruption') {
         throw new TaskRetryBlockedError(
@@ -308,7 +313,8 @@ export function createTaskRetryLedger(
         if (delay === undefined)
           throw new TaskRetryBlockedError(
             `Task-wide ${label} retry budget exhausted; record an authorized retry with a reason before repeating`,
-            'TASK_RETRY_AUTHORIZATION_REQUIRED',
+            'TASK_RETRY_RECONCILIATION_REQUIRED',
+            true,
           );
         retryKind = 'transient';
         notBefore = Date.parse(prior.ended_at as string) + delay;
@@ -316,7 +322,8 @@ export function createTaskRetryLedger(
       else
         throw new TaskRetryBlockedError(
           `Unchanged or unverified nonretryable ${label} inputs; change relevant conditions or record an authorized retry with a reason`,
-          'TASK_RETRY_AUTHORIZATION_REQUIRED',
+          'TASK_RETRY_RECONCILIATION_REQUIRED',
+          true,
         );
     }
     if (providerRetryNotBefore) notBefore = Math.max(notBefore, Date.parse(providerRetryNotBefore));

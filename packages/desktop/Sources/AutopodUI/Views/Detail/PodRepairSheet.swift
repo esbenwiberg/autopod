@@ -114,7 +114,7 @@ internal struct PodRepairSheet: View {
             .padding(12).background(DesktopTheme.surface, in: RoundedRectangle(cornerRadius: 6)).accessibilityIdentifier("repair-feedback").disabled(model.busy)
           Text("Leave blank to auto-detect CI failures and PR review comments. Feedback may join an existing fix pod.").font(.caption).foregroundStyle(.secondary)
         }
-        if model.kind == .rework && !observed.isWorkspace {
+        if model.kind == .rework && model.ordinaryRework && !observed.isWorkspace {
           if snapshot?.intent != "goal" {
             Text("Guidance for this continuation · optional").font(.headline)
             TextEditor(text: $model.guidance).frame(minHeight: 120).disabled(model.busy)
@@ -227,6 +227,7 @@ internal struct PodRepairSheet: View {
     do {
       snapshot = try await configuration.readLaunch(pod.id); snapshotError = nil
       if snapshot?.intent == "goal" {
+        model.ordinaryRework = false
         goalBlocked = true
         let goal = try await actions.loadGoal(pod.id)
         goalBlocked = goal?.state != "achieved" || goal?.executionStopped != true
