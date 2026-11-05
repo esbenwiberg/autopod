@@ -318,7 +318,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
 
   server.tool(
     'pre_submit_review',
-    "Run a fast critic pass on your **cumulative diff** — every change you've made since the pod started, NOT just your latest commit. The reviewer sees the same bytes the daemon's full reviewer will see after `report_task_summary`, so a clean verdict here lets the daemon skip its Tier 1 review. Call AFTER `validate_locally` succeeds and BEFORE `report_task_summary`. At most two fresh critic executions are allowed per provider attempt; unchanged-diff cache hits and no-diff skips do not spend the budget. Findings are scoped to medium-and-above issues (logic bugs, security, broken contracts, undisclosed scope creep) — style/format is out of scope. The response echoes `filesReviewed` / `linesAdded` / `linesRemoved` so you can verify what was reviewed.",
+    "Run a fast critic pass on your **cumulative diff** — every change you've made since the pod started, NOT just your latest commit. The reviewer sees the same bytes the daemon's full reviewer will see after `report_task_summary`, so a clean verdict here lets the daemon skip its Tier 1 review. Call after relevant self-checks and diff self-review, and before `report_task_summary`; a successful `validate_locally` call is not required. Report known failures and deferred checks honestly. At most two fresh critic executions are allowed per provider attempt; unchanged-diff cache hits and no-diff skips do not spend the budget. Findings are scoped to medium-and-above issues (logic bugs, security, broken contracts, undisclosed scope creep) — style/format is out of scope. The response echoes `filesReviewed` / `linesAdded` / `linesRemoved` so you can verify what was reviewed.",
     {
       plannedSummary: z
         .string()
@@ -352,13 +352,13 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
 
   server.tool(
     'validate_locally',
-    'Run the profile-configured setup, lint, build, and tests inside your container - the same commands the daemon will re-run after you finish. Call before `report_task_summary` to catch failures while you still have full context. Returns structured results per phase. With no `phases` argument, runs setup -> lint -> build -> tests in order; setup is prepended to requested downstream phases and tests are skipped automatically if build fails. Output is truncated to keep your context manageable.',
+    'Optional convenience for running fixed profile-configured setup, lint, build, and test commands inside your container. Choose the smallest meaningful checks for affected behavior, dependencies and contracts; broaden for shared interfaces, migrations, dependency/build configuration changes or uncertain impact. This tool does not select affected tests/files or accept command overrides. Returns structured results per phase. With no `phases` argument, runs setup -> lint -> build -> tests in order; setup is prepended to downstream requests and rerun on each call when configured, and tests are skipped automatically if build fails. Each selected phase runs its configured command. The daemon independently runs its configured enabled gates after you finish. Output is truncated to keep your context manageable.',
     {
       phases: z
         .array(z.enum(['setup', 'lint', 'build', 'tests']))
         .optional()
         .describe(
-          'Subset of phases to run. Omit to run all configured phases (recommended for the final pre-completion check). Setup is prepended to downstream requests when configured. Useful for re-running just `tests` or just `lint` after a targeted fix.',
+          'Optional subset of fixed command phases, not affected tests/files. Omit to run setup -> lint -> build -> tests. Setup is prepended to downstream requests and rerun on each call when configured. Each selected phase still runs its full configured command; phase selection does not scope that command to changed files.',
         ),
     },
     async (input) => {

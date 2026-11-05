@@ -25,9 +25,17 @@ development or deliberately authorized source changes to build tooling.
   `localhost:3100` is not a worker application endpoint and must not be probed as
   a route to the host daemon. Use the worker's assigned `$PORT` for the application
   under test and the provided MCP tools for control-plane communication.
-- **Validation and evidence:** Run the configured worker checks and independent
-  review; do not disable gates for documentation changes. Report actual commands,
-  failures, and deferred checks. Linux workers cannot validate macOS desktop code:
+- **Validation and evidence:** Run the smallest meaningful checks covering changed
+  behavior, affected dependencies and contracts, then self-review the diff and run
+  the required independent review. Broaden for shared interfaces, migrations,
+  dependency/build configuration changes or uncertain impact. Documentation-only
+  work needs applicable content/consistency checks, not an unrelated full worker
+  preflight. Explicit task/contract checks and configured preparation/native-binding
+  safeguards still apply. Full configured commands are references, not a mandatory
+  worker checklist; the daemon independently runs its configured enabled gates.
+  Do not disable those gates for documentation changes. Report exact commands,
+  results, scope rationale, failures and deferred checks; never conceal known
+  failures or relabel them as passes. Linux workers cannot validate macOS desktop code:
   defer Xcode/Swift checks to a Mac. Mock, unit, or browser results do not prove
   unavailable hardware or live infrastructure works.
 - **Delivery:** Follow the active worker's delivery instructions: commit changes

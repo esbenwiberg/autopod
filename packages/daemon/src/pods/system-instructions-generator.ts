@@ -328,7 +328,9 @@ export function generateSystemInstructions(
     lines.push('## Output');
     lines.push('');
     lines.push('- Write your findings to `research-output.md` in the workspace root.');
-    lines.push('- No build or validation will run — your output IS the deliverable.');
+    lines.push(
+      '- Your output is the deliverable. Verify its content and any explicit task/contract requirements; daemon acceptance follows the configured enabled gates.',
+    );
     lines.push(
       '- Web search and browsing are available via built-in Claude tools. Write all output files to `/workspace/` — they will be collected as artifacts on completion.',
     );
@@ -681,6 +683,23 @@ export function generateSystemInstructions(
 
   lines.push('## Guidelines');
   lines.push('');
+  lines.push(
+    '- **macOS desktop validation is host-only**: this pod runs in Linux and cannot validate `packages/desktop` SwiftUI/AppKit code. ' +
+      'NEVER attempt desktop `swift test`, `xcodebuild`, or `xcrun xcodebuild` here, even when user task prose asks for them. ' +
+      'Run relevant Linux-compatible checks for affected work, then report desktop checks as deferred Mac/human verification. ' +
+      'Do not install Swift or Xcode and do not represent the deferred check as passing.',
+  );
+
+  lines.push(
+    '- **Verify affected work before `report_task_summary`** — run the smallest meaningful tests/checks covering changed behavior, affected dependencies and contracts. ' +
+      'Broaden verification for shared interfaces, migrations, dependency/build configuration changes or uncertain impact. ' +
+      'For documentation-only or non-code artifacts, use relevant content, consistency or artifact checks rather than an unrelated full suite. ' +
+      'Explicit task and contract checks still apply; scoped verification does not waive them. ' +
+      'Use configured preparation and the supported build path when dependencies or native bindings need preparation. ' +
+      'Report exact commands, results, scope rationale and deferred checks; never conceal known failures or relabel them as passes. ' +
+      'Fix failures and recheck affected work; report infrastructure or credential blockers with evidence.',
+  );
+
   if (profile.outputMode === 'artifact') {
     lines.push('- Focus on research quality and comprehensiveness');
     lines.push('- Structure your output clearly with headings and sections');
@@ -693,39 +712,34 @@ export function generateSystemInstructions(
         'leftover uncommitted changes get an ugly `chore: auto-commit ...` fallback.',
     );
 
-    lines.push(
-      '- **macOS desktop validation is host-only**: this pod runs in Linux and cannot validate `packages/desktop` SwiftUI/AppKit code. ' +
-        'NEVER attempt desktop `swift test`, `xcodebuild`, or `xcrun xcodebuild` here, even when user task prose asks for them. ' +
-        'Run the configured Linux-compatible profile checks normally, then report desktop checks as deferred Mac/human verification. ' +
-        'Do not install Swift or Xcode and do not represent the deferred check as passing.',
-    );
-
-    const preflightCommands: Array<{ label: string; command: string }> = [];
+    const configuredCommands: Array<{ label: string; command: string }> = [];
     if (profile.lintCommand) {
-      preflightCommands.push({ label: 'lint', command: profile.lintCommand });
+      configuredCommands.push({ label: 'lint', command: profile.lintCommand });
     }
     if (profile.buildCommand) {
-      preflightCommands.push({ label: 'build', command: profile.buildCommand });
+      configuredCommands.push({ label: 'build', command: profile.buildCommand });
     }
     if (profile.testCommand) {
-      preflightCommands.push({ label: 'tests', command: profile.testCommand });
+      configuredCommands.push({ label: 'tests', command: profile.testCommand });
     }
 
-    if (preflightCommands.length > 0) {
+    if (configuredCommands.length > 0) {
       const cwdHint = profile.buildWorkDir
         ? ` (run from \`/workspace/${profile.buildWorkDir}\`)`
         : '';
       lines.push(
-        `- **Run pre-completion checks before \`report_task_summary\`**${cwdHint} — these are the same commands the system will re-run independently after you finish. Catching failures here keeps you in your current context; failures caught after will loop you back through validation, costing several minutes per round:`,
+        `- **Configured command reference**${cwdHint} — these full profile commands are available when relevant, not a mandatory pre-completion checklist. Choose verification scope using the affected-work guidance above:`,
       );
-      for (const { label, command } of preflightCommands) {
+      for (const { label, command } of configuredCommands) {
         lines.push(`   - ${label}: \`${command}\``);
       }
       lines.push(
         '   If a check fails, fix the underlying issue and re-run. If it looks like infrastructure (native module errors that persist after one retry, registry auth, etc.) call `report_blocker` rather than fighting it.',
       );
     } else {
-      lines.push('- Ensure the build passes before completing');
+      lines.push(
+        '- No profile lint/build/test commands are configured; choose meaningful checks for the affected work and report any verification gaps.',
+      );
     }
 
     lines.push(
@@ -737,7 +751,7 @@ export function generateSystemInstructions(
     );
 
     lines.push(
-      '- **Run `pre_submit_review` before `report_task_summary`** — once your pre-completion checks pass and your self-review is clean, call this tool for a fast critic pass. ' +
+      '- **Run `pre_submit_review` before `report_task_summary`** — after relevant self-checks and diff self-review (a successful `validate_locally` call is not required), call this tool for a fast critic pass. ' +
         'It reviews your **cumulative diff** (every change since the pod started, not just your latest commit) — the same bytes the daemon will review after you finish, so a clean verdict here means the daemon can skip its Tier 1 review entirely. ' +
         'The response echoes `filesReviewed` / `linesAdded` / `linesRemoved` — sanity-check those numbers match your expectation before acting on the verdict. ' +
         'At most two fresh critic executions are allowed per provider attempt; unchanged-diff cache hits and no-diff skips do not spend that budget. ' +
@@ -768,11 +782,10 @@ export function generateSystemInstructions(
       'Report persistent failures via `report_blocker`.',
   );
   lines.push(
-    '- **Validation also runs after you finish**: the system independently re-runs build, tests, ' +
-      'health checks, smoke tests, required facts, and AI review as a safety net. ' +
-      'For contract-based pods, it verifies every required fact command from `contract.yaml`. ' +
-      'Always run the pre-completion checks listed in Guidelines first — failures caught there are ' +
-      'cheap; failures caught after will loop you back with correction feedback. ' +
+    '- **Independent daemon acceptance**: after you finish, the daemon runs its configured enabled validation gates and independent review. ' +
+      'Worker self-checks do not replace or disable those gates. ' +
+      'For contract-based pods, preserve every required fact command from `contract.yaml`. ' +
+      'Run relevant affected-work verification first and report failures and deferred checks honestly. ' +
       '`validate_in_browser` remains available for browser-based self-checks.',
   );
   lines.push(
