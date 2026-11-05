@@ -25,12 +25,21 @@ describe('isolated migrated test databases', () => {
     for (const { name } of tables) {
       const table = `"${name.replaceAll('"', '""')}"`;
       const rows = (db: Database.Database) => db.prepare(`SELECT * FROM ${table}`).all();
-      // This singleton's migration timestamp is the only time-dependent seed value.
+      // Independent migrations may cross a clock boundary. Validate their audit
+      // timestamps, but compare all other seed fields exactly.
       const seedRows = (db: Database.Database) =>
         rows(db).map((row) => {
-          if (name !== 'configuration_security_policy') return row;
-          const { updated_at: _timestamp, ...policy } = row as Record<string, unknown>;
-          return policy;
+          const timestampColumn =
+            name === 'configuration_security_policy'
+              ? 'updated_at'
+              : name === 'schema_version'
+                ? 'applied_at'
+                : null;
+          if (!timestampColumn) return row;
+          const { [timestampColumn]: timestamp, ...seed } = row as Record<string, unknown>;
+          expect(timestamp).toEqual(expect.any(String));
+          expect(Number.isFinite(Date.parse(timestamp as string))).toBe(true);
+          return seed;
         });
       expect(seedRows(copied), name).toEqual(seedRows(migrated));
     }
