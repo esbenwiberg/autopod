@@ -13,9 +13,66 @@ export function checkpointRecoveryRoutes(
     | 'continueRetained'
     | 'previewRetainedExecution'
     | 'checkRetainedCandidate'
+    | 'prepareRewriteRepair'
+    | 'checkRewriteRepair'
+    | 'getApprovalSourceRewrite'
   >,
 ) {
   const params = z.object({ podId: z.string().min(1).max(128) });
+  const identity = {
+    rewriteId: z.string().min(1).max(128),
+    failedDispatchId: z.string().min(1).max(128),
+    expectedGeneration: z.number().int().min(1),
+    expectedResultHash: z.string().regex(/^[a-f0-9]{64}$/),
+    reason: z.string().trim().min(10).max(4000),
+  };
+  app.get('/pods/:podId/approval-rewrite-repair', async (request, reply) => {
+    if (!request.user?.oid)
+      throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
+    const { podId } = params.parse(request.params);
+    reply.header('Cache-Control', 'no-store');
+    return {
+      rewrite: manager.getApprovalSourceRewrite(podId),
+      operations: manager.getCheckpointRecoveries(podId),
+    };
+  });
+  app.post('/pods/:podId/approval-rewrite-repair', async (request, reply) => {
+    if (!request.user?.oid)
+      throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
+    const { podId } = params.parse(request.params);
+    const input = z
+      .object({
+        ...identity,
+        id: z.string().regex(/^[a-zA-Z0-9-]{1,64}$/),
+        checkpointHead: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
+      })
+      .strict()
+      .parse(request.body);
+    const operation = await manager.prepareRewriteRepair(podId, input, {
+      type: 'human',
+      userId: request.user.oid,
+    });
+    reply.header('Cache-Control', 'no-store');
+    return reply.code(202).send({ operation });
+  });
+  app.post('/pods/:podId/approval-rewrite-repair/:recoveryId/check', async (request, reply) => {
+    if (!request.user?.oid)
+      throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
+    const { podId, recoveryId } = params
+      .extend({ recoveryId: z.string().regex(/^[a-zA-Z0-9-]{1,64}$/) })
+      .parse(request.params);
+    const input = z
+      .object({ ...identity, candidateHead: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/) })
+      .strict()
+      .parse(request.body);
+    const operation = await manager.checkRewriteRepair(podId, recoveryId, input, {
+      type: 'human',
+      userId: request.user.oid,
+    });
+    reply.header('Cache-Control', 'no-store');
+    return reply.code(202).send({ operation });
+  });
+
   app.get('/pods/:podId/retained-continuation/execution', async (request, reply) => {
     if (!request.user?.oid)
       throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);

@@ -773,6 +773,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
 
   const { validateWithInfrastructureRetries } = createValidationExecution({
+    verifySelectedSource: (podId) => checkpointRecovery?.verifySource(podId) ?? Promise.resolve(),
     logger,
     containerManagerFactory,
     podRepo,
@@ -1428,7 +1429,17 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       'refreshNetworkPolicy',
       'deleteSeriesWithCascade',
     ]);
+    // Some registry calls take a profile name, not a pod ID. Query custody
+    // first rather than resolving an unrelated first string as a pod.
+    const rewritePod = podRepo.approvalRewrites?.has(podId) ? podRepo.getOrThrow(podId) : undefined;
+    const rewrite = rewritePod ? podRepo.approvalRewrites?.latest(rewritePod) : null;
     const continuation = podRepo.retainedCheckpoints?.latest(podId);
+    const successorChecks =
+      rewrite &&
+      !rewrite.checked &&
+      rewritePod &&
+      podRepo.approvalRewrites?.isRepairSuccessor(rewritePod);
+
     if (
       continuation?.binding.continuation &&
       ![
@@ -1439,8 +1450,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'nudgeSession',
         'refreshReadinessAfterQualityScore',
         'authorizeValidationRecoveryBudget',
-        ...(!continuation.checked &&
-        continuation.activated &&
+        ...(((!continuation.checked && continuation.activated) || successorChecks) &&
         podRepo.getOrThrow(podId).status === 'running'
           ? ['triggerValidation']
           : []),
@@ -1450,10 +1460,6 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'Retained continuation owns this source. Use exact candidate selection or fresh human approval; legacy Rework, budget resets and competing source changes are not authorized.',
         'CONTINUATION_SOURCE_HELD',
       );
-    // Some registry calls take a profile name, not a pod ID. Query custody
-    // first rather than resolving an unrelated first string as a pod.
-    const rewritePod = podRepo.approvalRewrites?.has(podId) ? podRepo.getOrThrow(podId) : undefined;
-    const rewrite = rewritePod ? podRepo.approvalRewrites?.latest(rewritePod) : null;
     if (
       rewrite &&
       ![

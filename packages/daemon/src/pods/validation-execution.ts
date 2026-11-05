@@ -34,6 +34,7 @@ interface ValidationExecutionDependencies {
     | 'atomically'
   >;
   validationEngine: Pick<ValidationEngine, 'validate'>;
+  verifySelectedSource?(podId: string): Promise<unknown>;
   retrySource: {
     validationInfrastructureRetryBackoffMs?: readonly number[];
     captureRetryIdentity?(config: ValidationEngineConfig): Promise<TaskRetryIdentity>;
@@ -189,6 +190,19 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
             }),
           )
           .digest('hex');
+        const repair = podRepo.retainedCheckpoints?.latest(podId);
+        const verifyRepair = async () => {
+          if (
+            repair?.binding.approvalRewrite &&
+            repair.activated?.generation === pod.lifecycleGeneration
+          ) {
+            if (!deps.verifySelectedSource)
+              throw new TaskRetryBlockedError('Rewrite repair source verification is unavailable');
+            await deps.verifySelectedSource(podId);
+            ownership.assertCurrent();
+          }
+        };
+        await verifyRepair();
         const admission =
           retryLedger && identity
             ? retryLedger.admit(podId, pod.lifecycleGeneration, identity, bindingHash, [
@@ -204,6 +218,7 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
                 throw new TaskRetryBlockedError('Validation admission cancelled during cooldown');
             });
             resolveEffectiveBoundProfile(ownership.assertCurrent());
+            await verifyRepair();
             if (validationController.signal.aborted)
               throw new TaskRetryBlockedError('Validation admission cancelled before execution');
             atomicPodChange(podRepo, () => {

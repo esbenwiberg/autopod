@@ -179,9 +179,10 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
       smokePages: profile.smokePages,
       attempt,
       validationSuite,
-      task: continuation
-        ? `${pod.task}\n\nRetained source continuation: independently review the current selected source against its pinned base. Historical worker reports and selection reasons are context, not passing evidence or waivers.\nSelection reason: ${retained?.selected?.reason ?? retained?.reason ?? ''}\nHistorical worker summary: ${pod.taskSummary?.actualSummary ?? 'None'}`
-        : pod.task,
+      task:
+        continuation && !retained?.binding.approvalRewrite
+          ? `${pod.task}\n\nRetained source continuation: independently review the current selected source against its pinned base. Historical worker reports and selection reasons are context, not passing evidence or waivers.\nSelection reason: ${retained?.selected?.reason ?? retained?.reason ?? ''}\nHistorical worker summary: ${pod.taskSummary?.actualSummary ?? 'None'}`
+          : pod.task,
       diff,
       testCommand: profile.testCommand,
       buildTimeout: (profile.buildTimeout ?? 300) * 1_000,

@@ -95,6 +95,25 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
         actor,
       );
     },
+    prepareRewriteRepair(
+      podId: string,
+      input: import('@autopod/shared').ApprovalRewriteRepairRequest,
+      actor: OperatorActor,
+    ) {
+      return (
+        captured.checkpointRecovery ?? checkpointError('Rewrite repair unavailable')
+      ).prepareRewriteRepair(podId, input, actor);
+    },
+    checkRewriteRepair(
+      podId: string,
+      recoveryId: string,
+      input: import('@autopod/shared').ApprovalRewriteRepairCheckRequest,
+      actor: OperatorActor,
+    ) {
+      return (
+        captured.checkpointRecovery ?? checkpointError('Rewrite repair unavailable')
+      ).checkRewriteRepair(podId, recoveryId, input, actor);
+    },
     previewRetainedExecution(podId: string, profileId: string) {
       return (
         captured.checkpointRecovery ?? checkpointError('Retained continuation unavailable')
@@ -165,6 +184,7 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
           checks = 'stale';
         }
       }
+      const repair = podRepo.retainedCheckpoints?.latest(podId);
       const held =
         ['failed', 'review_required'].includes(pod.status) ||
         Boolean(pod.lastRecoveryTrigger && pod.lastCorrectionMessage?.includes(record.id));
@@ -185,6 +205,26 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
         checks,
         originalResources: 'retained',
         requiresHumanApproval: true,
+        ...(repair?.binding.approvalRewrite?.id === record.id
+          ? {
+              repair: {
+                id: repair.id,
+                failedDispatchId: repair.binding.approvalRewrite.dispatchId,
+                phase:
+                  repair.blocked ||
+                  repair.checked?.result.overall === 'fail' ||
+                  (repair.activated && held)
+                    ? ('held' as const)
+                    : repair.checked
+                      ? ('checked' as const)
+                      : repair.activated
+                        ? ('checking' as const)
+                        : repair.prepared
+                          ? ('prepared' as const)
+                          : ('preparing' as const),
+              },
+            }
+          : {}),
       };
     },
     getSourceAdoptions(podId: string) {

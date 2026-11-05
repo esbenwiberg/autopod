@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -269,7 +269,9 @@ export async function retainedCheckpointFixture(
   const created = nativeAdmission
     ? ctx.podRepo.getOrThrow(nativeAdmission.podId)
     : manager.createSession({ profileName: 'test-profile', task }, 'operator');
-  const root = await mkdtemp(path.join(os.tmpdir(), 'checkpoint-controller-'));
+  // macOS temporary directories may be reached through /var or /tmp aliases.
+  // Fixtures must bind canonical storage without weakening production alias guards.
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'checkpoint-controller-')));
   const profile =
     nativeAdmission && ctx.deps.launchConfiguration
       ? ctx.deps.launchConfiguration.executionSettings(nativeAdmission.config)

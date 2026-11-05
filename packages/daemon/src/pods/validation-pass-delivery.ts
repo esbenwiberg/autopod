@@ -299,7 +299,7 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
     if (isTerminalState(postAdvisoryPod.status) || postAdvisoryPod.status === 'killing') {
       return;
     }
-    if (rewriteChecks && rewrite) {
+    if (rewriteChecks && rewrite && !rewrite.repairId) {
       const assertRewriteCurrent = () =>
         advisoryPublicationOwnership(validatedPod, result, validationRecord?.id).assertCurrent();
       const { source } = await verifyApprovalRewriteSource(

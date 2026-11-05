@@ -7,6 +7,8 @@ export type {
 } from './types/validation-execution-recovery.js';
 // Types
 export type {
+  ApprovalRewriteRepairRequest,
+  ApprovalRewriteRepairCheckRequest,
   CheckpointRecoveryRequest,
   RetainedContinuationRequest,
   RetainedContinuationCheckRequest,
@@ -686,6 +688,7 @@ export type {
   TaskRetryOutcome,
   TaskRetryAttempt,
   TaskRetryAuthorization,
+  RewriteRepairRetryTarget,
   TaskRetryState,
   TaskRetryStage,
 } from './types/task-retry.js';

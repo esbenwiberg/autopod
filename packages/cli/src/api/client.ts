@@ -485,14 +485,36 @@ export class AutopodClient {
     requestKey: string,
     reason: string,
     stage: TaskRetryStage = 'validation',
-    expectedFailureId?: string,
+    expectedFailureOrRepair?: string | import('@autopod/shared').RewriteRepairRetryTarget,
   ): Promise<TaskRetryAuthorization> {
-    return this.request('POST', `/pods/${id}/retry-authorizations`, {
-      requestKey,
-      reason,
-      ...(stage === 'validation' ? {} : { stage }),
-      ...(expectedFailureId === undefined ? {} : { expectedFailureId }),
-    });
+    const expectedFailureId =
+      typeof expectedFailureOrRepair === 'string' ? expectedFailureOrRepair : undefined;
+    const rewriteRepair =
+      typeof expectedFailureOrRepair === 'object' ? expectedFailureOrRepair : undefined;
+    if (rewriteRepair && stage !== 'validation')
+      throw new Error('Rewrite repair retry targets require validation stage');
+    const grant = await this.request<TaskRetryAuthorization>(
+      'POST',
+      `/pods/${id}/retry-authorizations${rewriteRepair ? '/rewrite-repair' : ''}`,
+      {
+        requestKey,
+        reason,
+        ...(stage === 'validation' ? {} : { stage }),
+        ...(expectedFailureId === undefined ? {} : { expectedFailureId }),
+        ...(rewriteRepair ? { rewriteRepair } : {}),
+      },
+    );
+    if (
+      rewriteRepair &&
+      (grant.stage !== 'validation' ||
+        grant.rewriteRepair?.recoveryId !== rewriteRepair.recoveryId ||
+        grant.rewriteRepair?.candidateHead !== rewriteRepair.candidateHead ||
+        grant.rewriteRepair?.candidateTree !== rewriteRepair.candidateTree)
+    )
+      throw new Error(
+        'Server did not confirm the exact rewrite repair retry target; inspect status, never retry without the target',
+      );
+    return grant;
   }
   async getSourceAdoptions(id: string): Promise<SourceAdoptionList> {
     return this.request<SourceAdoptionList>('GET', `/pods/${id}/source-adoptions`);
@@ -540,6 +562,22 @@ export class AutopodClient {
       'GET',
       `/pods/${id}/retained-continuation/execution?profileId=${encodeURIComponent(profileId)}`,
     );
+  }
+  async getRewriteRepairs(id: string): Promise<unknown> {
+    return this.request('GET', `/pods/${id}/approval-rewrite-repair`);
+  }
+  async prepareRewriteRepair(
+    id: string,
+    input: import('@autopod/shared').ApprovalRewriteRepairRequest,
+  ): Promise<unknown> {
+    return this.request('POST', `/pods/${id}/approval-rewrite-repair`, input);
+  }
+  async checkRewriteRepair(
+    id: string,
+    recoveryId: string,
+    input: import('@autopod/shared').ApprovalRewriteRepairCheckRequest,
+  ): Promise<unknown> {
+    return this.request('POST', `/pods/${id}/approval-rewrite-repair/${recoveryId}/check`, input);
   }
   async continueRetained(
     id: string,

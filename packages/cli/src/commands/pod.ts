@@ -19,6 +19,7 @@ import { type ColumnDef, renderTable } from '../output/table.js';
 import { formatToolUse } from '../utils/formatToolUse.js';
 import { resolvePodId } from '../utils/id-resolver.js';
 import { followLogs } from '../utils/log-follow.js';
+import { registerApprovalRewriteRepairCommand } from './approval-rewrite-repair.js';
 import { registerBudgetCommand } from './budget.js';
 import { registerGoalCommands } from './goal.js';
 import { registerLaunchCommand } from './launch.js';
@@ -144,6 +145,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   registerReviewerRunsCommand(program, getClient);
   registerSourceRecoveryCommand(program, getClient);
   registerRetainedContinuationCommand(program, getClient);
+  registerApprovalRewriteRepairCommand(program, getClient);
   program
     .command('execution-provenance <id>')
     .description('Inspect recorded runtime, image, build, resource and command preflight evidence')
@@ -303,11 +305,22 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
       'validation, sandbox_startup, codex_interruption or worker',
       'validation',
     )
+    .option('--rewrite-repair <id>', 'Bind validation retry to this prepared rewrite repair only')
+    .option('--candidate-head <sha>', 'Exact repair commit for targeted retry permission')
+    .option('--candidate-tree <sha>', 'Exact repair tree for targeted retry permission')
     .option('--json', 'Output JSON')
     .action(
       async (
         id: string,
-        opts: { reason: string; requestKey: string; json?: boolean; stage: string },
+        opts: {
+          reason: string;
+          requestKey: string;
+          json?: boolean;
+          stage: string;
+          rewriteRepair?: string;
+          candidateHead?: string;
+          candidateTree?: string;
+        },
       ) => {
         if (
           opts.stage !== 'validation' &&
@@ -318,6 +331,21 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           throw new Error(
             'Stage must be validation, sandbox_startup, codex_interruption or worker',
           );
+        const repair =
+          opts.rewriteRepair !== undefined ||
+          opts.candidateHead !== undefined ||
+          opts.candidateTree !== undefined;
+        if (
+          repair &&
+          (opts.stage !== 'validation' ||
+            !opts.rewriteRepair ||
+            !/^[a-zA-Z0-9-]{1,64}$/.test(opts.rewriteRepair) ||
+            !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(opts.candidateHead ?? '') ||
+            !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(opts.candidateTree ?? ''))
+        )
+          throw new Error(
+            'Targeted rewrite retry requires validation stage, --rewrite-repair, --candidate-head and --candidate-tree.',
+          );
         const client = getClient();
         const resolved = await resolvePodId(client, id);
         const grant = await client.authorizeRetry(
@@ -325,10 +353,19 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
           opts.requestKey,
           opts.reason,
           opts.stage,
+          repair
+            ? {
+                recoveryId: opts.rewriteRepair as string,
+                candidateHead: opts.candidateHead as string,
+                candidateTree: opts.candidateTree as string,
+              }
+            : undefined,
         );
         withJsonOutput(opts, grant, (value) =>
           console.log(
-            `Recorded ${value.id}. Run ap ${opts.stage === 'worker' ? 'rework' : 'resume'} ${resolved} to request execution; normal lifecycle and binding checks still apply.`,
+            repair
+              ? `Recorded ${value.id} for the exact repair candidate. Use approval-rewrite-repair --check; Resume/Rework remains blocked.`
+              : `Recorded ${value.id}. Run ap ${opts.stage === 'worker' ? 'rework' : 'resume'} ${resolved} to request execution; normal lifecycle and binding checks still apply.`,
           ),
         );
       },
