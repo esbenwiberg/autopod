@@ -1067,6 +1067,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
 
   const agentEventConsumption = createAgentEventConsumption(deps, {
+    containerManagerFactory,
     podRepo,
     activeAgentRunResolvers,
     activeAgentRuns,
