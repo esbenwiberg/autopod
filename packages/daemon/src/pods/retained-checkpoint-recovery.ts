@@ -33,6 +33,7 @@ import {
   type CheckpointRecoveryBinding,
   type CheckpointRecoveryRecord,
   type CheckpointRecoveryRequest,
+  type PreparedCheckpoint,
   checkpointError,
   checkpointHash,
 } from './retained-checkpoint-repository.js';
@@ -235,7 +236,7 @@ export function createRetainedCheckpointRecovery(deps: {
     assertCurrent();
     await mkdir(path.join(deps.root, record.podId), { recursive: true, mode: 0o700 });
     assertCurrent();
-    let prepared = await (deps.prepare ?? prepareRetainedCheckpointWorkspace)({
+    let prepared: PreparedCheckpoint = await (deps.prepare ?? prepareRetainedCheckpointWorkspace)({
       source: record.worktreePath,
       root: path.join(deps.root, record.podId, id),
       branch: record.binding.branch,
@@ -639,6 +640,7 @@ export function createRetainedCheckpointRecovery(deps: {
       if (
         exact.rewriteId !== record.binding.approvalRewrite?.id ||
         exact.failedDispatchId !== record.binding.approvalRewrite.dispatchId ||
+        record.actor.type !== 'human' ||
         actor.userId !== record.actor.userId ||
         input.executionProfileId ||
         input.expectedExecutionDigest ||
