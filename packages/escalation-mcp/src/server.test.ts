@@ -256,6 +256,32 @@ describe('createEscalationMcpServer memory reporting schema', () => {
     await expect(reportTaskSummary.handler(input)).rejects.toThrow(/memoryOutcomes is required/);
   });
 
+  it('describes optional fixed phases and review after affected-work self-checks', async () => {
+    const { createEscalationMcpServer } = await import('./server.js');
+    createEscalationMcpServer({ podId: 'pod', bridge: makeBridge() });
+    const validation = getTool('validate_locally');
+    expect(validation.description).toContain('Optional convenience');
+    expect(validation.description).toContain('smallest meaningful checks');
+    expect(validation.description).toContain('broaden for shared interfaces, migrations');
+    expect(validation.description).toContain('does not select affected tests/files');
+    expect(validation.description).toContain('setup -> lint -> build -> tests');
+    expect(validation.description).toContain('rerun on each call when configured');
+    expect(validation.description).toContain('tests are skipped automatically if build fails');
+    expect(validation.description).toContain('structured results per phase');
+    expect(validation.description).toContain('configured enabled gates');
+    expect(validation.description).not.toContain('Call before `report_task_summary`');
+    const phases = validation.schema.phases?.description;
+    expect(phases).toContain('not affected tests/files');
+    expect(phases).toContain('Setup is prepended');
+    expect(phases).toContain('Each selected phase still runs its full configured command');
+    expect(phases).not.toContain('recommended for the final pre-completion check');
+    const review = getTool('pre_submit_review').description;
+    expect(review).toContain('after relevant self-checks and diff self-review');
+    expect(review).toContain('a successful `validate_locally` call is not required');
+    expect(review).toContain('At most two fresh critic executions');
+    expect(review).not.toContain('AFTER `validate_locally` succeeds');
+  });
+
   it('accepts setup in validate_locally phases schema and forwards it to validation', async () => {
     const { createEscalationMcpServer } = await import('./server.js');
     const bridge = makeBridge({
