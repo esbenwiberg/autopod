@@ -18,7 +18,7 @@ internal struct PodRepairSheet: View {
   init(isPresented: Binding<Bool>, pod: Pod, kind: PodRepairKind, relatedPods: [Pod], actions: PodActions,
     configuration: LaunchConfigurationActions? = nil, onSelect: ((String) -> Void)? = nil, model: PodRepairModel? = nil) {
     self._isPresented = isPresented; self.pod = pod; self.relatedPods = relatedPods; self.actions = actions
-    self.configuration = configuration; self.onSelect = onSelect; self._model = State(initialValue: model ?? PodRepairModel(kind: kind, scope: actions.repair.scope))
+    self.configuration = configuration; self.onSelect = onSelect; self._model = State(initialValue: model ?? PodRepairModel(kind: kind, scope: actions.repair.scope, ordinaryRework: !pod.isWorkspace))
     self._budget = State(initialValue: TaskBudgetModel(podId: pod.id, scope: actions.taskBudget.scope))
   }
   private var observed: Pod { model.observation?.source ?? pod }
@@ -61,15 +61,20 @@ internal struct PodRepairSheet: View {
     }.background(DesktopTheme.canvas).tint(DesktopTheme.accent)
       .frame(minWidth: 900, idealWidth: 1120, minHeight: 650, idealHeight: 800)
       .task { await loadSnapshot() }
+      .task(id: model.kind) {
+        if model.kind == .rework && !pod.isWorkspace {
+          await model.prepareRework(id: pod.id, actions: actions.repair, draftScope: actions.retryDraftScope)
+        }
+      }
       .onChange(of: model.receipt != nil) { _, accepted in
         if accepted && model.kind == .resume { isPresented = false }
       }
-      .interactiveDismissDisabled(model.busy || budget.busy || model.uncertain || !model.feedback.isEmpty)
+      .interactiveDismissDisabled(model.busy || budget.busy || model.uncertain || !model.feedback.isEmpty || !model.guidance.isEmpty)
       .confirmationDialog("Leave this repair handoff?", isPresented: $confirmClose) {
         Button("Leave handoff", role: .destructive) { isPresented = false }; Button("Keep reviewing", role: .cancel) {}
       } message: { Text(model.uncertain ? "The result is unconfirmed. Check the pod and linked work before repeating the action." : "Your unsubmitted feedback will be discarded.") }
       .confirmationDialog("Review another attempt?", isPresented: $confirmRepeat) {
-        Button("Review another attempt", role: .destructive) { model.reviewAnotherAttempt() }; Button("Keep checking", role: .cancel) {}
+        Button("Review another attempt", role: .destructive) { model.reviewAnotherAttempt(); Task { await model.refreshEligibility(id: pod.id, actions: actions.repair) } }; Button("Keep checking", role: .cancel) {}
       } message: { Text("The earlier action may already have been accepted. Another submission can duplicate work or PR feedback. Inspect observed state first.") }
   }
   private var title: String { model.kind == .rework && observed.isWorkspace ? "Restart workspace" : model.kind.title }
@@ -79,7 +84,7 @@ internal struct PodRepairSheet: View {
       if model.uncertain {
         Label("Result unconfirmed", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
         Text("Check the latest state before repeating.").font(.title2.weight(.semibold))
-        Text("This control endpoint has no durable launch retry identity. Refresh the pod and inspect linked work or feedback before making another attempt.").foregroundStyle(.secondary)
+        Text(model.reworkDraft != nil ? "Your Rework request and guidance are retained. Inspect its durable receipt and the pod state; do not submit another execution." : "Refresh the pod and inspect linked work or feedback before making another attempt.").foregroundStyle(.secondary)
       } else if let receipt = model.receipt {
         Label("Request accepted", systemImage: "checkmark.circle").font(.title2).foregroundStyle(DesktopTheme.accent)
         Text(receipt.message).textSelection(.enabled)
@@ -109,12 +114,49 @@ internal struct PodRepairSheet: View {
             .padding(12).background(DesktopTheme.surface, in: RoundedRectangle(cornerRadius: 6)).accessibilityIdentifier("repair-feedback").disabled(model.busy)
           Text("Leave blank to auto-detect CI failures and PR review comments. Feedback may join an existing fix pod.").font(.caption).foregroundStyle(.secondary)
         }
+        if model.kind == .rework && model.ordinaryRework && !observed.isWorkspace {
+          if snapshot?.intent != "goal" {
+            Text("Guidance for this continuation · optional").font(.headline)
+            TextEditor(text: $model.guidance).frame(minHeight: 120).disabled(model.busy)
+            .accessibilityIdentifier("repair-continuation-guidance")
+            Text("Guidance supplements the frozen task. It does not expand scope, permissions, retry authority or publication approval.").font(.caption).foregroundStyle(.secondary)
+          }
+          if model.eligibilityLoading { ProgressView("Loading retry eligibility…") }
+          else if let eligibility = model.eligibility {
+            Text(eligibility.reason).accessibilityIdentifier("repair-retry-eligibility")
+            if let failureId = eligibility.failureId {
+              Text("Worker failure: \(failureId)").font(.caption).textSelection(.enabled)
+            }
+          } else { Text("Retry eligibility unavailable. A compatible daemon is required.") }
+          if model.eligibility?.status == "authorization_needed" || model.authorizationPending != nil {
+            TextField("Reason for one retry · required", text: $model.retryReason, axis: .vertical)
+              .disabled(model.busy || model.authorizationPending != nil)
+            if let pending = model.authorizationPending {
+              Text("Saved decision: \(pending.requestKey) · failure \(pending.expectedFailureId ?? "unbound legacy draft")").font(.caption).textSelection(.enabled)
+              Button("Inspect saved retry decision") { Task { await model.inspectRetryDecision(id: pod.id, actions: actions) } }.disabled(model.busy).accessibilityIdentifier("repair-inspect-retry-decision")
+              if pending.expectedFailureId == nil, let failureId = model.authorizationInspection?.latest?.id {
+                Text("Inspected worker failure: \(failureId)").font(.caption).textSelection(.enabled)
+                Button("Bind saved decision draft to this failure") { model.bindLegacyDecisionToInspectedFailure() }.disabled(model.busy).accessibilityIdentifier("repair-bind-retry-decision")
+              }
+            }
+            Button(model.authorizationPending == nil ? "Authorize one retry" : "Record the same retry decision") {
+              Task { await model.authorize(id: pod.id, actions: actions) }
+            }.disabled(model.busy || model.eligibilityLoading || model.retryReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (model.authorizationPending != nil && model.authorizationPending?.expectedFailureId == nil))
+              .accessibilityIdentifier("repair-authorize-retry")
+            if model.authorizationRejected {
+              Button("Revise rejected retry decision") { model.discardRejectedAuthorization() }.disabled(model.busy)
+            }
+          }
+          if let message = model.authorizationMessage { Text(message) }
+          Button("Refresh retry eligibility") { Task { await model.refreshEligibility(id: pod.id, actions: actions.repair) } }
+            .disabled(model.busy || model.eligibilityLoading)
+        }
         if let block { Label(block, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
         if [.rework, .revalidate, .resume].contains(model.kind), !observed.isWorkspace {
           TaskBudgetControls(podId: pod.id, actions: actions.taskBudget, model: budget,
-            continuationTitle: block == nil ? title : nil,
+            continuationTitle: block == nil && model.canSubmit ? title : nil,
             onContinue: {
-              guard block == nil else { return }
+              guard block == nil, !budget.busy, model.canSubmit else { return }
               await model.submit(id: pod.id, actions: actions.repair)
             })
             .disabled(model.busy)
@@ -170,21 +212,22 @@ internal struct PodRepairSheet: View {
       Text(model.uncertain ? "Check state before repeating" : model.receipt != nil ? "Receipt retained" : "Review the effect before continuing").font(.caption).foregroundStyle(.secondary)
       Spacer()
       if model.uncertain || model.receipt != nil {
-        if model.uncertain && model.observation != nil { Button("Review another attempt") { confirmRepeat = true }.disabled(model.busy) }
+        if model.canReviewAnotherAttempt { Button("Review another attempt") { confirmRepeat = true }.disabled(model.busy) }
         Button("Check latest state") { Task { await model.inspect(id: pod.id, actions: actions.repair) } }.disabled(model.busy)
           .accessibilityIdentifier("repair-inspect")
       } else {
-        Button(title) { Task { await model.submit(id: pod.id, actions: actions.repair) } }.buttonStyle(.borderedProminent)
-          .disabled(model.busy || budget.busy || block != nil).accessibilityIdentifier("repair-submit")
+        Button(title) { Task { guard block == nil, !budget.busy, model.canSubmit else { return }; await model.submit(id: pod.id, actions: actions.repair) } }.buttonStyle(.borderedProminent)
+          .disabled(!model.canSubmit || budget.busy || block != nil).accessibilityIdentifier("repair-submit")
       }
     }
   }
-  private func close() { if model.uncertain || (!model.feedback.isEmpty && model.receipt == nil) { confirmClose = true } else { isPresented = false } }
+  private func close() { if model.uncertain || ((!model.feedback.isEmpty || !model.guidance.isEmpty) && model.receipt == nil) { confirmClose = true } else { isPresented = false } }
   private func loadSnapshot() async {
     guard let configuration else { snapshotError = "Frozen configuration is unavailable for this connection."; return }
     do {
       snapshot = try await configuration.readLaunch(pod.id); snapshotError = nil
       if snapshot?.intent == "goal" {
+        model.ordinaryRework = false
         goalBlocked = true
         let goal = try await actions.loadGoal(pod.id)
         goalBlocked = goal?.state != "achieved" || goal?.executionStopped != true

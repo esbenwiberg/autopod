@@ -993,3 +993,70 @@ it('carries a provider deadline through an unstarted retry without refunding the
     db.close();
   }
 });
+
+it('binds a displayed failure while stable-key replay observes the prior decision after later failures', () => {
+  const { db, repo } = fixture();
+  const bound = { runtime: 'codex', model: 'model', providerAccountId: null };
+  const ledger = repo.workerRetries;
+  const executions = repo.taskExecutions;
+  if (!ledger || !executions) throw new Error('Missing worker ledgers');
+  const actor = { type: 'human' as const, userId: 'operator' };
+  const binding = workerBindingHash(bound);
+  try {
+    const first = executions.beginRun('root', 1, 1, bound);
+    ledger.admit('root', 1, unavailableWorkerInputs, binding, [0], first);
+    ledger.start(first);
+    executions.finishRun(first, 'failed', 'unknown');
+    ledger.finish(first, 'unknown', 12);
+    expect(() => ledger.preview('root', 1, unavailableWorkerInputs, binding, [0])).toThrow(
+      'authorized retry',
+    );
+    const before = ledger.state('root');
+    const grant = ledger.authorize(
+      'root',
+      'displayed-failure',
+      'Inspected partial work',
+      actor,
+      undefined,
+      first,
+    );
+    expect(
+      ledger.preview('root', 1, unavailableWorkerInputs, binding, [0]).authorizationAvailable,
+    ).toBe(true);
+    expect(ledger.state('root').admissionCount).toBe(before.admissionCount);
+    expect(ledger.state('root').authorizations[0]?.usedByAttemptId).toBeNull();
+    expect(() => ledger.preview('root', 2, unavailableWorkerInputs, binding, [0])).toThrow(
+      'Stale lifecycle',
+    );
+    expect(() => ledger.preview('root', 1, unavailableWorkerInputs, 'e'.repeat(64), [0])).toThrow(
+      'provider binding changed',
+    );
+    const next = executions.beginRun('root', 1, 2, bound);
+    ledger.admit('root', 1, unavailableWorkerInputs, binding, [0], next);
+    ledger.start(next);
+    executions.finishRun(next, 'failed', 'unknown');
+    ledger.finish(next, 'unknown', 4);
+    expect(
+      ledger.authorize(
+        'root',
+        'displayed-failure',
+        'Inspected partial work',
+        actor,
+        undefined,
+        first,
+      ).id,
+    ).toBe(grant.id);
+    expect(() =>
+      ledger.authorize('root', 'stale-display', 'Inspected partial work', actor, undefined, first),
+    ).toThrow('displayed failure has changed');
+    expect(() =>
+      ledger.authorize('root', 'displayed-failure', 'Changed reason', actor, undefined, first),
+    ).toThrow('different authorization');
+    expect(ledger.state('root').authorizations[0]?.usedByAttemptId).toBe(next);
+    expect(() => ledger.preview('root', 1, unavailableWorkerInputs, binding, [0])).toThrow(
+      'authorized retry',
+    );
+  } finally {
+    db.close();
+  }
+});

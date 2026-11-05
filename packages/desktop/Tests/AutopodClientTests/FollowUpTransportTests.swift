@@ -10,7 +10,9 @@ import AutopodUI
     try await withPodStoreLifetimeFixture { f in
       f.seed("source")
       let handler = ActionHandler(api: f.apiA, podStore: f.store, profileStore: ProfileStore())
-      let task = f.track(Task { () -> PodRepairReceipt? in try? await handler.actions.repair.submit("source", kind, "Reviewer feedback") })
+      let task = f.track(Task { () -> PodRepairReceipt? in
+        try? await handler.actions.repair.submit("source", kind, kind == .rework ? nil : "Reviewer feedback")
+      })
       let post = try await f.a.next()
       let suffix: String = switch kind { case .manual: "fix-manually"; case .rework: "validate"; case .revalidate: "revalidate"; case .resume: "resume"; case .prFix: "spawn-fix" }
       #expect(post.request.url?.path == "/pods/source/\(suffix)" && post.request.httpMethod == "POST")
@@ -31,6 +33,19 @@ import AutopodUI
       #expect(receipt.podID == (kind == .manual ? "workspace" : kind == .prFix ? "fix-pod" : nil))
       #expect(receipt.unreadFeedback == (kind == .prFix ? 3 : nil))
       #expect(f.a.requests.count == 1 && f.b.requests.isEmpty)
+    }
+  }
+  @Test func legacyReworkRejectsGuidanceRatherThanSilentlyDiscardingIt() async throws {
+    try await withPodStoreLifetimeFixture { f in
+      f.seed("source")
+      let handler = ActionHandler(api: f.apiA, podStore: f.store, profileStore: ProfileStore())
+      do {
+        _ = try await handler.actions.repair.submit("source", .rework, "Keep this guidance")
+        Issue.record("Legacy Rework must not discard continuation guidance")
+      } catch DaemonError.badRequest(let message) {
+        #expect(message.contains("versioned Rework"))
+      }
+      #expect(f.a.requests.isEmpty && f.b.requests.isEmpty)
     }
   }
   @Test(arguments: [false, true])

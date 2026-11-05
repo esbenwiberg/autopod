@@ -68,6 +68,41 @@ describe('AutopodClient', () => {
     );
   });
 
+  it('uses only the versioned Rework route, retains exact request payload, and fails closed on old daemons', async () => {
+    const input = { requestKey: 'stable-key', generation: 4, guidance: 'Retain the earlier edits' };
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ...input, settledAt: null, error: null }));
+    await client.requestRework('full-pod-id', input);
+    expect(mockFetch).toHaveBeenLastCalledWith(
+      'http://localhost:3100/pods/full-pod-id/rework-v1',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify(input) }),
+    );
+    mockFetch.mockResolvedValueOnce(errorResponse(404, { error: 'Not Found' }));
+    await expect(client.requestRework('full-pod-id', input)).rejects.toThrow();
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    mockFetch.mockResolvedValueOnce(jsonResponse({ eligible: false }));
+    await client.getReworkEligibility('full-pod-id');
+    expect(mockFetch.mock.calls[2]?.[0]).toBe(
+      'http://localhost:3100/pods/full-pod-id/rework-v1/eligibility',
+    );
+    mockFetch.mockResolvedValueOnce(jsonResponse({ requestKey: input.requestKey }));
+    await client.getReworkRequest('full-pod-id', input.requestKey);
+    expect(mockFetch.mock.calls[3]?.[0]).toBe(
+      'http://localhost:3100/pods/full-pod-id/rework-v1/requests/stable-key',
+    );
+    mockFetch.mockResolvedValueOnce(jsonResponse({ id: 'grant' }));
+    await client.authorizeRetry(
+      'full-pod-id',
+      'decision-key',
+      'Inspected failure',
+      'worker',
+      'displayed',
+    );
+    expect(JSON.parse(mockFetch.mock.calls[4]?.[1].body)).toMatchObject({
+      expectedFailureId: 'displayed',
+      stage: 'worker',
+    });
+  });
+
   describe('createSession', () => {
     it('sends POST to /pods', async () => {
       const pod = { id: 'abc12345', profileName: 'test', task: 'do stuff', status: 'queued' };

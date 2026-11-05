@@ -149,7 +149,10 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
     }
   }
 
-  function assertCanRework(podId: string): void {
+  function assertCanRework(podId: string): {
+    notBefore?: string;
+    authorizationAvailable?: boolean;
+  } {
     assertOrdinaryRecoveryAllowed(podId);
     assertExecutionTerminationVerified(podId);
     const pod = podRepo.getOrThrow(podId);
@@ -163,11 +166,11 @@ export function createContinuationControls(deps: ContinuationLiveDependencies, c
           409,
         );
     }
-    if (pod.options.agentMode === 'interactive') return;
+    if (pod.options.agentMode === 'interactive') return {};
     const retries = podRepo.workerRetries;
-    if (!retries?.state(podId).retryFailure) return;
+    if (!retries?.state(podId).retryFailure) return {};
     const profile = resolveEffectiveBoundProfile(pod);
-    retries.assertCanAdmit(
+    return retries.preview(
       podId,
       pod.lifecycleGeneration,
       unavailableWorkerInputs,

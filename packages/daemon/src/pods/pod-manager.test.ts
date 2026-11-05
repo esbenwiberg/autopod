@@ -42,6 +42,7 @@ import {
 import { runToolUseReview } from '../validation/review-tool-runner.js';
 import { createNudgeRepository } from './nudge-repository.js';
 import { createSessionBridge } from './pod-bridge-impl.js';
+import { createReworkRequestRepository } from './rework-request-repository.js';
 
 // Mock child_process so we can control deriveBareRepoPath and recovery-context git calls
 vi.mock('node:child_process', () => ({
@@ -27588,6 +27589,69 @@ describe('validation attempt start compatibility', () => {
       f.ctx.db.close();
     }
   });
+
+  it.each([false, true])(
+    'queues request-bound guidance atomically with real Rework and rolls back enqueue on queue fault (%s)',
+    async (fault) => {
+      const f = fixture(
+        { name: 'request-bound Rework', status: 'failed', count: 4, attempt: 1 },
+        true,
+      );
+      const requests = createReworkRequestRepository(f.ctx.db);
+      const nudges = createNudgeRepository(f.ctx.db);
+      const input = {
+        requestKey: 'real-rework-request',
+        generation: f.ctx.podRepo.getOrThrow(f.pod.id).lifecycleGeneration,
+        guidance: 'Keep preserved edits and finish the remaining test.',
+      };
+      try {
+        requests.accept(f.pod.id, input, { type: 'human', userId: 'operator' }, () =>
+          f.manager.assertCanRework(f.pod.id),
+        );
+        expect(nudges.hasPending(f.pod.id)).toBe(false);
+        if (fault)
+          f.ctx.db.exec(
+            "CREATE TRIGGER fixture_guidance_fault BEFORE INSERT ON nudge_messages BEGIN SELECT RAISE(ABORT,'fixture queue fault'); END;",
+          );
+        f.ctx.enqueuedSessions.length = 0;
+        f.release.resolve();
+        const operation = f.manager.triggerValidation(f.pod.id, {
+          force: true,
+          onReworkQueued: (generation) =>
+            requests.queueForGeneration(f.pod.id, input.requestKey, generation),
+        });
+        if (fault) {
+          await expect(operation).rejects.toThrow('fixture queue fault');
+          expect(f.ctx.podRepo.getOrThrow(f.pod.id).status).toBe('failed');
+          expect(f.ctx.enqueuedSessions).toEqual([]);
+          expect(nudges.hasPending(f.pod.id)).toBe(false);
+          expect(requests.read(input.requestKey)?.guidance).toBe(input.guidance);
+        } else {
+          await operation;
+          const current = f.ctx.podRepo.getOrThrow(f.pod.id);
+          expect(current.status).toBe('queued');
+          expect(f.ctx.enqueuedSessions).toEqual([f.pod.id]);
+          const run = f.ctx.podRepo.taskExecutions?.beginRun(
+            f.pod.id,
+            current.lifecycleGeneration,
+            1,
+            { runtime: current.runtime, model: current.model, providerAccountId: null },
+          );
+          expect(run).toBeTruthy();
+          const delivery = nudges.readPending(f.pod.id);
+          expect(delivery?.messages[0]).toContain(input.guidance);
+          expect(delivery?.messages[0]).toContain(
+            `request ${input.requestKey}, lifecycle ${current.lifecycleGeneration}`,
+          );
+          if (!delivery) throw new Error('Missing fresh worker guidance');
+          nudges.acknowledgeDelivery(f.pod.id, delivery.deliveryId);
+          expect(nudges.hasPending(f.pod.id)).toBe(false);
+        }
+      } finally {
+        f.ctx.db.close();
+      }
+    },
+  );
 
   it('keeps manual revalidation reset-before-scan and attempt-one activity', async () => {
     const f = fixture(

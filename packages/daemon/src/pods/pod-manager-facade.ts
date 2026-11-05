@@ -344,7 +344,11 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     },
     triggerValidation(
       podId: string,
-      options?: { force?: boolean; validationOnly?: boolean },
+      options?: {
+        force?: boolean;
+        validationOnly?: boolean;
+        onReworkQueued?: (generation: number) => void;
+      },
     ): Promise<void> {
       return validationTriggerWorkflow.triggerValidation.call(
         createValidationTriggerCalls(this),

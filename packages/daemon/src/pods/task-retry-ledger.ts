@@ -16,7 +16,11 @@ import { createValidationExecutionLedger } from './validation-execution-ledger.j
 import { retainWorkerRetryHistory, workerRetryFailure } from './worker-retry-history.js';
 
 export class TaskRetryBlockedError extends AutopodError {
-  constructor(message: string, code = 'TASK_RETRY_RECONCILIATION_REQUIRED') {
+  constructor(
+    message: string,
+    code = 'TASK_RETRY_RECONCILIATION_REQUIRED',
+    public readonly authorizationNeeded = false,
+  ) {
     super(message, code, 409);
   }
 }
@@ -37,6 +41,13 @@ export interface TaskRetryLedger {
     bindingHash: string,
     backoffs: number[],
   ): void;
+  preview(
+    podId: string,
+    generation: number,
+    identity: TaskRetryIdentity,
+    bindingHash: string,
+    backoffs: number[],
+  ): { notBefore: string; authorizationAvailable: boolean };
   start(id: string): void;
   finish(
     id: string,
@@ -51,6 +62,7 @@ export interface TaskRetryLedger {
     reason: string,
     actor: OperatorActor,
     targetBindingHash?: string,
+    expectedFailureId?: string,
   ): TaskRetryAuthorization;
 }
 const keys: Array<keyof TaskRetryIdentity> = [
@@ -289,6 +301,8 @@ export function createTaskRetryLedger(
       } else if (stage === 'worker' && workerFailure === 'auth') {
         throw new TaskRetryBlockedError(
           'Unchanged or unverified worker authentication failure; reconcile credentials and record a human retry authorization before another worker execution.',
+          'TASK_RETRY_RECONCILIATION_REQUIRED',
+          true,
         );
       } else if (stage === 'codex_interruption') {
         throw new TaskRetryBlockedError(
@@ -299,6 +313,8 @@ export function createTaskRetryLedger(
         if (delay === undefined)
           throw new TaskRetryBlockedError(
             `Task-wide ${label} retry budget exhausted; record an authorized retry with a reason before repeating`,
+            'TASK_RETRY_RECONCILIATION_REQUIRED',
+            true,
           );
         retryKind = 'transient';
         notBefore = Date.parse(prior.ended_at as string) + delay;
@@ -306,6 +322,8 @@ export function createTaskRetryLedger(
       else
         throw new TaskRetryBlockedError(
           `Unchanged or unverified nonretryable ${label} inputs; change relevant conditions or record an authorized retry with a reason`,
+          'TASK_RETRY_RECONCILIATION_REQUIRED',
+          true,
         );
     }
     if (providerRetryNotBefore) notBefore = Math.max(notBefore, Date.parse(providerRetryNotBefore));
@@ -321,6 +339,13 @@ export function createTaskRetryLedger(
   };
   return {
     state,
+    preview(podId, generation, identity, bindingHash, backoffs) {
+      const result = evaluate(podId, generation, identity, bindingHash, backoffs);
+      return {
+        notBefore: new Date(result.notBefore).toISOString(),
+        authorizationAvailable: !!result.useAuthorization,
+      };
+    },
     assertCanAdmit(podId, generation, identity, bindingHash, backoffs) {
       evaluate(podId, generation, identity, bindingHash, backoffs);
     },
@@ -478,6 +503,7 @@ export function createTaskRetryLedger(
         reason: string,
         actor: OperatorActor,
         targetBindingHash?: string,
+        expectedFailureId?: string,
       ) => {
         if (
           (targetBindingHash !== undefined &&
@@ -502,6 +528,7 @@ export function createTaskRetryLedger(
         if (existing) {
           const recorded = authorization(existing);
           if (
+            (expectedFailureId !== undefined && recorded.failureId !== expectedFailureId) ||
             recorded.podId !== podId ||
             recorded.stage !== stage ||
             recorded.targetBindingHash !== targetBindingHash ||
@@ -516,6 +543,11 @@ export function createTaskRetryLedger(
           return recorded;
         }
         const failure = latest(member.taskId);
+        if (expectedFailureId !== undefined && failure?.id !== expectedFailureId)
+          throw new TaskRetryBlockedError(
+            'The displayed failure has changed; refresh before authorizing.',
+            'TASK_RETRY_FAILURE_STALE',
+          );
         if (stage === 'worker' && workerRetryFailure(db, failure?.id ?? null) === null)
           throw new TaskRetryBlockedError(
             'A recorded worker authentication or transient provider failure is required for this authorization',

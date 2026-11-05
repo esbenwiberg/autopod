@@ -54,6 +54,7 @@ import { CONTROL_PLANE_RATE_LIMIT_MAX, rateLimitIdentity } from '../plugins/rate
 import { resolvePublicPreviewOrigin, rewritePreviewUrlForBrowser } from '../preview-url.js';
 import { serializePodForWire, serializeValidationResult } from '../wire-serializers.js';
 import { checkpointRecoveryRoutes } from './checkpoint-recovery.js';
+import { reworkRoutes } from './rework.js';
 import { sandboxRecoveryRoutes } from './sandbox-recovery.js';
 import { sourceAdoptionRoutes } from './source-adoption.js';
 import { validationRecoveryRoutes } from './validation-recovery.js';
@@ -502,7 +503,17 @@ export function podRoutes(
   // desktop request and coalesce repeats after a client-side timeout.
   const reworkRuns = new Map<string, Promise<void>>();
   sourceAdoptionRoutes(app, podManager);
-  const validationRecovery = validationRecoveryRoutes(app, podManager, (id) => reworkRuns.has(id));
+  const validationRecovery = validationRecoveryRoutes(app, podManager, (id) => {
+    durableRework.assertIdle(id);
+    return reworkRuns.has(id);
+  });
+  const durableRework = reworkRoutes(
+    app,
+    podManager,
+    podRepo,
+    db,
+    (id) => reworkRuns.has(id) || validationRecovery.isActive(id),
+  );
   const hostedDeployDrainSchema = z.object({
     ttlSeconds: z.number().int().min(60).max(3_600).default(1_800),
   });
@@ -935,6 +946,7 @@ export function podRoutes(
     const input = z
       .object({
         requestKey: z.string().min(1).max(200),
+        expectedFailureId: z.string().min(1).max(200).optional(),
         reason: z.string().trim().min(1).max(4000),
         stage: z
           .enum(['validation', 'sandbox_startup', 'codex_interruption', 'worker'])
@@ -957,6 +969,8 @@ export function podRoutes(
       input.requestKey,
       input.reason,
       humanActor(request),
+      undefined,
+      input.expectedFailureId,
     );
     reply.code(201);
     return result;
@@ -1310,6 +1324,7 @@ export function podRoutes(
   // POST /pods/:podId/validate — trigger validation (agent rework on failure)
   app.post('/pods/:podId/validate', async (request, reply) => {
     const { podId } = request.params as { podId: string };
+    durableRework.assertIdle(podId);
     podRepo?.deletionOwnership?.assertTaskAvailable(podId);
     assertTaskExecutionTerminationVerified(podRepo?.taskExecutions, podId);
     const pod = podManager.getSession(podId);

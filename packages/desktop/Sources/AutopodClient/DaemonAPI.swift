@@ -367,6 +367,15 @@ public actor DaemonAPI {
     let _: OkResponse = try await request("POST", "/pods/\(id)/promote", body: body)
   }
 
+  public func getReworkEligibility(_ id: String) async throws -> ReworkEligibility {
+    try await request("GET", "/pods/\(id)/rework-v1/eligibility")
+  }
+  public func requestRework(_ id: String, input: ReworkRequest) async throws -> ReworkRequestReceipt {
+    try await request("POST", "/pods/\(id)/rework-v1", body: encode(input))
+  }
+  public func getReworkRequest(_ id: String, requestKey: String) async throws -> ReworkRequestReceipt {
+    try await request("GET", "/pods/\(id)/rework-v1/requests/\(requestKey)")
+  }
   public func triggerValidation(_ id: String) async throws {
     let _: OkResponse = try await request("POST", "/pods/\(id)/validate")
   }

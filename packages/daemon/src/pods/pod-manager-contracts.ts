@@ -306,11 +306,15 @@ export interface PodManager {
     options?: { instructions?: string; skipAgent?: boolean },
   ): Promise<void>;
   /** Check worker retry permission before Rework can tear down or enqueue resources. */
-  assertCanRework(podId: string): void;
+  assertCanRework(podId: string): { notBefore?: string; authorizationAvailable?: boolean };
   assertCanRetryValidation(podId: string): void;
   triggerValidation(
     podId: string,
-    options?: { force?: boolean; validationOnly?: boolean },
+    options?: {
+      force?: boolean;
+      validationOnly?: boolean;
+      onReworkQueued?: (generation: number) => void;
+    },
   ): Promise<void>;
   /** Pull latest from remote branch and re-run validation without agent rework on failure.
    *  Used after human fixes via a linked workspace pod.

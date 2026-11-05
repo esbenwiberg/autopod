@@ -143,7 +143,7 @@ import Testing
   }
 
   @Test(
-    arguments: ["accepted", "budget-rejected", "recovery-rejected"],
+    arguments: ["accepted", "budget-rejected", "recovery-rejected", "retry-blocked", "retry-unavailable"],
     [PodRepairKind.rework, .revalidate, .resume])
   func nativeHandoffContinuesOnlyAfterConfirmedBudgetSave(outcome: String, kind: PodRepairKind)
     async throws
@@ -154,6 +154,8 @@ import Testing
     }
     var actions = PodActions()
     actions.taskBudget = fixture.actions
+    actions.retryDraftScope = UUID().uuidString
+    defer { UserDefaults.standard.removeObject(forKey: "autopod.rework-v1.\(actions.retryDraftScope).repair.worker") }
     actions.repair = PodRepairActions(
       scope: "fixture",
       submit: { _, kind, _ in
@@ -163,11 +165,23 @@ import Testing
         }
         return PodRepairReceipt(message: "Request accepted; checks still apply.")
       }, inspect: { _ in throw URLError(.unsupportedURL) })
+    let eligibility = try JSONDecoder().decode(ReworkEligibility.self, from: Data("""
+      {"eligible":\(outcome != "retry-blocked"),"status":"\(outcome == "retry-blocked" ? "blocked" : "eligible")","reason":"Daemon retry admission projection","generation":1}
+      """.utf8))
+    actions.repair.loadReworkEligibility = { _ in
+      if outcome == "retry-unavailable" { throw DaemonError.notFound("older daemon") }
+      return eligibility
+    }
+    actions.repair.submitRework = { _, request in
+      fixture.events.append(PodRepairKind.rework.rawValue)
+      if outcome == "recovery-rejected" { throw DaemonError.serverError(409, "This pod has uncollected human guidance. Use Rework.") }
+      return try JSONDecoder().decode(ReworkRequestReceipt.self, from: JSONEncoder().encode(request))
+    }
     let pod = Pod(
       id: "repair", status: .failed, hasWorktree: true,
       branch: "feature", profileName: "test", task: "Finish validation", model: "test",
       startedAt: .now)
-    let repair = PodRepairModel(kind: kind, scope: actions.repair.scope)
+    let repair = PodRepairModel(kind: kind, scope: actions.repair.scope, ordinaryRework: kind == .rework)
     let host = LaunchComposerHost(
       PodRepairSheet(
         isPresented: Binding(get: { fixture.presented }, set: { fixture.presented = $0 }),
@@ -176,6 +190,13 @@ import Testing
     defer { host.close() }
     try await host.wait { host.has("task-budget-limit") }
     try host.editField(placeholder: "New total token limit", text: "300")
+    if kind == .rework && ["retry-blocked", "retry-unavailable"].contains(outcome) {
+      try await host.wait { !repair.eligibilityLoading && host.enabled("task-budget-save") }
+      #expect(!host.has("task-budget-save-continue") && !host.enabled("repair-submit"))
+      await repair.submit(id: pod.id, actions: actions.repair)
+      #expect(fixture.requests.isEmpty && fixture.events.isEmpty)
+      return
+    }
     try await host.wait { host.enabled("task-budget-save-continue") }
     try host.press("task-budget-save-continue")
     try await host.wait { !fixture.requests.isEmpty && !host.enabled("task-budget-save-continue") }

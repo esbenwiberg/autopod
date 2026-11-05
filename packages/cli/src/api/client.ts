@@ -59,6 +59,9 @@ import type {
   PublicProviderAccount,
   PublicProviderCatalog,
   ReadinessStatus,
+  ReworkEligibility,
+  ReworkRequestInput,
+  ReworkRequestReceipt,
   ScheduledJob,
   ScheduledJobTemplate,
   TaskExecutionSummary,
@@ -482,11 +485,13 @@ export class AutopodClient {
     requestKey: string,
     reason: string,
     stage: TaskRetryStage = 'validation',
+    expectedFailureId?: string,
   ): Promise<TaskRetryAuthorization> {
     return this.request('POST', `/pods/${id}/retry-authorizations`, {
       requestKey,
       reason,
       ...(stage === 'validation' ? {} : { stage }),
+      ...(expectedFailureId === undefined ? {} : { expectedFailureId }),
     });
   }
   async getSourceAdoptions(id: string): Promise<SourceAdoptionList> {
@@ -596,6 +601,15 @@ export class AutopodClient {
     return this.request('GET', `/pods/${id}/validations`);
   }
 
+  async getReworkEligibility(id: string): Promise<ReworkEligibility> {
+    return this.request('GET', `/pods/${id}/rework-v1/eligibility`);
+  }
+  async requestRework(id: string, input: ReworkRequestInput): Promise<ReworkRequestReceipt> {
+    return this.request('POST', `/pods/${id}/rework-v1`, input);
+  }
+  async getReworkRequest(id: string, requestKey: string): Promise<ReworkRequestReceipt> {
+    return this.request('GET', `/pods/${id}/rework-v1/requests/${encodeURIComponent(requestKey)}`);
+  }
   async triggerValidation(id: string): Promise<void> {
     await this.request<void>('POST', `/pods/${id}/validate`);
   }
