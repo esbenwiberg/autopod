@@ -98,7 +98,7 @@ export function generateSystemInstructions(
       'Read relevant HTML/text files and use your native image-reading tool for images before implementing the design. A filename or base64 text is not visual inspection. If you cannot inspect a required visual reference, report a blocker rather than guessing.',
     );
     lines.push(
-      'Attaching HTML does not render it. Do not serve references on the app/control-plane port or change validation/network policy to render them. Original attachments are not automatically available to independent visual review.',
+      'Attaching HTML does not render it. Do not serve references on the app/control-plane port or change validation/network policy to render them. Configured isolated reviewers receive original PNG/JPEG/WebP references and bounded reference text. Comparing the actual rendered application also requires captured application views and configured advisory browser QA; a code review alone is not visual-fidelity proof.',
       '',
     );
     for (const file of pod.inputBundle.files)

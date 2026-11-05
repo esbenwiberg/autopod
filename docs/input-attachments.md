@@ -67,11 +67,30 @@ appearance matters. Autopod does not execute uploaded scripts or serve HTML in i
 authenticated origin. Downloads are inert attachment-disposition octet streams
 with `nosniff` and a sandbox CSP.
 
-Independent visual comparison is **not automatic** in this version
-(`inputBundles.visualReview: false`). Isolated code reviewers do not receive the
-original attachment bytes; a passing code review does not attest to wireframe
-fidelity. Safe isolated HTML rendering and a packet-scoped multimodal reviewer
-input channel are separate follow-up work, not implied capabilities.
+Independent visual comparison is **not automatic**. Configured isolated Claude
+and Codex reviewers receive original PNG/JPEG/WebP references as native image
+inputs, plus bounded source text for text references (64 KiB/file, 128 KiB total,
+explicitly marked when truncated). They never read the coding worker's reference
+copies or get its workspace/tools/credentials. Raster GIF/PDF interpretation is
+not implied.
+
+When advisory browser QA is enabled and application views were captured, those
+screenshots are delivered as separate **observation** images alongside the original
+**reference** images. Without observation images, the reviewer is explicitly told
+not to claim a rendered-UI comparison. Advisory findings remain advisory; this
+feature does not disable or replace blocking code/contract checks.
+
+Native review input is bounded to 8 images / 8 MiB total (references plus
+observations); an oversized input fails explicitly, never silently drops images.
+Claude uses verified streaming-JSON image blocks, Codex native `--image` files.
+Reviewer-run receipts retain prompt and image hashes, roles and sizes—not image
+bytes or filenames. A receipt proves submitted content, not model correctness.
+Historical reviews are not retroactively classified. Capabilities advertise
+`inputBundles.visualReview` as `{ available: true, automatic: false,
+requiresAdvisoryBrowserQa: true }`.
+
+Safe isolated HTML rendering remains separate follow-up work. Until then, supply
+a companion raster image for HTML designs requiring visual comparison.
 
 ## Identity, recovery, privacy, and retention
 

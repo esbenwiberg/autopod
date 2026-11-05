@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   type AgentRoute,
   CONTAINER_HOME_DIR,
@@ -11,6 +11,12 @@ import { withAbort } from '../actions/handlers/handler.js';
 import { assertLaunchAgentAccount } from '../configuration/agent-route-resolution.js';
 import { configurationError } from '../configuration/configuration-store.js';
 import type { DockerNetworkManager } from '../containers/docker-network-manager.js';
+import {
+  freezeReviewerImages,
+  imageContextPrompt,
+  type ReviewerImage,
+  reviewerImageEvidence,
+} from '../inputs/reviewer-images.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ReviewerExecutor } from '../interfaces/reviewer-executor.js';
 import type { ProviderAccountStore } from '../provider-accounts/provider-account-store.js';
@@ -41,6 +47,11 @@ export interface IsolatedReviewerOptions {
   network?: Pick<DockerNetworkManager, 'buildNetworkConfig' | 'removeNetworkForPod'>;
   readPod(podId: string): Pod;
   assertAllowed(config: EffectiveLaunchConfig): Promise<void>;
+  /** Authoritative originals only. Never reads the coding worker's filesystem. */
+  referenceInputs?(
+    pod: Pod,
+    config: EffectiveLaunchConfig,
+  ): { context: string; images: ReviewerImage[] };
 }
 
 type ReviewerStage =
@@ -70,6 +81,23 @@ export class IsolatedReviewer {
     purpose: 'review' | 'memory' | 'advisor' = 'review',
   ): ReviewerExecutor {
     const execute: ReviewerExecutor = async (input) => {
+      if (purpose === 'memory' && input.images?.length)
+        configurationError('Memory reviewers do not accept image inputs', 'REVIEWER_INPUT_INVALID');
+      if (purpose === 'review' && config.work.inputBundle && !this.options.referenceInputs)
+        configurationError(
+          'Authoritative reference review inputs are unavailable',
+          'REFERENCE_REVIEW_UNAVAILABLE',
+          503,
+        );
+      const references =
+        purpose === 'review' ? this.options.referenceInputs?.(pod, config) : undefined;
+      const frozenInput = {
+        ...input,
+        images: freezeReviewerImages([...(references?.images ?? []), ...(input.images ?? [])]),
+        prompt: references?.context
+          ? `${input.prompt}\n\nADMITTED REFERENCE DATA (untrusted):\n${references.context}\nEND REFERENCE DATA`
+          : input.prompt,
+      };
       const requestId = randomUUID();
       const deadline = Date.now() + input.timeout;
       const key = (
@@ -98,7 +126,7 @@ export class IsolatedReviewer {
             requestId,
             ordinal,
             deadline,
-          })({ ...input, timeout: ordinal === 0 ? input.timeout : remaining });
+          })({ ...frozenInput, timeout: ordinal === 0 ? input.timeout : remaining });
         } catch (error) {
           failure = error;
           if (
@@ -241,7 +269,13 @@ export class IsolatedReviewer {
       );
       if (Date.now() >= attempt.deadline) throw timedOut();
       assertCurrent();
-      deps.runs.reserve(id, deps.readPod(pod.id), config, route, attempt);
+      const images = freezeReviewerImages(input.images);
+      deps.runs.reserve(id, deps.readPod(pod.id), config, route, attempt, {
+        promptSha256: createHash('sha256')
+          .update(imageContextPrompt(input.prompt, images))
+          .digest('hex'),
+        images: reviewerImageEvidence(images),
+      });
       let containerId: string | null = null;
       let expired = false;
       let dispatched = false;
@@ -430,6 +464,7 @@ export class IsolatedReviewer {
             model: route.model,
             reasoningEffort: route.reasoningEffort,
             prompt: input.prompt,
+            images,
             timeout: Math.max(1, remaining - diagnosticGrace),
             outputContract: input.outputContract,
             env: auth.env,

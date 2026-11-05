@@ -11,6 +11,11 @@ import type {
 } from '@autopod/shared';
 import { CHROMIUM_LAUNCH_ARGS } from '@autopod/shared';
 import type { Logger } from 'pino';
+import {
+  freezeReviewerImages,
+  MAX_REVIEW_IMAGE_BYTES,
+  type ReviewerImage,
+} from '../inputs/reviewer-images.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ScreenshotStore } from '../pods/screenshot-store.js';
 import { createProviderAnthropicClient, resolveAnthropicModelId } from '../providers/llm-client.js';
@@ -1623,6 +1628,24 @@ function filterReviewerObservationsForTargets(
   return filtered;
 }
 
+export function advisoryReviewerImages(input: AdvisoryBrowserQaReviewInput): ReviewerImage[] {
+  const images: ReviewerImage[] = [];
+  for (const observation of input.browserObservations) {
+    for (const frame of observation.frames) {
+      if (!frame.imageLabel || !frame.screenshotBase64) continue;
+      if (frame.screenshotBase64.length > Math.ceil((MAX_REVIEW_IMAGE_BYTES * 4) / 3) + 4)
+        throw new Error('Advisory screenshot exceeds image review bounds');
+      images.push({
+        label: `${observation.targetId}: ${frame.imageLabel}`,
+        role: 'observation',
+        mediaType: 'image/png',
+        bytes: Buffer.from(frame.screenshotBase64, 'base64'),
+      });
+    }
+  }
+  return freezeReviewerImages(images);
+}
+
 function createProviderAwareAdvisoryReviewer(input: {
   podId: string;
   model: string | undefined;
@@ -1746,7 +1769,8 @@ function createProviderAwareAdvisoryReviewer(input: {
         try {
           const containerResult = input.reviewerExecutor
             ? await input.reviewerExecutor({
-                prompt: structuredEvidencePrompt,
+                prompt,
+                images: advisoryReviewerImages(reviewInput),
                 timeout: Math.max(1, reviewDeadlineMs - Date.now()),
               })
             : await callContainerReviewer({

@@ -277,7 +277,7 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('Do not copy or commit');
     expect(md).toContain('report a blocker rather than guessing');
     expect(md).toContain('Attaching HTML does not render it');
-    expect(md).toContain('not automatically available to independent visual review');
+    expect(md).toContain('code review alone is not visual-fidelity proof');
   });
 
   it('uses ephemeral artifact handovers for series pods', () => {

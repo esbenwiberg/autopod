@@ -6,6 +6,7 @@ import type {
   ExecResult,
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
+import { referenceImage } from '../test-utils/reference-image-helpers.js';
 import { runCodexReview } from './review-codex-runner.js';
 
 interface CapturedExec {
@@ -38,6 +39,31 @@ function createHarness(
 }
 
 describe('runCodexReview', () => {
+  it('attaches staged PNGs natively and cleans temporary files', async () => {
+    const harness = createHarness();
+    const image = referenceImage();
+    const writer = vi.spyOn(harness.manager, 'writeFile');
+    await runCodexReview({
+      podId: 'pod',
+      containerId: 'container',
+      containerManager: harness.manager,
+      model: 'review-model',
+      prompt: 'Compare',
+      images: [image],
+      timeout: 1000,
+    });
+    const staged = writer.mock.calls.find(([, path]) => String(path).endsWith('.png'));
+    expect(staged?.[2]).toEqual(image.bytes);
+    expect(staged?.[3]).toEqual({ mode: 0o444 });
+    const command = harness.execs.find((entry) => entry.command.includes('bash'))?.command ?? [];
+    expect(command.join(' ')).toContain('--image');
+    expect(command.join(' ')).toContain(String(staged?.[1]));
+    expect(
+      harness.execs.some(
+        (entry) => entry.command[0] === 'rm' && entry.command.includes(String(staged?.[1])),
+      ),
+    ).toBe(true);
+  });
   it.each([
     'probe-rejected',
     'ownership-lost',

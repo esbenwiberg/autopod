@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { computeCostWithCache } from '@autopod/shared';
 import type { Logger } from 'pino';
+import {
+  freezeReviewerImages,
+  imageContextPrompt,
+  reviewerImagePaths,
+  stageReviewerImages,
+} from '../inputs/reviewer-images.js';
 import type {
   ContainerManager,
   ExecOptions,
@@ -52,6 +58,7 @@ export interface CodexReviewConfig {
   containerManager: ContainerManager;
   model: string;
   prompt: string;
+  images?: readonly import('../inputs/reviewer-images.js').ReviewerImage[];
   env?: Record<string, string>;
   timeout: number;
   outputContract?: ReviewerOutputContract;
@@ -86,8 +93,15 @@ export async function runCodexReview(
   const logPath = `/tmp/autopod-codex-review-${suffix}.log`;
   const schemaPath = `/tmp/autopod-codex-review-${suffix}.schema.json`;
 
+  const images = freezeReviewerImages(config.images);
+  const imagePaths = reviewerImagePaths(images, suffix);
   try {
-    await config.containerManager.writeFile(config.containerId, promptPath, config.prompt);
+    await stageReviewerImages(config.containerManager, config.containerId, images, imagePaths);
+    await config.containerManager.writeFile(
+      config.containerId,
+      promptPath,
+      imageContextPrompt(config.prompt, images),
+    );
     if (config.outputContract)
       await config.containerManager.writeFile(
         config.containerId,
@@ -103,6 +117,7 @@ export async function runCodexReview(
       '--sandbox read-only',
       '--skip-git-repo-check',
       '--json',
+      ...imagePaths.map((path) => `--image ${shellQuote(path)}`),
       ...(config.isolated
         ? [
             '--ephemeral',
@@ -255,7 +270,7 @@ export async function runCodexReview(
     try {
       await config.containerManager.execInContainer(
         config.containerId,
-        ['rm', '-f', promptPath, outputPath, logPath, schemaPath],
+        ['rm', '-f', promptPath, outputPath, logPath, schemaPath, ...imagePaths],
         { timeout: 5_000 },
       );
     } catch {

@@ -242,6 +242,10 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     logger: options.logger,
     readPod: (id) => options.pods.getOrThrow(id),
     assertAllowed: assertCurrent,
+    referenceInputs: (pod, config) =>
+      config.work.inputBundle
+        ? inputBundles.reviewInputs(config.work.inputBundle, pod.userId)
+        : { context: '', images: [] },
   });
   const scopedTools = createScopedPodTools({
     db,
@@ -583,7 +587,8 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
           maxFiles: MAX_INPUT_FILES,
           maxFileBytes: MAX_INPUT_FILE_BYTES,
           maxBundleBytes: MAX_INPUT_BUNDLE_BYTES,
-          visualReview: false,
+          visualReview: { available: true, automatic: false, requiresAdvisoryBrowserQa: true },
+          isolatedImageReview: { maxImages: 8, maxBytes: 8 * 1024 * 1024 },
         },
         launchAvailable: ready.ready && !suspended,
         launchUnavailableReason: suspended

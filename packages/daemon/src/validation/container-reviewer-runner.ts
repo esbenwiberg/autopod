@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import type { ModelProvider } from '@autopod/shared';
 import type { Logger } from 'pino';
+import {
+  claudeImagePrompt,
+  freezeReviewerImages,
+  type ReviewerImage,
+} from '../inputs/reviewer-images.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { BeforeReviewerLaunch } from '../interfaces/reviewer-launch.js';
@@ -55,6 +60,7 @@ export interface ContainerReviewerRunnerConfig {
   profile: Pick<PodExecutionSettings, 'modelProvider' | 'providerCredentials'>;
   model: string;
   prompt: string;
+  images?: readonly ReviewerImage[];
   env?: Record<string, string>;
   timeout: number;
   logger?: Logger;
@@ -76,6 +82,7 @@ export async function runContainerReviewer(
   if (config.executor)
     return config.executor({
       prompt: config.prompt,
+      images: config.images,
       timeout: config.timeout,
       outputContract: config.outputContract,
     });
@@ -111,6 +118,7 @@ export async function runContainerReviewer(
       containerManager: config.containerManager,
       model: config.model,
       prompt: config.prompt,
+      images: config.images,
       env: config.env,
       timeout: config.timeout,
       outputContract: config.outputContract,
@@ -151,7 +159,12 @@ async function runClaudeContainerReview(
   const promptPath = `/tmp/autopod-claude-review-${suffix}.prompt`;
   const outputPath = `/tmp/autopod-claude-review-${suffix}.out`;
   const logPath = `/tmp/autopod-claude-review-${suffix}.log`;
-  await config.containerManager.writeFile(config.containerId, promptPath, config.prompt);
+  const images = freezeReviewerImages(config.images);
+  await config.containerManager.writeFile(
+    config.containerId,
+    promptPath,
+    images.length ? claudeImagePrompt(config.prompt, images) : config.prompt,
+  );
 
   const modelArgs =
     config.model && config.model !== 'auto' ? ` --model ${shellQuote(config.model)}` : '';
@@ -161,7 +174,9 @@ async function runClaudeContainerReview(
     "--tools ''",
     '--disable-slash-commands',
     '--no-session-persistence',
-    '--output-format json',
+    ...(images.length
+      ? ['--input-format stream-json', '--output-format stream-json', '--verbose']
+      : ['--output-format json']),
     ...(config.isolated ? ['--strict-mcp-config', '--mcp-config', '\'{"mcpServers":{}}\''] : []),
     ...(config.reasoningEffort && config.reasoningEffort !== 'auto'
       ? [`--effort ${shellQuote(config.reasoningEffort)}`]
@@ -237,7 +252,9 @@ async function runClaudeContainerReview(
       throw new ContainerReviewerUnavailableError(
         schemaInvalid
           ? 'Container reviewer rejected the configured output schema'
-          : `Container reviewer unavailable: claude CLI failed in pod container (exit=${result.exitCode}): ${diagnostic}`,
+          : images.length
+            ? `Container reviewer unavailable: claude image review failed (exit=${result.exitCode}; diagnostics withheld)`
+            : `Container reviewer unavailable: claude CLI failed in pod container (exit=${result.exitCode}): ${diagnostic}`,
         {
           kind: schemaInvalid
             ? 'schema-invalid'
@@ -246,17 +263,26 @@ async function runClaudeContainerReview(
               : providerUnavailable
                 ? 'provider-unavailable'
                 : 'non-zero-exit',
-          stderr: result.stderr,
-          tokenUsage: parseClaudeCliStdout(result.stdout, 'json').tokenUsage,
+          stderr: images.length ? '' : result.stderr,
+          tokenUsage: parseClaudeCliStdout(
+            images.length ? (claudeImageResultEnvelope(result.stdout) ?? '') : result.stdout,
+            'json',
+          ).tokenUsage,
         },
       );
     }
 
-    return parseClaudeCliStdout(result.stdout, 'json');
+    if (!images.length) return parseClaudeCliStdout(result.stdout, 'json');
+    return parseClaudeImageReview(result.stdout);
   } catch (err) {
     if (err instanceof ReviewerLaunchTimeoutError)
       throw new ContainerReviewerUnavailableError(err.message, { kind: 'timeout', cause: err });
     if (err instanceof ContainerReviewerUnavailableError && err.kind === 'timeout') {
+      if (images.length)
+        throw new ContainerReviewerUnavailableError(
+          `Claude image review timed out after ${config.timeout}ms (diagnostics withheld)`,
+          { cause: err, kind: 'timeout' },
+        );
       const stagedDiagnostic = await readBoundedDiagnostic(
         config.containerManager,
         config.containerId,
@@ -293,6 +319,38 @@ async function runClaudeContainerReview(
       // Best-effort cleanup after the review process has exited or been killed.
     }
   }
+}
+
+function claudeImageResultEnvelope(stdout: string): string | undefined {
+  for (const line of stdout.trim().split('\n').reverse()) {
+    try {
+      const event = JSON.parse(line) as Record<string, unknown>;
+      if (event && event.type === 'result') return JSON.stringify(event);
+    } catch {
+      /* Ignore framing/status lines, never turn them into reviewer prose. */
+    }
+  }
+  return undefined;
+}
+export function parseClaudeImageReview(stdout: string): ReturnType<typeof parseClaudeCliStdout> {
+  const envelope = claudeImageResultEnvelope(stdout);
+  if (!envelope)
+    throw new ContainerReviewerUnavailableError('Claude image review has no terminal result', {
+      kind: 'non-zero-exit',
+    });
+  const result = parseClaudeCliStdout(envelope, 'json');
+  const record = JSON.parse(envelope) as Record<string, unknown>;
+  if (record.is_error === true)
+    throw new ContainerReviewerUnavailableError('Claude image review reported a terminal failure', {
+      kind: 'non-zero-exit',
+      tokenUsage: result.tokenUsage,
+    });
+  return {
+    ...result,
+    ...(record.structured_output !== undefined
+      ? { stdout: JSON.stringify(record.structured_output) }
+      : {}),
+  };
 }
 
 async function readBoundedDiagnostic(
