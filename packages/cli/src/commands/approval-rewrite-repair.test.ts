@@ -1,3 +1,4 @@
+import { createServer } from 'node:http';
 import { Command } from 'commander';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AutopodClient } from '../api/client.js';
@@ -62,59 +63,71 @@ it('uses dedicated transports and propagates old-server failure without a fallba
   expect(client.prepareRewriteRepair).toHaveBeenCalledTimes(1);
 });
 
-it('sends targeted retry authority through the existing operation and never retries an old server without its target', async () => {
-  const { AutopodClient } = await import('../api/client.js');
-  const { registerPodCommands } = await import('./pod.js');
-  const requests: Array<{ url: string; body: unknown }> = [];
-  const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    requests.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) });
-    return new Response(JSON.stringify({ message: 'Unknown rewriteRepair authority' }), {
-      status: 400,
-      headers: { 'content-type': 'application/json' },
+it.each([404, 201])(
+  'requires a confirmed targeted retry response without fallback, server status=%s',
+  async (status) => {
+    const { AutopodClient } = await import('../api/client.js');
+    const { registerPodCommands } = await import('./pod.js');
+    const requests: Array<{ url: string; body: unknown }> = [];
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      requests.push({ url: request.url ?? '', body: JSON.parse(Buffer.concat(chunks).toString()) });
+      response.writeHead(status, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify(
+          status === 404
+            ? { message: 'Unsupported targeted retry route' }
+            : { id: 'generic', stage: 'validation' },
+        ),
+      );
     });
-  });
-  vi.stubGlobal('fetch', fetchMock);
-  const api = new AutopodClient({
-    baseUrl: 'http://127.0.0.1:9999',
-    getToken: async () => 'fixture-token',
-  });
-  const program = new Command().exitOverride();
-  registerPodCommands(program, () => api);
-  try {
-    await expect(
-      program.parseAsync(
-        [
-          'authorize-retry',
-          'whole-pod-id',
-          '--request-key',
-          'targeted-retry',
-          '--reason',
-          'Authorize exactly this prepared repair source',
-          '--rewrite-repair',
-          'repair',
-          '--candidate-head',
-          'a'.repeat(40),
-          '--candidate-tree',
-          'b'.repeat(40),
-          '--json',
-        ],
-        { from: 'user' },
-      ),
-    ).rejects.toThrow();
-    expect(requests).toHaveLength(1);
-    expect(requests[0]).toEqual({
-      url: 'http://127.0.0.1:9999/pods/whole-pod-id/retry-authorizations',
-      body: {
-        requestKey: 'targeted-retry',
-        reason: 'Authorize exactly this prepared repair source',
-        rewriteRepair: {
-          recoveryId: 'repair',
-          candidateHead: 'a'.repeat(40),
-          candidateTree: 'b'.repeat(40),
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing fixture address');
+    const api = new AutopodClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      getToken: async () => 'fixture-token',
+    });
+    const program = new Command().exitOverride();
+    registerPodCommands(program, () => api);
+    try {
+      await expect(
+        program.parseAsync(
+          [
+            'authorize-retry',
+            'whole-pod-id',
+            '--request-key',
+            'targeted-retry',
+            '--reason',
+            'Authorize exactly this prepared repair source',
+            '--rewrite-repair',
+            'repair',
+            '--candidate-head',
+            'a'.repeat(40),
+            '--candidate-tree',
+            'b'.repeat(40),
+            '--json',
+          ],
+          { from: 'user' },
+        ),
+      ).rejects.toThrow();
+      expect(requests).toEqual([
+        {
+          url: '/pods/whole-pod-id/retry-authorizations/rewrite-repair',
+          body: {
+            requestKey: 'targeted-retry',
+            reason: 'Authorize exactly this prepared repair source',
+            rewriteRepair: {
+              recoveryId: 'repair',
+              candidateHead: 'a'.repeat(40),
+              candidateTree: 'b'.repeat(40),
+            },
+          },
         },
-      },
-    });
-  } finally {
-    vi.unstubAllGlobals();
-  }
-});
+      ]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);

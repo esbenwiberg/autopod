@@ -103,8 +103,8 @@ ap authorize-retry "$POD_ID" --stage validation --request-key "$RETRY_REQUEST_KE
 ```
 
 The generic retry operation is permission only. Do not use Resume/Rework after it;
-those remain blocked for rewrite custody. An old daemon strictly rejects the new
-`rewriteRepair` field on retry authorization; the CLI never retries without it.
+those remain blocked for rewrite custody. Targeted grants use a distinct retry-authorization route that old daemons refuse;
+the CLI verifies the returned target and never falls back to a generic grant.
 Obtain the exact commit and tree in the prepared checkout with
 `git rev-parse HEAD HEAD^{tree}`. Source changes do not grant a retry, reset counters or
 expand budgets. The daemon binds this targeted grant to the prepared operation, exact prospective
@@ -144,9 +144,10 @@ Human-only, strict JSON endpoints:
 - `POST /pods/:podId/approval-rewrite-repair/:recoveryId/check`: `rewriteId`,
   `failedDispatchId`, `expectedGeneration`, `expectedResultHash`, `candidateHead`,
   `reason`.
-- Existing `POST /pods/:podId/retry-authorizations`: `requestKey`, `reason`,
-  validation `stage`, and strict `rewriteRepair: {recoveryId, candidateHead,
-  candidateTree}` for one prospective repair selection. Additional binding fields
+- `POST /pods/:podId/retry-authorizations/rewrite-repair`: the existing validation
+  retry operation through a dedicated transport, with `requestKey`, `reason`, and
+  strict `rewriteRepair: {recoveryId, candidateHead, candidateTree}` for one
+  prospective repair selection. Additional binding fields
   are server-derived. It neither selects source nor starts checks.
 
 Actor comes from authentication. Unknown fields (including paths, force, config,

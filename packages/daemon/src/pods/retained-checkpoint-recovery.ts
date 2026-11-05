@@ -133,6 +133,8 @@ export function createRetainedCheckpointRecovery(deps: {
       if (
         pod.executionTarget !== 'sandbox' ||
         !deps.podRepo.sandboxWakeups ||
+        !deps.podRepo.deletionOwnership ||
+        deps.podRepo.validationExecutions.hasGoal(pod.id) ||
         rewriteHash(pod.task) !== repair.taskHash ||
         !rewrite ||
         selected?.id !== rewrite.id ||

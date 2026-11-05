@@ -117,7 +117,7 @@ it('uses the existing human retry operation with a strict exact candidate target
         candidateTree: op.prepared!.tree,
       },
     };
-    const url = `/pods/${f.podId}/retry-authorizations`;
+    const url = `/pods/${f.podId}/retry-authorizations/rewrite-repair`;
     for (const authorization of [undefined, 'Bearer pod-token'])
       expect(
         (
@@ -139,6 +139,16 @@ it('uses the existing human retry operation with a strict exact candidate target
         (await app.inject({ method: 'POST', url, headers, payload: { ...input, ...extra } }))
           .statusCode,
       ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/pods/${f.podId}/retry-authorizations`,
+          headers,
+          payload: input,
+        })
+      ).statusCode,
+    ).toBe(400);
     const response = await app.inject({ method: 'POST', url, headers, payload: input });
     expect(response.statusCode, response.body).toBe(201);
     expect(response.json().rewriteRepair).toMatchObject(input.rewriteRepair);

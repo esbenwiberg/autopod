@@ -484,12 +484,29 @@ export class AutopodClient {
     stage: TaskRetryStage = 'validation',
     rewriteRepair?: import('@autopod/shared').RewriteRepairRetryTarget,
   ): Promise<TaskRetryAuthorization> {
-    return this.request('POST', `/pods/${id}/retry-authorizations`, {
-      requestKey,
-      reason,
-      ...(stage === 'validation' ? {} : { stage }),
-      ...(rewriteRepair ? { rewriteRepair } : {}),
-    });
+    if (rewriteRepair && stage !== 'validation')
+      throw new Error('Rewrite repair retry targets require validation stage');
+    const grant = await this.request<TaskRetryAuthorization>(
+      'POST',
+      `/pods/${id}/retry-authorizations${rewriteRepair ? '/rewrite-repair' : ''}`,
+      {
+        requestKey,
+        reason,
+        ...(stage === 'validation' ? {} : { stage }),
+        ...(rewriteRepair ? { rewriteRepair } : {}),
+      },
+    );
+    if (
+      rewriteRepair &&
+      (grant.stage !== 'validation' ||
+        grant.rewriteRepair?.recoveryId !== rewriteRepair.recoveryId ||
+        grant.rewriteRepair?.candidateHead !== rewriteRepair.candidateHead ||
+        grant.rewriteRepair?.candidateTree !== rewriteRepair.candidateTree)
+    )
+      throw new Error(
+        'Server did not confirm the exact rewrite repair retry target; inspect status, never retry without the target',
+      );
+    return grant;
   }
   async getSourceAdoptions(id: string): Promise<SourceAdoptionList> {
     return this.request<SourceAdoptionList>('GET', `/pods/${id}/source-adoptions`);
