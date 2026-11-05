@@ -56,7 +56,35 @@ public struct PodRepairActions: Sendable {
     if reworkDraft == nil { return true }
     return reworkRejected || (reworkSettled && [.failed, .reviewRequired, .killed, .validated].contains(observation.source.status))
   }
+  private(set) var authorizationInspection: TaskRetryState?
   private(set) var authorizationRejected = false
+  func inspectRetryDecision(id: String, actions: PodActions) async {
+    guard !busy, bind(actions.repair), let pending = authorizationPending else { return }
+    busy = true
+    do {
+      let state = try await actions.loadRetryState(id, "worker")
+      authorizationInspection = state
+      if let recorded = state.authorizations.first(where: { $0.requestKey == pending.requestKey && $0.reason == pending.reason }) {
+        if let authorizationKey { RetryAuthorizationDraft.clear(authorizationKey) }
+        authorizationPending = nil
+        authorizationMessage = recorded.usedByAttemptId != nil ? "Prior retry authorization was recorded and consumed. Inspect current eligibility." : recorded.failureId == state.latest?.id ? "Prior retry authorization is recorded. Rework remains separate." : "Prior retry authorization is superseded. Inspect the latest failure."
+      } else {
+        authorizationMessage = "No matching recorded decision was observed. The saved request remains unresolved; it has not been discarded."
+      }
+    } catch { self.error = error.localizedDescription }
+    busy = false
+    await refreshEligibility(id: id, actions: actions.repair)
+  }
+  func bindLegacyDecisionToInspectedFailure() {
+    guard !busy, let pending = authorizationPending, pending.expectedFailureId == nil,
+      let failureId = authorizationInspection?.latest?.id, let authorizationKey else { return }
+    do {
+      let draft = TaskRetryAuthorizationRequest(requestKey: pending.requestKey, reason: pending.reason, stage: "worker", expectedFailureId: failureId)
+      try RetryAuthorizationDraft.save(draft, key: authorizationKey)
+      authorizationPending = draft
+      authorizationMessage = "Saved decision draft bound to the inspected failure. Recording it is a separate action; the server rejects stale failure identity."
+    } catch { self.error = error.localizedDescription }
+  }
   func discardRejectedAuthorization() {
     guard !busy, authorizationRejected, let authorizationKey else { return }
     RetryAuthorizationDraft.clear(authorizationKey); authorizationPending = nil; authorizationRejected = false

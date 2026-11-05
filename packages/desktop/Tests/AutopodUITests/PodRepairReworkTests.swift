@@ -43,14 +43,14 @@ import Testing
     let scope = UUID().uuidString
     let source = pod()
     let model = PodRepairModel(kind: .rework, scope: scope); model.ordinaryRework = true
-    var calls = 0
+    let counter = ReworkPendingFixture()
     var actions = PodRepairActions(scope: scope, submit: { _, _, _ in
       Issue.record("Must use versioned transport"); throw URLError(.unsupportedURL)
     }, inspect: { _ in PodRepairObservation(source: source, related: []) })
     let projection = try eligibility()
     actions.loadReworkEligibility = { _ in projection }
     actions.submitRework = { _, request in
-      calls += 1
+      counter.submissions += 1
       #expect(request.guidance == "Keep existing edits")
       #expect(request.generation == 2)
       if outcome == "rejected" { throw DaemonError.serverError(409, "Lifecycle changed") }
@@ -59,22 +59,50 @@ import Testing
     await model.prepareRework(id: source.id, actions: actions, draftScope: scope)
     model.guidance = "Keep existing edits"
     await model.submit(id: source.id, actions: actions)
-    #expect(calls == 1 && model.guidance == "Keep existing edits")
+    #expect(counter.submissions == 1 && model.guidance == "Keep existing edits")
     #expect(model.uncertain == (outcome == "dropped"))
     let reopened = PodRepairModel(kind: .rework, scope: scope); reopened.ordinaryRework = true
     await reopened.prepareRework(id: source.id, actions: actions, draftScope: scope)
     #expect(reopened.guidance == "Keep existing edits")
     if outcome == "dropped" {
       await reopened.submit(id: source.id, actions: actions)
-      #expect(calls == 1)
+      #expect(counter.submissions == 1)
     }
     var changed = actions
     changed = PodRepairActions(scope: "other-daemon", submit: changed.submit, inspect: changed.inspect)
     await model.submit(id: source.id, actions: changed)
-    #expect(calls == 1)
+    #expect(counter.submissions == 1)
     UserDefaults.standard.removeObject(forKey: "autopod.rework-v1.\(scope).\(source.id).worker")
     UserDefaults.standard.removeObject(forKey: "autopod.rework-v1.\(scope).\(source.id).worker.rejected")
   }
+  @Test func legacyPendingDecisionRemainsVisibleWhenEligibilityIsUnavailable() async throws {
+    let scope = UUID().uuidString
+    let source = pod()
+    let key = RetryAuthorizationDraft.key(scope: scope, podId: source.id, stage: "worker")
+    try RetryAuthorizationDraft.save(TaskRetryAuthorizationRequest(requestKey: "legacy-key", reason: "Inspected earlier work", stage: "worker"), key: key)
+    defer { RetryAuthorizationDraft.clear(key) }
+    let model = PodRepairModel(kind: .rework, scope: scope, ordinaryRework: true)
+    var actions = PodActions(); actions.retryDraftScope = scope
+    actions.repair = PodRepairActions(scope: scope, submit: { _, _, _ in
+      Issue.record("No execution"); throw URLError(.unsupportedURL)
+    }, inspect: { _ in PodRepairObservation(source: source, related: []) })
+    actions.repair.loadReworkEligibility = { _ in throw DaemonError.networkError("Unavailable") }
+    let state = try JSONDecoder().decode(TaskRetryState.self, from: Data(#"{"taskId":"task","stage":"worker","admissionCount":1,"executedCount":1,"transientRetryCount":0,"interruptedCount":0,"latest":{"id":"inspected-failure","outcome":"unknown"},"authorizations":[],"telemetry":"partial"}"#.utf8))
+    actions.loadRetryState = { _, _ in state }
+    let host = LaunchComposerHost(PodRepairSheet(isPresented: .constant(true), pod: source, kind: .rework,
+      relatedPods: [], actions: actions, model: model), width: 1120)
+    defer { host.close() }
+    try await host.wait { host.has("repair-inspect-retry-decision") && !model.eligibilityLoading }
+    #expect(!model.canSubmit && host.has("repair-authorize-retry"))
+    #expect(!host.enabled("repair-authorize-retry"))
+    await model.inspectRetryDecision(id: source.id, actions: actions)
+    model.bindLegacyDecisionToInspectedFailure()
+    #expect(model.authorizationPending?.requestKey == "legacy-key")
+    #expect(model.authorizationPending?.expectedFailureId == "inspected-failure")
+    #expect(try RetryAuthorizationDraft.load(key)?.expectedFailureId == "inspected-failure")
+    #expect(!model.canSubmit)
+  }
+
   @Test func authorizationIsFailureBoundAndSeparateFromConcurrentReworkSubmits() async throws {
     let scope = UUID().uuidString
     let source = pod()

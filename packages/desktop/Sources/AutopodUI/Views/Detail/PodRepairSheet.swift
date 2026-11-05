@@ -127,18 +127,26 @@ internal struct PodRepairSheet: View {
             if let failureId = eligibility.failureId {
               Text("Worker failure: \(failureId)").font(.caption).textSelection(.enabled)
             }
-            if eligibility.status == "authorization_needed" || model.authorizationPending != nil {
-              TextField("Reason for one retry · required", text: $model.retryReason, axis: .vertical)
-                .disabled(model.busy || model.authorizationPending != nil)
-              Button(model.authorizationPending == nil ? "Authorize one retry" : "Record the same retry decision") {
-                Task { await model.authorize(id: pod.id, actions: actions) }
-              }.disabled(model.busy || model.retryReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityIdentifier("repair-authorize-retry")
-              if model.authorizationRejected {
-                Button("Revise rejected retry decision") { model.discardRejectedAuthorization() }.disabled(model.busy)
+          } else { Text("Retry eligibility unavailable. A compatible daemon is required.") }
+          if model.eligibility?.status == "authorization_needed" || model.authorizationPending != nil {
+            TextField("Reason for one retry · required", text: $model.retryReason, axis: .vertical)
+              .disabled(model.busy || model.authorizationPending != nil)
+            if let pending = model.authorizationPending {
+              Text("Saved decision: \(pending.requestKey) · failure \(pending.expectedFailureId ?? "unbound legacy draft")").font(.caption).textSelection(.enabled)
+              Button("Inspect saved retry decision") { Task { await model.inspectRetryDecision(id: pod.id, actions: actions) } }.disabled(model.busy).accessibilityIdentifier("repair-inspect-retry-decision")
+              if pending.expectedFailureId == nil, let failureId = model.authorizationInspection?.latest?.id {
+                Text("Inspected worker failure: \(failureId)").font(.caption).textSelection(.enabled)
+                Button("Bind saved decision draft to this failure") { model.bindLegacyDecisionToInspectedFailure() }.disabled(model.busy).accessibilityIdentifier("repair-bind-retry-decision")
               }
             }
-          } else { Text("Retry eligibility unavailable. A compatible daemon is required.") }
+            Button(model.authorizationPending == nil ? "Authorize one retry" : "Record the same retry decision") {
+              Task { await model.authorize(id: pod.id, actions: actions) }
+            }.disabled(model.busy || model.eligibilityLoading || model.retryReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (model.authorizationPending != nil && model.authorizationPending?.expectedFailureId == nil))
+              .accessibilityIdentifier("repair-authorize-retry")
+            if model.authorizationRejected {
+              Button("Revise rejected retry decision") { model.discardRejectedAuthorization() }.disabled(model.busy)
+            }
+          }
           if let message = model.authorizationMessage { Text(message) }
           Button("Refresh retry eligibility") { Task { await model.refreshEligibility(id: pod.id, actions: actions.repair) } }
             .disabled(model.busy || model.eligibilityLoading)

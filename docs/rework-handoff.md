@@ -53,7 +53,12 @@ ID and stage, and guards execution against connection changes and concurrent
 clicks. Rejected drafts remain available for revision. Uncertain submissions never
 automatically repeat. Use **Check latest state** to inspect the request and observed
 pod state. Authorization can explicitly retry recording the same decision key;
-this never starts Rework. Only after a settled dispatch and a terminal observed
+this never starts Rework. Pending decisions remain inspectable if eligibility is
+unavailable. Legacy drafts without a failure binding can be inspected in the
+handoff: an observed prior decision resolves the draft, or the operator can
+explicitly bind the same saved key/reason to the inspected failure before a
+separate recording action. Stale binding or a different prior decision conflicts.
+Only after a settled dispatch and a terminal observed
 pod may the operator deliberately review another attempt.
 
 ## Interrupted dispatch
