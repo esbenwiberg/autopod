@@ -895,7 +895,7 @@ export function createValidationTriggerWorkflow(
       } else if (force || attempt < s2.maxValidationAttempts) {
         if (tryConsumeUpdateIntent()) return;
 
-        if (options?.validationOnly) {
+        if (options?.validationOnly || podRepo.retainedCoding?.isOwner(podId)) {
           emitActivityStatus(podId, 'Validation-only resume failed — agent rework was not started');
           transition(s2, 'failed');
           return;

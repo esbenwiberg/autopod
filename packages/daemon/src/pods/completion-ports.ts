@@ -15,7 +15,7 @@ import type { createWorkspacePreservation } from './workspace-preservation.js';
 import type { createWorkspaceTransfer } from './workspace-transfer.js';
 
 export interface CompletionCalls {
-  triggerValidation(podId: string): Promise<void>;
+  triggerValidation(podId: string, options?: { validationOnly?: boolean }): Promise<void>;
 }
 export interface CompletionLiveDependencies {
   launchConfiguration?: {
@@ -97,10 +97,12 @@ export interface CompletionOwnersCaptured {
 }
 
 export interface CompletionWorkflowCaptured {
+  sealRetainedCodingSource?(pod: Pod): Promise<void>;
   podRepo: Pick<
     PodRepository,
     | 'getOrThrow'
     | 'hasInfrastructureBlocker'
+    | 'retainedCoding'
     | 'taskExecutions'
     | 'deletionOwnership'
     | 'validationExecutions'

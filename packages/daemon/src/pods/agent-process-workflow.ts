@@ -183,6 +183,7 @@ export function createAgentProcessWorkflow(
       }
 
       if (
+        !podRepo.retainedCoding?.isOwner(podId) &&
         isRecovery &&
         !isInfrastructureRecovery &&
         !isRework &&
@@ -284,7 +285,36 @@ export function createAgentProcessWorkflow(
         }
       }
 
-      if (launchConfig?.intent === 'goal') {
+      if (podRepo.retainedCoding?.isOwner(podId)) {
+        // Explicit fresh segment, before native recovery/old-complete shortcuts.
+        const original = podRepo.retainedCoding.latest(podId)!;
+        const historicalSummary = original.context.taskSummary?.actualSummary;
+        const summary = historicalSummary
+          ? historicalSummary.slice(0, 8000) +
+            (historicalSummary.length > 8000
+              ? '\n[Context excerpt truncated; complete original retained.]'
+              : '')
+          : 'None';
+        const spawn = () =>
+          runtime.spawn({
+            podId,
+            task: appendDecisionContext(
+              pod,
+              `${pod.task}\n\nRETAINED CODING CONTINUATION: Work only from this independently selected source. Original sandbox/ignored bytes remain retained and may not be present here. Qualification proves declared launchers only, not checks, publication or broader permissions.\nPrevious summary (historical context): ${summary}`,
+            ),
+            model: pod.model,
+            reasoningEffort,
+            workDir: '/workspace',
+            containerId,
+            customInstructions: runtimeInstructions,
+            env: secretEnv,
+            mcpServers,
+            executionTarget: pod.executionTarget,
+          });
+        events = (async function* () {
+          yield* spawn();
+        })();
+      } else if (launchConfig?.intent === 'goal') {
         const goals = deps.launchConfiguration?.goals;
         if (!goals || !runtime.nativeGoalSession || !recordedProvenance)
           throw new AutopodError('Native Goal execution is unavailable', 'GOAL_UNAVAILABLE', 503);
@@ -577,7 +607,13 @@ export function createAgentProcessWorkflow(
       }
 
       visibleFailurePhase = 'agent';
+      const assertCodingCurrent = captured.assertCodingCandidateCurrent;
+      const isCoding = podRepo.retainedCoding?.isOwner(podId);
       const observedEvents = (async function* () {
+        if (isCoding) {
+          if (!assertCodingCurrent) throw new Error('Coding consumption fence unavailable');
+          await assertCodingCurrent(podId);
+        }
         for await (const event of events) {
           if (!runtimeEventObserved) {
             finishStartup('pass');
@@ -648,7 +684,7 @@ export function createAgentProcessWorkflow(
         await this.reconcileInfrastructureBlocker(podId);
         return;
       }
-      if (err instanceof SandboxInfrastructureError) {
+      if (err instanceof SandboxInfrastructureError && !podRepo.retainedCoding?.isOwner(podId)) {
         const recovered = await tryRecoverTransientSandboxFailure(
           podId,
           podRepo.getOrThrow(podId),
@@ -661,7 +697,7 @@ export function createAgentProcessWorkflow(
           closeProviderAttempt(podId, 'aborted');
         }
       }
-      if (err instanceof GitTransientFetchError) {
+      if (err instanceof GitTransientFetchError && !podRepo.retainedCoding?.isOwner(podId)) {
         const current = podRepo.getOrThrow(podId);
         if (current.status === 'queued') scheduleHostFetchRetry(current, err);
         return;

@@ -211,7 +211,7 @@ export class DockerContainerManager implements ContainerManager {
   private managedDatabase?: Database.Database;
   private assertNotRetained(containerId: string) {
     if (this.managedDatabase)
-      assertCheckpointResourceNotRetained(this.managedDatabase, containerId);
+      assertCheckpointResourceNotRetained(this.managedDatabase, containerId, true);
   }
   readonly supportsExecRecovery = true;
 
@@ -599,6 +599,8 @@ export class DockerContainerManager implements ContainerManager {
   }
 
   async start(containerId: string, options: ContainerStartOptions = {}): Promise<void> {
+    if (this.managedDatabase)
+      assertCheckpointResourceNotRetained(this.managedDatabase, containerId);
     this.assertNotRetained(containerId);
     try {
       options.assertCurrent?.();
@@ -629,6 +631,8 @@ export class DockerContainerManager implements ContainerManager {
   }
 
   async kill(containerId: string): Promise<void> {
+    if (this.managedDatabase)
+      assertCheckpointResourceNotRetained(this.managedDatabase, containerId);
     this.assertNotRetained(containerId);
     try {
       const container = this.docker.getContainer(containerId);

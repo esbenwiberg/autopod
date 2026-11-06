@@ -11,6 +11,7 @@ export function mcpHandler(
   pendingRequestsByPod: Map<string, PendingRequests>,
   logger: Logger,
   sessionTokenIssuer?: PodTokenIssuer,
+  withWorkerScope?: (podId: string, operation: () => Promise<void>) => Promise<void>,
 ): void {
   // Only pendingRequests is stored per pod — the McpServer is created fresh per
   // HTTP request to avoid the "Already connected to a transport" error from the MCP SDK,
@@ -96,6 +97,15 @@ export function mcpHandler(
     });
 
     try {
+      // Transport setup awaits I/O. A retained claim may have revoked the old
+      // credential epoch since the auth hook; never lend that request a new run's scope.
+      if (sessionTokenIssuer && !request.user) {
+        const token = request.headers.authorization?.match(/^Bearer (.+)$/i)?.[1];
+        if (!token || sessionTokenIssuer.verify(token) !== podId) {
+          reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Pod credential epoch changed' });
+          return;
+        }
+      }
       // Tell Fastify we're handling the response manually via reply.raw
       // so it doesn't try to send its own response after the transport writes.
       reply.hijack();
@@ -107,7 +117,11 @@ export function mcpHandler(
       // that writes to a closed socket.
       request.raw.setTimeout(0);
       reply.raw.setTimeout?.(0);
-      await transport.handleRequest(request.raw, reply.raw, request.body);
+      const handle = async () => {
+        await transport.handleRequest(request.raw, reply.raw, request.body);
+      };
+      if (withWorkerScope) await withWorkerScope(podId, handle);
+      else await handle();
     } catch (err) {
       logger.error({ err, podId }, 'MCP handleRequest error');
     } finally {

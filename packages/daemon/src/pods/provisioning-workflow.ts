@@ -175,6 +175,9 @@ export function createProvisioningWorkflow(deps: ProvisioningLiveDependencies, c
     const materialsResult = await materials.prepareSessionMaterials(populationResult);
     if (materialsResult.kind === 'halted') return materialsResult;
     const prepared = await agent.prepareAgentMaterials(materialsResult);
+    // Normal repository preparation precedes actual-resource qualification; no
+    // runtime has been selected or its lazy iterator pulled at this boundary.
+    await deps.qualifyCodingCandidate?.(prepared);
     return { kind: 'ready', prepared };
   }
   return { preparePodExecution };

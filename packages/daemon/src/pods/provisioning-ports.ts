@@ -51,6 +51,7 @@ export interface ProvisioningNetworkManager {
 }
 
 export interface ProvisioningLiveDependencies {
+  qualifyCodingCandidate?(input: PreparedExecution): Promise<void>;
   launchConfiguration?: {
     read(podId: string): EffectiveLaunchConfig | null;
     assertCurrentCapabilities(config: EffectiveLaunchConfig): Promise<void>;

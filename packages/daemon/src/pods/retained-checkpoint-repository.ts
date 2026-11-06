@@ -10,6 +10,7 @@ import {
   type TaskRetryAuthorization,
   type ValidationResult,
 } from '@autopod/shared';
+import { createRetainedCodingRepository } from './retained-coding-repository.js';
 import {
   assertFinalizationResourceAvailable,
   createRetainedFinalizationRepository,
@@ -182,8 +183,17 @@ export function retainedCheckpointResourceIds(db: Database.Database): string[] {
 export function assertCheckpointResourceNotRetained(
   db: Database.Database,
   containerId: string,
+  allowCodingMutation = false,
 ): void {
   assertFinalizationResourceAvailable(db, containerId);
+  if (createRetainedCodingRepository(db).retains(containerId)) {
+    if (!allowCodingMutation)
+      checkpointError(
+        'Coding candidate retains source/report custody; no release is authorized',
+        'REPAIR_CANDIDATE_RETAINED',
+      );
+    createRetainedCodingRepository(db).assertMutationAllowed(containerId);
+  }
   const retained = db
     .prepare('SELECT binding FROM retained_checkpoint_recoveries WHERE container_id=?')
     .get(containerId) as { binding: string } | undefined;
@@ -514,7 +524,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
         checkpointError('Only owned atomic continuation activation can select execution');
       const changed = db
         .prepare(
-          'UPDATE pods SET launch_config_digest=? WHERE id=? AND launch_config_digest=? AND lifecycle_generation=? AND container_id IS NULL AND worktree_path=? AND skip_agent=1 AND execution_target=?',
+          'UPDATE pods SET launch_config_digest=? WHERE id=? AND launch_config_digest=? AND lifecycle_generation=? AND container_id IS NULL AND worktree_path=? AND skip_agent=? AND execution_target=?',
         )
         .run(
           execution.digest,
@@ -522,6 +532,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
           execution.parentDigest,
           record.generation + 1,
           record.prepared.worktree,
+          createRetainedCodingRepository(db).get(id) ? 0 : 1,
           execution.target,
         ).changes;
       if (changed !== 1)
@@ -618,6 +629,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       actor: OperatorActor;
       binding: CheckpointRecoveryBinding;
       assertCurrent(): void;
+      onClaim?(): void;
     }): { record: CheckpointRecoveryRecord; acquired: boolean } {
       return db.transaction(() => {
         const { pod, request, actor } = input;
@@ -693,6 +705,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
           JSON.stringify(evidence),
           new Date().toISOString(),
         );
+        input.onClaim?.();
         return {
           record: get(request.id) ?? checkpointError('Recovery claim was not retained'),
           acquired: true,
@@ -701,6 +714,10 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
     },
     assertWorkerAllowed(podId: string) {
       const current = latest(podId);
+      if (current && createRetainedCodingRepository(db).get(current.id)) {
+        createRetainedCodingRepository(db).assertWorkerAllowed(podId);
+        return;
+      }
       if (current && !current.checked)
         checkpointError(
           'Checkpoint recovery admits fresh checks only, never a coding worker',

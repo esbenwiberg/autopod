@@ -76,8 +76,14 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
         podId,
         worktreePath: s2.worktreePath,
         branch: s2.branch,
-        head: checkpoint.selected?.head ?? checkpoint.prepared.head,
-        tree: checkpoint.selected?.tree ?? checkpoint.prepared.tree,
+        head:
+          podRepo.retainedCoding?.finalSource(podId, s2.lifecycleGeneration)?.head ??
+          checkpoint.selected?.head ??
+          checkpoint.prepared.head,
+        tree:
+          podRepo.retainedCoding?.finalSource(podId, s2.lifecycleGeneration)?.tree ??
+          checkpoint.selected?.tree ??
+          checkpoint.prepared.tree,
         worktreeManager,
         assertCurrent,
       });

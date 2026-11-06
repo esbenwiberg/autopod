@@ -110,13 +110,13 @@ import { createWorkspaceTransfer } from './workspace-transfer.js';
 
 export { buildActionableFailureSummary, buildPrFixTask } from './fix-policy.js';
 
+import { qualifyExecutionEnvironment } from './environment-qualification.js';
 import { createFixAdmission } from './fix-admission.js';
 import { createFixControls } from './fix-controls.js';
 import { createFixDelivery } from './fix-delivery.js';
 import { createFixFeedback } from './fix-feedback.js';
 import { createFixParking } from './fix-parking.js';
 import { createFixProviderBinding } from './fix-provider-binding.js';
-
 import { createOperatorControls } from './operator-controls.js';
 import { createOperatorKill } from './operator-kill.js';
 import { createOperatorMessages } from './operator-messages.js';
@@ -124,7 +124,6 @@ import { createOperatorPause } from './operator-pause.js';
 import { createOperatorRejection } from './operator-rejection.js';
 import { createOperatorPauseState } from './operator-state.js';
 import { createOperatorTools } from './operator-tools.js';
-
 import {
   allocateHostPort,
   CONTAINER_APP_PORT,
@@ -132,6 +131,7 @@ import {
   hostnameFromUrl,
   portFromUrl,
 } from './resource-policy.js';
+import { sealRetainedCodingSource } from './retained-coding-source.js';
 
 export type { NetworkManager } from './resource-contracts.js';
 
@@ -992,49 +992,59 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     completeRevalidationPass,
   });
 
-  const provisioningWorkflow = createProvisioningWorkflow(deps, {
-    materializeSpecFiles,
-    captureDeployBaselineHashes,
-    podRepo,
-    profileStore,
-    providerAccountStore,
-    providerCatalog,
-    containerManagerFactory,
-    worktreeManager,
-    logger,
-    repoScanner,
-    executionCredentialsFor,
-    resolveGitCredential,
-    assertSandboxAgentStreamingExecSupported,
-    destroyPodNetwork,
-    stopSandboxPreviewProxy,
-    killSidecarsForPod,
-    closeProviderAttempt,
-    resolveEffectiveBoundProfile,
-    openProviderTargetAttempt,
-    persistRuntimeCredentialsForPod,
-    syncWorkspaceBack,
-    transition,
-    allocateHostPort,
-    CONTAINER_APP_PORT,
-    execFileAsync,
-    networkManager,
-    sidecarManager,
-    mcpBaseUrl,
-    injectionsForPod,
-    startHaproxyDenyReceiver,
-    hostnameFromUrl,
-    portFromUrl,
-    buildPrFixTask,
-    fixFeedbackRepo,
-    escalationRepo,
-    validationRepo,
-    progressEventRepo,
-    safetyEventsRepo,
-    rememberMaxCredentialLineage,
-    emitActivityStatus,
-  });
+  const provisioningWorkflow = createProvisioningWorkflow(
+    {
+      ...deps,
+      qualifyCodingCandidate: async (input) => {
+        if (podRepo.retainedCoding?.isOwner(input.pod.id))
+          await checkpointRecovery!.repair!.qualify(input);
+      },
+    },
+    {
+      materializeSpecFiles,
+      captureDeployBaselineHashes,
+      podRepo,
+      profileStore,
+      providerAccountStore,
+      providerCatalog,
+      containerManagerFactory,
+      worktreeManager,
+      logger,
+      repoScanner,
+      executionCredentialsFor,
+      resolveGitCredential,
+      assertSandboxAgentStreamingExecSupported,
+      destroyPodNetwork,
+      stopSandboxPreviewProxy,
+      killSidecarsForPod,
+      closeProviderAttempt,
+      resolveEffectiveBoundProfile,
+      openProviderTargetAttempt,
+      persistRuntimeCredentialsForPod,
+      syncWorkspaceBack,
+      transition,
+      allocateHostPort,
+      CONTAINER_APP_PORT,
+      execFileAsync,
+      networkManager,
+      sidecarManager,
+      mcpBaseUrl,
+      injectionsForPod,
+      startHaproxyDenyReceiver,
+      hostnameFromUrl,
+      portFromUrl,
+      buildPrFixTask,
+      fixFeedbackRepo,
+      escalationRepo,
+      validationRepo,
+      progressEventRepo,
+      safetyEventsRepo,
+      rememberMaxCredentialLineage,
+      emitActivityStatus,
+    },
+  );
   const processWorkflow = createAgentProcessWorkflow(deps, {
+    assertCodingCandidateCurrent: (id) => checkpointRecovery!.repair!.assertCandidateCurrent(id),
     podRepo,
     logger,
     emitActivityStatus,
@@ -1101,6 +1111,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     finalizeArtifactPod,
     prepareSourceForCompletion,
     applyCompletionDecision,
+    sealRetainedCodingSource: (pod) =>
+      sealRetainedCodingSource({
+        pod,
+        podRepo,
+        worktreeManager,
+        containerManager: containerManagerFactory.get(pod.executionTarget),
+      }),
   });
   const { prepareApprovalDelivery } = createApprovalDeliveryPreparation({
     podRepo,
@@ -1448,6 +1465,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     if (
       continuation?.binding.continuation &&
+      !(
+        podRepo.retainedCoding?.isOwner(podId) &&
+        ['consumeAgentEvents', 'handleCompletion', 'reconcileInfrastructureBlocker'].includes(
+          operation,
+        )
+      ) &&
       ![
         'approveSession',
         'processPod',
@@ -1484,6 +1507,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       rewriteError(
         `Rewrite ${rewrite.id} owns candidate checks/publication. Competing source mutation is not authorized.`,
       );
+    if (
+      operation === 'triggerValidation' &&
+      podRepo.retainedCoding?.latest(podId) &&
+      !podRepo.retainedCoding.finalSource(podId, podRepo.getOrThrow(podId).lifecycleGeneration)
+    )
+      checkpointError('Coding must positively settle and seal source before checks');
     sandboxRecovery.assertAvailable(podId, operation);
     if (operation !== 'processPod') podRepo.retainedCheckpoints?.assertAvailable(podId);
     if (!metadataOnly.has(operation)) assertValidationMutationSettled(podRepo, podId);
@@ -1553,6 +1582,25 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           worktreeManager,
           getContainerManager: (target = 'sandbox') => containerManagerFactory.get(target),
           readLaunch: deps.launchConfiguration?.read,
+          beforeCodingActivation: (pod) => closeProviderAttempt(pod.id, 'aborted'),
+          qualifyCoding: async (binding, input, assertCurrent) => {
+            const result = await qualifyExecutionEnvironment({
+              binding,
+              pod: input.pod,
+              profile: input.profile,
+              launchConfig: input.launchConfig!,
+              containerManager: input.containerManager,
+              preparationCompleted: true,
+              assertCurrent,
+            });
+            if (result.provenance)
+              podRepo.executionProvenance?.record(
+                input.pod.id,
+                input.pod.lifecycleGeneration,
+                result.provenance,
+              );
+            return result.evidence;
+          },
           executionSettings: deps.launchConfiguration?.executionSettings,
           previewExecution: deps.launchConfiguration?.previewRetainedExecution,
           isIdle: (id) =>

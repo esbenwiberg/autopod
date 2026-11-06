@@ -38,8 +38,14 @@ export async function verifiedCheckpointApprovalSnapshot(input: {
     podId: pod.id,
     worktreePath: prepared.worktree,
     branch: pod.branch,
-    head: recovery.selected?.head ?? prepared.head,
-    tree: recovery.selected?.tree ?? prepared.tree,
+    head:
+      podRepo.retainedCoding?.finalSource(pod.id, pod.lifecycleGeneration)?.head ??
+      recovery.selected?.head ??
+      prepared.head,
+    tree:
+      podRepo.retainedCoding?.finalSource(pod.id, pod.lifecycleGeneration)?.tree ??
+      recovery.selected?.tree ??
+      prepared.tree,
     worktreeManager,
     assertCurrent,
   });

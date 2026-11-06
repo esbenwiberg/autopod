@@ -23,6 +23,13 @@ export function admitCodexRecovery(
   sessionId: string,
   prompt: string,
 ) {
+  const coding = repo.retainedCoding?.latest(podId);
+  if (coding && coding.facts.candidate?.generation === expected.lifecycleGeneration)
+    throw new AutopodError(
+      'This retained operation authorizes one fresh coding segment, not native interruption recovery',
+      'REPAIR_CODING_SEGMENT_CONSUMED',
+      409,
+    );
   const ledger = repo.codexInterruptionRetries;
   if (!ledger)
     throw new AutopodError(

@@ -218,6 +218,7 @@ export async function retainedCheckpointFixture(
   kind: 'validation' | 'wakeup' = 'validation',
   native = false,
   independentReview = false,
+  executionRequirements?: import('@autopod/shared').ExecutionRequirements,
 ) {
   const ctx = createTestContext();
   vi.mocked(ctx.profileStore.get).mockReturnValue({
@@ -302,6 +303,21 @@ export async function retainedCheckpointFixture(
             repositoryId: 'repo-a',
             profileId: 'profile',
             task,
+            ...(executionRequirements
+              ? {
+                  work: {
+                    contract: {
+                      contractVersion: 1 as const,
+                      title: 'Retained typed launcher task',
+                      dependsOn: [],
+                      scenarios: [],
+                      requiredFacts: [],
+                      humanReview: [],
+                      executionRequirements,
+                    },
+                  },
+                }
+              : {}),
             overrides: { execution: { target: 'sandbox' } },
           },
           actorId: 'operator',

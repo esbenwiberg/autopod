@@ -81,6 +81,34 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     terminationReconciliation,
   } = captured;
   return {
+    inspectRepairContinuation(podId: string) {
+      return (captured.checkpointRecovery?.repair ?? checkpointError('Repair unavailable')).inspect(
+        podId,
+      );
+    },
+    previewRepairContinuation(
+      podId: string,
+      query: import('@autopod/shared').RepairContinuationPreviewQueryV1,
+    ) {
+      return (captured.checkpointRecovery?.repair ?? checkpointError('Repair unavailable')).preview(
+        podId,
+        query,
+      );
+    },
+    authorizeRepairContinuation(
+      podId: string,
+      request: import('@autopod/shared').RepairContinuationRequestV1,
+      actor: OperatorActor,
+    ) {
+      return (
+        captured.checkpointRecovery?.repair ?? checkpointError('Repair unavailable')
+      ).authorize(podId, request, actor);
+    },
+    getRepairContinuation(podId: string, requestId: string) {
+      return (
+        captured.checkpointRecovery?.repair ?? checkpointError('Repair unavailable')
+      ).operation(podId, requestId);
+    },
     inspectRetainedFinalization(podId: string) {
       return (
         captured.retainedFinalization ?? checkpointError('Retained finalization unavailable')
