@@ -29,6 +29,7 @@ import {
 import { rewriteConfiguration } from './approval-source-rewrite.js';
 import { rewriteHash } from './approval-source-rewrite-repository.js';
 import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
+import { assertQualificationExecutionContextSupported } from './environment-qualification.js';
 import type { PodRepository } from './pod-repository.js';
 import { createRepairContinuation } from './repair-continuation.js';
 import {
@@ -584,7 +585,12 @@ export function createRetainedCheckpointRecovery(deps: {
     let execution: RetainedExecutionSelection | undefined;
     const selection = input as RetainedContinuationRequest;
     if (continuation && selection.executionProfileId) {
-      execution = await resolveExecutionSelection(pod, selection, assertCurrent);
+      execution = await resolveExecutionSelection(
+        pod,
+        selection,
+        assertCurrent,
+        Boolean(codingClaim),
+      );
     }
     if (codingClaim) {
       const finalOriginalKey = await containerManager.getResourceKey(containerId);
@@ -597,6 +603,16 @@ export function createRetainedCheckpointRecovery(deps: {
       assertCurrent();
       if (finalOriginalKey !== resourceKey || finalOriginalStatus !== 'stopped')
         checkpointError('Original resource identity/state changed before retained claim');
+      const parent = deps.readLaunch?.(podId) ?? checkpointError('Original launch unavailable');
+      const replacement = retainedContinuationLaunch(
+        parent,
+        podId,
+        execution ?? checkpointError('Coding replacement required'),
+      );
+      const settings =
+        deps.executionSettings?.(replacement) ??
+        checkpointError('Replacement execution settings unavailable');
+      assertQualificationExecutionContextSupported(settings);
     }
     const claimed = repo.claim({
       pod,
@@ -754,6 +770,7 @@ export function createRetainedCheckpointRecovery(deps: {
     pod: Pod,
     input: Pick<RetainedContinuationRequest, 'executionProfileId' | 'expectedExecutionDigest'>,
     assertCurrent: () => void,
+    coding = false,
   ): Promise<RetainedExecutionSelection> {
     const execution = await previewExecution(pod.id, input.executionProfileId!);
     assertCurrent();
@@ -767,6 +784,7 @@ export function createRetainedCheckpointRecovery(deps: {
     const settings =
       deps.executionSettings?.(next) ??
       checkpointError('Replacement execution settings unavailable');
+    if (coding) assertQualificationExecutionContextSupported(settings);
     return {
       ...execution,
       configurationHash: configuration(

@@ -219,6 +219,9 @@ export async function retainedCheckpointFixture(
   native = false,
   independentReview = false,
   executionRequirements?: import('@autopod/shared').ExecutionRequirements,
+  repositoryContext?: Partial<
+    Pick<import('@autopod/shared').RepositorySetup, 'buildEnv' | 'buildWorkDir'>
+  >,
 ) {
   const ctx = createTestContext();
   vi.mocked(ctx.profileStore.get).mockReturnValue({
@@ -252,6 +255,19 @@ export async function retainedCheckpointFixture(
     ? createLaunchSnapshotRepository(ctx.db, nativeConfiguration.store)
     : null;
   if (nativeConfiguration && snapshots) {
+    if (repositoryContext) {
+      const repo = nativeConfiguration.store.get('repository', 'repo-a');
+      nativeConfiguration.store.write({
+        id: repo.id,
+        kind: 'repository',
+        name: repo.name,
+        expectedRevision: repo.revision,
+        payload: {
+          ...repo.payload,
+          setups: repo.payload.setups.map((setup) => ({ ...setup, ...repositoryContext })),
+        },
+      });
+    }
     if (independentReview) {
       const flow = nativeConfiguration.store.get('workflow', 'flow');
       nativeConfiguration.store.write({

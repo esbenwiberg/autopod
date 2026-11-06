@@ -24,6 +24,7 @@ import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import {
+  assertQualificationExecutionContextSupported,
   QUALIFICATION_SOURCE_PROBE,
   qualificationExecutionContextHash,
 } from './environment-qualification.js';
@@ -50,6 +51,7 @@ type Dependencies = {
   podRepo: PodRepository;
   readLaunch?(podId: string): EffectiveLaunchConfig | null;
   executionForPod(pod: Pod): PodExecutionSettings;
+  executionSettings?(config: EffectiveLaunchConfig): PodExecutionSettings;
   worktreeManager: WorktreeManager;
   getContainerManager(target?: Pod['executionTarget']): ContainerManager;
   assertGuidanceCollected(podId: string): void;
@@ -136,6 +138,7 @@ export function createRepairContinuation(deps: Dependencies) {
     if (!(error instanceof AutopodError) || error.statusCode >= 500) throw error;
     const known: Record<string, RepairContinuationRefusalCode> = {
       REPAIR_UNSUPPORTED_NEEDS: 'unsupported_needs',
+      REPAIR_EXECUTION_CONTEXT_UNSUPPORTED: 'unsupported_task',
       INVALID_PREREQUISITE_BLOCKER: 'unsupported_needs',
       REPAIR_INCOMPLETE_REPORTS: 'incomplete_reports',
       REPAIR_REPORTS_UNAVAILABLE: 'incomplete_reports',
@@ -177,6 +180,10 @@ export function createRepairContinuation(deps: Dependencies) {
       const replacement = retainedContinuationLaunch(after.config, podId, execution);
       if (!replacement.resolvedEnvironment.platform.startsWith('linux/'))
         checkpointError('Only Linux candidates are supported');
+      const settings =
+        deps.executionSettings?.(replacement) ??
+        checkpointError('Replacement execution settings unavailable');
+      assertQualificationExecutionContextSupported(settings);
       const inspect =
         deps.worktreeManager.inspectSourceAdoption ??
         checkpointError('Source inspection unavailable');

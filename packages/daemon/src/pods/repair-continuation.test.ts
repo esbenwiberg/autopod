@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
@@ -8,7 +8,9 @@ import type {
   RepairContinuationRequestV1,
 } from '@autopod/shared';
 import Database from 'better-sqlite3';
+import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { repairContinuationRoutes } from '../api/routes/repair-continuation.js';
 import { configurationDigest } from '../configuration/configuration-digest.js';
 import {
   type RetainedExecutionSelection,
@@ -49,8 +51,21 @@ async function git(cwd: string, ...args: string[]) {
     })
   ).stdout.trim();
 }
-async function fixture() {
-  const f = await retainedCheckpointFixture('validation', true, true, requirements);
+type RepositoryContext = NonNullable<Parameters<typeof retainedCheckpointFixture>[4]>;
+type TestLaunchConfiguration = NonNullable<
+  Awaited<ReturnType<typeof retainedCheckpointFixture>>['ctx']['deps']['launchConfiguration']
+>;
+async function fixture(
+  repositoryContext?: RepositoryContext,
+  configureLaunch?: (launch: TestLaunchConfiguration) => void,
+) {
+  const f = await retainedCheckpointFixture(
+    'validation',
+    true,
+    true,
+    requirements,
+    repositoryContext,
+  );
   fixtures.push(f);
   vi.stubEnv('DATA_DIR', f.root);
   vi.stubEnv('AUTOPOD_CLAUDE_STATE_DIR', path.join(f.root, 'claude-state'));
@@ -194,6 +209,7 @@ async function fixture() {
     f.actor,
   );
   f.ctx.deps.providerAttemptRepo = createProviderAttemptRepository(f.ctx.db);
+  configureLaunch?.(launch);
   const manager = createPodManager(f.ctx.deps);
   const preview = () =>
     manager.previewRepairContinuation(f.podId, {
@@ -216,6 +232,63 @@ async function fixture() {
     };
   }
   return { ...f, manager, preview, request, reportId: original.report.id };
+}
+/** Fully bound request a previously optimistic client could have saved; no caller-authored proof. */
+async function boundRequest(
+  f: Awaited<ReturnType<typeof fixture>>,
+): Promise<RepairContinuationRequestV1> {
+  const pod = f.pod();
+  const parent = f.ctx.deps.launchConfiguration!.read(f.podId)!;
+  const execution = await f.ctx.deps.launchConfiguration!.previewRetainedExecution!(
+    f.podId,
+    'profile',
+  );
+  const replacement = retainedContinuationLaunch(parent, f.podId, execution);
+  const source = await f.worktrees.inspectSourceAdoption(pod.worktreePath!, pod.branch);
+  const result = f.ctx.podRepo.retainedCheckpoints!.selectionEvidence(pod)!;
+  const reports = f.ctx.podRepo.retainedCoding!.reports(f.podId, pod.lifecycleGeneration);
+  const task = f.ctx.podRepo.taskExecutions!.snapshot(f.podId);
+  return {
+    version: 1,
+    intent: 'qualify_then_code_once',
+    id: 'static-context-attempt',
+    expectedGeneration: pod.lifecycleGeneration,
+    expectedResultHash: result.expectedResultHash,
+    expectedReportSetHash: reports.hash,
+    sourceHead: source.commitSha,
+    executionProfileId: 'profile',
+    expectedExecutionDigest: replacement.digest,
+    expectedBindingDigest: configurationDigest({
+      version: 1,
+      podId: f.podId,
+      generation: pod.lifecycleGeneration,
+      original: parent.digest,
+      replacement: replacement.digest,
+      result: result.expectedResultHash,
+      reportSet: reports.hash,
+      source,
+      base: pod.startCommitSha,
+      taskId: task.taskId,
+      executionId: task.executionId,
+      requirements: configurationDigest(parent.work.contract!.executionRequirements),
+    }),
+    reason: 'Authorize a fully bound conditional static-context attempt',
+  };
+}
+async function assertNoRepairEffects(
+  f: Awaited<ReturnType<typeof fixture>>,
+  before: { changes: unknown; queued: string[] },
+) {
+  expect(f.ctx.db.prepare('SELECT total_changes() AS n').get()).toEqual(before.changes);
+  expect(f.ctx.podRepo.retainedCheckpoints!.latest(f.podId)).toBeNull();
+  expect(f.ctx.podRepo.retainedCoding!.latest(f.podId)).toBeNull();
+  expect(f.ctx.enqueuedSessions).toEqual(before.queued);
+  expect(f.cm.spawn).not.toHaveBeenCalled();
+  expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+  expect(f.ctx.deps.launchConfiguration!.prepareEnvironment).not.toHaveBeenCalled();
+  await expect(readdir(path.join(f.root, 'checkpoint-recoveries'))).rejects.toMatchObject({
+    code: 'ENOENT',
+  });
 }
 async function waitPreparation(f: (typeof fixtures)[number]) {
   for (let n = 0; n < 1000; n++) {
@@ -277,6 +350,138 @@ describe('conditional retained coding continuation', () => {
     expect(await f.manager.authorizeRepairContinuation(f.podId, input, f.actor)).toEqual(operation);
     await f.manager.processPod(f.podId);
     expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    {
+      name: 'NODE_OPTIONS',
+      context: { buildEnv: { NODE_OPTIONS: { value: '--require /workspace/preload.js' } } },
+    },
+    { name: 'NODE_PATH', context: { buildEnv: { NODE_PATH: { value: '/workspace/modules' } } } },
+    { name: 'LD_PRELOAD', context: { buildEnv: { LD_PRELOAD: { value: '/tmp/preload.so' } } } },
+    {
+      name: 'LD_LIBRARY_PATH',
+      context: { buildEnv: { LD_LIBRARY_PATH: { value: '/tmp/libraries' } } },
+    },
+    { name: 'BASH_ENV', context: { buildEnv: { BASH_ENV: { value: '/workspace/env.sh' } } } },
+    { name: 'ENV', context: { buildEnv: { ENV: { value: '/workspace/env.sh' } } } },
+    { name: 'relative PATH', context: { buildEnv: { PATH: { value: 'bin:/usr/bin' } } } },
+    {
+      name: 'workspace PATH',
+      context: { buildEnv: { PATH: { value: '/workspace/bin:/usr/bin' } } },
+    },
+    { name: 'empty PATH entry', context: { buildEnv: { PATH: { value: '/usr/bin::/bin' } } } },
+    { name: 'tmp PATH', context: { buildEnv: { PATH: { value: '/tmp/bin:/usr/bin' } } } },
+    { name: 'unsupported cwd', context: { buildWorkDir: 'directory with spaces' } },
+  ] satisfies Array<{
+    name: string;
+    context: RepositoryContext;
+  }>)('refuses frozen unsupported static context ($name) in preview and POST without effects', async ({
+    context,
+  }) => {
+    const f = await fixture(context);
+    const input = await boundRequest(f);
+    const before = {
+      changes: f.ctx.db.prepare('SELECT total_changes() AS n').get(),
+      queued: [...f.ctx.enqueuedSessions],
+    };
+    const app = Fastify();
+    app.addHook('preHandler', async (req) => {
+      req.user = { oid: 'operator' } as NonNullable<typeof req.user>;
+    });
+    repairContinuationRoutes(app, f.manager);
+    try {
+      const preview = await app.inject({
+        url: `/pods/${f.podId}/repair-continuation-v1/preview?sourceHead=${input.sourceHead}&executionProfileId=profile`,
+      });
+      expect(preview.statusCode).toBe(200);
+      expect(preview.json()).toMatchObject({
+        conditionalAttemptEligible: false,
+        configurationOnly: true,
+        actualQualification: 'not_run',
+        selection: null,
+        refusals: [{ code: 'unsupported_task' }],
+      });
+      expect(preview.json().refusals[0].message).toContain('context is unsupported');
+      const post = await app.inject({
+        method: 'POST',
+        url: `/pods/${f.podId}/repair-continuation-v1`,
+        payload: input,
+      });
+      expect(post.statusCode).toBe(409);
+      expect(post.json().message).toContain('context is unsupported');
+      await assertNoRepairEffects(f, before);
+    } finally {
+      await app.close();
+    }
+  });
+  it('preserves supported static-context eligibility without claiming actual qualification', async () => {
+    const f = await fixture({
+      buildEnv: {
+        PATH: { value: '/usr/local/bin:/usr/bin:/bin' },
+        NODE_ENV: { value: 'development' },
+      },
+      buildWorkDir: 'packages/web',
+    });
+    const input = await boundRequest(f);
+    const before = {
+      changes: f.ctx.db.prepare('SELECT total_changes() AS n').get(),
+      queued: [...f.ctx.enqueuedSessions],
+    };
+    const view = await f.preview();
+    expect(view).toMatchObject({
+      conditionalAttemptEligible: true,
+      actualQualification: 'not_run',
+      configurationOnly: true,
+      refusals: [],
+      selection: {
+        expectedBindingDigest: input.expectedBindingDigest,
+        expectedExecutionDigest: input.expectedExecutionDigest,
+      },
+    });
+    await assertNoRepairEffects(f, before);
+  });
+  it.each([
+    'replacement-reselection',
+    'last-original-observation',
+  ] as const)('rechecks static context before authorization effects at %s', async (stage) => {
+    let unsupported = false;
+    const f = await fixture(undefined, (launch) => {
+      const resolve = launch.executionSettings;
+      launch.executionSettings = (config) => {
+        const settings = resolve(config);
+        return config.execution.target === 'local' && unsupported
+          ? { ...settings, buildEnv: { NODE_OPTIONS: '--require /workspace/preload.js' } }
+          : settings;
+      };
+    });
+    const input = await f.request();
+    if (stage === 'replacement-reselection') {
+      const selected = vi
+        .mocked(f.ctx.deps.launchConfiguration!.previewRetainedExecution!)
+        .getMockImplementation()!;
+      let selections = 0;
+      vi.mocked(f.ctx.deps.launchConfiguration!.previewRetainedExecution!).mockImplementation(
+        async (...args) => {
+          if (++selections === 2) unsupported = true;
+          return selected(...args);
+        },
+      );
+    } else {
+      const status = vi.mocked(f.cm.getStatus).getMockImplementation()!;
+      let observations = 0;
+      vi.mocked(f.cm.getStatus).mockImplementation(async (...args) => {
+        if (++observations === 2) unsupported = true;
+        return status(...args);
+      });
+    }
+    const before = {
+      changes: f.ctx.db.prepare('SELECT total_changes() AS n').get(),
+      queued: [...f.ctx.enqueuedSessions],
+    };
+    await expect(f.manager.authorizeRepairContinuation(f.podId, input, f.actor)).rejects.toThrow(
+      'context is unsupported',
+    );
+    await assertNoRepairEffects(f, before);
   });
   it('keeps preview/configuration-only and refuses unsupported mixed report sets before allocation', async () => {
     const f = await fixture();
