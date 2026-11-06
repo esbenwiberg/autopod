@@ -72,6 +72,50 @@ private func repairUIOperation(_ request: RepairContinuationRequestV1, changed: 
 }
 
 @Suite(.serialized) @MainActor struct RepairContinuationTests {
+  @Test func scalarBoundsAndECMAScriptTrimAgreeBeforeAnyJournalSaveOrPOST() async throws {
+    struct ReasonCase: Decodable {
+      let name: String
+      let kind: String
+      let path: [String]
+      let value: String
+      let success: Bool
+      let canonicalValue: String?
+    }
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+      .appendingPathComponent("Fixtures/repair-continuation-strings.json")
+    let vectors = try JSONDecoder().decode([ReasonCase].self, from: Data(contentsOf: url))
+      .filter { $0.kind == "request" && $0.path == ["reason"] }
+    for vector in vectors {
+      let f = RepairUIFixture(); defer { f.clean() }
+      let model = RepairContinuationModel(podId: "pod", actions: f.actions)
+      await f.prepare(model)
+      model.reason = vector.value
+      #expect(model.canAuthorize == vector.success, "\(vector.name)")
+      await model.authorize(f.actions)
+      let journal = RepairContinuationJournal<RepairContinuationRequestV1>(scope: "daemon", podId: "pod", directory: f.directory)
+      if vector.success {
+        let saved = try #require(try journal.load())
+        #expect(saved.reason.utf8.elementsEqual(vector.canonicalValue!.utf8), "\(vector.name)")
+        try saved.validate()
+        #expect(f.posts == 1 && model.pending == saved && model.operation?.request == saved)
+        await model.authorize(f.actions)
+        #expect(f.posts == 1) // No replay or replacement of immutable intent.
+      } else {
+        #expect(f.posts == 0 && model.pending == nil && model.operation == nil, "\(vector.name)")
+        #expect(!FileManager.default.fileExists(atPath: journal.url.path))
+        #expect(try journal.load() == nil)
+        let reopened = RepairContinuationModel(podId: "pod", actions: f.actions)
+        await f.prepare(reopened)
+        #expect(reopened.pending == nil && reopened.canAuthorize && f.posts == 0)
+        // A bad draft never poisons the journal; correction needs no clearing.
+        model.reason = "Corrected valid reason"
+        #expect(model.canAuthorize)
+        await model.authorize(f.actions)
+        #expect(f.posts == 1 && model.pending?.reason == "Corrected valid reason")
+      }
+    }
+  }
+
   @Test(arguments: ["restartedSealed", "restartedValidated", "restartedFailedChecks", "restartedUnsettled"])
   func reopensDurableRestartReceiptsWithoutAuthorization(stage: String) async throws {
     let f = RepairUIFixture(); defer { f.clean() }

@@ -21,14 +21,19 @@ public struct RepairContinuationRequestV1: Codable, Equatable, Sendable {
     expectedGeneration = selection.expectedGeneration; expectedResultHash = selection.expectedResultHash
     expectedReportSetHash = selection.expectedReportSetHash; sourceHead = selection.sourceHead
     executionProfileId = selection.executionProfileId; expectedExecutionDigest = selection.expectedExecutionDigest
-    expectedBindingDigest = selection.expectedBindingDigest; self.reason = reason
+    expectedBindingDigest = selection.expectedBindingDigest; self.reason = Self.canonicalReason(reason)
   }
+
+  /// The request body must be canonical BEFORE it enters the immutable journal.
+  /// This is ECMAScript String.trim, not Foundation whitespace or Unicode normalization.
+  public static func canonicalReason(_ value: String) -> String { RepairWire.trim(value) }
 
   public func validate() throws {
     try RepairWire.require(version == 1 && intent == "qualify_then_code_once" && RepairWire.id(id)
       && RepairWire.generation(expectedGeneration) && RepairWire.sha(sourceHead) && RepairWire.id(executionProfileId)
       && [expectedResultHash, expectedReportSetHash, expectedExecutionDigest, expectedBindingDigest].allSatisfy(RepairWire.hash)
-      && (10...4000).contains(reason.utf16.count) && reason == reason.trimmingCharacters(in: .whitespacesAndNewlines))
+      && (10...4000).contains(reason.unicodeScalars.count)
+      && reason.utf8.elementsEqual(Self.canonicalReason(reason).utf8))
   }
 }
 
@@ -53,7 +58,7 @@ public struct RepairContinuationRefusal: Codable, Equatable, Sendable {
   public let code: String
   public let message: String
   fileprivate func validate() throws {
-    try RepairWire.require(Self.codes.contains(code) && !message.isEmpty && message.utf16.count <= 1024)
+    try RepairWire.require(Self.codes.contains(code) && RepairWire.text(message))
   }
   private static let codes: Set<String> = ["unavailable", "unsupported_task", "unsupported_needs", "incomplete_reports", "stale_selection", "conflict", "custody_held", "execution_unsettled", "pending_decision", "uncollected_guidance", "source_unavailable", "configuration_changed", "retry_blocked", "budget_blocked", "qualification_failed", "qualification_unknown", "qualification_expired", "source_seal_failed", "checks_failed", "internal_error"]
 }
@@ -66,7 +71,7 @@ public struct RepairExecutionDisplayV1: Codable, Equatable, Sendable {
   public let memoryGb: Double
   public let cpus: Double?
   fileprivate func validate() throws {
-    try RepairWire.require(["local", "sandbox"].contains(target) && !template.isEmpty && template.utf16.count <= 128
+    try RepairWire.require(["local", "sandbox"].contains(target) && !template.isEmpty && template.unicodeScalars.count <= 128
       && RepairWire.hash(imageKey) && ["linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64"].contains(platform)
       && memoryGb.isFinite && memoryGb > 0 && memoryGb <= 1024
       && (cpus == nil || (cpus!.isFinite && cpus! > 0 && cpus! <= 1024)))
@@ -133,7 +138,7 @@ public struct RepairSourceIdentityV1: Codable, Equatable, Sendable {
   public let tree: String
   public let baseCommitSha: String
   fileprivate func validate() throws {
-    try RepairWire.require(!repository.isEmpty && repository.utf16.count <= 2048 && [head, tree, baseCommitSha].allSatisfy(RepairWire.sha))
+    try RepairWire.require(!repository.isEmpty && repository.unicodeScalars.count <= 2048 && [head, tree, baseCommitSha].allSatisfy(RepairWire.sha))
   }
 }
 public struct RepairImageIdentityV1: Codable, Equatable, Sendable {
@@ -171,7 +176,7 @@ public struct EnvironmentQualificationBindingV1: Codable, Equatable, Sendable {
       && RepairWire.generation(originalGeneration) && RepairWire.generation(candidateGeneration)
       && [requestHash, originalResultHash, reportSetHash, requirementsHash, originalLaunchDigest, replacementLaunchDigest,
         configurationHash, sourceEpoch, credentialEpoch, resourceEpoch, executionContextHash, containerId].allSatisfy(RepairWire.hash)
-      && target == "local" && !resourceKey.isEmpty && resourceKey.utf16.count <= 2048
+      && target == "local" && !resourceKey.isEmpty && resourceKey.unicodeScalars.count <= 2048
       && expectedImage.kind == "docker-image-id" && RepairWire.matches(expectedImage.digest, "^sha256:[a-f0-9]{64}$")
       && ["linux/amd64", "linux/arm64"].contains(platform))
     try source.validate()
@@ -206,7 +211,7 @@ public struct EnvironmentQualificationEvidenceV1: Codable, Equatable, Sendable {
   }
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
-    let raw = try c.decode(RepairBindingCanonicalJSON.self, forKey: .binding)
+    let raw = try c.decode(RepairStrictBindingJSON.self, forKey: .binding).value
     try raw.validateBindingShape()
     decodedBindingDigest = raw.digest
     version = try c.decode(Int.self, forKey: .version)
@@ -227,13 +232,13 @@ public struct EnvironmentQualificationEvidenceV1: Codable, Equatable, Sendable {
     try RepairWire.require(bindingDigest == decodedBindingDigest)
     guard let start = RepairWire.date(startedAt), let end = RepairWire.date(finishedAt), let expiry = RepairWire.date(expiresAt) else { throw RepairWire.error }
     try RepairWire.require(version == 1 && probeVersion == 1 && RepairWire.hash(bindingDigest)
-      && (daemonCommit?.utf16.count ?? 0) <= 128 && (implementationHash == nil || RepairWire.hash(implementationHash!))
+      && (daemonCommit?.unicodeScalars.count ?? 0) <= 128 && (implementationHash == nil || RepairWire.hash(implementationHash!))
       && (provenanceId == nil || RepairWire.id(provenanceId!)) && end >= start && expiry >= end && expiry.timeIntervalSince(end) <= 300
       && (1...96).contains(observations.count) && (outcome != .qualified || observations.allSatisfy { $0.outcome == .qualified }))
     for item in observations {
       try RepairWire.require(["resource_identity", "image", "platform", "source", "memory", "cpu", "streaming", "agent_cli", "launcher", "preparation"].contains(item.prerequisite)
-        && (item.launcher == nil || (item.launcher!.utf16.count <= 256 && RepairWire.matches(item.launcher!, "^[A-Za-z0-9_][A-Za-z0-9_.+-]*$")))
-        && item.code.utf16.count <= 80 && RepairWire.matches(item.code, "^[A-Z][A-Z0-9_]*$") && !item.detail.isEmpty && item.detail.utf16.count <= 1024)
+        && (item.launcher == nil || (item.launcher!.unicodeScalars.count <= 256 && RepairWire.matches(item.launcher!, "^[A-Za-z0-9_][A-Za-z0-9_.+-]*$")))
+        && item.code.unicodeScalars.count <= 80 && RepairWire.matches(item.code, "^[A-Z][A-Z0-9_]*$") && RepairWire.text(item.detail))
     }
   }
 }
@@ -310,15 +315,41 @@ public struct RepairContinuationOperationV1: Codable, Equatable, Sendable {
 /// Resource floats live in display/requirements, not this hashed binding. Reject
 /// arrays/null/bools/floats/unknown fields rather than silently round or drop them.
 /// JSONDecoder rejects unpaired surrogates; no identity is inferred for such input.
+private struct RepairStrictBindingJSON: Decodable {
+  let value: RepairBindingCanonicalJSON
+  init(from decoder: Decoder) throws {
+    value = try RepairBindingCanonicalJSON(from: decoder, asciiKeys: true)
+  }
+}
+
 indirect enum RepairBindingCanonicalJSON: Decodable {
   case object([String: Self]), string(String), integer(Int)
 
-  init(from decoder: Decoder) throws {
-    let c = try decoder.singleValueContainer()
-    if let object = try? c.decode([String: Self].self) { self = .object(object) }
-    else if let string = try? c.decode(String.self) { self = .string(string) }
-    else if let integer = try? c.decode(Int.self), RepairWire.generation(integer) { self = .integer(integer) }
-    else { throw RepairWire.error }
+  private struct WireKey: CodingKey {
+    let stringValue: String
+    let intValue: Int? = nil
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { return nil }
+  }
+  init(from decoder: Decoder) throws { try self.init(from: decoder, asciiKeys: false) }
+  fileprivate init(from decoder: Decoder, asciiKeys: Bool) throws {
+    if let object = try? decoder.container(keyedBy: WireKey.self) {
+      // Check enumerated spellings BEFORE Swift Set/Dictionary can equate an
+      // unsupported Unicode alias (e.g. resourceKey) with an ASCII schema key.
+      // Foundation may already coalesce duplicate equivalent wire keys; this is
+      // not a raw JSON parser or a claim to enumerate every serialized duplicate.
+      if asciiKeys { try RepairWire.require(object.allKeys.allSatisfy { $0.stringValue.utf8.allSatisfy { $0 < 128 } }) }
+      var fields: [String: Self] = [:]
+      for key in object.allKeys {
+        fields[key.stringValue] = try Self(from: object.superDecoder(forKey: key), asciiKeys: asciiKeys)
+      }
+      self = .object(fields)
+    } else {
+      let c = try decoder.singleValueContainer()
+      if let string = try? c.decode(String.self) { self = .string(string) }
+      else if let integer = try? c.decode(Int.self), RepairWire.generation(integer) { self = .integer(integer) }
+      else { throw RepairWire.error }
+    }
   }
   var canonical: String {
     switch self {
@@ -353,6 +384,7 @@ indirect enum RepairBindingCanonicalJSON: Decodable {
     guard case .object(let fields) = self,
       case .object(let source) = fields["source"],
       case .object(let image) = fields["expectedImage"] else { throw RepairWire.error }
+    try RepairWire.require([fields, source, image].allSatisfy { $0.keys.allSatisfy { $0.utf8.allSatisfy { $0 < 128 } } })
     try RepairWire.require(Set(fields.keys) == Set([
       "version", "operationId", "requestHash", "podId", "taskId", "executionId", "custodyId",
       "originalGeneration", "candidateGeneration", "originalResultHash", "reportSetHash",
@@ -366,11 +398,27 @@ indirect enum RepairBindingCanonicalJSON: Decodable {
 
 private enum RepairWire {
   static var error: DaemonError { .decodingError("Unsupported or uncorrelated repair-continuation response. No qualification or coding inferred; observe the saved request.") }
+  // Pinned Zod 4.6.7 min/max count Unicode code points, not UTF-16 or graphemes.
+  // ECMAScript WhiteSpace + LineTerminator; notably FEFF is trimmed, NEL is not.
+  static func trim(_ value: String) -> String {
+    func whitespace(_ scalar: Unicode.Scalar) -> Bool {
+      switch scalar.value {
+      case 0x09...0x0d, 0x20, 0xa0, 0x1680, 0x2000...0x200a,
+           0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff: return true
+      default: return false
+      }
+    }
+    var scalars = value.unicodeScalars[...]
+    while let first = scalars.first, whitespace(first) { scalars.removeFirst() }
+    while let last = scalars.last, whitespace(last) { scalars.removeLast() }
+    return String(scalars)
+  }
+  static func text(_ value: String) -> Bool { (1...1024).contains(trim(value).unicodeScalars.count) }
   static func require(_ valid: Bool) throws { if !valid { throw error } }
   static func matches(_ value: String, _ pattern: String) -> Bool { value.range(of: pattern, options: .regularExpression) != nil }
   static func hash(_ value: String) -> Bool { matches(value, "^[a-f0-9]{64}$") }
   static func sha(_ value: String) -> Bool { matches(value, "^(?:[a-f0-9]{40}|[a-f0-9]{64})$") }
-  static func id(_ value: String) -> Bool { value.utf16.count <= 128 && matches(value, "^[A-Za-z0-9][A-Za-z0-9_.:-]*$") }
+  static func id(_ value: String) -> Bool { value.unicodeScalars.count <= 128 && matches(value, "^[A-Za-z0-9][A-Za-z0-9_.:-]*$") }
   static func generation(_ value: Int) -> Bool { value >= 0 && value <= 9_007_199_254_740_991 }
   static func date(_ value: String) -> Date? {
     let format = ISO8601DateFormatter()

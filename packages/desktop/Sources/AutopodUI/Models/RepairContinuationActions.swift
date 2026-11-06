@@ -65,14 +65,16 @@ public struct RepairContinuationActions: Sendable {
 
   var canPreview: Bool {
     !busy && !journalInvalid && pending == nil && snapshot?.available == true && snapshot?.operation == nil
-      && profileId.utf16.count <= 128 && profileId.range(of: "^[A-Za-z0-9][A-Za-z0-9_.:-]*$", options: .regularExpression) != nil
+      && profileId.unicodeScalars.count <= 128 && profileId.range(of: "^[A-Za-z0-9][A-Za-z0-9_.:-]*$", options: .regularExpression) != nil
       && hostHead.range(of: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$", options: .regularExpression) != nil
   }
   var canAuthorize: Bool {
-    let length = reason.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count
-    guard canPreview, (10...4000).contains(length), let snapshot, snapshot.refusals.isEmpty, let preview,
+    guard canPreview, let snapshot, snapshot.refusals.isEmpty, let preview,
       preview.conditionalAttemptEligible, preview.configurationOnly, preview.actualQualification == "not_run",
       preview.refusals.isEmpty, preview.configurationDiff != nil, let selected = preview.selection else { return false }
+    // Use the exact canonical request/validator used before save, not a second
+    // reason-length/whitespace approximation in the enablement path.
+    guard (try? RepairContinuationRequestV1(id: "validation", selection: selected, reason: reason).validate()) != nil else { return false }
     // Inspection deliberately does not read host source. The successful source-checked
     // preview binds the exact user HEAD; a provided inspection HEAD must still agree.
     return selected.sourceHead == hostHead && (snapshot.sourceHead == nil || selected.sourceHead == snapshot.sourceHead)
@@ -143,7 +145,7 @@ public struct RepairContinuationActions: Sendable {
   func authorize(_ actions: RepairContinuationActions) async {
     guard canAuthorize, bind(actions), let selection = preview?.selection else { return }
     let request = RepairContinuationRequestV1(id: UUID().uuidString, selection: selection,
-      reason: reason.trimmingCharacters(in: .whitespacesAndNewlines))
+      reason: reason)
     busy = true; error = nil
     defer { busy = false }
     do {
