@@ -87,6 +87,7 @@ export function createRetainedCheckpointRecovery(deps: {
     pod: Pod,
     continuation = false,
     repair?: CheckpointRecoveryBinding['approvalRewrite'],
+    addReview = false,
   ) {
     deps.podRepo.retainedFinalizations?.assertAvailable(pod.id);
     if (
@@ -200,7 +201,8 @@ export function createRetainedCheckpointRecovery(deps: {
     if (
       continuation &&
       (pod.options.validationSuite === 'thin' ||
-        getPodValidationSkipPhases(deps.executionForPod(pod), pod).includes('review'))
+        (getPodValidationSkipPhases(deps.executionForPod(pod), pod).includes('review') &&
+          !(addReview && deps.readLaunch?.(pod.id)?.ai.reviewer.mode === 'independent')))
     )
       checkpointError(
         'Retained continuation requires configured independent review without waivers',
@@ -218,7 +220,12 @@ export function createRetainedCheckpointRecovery(deps: {
   }
   function original(record: CheckpointRecoveryRecord) {
     const current = deps.podRepo.getOrThrow(record.podId);
-    policy(current, Boolean(record.binding.continuation), record.binding.approvalRewrite);
+    policy(
+      current,
+      Boolean(record.binding.continuation),
+      record.binding.approvalRewrite,
+      record.binding.continuation?.reviewPolicy === 'independent-v1',
+    );
     if (
       current.lifecycleGeneration !== record.generation ||
       current.containerId !== record.containerId ||
@@ -361,14 +368,15 @@ export function createRetainedCheckpointRecovery(deps: {
     const prior = replay();
     if (prior) return prior; // Lost responses/restarts never repeat preparation or dispatch.
     const pod = deps.podRepo.getOrThrow(podId);
-    policy(pod, continuation, repair);
+    const addReview = continuation && !repair;
+    policy(pod, continuation, repair, addReview);
     const containerManager = deps.getContainerManager(pod.executionTarget);
     if (!containerManager.getResourceKey || !deps.worktreeManager.inspectSourceAdoption)
       checkpointError('Exact provider namespace and clean source inspection are required');
     const anchor = configuration(pod);
     const assertCurrent = () => {
       const current = deps.podRepo.getOrThrow(podId);
-      policy(current, continuation, repair);
+      policy(current, continuation, repair, addReview);
       if (
         current.lifecycleGeneration !== input.expectedGeneration ||
         current.containerId !== pod.containerId ||
@@ -459,6 +467,7 @@ export function createRetainedCheckpointRecovery(deps: {
         ...(continuation
           ? {
               continuation: {
+                ...(addReview ? { reviewPolicy: 'independent-v1' as const } : {}),
                 remoteHead: (input as RetainedContinuationRequest).remoteHead,
                 prepareOnly: repair
                   ? true
@@ -562,7 +571,7 @@ export function createRetainedCheckpointRecovery(deps: {
     if (!profileId.trim() || profileId.length > 128)
       checkpointError('Explicit replacement profile required');
     const pod = deps.podRepo.getOrThrow(podId);
-    policy(pod, true);
+    policy(pod, true, undefined, true);
     const preview =
       deps.previewExecution ?? checkpointError('Explicit execution selection is unavailable');
     return preview(podId, profileId);

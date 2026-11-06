@@ -72,6 +72,8 @@ export interface CheckpointRecoveryBinding {
   continuation?: {
     remoteHead?: string;
     prepareOnly: boolean;
+    /** Additive checks-only gate; never rewrites or removes frozen workflow phases. */
+    reviewPolicy?: 'independent-v1';
     execution?: RetainedExecutionSelection;
   };
 }
@@ -449,6 +451,39 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
         WHERE task_id=? AND pod_id=? AND generation=? AND stage='validation' AND started_at IS NOT NULL LIMIT 1`)
         .get(record.taskId, pod.id, pod.lifecycleGeneration);
       return { ...budget, recoveryId: record.id, used: Boolean(used) };
+    },
+    requiredReview(pod: Pod): boolean {
+      const record = latest(pod.id);
+      if (!record?.binding.continuation?.reviewPolicy) return false;
+      if (
+        record.checked &&
+        record.activated &&
+        pod.lifecycleGeneration > record.activated.generation
+      )
+        return false;
+      assertAvailable(pod.id);
+      const task = db
+        .prepare('SELECT task_id AS id FROM task_executions WHERE pod_id=?')
+        .get(pod.id) as { id: string } | undefined;
+      if (
+        record.binding.continuation.reviewPolicy !== 'independent-v1' ||
+        task?.id !== record.taskId ||
+        scope(db).getStore() !== record.id ||
+        !record.checking ||
+        record.checked ||
+        record.blocked ||
+        record.generation + 1 !== pod.lifecycleGeneration ||
+        record.activated?.generation !== pod.lifecycleGeneration ||
+        record.checking.generation !== pod.lifecycleGeneration ||
+        record.prepared?.worktree !== pod.worktreePath ||
+        pod.status !== 'validating' ||
+        !pod.containerId ||
+        pod.containerId === record.containerId
+      )
+        checkpointError(
+          'Mandatory continuation review no longer matches its owned source/generation',
+        );
+      return true;
     },
     providerIdentity(podId: string, generation: number): string {
       const record = latest(podId);

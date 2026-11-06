@@ -79,7 +79,7 @@ describe('explicit retention-safe continuation', () => {
     await f.recovery.wait(f.input.id);
     const op = f.recovery.list(f.podId)[0]!;
     expect(op.blocked, JSON.stringify(vi.mocked(f.deps.logger.error).mock.calls)).toBeNull();
-    expect(op.binding.continuation).toEqual({ prepareOnly: false });
+    expect(op.binding.continuation).toEqual({ prepareOnly: false, reviewPolicy: 'independent-v1' });
     expect(op.containerId).toBe(before.containerId);
     expect(f.pod()).toMatchObject({
       status: 'queued',
