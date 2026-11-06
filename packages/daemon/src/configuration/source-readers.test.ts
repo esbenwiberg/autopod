@@ -106,7 +106,7 @@ describe('daemon configuration source readers', () => {
       db.close();
     }
   });
-  it('discovers and freezes canonical shared skills without additional enrolled roots', async () => {
+  it('bundles only repo-specific skills and does not resolve removed global workflows', async () => {
     const db = createTestDb();
     try {
       const { store } = createTestConfiguration(db);
@@ -134,7 +134,12 @@ describe('daemon configuration source readers', () => {
           readers.skillContent({ name, source: { type: 'local', path: alias } }),
         ).resolves.toBe(content);
       }
-      expect(builtinNames).toContain('prep');
+      expect(builtinNames).toEqual(['add-pod-state', 'add-profile-field', 'deploy-hosted-daemon']);
+      for (const name of ['plan-feature', 'prep', 'podsitter', 'triage', 'investigate-bug']) {
+        await expect(
+          readers.skillContent({ name, source: { type: 'builtin' } }),
+        ).rejects.toMatchObject({ code: 'ENOENT' });
+      }
     } finally {
       db.close();
     }

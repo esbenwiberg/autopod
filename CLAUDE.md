@@ -198,7 +198,7 @@ Commander-based CLI.
 - `history.ts` — pod history queries
 - `research.ts` — research-pod workflows
 - `schedule.ts` — scheduled-job CRUD plus reusable prompt templates
-- `series.ts` — multi-pod series (consumed by `/plan-feature`)
+- `series.ts` — multi-pod series from structured spec folders
 - `spec.ts` — local spec parser/checker
 - `mobile.ts` — Tailscale phone PWA pairing helpers
 - `watch.ts` — live event tail

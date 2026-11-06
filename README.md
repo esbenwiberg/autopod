@@ -846,7 +846,7 @@ The AC file format is one criterion per line, with optional `- ` prefixes and bl
 
 The validation engine classifies criteria as web, API, command, or reviewer-owned checks. Web criteria use a real browser and screenshots; command/API criteria can run deterministically; reviewer-owned criteria are checked by the AI task reviewer. The agent also has access to a `validate_in_browser` MCP tool for self-checking during development.
 
-For runnable specs created by `/prep` or `/plan-feature`, put executable proof in `contract.yaml` (`scenarios`, `required_facts`, and optional `human_review`) rather than brief frontmatter ACs. Required facts run during validation and produce attempt-scoped evidence YAML.
+For runnable specs created by your planning workflow, put executable proof in `contract.yaml` (`scenarios`, `required_facts`, and optional `human_review`) rather than brief frontmatter ACs. Required facts run during validation and produce attempt-scoped evidence YAML.
 
 ### Validation commands
 
