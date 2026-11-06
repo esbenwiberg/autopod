@@ -1,3 +1,5 @@
+export { canonicalConfiguration } from './canonical-configuration.js';
+
 // Constants (runtime values)
 export {
   AUTOPOD_INSTRUCTIONS_PATH,

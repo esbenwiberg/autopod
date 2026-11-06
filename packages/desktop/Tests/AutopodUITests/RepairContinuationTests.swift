@@ -72,6 +72,36 @@ private func repairUIOperation(_ request: RepairContinuationRequestV1, changed: 
 }
 
 @Suite(.serialized) @MainActor struct RepairContinuationTests {
+  @Test(arguments: ["restartedSealed", "restartedValidated", "restartedFailedChecks", "restartedUnsettled"])
+  func reopensDurableRestartReceiptsWithoutAuthorization(stage: String) async throws {
+    let f = RepairUIFixture(); defer { f.clean() }
+    let url = ProcessInfo.processInfo.environment["REPAIR_CLIENT_PRODUCER_FIXTURE"].map { URL(fileURLWithPath: $0) }
+      ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/repair-continuation-backend.json")
+    let all = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    let receipt = try JSONDecoder().decode(RepairContinuationOperationV1.self, from: JSONSerialization.data(withJSONObject: all[stage]!))
+    let inspection = try JSONDecoder().decode(RepairContinuationInspectionV1.self, from: JSONSerialization.data(withJSONObject: all[stage + "Inspection"]!))
+    let actions = RepairContinuationActions(scope: f.scope, draftScope: "restart", journalDirectory: f.directory,
+      load: { _ in f.loads += 1; return inspection },
+      preview: { _, _, _ in f.previews += 1; throw URLError(.unsupportedURL) },
+      submit: { _, _ in f.posts += 1; throw URLError(.unsupportedURL) },
+      observe: { pod, id in
+        #expect(pod == receipt.podId && id == receipt.request.id)
+        f.observations += 1; return receipt
+      })
+    for _ in 0..<2 {
+      let model = RepairContinuationModel(podId: receipt.podId, actions: actions)
+      await model.refresh(actions)
+      #expect(model.error == nil && model.operation == receipt && model.pending == receipt.request)
+      #expect(!model.canAuthorize && !model.canPreview)
+      await model.observe(actions)
+      #expect(model.operation == receipt && model.pending == receipt.request)
+    }
+    let journal = RepairContinuationJournal<RepairContinuationRequestV1>(scope: "restart", podId: receipt.podId, directory: f.directory)
+    #expect(try journal.load() == receipt.request)
+    #expect(f.posts == 0 && f.previews == 0 && f.observations == 4 && f.loads == 2)
+  }
+
   @Test func productionNullHeadInspectionBindsUserSourceCheckedPreviewForOneConditionalPost() async throws {
     let f = RepairUIFixture(); defer { f.clean() }
     let url = ProcessInfo.processInfo.environment["REPAIR_CLIENT_PRODUCER_FIXTURE"].map { URL(fileURLWithPath: $0) }

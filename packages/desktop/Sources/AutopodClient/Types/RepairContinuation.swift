@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 // Wire mirrors of @autopod/shared repair-continuation.schema.ts (including required retained operationId).
@@ -196,8 +197,34 @@ public struct EnvironmentQualificationEvidenceV1: Codable, Equatable, Sendable {
   public let outcome: RepairQualificationOutcome
   public let observations: [EnvironmentQualificationObservationV1]
   public let provenanceId: String?
+  // Captured from the full wire value, NOT JSONEncoder(binding) (which can drop fields).
+  private let decodedBindingDigest: String
+
+  private enum CodingKeys: String, CodingKey {
+    case version, binding, bindingDigest, probeVersion, daemonCommit, implementationHash
+    case startedAt, finishedAt, expiresAt, outcome, observations, provenanceId
+  }
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    let raw = try c.decode(RepairBindingCanonicalJSON.self, forKey: .binding)
+    try raw.validateBindingShape()
+    decodedBindingDigest = raw.digest
+    version = try c.decode(Int.self, forKey: .version)
+    binding = try c.decode(EnvironmentQualificationBindingV1.self, forKey: .binding)
+    bindingDigest = try c.decode(String.self, forKey: .bindingDigest)
+    probeVersion = try c.decode(Int.self, forKey: .probeVersion)
+    daemonCommit = try c.decodeIfPresent(String.self, forKey: .daemonCommit)
+    implementationHash = try c.decodeIfPresent(String.self, forKey: .implementationHash)
+    startedAt = try c.decode(String.self, forKey: .startedAt)
+    finishedAt = try c.decode(String.self, forKey: .finishedAt)
+    expiresAt = try c.decode(String.self, forKey: .expiresAt)
+    outcome = try c.decode(RepairQualificationOutcome.self, forKey: .outcome)
+    observations = try c.decode([EnvironmentQualificationObservationV1].self, forKey: .observations)
+    provenanceId = try c.decodeIfPresent(String.self, forKey: .provenanceId)
+  }
   fileprivate func validate() throws {
     try binding.validate()
+    try RepairWire.require(bindingDigest == decodedBindingDigest)
     guard let start = RepairWire.date(startedAt), let end = RepairWire.date(finishedAt), let expiry = RepairWire.date(expiresAt) else { throw RepairWire.error }
     try RepairWire.require(version == 1 && probeVersion == 1 && RepairWire.hash(bindingDigest)
       && (daemonCommit?.utf16.count ?? 0) <= 128 && (implementationHash == nil || RepairWire.hash(implementationHash!))
@@ -265,13 +292,75 @@ public struct RepairContinuationOperationV1: Codable, Equatable, Sendable {
     }
     if let final = codingFinalSource {
       try final.validate()
-      try RepairWire.require(final.operationId == operationId && final.selectedHead == request.sourceHead && final.generation == candidateGeneration)
+      guard let input = qualification?.binding.source else { throw RepairWire.error }
+      try RepairWire.require(final.operationId == operationId && final.selectedHead == request.sourceHead && final.generation == candidateGeneration
+        && final.source.repository.utf8.elementsEqual(input.repository.utf8)
+        && final.source.baseCommitSha == input.baseCommitSha)
     }
     try RepairWire.require((codingAdmission != .consumed && state != .qualified) || qualification?.outcome == .qualified)
     try RepairWire.require(codingFinalSource == nil || codingAdmission == .consumed)
     try RepairWire.require(![.coding, .sealing, .checking, .validated].contains(state) || codingAdmission == .consumed)
     try RepairWire.require([.notStarted, .unknown].contains(checks) || codingFinalSource != nil)
     try RepairWire.require(state != .validated || (checks == .passed && codingFinalSource != nil))
+  }
+}
+
+/// Exact canonicalConfiguration subset for the STRICT v1 binding schema:
+/// objects, strings, and integers in [0, Number.MAX_SAFE_INTEGER] only.
+/// Resource floats live in display/requirements, not this hashed binding. Reject
+/// arrays/null/bools/floats/unknown fields rather than silently round or drop them.
+/// JSONDecoder rejects unpaired surrogates; no identity is inferred for such input.
+indirect enum RepairBindingCanonicalJSON: Decodable {
+  case object([String: Self]), string(String), integer(Int)
+
+  init(from decoder: Decoder) throws {
+    let c = try decoder.singleValueContainer()
+    if let object = try? c.decode([String: Self].self) { self = .object(object) }
+    else if let string = try? c.decode(String.self) { self = .string(string) }
+    else if let integer = try? c.decode(Int.self), RepairWire.generation(integer) { self = .integer(integer) }
+    else { throw RepairWire.error }
+  }
+  var canonical: String {
+    switch self {
+    case .integer(let value): return String(value)
+    case .string(let value): return Self.quote(value)
+    case .object(let fields):
+      let keys = fields.keys.sorted { $0.utf16.lexicographicallyPrecedes($1.utf16) }
+      return "{" + keys.map { Self.quote($0) + ":" + fields[$0]!.canonical }.joined(separator: ",") + "}"
+    }
+  }
+  var digest: String {
+    SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
+  }
+  private static func quote(_ value: String) -> String {
+    var result = "\""
+    for scalar in value.unicodeScalars {
+      switch scalar.value {
+      case 0x22: result += "\\\""
+      case 0x5c: result += "\\\\"
+      case 0x08: result += "\\b"
+      case 0x09: result += "\\t"
+      case 0x0a: result += "\\n"
+      case 0x0c: result += "\\f"
+      case 0x0d: result += "\\r"
+      case 0..<0x20: result += String(format: "\\u%04x", scalar.value)
+      default: result.unicodeScalars.append(scalar)
+      }
+    }
+    return result + "\""
+  }
+  func validateBindingShape() throws {
+    guard case .object(let fields) = self,
+      case .object(let source) = fields["source"],
+      case .object(let image) = fields["expectedImage"] else { throw RepairWire.error }
+    try RepairWire.require(Set(fields.keys) == Set([
+      "version", "operationId", "requestHash", "podId", "taskId", "executionId", "custodyId",
+      "originalGeneration", "candidateGeneration", "originalResultHash", "reportSetHash",
+      "requirementsHash", "originalLaunchDigest", "replacementLaunchDigest", "configurationHash",
+      "sourceEpoch", "credentialEpoch", "resourceEpoch", "source", "target", "containerId",
+      "resourceKey", "expectedImage", "platform", "executionContextHash"
+    ]) && Set(source.keys) == Set(["repository", "head", "tree", "baseCommitSha"])
+      && Set(image.keys) == Set(["kind", "digest"]))
   }
 }
 

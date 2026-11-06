@@ -322,7 +322,13 @@ export function createRepairContinuation(deps: Dependencies) {
             reportsHash: final.reportsHash,
           }
         : null,
-      codingAdmission: facts.worker ? (interrupted ? 'unknown' : 'consumed') : 'not_admitted',
+      // A durable seal proves this admitted worker settled, even after process restart.
+      // In-flight execution remains uncertain; this display fact never grants replay.
+      codingAdmission: facts.worker
+        ? interrupted && !final
+          ? 'unknown'
+          : 'consumed'
+        : 'not_admitted',
       checks: result
         ? result.overall === 'pass'
           ? 'passed'

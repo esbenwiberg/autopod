@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
+  canonicalConfiguration,
   repairContinuationInspectionV1Schema,
   repairContinuationOperationV1Schema,
   repairContinuationPreviewV1Schema,
@@ -45,7 +47,15 @@ describe('repair continuation versioned transport', () => {
     expect(
       (await client.inspectRepairContinuation(fixture.inspection.podId)).sourceHead,
     ).toBeNull();
-    for (const key of ['qualified', 'failed', 'validated']) {
+    for (const key of [
+      'qualified',
+      'failed',
+      'validated',
+      'restartedSealed',
+      'restartedValidated',
+      'restartedFailedChecks',
+      'restartedUnsettled',
+    ]) {
       const wire = fixture[key];
       fetch.mockResolvedValueOnce(reply(wire));
       const result = await client.observeRepairContinuation(wire.podId, wire.request.id);
@@ -56,13 +66,29 @@ describe('repair continuation versioned transport', () => {
       if (result.codingFinalSource)
         expect(result.codingFinalSource.operationId).toBe(result.operationId);
     }
-    expect(fetch.mock.calls.map(([, init]) => init.method)).toEqual(['GET', 'GET', 'GET', 'GET']);
+    for (const key of [
+      'restartedSealedInspection',
+      'restartedValidatedInspection',
+      'restartedFailedChecksInspection',
+      'restartedUnsettledInspection',
+    ]) {
+      const wire = fixture[key];
+      fetch.mockResolvedValueOnce(reply(wire));
+      expect(await client.inspectRepairContinuation(wire.podId)).toEqual(wire);
+    }
+    expect(fetch.mock.calls).toHaveLength(12);
+    expect(fetch.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
   });
   it.each([
     'operation',
     'custody',
     'final',
     'missing-public-id',
+    'binding-digest',
+    'resource',
+    'repository',
+    'base',
+    'unknown-field',
   ])('refuses %s identity drift instead of dropping proof correlation', async (field) => {
     const fixture = JSON.parse(
       readFileSync(
@@ -78,11 +104,37 @@ describe('repair continuation versioned transport', () => {
     if (field === 'custody') wire.qualification.binding.custodyId = wire.request.id;
     if (field === 'final') wire.codingFinalSource.operationId = wire.request.id;
     if (field === 'missing-public-id') delete wire.operationId;
+    if (field === 'binding-digest') wire.qualification.bindingDigest = '0'.repeat(64);
+    if (field === 'resource') wire.qualification.binding.resourceKey += '-other';
+    if (field === 'repository') wire.codingFinalSource.source.repository += '/other';
+    if (field === 'base') wire.codingFinalSource.source.baseCommitSha = '0'.repeat(40);
+    if (field === 'unknown-field') wire.qualification.binding.extra = 'must not be dropped';
+    if (['operation', 'custody', 'unknown-field'].includes(field))
+      wire.qualification.bindingDigest = createHash('sha256')
+        .update(canonicalConfiguration(wire.qualification.binding))
+        .digest('hex');
     fetch.mockResolvedValueOnce(reply(wire));
     await expect(client.observeRepairContinuation(wire.podId, wire.request.id)).rejects.toThrow(
       'uncorrelated',
     );
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it('matches the backend canonical digest vectors including resource floats and nested arrays', () => {
+    const vectors: { wire: string; digest: string }[] = JSON.parse(
+      readFileSync(
+        new URL(
+          '../../../desktop/Tests/Fixtures/configuration-digest-vectors.json',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    );
+    for (const vector of vectors)
+      expect(
+        createHash('sha256')
+          .update(canonicalConfiguration(JSON.parse(vector.wire)))
+          .digest('hex'),
+      ).toBe(vector.digest);
   });
   it('keeps native fixtures compatible with the pinned shared schemas including sealed source', () => {
     const fixture = JSON.parse(

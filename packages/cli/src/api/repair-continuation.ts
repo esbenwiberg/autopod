@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import {
+  canonicalConfiguration,
   type RepairContinuationPreviewQueryV1,
   type RepairContinuationRequestV1,
   repairContinuationInspectionV1Schema,
@@ -32,7 +34,9 @@ export function repairOperation(
   const proof = operation.qualification;
   if (
     proof &&
-    (proof.binding.operationId !== operation.operationId ||
+    (createHash('sha256').update(canonicalConfiguration(proof.binding)).digest('hex') !==
+      proof.bindingDigest ||
+      proof.binding.operationId !== operation.operationId ||
       proof.binding.custodyId !== operation.operationId ||
       proof.binding.podId !== podId ||
       proof.binding.originalGeneration !== input.expectedGeneration ||
@@ -48,7 +52,10 @@ export function repairOperation(
     final &&
     (final.operationId !== operation.operationId ||
       final.selectedHead !== input.sourceHead ||
-      final.generation !== operation.candidateGeneration)
+      final.generation !== operation.candidateGeneration ||
+      !proof ||
+      final.source.repository !== proof.binding.source.repository ||
+      final.source.baseCommitSha !== proof.binding.source.baseCommitSha)
   )
     return unconfirmed();
   if (

@@ -1,4 +1,4 @@
-import AutopodClient
+@testable import AutopodClient
 import AutopodDesktop
 import Foundation
 import Testing
@@ -8,6 +8,13 @@ private func repairFixture(_ key: String) throws -> String {
     .appendingPathComponent("Fixtures/repair-continuation-v1.json")
   let all = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
   return String(decoding: try JSONSerialization.data(withJSONObject: all[key]!), as: UTF8.self)
+}
+private func backendRepairFixture(_ key: String) throws -> Data {
+  let url = ProcessInfo.processInfo.environment["REPAIR_CLIENT_PRODUCER_FIXTURE"].map { URL(fileURLWithPath: $0) }
+    ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+      .appendingPathComponent("Fixtures/repair-continuation-backend.json")
+  let all = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+  return try JSONSerialization.data(withJSONObject: all[key]!)
 }
 private func repairInput() throws -> RepairContinuationRequestV1 {
   try JSONDecoder().decode(RepairContinuationRequestV1.self, from: Data(repairFixture("request").utf8))
@@ -26,7 +33,7 @@ private func bodyData(_ request: URLRequest) throws -> Data {
 }
 
 @MainActor @Suite struct RepairContinuationTransportTests {
-  @Test(arguments: ["qualified", "failed", "validated"])
+  @Test(arguments: ["qualified", "failed", "validated", "restartedSealed", "restartedValidated", "restartedFailedChecks", "restartedUnsettled"])
   func consumesRealBackendProjectionsWithoutRewritingOperationOrCustodyIdentity(stage: String) async throws {
     // Captured by the real manager lifecycle + operation() producer, not a client-authored DTO.
     // Set REPAIR_CLIENT_PRODUCER_FIXTURE to consume a fresh backend test run directly.
@@ -54,10 +61,58 @@ private func bodyData(_ request: URLRequest) throws -> Data {
     }
   }
 
-  @Test(arguments: ["operation", "custody", "final", "missing-public-id"])
+  @Test func canonicalBindingBytesMatchBackendWithoutLossyCodableRoundtrip() throws {
+    struct Vector: Decodable {
+      let name: String
+      let wire: String
+      let bindingSubset: Bool
+      let canonical: String
+      let digest: String
+    }
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+      .appendingPathComponent("Fixtures/configuration-digest-vectors.json")
+    let vectors = try JSONDecoder().decode([Vector].self, from: Data(contentsOf: url))
+    for vector in vectors {
+      if vector.bindingSubset {
+        let raw = try JSONDecoder().decode(RepairBindingCanonicalJSON.self, from: Data(vector.wire.utf8))
+        #expect(raw.canonical.utf8.elementsEqual(vector.canonical.utf8), "\(vector.name)")
+        #expect(raw.digest == vector.digest, "\(vector.name)")
+      } else {
+        // These are valid daemon configuration values but outside the hashed v1
+        // binding schema: no float spelling/rounding, bool→Int, array/null coercion.
+        #expect(throws: (any Error).self) {
+          _ = try JSONDecoder().decode(RepairBindingCanonicalJSON.self, from: Data(vector.wire.utf8))
+        }
+      }
+    }
+    #expect(throws: (any Error).self) {
+      _ = try JSONDecoder().decode(RepairBindingCanonicalJSON.self, from: Data(#""\ud800""#.utf8))
+    }
+  }
+
+  @Test(arguments: ["restartedSealedInspection", "restartedValidatedInspection", "restartedFailedChecksInspection", "restartedUnsettledInspection"])
+  func inspectionAcceptsDurableRestartReceipts(stage: String) async throws {
+    let url = ProcessInfo.processInfo.environment["REPAIR_CLIENT_PRODUCER_FIXTURE"].map { URL(fileURLWithPath: $0) }
+      ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/repair-continuation-backend.json")
+    let all = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    let body = String(decoding: try JSONSerialization.data(withJSONObject: all[stage]!), as: UTF8.self)
+    let raw = try JSONDecoder().decode(RepairContinuationInspectionV1.self, from: Data(body.utf8))
+    try await withPodStoreLifetimeFixture { f in
+      let task = f.startResult {
+        do { let value = try await f.apiA.inspectRepairContinuation(raw.podId); #expect(value == raw); return "ok" }
+        catch { return error.localizedDescription }
+      }
+      try await f.next(f.a, "/pods/\(raw.podId)/repair-continuation-v1").respond(body: body)
+      #expect(await task.value == "ok")
+      #expect(f.a.requests.count == 1 && f.a.requests[0].httpMethod == "GET")
+    }
+  }
+
+  @Test(arguments: ["operation", "custody", "final", "missing-public-id", "binding-digest", "resource", "repository", "base", "unknown-field", "unknown-source-field", "bool-version", "fraction-generation", "unsafe-generation"])
   func rejectsProofOrFinalIdentityChangedToExternalReplayKey(field: String) async throws {
-    let raw = try JSONDecoder().decode(RepairContinuationOperationV1.self, from: Data(repairFixture("validatedOperation").utf8))
-    var wire = try JSONSerialization.jsonObject(with: Data(repairFixture("validatedOperation").utf8)) as! [String: Any]
+    let raw = try JSONDecoder().decode(RepairContinuationOperationV1.self, from: backendRepairFixture("validated"))
+    var wire = try JSONSerialization.jsonObject(with: backendRepairFixture("validated")) as! [String: Any]
     if field == "operation" || field == "custody" {
       var qualification = wire["qualification"] as! [String: Any]
       var binding = qualification["binding"] as! [String: Any]
@@ -66,6 +121,33 @@ private func bodyData(_ request: URLRequest) throws -> Data {
     }
     if field == "final" { var final = wire["codingFinalSource"] as! [String: Any]; final["operationId"] = raw.request.id; wire["codingFinalSource"] = final }
     if field == "missing-public-id" { wire.removeValue(forKey: "operationId") }
+    if ["binding-digest", "resource", "unknown-field", "unknown-source-field", "bool-version", "fraction-generation", "unsafe-generation"].contains(field) {
+      var q = wire["qualification"] as! [String: Any]
+      var b = q["binding"] as! [String: Any]
+      if field == "binding-digest" { q["bindingDigest"] = String(repeating: "0", count: 64) }
+      if field == "resource" { b["resourceKey"] = "other-resource" }
+      if field == "unknown-field" { b["extra"] = "must not be dropped" }
+      if field == "unknown-source-field" {
+        var s = b["source"] as! [String: Any]; s["extra"] = 1; b["source"] = s
+      }
+      if field == "bool-version" { b["version"] = true }
+      if field == "fraction-generation" { b["candidateGeneration"] = 3.25 }
+      if field == "unsafe-generation" { b["originalGeneration"] = 9_007_199_254_740_992 }
+      q["binding"] = b; wire["qualification"] = q
+    }
+    if field == "repository" || field == "base" {
+      var final = wire["codingFinalSource"] as! [String: Any]
+      var source = final["source"] as! [String: Any]
+      source[field == "repository" ? "repository" : "baseCommitSha"] = field == "repository"
+        ? "https://fixture.invalid/other" : String(repeating: "0", count: 40)
+      final["source"] = source; wire["codingFinalSource"] = final
+    }
+    if ["operation", "custody", "unknown-field", "unknown-source-field"].contains(field) {
+      var q = wire["qualification"] as! [String: Any]
+      let rawBinding = try JSONDecoder().decode(RepairBindingCanonicalJSON.self,
+        from: JSONSerialization.data(withJSONObject: q["binding"]!))
+      q["bindingDigest"] = rawBinding.digest; wire["qualification"] = q
+    }
     let body = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
     try await withPodStoreLifetimeFixture { f in
       let task = f.startResult {

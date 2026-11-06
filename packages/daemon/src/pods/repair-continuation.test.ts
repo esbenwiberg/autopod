@@ -297,6 +297,42 @@ async function assertNoRepairEffects(
     code: 'ENOENT',
   });
 }
+/** New module epoch + reconstructed SQLite, without rewriting any historical fact. */
+async function afterRestart(
+  f: Awaited<ReturnType<typeof fixture>>,
+  input: RepairContinuationRequestV1,
+) {
+  const reopened = new Database(f.ctx.db.serialize());
+  vi.resetModules();
+  const { createPodRepository: freshRepository } = await import('./pod-repository.js');
+  const pods = freshRepository(reopened);
+  try {
+    expect(pods.retainedCoding!.processEpoch).not.toBe(f.ctx.podRepo.retainedCoding!.processEpoch);
+    const before = pods.retainedCoding!.latest(f.podId);
+    const attempts = pods.taskExecutions!.snapshot(f.podId);
+    const recovery = createRetainedCheckpointRecovery({ ...f.deps, podRepo: pods });
+    const changes = reopened.prepare('SELECT total_changes() AS n').get();
+    const observed = recovery.repair!.operation(f.podId, input.id);
+    expect(repairOperation(observed, f.podId, input.id, input)).toEqual(observed);
+    const inspection = recovery.repair!.inspect(f.podId);
+    expect(repairInspection(inspection, f.podId).operation).toEqual(observed);
+    expect(await recovery.repair!.authorize(f.podId, input, f.actor)).toEqual(observed);
+    expect(reopened.prepare('SELECT total_changes() AS n').get()).toEqual(changes);
+    expect(pods.retainedCoding!.latest(f.podId)).toEqual(before);
+    expect(pods.taskExecutions!.snapshot(f.podId)).toEqual(attempts);
+    expect(() => pods.retainedCoding!.withWorkerScope(f.podId, () => {})).toThrow();
+    expect(() => pods.retainedCheckpoints!.assertWorkerAllowed(f.podId)).toThrow();
+    return { observed, inspection };
+  } finally {
+    reopened.close();
+  }
+}
+async function captureClientProjection(values: Record<string, unknown>) {
+  const capture = process.env.REPAIR_CLIENT_PRODUCER_FIXTURE;
+  if (!capture) return;
+  const existing = JSON.parse(await readFile(capture, 'utf8'));
+  await writeFile(capture, JSON.stringify({ ...existing, ...values }, null, 2) + '\n');
+}
 async function waitPreparation(f: (typeof fixtures)[number]) {
   for (let n = 0; n < 1000; n++) {
     const root = f.ctx.podRepo.retainedCheckpoints!.latest(f.podId);
@@ -347,6 +383,14 @@ describe('conditional retained coding continuation', () => {
   });
   it('feeds actual inspection/qualified/failed/final projections to clients without rewriting immutable IDs', async () => {
     const f = await fixture();
+    // Real producer hashing/serialization must preserve slash, controls, Unicode
+    // composition and astral characters in the actual resource identity.
+    const resourceKey = f.cm.getResourceKey!.bind(f.cm);
+    f.cm.getResourceKey = vi.fn(async (id) =>
+      id === candidateId
+        ? 'docker://fixture/' + id + '/é/e\u0301/😀/"\\\n\t\u0000'
+        : resourceKey(id),
+    );
     const inspection = f.manager.inspectRepairContinuation(f.podId);
     expect(inspection).toMatchObject({ available: true, sourceHead: null });
     expect(repairInspection(inspection, f.podId)).toEqual(inspection);
@@ -376,6 +420,14 @@ describe('conditional retained coding continuation', () => {
     expect(validated.state).toBe('validated');
     expect(validated.codingFinalSource?.operationId).toBe(validated.operationId);
     expect(repairOperation(validated, f.podId, request.id, request)).toEqual(validated);
+    const restarted = await afterRestart(f, request);
+    expect(restarted.observed).toEqual(validated);
+    expect(restarted.observed).toMatchObject({
+      state: 'validated',
+      codingAdmission: 'consumed',
+      checks: 'passed',
+    });
+    expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
     // A failed actual-source probe produces immutable failed evidence without a worker.
     const failedFixture = await fixture();
     const failedRequest = await failedFixture.request('failed-external-request');
@@ -420,11 +472,66 @@ describe('conditional retained coding continuation', () => {
       await writeFile(
         capture,
         JSON.stringify(
-          { inspection, preview, request, claimed, qualified, failed, validated },
+          {
+            inspection,
+            preview,
+            request,
+            claimed,
+            qualified,
+            failed,
+            validated,
+            restartedValidated: restarted.observed,
+            restartedValidatedInspection: restarted.inspection,
+          },
           null,
           2,
         ) + '\n',
       );
+  });
+  it('retains proven consumed admission after sealing while restarted checks remain unknown', async () => {
+    const f = await fixture();
+    const input = await f.request();
+    let enteredChecks!: () => void;
+    let releaseChecks!: () => void;
+    const checking = new Promise<void>((resolve) => {
+      enteredChecks = resolve;
+    });
+    const hold = new Promise<void>((resolve) => {
+      releaseChecks = resolve;
+    });
+    const validate = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
+    vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => {
+      enteredChecks();
+      await hold;
+      return validate(config);
+    });
+    await f.manager.authorizeRepairContinuation(f.podId, input, f.actor);
+    await waitPreparation(f);
+    const processing = f.manager.processPod(f.podId);
+    try {
+      await Promise.race([
+        checking,
+        processing.then(() => {
+          throw new Error('Checks never entered');
+        }),
+      ]);
+      const restarted = await afterRestart(f, input);
+      expect(restarted.observed).toMatchObject({
+        state: 'unknown',
+        codingAdmission: 'consumed',
+        checks: 'unknown',
+        codingFinalSource: { workerSettled: true, clean: true, descendant: true },
+      });
+      await captureClientProjection({
+        restartedSealed: restarted.observed,
+        restartedSealedInspection: restarted.inspection,
+      });
+    } finally {
+      releaseChecks();
+      await processing;
+    }
+    expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+    expect(f.manager.getRepairContinuation(f.podId, input.id).state).toBe('validated');
   });
   it('qualifies the actual candidate, spawns once, seals descendant source and runs real checks without delivery', async () => {
     const f = await fixture();
@@ -918,6 +1025,17 @@ describe('conditional retained coding continuation', () => {
     expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
     expect(f.ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
     expect(() => f.ctx.podRepo.retainedCheckpoints!.assertWorkerAllowed(f.podId)).toThrow();
+    const restarted = await afterRestart(f, input);
+    expect(restarted.observed).toMatchObject({
+      state: 'failed',
+      checks: 'failed',
+      codingAdmission: 'consumed',
+    });
+    expect(restarted.observed.codingFinalSource).not.toBeNull();
+    await captureClientProjection({
+      restartedFailedChecks: restarted.observed,
+      restartedFailedChecksInspection: restarted.inspection,
+    });
   });
   it('retains uncertain coding across SQLite reconstruction and observes replay without a second worker', async () => {
     const f = await fixture();
@@ -938,6 +1056,16 @@ describe('conditional retained coding continuation', () => {
       state: 'unknown',
       codingAdmission: 'unknown',
       codingFinalSource: null,
+    });
+    const restarted = await afterRestart(f, input);
+    expect(restarted.observed).toMatchObject({
+      state: 'unknown',
+      codingAdmission: 'unknown',
+      codingFinalSource: null,
+    });
+    await captureClientProjection({
+      restartedUnsettled: restarted.observed,
+      restartedUnsettledInspection: restarted.inspection,
     });
     const reopened = new Database(f.ctx.db.serialize());
     try {
