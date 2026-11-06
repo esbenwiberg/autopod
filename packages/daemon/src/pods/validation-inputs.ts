@@ -149,6 +149,7 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
     // A changed integration source needs independent review, not a cached
     // pre-submit verdict or closure ledger from the pre-rebase bytes.
     const continuation = podRepo.retainedCheckpoints?.latest(podId)?.binding.continuation;
+    const requiredRecoveryReview = podRepo.retainedCheckpoints?.requiredReview(s1) ?? false;
     const freshSource = rewrite || continuation;
     const previousValidation = freshSource ? null : (validationRepo?.getLatest(podId) ?? null);
     const priorReviewBatch = freshSource ? undefined : validationRepo?.getLatestReviewBatch(podId);
@@ -181,7 +182,7 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
       validationSuite,
       task:
         continuation && !retained?.binding.approvalRewrite
-          ? `${pod.task}\n\nRetained source continuation: independently review the current selected source against its pinned base. Historical worker reports and selection reasons are context, not passing evidence or waivers.\nSelection reason: ${retained?.selected?.reason ?? retained?.reason ?? ''}\nHistorical worker summary: ${pod.taskSummary?.actualSummary ?? 'None'}`
+          ? `${pod.task}\n\nRetained source continuation: independently review the current selected source against its pinned base. Historical worker reports and selection reasons are context, not passing evidence or waivers.${requiredRecoveryReview ? '\nMandatory additional recovery check: independent-v1. Run fresh independent review even if the original workflow omitted it; this is not historical review evidence.' : ''}\nSelection reason: ${retained?.selected?.reason ?? retained?.reason ?? ''}\nHistorical worker summary: ${pod.taskSummary?.actualSummary ?? 'None'}`
           : pod.task,
       diff,
       testCommand: profile.testCommand,
@@ -215,7 +216,10 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
       // credential/literal distinction and stays in the scoped exec channel.
       nonSecretExecEnv: pod.launchConfigDigest ? { ...profile.buildEnv } : undefined,
       preSubmitReview: freshSource ? undefined : (pod.preSubmitReview ?? undefined),
-      skipPhases: getPodValidationSkipPhases(profile, s1),
+      // New explicit retained selection may ADD independent review, never remove another gate.
+      skipPhases: getPodValidationSkipPhases(profile, s1).filter(
+        (phase) => !requiredRecoveryReview || phase !== 'review',
+      ),
       priorReviewBatch,
     };
 

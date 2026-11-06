@@ -147,7 +147,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
 
   server.tool(
     'report_blocker',
-    'Report infrastructure or missing capabilities without requesting a human answer. Stop blocked attempts, preserve work, summarize incomplete checks and finish; Autopod holds completion after execution settles.',
+    'Report genuine infrastructure or unexpected missing capabilities without requesting a human answer. Do not use for expected host-only macOS checks explicitly deferred to a Mac: record those as not run in report_task_summary. Required Mac runner failures remain blockers. Stop blocked attempts, preserve work, summarize incomplete checks and finish; Autopod holds completion after execution settles.',
     {
       description: z
         .string()

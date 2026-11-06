@@ -22,6 +22,12 @@ refused while a rewrite owns source.
   requests, competing custody, pending decisions/guidance, Goals, sidecars and
   waivers remain blockers. Custom workflows retain their configured phases;
   independent review is mandatory. Thin/off validation is not a recovery route.
+  New ordinary continuation records `reviewPolicy: independent-v1`: this adds a
+  fresh independent review gate even when the original native workflow omitted
+  its review phase, provided its frozen AI configuration already has an
+  independent reviewer route. No reviewer route is invented or selected from a
+  mutable preset. A legacy launch lacking enabled review, or a native launch
+  without that frozen independent route, still refuses recovery.
 - An exact **host checkpoint** is selected, not a claim that it contains final
   sandbox bytes. Ignored reports or unsynced edits can still exist in the original.
   Preserve that original; do not wake it, replay an unknown restore, or delete it.
@@ -133,6 +139,18 @@ only after inspecting the preview. Missing/stale digest refuses selection before
 claiming or detaching the original. A backend change is atomic with the original
 resource hold, new generation and selected launch digest. No old container,
 worktree or network is torn down by selection.
+
+New ordinary continuation admission also records the versioned mandatory-review
+obligation in the immutable binding. During ONLY the owned, activated, exact-source
+checking invocation, the daemon removes `review` from effective skipped phases;
+all other frozen phase skips and commands remain unchanged. It never edits the
+original launch workflow, imports worker pre-submit review or resets retry budgets.
+The obligation is explicit in the validation task/fingerprint and a passing
+current independent-review result is required before the operation can settle.
+Existing records without this policy are not retroactively upgraded. Approval
+rewrite repair keeps its dedicated admission semantics. Do not downgrade a daemon
+while it owns an active operation with this policy: old binaries cannot execute
+that additional review gate.
 
 Admission returns a durable operation, not successful validation. Reuse the same
 request ID and identical inputs after an uncertain response to observe it.

@@ -218,6 +218,7 @@ export async function retainedCheckpointFixture(
   kind: 'validation' | 'wakeup' = 'validation',
   native = false,
   independentReview = false,
+  independentRoute = false,
 ) {
   const ctx = createTestContext();
   vi.mocked(ctx.profileStore.get).mockReturnValue({
@@ -251,6 +252,22 @@ export async function retainedCheckpointFixture(
     ? createLaunchSnapshotRepository(ctx.db, nativeConfiguration.store)
     : null;
   if (nativeConfiguration && snapshots) {
+    if (independentRoute) {
+      const ai = nativeConfiguration.store.get('ai', 'ai');
+      nativeConfiguration.store.write({
+        id: ai.id,
+        kind: 'ai',
+        name: ai.name,
+        expectedRevision: ai.revision,
+        payload: {
+          ...ai.payload,
+          reviewer: {
+            mode: 'independent',
+            route: { ...ai.payload.main, model: 'claude-opus-4-6' },
+          },
+        },
+      });
+    }
     if (independentReview) {
       const flow = nativeConfiguration.store.get('workflow', 'flow');
       nativeConfiguration.store.write({
