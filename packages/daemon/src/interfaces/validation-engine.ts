@@ -1,5 +1,6 @@
 import type {
   AdvisoryBrowserQaResult,
+  DeferredCheckReport,
   ExecutionTarget,
   ModelProvider,
   PreSubmitReviewSnapshot,
@@ -103,6 +104,8 @@ export interface ValidationEngineConfig {
   plan?: { summary: string; steps: string[] };
   /** Task summary reported by the agent via report_task_summary */
   taskSummary?: TaskSummary;
+  /** Review-only history from retained continuation; never fact evidence, waiver or current pass. */
+  historicalDeferredChecks?: DeferredCheckReport[];
   /**
    * Brief-level advisory: files this pod was scoped to modify. Surfaced to the
    * reviewer as guidance, not enforcement — deviations become discussion items

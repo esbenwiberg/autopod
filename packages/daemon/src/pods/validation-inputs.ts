@@ -202,6 +202,9 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
       commitLog: commitLog || undefined,
       plan: pod.plan ?? undefined,
       taskSummary: continuation ? undefined : (pod.taskSummary ?? undefined),
+      // Keep inherited fact evidence/deviation approvals excluded. Only NOT-RUN
+      // reports cross this boundary as historical, non-authoritative review context.
+      historicalDeferredChecks: continuation ? pod.taskSummary?.deferredChecks : undefined,
       briefTouches: pod.touches ?? undefined,
       briefDoesNotTouch: pod.doesNotTouch ?? undefined,
       worktreePath: pod.worktreePath ?? undefined,
