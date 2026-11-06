@@ -438,6 +438,12 @@ export interface PodManager {
   previewRetainedExecution: ReturnType<
     typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
   >['previewExecution'];
+  recoverInfrastructure: ReturnType<
+    typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
+  >['recoverInfrastructure'];
+  reconcileInfrastructure: ReturnType<
+    typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
+  >['reconcileInfrastructure'];
   continueRetained: ReturnType<
     typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
   >['continueRetained'];

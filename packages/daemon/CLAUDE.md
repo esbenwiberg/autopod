@@ -159,6 +159,18 @@ controls remain blocked while this source is owned. Never clear custody to retry
 or downgrade to an unaware binary after selection. See
 `docs/retained-pod-continuation.md` at the repository root.
 
+### Infrastructure-held running originals
+
+`ap recover-infrastructure` is a distinct human-bound control for settled failed
+local Docker tasks with preserved clean source and recorded infrastructure needs.
+It acquires custody before one non-destructive stop, reconciles uncertain stop
+outcomes without replay, and independently provisions either checks-only source
+or one owned coding repair. Repair candidates must be clean descendants and still
+pass fresh checks/review/report capture. There is no budget reset, original wake,
+automatic second repair worker or delivery authority. See
+`docs/infrastructure-recovery.md` at the repository root for input qualification,
+exact-request reconciliation, limitations and honest test evidence scope.
+
 ## Database
 
 ### Connection (`src/db/connection.ts`)

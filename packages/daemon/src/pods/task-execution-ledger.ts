@@ -599,9 +599,12 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           .get(podId),
       ),
     beginRun: db.transaction((podId, generation, cycle, binding) => {
-      createRetainedCheckpointRepository(db).assertWorkerAllowed(podId);
+      const retained = createRetainedCheckpointRepository(db);
+      const repairWorker = retained.assertWorkerAllowed(podId);
       assertSourceAvailable(db, podId, '');
-      assertSourceDeliveryAllowed(db, podId);
+      // Worker admission is not publication authority. Only this owned repair
+      // capability may start before the independent post-repair checks exist.
+      if (!repairWorker) assertSourceDeliveryAllowed(db, podId);
       createDeletionOwnership(db).assertTaskAvailable(podId);
       createValidationExecutionLedger(db).assertTaskSettled(podId);
       const encoded = JSON.stringify({
@@ -693,6 +696,8 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       db.prepare(
         'INSERT INTO task_agent_runs (id, pod_id, generation, cycle, binding, started_at) VALUES (?, ?, ?, ?, ?, ?)',
       ).run(id, podId, generation, cycle, encoded, new Date().toISOString());
+      if (repairWorker)
+        retained.recordRepairWorker(podId, id, generation, cycle, current.containerId);
       return id;
     }),
     retainUnverifiedRun: db.transaction((id) => {

@@ -10,6 +10,12 @@ A failed approval rewrite retains its own publication/source authority. Use the
 eligible settled sandbox selection; these ordinary continuation operations remain
 refused while a rewrite owns source.
 
+For a failed **running but settled local Docker original**, do not manually stop
+it to satisfy the stopped-original prerequisite. The separate
+[preservation-safe infrastructure recovery](infrastructure-recovery.md) control
+acquires custody before its one non-destructive stop and explicitly distinguishes
+checks-only from an independently provisioned coding repair.
+
 ## Authority and limits
 
 - Only idle ordinary automatic PR/branch tasks in failed/review-required/validated states,

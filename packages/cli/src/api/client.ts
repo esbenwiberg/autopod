@@ -625,6 +625,17 @@ export class AutopodClient {
   ): Promise<unknown> {
     return this.request('POST', `/pods/${id}/approval-rewrite-repair/${recoveryId}/check`, input);
   }
+  async recoverInfrastructure(
+    id: string,
+    input: import('@autopod/shared').InfrastructureRecoveryRequest,
+    reconcile = false,
+  ): Promise<unknown> {
+    return this.request(
+      'POST',
+      `/pods/${id}/infrastructure-recovery${reconcile ? '/reconcile' : ''}`,
+      input,
+    );
+  }
   async continueRetained(
     id: string,
     input: import('@autopod/shared').RetainedContinuationRequest,
