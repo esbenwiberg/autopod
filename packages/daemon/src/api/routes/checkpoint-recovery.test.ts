@@ -29,6 +29,7 @@ describe('human-only retained checkpoint selection', () => {
       recoverCheckpoint: f.recovery.submit,
       getCheckpointRecoveries: f.recovery.list,
       getCheckpointRecoverySelection: f.recovery.selection,
+      inspectRetainedContinuation: (...args) => f.recovery.inspect(...args),
       reconcileCheckpointOutcome: f.recovery.reconcileOutcome,
       continueRetained: f.recovery.continueRetained,
       checkRetainedCandidate: (...args: Parameters<typeof f.recovery.checkCandidate>) =>
@@ -59,6 +60,7 @@ describe('human-only retained checkpoint selection', () => {
     expect(response.headers['cache-control']).toBe('no-store');
     expect(response.json()).toEqual({
       operations: [],
+      inspection: f.recovery.inspect(f.podId),
       selection: {
         expectedGeneration: f.pod().lifecycleGeneration,
         expectedResultHash: f.input.expectedResultHash,
@@ -243,11 +245,22 @@ describe('human-only retained checkpoint selection', () => {
     expect(result.headers['cache-control']).toBe('no-store');
     expect(result.json()).toEqual({
       operations: [],
+      inspection: f.recovery.inspect(f.podId),
       selection: {
         expectedGeneration: f.pod().lifecycleGeneration,
         expectedResultHash: f.input.expectedResultHash,
       },
     });
+    expect(f.cm.getStatus).not.toHaveBeenCalled();
+    expect(f.deps.enqueue).not.toHaveBeenCalled();
+  });
+  it('fails closed when inspection storage fails rather than returning an eligible projection', async () => {
+    vi.spyOn(f.recovery, 'inspect').mockImplementation(() => {
+      throw new Error('Synthetic inspection storage failure');
+    });
+    const response = await app.inject({ url: endpoint(), headers });
+    expect(response.statusCode).toBe(500);
+    expect(response.json().inspection).toBeUndefined();
     expect(f.cm.getStatus).not.toHaveBeenCalled();
     expect(f.deps.enqueue).not.toHaveBeenCalled();
   });

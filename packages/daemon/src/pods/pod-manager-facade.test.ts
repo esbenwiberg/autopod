@@ -31,7 +31,8 @@ function instance(disk = false) {
 describe('composed pod manager facade boundary', () => {
   it('adds no extra infrastructure construction effects and preserves actual shorthand function identities', () => {
     const f = instance();
-    expect(Object.keys(f.manager)).toHaveLength(98);
+    expect(Object.keys(f.manager)).toHaveLength(99);
+    expect(f.manager.inspectRetainedContinuation).toBeTypeOf('function');
     expect(f.manager.getCheckpointRecoverySelection).toBeTypeOf('function');
     expect(f.manager.getCheckpointRecoverySelection('prepare')).toBeNull();
     expect(f.manager.inspectRetainedFinalization).toBeTypeOf('function');
@@ -65,6 +66,23 @@ describe('composed pod manager facade boundary', () => {
     expect(f.cm.spawn).not.toHaveBeenCalled();
     expect(f.cm.stop).not.toHaveBeenCalled();
     expect(f.cm.kill).not.toHaveBeenCalled();
+    expect(f.ctx.enqueuedSessions).toEqual([]);
+  });
+  it('forwards read-only retained inspection and preserves inspection failures', () => {
+    const f = instance();
+    const inspection = f.manager.inspectRetainedContinuation('prepare');
+    const inspect = vi.fn(() => inspection);
+    if (!f.owners.checkpointRecovery) throw new Error('Missing checkpoint owner');
+    f.owners.checkpointRecovery.inspect = inspect;
+    expect(f.manager.inspectRetainedContinuation('prepare')).toBe(inspection);
+    expect(inspect).toHaveBeenCalledExactlyOnceWith('prepare');
+    const error = new Error('Inspection unavailable');
+    inspect.mockImplementation(() => {
+      throw error;
+    });
+    expect(() => f.manager.inspectRetainedContinuation('prepare')).toThrow(error);
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+    expect(f.cm.start).not.toHaveBeenCalled();
     expect(f.ctx.enqueuedSessions).toEqual([]);
   });
   it('preserves synchronous errors and direct returned promise identity at the API boundary', async () => {

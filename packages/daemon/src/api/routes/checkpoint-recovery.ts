@@ -17,7 +17,8 @@ export function checkpointRecoveryRoutes(
     | 'prepareRewriteRepair'
     | 'checkRewriteRepair'
     | 'getApprovalSourceRewrite'
-  >,
+  > &
+    Partial<Pick<PodManager, 'inspectRetainedContinuation'>>,
 ) {
   const params = z.object({ podId: z.string().min(1).max(128) });
   const identity = {
@@ -172,6 +173,7 @@ export function checkpointRecoveryRoutes(
     return {
       operations: manager.getCheckpointRecoveries(podId),
       selection: manager.getCheckpointRecoverySelection(podId),
+      inspection: manager.inspectRetainedContinuation?.(podId) ?? null,
     };
   });
   app.post('/pods/:podId/checkpoint-recovery/:recoveryId/reconcile', async (request, reply) => {

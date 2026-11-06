@@ -53,6 +53,33 @@ ap retry-state POD --stage validation --json
 ap retained-continuation POD --json
 ```
 
+The default `ap retained-continuation POD` view leads with recorded infrastructure
+needs and policy refusals. `--json` includes the full additive `inspection` field
+alongside the existing `selection` and `operations`. This is authenticated,
+read-only inspection: no provider GET, wakeup, source fetch/preparation, credential
+epoch rotation, report changes or queue dispatch is performed.
+
+`requires_selection` and `no_recorded_blocker` are **not admission permission**.
+Inspection reuses the continuation policy's first conservative refusal and exposes
+worker/guidance/custody observations, but source cleanliness/identity, provider
+resource state, actual environment qualification and retry admission remain
+`not_checked`. A recorded host path or preservation marker is not proof of final
+original sandbox bytes; uncollected files/reports remain retained there. Needs
+are worker-reported context, not diagnosed prerequisites or repaired evidence.
+Displayed needs are bounded (20 reports, 256-character phase, 1024-character need);
+truncation is explicit and original selection evidence remains unchanged. When
+current reports are not exposed by the existing selection reader (for example,
+missing settlement or an existing validation result), needs remain unavailable;
+inspection does not fabricate settlement or infer them from prose.
+An older daemon without this projection displays inspection unavailable, never
+assumed eligibility. Storage/inspection errors do not produce an eligible result.
+
+Use execution preview only to inspect a proposed configuration; qualify the actual
+environment separately. Waking the original sandbox is machine recovery, not task
+continuation. Preparation, candidate selection, checks, retry authorization and
+fresh human approval retain their existing independent fences. No coding worker
+or generic in-place repair operation is added by this inspection.
+
 ### Infrastructure reported before validation
 
 An expected native-check deferral can be mistakenly reported as infrastructure

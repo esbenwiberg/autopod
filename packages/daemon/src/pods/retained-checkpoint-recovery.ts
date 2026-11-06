@@ -10,6 +10,7 @@ import type {
   RetainedContinuationCheckRequest,
   RetainedContinuationRequest,
 } from '@autopod/shared';
+import { AutopodError } from '@autopod/shared';
 import type { Logger } from 'pino';
 import {
   type RetainedExecutionSelection,
@@ -228,6 +229,106 @@ export function createRetainedCheckpointRecovery(deps: {
     )
       checkpointError('Original checkpoint selection was superseded', 'STALE_CHECKPOINT_RECOVERY');
     return current;
+  }
+  /** Observation only. Successful row checks are not admission or environment qualification. */
+  function inspect(podId: string) {
+    const pod = deps.podRepo.getOrThrow(podId);
+    const check = (id: string, run: () => void) => {
+      try {
+        run();
+        return { id, state: 'no_recorded_blocker' as const, code: null, reason: null };
+      } catch (error) {
+        // Storage/programming failures must fail the request, never look eligible.
+        if (!(error instanceof AutopodError) || error.statusCode !== 409) throw error;
+        return { id, state: 'blocked' as const, code: error.code, reason: error.message };
+      }
+    };
+    const checks = [
+      // Reuse admission's policy verbatim, reporting its first conservative refusal.
+      check('continuation_policy', () => policy(pod, true)),
+      check('retained_custody', () => repo.assertAvailable(podId)),
+      check('worker_settlement', () => {
+        const tasks = deps.podRepo.taskExecutions ?? checkpointError('Task ledger unavailable');
+        tasks.assertCanDelete(podId); // This assertion reads only; no deletion is performed.
+      }),
+      check('validation_settlement', () => {
+        const validations =
+          deps.podRepo.validationExecutions ?? checkpointError('Validation ledger unavailable');
+        validations.assertNoActiveTaskExecution(podId);
+        if (validations.unsettled(podId))
+          checkpointError(
+            'An immutable validation dispatch requires its own exact-execution recovery',
+          );
+      }),
+      check('source_and_delivery_custody', () => {
+        const sources =
+          deps.podRepo.sourceAdoptions ?? checkpointError('Source ledger unavailable');
+        if (sources.hasCustody(podId)) checkpointError('Another source recovery retains custody');
+        sources.assertControlPlaneSettled(podId);
+        deps.podRepo.deletionOwnership?.assertTaskAvailable(podId);
+      }),
+      check('human_guidance', () => deps.assertGuidanceCollected(podId)),
+    ];
+    const selection = repo.selectionEvidence(pod);
+    const reports = selection?.infrastructureReports ?? [];
+    const infrastructureBlocker = deps.podRepo.hasInfrastructureBlocker?.(podId);
+    const currentFinalization = pod.finalization?.generation === pod.lifecycleGeneration;
+    return {
+      version: 1 as const,
+      mode: 'read_only' as const,
+      generation: pod.lifecycleGeneration,
+      status: checks.some((item) => item.state === 'blocked')
+        ? ('blocked' as const)
+        : ('requires_selection' as const),
+      selection: selection
+        ? {
+            expectedGeneration: selection.expectedGeneration,
+            expectedResultHash: selection.expectedResultHash,
+          }
+        : null,
+      infrastructure: {
+        state: reports.length
+          ? ('reported' as const)
+          : infrastructureBlocker === false
+            ? ('none_recorded' as const)
+            : ('not_checked' as const),
+        truncated: reports.length > 20,
+        needs: reports.slice(0, 20).map((report) => ({
+          id: report.id.slice(0, 256),
+          owner: report.payload.owner,
+          phase: report.payload.phase?.slice(0, 256),
+          needs: report.payload.needs?.slice(0, 1024),
+          truncated:
+            report.id.length > 256 ||
+            (report.payload.phase?.length ?? 0) > 256 ||
+            (report.payload.needs?.length ?? 0) > 1024,
+        })),
+      },
+      prerequisites: {
+        hostPathRecorded: Boolean(pod.worktreePath),
+        sourcePreservationRecorded: Boolean(
+          currentFinalization && pod.finalization?.sourcePreservedAt,
+        ),
+        workerSettlementRecorded: Boolean(currentFinalization && pod.finalization?.agentSettledAt),
+        pendingDecision: Boolean(
+          pod.pendingEscalation || deps.podRepo.hasUnansweredDecision?.(podId),
+        ),
+        hostSource: 'not_checked' as const,
+        originalFilesAndReports: 'not_checked' as const,
+        resourceStateAndIdentity: 'not_checked' as const,
+        environmentQualification: 'not_checked' as const,
+        retryAdmission: 'not_checked' as const,
+      },
+      checks,
+      nextSteps: [
+        'Inspect recorded needs and resolve pending decisions/guidance or custody through their owning controls; never clear a hold to retry.',
+        'Select the exact retained host HEAD and generation/result hash. Host preservation does not collect unsynced original files or reports.',
+        'Use --preview-execution PROFILE for configuration only; it does not qualify the actual environment. Sandbox wakeup is machine-only, not task continuation.',
+        'Use --apply --prepare-only for an independent repair checkout, or --apply for checks-only selection. All existing admission/source/resource checks still apply; no coding worker starts.',
+        'After preparation, use --check with the exact committed candidate. Inspect ap retry-state POD --stage validation; any authorize-retry is a separate human action, not implied by selection.',
+        'Fresh configured checks and independent review must run on the selected source. A pass still requires separate human approval; historical reports and budgets remain retained.',
+      ],
+    };
   }
   async function prepare(id: string) {
     const record = repo.get(id) ?? checkpointError('Recovery record is unavailable');
@@ -1072,6 +1173,7 @@ export function createRetainedCheckpointRecovery(deps: {
     process,
     verifySource,
     reconcileOutcome,
+    inspect,
     selection: (podId: string) => repo.selectionEvidence(deps.podRepo.getOrThrow(podId)),
     list: (podId: string) => repo.list(podId),
     wait: (id: string) => pending.get(id) ?? Promise.resolve(),

@@ -450,6 +450,9 @@ export interface PodManager {
   reconcileCheckpointOutcome: ReturnType<
     typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
   >['reconcileOutcome'];
+  inspectRetainedContinuation: ReturnType<
+    typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
+  >['inspect'];
   getCheckpointRecoverySelection: ReturnType<
     typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
   >['selection'];
