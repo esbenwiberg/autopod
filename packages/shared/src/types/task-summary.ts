@@ -31,6 +31,22 @@ export interface ReviewFeedbackResponseItem {
   response: string;
 }
 
+/** Worker-reported NOT-RUN context only; never a pass, waiver or repair receipt. */
+export interface DeferredCheck {
+  /** Stable within preserved summary context; conflicting reuse is rejected. */
+  id: string;
+  check: string;
+  reason: string;
+  expectedExecutor: string;
+  /** Must identify a required fact in the admitted contract when supplied. */
+  requiredFactId?: string;
+}
+
+/** Attribution is stamped by the daemon, not accepted from the worker. */
+export interface DeferredCheckReport extends DeferredCheck {
+  lifecycleGeneration: number;
+}
+
 /** Agent-reported task summary submitted via report_task_summary before finishing. */
 export interface TaskSummary {
   /** High-level description of what was actually accomplished */
@@ -39,6 +55,8 @@ export interface TaskSummary {
   how?: string;
   /** Deviations from the original plan, if any */
   deviations: DeviationItem[];
+  /** Append-only reported NOT-RUN context. Absence or omission proves nothing. */
+  deferredChecks?: DeferredCheckReport[];
   /** Agent-reported fact evidence. Validator re-runs commands; this is context only. */
   factEvidence?: FactEvidence[];
   /** Optional requests to waive/replace required facts that are impossible under current reality. */

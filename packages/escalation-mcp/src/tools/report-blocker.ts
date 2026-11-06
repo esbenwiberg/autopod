@@ -38,5 +38,5 @@ export async function reportBlocker(
   bridge.createEscalation(escalation);
   bridge.incrementEscalationCount(podId);
 
-  return `Infrastructure blocker recorded: ${input.description}. No human answer is requested. Stop blocked attempts; preserve work and report incomplete checks in report_task_summary, then finish. Autopod will hold completion after execution settles. This report is not a validation receipt, permission, or gate waiver.`;
+  return `Infrastructure blocker recorded: ${input.description}. No human answer is requested. Stop blocked attempts; preserve work and report incomplete checks in report_task_summary, then finish. Autopod will hold completion after execution settles. This report is not a validation receipt, permission, or gate waiver. Expected external/Mac checks belong in report_task_summary.deferredChecks; do not report an expected deferral as executor failure.`;
 }

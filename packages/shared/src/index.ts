@@ -612,6 +612,8 @@ export type {
   TaskRetryState,
 } from './types/task-retry.js';
 export type {
+  DeferredCheck,
+  DeferredCheckReport,
   DeviationItem,
   DeviationsAssessment,
   MemoryOutcomeItem,

@@ -1,6 +1,7 @@
 import type {
   ActionDefinition,
   ActionResponse,
+  DeferredCheck,
   EscalationRequest,
   EscalationResponse,
   FactEvidence,
@@ -105,6 +106,7 @@ export interface PodBridge {
     }>,
     memoryOutcomes?: MemoryOutcomeItem[],
     reviewFeedbackResponses?: ReviewFeedbackResponseItem[],
+    deferredChecks?: DeferredCheck[],
   ): void;
   /** Reading retains guidance until the current worker acknowledges its receipt. */
   readOperatorGuidance(podId: string): OperatorGuidanceDelivery | null;

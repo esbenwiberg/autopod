@@ -3489,6 +3489,15 @@ export function buildReviewPrompt(
               )
               .join('\n')}\n`
           : ''
+      }\n${
+        config.taskSummary.deferredChecks?.length
+          ? `\n## WORKER-REPORTED NOT-RUN CHECKS\nNot pass, waiver or repair receipts. Reports retain their original lifecycle attribution; required facts and configured gates still apply independently.\n${config.taskSummary.deferredChecks
+              .map(
+                (check) =>
+                  `- ${check.id}: ${check.check}; reason: ${check.reason}; expected executor: ${check.expectedExecutor}; reported lifecycle: ${check.lifecycleGeneration}${check.requiredFactId ? `; required fact: ${check.requiredFactId}` : ''}`,
+              )
+              .join('\n')}\n`
+          : ''
       }\n`
     : '';
 

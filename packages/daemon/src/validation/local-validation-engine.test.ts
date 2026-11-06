@@ -951,6 +951,32 @@ human_review:
     reason: Requires judgment over the diff, not a deterministic command
 `);
 
+  it('includes retained NOT-RUN context independently of the task narrative', () => {
+    const prompt = buildReviewPrompt({
+      ...baseConfig,
+      taskSummary: {
+        actualSummary: 'Implemented',
+        deviations: [],
+        deferredChecks: [
+          {
+            id: 'mac',
+            check: 'xcodebuild test',
+            reason: 'Linux',
+            expectedExecutor: 'Mac owner',
+            requiredFactId: 'mac-fact',
+            lifecycleGeneration: 7,
+          },
+        ],
+      },
+    });
+    expect(prompt).toContain('WORKER-REPORTED NOT-RUN CHECKS');
+    expect(prompt).toContain('Not pass, waiver or repair receipts');
+    expect(prompt).toContain('required facts and configured gates still apply independently');
+    expect(prompt).toContain(
+      'mac: xcodebuild test; reason: Linux; expected executor: Mac owner; reported lifecycle: 7; required fact: mac-fact',
+    );
+  });
+
   it('keeps daemon-owned milestones out of pre-publication diff review', () => {
     const prompt = buildReviewPrompt({
       ...baseConfig,
@@ -4909,6 +4935,20 @@ required_facts:
     command: swift test --filter ThroughputTimeInStatusDisplayTests
 human_review: []
 `),
+        taskSummary: {
+          actualSummary: 'Changed helper; Mac check deferred',
+          deviations: [],
+          deferredChecks: [
+            {
+              id: 'mac',
+              check: 'swift test',
+              reason: 'Linux worker',
+              expectedExecutor: 'Mac owner',
+              requiredFactId: 'fact-swift-only',
+              lifecycleGeneration: 1,
+            },
+          ],
+        },
       }),
       undefined,
       undefined,

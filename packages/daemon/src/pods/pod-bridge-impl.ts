@@ -10,6 +10,8 @@ import type {
 import type {
   ActionDefinition,
   ActionResponse,
+  DeferredCheck,
+  DeferredCheckReport,
   EffectiveLaunchConfig,
   EscalationRequest,
   EscalationResponse,
@@ -26,6 +28,7 @@ import type {
 } from '@autopod/shared';
 import { AutopodError, generateId, MAX_DIFF_LENGTH } from '@autopod/shared';
 import type { Logger } from 'pino';
+import { z } from 'zod';
 import type { ActionEngine } from '../actions/action-engine.js';
 import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
 import { isPrivateIp } from '../api/ssrf-guard.js';
@@ -67,6 +70,69 @@ import {
   resolveReviewerModel,
   resolveReviewerProvider,
 } from './runtime-resolver.js';
+
+// Validate direct bridge callers independently of the MCP schema.
+const deferredChecksSchema = z
+  .array(
+    z
+      .object({
+        id: z.string().trim().min(1).max(128),
+        check: z.string().trim().min(1).max(2000),
+        reason: z.string().trim().min(1).max(2000),
+        expectedExecutor: z.string().trim().min(1).max(256),
+        requiredFactId: z.string().trim().min(1).max(128).optional(),
+      })
+      .strict(),
+  )
+  .max(50);
+
+function mergeDeferredChecks(
+  pod: Pod,
+  input: DeferredCheck[] | undefined,
+): DeferredCheckReport[] | undefined {
+  const previous = pod.taskSummary?.deferredChecks;
+  if (input === undefined) return previous;
+  const incoming = deferredChecksSchema.parse(input);
+  const merged = new Map((previous ?? []).map((check) => [check.id, check]));
+  for (const check of incoming) {
+    if (
+      check.requiredFactId &&
+      !pod.contract?.requiredFacts.some((fact) => fact.id === check.requiredFactId)
+    ) {
+      throw new AutopodError(
+        'Deferred check references an unknown required fact.',
+        'INVALID_DEFERRED_CHECK',
+        400,
+      );
+    }
+    const recorded = merged.get(check.id);
+    if (recorded) {
+      if (
+        recorded.check !== check.check ||
+        recorded.reason !== check.reason ||
+        recorded.expectedExecutor !== check.expectedExecutor ||
+        recorded.requiredFactId !== check.requiredFactId
+      ) {
+        throw new AutopodError(
+          'Deferred check ID already has different content.',
+          'DEFERRED_CHECK_ID_CONFLICT',
+          409,
+        );
+      }
+      // A replay does not reattribute historical context to a new lifecycle.
+      continue;
+    }
+    merged.set(check.id, { ...check, lifecycleGeneration: pod.lifecycleGeneration });
+  }
+  if (merged.size > 50) {
+    throw new AutopodError(
+      'At most 50 deferred checks may be preserved in the task summary.',
+      'DEFERRED_CHECK_LIMIT',
+      400,
+    );
+  }
+  return [...merged.values()];
+}
 
 export interface SessionBridgeDependencies {
   podManager: SessionBridgeManagerPort;
@@ -571,8 +637,11 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       }>,
       memoryOutcomes?: MemoryOutcomeItem[],
       reviewFeedbackResponses?: ReviewFeedbackResponseItem[],
+      deferredChecks?: DeferredCheck[],
     ): void {
       assertAgentWriteAllowed(podId, 'report_task_summary');
+      const existing = podRepo.getOrThrow(podId);
+      const preservedDeferredChecks = mergeDeferredChecks(existing, deferredChecks);
       podManager.touchHeartbeat(podId);
       const requiredMemoryIds = selectedMemoryIdsForPod(memoryUsageRepo, podId);
       if (requiredMemoryIds.length > 0 || memoryOutcomes?.length) {
@@ -589,7 +658,6 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       // the agent to call report_task_summary "as your very last step" each
       // time. Without this guard, the original task summary gets clobbered
       // by a fix-cycle summary like "Fixed the two medium-severity issues…".
-      const existing = podRepo.getOrThrow(podId);
       const summaryAlreadySet = existing.taskSummary != null;
       logger.info(
         {
@@ -616,13 +684,17 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           factDeviations,
           memoryOutcomes,
           reviewFeedbackResponses,
+          ...(preservedDeferredChecks !== undefined
+            ? { deferredChecks: preservedDeferredChecks }
+            : {}),
         };
       } else if (
         existing.taskSummary &&
         (factEvidence != null ||
           factDeviations != null ||
           memoryOutcomes != null ||
-          reviewFeedbackResponses != null)
+          reviewFeedbackResponses != null ||
+          deferredChecks != null)
       ) {
         updates.taskSummary = {
           ...existing.taskSummary,
@@ -630,6 +702,9 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           ...(factDeviations != null ? { factDeviations } : {}),
           ...(memoryOutcomes != null ? { memoryOutcomes } : {}),
           ...(reviewFeedbackResponses != null ? { reviewFeedbackResponses } : {}),
+          ...(preservedDeferredChecks !== undefined
+            ? { deferredChecks: preservedDeferredChecks }
+            : {}),
         };
       }
       if (Object.keys(updates).length > 0) {
@@ -648,6 +723,9 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           factDeviations,
           memoryOutcomes,
           reviewFeedbackResponses,
+          ...(preservedDeferredChecks !== undefined
+            ? { deferredChecks: preservedDeferredChecks }
+            : {}),
           timestamp: new Date().toISOString(),
         },
       });
