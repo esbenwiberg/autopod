@@ -9,12 +9,17 @@ import {
 import type { Logger } from 'pino';
 import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
 
-/** Directory scanned for builtin (daemon-bundled) skills. Override via SKILLS_DIR env var.
- *  Defaults to the repo-root .claude/skills directory (resolved relative to this file so it
- *  works from both source and compiled dist layouts: 4 dirs up from src/pods/ or dist/pods/). */
+/** Legacy builtin directory. Paths work from both src/pods/ and dist/pods/ layouts. */
 const _dir = path.dirname(new URL(import.meta.url).pathname);
 export const BUILTIN_SKILLS_DIR =
   process.env.SKILLS_DIR ?? path.resolve(_dir, '../../../..', '.claude/skills');
+
+/** Prefer canonical shared skills, retaining Claude-only skills as a fallback.
+ * SKILLS_DIR is an exclusive override; never implicitly trust its siblings or link targets. */
+export const BUILTIN_SKILL_ROOTS =
+  process.env.SKILLS_DIR === undefined
+    ? [path.resolve(_dir, '../../../..', '.agents/skills'), BUILTIN_SKILLS_DIR]
+    : [BUILTIN_SKILLS_DIR];
 
 export interface BuiltinSkillMeta {
   name: string;
@@ -24,49 +29,53 @@ export interface BuiltinSkillMeta {
 /** Resolve the content file path for a builtin skill.
  *  Supports two layouts: flat `name.md` and subdirectory `name/SKILL.md`. */
 export async function resolveBuiltinSkillPath(name: string): Promise<string> {
-  const flat = path.join(BUILTIN_SKILLS_DIR, `${name}.md`);
-  try {
-    await fs.access(flat);
-    return flat;
-  } catch {
-    return path.join(BUILTIN_SKILLS_DIR, name, 'SKILL.md');
+  for (const root of BUILTIN_SKILL_ROOTS) {
+    for (const file of [path.join(root, `${name}.md`), path.join(root, name, 'SKILL.md')]) {
+      try {
+        await fs.access(file);
+        return file;
+      } catch {
+        // Try the next layout/root.
+      }
+    }
   }
+  return path.join(BUILTIN_SKILLS_DIR, name, 'SKILL.md');
 }
 
 /**
- * List all builtin skills in the skills directory.
+ * List builtin skills from the canonical and legacy directories, preferring canonical names.
  * Supports flat `name.md` files and subdirectory `name/SKILL.md` layouts.
- * Returns an empty array if the directory doesn't exist.
+ * Missing roots and symlink aliases are skipped; canonical skills are discovered directly.
  */
 export async function listBuiltinSkills(): Promise<BuiltinSkillMeta[]> {
-  let dirents: Awaited<ReturnType<typeof fs.readdir>>;
-  try {
-    dirents = await fs.readdir(BUILTIN_SKILLS_DIR, { withFileTypes: true });
-  } catch {
-    return [];
-  }
+  const candidates = new Map<string, string>();
+  for (const root of BUILTIN_SKILL_ROOTS) {
+    let dirents: Awaited<ReturnType<typeof fs.readdir>>;
+    try {
+      dirents = await fs.readdir(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
 
-  const candidates: Array<{ name: string; file: string }> = [];
-
-  for (const d of dirents) {
-    if (d.isFile() && d.name.endsWith('.md')) {
-      candidates.push({
-        name: d.name.replace(/\.md$/, ''),
-        file: path.join(BUILTIN_SKILLS_DIR, d.name),
-      });
-    } else if (d.isDirectory()) {
-      const skillFile = path.join(BUILTIN_SKILLS_DIR, d.name, 'SKILL.md');
-      try {
-        await fs.access(skillFile);
-        candidates.push({ name: d.name, file: skillFile });
-      } catch {
-        // no SKILL.md in this subdir — skip
+    for (const d of dirents) {
+      const name = d.isFile() ? d.name.replace(/\.md$/, '') : d.name;
+      if (candidates.has(name)) continue;
+      if (d.isFile() && d.name.endsWith('.md')) {
+        candidates.set(name, path.join(root, d.name));
+      } else if (d.isDirectory()) {
+        const skillFile = path.join(root, d.name, 'SKILL.md');
+        try {
+          await fs.access(skillFile);
+          candidates.set(name, skillFile);
+        } catch {
+          // no SKILL.md in this subdir — skip
+        }
       }
     }
   }
 
   const results = await Promise.all(
-    candidates.map(async ({ name, file }): Promise<BuiltinSkillMeta> => {
+    [...candidates].map(async ([name, file]): Promise<BuiltinSkillMeta> => {
       try {
         const content = await fs.readFile(file, 'utf-8');
         const description = extractSkillDescription(content);

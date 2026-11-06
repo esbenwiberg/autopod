@@ -470,6 +470,11 @@ add a fixture here before touching the parser.
 
 - **Skills are non-fatal** — `skill-resolver.ts` catches all errors and returns only the skills that
   resolved successfully. A GitHub fetch timeout (15 s) will silently drop that skill.
+  Builtin discovery and launch-time reading prefer repo-root `.agents/skills/`,
+  falling back to `.claude/skills/` for legacy-only names. Shared skills are discovered
+  directly from their canonical directories, not by following Claude's symlink aliases.
+  `SKILLS_DIR` replaces both defaults; launch reading still requires realpath containment
+  within these fixed roots or explicitly enrolled `skillRoots` and enforces its byte bound.
 
 - **Workspace pods** skip validation, skip PR creation, and never auto-complete. The container
   exits when the user disconnects; the pod transitions to `complete` and the branch is pushed.

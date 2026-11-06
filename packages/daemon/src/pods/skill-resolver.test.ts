@@ -1,17 +1,24 @@
 import type { Dirent } from 'node:fs';
 import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import type { InjectedSkill } from '@autopod/shared';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SafetyEventsRepository } from '../safety/safety-events-repository.js';
-import { listBuiltinSkills, resolveSkills } from './skill-resolver.js';
+import {
+  BUILTIN_SKILLS_DIR,
+  listBuiltinSkills,
+  resolveBuiltinSkillPath,
+  resolveSkills,
+} from './skill-resolver.js';
 
 const logger = pino({ level: 'silent' });
+const canonicalRoot = path.resolve(BUILTIN_SKILLS_DIR, '../../.agents/skills');
 
 vi.mock('node:fs/promises');
 const mockFs = vi.mocked(fs);
 
-function dirent(name: string, type: 'file' | 'directory') {
+function dirent(name: string, type: 'file' | 'directory' | 'symlink') {
   return {
     name,
     isFile: () => type === 'file',
@@ -428,11 +435,94 @@ Review the PR carefully.`);
 
 describe('listBuiltinSkills', () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
+    vi.resetAllMocks();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it('discovers shared skills directly and retains legacy-only skills, skipping symlink aliases', async () => {
+    mockFs.readdir
+      .mockResolvedValueOnce([dirent('shared', 'directory')])
+      .mockResolvedValueOnce([dirent('shared', 'symlink'), dirent('legacy.md', 'file')]);
+    mockFs.access.mockResolvedValue(undefined);
+    mockFs.readFile.mockResolvedValue('---\ndescription: Shared or legacy skill\n---');
+
+    await expect(listBuiltinSkills()).resolves.toEqual([
+      { name: 'legacy', description: 'Shared or legacy skill' },
+      { name: 'shared', description: 'Shared or legacy skill' },
+    ]);
+    expect(mockFs.readFile).toHaveBeenCalledWith(
+      path.join(canonicalRoot, 'shared', 'SKILL.md'),
+      'utf-8',
+    );
+  });
+
+  it('prefers canonical skill content when both roots contain the same name', async () => {
+    mockFs.readdir.mockResolvedValue([dirent('shared', 'directory')]);
+    mockFs.access.mockResolvedValue(undefined);
+    mockFs.readFile.mockResolvedValue('---\ndescription: Canonical skill\n---');
+
+    await expect(listBuiltinSkills()).resolves.toEqual([
+      { name: 'shared', description: 'Canonical skill' },
+    ]);
+    expect(mockFs.readFile).toHaveBeenCalledTimes(1);
+    expect(mockFs.readFile).toHaveBeenCalledWith(
+      path.join(canonicalRoot, 'shared', 'SKILL.md'),
+      'utf-8',
+    );
+  });
+
+  it('continues to the legacy root when the canonical directory is absent', async () => {
+    mockFs.readdir
+      .mockRejectedValueOnce(new Error('ENOENT'))
+      .mockResolvedValueOnce([dirent('legacy.md', 'file')]);
+    mockFs.readFile.mockResolvedValue('---\ndescription: Legacy skill\n---');
+
+    await expect(listBuiltinSkills()).resolves.toEqual([
+      { name: 'legacy', description: 'Legacy skill' },
+    ]);
+  });
+
+  it('resolves a canonical skill before checking legacy layouts', async () => {
+    mockFs.access.mockRejectedValueOnce(new Error('ENOENT')).mockResolvedValueOnce(undefined);
+
+    await expect(resolveBuiltinSkillPath('shared')).resolves.toBe(
+      path.join(canonicalRoot, 'shared', 'SKILL.md'),
+    );
+    expect(mockFs.access).toHaveBeenCalledTimes(2);
+  });
+
+  it('resolves legacy-only skills after checking both canonical layouts', async () => {
+    mockFs.access
+      .mockRejectedValueOnce(new Error('ENOENT'))
+      .mockRejectedValueOnce(new Error('ENOENT'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(resolveBuiltinSkillPath('legacy')).resolves.toBe(
+      path.join(BUILTIN_SKILLS_DIR, 'legacy.md'),
+    );
+  });
+
+  it('keeps SKILLS_DIR exclusive instead of enrolling canonical or sibling roots', async () => {
+    vi.stubEnv('SKILLS_DIR', '/operator/skills');
+    vi.resetModules();
+    const overridden = await import('./skill-resolver.js');
+    expect(overridden.BUILTIN_SKILL_ROOTS).toEqual(['/operator/skills']);
+    mockFs.readdir.mockResolvedValue([dirent('custom.md', 'file')]);
+    mockFs.readFile.mockResolvedValue('---\ndescription: Custom skill\n---');
+    mockFs.access.mockResolvedValue(undefined);
+
+    await expect(overridden.listBuiltinSkills()).resolves.toEqual([
+      { name: 'custom', description: 'Custom skill' },
+    ]);
+    expect(mockFs.readdir).toHaveBeenCalledTimes(1);
+    expect(mockFs.readdir).toHaveBeenCalledWith('/operator/skills', { withFileTypes: true });
+    await expect(overridden.resolveBuiltinSkillPath('custom')).resolves.toBe(
+      '/operator/skills/custom.md',
+    );
   });
 
   it('extracts folded descriptions from builtin skill frontmatter', async () => {

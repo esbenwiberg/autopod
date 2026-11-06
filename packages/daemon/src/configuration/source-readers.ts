@@ -4,7 +4,7 @@ import type { RepositoryConfig, ToolPack } from '@autopod/shared';
 import { z } from 'zod';
 import { GitHubDiscovery } from '../github/discovery.js';
 import type { GitHubMutationClient } from '../github/mutation-broker.js';
-import { BUILTIN_SKILLS_DIR, resolveBuiltinSkillPath } from '../pods/skill-resolver.js';
+import { BUILTIN_SKILL_ROOTS, resolveBuiltinSkillPath } from '../pods/skill-resolver.js';
 import { type ConfigurationStore, configurationError } from './configuration-store.js';
 
 const maxSkillBytes = 1_000_000;
@@ -50,7 +50,7 @@ export function createConfigurationSourceReaders(options: {
   async function localSkill(file: string): Promise<string> {
     const actual = await realpath(file);
     const roots = await Promise.all(
-      [BUILTIN_SKILLS_DIR, ...options.skillRoots].map(async (root) => {
+      [...BUILTIN_SKILL_ROOTS, ...options.skillRoots].map(async (root) => {
         try {
           return await realpath(root);
         } catch {

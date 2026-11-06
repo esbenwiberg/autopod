@@ -1,7 +1,8 @@
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { listBuiltinSkills, resolveBuiltinSkillPath } from '../pods/skill-resolver.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
 import { createTestDb } from '../test-utils/mock-helpers.js';
 import { createConfigurationSourceReaders } from './source-readers.js';
@@ -105,6 +106,80 @@ describe('daemon configuration source readers', () => {
       db.close();
     }
   });
+  it('discovers and freezes canonical shared skills without additional enrolled roots', async () => {
+    const db = createTestDb();
+    try {
+      const { store } = createTestConfiguration(db);
+      const readers = createConfigurationSourceReaders({
+        store,
+        github: { get: vi.fn() },
+        skillRoots: [],
+      });
+      const builtinNames = (await listBuiltinSkills()).map((skill) => skill.name);
+      for (const name of ['add-pod-state', 'add-profile-field', 'deploy-hosted-daemon']) {
+        const canonical = await resolveBuiltinSkillPath(name);
+        expect(canonical).toContain(`${path.sep}.agents${path.sep}skills${path.sep}`);
+        const content = await readFile(canonical, 'utf8');
+        expect(builtinNames.filter((builtin) => builtin === name)).toHaveLength(1);
+        await expect(readers.skillContent({ name, source: { type: 'builtin' } })).resolves.toBe(
+          content,
+        );
+        const alias = path.resolve(
+          path.dirname(canonical),
+          '../../../.claude/skills',
+          name,
+          'SKILL.md',
+        );
+        await expect(
+          readers.skillContent({ name, source: { type: 'local', path: alias } }),
+        ).resolves.toBe(content);
+      }
+      expect(builtinNames).toContain('prep');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('does not trust sibling directories or escaped aliases when SKILLS_DIR is overridden', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'configuration-skill-roots-'));
+    const custom = path.join(root, '.claude/skills');
+    const sibling = path.join(root, '.agents/skills');
+    const db = createTestDb();
+    try {
+      await mkdir(custom, { recursive: true });
+      await mkdir(sibling, { recursive: true });
+      await writeFile(path.join(custom, 'local.md'), 'Custom');
+      await writeFile(path.join(sibling, 'shared.md'), 'Not implicitly enrolled');
+      await symlink(path.join(sibling, 'shared.md'), path.join(custom, 'escape.md'));
+      vi.stubEnv('SKILLS_DIR', custom);
+      vi.resetModules();
+      const { createConfigurationSourceReaders: overridden } = await import('./source-readers.js');
+      const { store } = createTestConfiguration(db);
+      const readers = overridden({ store, github: { get: vi.fn() }, skillRoots: [] });
+      await expect(
+        readers.skillContent({ name: 'local', source: { type: 'builtin' } }),
+      ).resolves.toBe('Custom');
+      await expect(
+        readers.skillContent({ name: 'escape', source: { type: 'builtin' } }),
+      ).rejects.toThrow('outside');
+      await expect(
+        readers.skillContent({
+          name: 'shared',
+          source: { type: 'local', path: path.join(sibling, 'shared.md') },
+        }),
+      ).rejects.toThrow('outside');
+      const enrolled = overridden({ store, github: { get: vi.fn() }, skillRoots: [sibling] });
+      await expect(
+        enrolled.skillContent({ name: 'escape', source: { type: 'builtin' } }),
+      ).resolves.toBe('Not implicitly enrolled');
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+      db.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('bounds local files and rejects symlinks outside enrolled directories', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'configuration-skill-'));
     const outside = await mkdtemp(path.join(tmpdir(), 'configuration-outside-'));
