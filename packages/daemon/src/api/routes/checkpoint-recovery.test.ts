@@ -29,6 +29,8 @@ describe('human-only retained checkpoint selection', () => {
       recoverCheckpoint: f.recovery.submit,
       getCheckpointRecoveries: f.recovery.list,
       getCheckpointRecoverySelection: f.recovery.selection,
+      recoverInfrastructure: f.recovery.recoverInfrastructure,
+      reconcileInfrastructure: f.recovery.reconcileInfrastructure,
       reconcileCheckpointOutcome: f.recovery.reconcileOutcome,
       continueRetained: f.recovery.continueRetained,
       checkRetainedCandidate: (...args: Parameters<typeof f.recovery.checkCandidate>) =>
@@ -43,6 +45,43 @@ describe('human-only retained checkpoint selection', () => {
     f.ctx.db.close();
     await rm(f.root, { recursive: true, force: true });
     vi.unstubAllEnvs();
+  });
+  it('authenticates and strictly validates preservation-safe infrastructure admission and reconciliation', async () => {
+    const input = {
+      ...f.input,
+      mode: 'checks',
+      qualification: 'Explicit owner diagnosis of the recorded needs, not a passing result',
+    };
+    for (const suffix of ['', '/reconcile']) {
+      const url = `/pods/${f.podId}/infrastructure-recovery${suffix}`;
+      for (const authorization of [undefined, 'Bearer pod-token']) {
+        const response = await app.inject({
+          method: 'POST',
+          url,
+          payload: input,
+          headers: authorization ? { authorization } : {},
+        });
+        expect(response.statusCode).toBe(401);
+      }
+      for (const extra of [
+        { actor: f.actor },
+        { force: true },
+        { result: { overall: 'pass' } },
+        { sourcePath: '/other' },
+        { prepareOnly: true },
+        { remoteHead: 'a'.repeat(40) },
+        { mode: 'other' },
+        { instructions: { content: 'Different bytes', sha256: 'bad' } },
+      ]) {
+        expect(
+          (await app.inject({ method: 'POST', url, headers, payload: { ...input, ...extra } }))
+            .statusCode,
+        ).toBe(400);
+      }
+    }
+    expect(f.cm.getStatus).not.toHaveBeenCalled();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.recovery.list(f.podId)).toEqual([]);
   });
   it('exposes authenticated report-bound selection without inventing a validation result', async () => {
     const evidence = recordPreValidationInfrastructure(f);

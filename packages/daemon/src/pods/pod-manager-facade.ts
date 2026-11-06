@@ -133,6 +133,24 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
         captured.checkpointRecovery ?? checkpointError('Retained continuation unavailable')
       ).previewExecution(podId, profileId);
     },
+    recoverInfrastructure(
+      podId: string,
+      input: import('@autopod/shared').InfrastructureRecoveryRequest,
+      actor: OperatorActor,
+    ) {
+      return (
+        captured.checkpointRecovery ?? checkpointError('Recovery unavailable')
+      ).recoverInfrastructure(podId, input, actor);
+    },
+    reconcileInfrastructure(
+      podId: string,
+      input: import('@autopod/shared').InfrastructureRecoveryRequest,
+      actor: OperatorActor,
+    ) {
+      return (
+        captured.checkpointRecovery ?? checkpointError('Recovery unavailable')
+      ).reconcileInfrastructure(podId, input, actor);
+    },
     continueRetained(
       podId: string,
       input: import('@autopod/shared').RetainedContinuationRequest,
@@ -320,6 +338,15 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
       message: string,
       actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
     ): Promise<void> {
+      if (
+        captured.podRepo.retainedCheckpoints?.latest(podId)?.binding.continuation?.infrastructure
+          ?.mode === 'rework'
+      )
+        return (
+          captured.checkpointRecovery ?? checkpointError('Recovery unavailable')
+        ).replyToRepair(podId, actor, () =>
+          operatorMessages.sendMessage.call(this, podId, message, actor),
+        );
       return operatorMessages.sendMessage.call(this, podId, message, actor);
     },
 

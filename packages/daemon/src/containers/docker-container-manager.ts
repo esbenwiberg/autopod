@@ -31,7 +31,10 @@ import type {
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
 import { extractManagedDockerOutput } from '../managed/output-extraction.js';
-import { assertCheckpointResourceNotRetained } from '../pods/retained-checkpoint-repository.js';
+import {
+  assertCheckpointResourceNotRetained,
+  ownsInfrastructureRecoveryStop,
+} from '../pods/retained-checkpoint-repository.js';
 import { ownsRetainedFinalizationStop } from '../pods/retained-finalization-repository.js';
 import { assertDirectoryExtractionCurrent } from './directory-extraction-ownership.js';
 import {
@@ -523,7 +526,8 @@ export class DockerContainerManager implements ContainerManager {
   async stop(containerId: string): Promise<void> {
     if (
       !this.managedDatabase ||
-      !ownsRetainedFinalizationStop(this.managedDatabase, containerId, 'local')
+      (!ownsRetainedFinalizationStop(this.managedDatabase, containerId, 'local') &&
+        !ownsInfrastructureRecoveryStop(this.managedDatabase, containerId))
     )
       this.assertNotRetained(containerId);
     try {

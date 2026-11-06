@@ -219,6 +219,7 @@ export async function retainedCheckpointFixture(
   native = false,
   independentReview = false,
   independentRoute = false,
+  target: 'local' | 'sandbox' = 'sandbox',
 ) {
   const ctx = createTestContext();
   vi.mocked(ctx.profileStore.get).mockReturnValue({
@@ -280,7 +281,7 @@ export async function retainedCheckpointFixture(
     }
     vi.mocked(nativeConfiguration.services.executionCapabilities).mockResolvedValue({
       ...testExecutionCapabilities,
-      target: 'sandbox',
+      target,
     });
     const accounts = createProviderAccountStore(ctx.db);
     accounts.create({
@@ -319,7 +320,7 @@ export async function retainedCheckpointFixture(
             repositoryId: 'repo-a',
             profileId: 'profile',
             task,
-            overrides: { execution: { target: 'sandbox' } },
+            overrides: { execution: { target } },
           },
           actorId: 'operator',
           services: nativeConfiguration.services,
@@ -374,7 +375,7 @@ export async function retainedCheckpointFixture(
   const resourceKey = `https://management.swedencentral.azuredevcompute.io/subscriptions/test/resourcegroups/test/sandboxgroups/test/sandboxes/${containerId}`;
   ctx.podRepo.update(created.id, {
     status: kind === 'validation' ? 'review_required' : 'validated',
-    executionTarget: 'sandbox',
+    executionTarget: target,
     containerId,
     worktreePath: path.join(root, 'original'),
     lastValidationResult: result,
