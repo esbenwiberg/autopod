@@ -5,7 +5,7 @@
 # Usage:
 #   ./scripts/generate-knowledge-index.sh
 #
-# Invoked automatically by /plan-feature at the start of each run.
+# Run from your planning workflow when refreshing ADR and convention context.
 # Run manually after adding or editing any ADR or convention.
 
 set -euo pipefail

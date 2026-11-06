@@ -1,6 +1,6 @@
 # Analytics Dashboard — Phased Plan
 
-A living plan for the macOS desktop analytics rebuild. Each phase below is sized to be its own `/plan-feature` invocation: self-contained scope, clear data deps, ships user-visible value at the end.
+A living plan for the macOS desktop analytics rebuild. Each phase below is sized to be its own planning session: self-contained scope, clear data deps, ships user-visible value at the end.
 
 ## Status
 
@@ -47,7 +47,7 @@ Every card has a sparkline + delta. Every card opens a deep view in the right pa
 
 ## Established conventions (locked by Phase 0 + Phase 1)
 
-Future phases consume these as-is — don't re-litigate during `/plan-feature`.
+Future phases consume these as-is — don't re-litigate during planning.
 
 - **Card API** (Phase 0): `AnalyticsCard` takes `title: String`, `value: String`, `sparkline: [Double]?`, `delta: AnalyticsCardDelta?`, `isSelected: Bool`, `onClick: () -> Void`. Pre-formatted strings, not numbers. Source: `specs/analytics-shell/design.md`.
 - **Card kind enum** (Phase 0): `AnalyticsCardKind` is an enum with `.cost`, `.quality`, `.status`. New phases extend the enum with their card kind (e.g. `.reliability`, `.safety`, `.throughput`, `.models`).
@@ -105,7 +105,7 @@ Each phase ships a working slice: migration (if any) → daemon endpoint → Swi
 
 **Done when:** clicking the Cost card lets me find — in under three clicks — the pod that blew yesterday's budget.
 
-**Risks / open Qs for /plan-feature**
+**Risks / open planning questions**
 - `phase_token_usage` JSON shape stability — confirm all phase keys before grouping.
 - Currency rounding strategy (already cents-rounded? confirm).
 
@@ -252,11 +252,11 @@ Phases 1–3 are independent after Phase 0 ships and could be parallelized if we
 
 ## How to use this doc
 
-For each phase, run `/plan-feature` and paste the corresponding section as the seed. The plan-feature skill will interview, scan the codebase, and produce a `specs/<phase-name>/` folder with `purpose.md`, `design.md`, and per-module briefs.
+For each phase, use your configured global planning workflow with the corresponding section as the seed. Research the codebase and resolve open questions, then produce a `specs/<phase-name>/` folder with `purpose.md`, `design.md`, and per-module briefs.
 
 After a phase is spec'd, update the Status table at the top of this doc with a link to its `specs/<phase-name>/` folder so progress is trackable from one place.
 
-Suggested phase names for `/plan-feature`:
+Suggested phase names:
 - `analytics-shell` ✅
 - `analytics-cost` ✅
 - `analytics-reliability-funnel`

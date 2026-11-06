@@ -14,8 +14,8 @@ without hunting through old spec folders.
 
 ## Producing new ADRs
 
-`/plan-feature` writes new ADRs here when the planning interview surfaces
-a hard-to-reverse or surprising decision. The spec folder
+Write new ADRs here when planning surfaces a hard-to-reverse or surprising
+decision, using your configured global planning workflow. The spec folder
 (`specs/<feature>/`) only references ADR IDs in `design.md` — full text
 lives here.
 
