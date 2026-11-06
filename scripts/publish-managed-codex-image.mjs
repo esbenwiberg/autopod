@@ -80,6 +80,12 @@ export async function publishManagedImage(
   try {
     prepareSourceArchive(plan, sourceRepository, context);
     fs.copyFileSync(path.join(ROOT, DOCKERFILE), path.join(context, 'Dockerfile'));
+    // Copy only trusted image-build helpers, never the caller's full working tree.
+    const helperDirectory = path.join(context, 'templates/base');
+    fs.mkdirSync(helperDirectory, { recursive: true });
+    for (const name of ['install-worker-git.sh', 'check-worker-git.sh']) {
+      fs.copyFileSync(path.join(ROOT, 'templates/base', name), path.join(helperDirectory, name));
+    }
     const queued = parseQueued(runAz(buildArgs, context));
     const runId =
       queued.runId ??

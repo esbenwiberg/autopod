@@ -3,6 +3,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0
 # System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    libcurl4-openssl-dev libexpat1-dev libssl-dev zlib1g-dev \
     curl \
     ca-certificates \
     gnupg \
@@ -18,6 +19,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/python3 /usr/local/bin/python \
     && rm -f /usr/lib/python3*/EXTERNALLY-MANAGED \
     && rm -rf /var/lib/apt/lists/*
+
+# Keep Git integration capabilities independent of the distribution package version.
+COPY templates/base/install-worker-git.sh /tmp/install-worker-git.sh
+RUN sh /tmp/install-worker-git.sh && rm /tmp/install-worker-git.sh
+COPY templates/base/check-worker-git.sh /usr/local/bin/autopod-check-git
+# Bounded workers must not acquire untracked background Git writers.
+RUN chmod 0755 /usr/local/bin/autopod-check-git \
+    && mkdir -p /usr/local/etc \
+    && git config --system maintenance.auto false \
+    && git config --system gc.auto 0
 
 # Glow — terminal markdown viewer from Charm
 RUN mkdir -p /etc/apt/keyrings \
@@ -155,6 +166,7 @@ WORKDIR /workspace
 RUN chown autopod:autopod /workspace
 
 USER autopod
+RUN autopod-check-git
 
 # Install credential provider for the runtime user (root install above covers build-time only)
 RUN curl -fsSL https://aka.ms/install-artifacts-credprovider.sh | bash \

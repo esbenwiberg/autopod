@@ -13,13 +13,27 @@ const base = path.resolve(
 );
 const checker = path.join(base, 'check-worker-git.sh');
 
-describe('durable PostgreSQL worker Git', () => {
-  it.each([
-    'node22-pw-pg',
-    'node24-pw-pg',
-  ])('%s installs Git and checks it as the worker', async (name) => {
-    const dockerfile = await readFile(path.join(base, `Dockerfile.${name}`), 'utf8');
-    expect(dockerfile).toContain('libcurl4-openssl-dev libexpat1-dev libssl-dev zlib1g-dev');
+// Discover every coding template so a new family cannot silently inherit distro Git.
+const codingTemplates: string[] = [];
+for (const directory of ['base', 'managed']) {
+  const files = await readdir(path.join(base, '..', directory));
+  codingTemplates.push(
+    ...files.filter((name) => name.startsWith('Dockerfile.')).map((name) => `${directory}/${name}`),
+  );
+}
+codingTemplates.sort();
+
+describe('durable coding-worker Git', () => {
+  it.each(codingTemplates)('%s installs Git and checks it as the worker', async (name) => {
+    const dockerfile = await readFile(path.join(base, '..', name), 'utf8');
+    const systemDependencies = dockerfile.match(
+      /RUN apt-get update[\s\S]+?rm -rf \/var\/lib\/apt\/lists\/\*/,
+    )?.[0];
+    expect(systemDependencies).toMatch(/\s+curl\s/);
+    expect(systemDependencies).toContain('build-essential');
+    expect(systemDependencies).toContain(
+      'libcurl4-openssl-dev libexpat1-dev libssl-dev zlib1g-dev',
+    );
     expect(dockerfile).toContain(
       'COPY templates/base/install-worker-git.sh /tmp/install-worker-git.sh',
     );

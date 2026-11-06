@@ -11,7 +11,8 @@ No extra launch question or approval is added.
 Build the local worker image from the repository root:
 
 ```sh
-docker build -f templates/managed/Dockerfile.codex-local -t autopod-managed-local:reviewed templates/managed
+docker build -f templates/managed/Dockerfile.codex-local -t autopod-managed-local:reviewed .
+bash scripts/smoke-worker-git.sh autopod-managed-local:reviewed
 docker image inspect autopod-managed-local:reviewed --format '{{.Id}}'
 ```
 
