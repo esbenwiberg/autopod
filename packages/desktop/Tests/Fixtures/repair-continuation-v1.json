@@ -1,0 +1,200 @@
+{
+  "request": {
+    "version": 1,
+    "intent": "qualify_then_code_once",
+    "id": "stable-request",
+    "expectedGeneration": 2,
+    "expectedResultHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "expectedReportSetHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "sourceHead": "cccccccccccccccccccccccccccccccccccccccc",
+    "executionProfileId": "reviewed-profile",
+    "expectedExecutionDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "expectedBindingDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "reason": "Use reviewed software without expanding authority"
+  },
+  "inspection": {
+    "version": 1,
+    "intent": "qualify_then_code_once",
+    "podId": "pod",
+    "generation": 2,
+    "available": true,
+    "expectedResultHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "expectedReportSetHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "sourceHead": "cccccccccccccccccccccccccccccccccccccccc",
+    "requirementsHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "operation": null,
+    "refusals": []
+  },
+  "preview": {
+    "version": 1,
+    "intent": "qualify_then_code_once",
+    "podId": "pod",
+    "configurationOnly": true,
+    "actualQualification": "not_run",
+    "conditionalAttemptEligible": true,
+    "selection": {
+      "expectedGeneration": 2,
+      "expectedResultHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedReportSetHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "sourceHead": "cccccccccccccccccccccccccccccccccccccccc",
+      "executionProfileId": "reviewed-profile",
+      "expectedExecutionDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "expectedBindingDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "requirementsHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "target": "local"
+    },
+    "configurationDiff": {
+      "before": {
+        "target": "local",
+        "template": "old",
+        "imageKey": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "platform": "linux/arm64",
+        "memoryGb": 8,
+        "cpus": 2
+      },
+      "after": {
+        "target": "local",
+        "template": "reviewed",
+        "imageKey": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "platform": "linux/arm64",
+        "memoryGb": 8,
+        "cpus": 2
+      }
+    },
+    "refusals": []
+  },
+  "operation": {
+    "version": 1,
+    "intent": "qualify_then_code_once",
+    "podId": "pod",
+    "request": {
+      "version": 1,
+      "intent": "qualify_then_code_once",
+      "id": "stable-request",
+      "expectedGeneration": 2,
+      "expectedResultHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedReportSetHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "sourceHead": "cccccccccccccccccccccccccccccccccccccccc",
+      "executionProfileId": "reviewed-profile",
+      "expectedExecutionDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "expectedBindingDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "reason": "Use reviewed software without expanding authority"
+    },
+    "state": "claimed",
+    "createdAt": "2026-11-06T12:00:00Z",
+    "updatedAt": "2026-11-06T12:00:00Z",
+    "originalGeneration": 2,
+    "candidateGeneration": null,
+    "qualification": null,
+    "codingFinalSource": null,
+    "codingAdmission": "not_admitted",
+    "checks": "not_started",
+    "refusals": [],
+    "originalResourcesRetained": true,
+    "requiresHumanApproval": true,
+    "publicationAuthorized": false
+  },
+  "validatedOperation": {
+    "version": 1,
+    "intent": "qualify_then_code_once",
+    "podId": "pod",
+    "request": {
+      "version": 1,
+      "intent": "qualify_then_code_once",
+      "id": "stable-request",
+      "expectedGeneration": 2,
+      "expectedResultHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedReportSetHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "sourceHead": "cccccccccccccccccccccccccccccccccccccccc",
+      "executionProfileId": "reviewed-profile",
+      "expectedExecutionDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "expectedBindingDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "reason": "Use reviewed software without expanding authority"
+    },
+    "state": "validated",
+    "createdAt": "2026-11-06T12:00:00Z",
+    "updatedAt": "2026-11-06T12:00:00Z",
+    "originalGeneration": 2,
+    "candidateGeneration": 3,
+    "qualification": {
+      "version": 1,
+      "binding": {
+        "version": 1,
+        "operationId": "stable-request",
+        "requestHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "podId": "pod",
+        "taskId": "task",
+        "executionId": "execution",
+        "custodyId": "custody",
+        "originalGeneration": 2,
+        "candidateGeneration": 3,
+        "originalResultHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reportSetHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "requirementsHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "originalLaunchDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "replacementLaunchDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "configurationHash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "sourceEpoch": "3333333333333333333333333333333333333333333333333333333333333333",
+        "credentialEpoch": "4444444444444444444444444444444444444444444444444444444444444444",
+        "resourceEpoch": "5555555555555555555555555555555555555555555555555555555555555555",
+        "source": {
+          "repository": "https://fixture.invalid/repository",
+          "head": "cccccccccccccccccccccccccccccccccccccccc",
+          "tree": "2222222222222222222222222222222222222222",
+          "baseCommitSha": "1111111111111111111111111111111111111111"
+        },
+        "target": "local",
+        "containerId": "6666666666666666666666666666666666666666666666666666666666666666",
+        "resourceKey": "resource",
+        "expectedImage": {
+          "kind": "docker-image-id",
+          "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+        },
+        "platform": "linux/arm64",
+        "executionContextHash": "8888888888888888888888888888888888888888888888888888888888888888"
+      },
+      "bindingDigest": "9999999999999999999999999999999999999999999999999999999999999999",
+      "probeVersion": 1,
+      "daemonCommit": "fixture",
+      "implementationHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "startedAt": "2026-11-06T12:00:00Z",
+      "finishedAt": "2026-11-06T12:00:01Z",
+      "expiresAt": "2026-11-06T12:05:01Z",
+      "outcome": "qualified",
+      "observations": [
+        {
+          "prerequisite": "launcher",
+          "launcher": "node",
+          "outcome": "qualified",
+          "code": "LAUNCHER_PRESENT",
+          "detail": "Launcher available, not operation proof"
+        }
+      ],
+      "provenanceId": null
+    },
+    "codingFinalSource": {
+      "version": 1,
+      "operationId": "stable-request",
+      "generation": 3,
+      "taskRunId": "task-run",
+      "selectedHead": "cccccccccccccccccccccccccccccccccccccccc",
+      "source": {
+        "repository": "https://fixture.invalid/repository",
+        "head": "9999999999999999999999999999999999999999",
+        "tree": "8888888888888888888888888888888888888888",
+        "baseCommitSha": "1111111111111111111111111111111111111111"
+      },
+      "clean": true,
+      "descendant": true,
+      "workerSettled": true,
+      "sealedAt": "2026-11-06T12:01:00Z",
+      "reportsHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "codingAdmission": "consumed",
+    "checks": "passed",
+    "refusals": [],
+    "originalResourcesRetained": true,
+    "requiresHumanApproval": true,
+    "publicationAuthorized": false
+  }
+}

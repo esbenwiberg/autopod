@@ -1,0 +1,206 @@
+import AutopodClient
+import Foundation
+import SwiftUI
+import Testing
+@testable import AutopodUI
+
+private func repairUIFixture(_ key: String, patch: ([String: Any]) -> [String: Any] = { $0 }) throws -> Data {
+  let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+    .appendingPathComponent("Fixtures/repair-continuation-v1.json")
+  let all = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+  return try JSONSerialization.data(withJSONObject: patch(all[key] as! [String: Any]))
+}
+private func repairUIOperation(_ request: RepairContinuationRequestV1, changed: Bool = false) throws -> RepairContinuationOperationV1 {
+  var body = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as! [String: Any]
+  if changed { body["reason"] = "Different same-key authorization reason" }
+  return try JSONDecoder().decode(RepairContinuationOperationV1.self, from: repairUIFixture("operation") {
+    var value = $0; value["request"] = body; return value
+  })
+}
+
+@MainActor private final class RepairUIFixture {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  let scope = UUID().uuidString
+  var loads = 0
+  var previews = 0
+  var posts = 0
+  var observations = 0
+  var current = true
+  var loadFailure = false
+  var unsupported = false
+  var changedObservation = false
+  var hold = false
+  var postOutcome = "accepted"
+  var release: CheckedContinuation<Void, Never>?
+  var request: RepairContinuationRequestV1?
+  var actions: RepairContinuationActions {
+    RepairContinuationActions(scope: scope, draftScope: "daemon", journalDirectory: directory, isCurrent: { self.current },
+      load: { _ in
+        self.loads += 1
+        if self.loadFailure { throw DaemonError.notFound("Unsupported repair-continuation-v1") }
+        return try JSONDecoder().decode(RepairContinuationInspectionV1.self, from: repairUIFixture("inspection"))
+      }, preview: { _, _, _ in
+        self.previews += 1
+        return try JSONDecoder().decode(RepairContinuationPreviewV1.self, from: repairUIFixture("preview") {
+          guard self.unsupported else { return $0 }
+          var value = $0; value["conditionalAttemptEligible"] = false
+          value["refusals"] = [["code": "unsupported_needs", "message": "Legacy text cannot be qualified"]]
+          return value
+        })
+      }, submit: { _, request in
+        self.posts += 1; self.request = request
+        let journal = RepairContinuationJournal<RepairContinuationRequestV1>(scope: "daemon", podId: "pod", directory: self.directory)
+        #expect(try journal.load() == request) // Exact protected body exists before POST.
+        if self.hold { await withCheckedContinuation { self.release = $0 } }
+        if self.postOutcome == "lost" { throw DaemonError.networkError("Response lost") }
+        if self.postOutcome == "409" { throw DaemonError.serverError(409, "Same-key conflict") }
+        return try repairUIOperation(request, changed: self.postOutcome == "malformed")
+      }, observe: { _, id in
+        self.observations += 1
+        guard let request = self.request else { throw DaemonError.notFound("No receipt observed") }
+        #expect(id == request.id)
+        return try repairUIOperation(request, changed: self.changedObservation)
+      })
+  }
+  func prepare(_ model: RepairContinuationModel) async {
+    await model.refresh(actions)
+    model.profileId = "reviewed-profile"; model.reason = "Use reviewed software without expanding authority"
+    await model.loadPreview(actions)
+  }
+  func clean() { release?.resume(); release = nil; try? FileManager.default.removeItem(at: directory) }
+}
+
+@Suite(.serialized) @MainActor struct RepairContinuationTests {
+  @Test func supportedConditionalAttemptCanAuthorizeBeforeQualificationButCannotSkipProbes() async throws {
+    let f = RepairUIFixture(); defer { f.clean() }
+    let model = RepairContinuationModel(podId: "pod", actions: f.actions)
+    await f.prepare(model)
+    #expect(model.canAuthorize && model.preview?.actualQualification == "not_run")
+    #expect(model.operation == nil && f.posts == 0 && f.loads == 1 && f.previews == 1)
+    await model.authorize(f.actions)
+    #expect(f.posts == 1 && model.pending == f.request)
+    #expect(model.operation?.state == .claimed && model.operation?.qualification == nil && model.operation?.codingAdmission == .notAdmitted)
+    #expect(!model.canAuthorize)
+    await model.observe(f.actions)
+    #expect(f.observations == 1 && f.posts == 1 && model.operation?.checks == .notStarted)
+  }
+
+  @Test(arguments: ["lost", "409", "malformed"])
+  func doubleClickAndReopenPreserveExactRequestAndOnlyObserve(outcome: String) async throws {
+    let f = RepairUIFixture(); defer { f.clean() }
+    f.postOutcome = outcome; f.hold = true
+    let model = RepairContinuationModel(podId: "pod", actions: f.actions)
+    await f.prepare(model)
+    let task = Task { await model.authorize(f.actions) }
+    for _ in 0..<200 { if f.release != nil { break }; try await Task.sleep(for: .milliseconds(5)) }
+    try #require(f.release != nil)
+    await model.authorize(f.actions)
+    #expect(f.posts == 1 && model.busy)
+    f.release?.resume(); f.release = nil
+    await task.value
+    #expect(model.operation == nil && model.pending != nil && model.error?.contains("unconfirmed") == true)
+    let saved = model.pending
+    let reopened = RepairContinuationModel(podId: "pod", actions: f.actions)
+    await reopened.refresh(f.actions)
+    #expect(reopened.pending == saved && reopened.operation?.request == saved)
+    #expect(!reopened.canAuthorize && f.posts == 1 && f.observations == 1)
+    await reopened.authorize(f.actions)
+    #expect(f.posts == 1)
+  }
+
+  @Test func twoPreparedSheetsCannotReplaceAnUncertainRequest() async throws {
+    let f = RepairUIFixture(); defer { f.clean() }
+    let first = RepairContinuationModel(podId: "pod", actions: f.actions)
+    let second = RepairContinuationModel(podId: "pod", actions: f.actions)
+    await f.prepare(first); await f.prepare(second)
+    f.hold = true
+    let task = Task { await first.authorize(f.actions) }
+    for _ in 0..<200 { if f.release != nil { break }; try await Task.sleep(for: .milliseconds(5)) }
+    try #require(f.release != nil)
+    await second.authorize(f.actions)
+    #expect(f.posts == 1 && second.pending == nil && !second.canAuthorize && second.error?.contains("nothing was sent") == true)
+    f.release?.resume(); f.release = nil; await task.value
+    #expect(first.pending == f.request)
+  }
+
+  @Test func sameKeyDifferentObservedBodyNeverReplacesSavedIntent() async throws {
+    let f = RepairUIFixture(); defer { f.clean() }
+    f.postOutcome = "lost"
+    let model = RepairContinuationModel(podId: "pod", actions: f.actions)
+    await f.prepare(model); await model.authorize(f.actions)
+    let original = model.pending
+    f.changedObservation = true
+    await model.observe(f.actions)
+    #expect(model.operation == nil && model.pending == original && model.error != nil && f.posts == 1 && f.observations == 1)
+  }
+
+  @Test func unsupportedAndOldDaemonNeverEnableAuthorizationOrFallback() async throws {
+    let f = RepairUIFixture(); defer { f.clean() }
+    f.loadFailure = true
+    let old = RepairContinuationModel(podId: "pod", actions: f.actions)
+    await f.prepare(old); await old.authorize(f.actions)
+    #expect(!old.canPreview && !old.canAuthorize && f.posts == 0 && f.previews == 0 && old.error != nil)
+    f.loadFailure = false; f.unsupported = true
+    let unsupported = RepairContinuationModel(podId: "pod", actions: f.actions)
+    await f.prepare(unsupported); await unsupported.authorize(f.actions)
+    #expect(!unsupported.canAuthorize && unsupported.preview?.refusals.first?.code == "unsupported_needs" && f.posts == 0)
+  }
+
+  @Test func changedSelectionAndConnectionInvalidateClientAuthority() async throws {
+    let f = RepairUIFixture(); defer { f.clean() }
+    let model = RepairContinuationModel(podId: "pod", actions: f.actions)
+    await f.prepare(model); #expect(model.canAuthorize)
+    model.profileId = "other-profile"; #expect(!model.canAuthorize)
+    model.profileId = "reviewed-profile"; #expect(model.canAuthorize)
+    f.current = false
+    await model.authorize(f.actions)
+    #expect(f.posts == 0 && model.preview == nil && model.error?.contains("Connection changed") == true)
+  }
+
+  @Test func lateSubmitResultCannotCrossConnectionAndJournalRemainsOwned() async throws {
+    let f = RepairUIFixture(); defer { f.clean() }
+    let model = RepairContinuationModel(podId: "pod", actions: f.actions)
+    await f.prepare(model); f.hold = true
+    let task = Task { await model.authorize(f.actions) }
+    for _ in 0..<200 { if f.release != nil { break }; try await Task.sleep(for: .milliseconds(5)) }
+    try #require(f.release != nil)
+    f.current = false; f.release?.resume(); f.release = nil
+    await task.value
+    #expect(model.operation == nil && model.pending == f.request && model.error?.contains("Connection changed") == true)
+    #expect(f.posts == 1)
+  }
+
+  @Test func corruptJournalBlocksAllNewAuthorizationWithoutNetwork() async throws {
+    let f = RepairUIFixture(); defer { f.clean() }
+    let journal = RepairContinuationJournal<RepairContinuationRequestV1>(scope: "daemon", podId: "pod", directory: f.directory)
+    try FileManager.default.createDirectory(at: f.directory, withIntermediateDirectories: true)
+    try Data("corrupted saved request".utf8).write(to: journal.url)
+    let model = RepairContinuationModel(podId: "pod", actions: f.actions)
+    await f.prepare(model); await model.authorize(f.actions)
+    #expect(f.loads == 0 && f.previews == 0 && f.posts == 0 && !model.canAuthorize)
+    #expect(model.error?.contains("unreadable") == true)
+  }
+
+  @Test func renderedSheetKeepsConditionalPreviewDistinctAndBlocksBusyDoubleClick() async throws {
+    let f = RepairUIFixture(); defer { f.clean() }
+    let model = RepairContinuationModel(podId: "pod", actions: f.actions)
+    let host = LaunchComposerHost(RepairContinuationSheet(podId: "pod", actions: f.actions, model: model), width: 1000)
+    defer { host.close() }
+    try await host.wait { model.snapshot != nil && !model.busy }
+    #expect(!host.enabled("repair-continuation-authorize") && f.posts == 0)
+    model.profileId = "reviewed-profile"; model.reason = "Use reviewed software without expanding authority"
+    await model.loadPreview(f.actions)
+    try await host.wait { host.enabled("repair-continuation-authorize") }
+    #expect(host.has("repair-continuation-conditional"))
+    #expect(model.preview?.actualQualification == "not_run" && model.operation == nil)
+    f.hold = true
+    let task = Task { await model.authorize(f.actions) }
+    for _ in 0..<200 { if f.release != nil { break }; try await Task.sleep(for: .milliseconds(5)) }
+    try #require(f.release != nil)
+    try await host.wait { !host.has("repair-continuation-authorize") || !host.enabled("repair-continuation-authorize") }
+    await model.authorize(f.actions)
+    #expect(f.posts == 1)
+    f.release?.resume(); f.release = nil; await task.value
+    #expect(model.operation?.qualification == nil && model.operation?.codingAdmission == .notAdmitted)
+  }
+}

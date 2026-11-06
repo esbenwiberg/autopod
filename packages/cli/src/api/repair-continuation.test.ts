@@ -1,0 +1,148 @@
+import { readFileSync } from 'node:fs';
+import {
+  repairContinuationInspectionV1Schema,
+  repairContinuationOperationV1Schema,
+  repairContinuationPreviewV1Schema,
+  repairContinuationRequestV1Schema,
+} from '@autopod/shared';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  repairInspection,
+  repairOperation,
+  repairPreview,
+  repairRequest,
+} from '../test-utils/repair-continuation.js';
+import { AutopodClient } from './client.js';
+
+const fetch = vi.fn();
+vi.mock('undici', () => ({ fetch: (...args: unknown[]) => fetch(...args) }));
+const token = vi.fn(async () => 'synthetic');
+const client = new AutopodClient({ baseUrl: 'https://fixture.invalid', getToken: token });
+function reply(body: unknown, status = 200) {
+  return {
+    ok: status < 400,
+    status,
+    headers: { get: () => 'application/json' },
+    json: async () => body,
+  };
+}
+beforeEach(() => {
+  fetch.mockReset();
+  token.mockClear();
+});
+describe('repair continuation versioned transport', () => {
+  it('keeps native fixtures compatible with the pinned shared schemas including sealed source', () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        new URL('../../../desktop/Tests/Fixtures/repair-continuation-v1.json', import.meta.url),
+        'utf8',
+      ),
+    );
+    repairContinuationRequestV1Schema.parse(fixture.request);
+    repairContinuationInspectionV1Schema.parse(fixture.inspection);
+    repairContinuationPreviewV1Schema.parse(fixture.preview);
+    repairContinuationOperationV1Schema.parse(fixture.operation);
+    repairContinuationOperationV1Schema.parse(fixture.validatedOperation);
+  });
+  it('inspects, previews and observes with GET only; conditional eligibility is not qualification', async () => {
+    fetch
+      .mockResolvedValueOnce(reply(repairInspection))
+      .mockResolvedValueOnce(reply(repairPreview))
+      .mockResolvedValueOnce(reply(repairOperation));
+    expect(await client.inspectRepairContinuation('pod')).toEqual(repairInspection);
+    const preview = await client.previewRepairContinuation('pod', {
+      sourceHead: repairRequest.sourceHead,
+      executionProfileId: repairRequest.executionProfileId,
+    });
+    expect(preview.conditionalAttemptEligible).toBe(true);
+    expect(preview.actualQualification).toBe('not_run');
+    const observed = await client.observeRepairContinuation('pod', repairRequest.id);
+    expect(observed.qualification).toBeNull();
+    expect(observed.codingAdmission).toBe('not_admitted');
+    expect(fetch.mock.calls.map(([, request]) => request.method)).toEqual(['GET', 'GET', 'GET']);
+    expect(fetch.mock.calls[1]?.[0]).toContain('/repair-continuation-v1/preview?sourceHead=');
+    expect(fetch.mock.calls[2]?.[0]).toBe(
+      'https://fixture.invalid/pods/pod/repair-continuation-v1/requests/stable-request',
+    );
+  });
+  it('authorizes exactly the pinned body, accepts claimed not qualified, and keeps same body/key on 401', async () => {
+    fetch
+      .mockResolvedValueOnce(reply({ error: 'expired' }, 401))
+      .mockResolvedValueOnce(reply(repairOperation, 202));
+    const result = await client.authorizeRepairContinuation('pod', repairRequest);
+    expect(result.state).toBe('claimed');
+    expect(result.qualification).toBeNull();
+    expect(result.codingAdmission).toBe('not_admitted');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    for (const [path, init] of fetch.mock.calls) {
+      expect(path).toBe('https://fixture.invalid/pods/pod/repair-continuation-v1');
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(init.body)).toEqual(repairRequest);
+    }
+    expect(fetch.mock.calls[0]?.[1].body).toBe(fetch.mock.calls[1]?.[1].body);
+  });
+  it.each([
+    401, 404, 409, 501,
+  ])('refuses HTTP %s with no older-mutation fallback', async (status) => {
+    fetch.mockResolvedValue(
+      reply({ error: 'unsupported or same-key conflict', code: 'CONFLICT' }, status),
+    );
+    await expect(client.authorizeRepairContinuation('pod', repairRequest)).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(status === 401 ? 2 : 1);
+    expect(fetch.mock.calls.every(([path]) => path.endsWith('/repair-continuation-v1'))).toBe(true);
+  });
+  it('does not retry a lost response', async () => {
+    fetch.mockRejectedValue(new Error('response lost'));
+    await expect(client.authorizeRepairContinuation('pod', repairRequest)).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    {},
+    { ...repairOperation, version: 99 },
+    { ...repairOperation, podId: 'other' },
+    {
+      ...repairOperation,
+      request: { ...repairRequest, reason: 'Different saved authorization reason' },
+    },
+    { ...repairOperation, originalGeneration: 3 },
+    { ...repairOperation, codingAdmission: 'consumed' },
+    { ...repairOperation, state: 'validated', checks: 'passed' },
+    { ...repairOperation, publicationAuthorized: true },
+  ])('rejects malformed or uncorrelated 202 without claiming success', async (body) => {
+    fetch.mockResolvedValue(reply(body, 202));
+    await expect(client.authorizeRepairContinuation('pod', repairRequest)).rejects.toThrow(
+      'Uncorrelated'.toLowerCase(),
+    );
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it('rejects stale/uncorrelated preview and observe identities', async () => {
+    fetch
+      .mockResolvedValueOnce(
+        reply({
+          ...repairPreview,
+          selection: { ...repairPreview.selection, sourceHead: '1'.repeat(40) },
+        }),
+      )
+      .mockResolvedValueOnce(
+        reply({ ...repairOperation, request: { ...repairRequest, id: 'other' } }),
+      );
+    await expect(
+      client.previewRepairContinuation('pod', {
+        sourceHead: repairRequest.sourceHead,
+        executionProfileId: repairRequest.executionProfileId,
+      }),
+    ).rejects.toThrow();
+    await expect(client.observeRepairContinuation('pod', repairRequest.id)).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it('validates strict authorization before auth/network, refusing caller proof/grants', async () => {
+    await expect(
+      client.authorizeRepairContinuation('pod', {
+        ...repairRequest,
+        proof: true,
+      } as typeof repairRequest),
+    ).rejects.toThrow();
+    expect(token).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});

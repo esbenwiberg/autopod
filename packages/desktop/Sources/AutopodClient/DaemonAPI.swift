@@ -424,6 +424,41 @@ public actor DaemonAPI {
     let _: OkResponse = try await request("POST", "/pods/\(id)/promote", body: body)
   }
 
+  // MARK: - Conditional repair continuation v1 (never falls back to legacy controls)
+
+  public func inspectRepairContinuation(_ id: String) async throws -> RepairContinuationInspectionV1 {
+    let value: RepairContinuationInspectionV1 = try await request("GET", "/pods/\(id)/repair-continuation-v1")
+    try value.validate(podId: id)
+    return value
+  }
+  public func previewRepairContinuation(_ id: String, sourceHead: String, profileId: String) async throws -> RepairContinuationPreviewV1 {
+    guard sourceHead.range(of: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$", options: .regularExpression) != nil,
+      profileId.utf16.count <= 128, profileId.range(of: "^[A-Za-z0-9][A-Za-z0-9_.:-]*$", options: .regularExpression) != nil else {
+      throw DaemonError.badRequest("Preview requires exact HOST HEAD and reviewed profile ID")
+    }
+    let value: RepairContinuationPreviewV1 = try await request("GET", "/pods/\(id)/repair-continuation-v1/preview",
+      query: ["sourceHead": sourceHead, "executionProfileId": profileId])
+    try value.validate(podId: id, sourceHead: sourceHead, profileId: profileId)
+    return value
+  }
+  public func authorizeRepairContinuation(_ id: String, input: RepairContinuationRequestV1) async throws -> RepairContinuationOperationV1 {
+    try input.validate()
+    let value: RepairContinuationOperationV1 = try await request("POST", "/pods/\(id)/repair-continuation-v1", body: encode(input))
+    try value.validate(podId: id, requestId: input.id, expected: input)
+    return value
+  }
+  public func observeRepairContinuation(_ id: String, requestId: String) async throws -> RepairContinuationOperationV1 {
+    guard requestId.utf16.count <= 128, requestId.range(of: "^[A-Za-z0-9][A-Za-z0-9_.:-]*$", options: .regularExpression) != nil else {
+      throw DaemonError.badRequest("Invalid saved repair request ID")
+    }
+    let value: RepairContinuationOperationV1 = try await request("GET", "/pods/\(id)/repair-continuation-v1/requests/\(requestId)")
+    try value.validate(podId: id, requestId: requestId)
+    return value
+  }
+  public func getRepairRetainedContext(_ id: String) async throws -> RepairRetainedContext {
+    try await request("GET", "/pods/\(id)/checkpoint-recovery")
+  }
+
   public func inspectRetainedFinalization(_ id: String) async throws -> RetainedFinalizationView {
     try await request("GET", "/pods/\(id)/retained-finalization")
   }
