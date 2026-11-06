@@ -990,6 +990,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
           pod.intentionalRerun,
           pod.userId,
           pod.rerunRequestHash ?? '',
+          pod.dispatchRepository,
         );
     }),
 

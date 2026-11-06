@@ -14,7 +14,10 @@ refused while a rewrite owns source.
 
 - Only idle ordinary automatic PR/branch tasks in failed/review-required/validated states,
   with a stopped original resource, clean retained host source and an existing
-  result are eligible. Docker and sandbox originals are supported.
+  result are eligible. A failed task with no result is also eligible when its
+  worker is settled, completion records source preservation, and current-generation
+  infrastructure reports are retained (see below). Docker and sandbox originals
+  are supported.
 - Unsettled workers, immutable validation dispatches, unknown publication/merge
   requests, competing custody, pending decisions/guidance, Goals, sidecars and
   waivers remain blockers. Custom workflows retain their configured phases;
@@ -49,6 +52,31 @@ ap reconcile-validation POD --json
 ap retry-state POD --stage validation --json
 ap retained-continuation POD --json
 ```
+
+### Infrastructure reported before validation
+
+An expected native-check deferral can be mistakenly reported as infrastructure
+trouble before daemon validation ever starts. Do not clear the report, invent a
+validation result, answer it as a question, or force ordinary Resume. After
+inspecting the recorded need and qualifying the intended fresh execution, use
+this explicit checks-only continuation.
+
+Read-only inspection returns `selection.expectedGeneration` and
+`selection.expectedResultHash`. For an existing validation result the hash is
+unchanged. With no result, it binds `{result: null, infrastructureReports}` using
+the exact current-generation report IDs, recorded timestamps and payloads shown
+in `selection.infrastructureReports`. **Do not hash `null` alone.** The server
+preserves the null result and reports in the operation's `originalEvidence`;
+report changes during observation/preparation invalidate selection. At most 100
+reports, 64 KiB per payload and 1 MiB combined payload are accepted.
+
+Use that inspected hash with `--result-hash` for both preparation and any later
+candidate selection. A selection hash is not an eligibility or qualification
+receipt: all stopped-resource, source-custody, termination, pending-guidance,
+retry-budget and independent-review checks still apply. Missing settlement,
+source preservation or current reports remains blocked. Legacy checkpoint
+recovery is unchanged. Successful fresh checks still require separate approval;
+no historical report is marked repaired or erased.
 
 Confirm the hosted release includes this control before applying it; CLI help alone
 is not proof of deployed support. Serialize heavy recovery/check runs on qualified

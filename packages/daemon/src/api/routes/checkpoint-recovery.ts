@@ -8,6 +8,7 @@ export function checkpointRecoveryRoutes(
   manager: Pick<
     PodManager,
     | 'getCheckpointRecoveries'
+    | 'getCheckpointRecoverySelection'
     | 'recoverCheckpoint'
     | 'reconcileCheckpointOutcome'
     | 'continueRetained'
@@ -168,7 +169,10 @@ export function checkpointRecoveryRoutes(
       throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
     const { podId } = params.parse(request.params);
     reply.header('Cache-Control', 'no-store');
-    return { operations: manager.getCheckpointRecoveries(podId) };
+    return {
+      operations: manager.getCheckpointRecoveries(podId),
+      selection: manager.getCheckpointRecoverySelection(podId),
+    };
   });
   app.post('/pods/:podId/checkpoint-recovery/:recoveryId/reconcile', async (request, reply) => {
     if (!request.user?.oid)

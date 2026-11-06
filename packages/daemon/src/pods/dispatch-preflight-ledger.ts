@@ -6,6 +6,7 @@ import {
   type IntentionalRerun,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { configurationDigest } from '../configuration/configuration-digest.js';
 import { canonicalMergePrIdentity } from '../worktrees/merge-pr-identity.js';
 import { assertMergeRepository } from '../worktrees/merge-source-identity.js';
 import { selectSinglePrOwner } from './single-pr-owner.js';
@@ -18,6 +19,7 @@ export interface DispatchPreflightLedger {
     request: IntentionalRerun,
     userId: string,
     requestHash: string,
+    repository?: string | null,
   ): void;
   inspect(
     podId: string,
@@ -115,7 +117,7 @@ const requireExecutableRerun = (task: string): void => {
       409,
     );
 };
-const requestRepository = (
+const historicalRepository = (
   row: Pick<RequestRow, 'frozenRepository' | 'profileSnapshot'>,
 ): string => {
   if (row.frozenRepository) return row.frozenRepository;
@@ -167,6 +169,34 @@ export const GENERIC_REPAIR_CANDIDATES_SQL = `SELECT d.pod_id AS podId,d.executi
       GROUP BY d.execution_id,d.work_hash ORDER BY MAX(d.checked_at) DESC LIMIT 101`;
 
 export function createDispatchPreflightLedger(db: Database.Database): DispatchPreflightLedger {
+  function requestRepository(
+    row: Pick<RequestRow, 'id' | 'frozenRepository' | 'profileSnapshot'>,
+  ): string | null {
+    if (row.frozenRepository) return row.frozenRepository;
+    // Only an integrity-checked composed launch can prove the absence of a repository.
+    // Missing legacy bindings must still fail closed, never become an empty workspace.
+    const launch = db
+      .prepare(`SELECT s.digest,substr(s.payload,1,1048577) AS payload,p.launch_config_digest AS activeDigest
+      FROM retained_pods p JOIN retained_pod_launch_snapshots s ON s.pod_id=p.id WHERE p.id=?`)
+      .get(row.id) as { digest: string; payload: string; activeDigest: string | null } | undefined;
+    if (launch) {
+      try {
+        if (!launch.activeDigest || Buffer.byteLength(launch.payload) > 1048576)
+          throw new Error('Missing or oversized launch evidence');
+        const { digest, ...body } = JSON.parse(launch.payload) as Record<string, unknown>;
+        if (digest !== launch.digest || digest !== configurationDigest(body))
+          throw new Error('Corrupt launch evidence');
+        if (body.repository === null) return null;
+      } catch {
+        throw new AutopodError(
+          'Historical launch identity is unreadable; reconcile before dispatch',
+          'DISPATCH_IDENTITY_UNAVAILABLE',
+          409,
+        );
+      }
+    }
+    return historicalRepository(row);
+  }
   const get = (id: string): RequestRow => {
     const row = db.prepare(`${selectRequest} WHERE p.id = ?`).get(id) as RequestRow | undefined;
     if (!row)
@@ -313,7 +343,7 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
         );
       return row.podId;
     },
-    registerRerun(podId, request, userId, requestHash) {
+    registerRerun(podId, request, userId, requestHash, repository) {
       if (
         !request.requestKey ||
         request.requestKey.length > 128 ||
@@ -337,14 +367,22 @@ export function createDispatchPreflightLedger(db: Database.Database): DispatchPr
           'INVALID_RERUN',
           409,
         );
+      const sourceRepository = requestRepository(source);
+      const targetRepository = repository === null ? null : requestRepository(pod);
+      if ((sourceRepository === null) !== (targetRepository === null))
+        throw new AutopodError(
+          'Intentional rerun cannot change repository/empty-workspace scope',
+          'INVALID_RERUN',
+          409,
+        );
       db.prepare(`INSERT INTO execution_rerun_intents(execution_id,pod_id,source_pod_id,source_execution_id,source_repository,source_base_branch,work_hash,reason,user_id,request_key,request_hash,actor,recorded_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         pod.executionId,
         podId,
         source.id,
         source.executionId,
-        requestRepository(source),
-        source.baseBranch,
+        sourceRepository ?? 'empty-workspace',
+        sourceRepository === null ? 'empty-workspace' : source.baseBranch,
         hash(pod),
         request.reason.trim(),
         userId,

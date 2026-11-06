@@ -21,7 +21,7 @@ export function registerRetainedContinuationCommand(
     )
     .option('--request-id <id>', 'Stable recovery ID; reuse to observe an uncertain response')
     .option('--generation <number>', 'Exact original lifecycle generation')
-    .option('--result-hash <sha256>', 'Exact original stored result hash')
+    .option('--result-hash <sha256>', 'Exact result or pre-validation report hash from inspection')
     .option('--head <sha>', 'Exact original retained host HEAD')
     .option(
       '--remote-head <sha>',

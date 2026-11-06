@@ -5,6 +5,7 @@ import {
   type CheckpointRecoveryRequest,
   type OperatorActor,
   type Pod,
+  type ReportBlockerPayload,
   type RewriteRepairRetryTarget,
   type TaskRetryAuthorization,
   type ValidationResult,
@@ -106,7 +107,11 @@ export interface CheckpointRecoveryRecord {
   actor: OperatorActor;
   reason: string;
   binding: CheckpointRecoveryBinding;
-  originalEvidence: { result: ValidationResult; preSubmitReview: Pod['preSubmitReview'] };
+  originalEvidence: {
+    result: ValidationResult | null;
+    preSubmitReview: Pod['preSubmitReview'];
+    infrastructureReports?: { id: string; timestamp: string; payload: ReportBlockerPayload }[];
+  };
   createdAt: string;
   prepared: PreparedCheckpoint | null;
   selected: {
@@ -209,6 +214,73 @@ export function checkpointDetachedWakeup(
 }
 
 export function createRetainedCheckpointRepository(db: Database.Database) {
+  function originalEvidence(pod: Pod): CheckpointRecoveryRecord['originalEvidence'] | null {
+    if (pod.lastValidationResult)
+      return { result: pod.lastValidationResult, preSubmitReview: pod.preSubmitReview };
+    const finalization = pod.finalization;
+    if (
+      pod.status !== 'failed' ||
+      finalization?.generation !== pod.lifecycleGeneration ||
+      finalization.phase !== 'ready' ||
+      !finalization.agentSettledAt ||
+      !finalization.sourcePreservedAt
+    )
+      return null;
+    const rows = db
+      .prepare(`SELECT id,created_at AS timestamp,substr(payload,1,65537) AS payload FROM escalations
+      WHERE pod_id=? AND type='report_blocker'
+      AND json_extract(CASE WHEN json_valid(payload) THEN payload END,'$.kind')='infrastructure'
+      AND json_extract(CASE WHEN json_valid(payload) THEN payload END,'$.lifecycleGeneration')=?
+      ORDER BY created_at,id LIMIT 101`)
+      .all(pod.id, pod.lifecycleGeneration) as {
+      id: string;
+      timestamp: string;
+      payload: string;
+    }[];
+    if (!rows.length) return null;
+    if (
+      rows.length > 100 ||
+      rows.some((row) => Buffer.byteLength(row.payload) > 65536) ||
+      rows.reduce((size, row) => size + Buffer.byteLength(row.payload), 0) > 1048576
+    )
+      checkpointError('Infrastructure report evidence exceeds its safe bound');
+    const infrastructureReports = rows.map((row) => {
+      const payload = JSON.parse(row.payload) as ReportBlockerPayload;
+      if (
+        payload.kind !== 'infrastructure' ||
+        payload.lifecycleGeneration !== pod.lifecycleGeneration ||
+        payload.requiresResponse !== false ||
+        !['autopod', 'parent', 'validation'].includes(payload.owner ?? '') ||
+        typeof payload.phase !== 'string' ||
+        !payload.phase.trim() ||
+        typeof payload.description !== 'string' ||
+        !payload.description.trim() ||
+        typeof payload.needs !== 'string' ||
+        !payload.needs.trim() ||
+        !Array.isArray(payload.attempted) ||
+        payload.attempted.some((item) => typeof item !== 'string')
+      )
+        checkpointError('Infrastructure report evidence is incomplete');
+      return { id: row.id, timestamp: row.timestamp, payload };
+    });
+    return { result: null, preSubmitReview: pod.preSubmitReview, infrastructureReports };
+  }
+  const evidenceHash = (evidence: CheckpointRecoveryRecord['originalEvidence']) =>
+    checkpointHash(
+      evidence.result ?? { result: null, infrastructureReports: evidence.infrastructureReports },
+    );
+  function selectionEvidence(pod: Pod) {
+    const evidence = originalEvidence(pod);
+    return evidence
+      ? {
+          expectedGeneration: pod.lifecycleGeneration,
+          expectedResultHash: evidenceHash(evidence),
+          ...(evidence.infrastructureReports
+            ? { infrastructureReports: evidence.infrastructureReports }
+            : {}),
+        }
+      : null;
+  }
   function get(id: string): CheckpointRecoveryRecord | null {
     const raw = db
       .prepare(`SELECT id,pod_id AS podId,task_id AS taskId,generation,
@@ -496,6 +568,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
     owned<T>(id: string, operation: () => T): T {
       return scope(db).run(id, operation);
     },
+    selectionEvidence,
     claim(input: {
       pod: Pod;
       taskId: string;
@@ -527,9 +600,14 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
         }
         input.assertCurrent();
         assertAvailable(pod.id);
+        const evidence = originalEvidence(pod);
+        if (!evidence || (!evidence.result && !input.binding.continuation))
+          checkpointError(
+            'Original source/resource/result or preserved infrastructure evidence required',
+          );
         if (
           request.expectedGeneration !== pod.lifecycleGeneration ||
-          request.expectedResultHash !== checkpointHash(pod.lastValidationResult) ||
+          request.expectedResultHash !== evidenceHash(evidence) ||
           input.binding.head !== request.checkpointHead ||
           input.binding.resultHash !== request.expectedResultHash
         )
@@ -537,8 +615,8 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
             'Expected generation, result and checkpoint must match',
             'STALE_CHECKPOINT_RECOVERY',
           );
-        if (!pod.containerId || !pod.worktreePath || !pod.lastValidationResult)
-          checkpointError('Original source/resource/result required');
+        if (!pod.containerId || !pod.worktreePath)
+          checkpointError('Original source/resource required');
         const current = db
           .prepare(
             'SELECT lifecycle_generation,container_id,worktree_path,last_validation_result,status FROM pods WHERE id=?',
@@ -550,7 +628,8 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
           current.status !== pod.status ||
           current.container_id !== pod.containerId ||
           current.worktree_path !== pod.worktreePath ||
-          current.last_validation_result !== JSON.stringify(pod.lastValidationResult)
+          current.last_validation_result !==
+            (pod.lastValidationResult ? JSON.stringify(pod.lastValidationResult) : null)
         )
           checkpointError(
             'Original pod changed before recovery claim',
@@ -570,10 +649,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
           JSON.stringify(actor),
           request.reason.trim(),
           JSON.stringify(input.binding),
-          JSON.stringify({
-            result: pod.lastValidationResult,
-            preSubmitReview: pod.preSubmitReview,
-          }),
+          JSON.stringify(evidence),
           new Date().toISOString(),
         );
         return {
