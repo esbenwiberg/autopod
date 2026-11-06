@@ -10,8 +10,10 @@
 </p>
 
 <p align="center">
-  <a href="#getting-started">Get started</a> ·
+  <a href="#why-autopod">Why Autopod</a> ·
+  <a href="#how-it-works">How it works</a> ·
   <a href="#see-it-in-action">See it in action</a> ·
+  <a href="#getting-started">Get started</a> ·
   <a href="#documentation">Documentation</a> ·
   <a href="https://esbenwiberg.github.io/autopod">Explore the docs ↗</a>
 </p>
@@ -22,21 +24,45 @@
   <sub>macOS desktop preview · real UI, offline sample data · click to enlarge</sub>
 </p>
 
-## More agents. Less babysitting.
+## Why Autopod
 
-A coding agent can write a patch. Getting that patch safely from a task to a
-reviewable result is the rest of the job.
+Starting an agent is easy. Turning its output into a change you can confidently
+review is the real work.
 
-Autopod handles the environment, parallel execution, configured checks, and
-feedback loops. You get a workspace for the decisions that matter: what is
-running, what needs help, what changed, and whether the evidence supports shipping.
+Autopod connects the parts around the agent—isolated environments, parallel work,
+independent checks, and feedback loops—so **you're not the glue holding every
+task together.**
 
-| | What you get |
-| :-- | :-- |
-| **A fleet, not a pile of terminals** | Run tasks across repositories. See progress, costs, blockers, and work that needs your attention. |
-| **Evidence beyond “done”** | Inspect build/test results, diffs, required proof, and a separate AI task review. Add browser checks for web projects. |
-| **Control at the right moments** | Answer escalations, pause or nudge an agent, request changes, and review readiness before approval. |
-| **Your tools, your environment** | Claude, Codex, or Copilot runtimes. Local Docker or Azure Container Apps Sandboxes. GitHub or Azure DevOps PRs. |
+[![Why Autopod: parallel agents, independent validation, feedback loops, model and infrastructure choice, repeatable workflows, and human control. How it works: describe, run an isolated agent, verify, decide, and deliver under your configured policy.](assets/readme/features.png)](assets/readme/features.png)
+
+- **More work in flight, less context-switching.** Run independent tasks across
+  repositories, each with its own container and branch. One fleet view, not a
+  terminal for every agent.
+- **Proof beyond “done.”** Review configured build/test results, diffs, required
+  evidence, and a separate AI task review. Add browser checks for web projects.
+- **Another attempt, not another manual restart.** Failed required checks feed
+  structured feedback back to the agent, within your configured retry limits.
+- **Your models. Your stack.** Choose Claude, Codex, or Copilot; local Docker or
+  Azure Container Apps Sandboxes; GitHub or Azure DevOps PRs.
+- **Workflows, not just one-off prompts.** Chain dependent pods into a series,
+  schedule recurring work, and reuse repository profiles and prompt templates.
+- **Your attention where it matters.** Answer escalations, pause or nudge work,
+  inspect readiness, and approve or reject from your phone when you're away.
+
+<details>
+<summary><strong>And the details that make it practical</strong></summary>
+
+- **Set up a repo once:** inheritable profiles, warmed images, and private package feeds.
+- **Carry lessons forward:** human-approved, scoped memory with source evidence and usage history.
+- **Bring your context:** inject MCP tools, skills, and repository instructions into pods.
+- **Set deliberate boundaries:** per-profile network policies and control-plane action approvals.
+- **See where the spend goes:** per-pod cost breakdowns and fleet analytics by phase and model.
+
+[Explore profiles and integrations →](docs/reference/profiles.md) ·
+[Explore workflows →](docs/reference/cli.md#series) ·
+[Explore analytics →](docs/reference/operations.md#analytics)
+
+</details>
 
 ## See it in action
 
@@ -61,11 +87,8 @@ that a green check doesn't have to tell the whole story.
 
 ## How it works
 
-```text
-Describe a task → Isolated agent → Configured checks → Review & decide → Delivery
-                       ↑                  │
-                       └─── feedback ─────┘
-```
+Start with an outcome, not a terminal session. Autopod coordinates the work and
+the checks, then brings the evidence back to you.
 
 1. **Describe the outcome.** Select a repository configuration and task. For
    larger changes, use specs with executable proof and dependent pod workflows.
