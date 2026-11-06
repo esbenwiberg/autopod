@@ -1,8 +1,8 @@
 # README media
 
 The desktop screenshots and tour show **real SwiftUI/AppKit components with
-offline fixture data**. `features.png` is a separate editorial product overview,
-not a screenshot. None of these images is a live task execution, benchmark,
+offline fixture data**. `features.png` and `security.png` are editorial product
+and security overviews, not screenshots. None of these images is a live task execution, benchmark,
 passing validation claim, or proof that a PR was delivered. The redesigned desktop interface is enabled in
 the preview; it can also be selected in the app's Appearance settings.
 
@@ -31,7 +31,8 @@ The original fixture's warnings and missing evidence remain visible.
 and rounded panels as the screenshot frames and tour. Its six feature cards
 explain benefits rather than inventing performance or security guarantees;
 the five-step flow includes the retry loop and configuration/policy caveats.
-The README also describes these features and steps in ordinary Markdown.
+The README uses descriptive alt text and links to the detailed guides rather
+than repeating the visible feature cards and steps in a second list.
 
 The claims are grounded in the linked [validation](../../docs/reference/validation.md),
 [profile](../../docs/reference/profiles.md), [workflow](../../docs/reference/cli.md),
@@ -48,6 +49,29 @@ Requires Python 3, Pillow, and the macOS Arial fonts, but no Xcode build, raw
 captures, screen permissions, daemon, or provider. Open the result at full size
 and around 850 pixels wide (typical README content width); inspect card copy,
 alignment, contrast, arrows, and footer text before publishing.
+
+## Security overview
+
+`security.png` matches the same visual system. It distinguishes enabled worker
+egress policy, daemon action permissions, and configured action-response filters, then
+shows stored-credential protection, pod identity, and audit/readiness evidence.
+It is not a live enforcement test, certification, or promise of complete
+prompt-injection prevention. The source-checked [security guide](../../docs/security-overview.md)
+records exceptions, limitations, implementation links, and the inspected revision.
+The README links there without mirroring the graphic as another bullet list,
+and explicitly notes that the default remote-MCP proxy does not wire its optional
+response filters. Don't silently widen the action-filter claim to all MCP traffic.
+
+Regenerate independently of all screenshots:
+
+```bash
+python3 assets/readme/security.py
+```
+
+This needs the same Python/Pillow/fonts as the feature graphic. Inspect both
+full-size and around 850 pixels wide. Keep the egress exceptions, configuration
+scope, and non-immunity footer readable; never replace them with absolute
+“no credentials leave” or “zero outbound” claims.
 
 ## Regenerate native media
 
@@ -81,11 +105,12 @@ durations are time-relative and need not be byte-identical on regeneration.
 
 ## Checks before publishing
 
-- Open all three PNGs and inspect every GIF chapter, not just its first frame.
+- Open all four PNGs and inspect every GIF chapter, not just its first frame.
 - Check that labels are readable, no private information is shown, and the
   sample-data disclosure remains visible.
 - Keep total published media below 3 MiB. PNGs are 1624×1044 (desktop),
-  1280×800 (readiness), and 1624×1256 (features); the GIF is 1280×800, 20 frames,
+  1280×800 (readiness), 1624×1256 (features), and 1624×1032 (security);
+  the GIF is 1280×800, 20 frames,
   and approximately 14.6 seconds per loop.
 - Keep a static alternative in the README and meaningful image alt text.
 - Run `bash -n scripts/capture-readme.sh` and `git diff --check`.

@@ -164,15 +164,17 @@ At pod startup, autopod generates `.npmrc` and/or `NuGet.config` files in the co
 
 ### Network Policy
 
-Control egress traffic from agent containers. Disabled by default.
+Choose egress controls for the workload and inspect the effective launch policy.
+Docker and Azure Sandboxes enforce it differently; see the
+[security boundaries guide](../security-overview.md#worker-egress).
 
 ```yaml
 networkPolicy:
   enabled: true
 
   # Mode controls the firewall behaviour:
-  #   restricted  — (default) only allowedHosts are reachable via SNI proxy
-  #   deny-all    — block everything except loopback and DNS
+  #   restricted  — resolved hostname allowlist (HTTPS SNI proxy on Docker)
+  #   deny-all    — exception-only egress; not an air gap
   #   allow-all   — no outbound restrictions (useful for debug)
   mode: restricted
 
@@ -181,8 +183,8 @@ networkPolicy:
     - "api.stripe.com"
     - "*.my-company.com"
 
-  # Replace the built-in defaults (Anthropic, npm, GitHub, etc.) entirely.
-  # Use this when you need a strict allowlist with no implicit hosts.
+  # Remove the built-in provider/registry host set.
+  # This does not remove control-plane exceptions or other derived hosts.
   replaceDefaults: false
 
   # Shorthand: automatically add all common package manager hosts.
@@ -192,17 +194,28 @@ networkPolicy:
 
 **How `restricted` mode works — HAProxy SNI proxy:**
 
-In `restricted` mode, iptables NAT redirects outbound port 443 to an HAProxy instance running on loopback inside the container. HAProxy reads the TLS ClientHello SNI field, checks it against the allowlist, then splices the raw TLS bytes through to the real host — no MITM, no certificate substitution. Denied connections are logged and counted as safety events. Port 80 follows the same pattern for HTTP. DNS (UDP/TCP 53) is always allowed in all modes.
+On Docker, `restricted` mode redirects outbound port 443 through an HAProxy
+instance inside the container. It checks the TLS ClientHello SNI against the
+resolved allowlist and splices the original TLS bytes—no MITM or certificate
+substitution. Port 80 is dropped, not proxied. DNS is allowed through Docker's
+embedded resolver; daemon gateway and declared sidecar paths are explicit
+exceptions. Denials are recorded as safety evidence. Sandboxes uses its native
+egress policy instead of this Docker implementation.
 
 This means egress policy is enforced at the hostname level even for HTTPS, without breaking TLS.
 
-**Built-in default hosts** (always allowed unless `replaceDefaults: true`):
+**Restricted-mode built-in hosts** (included unless `replaceDefaults: true`):
 
 `api.anthropic.com`, `api.openai.com`, `registry.npmjs.org`, `pypi.org`, NuGet hosts, Azure CDN hosts, `pkgs.dev.azure.com`, `platform.claude.com`, and GitHub Copilot endpoints. `github.com` / `raw.githubusercontent.com` are intentionally not on the default list; add them explicitly only for profiles that need direct GitHub egress (for example, GitHub-hosted package dependencies).
 
-**Live updates** — patching a profile's `networkPolicy` via the API immediately re-applies firewall rules to all running containers using that profile. No restart needed.
+**Updates:** use supported configuration/update paths and inspect the effective
+policy on running pods. Editing a profile alone is not proof that an existing
+worker's firewall changed; frozen launch authority and retained-source guards
+also matter.
 
-**MCP server hosts** are always allowed regardless of mode — the daemon injects them automatically.
+**Derived hosts:** restricted allowlist resolution can include configured MCP
+and registry hosts in addition to explicit entries. `deny-all` does not thereby
+open general access to every remote MCP host; brokered MCP uses the daemon path.
 
 ### Escalation settings
 
@@ -463,7 +476,12 @@ actionPolicy:
         - "owner/repo2"
 ```
 
-Injected MCP servers are automatically proxied through the daemon. Auth headers are injected server-side, and responses pass through the same PII sanitization pipeline. Agents never see raw credentials or unsanitized data.
+Remote injected MCP servers can be proxied through the daemon with auth headers
+added server-side. However, the normal server registration does not wire the
+proxy's optional content-processing hook: don't assume its responses have
+Autopod's injection/PII filtering. Action-response filtering is a separate path,
+and workers can still receive selected runtime/tool credentials. See the
+[security boundary details](../security-overview.md#prompt-injection-and-data-hygiene).
 
 ### Azure PIM Groups
 

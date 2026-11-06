@@ -12,6 +12,7 @@
 <p align="center">
   <a href="#why-autopod">Why Autopod</a> ·
   <a href="#how-it-works">How it works</a> ·
+  <a href="#security-boundaries">Security</a> ·
   <a href="#see-it-in-action">See it in action</a> ·
   <a href="#getting-started">Get started</a> ·
   <a href="#documentation">Documentation</a> ·
@@ -35,34 +36,17 @@ task together.**
 
 [![Why Autopod: parallel agents, independent validation, feedback loops, model and infrastructure choice, repeatable workflows, and human control. How it works: describe, run an isolated agent, verify, decide, and deliver under your configured policy.](assets/readme/features.png)](assets/readme/features.png)
 
-- **More work in flight, less context-switching.** Run independent tasks across
-  repositories, each with its own container and branch. One fleet view, not a
-  terminal for every agent.
-- **Proof beyond “done.”** Review configured build/test results, diffs, required
-  evidence, and a separate AI task review. Add browser checks for web projects.
-- **Another attempt, not another manual restart.** Failed required checks feed
-  structured feedback back to the agent, within your configured retry limits.
-- **Your models. Your stack.** Choose Claude, Codex, or Copilot; local Docker or
-  Azure Container Apps Sandboxes; GitHub or Azure DevOps PRs.
-- **Workflows, not just one-off prompts.** Chain dependent pods into a series,
-  schedule recurring work, and reuse repository profiles and prompt templates.
-- **Your attention where it matters.** Answer escalations, pause or nudge work,
-  inspect readiness, and approve or reject from your phone when you're away.
+## Security boundaries
 
-<details>
-<summary><strong>And the details that make it practical</strong></summary>
+A prompt is not a permission boundary. Autopod puts controls around the worker,
+the tools it can call, and the external content those tools return. Repository
+checkpoints add secret detection and optional ML-backed PII/injection scanning.
 
-- **Set up a repo once:** inheritable profiles, warmed images, and private package feeds.
-- **Carry lessons forward:** human-approved, scoped memory with source evidence and usage history.
-- **Bring your context:** inject MCP tools, skills, and repository instructions into pods.
-- **Set deliberate boundaries:** per-profile network policies and control-plane action approvals.
-- **See where the spend goes:** per-pod cost breakdowns and fleet analytics by phase and model.
+[![Security boundaries: configurable egress, brokered action permissions, prompt-injection quarantine and PII redaction, encrypted stored credentials, pod-scoped tokens, and verifiable action audit.](assets/readme/security.png)](assets/readme/security.png)
 
-[Explore profiles and integrations →](docs/reference/profiles.md) ·
-[Explore workflows →](docs/reference/cli.md#series) ·
-[Explore analytics →](docs/reference/operations.md#analytics)
-
-</details>
+**Current limit:** default remote-MCP proxy wiring does not enable its response
+filters; the action-response filtering above is a separate path.
+[Enforcement details, policy exceptions, and honest limits →](docs/security-overview.md)
 
 ## See it in action
 
@@ -75,36 +59,40 @@ task together.**
 
 ### Review the evidence, not just the status
 
-A task can be validated and still deserve a closer look. Readiness brings
-validation, security, scope, quality, network events, and PR state together so
-that a green check doesn't have to tell the whole story.
-
 [![Readiness Review in the native app, showing a compatibility warning and the evidence areas that need operator review. Offline sample data.](assets/readme/readiness.png)](assets/readme/readiness.png)
 
-<p align="center">
-  <sub>Sample readiness findings are deliberately visible—not a fabricated all-green run.</sub>
-</p>
+## Beyond a single run
+
+- **Prepare interactively, then hand off.** Workspace pods give you a container
+  for exploration or manual fixes before an automated agent takes over.
+- **Keep lessons, not every chat.** Scoped, human-approved memory carries useful
+  knowledge forward with source evidence and usage history.
+- **Close the loop around the PR.** Configured issue watchers can turn labeled
+  issues into work; bounded fix pods can respond to CI failures and review comments.
+- **Bring the awkward parts of your stack.** Private npm/NuGet feeds, warmed
+  images, injected MCP tools, and skills fit into repository-specific setups.
+- **Set allowances, not just reminders.** Optional whole-task token budgets help
+  bound reported usage; they are not exact provider spending caps.
+
+[Repository integrations →](docs/reference/profiles.md) ·
+[Workspaces and automation →](docs/reference/cli.md) ·
+[Token-budget behavior →](docs/reference/operations.md#task-token-limits)
 
 ## How it works
 
-Start with an outcome, not a terminal session. Autopod coordinates the work and
-the checks, then brings the evidence back to you.
+One long-running daemon coordinates short-lived workers. The desktop, CLI, and
+phone are clients of that same control plane—not separate orchestration systems.
+Repository configuration supplies the environment; task contracts can add
+executable proof requirements.
 
-1. **Describe the outcome.** Select a repository configuration and task. For
-   larger changes, use specs with executable proof and dependent pod workflows.
-2. **Let the agent work.** Each pod gets its own container and branch. Agents can
-   report progress and ask for help; you can pause or send instructions.
-3. **Check the result independently.** Run the configured lint, security, build,
-   test, acceptance, and required-fact checks, plus a separate AI task review.
-   Web projects can capture browser evidence. Optional advisory browser QA adds
-   context; it isn't a blocking validation gate.
-4. **Decide what ships.** Inspect the diff, evidence, and readiness. Approve or
-   request changes—or configure auto-approval within the readiness and delivery
-   guards. Delivery follows the selected output and PR policy.
+Workers change code and report evidence. The daemon owns configured independent
+validation, source/delivery guards, and authorized publication. Manual approval
+and configured auto-approval both follow readiness and external delivery policy.
+A passing review is not approval, publication, or proof of a merge. Optional
+advisory browser QA adds context, not a blocking validation gate.
 
-Validation is configurable, not a promise that every task runs every check.
-A passing review is not approval, publication, or proof of a merge.
-[Read about validation and readiness →](docs/reference/validation.md)
+[Architecture →](ARCHITECTURE.md) ·
+[Validation and readiness →](docs/reference/validation.md)
 
 ## Getting started
 
@@ -156,7 +144,7 @@ ap reject <pod-id> "The selected theme should survive a page refresh"
 | [Repository profiles & providers](docs/reference/profiles.md) | [Validation, evidence & readiness](docs/reference/validation.md) |
 | [Mobile access](docs/mobile.md) | [Authentication, deployment & operations](docs/reference/operations.md) |
 | [Architecture](ARCHITECTURE.md) | [Azure Container Apps Sandboxes](docs/azure-container-apps-sandboxes.md) |
-| [Contributing](CONTRIBUTING.md) | [Security model](docs/threat-model.md) |
+| [Contributing](CONTRIBUTING.md) | [Security boundaries & limitations](docs/security-overview.md) |
 
 ## Development
 
