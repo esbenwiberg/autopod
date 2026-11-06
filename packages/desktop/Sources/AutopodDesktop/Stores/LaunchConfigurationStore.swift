@@ -120,6 +120,9 @@ public final class LaunchConfigurationStore {
       readLaunch: { id in try await self.onConnection(owner) { try await $0.getLaunchConfiguration(id) } })
     actions.connectionID = owner.uuidString
     actions.uploadInputs = { files in try await self.onConnection(owner) { try await $0.uploadInputs(files) } }
+    actions.readInputFile = { bundle, index in
+      try await self.onConnection(owner) { try await $0.getInputFile(bundle, index: index) }
+    }
     actions.cachedPim = { self.pimDiscovery }
     actions.listRegistryCredentials = { try await self.connectedAPI().listRegistryCredentials() }
     actions.saveRegistryCredential = { try await self.connectedAPI().saveRegistryCredential($0, body: $1) }

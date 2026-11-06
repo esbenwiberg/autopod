@@ -11,6 +11,7 @@ struct WorkTab: View {
     /// (previews, tests without daemon), the cards are simply hidden.
     var loadQuality: ((String) async throws -> PodQualitySignals)? = nil
     var loadCost: ((String) async throws -> PodCostBreakdownResponse)? = nil
+    var configurationActions: LaunchConfigurationActions? = nil
 
     @State private var quality: PodQualitySignals? = nil
     @State private var cost: PodCostBreakdownResponse? = nil
@@ -142,6 +143,10 @@ struct WorkTab: View {
             PodGoalCard(podId: pod.id, podStatus: pod.status.rawValue, actions: actions)
             DispatchPreflightCard(podId: pod.id, actions: actions)
             promptCard
+            if let configurationActions {
+                ReferenceAttachmentsCard(podId: pod.id, actions: configurationActions)
+                    .id("\(configurationActions.connectionID ?? "offline"):\(pod.id)")
+            }
         case .plan:
             if let plan = pod.plan {
                 planCard(plan, phase: pod.phase)

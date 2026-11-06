@@ -137,6 +137,39 @@ public actor DaemonAPI {
     return InputBundleReference(id: sealed.id, digest: sealed.digest, files: sealed.files)
   }
 
+  /// Original sealed reference bytes; never a worker-generated artifact or an active URL.
+  public func getInputFile(_ bundle: InputBundleReference, index: Int) async throws -> Data {
+    try bundle.validateManifest()
+    guard bundle.files.indices.contains(index) else {
+      throw DaemonError.badRequest("Invalid reference attachment index")
+    }
+    let path = "/input-bundles/\(bundle.id)/files/\(index)"
+    var req = URLRequest(url: try makeRequestURL(path))
+    req.httpMethod = "GET"
+    req.setValue(try await authorizationHeader(), forHTTPHeaderField: "Authorization")
+    req.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
+    req.cachePolicy = .reloadIgnoringLocalCacheData
+    req.timeoutInterval = 60
+    let (data, response) = try await pod.data(for: req)
+    try Task.checkCancellation()
+    guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+    switch http.statusCode {
+    case 200:
+      let file = bundle.files[index]
+      let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+      guard data.count == file.byteLength, hash == file.sha256 else {
+        throw DaemonError.serverError(409, "Reference attachment failed its integrity check")
+      }
+      return data
+    case 401:
+      throw DaemonError.unauthorized(decodeErrorMessage(data))
+    case 404:
+      throw DaemonError.notFound(path)
+    default:
+      throw DaemonError.serverError(http.statusCode, decodeErrorMessage(data) ?? "Reference attachment unavailable")
+    }
+  }
+
   public func resolveLaunch(_ body: ComposableLaunchRequest) async throws -> EffectiveLaunchPreview {
     try await request("POST", "/launch/resolve", body: encode(body))
   }
