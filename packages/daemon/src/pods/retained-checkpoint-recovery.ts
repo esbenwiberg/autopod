@@ -47,6 +47,21 @@ import {
   isPodValidationDisabled,
 } from './validation-workflow-policy.js';
 
+/** Read-only diagnostics may retain expected selection refusals, never invent evidence. */
+export function observeCheckpointSelection<T>(read: () => T) {
+  try {
+    return { selection: read(), refusal: null };
+  } catch (error) {
+    if (
+      !(error instanceof AutopodError) ||
+      error.code !== 'CHECKPOINT_RECOVERY_BLOCKED' ||
+      error.statusCode !== 409
+    )
+      throw error;
+    return { selection: null, refusal: { code: error.code, reason: error.message } };
+  }
+}
+
 export function createRetainedCheckpointRecovery(deps: {
   podRepo: PodRepository;
   executionForPod(pod: Pod): PodExecutionSettings;
@@ -269,7 +284,10 @@ export function createRetainedCheckpointRecovery(deps: {
       }),
       check('human_guidance', () => deps.assertGuidanceCollected(podId)),
     ];
-    const selection = repo.selectionEvidence(pod);
+    const observed = observeCheckpointSelection(() => repo.selectionEvidence(pod));
+    if (observed.refusal)
+      checks.push({ id: 'selection_evidence', state: 'blocked', ...observed.refusal });
+    const selection = observed.selection;
     const infrastructure = repo.infrastructureNeeds(pod);
     const currentFinalization = pod.finalization?.generation === pod.lifecycleGeneration;
     return {

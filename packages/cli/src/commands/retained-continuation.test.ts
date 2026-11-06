@@ -98,6 +98,55 @@ describe('retained continuation CLI', () => {
     expect(output).not.toContain('Accepted');
     expect(client.continueRetained).not.toHaveBeenCalled();
   });
+  it.each([
+    'incomplete',
+    'oversized',
+  ])('renders %s selection refusal and bounded needs without a usable hash', async (kind) => {
+    const refusal = {
+      code: 'CHECKPOINT_RECOVERY_BLOCKED',
+      reason:
+        kind === 'incomplete'
+          ? 'Infrastructure report evidence is incomplete'
+          : 'Infrastructure report evidence exceeds its safe bound',
+    };
+    const response = {
+      operations: [],
+      selection: null,
+      selectionRefusal: refusal,
+      inspection: {
+        ...inspection,
+        selection: null,
+        checks: [{ id: 'selection_evidence', state: 'blocked', ...refusal }],
+        infrastructure: {
+          state: 'reported',
+          truncated: false,
+          needs: [
+            {
+              id: 'report',
+              owner: 'validation',
+              phase: kind === 'incomplete' ? undefined : 'Build',
+              needs: kind === 'incomplete' ? 'Staged private source' : 'n'.repeat(1024),
+              truncated: kind === 'oversized',
+            },
+          ],
+        },
+      },
+    };
+    client.getCheckpointRecoveries.mockResolvedValue(response);
+    await runHuman();
+    const output = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(output).toContain('Blocked [selection_evidence / CHECKPOINT_RECOVERY_BLOCKED]');
+    expect(output).toContain(
+      'Selection evidence unavailable; no result/report hash can be selected yet.',
+    );
+    expect(output).toContain(kind === 'incomplete' ? 'Staged private source' : 'n'.repeat(1024));
+    expect(output).not.toContain('a'.repeat(64));
+    const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    await run();
+    expect(JSON.parse(stdout.mock.calls[0]?.[0] as string)).toEqual(response);
+    expect(client.continueRetained).not.toHaveBeenCalled();
+    expect(client.checkRetainedCandidate).not.toHaveBeenCalled();
+  });
   it('shows prepared operation identity without suggesting a replacement request', async () => {
     client.getCheckpointRecoveries.mockResolvedValue({
       inspection,

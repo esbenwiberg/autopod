@@ -78,6 +78,76 @@ describe('human-only retained checkpoint selection', () => {
     await f.recovery.wait(f.input.id);
     expect(f.recovery.list(f.podId)[0]?.activated).toEqual({ generation: 2 });
   });
+  it.each([
+    'incomplete',
+    'oversized',
+  ])('GET displays bounded needs and null selection for %s report evidence', async (kind) => {
+    const evidence = recordPreValidationInfrastructure(f);
+    f.ctx.db.prepare('UPDATE escalations SET payload=? WHERE id=?').run(
+      JSON.stringify({
+        ...evidence.report.payload,
+        ...(kind === 'incomplete' ? { phase: undefined } : { needs: 'n'.repeat(70000) }),
+      }),
+      evidence.report.id,
+    );
+    const before = f.pod();
+    const report = f.ctx.escalationRepo.getOrThrow(evidence.report.id);
+    f.ctx.db.pragma('query_only=ON');
+    const response = await app.inject({ url: endpoint(), headers });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    const body = response.json();
+    expect(body.selection).toBeNull();
+    expect(body.selectionRefusal).toMatchObject({ code: 'CHECKPOINT_RECOVERY_BLOCKED' });
+    expect(body.inspection).toMatchObject({
+      status: 'blocked',
+      selection: null,
+      infrastructure: {
+        state: 'reported',
+        needs: [
+          {
+            id: evidence.report.id,
+            needs: kind === 'incomplete' ? evidence.report.payload.needs : 'n'.repeat(1024),
+            truncated: kind === 'oversized',
+          },
+        ],
+      },
+    });
+    expect(body.inspection.checks).toContainEqual(
+      expect.objectContaining({
+        id: 'selection_evidence',
+        code: 'CHECKPOINT_RECOVERY_BLOCKED',
+        state: 'blocked',
+      }),
+    );
+    expect(f.pod()).toEqual(before);
+    expect(f.ctx.escalationRepo.getOrThrow(evidence.report.id)).toEqual(report);
+    expect(f.cm.getStatus).not.toHaveBeenCalled();
+    expect(f.deps.enqueue).not.toHaveBeenCalled();
+  });
+  it.each([
+    { error: new Error('Selection DB failure'), status: 500 },
+    { error: new AutopodError('Selection programming failure', 'UNEXPECTED', 409), status: 409 },
+    {
+      error: new AutopodError('Selection authentication failure', 'UNAUTHORIZED', 401),
+      status: 401,
+    },
+    {
+      error: new AutopodError('Selection storage failure', 'CHECKPOINT_RECOVERY_BLOCKED', 500),
+      status: 500,
+    },
+  ])('GET propagates unexpected selection failure: $status', async ({ error, status }) => {
+    const repo = f.ctx.podRepo.retainedCheckpoints;
+    if (!repo) throw new Error('Missing checkpoint repository');
+    vi.spyOn(repo, 'selectionEvidence').mockImplementation(() => {
+      throw error;
+    });
+    const response = await app.inject({ url: endpoint(), headers });
+    expect(response.statusCode).toBe(status);
+    expect(response.json().inspection).toBeUndefined();
+    expect(response.json().selectionRefusal).toBeUndefined();
+    expect(f.deps.enqueue).not.toHaveBeenCalled();
+  });
   it('strictly authenticates new continuation and candidate selection without accepting caller proof', async () => {
     const url = `/pods/${f.podId}/retained-continuation`;
     const input = { ...f.input, prepareOnly: true };

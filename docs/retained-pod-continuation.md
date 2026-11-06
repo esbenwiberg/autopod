@@ -72,7 +72,13 @@ need). Truncation is explicit and original selection evidence remains unchanged.
 Needs remain visible with an existing validation result or missing settlement/source
 preservation; displaying them neither supplies missing evidence nor permits execution.
 Old-generation reports are excluded, and missing/non-text fields remain unrecorded
-rather than being inferred from prose.
+rather than being inferred from prose. If settled pre-validation report evidence
+is incomplete or exceeds selection bounds, inspection still displays bounded
+needs and the refusal: `selection` is null, the GET response includes
+`selectionRefusal`, and inspection records a blocked `selection_evidence` check.
+No usable hash is invented. Only the expected `CHECKPOINT_RECOVERY_BLOCKED` (409)
+selection refusal is displayed this way; unexpected storage/programming/auth errors
+still fail the request. Selection and admission themselves remain unchanged.
 An older daemon without this projection displays inspection unavailable, never
 assumed eligibility. Storage/inspection errors do not produce an eligible result.
 
