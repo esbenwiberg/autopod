@@ -42,7 +42,7 @@ A prompt is not a permission boundary. Autopod puts controls around the worker,
 the tools it can call, and the external content those tools return. Repository
 checkpoints add secret detection and optional ML-backed PII/injection scanning.
 
-[![Security boundaries: configurable egress, brokered action permissions, prompt-injection quarantine and PII redaction, encrypted stored credentials, pod-scoped tokens, and verifiable action audit.](assets/readme/security.png)](assets/readme/security.png)
+[![Security boundaries: configurable egress; allowed GitHub, logs, PIM and HTTP actions; a local Git checkout without automatic daemon source-token injection; action-response filtering, encrypted stored credentials, pod-scoped tokens, and verifiable audit.](assets/readme/security.png)](assets/readme/security.png)
 
 **Current limit:** default remote-MCP proxy wiring does not enable its response
 filters; the action-response filtering above is a separate path.

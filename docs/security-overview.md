@@ -46,6 +46,27 @@ policy, not Docker's iptables/HAProxy implementation. Check the
 [sandbox guide](azure-container-apps-sandboxes.md) for that target's requirements
 and limitations. Don't infer identical DNS, sidecar, or transport behavior.
 
+## A checkout, not the daemon's source-account identity
+
+The worker gets materialized repository contents so it can read, edit, test,
+and commit locally. It does **not automatically inherit the daemon's GitHub
+login or source-service credentials**. Authenticated remote refresh, branch
+publication, and PR delivery belong to the daemon under the admitted source
+and output policy, not to the coding agent's shell.
+
+Direct GitHub/ADO credential injection is rejected by the source-credential
+boundary. Service-credential enrollment also rejects known source credentials
+and source-service origins rather than letting them be repackaged as tool secrets.
+That check is not a proof of every enrolled token's provider scopes: operators
+must still scope model, registry, and service credentials carefully.
+
+This is deliberately **not** a claim that Git is absent or that the agent cannot
+read the repository. Local Git remains useful for diffs, history, and commits.
+Nor is missing private-repository authentication a universal network block:
+public Git endpoints may still be reachable if the effective egress policy and
+available credentials permit them. Source-account authority, network reachability,
+and local checkout access are separate boundaries.
+
 ## Brokered tools, not ambient authority
 
 The action control plane brokers configured GitHub, Azure DevOps, Azure, and
@@ -53,6 +74,25 @@ HTTP operations through daemon handlers. It checks enabled action groups,
 request parameters, configured resource allowlists, and applicable approval
 requirements before dispatch. Limits and approvals must be configured for the
 actions you expose; an allowed tool is still a capability to use carefully.
+
+The worker requests these capabilities through the `execute_action` MCP tool,
+rather than receiving unrestricted access to the daemon's accounts. Examples of
+configured action groups include:
+
+| Capability | Examples | Boundary |
+| --- | --- | --- |
+| GitHub context | Read issues, PRs, comments, diffs, and files; search issues/code | Only enabled actions, with resource restrictions where configured. This is not an arbitrary Git credential. |
+| Azure DevOps context | Read work items, PR threads, changes, and files | Selected action groups and configured organization/project/repository scope. |
+| Azure/application logs | Query Log Analytics, Application Insights, or container logs | The daemon performs the configured query with its handler identity. |
+| Azure PIM | Request activation/deactivation of declared groups or RBAC roles | The pod bridge checks preconfigured group or exact role/scope choices; activation still depends on eligibility and tenant policy. |
+| HTTP integrations | Call configured API operations | Configured endpoints, parameter handling, destination checks, and applicable approvals. |
+
+For example, an agent can request “read this PR,” “query these application logs,”
+or “activate this declared PIM role.” It does not choose a new privilege set
+just because a prompt asks for it. PIM grant choices and durations come from the
+configured pod/profile; don't describe this as permission to elevate to any role.
+Action approval is required **where configured**, not an assertion that every
+read-only operation prompts a human. See [action configuration](reference/profiles.md#action-control-plane).
 
 The generic HTTP action handler validates destinations and uses a DNS-pinned
 transport to reduce SSRF and rebinding risk. This protection is for that handler,
@@ -142,14 +182,16 @@ determine how evidence affects the decision to proceed.
 
 ## Implementation references
 
-This overview was checked against the application source at `0c78989d`; it is a
+This overview was checked against the application source at `8d71b9d2`; it is a
 code/documentation review, not a penetration-test report or live enforcement test.
 
 | Boundary | Source |
 | --- | --- |
 | Docker egress and allowlist resolution | [Network manager](../packages/daemon/src/containers/docker-network-manager.ts), [provisioning gate](../packages/daemon/src/pods/provisioning-container.ts), [firewall startup handling](../packages/daemon/src/containers/docker-container-manager.ts) |
 | Sandbox egress | [Sandbox manager](../packages/daemon/src/containers/sandbox-container-manager.ts) |
+| Source-account separation | [Daemon GitHub identity](../packages/daemon/src/github/daemon-github-auth.ts), [blocked source injection](../packages/daemon/src/pods/operator-tools.ts), [service-credential boundary](../packages/daemon/src/configuration/service-credential-boundary.ts), [worker Git instructions](../packages/daemon/src/pods/system-instructions-generator.ts) |
 | Action permissions and response processing | [Action engine](../packages/daemon/src/actions/action-engine.ts), [field selection](../packages/daemon/src/actions/handlers/handler.ts) |
+| PIM request restrictions | [Pod bridge](../packages/daemon/src/pods/pod-bridge-impl.ts), [PIM action definitions](../packages/daemon/src/actions/defaults/azure-pim.json), [PIM handler](../packages/daemon/src/actions/handlers/azure-pim-handler.ts) |
 | Generic HTTP destination handling | [HTTP handler](../packages/daemon/src/actions/generic-http-handler.ts), [pinned transport](../packages/daemon/src/actions/pinned-http-transport.ts) |
 | Remote MCP proxy and actual wiring | [Proxy handler](../packages/daemon/src/api/mcp-proxy-handler.ts), [server registration](../packages/daemon/src/api/server.ts) |
 | Content filters | [Processor](../packages/shared/src/sanitize/processor.ts), [quarantine](../packages/shared/src/sanitize/quarantine.ts) |

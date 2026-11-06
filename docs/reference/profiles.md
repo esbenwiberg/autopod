@@ -296,8 +296,10 @@ make its GitHub CLI state available inside a container.
 
 Use a dedicated, lower-privilege development account and restrict its repository permissions.
 Autopod resolves its credential explicitly for host Git, PRs, brokered GitHub actions, issue
-watchers, private reference repositories, warm images, and requested workspace injection; it does
-not enable ambient Git credential helpers or automatically inject the credential into pods.
+watchers, private reference repositories, and warm images. It does not enable
+ambient Git credential helpers or automatically inject the credential into pods.
+Direct GitHub/ADO source-credential injection is disabled; workers can still use
+local Git on their supplied checkout. See [source-account separation](../security-overview.md#a-checkout-not-the-daemons-source-account-identity).
 Legacy profile `githubPat` fields remain accepted and encrypted for rolling-client compatibility
 and rollback, but are redacted, ignored operationally, and never mask missing daemon `gh` auth.
 `COPILOT_GITHUB_TOKEN` remains a separate model-provider credential.

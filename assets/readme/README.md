@@ -55,6 +55,10 @@ alignment, contrast, arrows, and footer text before publishing.
 `security.png` matches the same visual system. It distinguishes enabled worker
 egress policy, daemon action permissions, and configured action-response filters, then
 shows stored-credential protection, pod identity, and audit/readiness evidence.
+The checkout/account band explicitly keeps local Git usable without implying
+inheritance of the daemon's source-service identity. The action card names
+GitHub context, log queries, preconfigured PIM activation, and HTTP integrations;
+these are policy-gated requests, not arbitrary account access.
 It is not a live enforcement test, certification, or promise of complete
 prompt-injection prevention. The source-checked [security guide](../../docs/security-overview.md)
 records exceptions, limitations, implementation links, and the inspected revision.
@@ -109,7 +113,7 @@ durations are time-relative and need not be byte-identical on regeneration.
 - Check that labels are readable, no private information is shown, and the
   sample-data disclosure remains visible.
 - Keep total published media below 3 MiB. PNGs are 1624×1044 (desktop),
-  1280×800 (readiness), 1624×1256 (features), and 1624×1032 (security);
+  1280×800 (readiness), 1624×1256 (features), and 1624×1162 (security);
   the GIF is 1280×800, 20 frames,
   and approximately 14.6 seconds per loop.
 - Keep a static alternative in the README and meaningful image alt text.

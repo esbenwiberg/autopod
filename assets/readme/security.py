@@ -11,7 +11,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 OUTPUT = Path(__file__).resolve().parent / "security.png"
-WIDTH, HEIGHT = 1624, 1032
+WIDTH, HEIGHT = 1624, 1162
 INK, MUTED, ACCENT = "#eef0f8", "#a6aabd", "#b8a6ef"
 FONT = "/System/Library/Fonts/Supplemental/Arial.ttf"
 BOLD = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
@@ -59,13 +59,18 @@ text(76, 597, "*Enable policy; target-specific DNS,\ndaemon and sidecar exceptio
 
 text(588, 344, "02  /  BROKERED ACTIONS", 15, ACCENT, True, max_width=448)
 text(588, 387, "Gate requests, not intent.", 28, bold=True, max_width=448)
-text(588, 443, "Enabled action groups\nValidated request parameters\nOptional resource allowlists\nApproval where configured", 24, max_width=448)
-text(588, 597, "The daemon resolves credentials\nfor its action handlers.", 20, MUTED, max_width=448)
+text(588, 443, "GitHub issues, PRs and code\nAzure / application log queries\nPreconfigured PIM groups / roles\nAllowed HTTP integrations", 24, max_width=448)
+text(588, 597, "Enabled groups + resource scope.\nApproval where configured.", 20, MUTED, max_width=448)
 
 text(1100, 344, "03  /  UNTRUSTED RESPONSES", 15, ACCENT, True, max_width=448)
 text(1100, 387, "Filter what comes back.", 28, bold=True, max_width=448)
 text(1100, 443, "Prompt-injection scoring\nQuarantine / block by score\nPII and secret-pattern redaction\nAction response-field selection", 24, max_width=448)
 text(1100, 597, "Configured action-response filters.\nNot inspection of every network byte.", 20, MUTED, max_width=448)
+
+draw.rounded_rectangle((52, 694, 1572, 802), 16,
+                       fill="#171923", outline="#484056", width=1)
+text(76, 713, "A checkout. Not the daemon's GitHub login.", 30, bold=True)
+text(76, 763, "Local Git works. No inherited daemon Git credentials. Authenticated refresh and publication are daemon-owned.", 23, MUTED)
 
 supports = [
     (52, "Encrypted at rest", "Stored profile secrets: AES-256-GCM.\nAction auth is resolved daemon-side.\nWorkers can receive runtime tokens."),
@@ -73,12 +78,12 @@ supports = [
     (1076, "Evidence you can inspect", "Hash-chained action audit.\nEgress-denial and filter findings.\nRisk signals in Readiness Review."),
 ]
 for x, title, body in supports:
-    card(x, 694, 179)
-    text(x + 24, 717, title, 27, bold=True, max_width=448)
-    text(x + 24, 765, body, 22, MUTED, max_width=448)
+    card(x, 824, 179)
+    text(x + 24, 847, title, 27, bold=True, max_width=448)
+    text(x + 24, 895, body, 22, MUTED, max_width=448)
 
-draw.line((52, 910, 1572, 910), fill="#383546", width=1)
-text(52, 937, "Defense in depth. Not immunity to prompt injection.", 29, bold=True)
-text(52, 986, "Allowed tools and destinations can still move data. Scope policies; protect the host.", 22, MUTED)
+draw.line((52, 1040, 1572, 1040), fill="#383546", width=1)
+text(52, 1067, "Defense in depth. Not immunity to prompt injection.", 29, bold=True)
+text(52, 1116, "Allowed tools and destinations can still move data. Scope policies; protect the host.", 22, MUTED)
 image.save(OUTPUT, optimize=True)
 print(f"{OUTPUT.name}: {WIDTH}×{HEIGHT}, {OUTPUT.stat().st_size / 1024:.0f} KiB")
