@@ -18,6 +18,7 @@ docker run --rm -i --platform linux/amd64 --entrypoint bash \
 set -euo pipefail
 test "$(id -u)" = 1000
 test "$(id -un)" = autopod
+autopod-check-git
 node --version
 node -e 'if (process.versions.node.split(".")[0] !== "24") process.exit(1); if (process.env.EXPECTED_NODE && process.versions.node !== process.env.EXPECTED_NODE) throw Error("Exact Node pin mismatch")'
 for cli in pnpm claude codex copilot pi; do command -v "$cli"; done

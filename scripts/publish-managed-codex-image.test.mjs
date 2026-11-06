@@ -62,11 +62,26 @@ test('publication accepts queue text and returns the immutable manifest', async 
   });
   plan.baseRevision = fixture.revision;
   const digest = `sha256:${'d'.repeat(64)}`;
+  let buildContext;
   const result = await publishManagedImage(plan, {
     pollIntervalMs: 0,
     sourceRepository: fixture.path,
-    runAz: (args) => {
-      if (args[1] === 'build') return 'Queued a build with ID: managed-1\n';
+    runAz: (args, cwd) => {
+      if (args[1] === 'build') {
+        buildContext = cwd;
+        assert.deepEqual(fs.readdirSync(cwd).sort(), ['Dockerfile', 'source.tar', 'templates']);
+        assert.deepEqual(fs.readdirSync(path.join(cwd, 'templates/base')).sort(), [
+          'check-worker-git.sh',
+          'install-worker-git.sh',
+        ]);
+        for (const name of ['install-worker-git.sh', 'check-worker-git.sh']) {
+          assert.equal(
+            fs.readFileSync(path.join(cwd, 'templates/base', name), 'utf8'),
+            fs.readFileSync(path.join(root, 'templates/base', name), 'utf8'),
+          );
+        }
+        return 'Queued a build with ID: managed-1\n';
+      }
       if (args[1] === 'task')
         return JSON.stringify({
           status: 'Succeeded',
@@ -78,6 +93,8 @@ test('publication accepts queue text and returns the immutable manifest', async 
   });
   assert.equal(result.image, `ewiautopodacr.azurecr.io/autopod/managed-codex-portfolio@${digest}`);
   assert.equal(result.baseRevision, fixture.revision);
+  assert.ok(buildContext);
+  assert.equal(fs.existsSync(buildContext), false);
 });
 
 test('publication rejects mutable tags and unpinned repository revisions', () => {

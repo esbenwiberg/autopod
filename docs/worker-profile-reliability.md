@@ -138,6 +138,40 @@ Only the new generation uses that immutable selection. Preset edits alone still
 do nothing to an existing worker; image qualification, fresh checks/review and
 subsequent human approval remain separate.
 
+## Consistent coding-worker Git
+
+All base coding templates and both managed Codex templates install the same Git
+2.56.0 from a checksum-verified upstream archive using
+`templates/base/install-worker-git.sh`. Compiler, TLS, expat and zlib dependencies
+are explicit in each image. HTTP(S) transports remain installed. Every image runs
+`autopod-check-git` as its non-root worker during the build, proving the required
+`git merge-tree --write-tree --merge-base=<oid>` operation with disposable local
+commits rather than trusting a version/help string. Automatic background Git
+maintenance and auto-GC are disabled; explicit maintenance remains possible.
+The template regression discovers every base/managed Dockerfile so a new family
+cannot silently fall back to distribution Git.
+
+Qualify already-built images using their actual immutable local identities:
+
+```sh
+bash scripts/smoke-worker-git.sh IMAGE_REF [IMAGE_REF ...]
+```
+
+The smoke resolves each local reference once, records the image ID/platform, and
+runs that ID as the image's configured non-root user with no network or host
+mounts. It checks the exact pinned version, the real merge-tree operation, HTTPS
+helper presence and maintenance defaults. It never pulls, publishes or wakes a
+pod. The Node24 native-build smoke also exercises `autopod-check-git`.
+
+This is a source/build contract, not proof that existing published images have
+been replaced. Build and qualify new images, publish them and deliberately select
+their digests in future environments. Preset/daemon updates do not upgrade frozen
+workers. Existing pods require supported exact-source recovery with a qualified
+replacement execution, fresh checks and independent review; pending guidance and
+infrastructure/custody gates remain enforced. Do not install Git ad hoc inside a
+retained worker, discard guidance, disable tests or infer a fleet repair from a
+passing template test. A custom image must be qualified separately.
+
 ## Node certificate trust
 
 Newly built worker base templates set:
@@ -191,10 +225,11 @@ both explicitly without silently changing the branch under an existing task.
 
 Before operator-fixture work:
 
-- The Node22/Node24 PostgreSQL base templates bake Git 2.56.0 into `/usr/local`,
-  independently of the distribution Git package. The installer checks the pinned
-  upstream archive SHA-256 before compilation and retains HTTP(S) transports.
-  Both images run `autopod-check-git` as the non-root worker during the build. It
+- The coding-worker templates bake Git 2.56.0 into `/usr/local`,
+  independently of the distribution Git package (see the shared Git policy above).
+  The installer checks the pinned upstream archive SHA-256 before compilation and
+  retains HTTP(S) transports. These images run `autopod-check-git` as the non-root
+  worker during the build. It
   proves `git merge-tree --write-tree --merge-base=<oid>` with disposable local
   commits, ignores inherited checkout/index selectors and cleans only its fixture.
   Re-run that check when qualifying the selected environment and fresh containers;
@@ -206,8 +241,8 @@ Before operator-fixture work:
   execution settings. The isolated capability fixture also disables automatic
   maintenance in its private command environment. No preservation assertion is
   weakened or lock file ignored to obtain a pass.
-  Other template families retain their distribution Git; do not weaken integration
-  assertions to accommodate an older binary.
+  Published historical images can still contain distribution Git; do not weaken
+  integration assertions to accommodate an older binary.
 - Run the repository's cached-browser prerequisite helper from the selected
   source. The cached Chromium bootstrap repair is already merged in platform
   PR #110; do not replace qualified cached browsers with unconditional downloads.

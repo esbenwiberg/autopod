@@ -3,6 +3,7 @@ FROM python:3.12-slim
 # System deps + Node.js 22
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    libcurl4-openssl-dev libexpat1-dev libssl-dev zlib1g-dev \
     curl \
     ca-certificates \
     gnupg \
@@ -17,6 +18,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
     && locale-gen \
     && rm -rf /var/lib/apt/lists/*
+
+# Keep Git integration capabilities independent of the distribution package version.
+COPY templates/base/install-worker-git.sh /tmp/install-worker-git.sh
+RUN sh /tmp/install-worker-git.sh && rm /tmp/install-worker-git.sh
+COPY templates/base/check-worker-git.sh /usr/local/bin/autopod-check-git
+# Bounded workers must not acquire untracked background Git writers.
+RUN chmod 0755 /usr/local/bin/autopod-check-git \
+    && mkdir -p /usr/local/etc \
+    && git config --system maintenance.auto false \
+    && git config --system gc.auto 0
 
 # Glow — terminal markdown viewer from Charm
 RUN mkdir -p /etc/apt/keyrings \
@@ -62,6 +73,7 @@ WORKDIR /workspace
 RUN chown autopod:autopod /workspace
 
 USER autopod
+RUN autopod-check-git
 
 # pip --user is the only install location available to the non-root agent —
 # put its bin dir on PATH so user-installed CLIs (alembic, pytest plugins, etc.)
