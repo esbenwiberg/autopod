@@ -130,19 +130,22 @@ export async function inspectRequiredCommands(
       (fact) => [`fact:${fact.id}`, fact.command] as [string, string],
     ),
   ];
+  const declared = pod.contract?.executionRequirements;
+  const explicitRequirements: CommandPreflight['requirements'] = (declared?.executables ?? []).map(
+    (executable) => ({ source: 'contract.executionRequirements', executable, available: null }),
+  );
   if (commands.length > 128)
     return {
-      requirements: [],
+      // Bounds must not erase a strict dependency and accidentally authorize dispatch.
+      requirements: declared?.version === 2 ? explicitRequirements : [],
       unresolvedSources: ['command scope exceeds 128 declarations'],
       deferredArtifacts: [],
-      explicitDependencies: false,
+      explicitDependencies: declared?.version === 2,
     };
-  const requirements: CommandPreflight['requirements'] = [];
+  const requirements = [...explicitRequirements];
   const unresolvedSources: string[] = [];
   const deferredArtifacts: string[] = [];
-  const explicitDependencies = !!pod.contract?.executionRequirements;
-  for (const executable of pod.contract?.executionRequirements?.executables ?? [])
-    requirements.push({ source: 'contract.executionRequirements', executable, available: null });
+  const explicitDependencies = !!declared;
   for (const [source, command] of commands) {
     if (!command?.trim()) continue;
     const executables = discoverCommandLaunchers(command);
@@ -170,9 +173,9 @@ export async function inspectRequiredCommands(
   const names = [...new Set(requirements.map((value) => value.executable))];
   if (names.length > 64)
     return {
-      requirements: [],
+      requirements: declared?.version === 2 ? explicitRequirements : [],
       deferredArtifacts,
-      explicitDependencies: false,
+      explicitDependencies: declared?.version === 2,
       unresolvedSources: [...unresolvedSources, 'command scope exceeds 64 launchers'],
     };
   if (names.length) {

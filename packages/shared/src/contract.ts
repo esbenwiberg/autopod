@@ -63,6 +63,59 @@ const factSchema = z
 const reviewSchema = z
   .object({ id: text(128), covers: list(text(128), true), criterion: text(500), reason: text(500) })
   .passthrough();
+const executableSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(/^[A-Za-z0-9_./+:][A-Za-z0-9_./+:-]*$/);
+const executionResourceFields = {
+  minimumMemoryBytes: z
+    .number()
+    .int()
+    .positive()
+    .max(1024 ** 4)
+    .optional(),
+  minimumCpu: z.number().positive().max(1024).optional(),
+};
+const executionRequirementsV1Schema = z
+  .object({
+    version: z.literal(1),
+    executables: z.array(executableSchema).min(1).max(64),
+    ...executionResourceFields,
+  })
+  .strict();
+const executionRequirementsV2Schema = z
+  .object({
+    version: z.literal(2),
+    executables: z
+      .array(executableSchema)
+      .max(64)
+      .refine((names) => new Set(names).size === names.length, 'Duplicate executables'),
+    ...executionResourceFields,
+    platform: z.enum(['linux/amd64', 'linux/arm64', 'darwin/amd64', 'darwin/arm64']).optional(),
+    requiredReferenceRepositories: z
+      .array(
+        z
+          .object({
+            repositoryId: z
+              .string()
+              .min(1)
+              .max(128)
+              .regex(/^[a-zA-Z0-9_.-]+$/),
+            commitSha: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
+          })
+          .strict(),
+      )
+      .max(16)
+      .refine(
+        (references) =>
+          new Set(references.map((ref) => ref.repositoryId)).size === references.length,
+        'Duplicate reference repository IDs',
+      )
+      .optional(),
+    requiresImageBuild: z.literal(true).optional(),
+  })
+  .strict();
 /** Versioned canonical wire/domain schema. Unknown extension fields intentionally survive. */
 export const specContractV1Schema = z
   .object({
@@ -73,27 +126,7 @@ export const specContractV1Schema = z
     requiredFacts: list(factSchema),
     humanReview: list(reviewSchema),
     executionRequirements: z
-      .object({
-        version: z.literal(1),
-        executables: z
-          .array(
-            z
-              .string()
-              .min(1)
-              .max(256)
-              .regex(/^[A-Za-z0-9_./+:][A-Za-z0-9_./+:-]*$/),
-          )
-          .min(1)
-          .max(64),
-        minimumMemoryBytes: z
-          .number()
-          .int()
-          .positive()
-          .max(1024 ** 4)
-          .optional(),
-        minimumCpu: z.number().positive().max(1024).optional(),
-      })
-      .strict()
+      .discriminatedUnion('version', [executionRequirementsV1Schema, executionRequirementsV2Schema])
       .optional(),
     validationEvidence: z
       .object({
