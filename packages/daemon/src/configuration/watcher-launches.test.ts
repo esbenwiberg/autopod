@@ -1,4 +1,9 @@
-import type { CreatePodRequest, EffectiveLaunchConfig } from '@autopod/shared';
+import type {
+  CreatePodRequest,
+  EffectiveLaunchConfig,
+  ExecutionRequirements,
+  SpecContract,
+} from '@autopod/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createWatcherBindingRepository } from '../issue-watcher/watcher-binding-repository.js';
 import { createPodRepository } from '../pods/pod-repository.js';
@@ -89,7 +94,166 @@ function fixture() {
     },
   };
 }
+function generatedContract(executionRequirements: ExecutionRequirements): SpecContract {
+  return {
+    contractVersion: 1,
+    title: 'Generated worker prerequisites',
+    dependsOn: [],
+    scenarios: [],
+    requiredFacts: [],
+    humanReview: [],
+    executionRequirements,
+  };
+}
+
 describe('watcher launch snapshots', () => {
+  it.each([
+    [
+      {
+        version: 2,
+        executables: [],
+        requiredReferenceRepositories: [
+          { repositoryId: 'missing-input', commitSha: 'a'.repeat(40) },
+        ],
+      },
+      false,
+      'EXECUTION_REFERENCE_MISSING',
+    ],
+    [
+      {
+        version: 2,
+        executables: [],
+        requiredReferenceRepositories: [{ repositoryId: 'repo-b', commitSha: 'b'.repeat(40) }],
+      },
+      true,
+      'EXECUTION_REFERENCE_MISMATCH',
+    ],
+    [
+      { version: 2, executables: [], platform: 'linux/arm64' },
+      false,
+      'EXECUTION_PLATFORM_MISMATCH',
+    ],
+    [
+      { version: 2, executables: [], platform: 'darwin/arm64' },
+      false,
+      'EXECUTION_PLATFORM_MISMATCH',
+    ],
+    [
+      { version: 2, executables: ['docker'], requiresImageBuild: true },
+      false,
+      'EXECUTION_IMAGE_BUILD_UNSUPPORTED',
+    ],
+  ] satisfies Array<
+    [ExecutionRequirements, boolean, string]
+  >)('rejects generated worker prerequisites before final pod admission: %j', async (requirements, includeReference, code) => {
+    const f = fixture();
+    if (includeReference)
+      f.bindings.write(
+        {
+          id: f.binding.id,
+          expectedRevision: f.binding.revision,
+          payload: {
+            ...f.binding.payload,
+            launch: {
+              ...f.binding.payload.launch,
+              referenceRepositories: [{ repositoryId: 'repo-b', ref: 'main', access: 'read' }],
+            },
+          },
+        },
+        'operator',
+      );
+    const planner = await f.launches.create(f.request, f.source, f.candidate);
+    f.db.prepare("UPDATE pods SET status='complete' WHERE id=?").run(planner.id);
+    const before = f.snapshots.get(planner.id);
+    const admitted = f.db.prepare('SELECT * FROM pod_launch_snapshots').all();
+    const pod = f.pods.getOrThrow(planner.id);
+    await expect(
+      f.launches.createWorker(
+        {
+          ...f.request,
+          task: 'Implement generated brief',
+          contract: generatedContract(requirements),
+        },
+        pod,
+      ),
+    ).rejects.toMatchObject({ code });
+    // The real watcher derives/seals new work after planning; even its injected external
+    // capability hook returning successfully must not bypass the final snapshot boundary.
+    expect(f.services.assertCapabilities).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        work: expect.objectContaining({ contract: generatedContract(requirements) }),
+        derivation: expect.objectContaining({ kind: 'watcher-worker' }),
+      }),
+    );
+    expect(f.create).toHaveBeenCalledOnce(); // Planner only, never a worker.
+    expect(f.db.prepare('SELECT COUNT(*) AS n FROM pods').get()).toEqual({ n: 1 });
+    expect(f.db.prepare('SELECT * FROM pod_launch_snapshots').all()).toEqual(admitted);
+    expect(f.snapshots.get(planner.id)).toEqual(before);
+    expect(f.pods.getOrThrow(planner.id)).toEqual(pod);
+  });
+
+  it('admits matching generated v2 work and replays its receipt before discovery or capability checks', async () => {
+    const f = fixture();
+    f.bindings.write(
+      {
+        id: f.binding.id,
+        expectedRevision: f.binding.revision,
+        payload: {
+          ...f.binding.payload,
+          launch: {
+            ...f.binding.payload.launch,
+            referenceRepositories: [{ repositoryId: 'repo-b', ref: 'main', access: 'read' }],
+          },
+        },
+      },
+      'operator',
+    );
+    const planner = await f.launches.create(f.request, f.source, f.candidate);
+    f.db.prepare("UPDATE pods SET status='complete' WHERE id=?").run(planner.id);
+    const requirements: ExecutionRequirements = {
+      version: 2,
+      executables: [],
+      platform: 'linux/amd64',
+      requiredReferenceRepositories: [{ repositoryId: 'repo-b', commitSha: 'a'.repeat(40) }],
+    };
+    const request = {
+      ...f.request,
+      task: 'Implement matching brief',
+      contract: generatedContract(requirements),
+    };
+    const parent = f.pods.getOrThrow(planner.id);
+    const worker = await f.launches.createWorker(request, parent);
+    const frozen = f.snapshots.get(worker.id);
+    expect(frozen?.work.contract?.executionRequirements).toEqual(requirements);
+    expect(frozen?.workflow.validationPhases).toEqual(['build', 'test']);
+    vi.mocked(f.services.assertCapabilities).mockRejectedValue(
+      new Error('Do not revalidate a receipt'),
+    );
+    vi.mocked(f.services.resolveEnvironment).mockRejectedValue(
+      new Error('Do not resolve a receipt'),
+    );
+    f.services.referenceRevision = vi.fn(async () => {
+      throw new Error('Do not rediscover a receipt');
+    });
+    vi.mocked(f.services.assertCapabilities).mockClear();
+    vi.mocked(f.services.resolveEnvironment).mockClear();
+    expect(await f.launches.createWorker(request, parent)).toEqual(worker);
+    expect(f.create).toHaveBeenCalledTimes(2);
+    expect(f.services.assertCapabilities).not.toHaveBeenCalled();
+    expect(f.services.resolveEnvironment).not.toHaveBeenCalled();
+    expect(f.services.referenceRevision).not.toHaveBeenCalled();
+    expect(f.snapshots.get(worker.id)).toEqual(frozen);
+    await expect(
+      f.launches.createWorker(
+        {
+          ...request,
+          contract: generatedContract({ version: 2, executables: [], platform: 'darwin/arm64' }),
+        },
+        parent,
+      ),
+    ).rejects.toMatchObject({ code: 'REQUEST_CONFLICT' });
+    expect(f.create).toHaveBeenCalledTimes(2);
+  });
   it('pins worker settings before planning and reuses the admitted result after profile and watcher edits', async () => {
     const f = fixture();
     expect(f.launches.target(f.source, 'autopod:arbitrary-profile')).toBeNull();

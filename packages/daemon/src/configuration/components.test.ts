@@ -1,3 +1,4 @@
+import type { ExecutionRequirements } from '@autopod/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { createActionAuditRepository } from '../actions/audit-repository.js';
 import { createPimEligibilityService } from '../pim/eligibility-service.js';
@@ -10,6 +11,7 @@ import { createTestConfiguration } from '../test-utils/configuration-helpers.js'
 import { createTestContext } from '../test-utils/mock-helpers.js';
 import { createConfigurationComponents } from './components.js';
 import { createConfigurationCredentialStore } from './credential-store.js';
+import { deriveLaunch } from './derive-launch.js';
 import { resolveLaunch } from './launch-resolver.js';
 
 describe('composable daemon services', () => {
@@ -124,6 +126,51 @@ describe('composable daemon services', () => {
       const saved = components.snapshots.get(pod.id);
       if (!saved) throw new Error('Missing admitted snapshot');
       expect(saved.work).toEqual(work);
+      // Final derived work can arrive without resolveLaunch(). The composed current-capability
+      // boundary must check it before external capability hooks or any worker preparation.
+      for (const [executionRequirements, code] of [
+        [{ version: 2, executables: [], platform: 'darwin/arm64' }, 'EXECUTION_PLATFORM_MISMATCH'],
+        [
+          {
+            version: 2,
+            executables: [],
+            requiredReferenceRepositories: [
+              { repositoryId: 'missing-input', commitSha: 'a'.repeat(40) },
+            ],
+          },
+          'EXECUTION_REFERENCE_MISSING',
+        ],
+        [
+          { version: 2, executables: [], requiresImageBuild: true },
+          'EXECUTION_IMAGE_BUILD_UNSUPPORTED',
+        ],
+      ] satisfies Array<[ExecutionRequirements, string]>) {
+        const derived = deriveLaunch(saved, {
+          source: { podId: pod.id, digest: saved.digest, kind: 'follow-up' },
+          task: 'Derived task with new explicit requirements',
+          work: {
+            contract: {
+              contractVersion: 1,
+              title: 'Derived task',
+              dependsOn: [],
+              scenarios: [],
+              requiredFacts: [],
+              humanReview: [],
+              executionRequirements,
+            },
+          },
+        });
+        await expect(
+          components.launchConfiguration.assertCurrentCapabilities(derived),
+        ).rejects.toMatchObject({ code });
+        await expect(components.resolution.assertCapabilities(derived)).rejects.toMatchObject({
+          code,
+        });
+      }
+      expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM pods').get()).toEqual({ n: 1 });
+      expect(build).not.toHaveBeenCalled();
+      expect(ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(ctx.runtime.resume).not.toHaveBeenCalled();
       accounts.create({
         id: 'advisor-only',
         name: 'Advisor fallback',
