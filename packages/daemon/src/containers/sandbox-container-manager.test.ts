@@ -978,6 +978,15 @@ describe('SandboxContainerManager', () => {
   });
 
   describe('exec', () => {
+    it('refuses unsupported bounded buffered evidence before dispatch', async () => {
+      const client = new FakeSandboxApiClient();
+      const mgr = new SandboxContainerManager(client, logger);
+      await expect(
+        mgr.execInContainer('candidate', ['fixed-probe'], { maxOutputBytes: 65536 }),
+      ).rejects.toMatchObject({ code: 'EXEC_OUTPUT_BOUND_UNSUPPORTED' });
+      expect(client.execCalls).toHaveLength(0);
+    });
+
     it('maps exec result and options', async () => {
       const client = new FakeSandboxApiClient(() => ({
         stdout: 'out',

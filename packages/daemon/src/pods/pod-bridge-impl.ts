@@ -32,6 +32,7 @@ import { z } from 'zod';
 import type { ActionEngine } from '../actions/action-engine.js';
 import { resolveEffectiveActionPolicy } from '../actions/policy-resolver.js';
 import { isPrivateIp } from '../api/ssrf-guard.js';
+import { configurationDigest } from '../configuration/configuration-digest.js';
 import { atomicPodChange } from '../db/unit-of-work.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
@@ -57,6 +58,7 @@ import type {
 } from './pod-bridge-ports.js';
 import { computePodDiff, summarizeDiff } from './pod-diff-fetcher.js';
 import type { PodRepository } from './pod-repository.js';
+import { validatePrerequisiteBlocker } from './prerequisite-blocker.js';
 import type { ProgressEventRepository } from './progress-event-repository.js';
 import {
   memoryMatchesProjectSetup,
@@ -286,8 +288,81 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       if (!pod.launchConfigDigest) return undefined;
       return deps.scopedTools?.(podId);
     },
+    getExecutionPrerequisites(podId: string) {
+      const pod = podRepo.getOrThrow(podId);
+      if (!pod.launchConfigDigest) return null;
+      const launch = podManager.getLaunchConfiguration?.(podId);
+      if (!launch || launch.digest !== pod.launchConfigDigest) return null;
+      const requirements = launch.work.contract?.executionRequirements;
+      return requirements?.version === 2
+        ? {
+            requirements: structuredClone(requirements),
+            requirementsHash: configurationDigest(requirements),
+          }
+        : null;
+    },
     createEscalation(request: EscalationRequest): void {
       let escalation = request;
+      if (
+        request.type === 'report_blocker' &&
+        'prerequisiteBlocker' in request.payload &&
+        request.payload.prerequisiteBlocker !== undefined
+      ) {
+        const pod = podRepo.getOrThrow(request.podId);
+        const launch = podManager.getLaunchConfiguration?.(request.podId);
+        if (
+          !launch ||
+          !pod.launchConfigDigest ||
+          launch.digest !== pod.launchConfigDigest ||
+          !('kind' in request.payload) ||
+          request.payload.kind !== 'infrastructure'
+        )
+          throw new AutopodError(
+            'Typed prerequisite reporting requires the current frozen launch',
+            'INVALID_PREREQUISITE_BLOCKER',
+            400,
+          );
+        const payload = request.payload;
+        if (
+          Object.keys(payload).some(
+            (key) =>
+              ![
+                'kind',
+                'owner',
+                'phase',
+                'lifecycleGeneration',
+                'requiresResponse',
+                'description',
+                'attempted',
+                'needs',
+                'prerequisiteBlocker',
+              ].includes(key),
+          ) ||
+          Buffer.byteLength(JSON.stringify(payload)) > 65536 ||
+          request.response !== null ||
+          typeof payload.phase !== 'string' ||
+          !payload.phase.trim() ||
+          payload.phase.length > 256 ||
+          payload.requiresResponse !== false ||
+          !['autopod', 'parent', 'validation'].includes(payload.owner ?? '') ||
+          typeof payload.description !== 'string' ||
+          !payload.description.trim() ||
+          typeof payload.needs !== 'string' ||
+          !payload.needs.trim() ||
+          !Array.isArray(payload.attempted) ||
+          payload.attempted.length > 50 ||
+          payload.attempted.some((item) => typeof item !== 'string' || item.length > 4000)
+        )
+          throw new AutopodError(
+            'Typed blocker is a complete prerequisite claim, never worker proof or authority',
+            'INVALID_PREREQUISITE_BLOCKER',
+            400,
+          );
+        validatePrerequisiteBlocker(
+          request.payload.prerequisiteBlocker,
+          launch.work.contract?.executionRequirements,
+        );
+      }
       podManager.touchHeartbeat(escalation.podId);
       if (
         escalation.type === 'report_blocker' &&

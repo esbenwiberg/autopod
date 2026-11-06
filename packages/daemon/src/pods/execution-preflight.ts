@@ -14,6 +14,14 @@ import { daemonRelease } from '../release.js';
 import { verifyAgentCli } from '../runtimes/agent-cli-preflight.js';
 import { inspectRequiredCommands } from './required-command-preflight.js';
 
+export interface ExecutionPreflightOptions {
+  assertCurrent?: () => void;
+  user?: string;
+  probeNodePath?: string;
+  /** Qualification never dispatches another probe after an uncertain CLI/metadata observation. */
+  stopOnProbeError?: boolean;
+}
+
 /** Read-only pre-agent evidence. Unknown capabilities are explicit diagnostics. */
 export async function inspectExecutionPreflight(
   cm: ContainerManager,
@@ -22,7 +30,9 @@ export async function inspectExecutionPreflight(
   profile: PodExecutionSettings,
   purpose: NonNullable<ExecutionProvenanceInput['purpose']> = 'coding',
   subject: NonNullable<ExecutionProvenanceInput['subject']> = 'worker',
+  options: ExecutionPreflightOptions = {},
 ): Promise<ExecutionProvenanceInput> {
+  options.assertCurrent?.();
   const result: ExecutionProvenanceInput = {
     version: 1,
     purpose,
@@ -90,8 +100,24 @@ export async function inspectExecutionPreflight(
   }
   const requiresCli = purpose === 'coding' || subject === 'reviewer';
   try {
-    Object.assign(result, await verifyAgentCli(cm, containerId, pod.runtime, pod.model));
+    Object.assign(
+      result,
+      await verifyAgentCli(cm, containerId, pod.runtime, pod.model, {
+        ...(options.assertCurrent ? { assertCurrent: options.assertCurrent } : {}),
+        ...(options.user ? { maxOutputBytes: 65536 } : {}),
+        ...(options.user
+          ? {
+              user: options.user,
+              cwd: profile.buildWorkDir ? `/workspace/${profile.buildWorkDir}` : '/workspace',
+              ...(profile.buildEnv ? { env: profile.buildEnv } : {}),
+            }
+          : {}),
+      }),
+    );
+    options.assertCurrent?.();
   } catch (error) {
+    options.assertCurrent?.();
+    if (options.stopOnProbeError) throw error;
     if (requiresCli) result.status = 'blocked';
     result.diagnostics.push({
       code: !requiresCli
@@ -107,7 +133,9 @@ export async function inspectExecutionPreflight(
     });
   }
   try {
+    options.assertCurrent?.();
     const metadata = await boundedMetadata(cm, containerId);
+    options.assertCurrent?.();
     if (metadata) {
       result.imageDigest =
         metadata.imageDigest && /^sha256:[a-f0-9]{64}$/.test(metadata.imageDigest)
@@ -141,7 +169,9 @@ export async function inspectExecutionPreflight(
         });
       }
     }
-  } catch {
+  } catch (error) {
+    options.assertCurrent?.();
+    if (options.stopOnProbeError) throw error;
     result.diagnostics.push({
       code: 'ENVIRONMENT_METADATA_UNAVAILABLE',
       detail: 'Backend environment metadata could not be read.',
@@ -155,7 +185,9 @@ export async function inspectExecutionPreflight(
         ? { ...pod, contract: { ...pod.contract, executionRequirements: undefined } }
         : pod,
       profile,
+      options,
     );
+  options.assertCurrent?.();
   for (const requirement of result.commands.requirements) {
     const strict =
       declared?.version === 2 && requirement.source === 'contract.executionRequirements';
@@ -237,6 +269,7 @@ export async function inspectExecutionPreflight(
       code: 'RELEASE_IDENTITY_INCOMPLETE',
       detail: 'Build release or validation implementation identity is unavailable.',
     });
+  options.assertCurrent?.();
   return result;
 }
 

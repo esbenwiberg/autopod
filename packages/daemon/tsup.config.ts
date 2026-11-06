@@ -65,6 +65,8 @@ export default defineConfig({
           'src/issue-watcher/issue-watcher-service.ts',
           'src/managed/codex-wire.ts',
           'src/pods/admission-memory-briefing.ts',
+          'src/pods/environment-qualification.ts',
+          'src/pods/prerequisite-blocker.ts',
           'src/pods/approval-delivery-execution.ts',
           'src/pods/completion-guards.ts',
           'src/pods/completion-ports.ts',

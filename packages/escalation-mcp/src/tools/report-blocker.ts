@@ -1,5 +1,6 @@
-import type { EscalationRequest } from '@autopod/shared';
-import { generateId } from '@autopod/shared';
+import type { EscalationRequest, PrerequisiteBlockerV1 } from '@autopod/shared';
+import { generateId, prerequisiteBlockerV1Schema } from '@autopod/shared';
+import { z } from 'zod';
 import type { PendingRequests } from '../pending-requests.js';
 import type { PodBridge } from '../pod-bridge.js';
 
@@ -9,7 +10,23 @@ export interface ReportBlockerInput {
   needs: string;
   owner?: 'autopod' | 'parent' | 'validation';
   phase?: string;
+  prerequisiteBlocker?: PrerequisiteBlockerV1;
 }
+
+const reportBlockerInputSchema = z
+  .object({
+    description: z.string().trim().min(1).max(10000),
+    attempted: z.array(z.string().max(4000)).max(50),
+    needs: z.string().trim().min(1).max(10000),
+    owner: z.enum(['autopod', 'parent', 'validation']).optional(),
+    phase: z.string().trim().min(1).max(256).optional(),
+    prerequisiteBlocker: prerequisiteBlockerV1Schema.optional(),
+  })
+  .strict()
+  .refine(
+    (value) => !value.prerequisiteBlocker || Boolean(value.phase),
+    'Typed prerequisite reports require an explicit failing phase',
+  );
 
 export async function reportBlocker(
   podId: string,
@@ -17,6 +34,7 @@ export async function reportBlocker(
   bridge: PodBridge,
   _pendingRequests: PendingRequests,
 ): Promise<string> {
+  input = reportBlockerInputSchema.parse(input);
   const escalationId = generateId();
   const escalation: EscalationRequest = {
     id: escalationId,
@@ -31,6 +49,7 @@ export async function reportBlocker(
       description: input.description,
       attempted: input.attempted,
       needs: input.needs,
+      ...(input.prerequisiteBlocker ? { prerequisiteBlocker: input.prerequisiteBlocker } : {}),
     },
     response: null,
   };

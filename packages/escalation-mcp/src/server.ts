@@ -4,6 +4,7 @@ import {
   githubMutationSchema,
   githubReadSchema,
   inputPathSchema,
+  prerequisiteBlockerV1Schema,
   serviceReadSchema,
 } from '@autopod/shared';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -145,6 +146,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     },
   );
 
+  const executionPrerequisites = bridge.getExecutionPrerequisites?.(podId);
   server.tool(
     'report_blocker',
     'Report a true executor/environment failure or missing required input without requesting a human answer. Stop blocked attempts, preserve work, summarize incomplete checks and finish; Autopod holds completion after execution settles. Expected external/Mac verification belongs in report_task_summary.deferredChecks, not here; required gates still apply.',
@@ -162,6 +164,11 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         .describe('Required repair or missing input; say when no supported recovery exists'),
       owner: z.enum(['autopod', 'parent', 'validation']).default('autopod'),
       phase: z.string().optional().describe('Failing execution or validation phase'),
+      prerequisiteBlocker: prerequisiteBlockerV1Schema
+        .optional()
+        .describe(
+          `Optional prospective lookup-only launcher need referencing the original frozen v2 requirements hash and declared names. Not a repair claim, builder/private/native proof, receipt, permission or retry grant. Omit for legacy/unsupported needs; never infer a mapping from text. ${executionPrerequisites ? `Frozen declaration (NOT evidence): ${JSON.stringify(executionPrerequisites)}` : 'No frozen v2 declaration is available; omit this envelope.'}`,
+        ),
     },
     async (input) => {
       const response = await reportBlocker(podId, input, bridge, pendingRequests);

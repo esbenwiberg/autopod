@@ -204,6 +204,7 @@ interface ImagePuller {
 }
 
 export class DockerContainerManager implements ContainerManager {
+  readonly supportsStreamingExec = true;
   private docker: Dockerode;
   private logger: Logger;
   private imagePuller: ImagePuller | null;
@@ -1040,7 +1041,12 @@ export class DockerContainerManager implements ContainerManager {
       containerId,
     });
 
-    const { stdout, stderr } = await collectDemuxedOutput(stream, this.docker, options?.timeout);
+    const { stdout, stderr } = await collectDemuxedOutput(
+      stream,
+      this.docker,
+      options?.timeout,
+      options?.maxOutputBytes,
+    );
 
     let exitCode = 1;
     try {
@@ -1338,23 +1344,42 @@ function collectDemuxedOutput(
   stream: NodeJS.ReadableStream,
   docker: Dockerode,
   timeout?: number,
+  maxOutputBytes?: number,
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     let stdoutBuf = '';
     let stderrBuf = '';
+    let outputBytes = 0;
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
+    const append = (chunk: Buffer, channel: 'stdout' | 'stderr') => {
+      if (settled) return;
+      outputBytes += chunk.length;
+      if (maxOutputBytes !== undefined && outputBytes > maxOutputBytes) {
+        // Closing a transport is not a remote termination receipt. Caller retains uncertainty.
+        settle(
+          new AutopodError(
+            'Buffered execution output exceeded its evidence bound',
+            'EXEC_OUTPUT_LIMIT',
+            409,
+          ),
+        );
+        (stream as NodeJS.ReadableStream & { destroy?: () => void }).destroy?.();
+        return;
+      }
+      if (channel === 'stdout') stdoutBuf += chunk.toString('utf-8');
+      else stderrBuf += chunk.toString('utf-8');
+    };
     const stdoutWriter = new Writable({
       write(chunk: Buffer, _encoding, cb) {
-        stdoutBuf += chunk.toString('utf-8');
+        append(chunk, 'stdout');
         cb();
       },
     });
-
     const stderrWriter = new Writable({
       write(chunk: Buffer, _encoding, cb) {
-        stderrBuf += chunk.toString('utf-8');
+        append(chunk, 'stderr');
         cb();
       },
     });

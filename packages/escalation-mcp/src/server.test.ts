@@ -463,6 +463,36 @@ describe('decision and infrastructure tool contracts', () => {
     expect(getTool('ask_human').description).toContain('report_blocker');
   });
 
+  it('offers the original frozen manifest hash as declaration metadata, never a qualification tool', async () => {
+    const { createEscalationMcpServer } = await import('./server.js');
+    const declaration = {
+      requirementsHash: 'a'.repeat(64),
+      requirements: { version: 2 as const, executables: ['jq'] },
+    };
+    createEscalationMcpServer({
+      podId: 'pod',
+      bridge: makeBridge({ getExecutionPrerequisites: () => declaration }),
+    });
+    const schema = getTool('report_blocker').schema.prerequisiteBlocker;
+    expect(schema?.description).toContain(declaration.requirementsHash);
+    expect(schema?.description).toContain('Frozen declaration (NOT evidence)');
+    expect(toolRegistrations.map((tool) => tool.name)).not.toContain('qualify_environment');
+    expect(
+      z.object(getTool('report_blocker').schema).safeParse({
+        description: 'jq missing',
+        attempted: [],
+        needs: 'jq',
+        phase: 'coding',
+        prerequisiteBlocker: {
+          version: 1,
+          kind: 'missing-execution-prerequisites',
+          requirementsHash: declaration.requirementsHash,
+          launchers: ['jq'],
+        },
+      }).success,
+    ).toBe(true);
+  });
+
   it('defaults infrastructure ownership without accepting worker-selected response or lifecycle authority', async () => {
     const { createEscalationMcpServer } = await import('./server.js');
     createEscalationMcpServer({ podId: 'husky-booby', bridge: makeBridge() });

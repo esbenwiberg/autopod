@@ -95,6 +95,8 @@ export interface ExecOptions {
   assertCurrent?: () => void;
   cwd?: string;
   timeout?: number;
+  /** Bound buffered stdout + stderr; exceeding it is uncertain execution, never verified termination. */
+  maxOutputBytes?: number;
   /** Run the command as this user inside the container (e.g. 'root'). */
   user?: string;
   /**
