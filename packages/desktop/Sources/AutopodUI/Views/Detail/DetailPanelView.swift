@@ -391,7 +391,8 @@ public struct DetailPanelView: View {
                     pod: pod,
                     actions: actions,
                     loadQuality: loadQuality,
-                    loadCost: loadCost
+                    loadCost: loadCost,
+                    configurationActions: configurationActions
                 )
                 case .validation: ValidationTab(
                     pod: pod,

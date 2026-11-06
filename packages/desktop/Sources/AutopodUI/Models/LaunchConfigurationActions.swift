@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 public struct LaunchConfigurationActions {
   public var connectionID: String? = nil
+  public var readInputFile: (InputBundleReference, Int) async throws -> Data = { _, _ in throw DaemonError.badRequest("Reference attachments unavailable") }
   public var uploadInputs: ([InputAttachment]) async throws -> InputBundleReference = { _ in throw DaemonError.badRequest("Reference attachments unavailable") }
   public var listRegistryCredentials: () async throws -> [ConfigurationJSON] = { throw DaemonError.badRequest("Credentials unavailable") }
   public var saveRegistryCredential: (String?, ConfigurationJSON) async throws -> ConfigurationJSON = { _, _ in throw DaemonError.badRequest("Credentials unavailable") }

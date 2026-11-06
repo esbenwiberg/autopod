@@ -37,6 +37,20 @@ public struct InputBundleReference: Codable, Equatable, Sendable {
   public let id: String
   public let digest: String
   public let files: [InputFileManifest]
+  /// Validate server-provided metadata before using it for downloads or previews.
+  public func validateManifest() throws {
+    guard id.range(of: #"^inputs-[a-f0-9-]{36}$"#, options: .regularExpression) != nil,
+      digest.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil,
+      !files.isEmpty, files.count <= 50,
+      files.allSatisfy({ file in
+        !file.path.isEmpty && file.path.count <= 240 && file.byteLength >= 0
+          && file.byteLength <= 10 * 1024 * 1024
+          && file.sha256.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil
+      }), files.reduce(0, { $0 + $1.byteLength }) <= 25 * 1024 * 1024 else {
+      throw DaemonError.badRequest("Invalid reference attachment manifest")
+    }
+  }
+
   public var configuration: ConfigurationJSON {
     .object(["id": .string(id), "digest": .string(digest), "files": .array(files.map { file in
       .object(["path": .string(file.path), "mediaType": .string(file.mediaType), "byteLength": .number(Double(file.byteLength)), "sha256": .string(file.sha256)])

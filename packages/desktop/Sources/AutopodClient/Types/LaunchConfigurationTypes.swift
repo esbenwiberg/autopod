@@ -192,6 +192,13 @@ public struct EffectiveLaunchPreview: Codable, Equatable, Sendable {
   public var mainModel: String { fields["ai"]?["main"]?["model"]?.string ?? "" }
   public var executionTarget: String { fields["resolvedExecution"]?["target"]?.string ?? "" }
   public var memoryGb: Double? { fields["resolvedExecution"]?["main"]?["memoryGb"]?.number }
+
+  public func referenceInputBundle() throws -> InputBundleReference? {
+    guard let value = fields["work"]?["inputBundle"], value != .null else { return nil }
+    let bundle = try JSONDecoder().decode(InputBundleReference.self, from: JSONEncoder().encode(value))
+    try bundle.validateManifest()
+    return bundle
+  }
 }
 
 public extension ComposableLaunchRequest {
