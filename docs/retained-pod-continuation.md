@@ -66,11 +66,13 @@ resource state, actual environment qualification and retry admission remain
 `not_checked`. A recorded host path or preservation marker is not proof of final
 original sandbox bytes; uncollected files/reports remain retained there. Needs
 are worker-reported context, not diagnosed prerequisites or repaired evidence.
-Displayed needs are bounded (20 reports, 256-character phase, 1024-character need);
-truncation is explicit and original selection evidence remains unchanged. When
-current reports are not exposed by the existing selection reader (for example,
-missing settlement or an existing validation result), needs remain unavailable;
-inspection does not fabricate settlement or infer them from prose.
+Displayed needs are read independently of selection eligibility and bounded in
+SQLite (20 current-generation reports, 256-character ID/owner/phase, 1024-character
+need). Truncation is explicit and original selection evidence remains unchanged.
+Needs remain visible with an existing validation result or missing settlement/source
+preservation; displaying them neither supplies missing evidence nor permits execution.
+Old-generation reports are excluded, and missing/non-text fields remain unrecorded
+rather than being inferred from prose.
 An older daemon without this projection displays inspection unavailable, never
 assumed eligibility. Storage/inspection errors do not produce an eligible result.
 

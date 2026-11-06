@@ -270,8 +270,7 @@ export function createRetainedCheckpointRecovery(deps: {
       check('human_guidance', () => deps.assertGuidanceCollected(podId)),
     ];
     const selection = repo.selectionEvidence(pod);
-    const reports = selection?.infrastructureReports ?? [];
-    const infrastructureBlocker = deps.podRepo.hasInfrastructureBlocker?.(podId);
+    const infrastructure = repo.infrastructureNeeds(pod);
     const currentFinalization = pod.finalization?.generation === pod.lifecycleGeneration;
     return {
       version: 1 as const,
@@ -287,22 +286,8 @@ export function createRetainedCheckpointRecovery(deps: {
           }
         : null,
       infrastructure: {
-        state: reports.length
-          ? ('reported' as const)
-          : infrastructureBlocker === false
-            ? ('none_recorded' as const)
-            : ('not_checked' as const),
-        truncated: reports.length > 20,
-        needs: reports.slice(0, 20).map((report) => ({
-          id: report.id.slice(0, 256),
-          owner: report.payload.owner,
-          phase: report.payload.phase?.slice(0, 256),
-          needs: report.payload.needs?.slice(0, 1024),
-          truncated:
-            report.id.length > 256 ||
-            (report.payload.phase?.length ?? 0) > 256 ||
-            (report.payload.needs?.length ?? 0) > 1024,
-        })),
+        state: infrastructure.needs.length ? ('reported' as const) : ('none_recorded' as const),
+        ...infrastructure,
       },
       prerequisites: {
         hostPathRecorded: Boolean(pod.worktreePath),

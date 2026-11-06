@@ -214,6 +214,46 @@ export function checkpointDetachedWakeup(
 }
 
 export function createRetainedCheckpointRepository(db: Database.Database) {
+  /** Diagnostic projection only: neither settlement nor selection/admission evidence.
+   * Bound fields inside SQLite before crossing into JS; never load whole payloads.
+   * Keep this independent of originalEvidence and its immutable hash meaning.
+   */
+  function infrastructureNeeds(pod: Pick<Pod, 'id' | 'lifecycleGeneration'>) {
+    const rows = db
+      .prepare(`WITH reports AS (
+      SELECT id,created_at,CASE WHEN json_valid(payload) THEN payload END AS data
+      FROM escalations WHERE pod_id=? AND type='report_blocker'
+    ) SELECT substr(id,1,257) AS id,
+      CASE WHEN json_type(data,'$.owner')='text'
+        THEN substr(json_extract(data,'$.owner'),1,257) END AS owner,
+      CASE WHEN json_type(data,'$.phase')='text'
+        THEN substr(json_extract(data,'$.phase'),1,257) END AS phase,
+      CASE WHEN json_type(data,'$.needs')='text'
+        THEN substr(json_extract(data,'$.needs'),1,1025) END AS needs
+      FROM reports WHERE json_extract(data,'$.kind')='infrastructure'
+      AND json_extract(data,'$.lifecycleGeneration')=?
+      ORDER BY created_at,reports.id LIMIT 21`)
+      .all(pod.id, pod.lifecycleGeneration) as {
+      id: string;
+      owner: string | null;
+      phase: string | null;
+      needs: string | null;
+    }[];
+    return {
+      truncated: rows.length > 20,
+      needs: rows.slice(0, 20).map((row) => ({
+        id: row.id.slice(0, 256),
+        owner: row.owner?.slice(0, 256),
+        phase: row.phase?.slice(0, 256),
+        needs: row.needs?.slice(0, 1024),
+        truncated:
+          row.id.length > 256 ||
+          (row.owner?.length ?? 0) > 256 ||
+          (row.phase?.length ?? 0) > 256 ||
+          (row.needs?.length ?? 0) > 1024,
+      })),
+    };
+  }
   function originalEvidence(pod: Pod): CheckpointRecoveryRecord['originalEvidence'] | null {
     if (pod.lastValidationResult)
       return { result: pod.lastValidationResult, preSubmitReview: pod.preSubmitReview };
@@ -569,6 +609,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       return scope(db).run(id, operation);
     },
     selectionEvidence,
+    infrastructureNeeds,
     claim(input: {
       pod: Pod;
       taskId: string;

@@ -255,8 +255,10 @@ describe('human-only retained checkpoint selection', () => {
     expect(f.deps.enqueue).not.toHaveBeenCalled();
   });
   it('fails closed when inspection storage fails rather than returning an eligible projection', async () => {
-    vi.spyOn(f.recovery, 'inspect').mockImplementation(() => {
-      throw new Error('Synthetic inspection storage failure');
+    const repo = f.ctx.podRepo.retainedCheckpoints;
+    if (!repo) throw new Error('Missing checkpoint repository');
+    vi.spyOn(repo, 'infrastructureNeeds').mockImplementation(() => {
+      throw new Error('Synthetic report inspection storage failure');
     });
     const response = await app.inject({ url: endpoint(), headers });
     expect(response.statusCode).toBe(500);

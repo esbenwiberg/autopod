@@ -3,6 +3,7 @@ import { AutopodError } from '@autopod/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { preValidationCheckpointFixture } from '../test-utils/retained-checkpoint-helpers.js';
 import { createCompletionGuards } from './completion-guards.js';
+import { checkpointHash } from './retained-checkpoint-repository.js';
 
 const fixtures: Awaited<ReturnType<typeof preValidationCheckpointFixture>>[] = [];
 async function fixture() {
@@ -80,12 +81,20 @@ describe('read-only retained-continuation inspection', () => {
     f.ctx.db.pragma('query_only = OFF');
   });
 
-  it('preserves the existing result hash and labels needs unavailable when the selection reader omits reports', async () => {
+  it('preserves the existing result hash and independently shows current reported needs', async () => {
     const f = await fixture();
     f.ctx.podRepo.update(f.podId, { lastValidationResult: f.result });
+    f.ctx.db.pragma('query_only=ON');
     const inspection = f.recovery.inspect(f.podId);
+    expect(inspection.selection).toEqual({
+      expectedGeneration: f.pod().lifecycleGeneration,
+      expectedResultHash: checkpointHash(f.result),
+    });
     expect(inspection.selection).toEqual(f.recovery.selection(f.podId));
-    expect(inspection.infrastructure).toMatchObject({ state: 'not_checked', needs: [] });
+    expect(inspection.infrastructure).toMatchObject({
+      state: 'reported',
+      needs: [{ id: f.report.id, needs: f.report.payload.needs }],
+    });
     expect(f.ctx.podRepo.hasInfrastructureBlocker?.(f.podId)).toBe(true);
     expect(f.ctx.escalationRepo.getOrThrow(f.report.id)).toEqual(f.originalReport);
   });
@@ -126,6 +135,10 @@ describe('read-only retained-continuation inspection', () => {
         code: 'TASK_EXECUTION_UNSETTLED',
       }),
     );
+    expect(inspection.infrastructure).toMatchObject({
+      state: 'reported',
+      needs: [{ id: f.report.id, needs: f.report.payload.needs }],
+    });
     expect(tasks.hasActiveRun(f.podId)).toBe(true);
     expect(tasks.hasUnverifiedTermination(f.podId)).toBe(kind === 'unknown');
     expect(f.cm.getStatus).not.toHaveBeenCalled();
@@ -173,16 +186,25 @@ describe('read-only retained-continuation inspection', () => {
     });
   });
 
-  it('keeps reports unavailable rather than fabricating settlement to obtain selection evidence', async () => {
+  it.each([
+    'agent_settled_at',
+    'source_preserved_at',
+  ])('shows reports without fabricating missing %s or selection evidence', async (column) => {
     const f = await fixture();
-    f.ctx.db
-      .prepare('UPDATE pod_finalizations SET agent_settled_at=NULL WHERE pod_id=?')
-      .run(f.podId);
+    f.ctx.db.prepare(`UPDATE pod_finalizations SET ${column}=NULL WHERE pod_id=?`).run(f.podId);
+    f.ctx.db.pragma('query_only=ON');
     const inspection = f.recovery.inspect(f.podId);
     expect(inspection.status).toBe('blocked');
     expect(inspection.selection).toBeNull();
-    expect(inspection.prerequisites.workerSettlementRecorded).toBe(false);
-    expect(inspection.infrastructure).toMatchObject({ state: 'not_checked', needs: [] });
+    expect(
+      column === 'agent_settled_at'
+        ? inspection.prerequisites.workerSettlementRecorded
+        : inspection.prerequisites.sourcePreservationRecorded,
+    ).toBe(false);
+    expect(inspection.infrastructure).toMatchObject({
+      state: 'reported',
+      needs: [{ id: f.report.id, needs: f.report.payload.needs }],
+    });
     expect(f.ctx.escalationRepo.getOrThrow(f.report.id)).toEqual(f.originalReport);
   });
 
@@ -213,6 +235,19 @@ describe('read-only retained-continuation inspection', () => {
     expect(f.recovery.list(f.podId)).toEqual(before);
     expect(f.deps.prepare).toHaveBeenCalledTimes(1);
     expect(f.deps.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('propagates a diagnostic report storage failure rather than hiding reported needs', async () => {
+    const f = await fixture();
+    const repo = f.ctx.podRepo.retainedCheckpoints;
+    if (!repo) throw new Error('Missing checkpoint repository');
+    const error = new Error('Diagnostic report query failed');
+    vi.spyOn(repo, 'infrastructureNeeds').mockImplementation(() => {
+      throw error;
+    });
+    expect(() => f.recovery.inspect(f.podId)).toThrow(error);
+    expect(f.deps.enqueue).not.toHaveBeenCalled();
+    expect(f.cm.getStatus).not.toHaveBeenCalled();
   });
 
   it('propagates unexpected storage and configuration errors rather than claiming no blocker', async () => {
