@@ -77,6 +77,30 @@ function context(profile: PodExecutionSettings, probeNodePath: QualificationProb
     probeNodePath,
   };
 }
+/** Configuration-only preview gate. Success is eligibility for an attempt, NEVER qualification. */
+export function assertQualificationExecutionContextSupported(
+  profile: PodExecutionSettings,
+  probeNodePath: QualificationProbeNodePath = '/usr/local/bin/node',
+): void {
+  const execution = context(profile, probeNodePath);
+  if (
+    !['/usr/local/bin/node', '/usr/bin/node'].includes(probeNodePath) ||
+    !/^\/workspace(?:\/[A-Za-z0-9_.-]+)*$/.test(execution.cwd) ||
+    execution.cwd.split('/').includes('..') ||
+    execution.env.PATH?.split(':').some(
+      (path) => !path.startsWith('/') || /^\/(workspace|mnt|repos|tmp)(\/|$)/.test(path),
+    ) ||
+    Object.keys(execution.env).some((key) =>
+      /^(NODE_OPTIONS|NODE_PATH|LD_PRELOAD|LD_LIBRARY_PATH|BASH_ENV|ENV)$/.test(key),
+    )
+  )
+    throw new AutopodError(
+      'Trusted bounded probe context is unsupported; no candidate should be allocated',
+      'REPAIR_EXECUTION_CONTEXT_UNSUPPORTED',
+      409,
+    );
+}
+
 /** Hash, never expose, effective frozen buildEnv (which can contain secret values). */
 export function qualificationExecutionContextHash(
   profile: PodExecutionSettings,
@@ -165,6 +189,7 @@ export async function qualifyExecutionEnvironment(
     const requirements = pod.contract?.executionRequirements;
     assertRepairableExecutionRequirements(requirements);
     assertLaunchRequirements(launchConfig);
+    assertQualificationExecutionContextSupported(profile, probeNodePath);
     const execution = context(profile, probeNodePath);
     if (
       launchDigest !== binding.replacementLaunchDigest ||
@@ -183,16 +208,7 @@ export async function qualifyExecutionEnvironment(
       pod.launchConfigDigest !== binding.replacementLaunchDigest ||
       configurationDigest(requirements) !== binding.requirementsHash ||
       qualificationExecutionContextHash(profile, probeNodePath) !== binding.executionContextHash ||
-      (requirements.platform && requirements.platform !== binding.platform) ||
-      !['/usr/local/bin/node', '/usr/bin/node'].includes(probeNodePath) ||
-      !/^\/workspace(?:\/[A-Za-z0-9_.-]+)*$/.test(execution.cwd) ||
-      execution.cwd.split('/').includes('..') ||
-      execution.env.PATH?.split(':').some(
-        (path) => !path.startsWith('/') || /^\/(workspace|mnt|repos|tmp)(\/|$)/.test(path),
-      ) ||
-      Object.keys(execution.env).some((key) =>
-        /^(NODE_OPTIONS|NODE_PATH|LD_PRELOAD|LD_LIBRARY_PATH|BASH_ENV|ENV)$/.test(key),
-      )
+      (requirements.platform && requirements.platform !== binding.platform)
     ) {
       observe(
         'preparation',
@@ -394,7 +410,8 @@ export async function qualifyExecutionEnvironment(
     input.assertCurrent();
     observe(
       'preparation',
-      error instanceof AutopodError && error.code === 'REPAIR_UNSUPPORTED_NEEDS'
+      error instanceof AutopodError &&
+        ['REPAIR_UNSUPPORTED_NEEDS', 'REPAIR_EXECUTION_CONTEXT_UNSUPPORTED'].includes(error.code)
         ? 'unsupported'
         : 'unknown',
       expired ? 'QUALIFICATION_TIMEOUT' : 'QUALIFICATION_UNVERIFIED',

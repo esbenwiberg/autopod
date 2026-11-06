@@ -14,6 +14,7 @@ import type { ContainerExecutionMetadata } from '../interfaces/container-manager
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import { createMockContainerManager } from '../test-utils/mock-helpers.js';
 import {
+  assertQualificationExecutionContextSupported,
   type EnvironmentQualificationInput,
   QUALIFICATION_SOURCE_PROBE,
   QUALIFICATION_TIMEOUT_MS,
@@ -177,6 +178,18 @@ describe('actual resource environment qualification (evidence only)', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+  it('checks known static context support for preview without requiring or manufacturing future-resource proof', () => {
+    const { input, cm } = fixture();
+    expect(() => assertQualificationExecutionContextSupported(input.profile)).not.toThrow();
+    expect(cm.execInContainer).not.toHaveBeenCalled();
+    for (const profile of [
+      { ...input.profile, buildWorkDir: '../escape' },
+      { ...input.profile, buildEnv: { NODE_OPTIONS: '--require spoof' } },
+      { ...input.profile, buildEnv: { PATH: '/workspace/bin:/usr/bin' } },
+    ])
+      expect(() => assertQualificationExecutionContextSupported(profile)).toThrow(/unsupported/);
+    expect(cm.getResourceKey).not.toHaveBeenCalled();
   });
   it('qualifies exact resource/image/context/source and declared prerequisites through normal preflight', async () => {
     const { input, cm } = fixture();
