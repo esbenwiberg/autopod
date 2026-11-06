@@ -12,6 +12,7 @@ import { createProvisioningWorkspacePopulation } from './provisioning-workspace-
 
 type Captured = Pick<
   ProvisioningCaptured,
+  | 'qualifyCodingCandidate'
   | 'materializeSpecFiles'
   | 'captureDeployBaselineHashes'
   | 'podRepo'
@@ -56,6 +57,7 @@ type Captured = Pick<
 
 export function createProvisioningWorkflow(deps: ProvisioningLiveDependencies, captured: Captured) {
   const {
+    qualifyCodingCandidate,
     materializeSpecFiles,
     captureDeployBaselineHashes,
     podRepo,
@@ -177,7 +179,7 @@ export function createProvisioningWorkflow(deps: ProvisioningLiveDependencies, c
     const prepared = await agent.prepareAgentMaterials(materialsResult);
     // Normal repository preparation precedes actual-resource qualification; no
     // runtime has been selected or its lazy iterator pulled at this boundary.
-    await deps.qualifyCodingCandidate?.(prepared);
+    await qualifyCodingCandidate?.(prepared);
     return { kind: 'ready', prepared };
   }
   return { preparePodExecution };

@@ -8,11 +8,16 @@ import {
 } from '../test-utils/admission-queries-helpers.js';
 import { createPodManager } from './pod-manager.js';
 import { createPodManagerFacade } from './pod-manager-facade.js';
+import { createProvisioningWorkflow } from './provisioning-workflow.js';
 import type { ValidationWorkflowCalls } from './validation-workflow-ports.js';
 
 vi.mock('./pod-manager-facade.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('./pod-manager-facade.js')>();
   return { ...original, createPodManagerFacade: vi.fn(original.createPodManagerFacade) };
+});
+vi.mock('./provisioning-workflow.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./provisioning-workflow.js')>();
+  return { ...original, createProvisioningWorkflow: vi.fn(original.createProvisioningWorkflow) };
 });
 function instance(disk = false) {
   const f = createAdmissionFixture(disk);
@@ -69,6 +74,13 @@ describe('composed pod manager facade boundary', () => {
     expect(f.cm.stop).not.toHaveBeenCalled();
     expect(f.cm.kill).not.toHaveBeenCalled();
     expect(f.ctx.enqueuedSessions).toEqual([]);
+  });
+  it('keeps provisioning dependencies live while capturing the private coding qualifier separately', () => {
+    const f = instance();
+    const call = vi.mocked(createProvisioningWorkflow).mock.calls.at(-1);
+    expect(call?.[0]).toBe(f.deps);
+    expect(call?.[1]).toMatchObject({ qualifyCodingCandidate: expect.any(Function) });
+    expect(f.deps).not.toHaveProperty('qualifyCodingCandidate');
   });
   it('forwards read-only retained inspection and preserves inspection failures', () => {
     const f = instance();
