@@ -167,6 +167,11 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
         captured.checkpointRecovery ?? checkpointError('Checkpoint recovery unavailable')
       ).reconcileOutcome(podId, recoveryId, input, actor);
     },
+    getCheckpointRecoverySelection(podId: string) {
+      return (
+        captured.checkpointRecovery ?? checkpointError('Checkpoint recovery unavailable')
+      ).selection(podId);
+    },
     getCheckpointRecoveries(podId: string) {
       podRepo.getOrThrow(podId);
       return (

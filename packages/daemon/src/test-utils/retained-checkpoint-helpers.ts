@@ -119,6 +119,50 @@ export async function materializeCheckpointFixture(
   });
 }
 
+/** A settled worker reported infrastructure before any validation result existed. */
+export async function preValidationCheckpointFixture() {
+  return recordPreValidationInfrastructure(await retainedCheckpointFixture());
+}
+
+export function recordPreValidationInfrastructure(
+  f: Awaited<ReturnType<typeof retainedCheckpointFixture>>,
+) {
+  f.ctx.podRepo.update(f.podId, { status: 'failed', lastValidationResult: null });
+  const journal = f.ctx.podRepo.completionJournal;
+  if (!journal) throw new Error('Missing completion journal fixture');
+  journal.settle(f.pod(), 'Implementation preserved; runner unavailable');
+  journal.mark(f.pod(), 'ready', true);
+  const report = {
+    id: 'prevalidation-infrastructure',
+    podId: f.podId,
+    type: 'report_blocker' as const,
+    timestamp: '2026-11-06T12:00:00.000Z',
+    response: null,
+    payload: {
+      kind: 'infrastructure' as const,
+      lifecycleGeneration: f.pod().lifecycleGeneration,
+      requiresResponse: false,
+      owner: 'validation' as const,
+      phase: 'Native desktop verification',
+      description: 'Worker cannot run native Mac checks',
+      attempted: ['Configured Linux worker'],
+      needs: 'Qualified verification of the preserved candidate',
+    },
+  };
+  f.ctx.escalationRepo.insert(report);
+  const originalReport = f.ctx.escalationRepo.getOrThrow(report.id);
+  const infrastructureReports = [
+    { id: report.id, timestamp: originalReport.createdAt, payload: report.payload },
+  ];
+  f.input.expectedResultHash = checkpointHash({ result: null, infrastructureReports });
+  f.worktrees.selectRetainedContinuationSource = vi.fn(async () => ({
+    head: f.prepared.head,
+    tree: f.prepared.tree,
+    baseCommitSha: '1'.repeat(40),
+  }));
+  return { ...f, report, originalReport, infrastructureReports };
+}
+
 /** Exercise a real replacement dispatch and published failure, then model the
  * old final-source comparator rejecting a daemon-only no-op capture.
  */

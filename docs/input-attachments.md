@@ -189,6 +189,19 @@ references. There is no automatic expiration of pinned originals or destructive
 quota-bypass cleanup; storage exhaustion requires an explicit retention decision.
 Existing duplicate-work preflight remains conservative (task/contract identity);
 changing a wireframe alone does not silently bypass duplicate-work safeguards.
+Explicit human `work.intentionalRerun` also supports repository-less composed
+workspaces. The prior immutable launch must verify within a 1 MiB evidence bound and explicitly record
+`repository: null`; the new workspace must be explicitly empty too. The rerun
+journal records a non-Git `empty-workspace` scope, distinct task/execution and
+human reason/request key, without inventing a Git preflight or inheriting old
+approval. Missing/corrupt historical identity and Git/empty scope changes remain
+blocked. Reuse the exact saved launch request after uncertain submission rather
+than changing keys or clearing the rerun declaration.
+
+For a screenshot-only artifact smoke test, save the report as `research-output.md`
+in the writable workspace root (normally `/workspace`), not an assumed writable
+`/artifacts` root directory. This tests native reference interpretation and
+artifact capture only, not application rendering or visual fidelity.
 
 ## Upload API
 

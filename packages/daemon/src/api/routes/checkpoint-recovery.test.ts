@@ -4,6 +4,7 @@ import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   blockedCheckpointOutcomeFixture,
+  recordPreValidationInfrastructure,
   retainedCheckpointFixture,
 } from '../../test-utils/retained-checkpoint-helpers.js';
 import { terminationAuth } from '../../test-utils/termination-reconciliation-helpers.js';
@@ -27,6 +28,7 @@ describe('human-only retained checkpoint selection', () => {
       getApprovalSourceRewrite: f.manager.getApprovalSourceRewrite,
       recoverCheckpoint: f.recovery.submit,
       getCheckpointRecoveries: f.recovery.list,
+      getCheckpointRecoverySelection: f.recovery.selection,
       reconcileCheckpointOutcome: f.recovery.reconcileOutcome,
       continueRetained: f.recovery.continueRetained,
       checkRetainedCandidate: (...args: Parameters<typeof f.recovery.checkCandidate>) =>
@@ -41,6 +43,38 @@ describe('human-only retained checkpoint selection', () => {
     f.ctx.db.close();
     await rm(f.root, { recursive: true, force: true });
     vi.unstubAllEnvs();
+  });
+  it('exposes authenticated report-bound selection without inventing a validation result', async () => {
+    const evidence = recordPreValidationInfrastructure(f);
+    for (const authorization of [undefined, 'Bearer pod-token']) {
+      const response = await app.inject({
+        method: 'GET',
+        url: endpoint(),
+        headers: authorization ? { authorization } : {},
+      });
+      expect(response.statusCode).toBe(401);
+    }
+    const response = await app.inject({ method: 'GET', url: endpoint(), headers });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toEqual({
+      operations: [],
+      selection: {
+        expectedGeneration: f.pod().lifecycleGeneration,
+        expectedResultHash: f.input.expectedResultHash,
+        infrastructureReports: evidence.infrastructureReports,
+      },
+    });
+    expect(f.pod().lastValidationResult).toBeNull();
+    const accepted = await app.inject({
+      method: 'POST',
+      url: `/pods/${f.podId}/retained-continuation`,
+      headers,
+      payload: f.input,
+    });
+    expect(accepted.statusCode).toBe(202);
+    await f.recovery.wait(f.input.id);
+    expect(f.recovery.list(f.podId)[0]?.activated).toEqual({ generation: 2 });
   });
   it('strictly authenticates new continuation and candidate selection without accepting caller proof', async () => {
     const url = `/pods/${f.podId}/retained-continuation`;
@@ -207,7 +241,13 @@ describe('human-only retained checkpoint selection', () => {
     const result = await app.inject({ url: endpoint(), headers });
     expect(result.statusCode).toBe(200);
     expect(result.headers['cache-control']).toBe('no-store');
-    expect(result.json()).toEqual({ operations: [] });
+    expect(result.json()).toEqual({
+      operations: [],
+      selection: {
+        expectedGeneration: f.pod().lifecycleGeneration,
+        expectedResultHash: f.input.expectedResultHash,
+      },
+    });
     expect(f.cm.getStatus).not.toHaveBeenCalled();
     expect(f.deps.enqueue).not.toHaveBeenCalled();
   });

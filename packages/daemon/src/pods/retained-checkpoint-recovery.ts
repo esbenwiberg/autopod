@@ -110,7 +110,7 @@ export function createRetainedCheckpointRecovery(deps: {
       !pod.containerId ||
       !pod.worktreePath ||
       pod.worktreeCompromised ||
-      !pod.lastValidationResult ||
+      (!pod.lastValidationResult && (!continuation || !repo.selectionEvidence(pod))) ||
       pod.pendingEscalation ||
       deps.podRepo.hasUnansweredDecision?.(pod.id) ||
       isPodValidationDisabled(pod) ||
@@ -223,7 +223,7 @@ export function createRetainedCheckpointRecovery(deps: {
       current.lifecycleGeneration !== record.generation ||
       current.containerId !== record.containerId ||
       current.worktreePath !== record.worktreePath ||
-      checkpointHash(current.lastValidationResult) !== record.binding.resultHash ||
+      repo.selectionEvidence(current)?.expectedResultHash !== record.binding.resultHash ||
       configuration(current) !== record.binding.configurationHash
     )
       checkpointError('Original checkpoint selection was superseded', 'STALE_CHECKPOINT_RECOVERY');
@@ -373,7 +373,7 @@ export function createRetainedCheckpointRecovery(deps: {
         current.lifecycleGeneration !== input.expectedGeneration ||
         current.containerId !== pod.containerId ||
         current.worktreePath !== pod.worktreePath ||
-        checkpointHash(current.lastValidationResult) !== input.expectedResultHash ||
+        repo.selectionEvidence(current)?.expectedResultHash !== input.expectedResultHash ||
         configuration(current) !== anchor
       )
         checkpointError(
@@ -1072,6 +1072,7 @@ export function createRetainedCheckpointRecovery(deps: {
     process,
     verifySource,
     reconcileOutcome,
+    selection: (podId: string) => repo.selectionEvidence(deps.podRepo.getOrThrow(podId)),
     list: (podId: string) => repo.list(podId),
     wait: (id: string) => pending.get(id) ?? Promise.resolve(),
   };
