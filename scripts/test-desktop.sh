@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# A Linux worker must not start or install native Swift/AppKit tooling. This is
+# explicitly NOT success: the execution owner still needs a real Mac result.
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "DEFERRED_NATIVE_CHECKS: desktop tests not run; macOS is required. Record expected Mac deferral in the task summary, not as a passing check. A required Mac runner failure remains a blocker." >&2
+  exit 2
+fi
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 

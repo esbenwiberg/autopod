@@ -22,6 +22,7 @@ import { followLogs } from '../utils/log-follow.js';
 import { registerApprovalRewriteRepairCommand } from './approval-rewrite-repair.js';
 import { registerBudgetCommand } from './budget.js';
 import { registerGoalCommands } from './goal.js';
+import { registerInfrastructureRecoveryCommand } from './infrastructure-recovery.js';
 import { registerLaunchCommand } from './launch.js';
 import { registerRepairContinuationCommand } from './repair-continuation.js';
 import { registerRetainedContinuationCommand } from './retained-continuation.js';
@@ -148,6 +149,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   registerSourceRecoveryCommand(program, getClient);
   registerRetainedContinuationCommand(program, getClient);
   registerRepairContinuationCommand(program, getClient);
+  registerInfrastructureRecoveryCommand(program, getClient);
   registerApprovalRewriteRepairCommand(program, getClient);
   registerRetainedFinalizationCommand(program, getClient);
   program

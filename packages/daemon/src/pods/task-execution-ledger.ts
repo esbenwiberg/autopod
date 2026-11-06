@@ -20,7 +20,6 @@ import { createDeletionOwnership } from './deletion-ownership.js';
 import { ensureMergeIdentityProjection } from './merge-identity-projection.js';
 import { readProviderUsage } from './provider-usage-projection.js';
 import { createRetainedCheckpointRepository } from './retained-checkpoint-repository.js';
-import { createRetainedCodingRepository } from './retained-coding-repository.js';
 import { assertSourceAvailable, assertSourceDeliveryAllowed } from './source-custody-guards.js';
 import { createTerminationReconciliationRepository } from './termination-reconciliation-repository.js';
 import { createValidationExecutionLedger } from './validation-execution-ledger.js';
@@ -600,12 +599,12 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           .get(podId),
       ),
     beginRun: db.transaction((podId, generation, cycle, binding) => {
-      createRetainedCheckpointRepository(db).assertWorkerAllowed(podId);
+      const retained = createRetainedCheckpointRepository(db);
+      const repairWorker = retained.assertWorkerAllowed(podId);
       assertSourceAvailable(db, podId, '');
-      // An owned coding capability permits mutation, never publication. All public
-      // delivery callers retain assertSourceDeliveryAllowed's unchanged fence.
-      if (!createRetainedCodingRepository(db).isOwner(podId))
-        assertSourceDeliveryAllowed(db, podId);
+      // Worker admission is not publication authority. Only an owned recovery
+      // worker may start before independent post-repair checks exist.
+      if (!repairWorker) assertSourceDeliveryAllowed(db, podId);
       createDeletionOwnership(db).assertTaskAvailable(podId);
       createValidationExecutionLedger(db).assertTaskSettled(podId);
       const encoded = JSON.stringify({
@@ -697,6 +696,8 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       db.prepare(
         'INSERT INTO task_agent_runs (id, pod_id, generation, cycle, binding, started_at) VALUES (?, ?, ?, ?, ?, ?)',
       ).run(id, podId, generation, cycle, encoded, new Date().toISOString());
+      if (repairWorker)
+        retained.recordRepairWorker(podId, id, generation, cycle, current.containerId);
       return id;
     }),
     retainUnverifiedRun: db.transaction((id) => {

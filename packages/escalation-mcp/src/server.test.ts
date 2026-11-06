@@ -496,7 +496,12 @@ describe('decision and infrastructure tool contracts', () => {
   it('defaults infrastructure ownership without accepting worker-selected response or lifecycle authority', async () => {
     const { createEscalationMcpServer } = await import('./server.js');
     createEscalationMcpServer({ podId: 'husky-booby', bridge: makeBridge() });
-    const schema = z.object(getTool('report_blocker').schema);
+    const tool = getTool('report_blocker');
+    expect(tool.description).toContain(
+      'expected host-only macOS checks explicitly deferred to a Mac',
+    );
+    expect(tool.description).toContain('Required Mac runner failures remain blockers');
+    const schema = z.object(tool.schema);
     const report = schema.parse({
       description: 'Runner unavailable',
       attempted: [],

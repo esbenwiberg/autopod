@@ -19,6 +19,8 @@ it('authenticates and strictly transports rewrite repair preparation/selection; 
     checkRewriteRepair: f.recovery.checkRewriteRepair,
     getCheckpointRecoveries: f.recovery.list,
     getCheckpointRecoverySelection: f.recovery.selection,
+    recoverInfrastructure: f.recovery.recoverInfrastructure,
+    reconcileInfrastructure: f.recovery.reconcileInfrastructure,
   });
   const url = `/pods/${f.podId}/approval-rewrite-repair`;
   const headers = { authorization: 'Bearer human-token' };

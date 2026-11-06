@@ -525,7 +525,7 @@ export function generateSystemInstructions(
   );
   lines.push('- You discover something unexpected that changes the nature or scope of the task');
   lines.push(
-    '- Required product intent is missing and the owner can actually supply it. True executor failures and missing required runner prerequisites or parent inputs belong in report_blocker. Expected external/platform checks belong in report_task_summary.deferredChecks; required gates remain incomplete.',
+    '- Required product intent is missing and the owner can actually supply it. True executor failures and missing required runner prerequisites or parent inputs belong in report_blocker. Expected external/platform checks explicitly delegated to their owner belong in report_task_summary.deferredChecks; required gates remain incomplete.',
   );
   lines.push('- The task explicitly asks you to check in before acting');
   lines.push(
@@ -548,7 +548,7 @@ export function generateSystemInstructions(
     'For an owner decision, give a short question, recommendation/reason and useful choices with consequences. Keep technical evidence in context. Generic ok/go on/skip and choice labels are not execution receipts, validation overrides or permission for another action.',
   );
   lines.push(
-    'Report infrastructure/capability blockers with phase, responsible system, evidence and supported recovery (or say none exists). Stop repeated blocked attempts, preserve work and incomplete checks, summarize and finish for owned finalization. Do not ask chat to repair validator PATH or settle unknown exits. Linux cannot run Xcode: record expected Mac validation in report_task_summary.deferredChecks, not report_blocker. Required checks still gate; a deferral is never a pass, waiver or repair receipt. Never fabricate missing parent inputs or reviewer approval.',
+    'Report infrastructure/capability blockers with phase, responsible system, evidence and supported recovery (or say none exists). Stop repeated blocked attempts, preserve work and incomplete checks, summarize and finish for owned finalization. Do not ask chat to repair validator PATH or settle unknown exits. Linux cannot run Xcode: record expected Mac validation in report_task_summary.deferredChecks, not report_blocker. Required checks still gate; a deferral is never a pass, waiver or repair receipt. A failed required Mac runner, or a task requiring native results before delivery without authorized deferral, remains a genuine blocker. Never fabricate missing parent inputs or reviewer approval.',
   );
   lines.push('');
   lines.push('## Workflow Requirements');
@@ -725,6 +725,9 @@ export function generateSystemInstructions(
     '- **macOS desktop validation is host-only**: this pod runs in Linux and cannot validate `packages/desktop` SwiftUI/AppKit code. ' +
       'NEVER attempt desktop `swift test`, `xcodebuild`, or `xcrun xcodebuild` here, even when user task prose asks for them. ' +
       'Run relevant Linux-compatible checks for affected work, then report desktop checks as deferred Mac/human verification in `report_task_summary.deferredChecks`, not `report_blocker`. Required checks remain pending. ' +
+      'Expected host-only deferral is not an infrastructure failure: do not call report_blocker for that limitation alone. ' +
+      'The maintained scripts/test-desktop.sh refuses non-macOS execution with DEFERRED_NATIVE_CHECKS (exit 2, not a pass). ' +
+      'Record the exact source SHA, native commands and deferred/not-run status in report_task_summary; Mac/CI verification still belongs to the execution owner. ' +
       'Do not install Swift or Xcode and do not represent the deferred check as passing.',
   );
 

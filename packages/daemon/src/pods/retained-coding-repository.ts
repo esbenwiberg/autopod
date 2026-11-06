@@ -238,6 +238,16 @@ export function createRetainedCodingRepository(db: Database.Database) {
     claim(id: string, pod: Pod, request: unknown, requestHash: string, binding: CodingBinding) {
       if (!db.inTransaction)
         checkpointError('Coding claim must share original custody transaction');
+      const root = createRetainedCheckpointRepository(db).get(id);
+      if (
+        !root?.binding.continuation ||
+        root.podId !== pod.id ||
+        root.binding.continuation.infrastructure ||
+        root.binding.approvalRewrite
+      )
+        checkpointError(
+          'Qualified coding requires its own retained root, not another recovery protocol',
+        );
       const {
         taskSummary,
         plan,

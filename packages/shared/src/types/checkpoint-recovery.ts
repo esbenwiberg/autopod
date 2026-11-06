@@ -30,6 +30,17 @@ export interface RetainedContinuationCheckRequest {
   reason: string;
 }
 
+/** Human-bound preservation, one-shot quiescence and independently provisioned successor. */
+export interface InfrastructureRecoveryRequest extends CheckpointRecoveryRequest {
+  mode: 'checks' | 'rework';
+  /** Operator diagnosis/qualification, not a passing execution receipt or waiver. */
+  qualification: string;
+  /** Explicit credential-free repair context; hash binds the exact UTF-8 bytes. */
+  instructions?: { content: string; sha256: string };
+  executionProfileId?: string;
+  expectedExecutionDigest?: string;
+}
+
 /** Repair remains owned by the exact failed approval rewrite; no task/config amendment. */
 export interface ApprovalRewriteRepairRequest extends CheckpointRecoveryRequest {
   rewriteId: string;

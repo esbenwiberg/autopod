@@ -14,6 +14,7 @@ import { createPodRepository } from './pod-repository.js';
 import {
   assertCheckpointResourceNotRetained,
   checkpointHash,
+  ownsInfrastructureRecoveryStop,
 } from './retained-checkpoint-repository.js';
 import { assertSourceDeliveryAllowed } from './source-custody-guards.js';
 import { unavailableWorkerInputs, workerBindingHash } from './worker-retry-history.js';
@@ -234,6 +235,27 @@ describe('retained coding private one-use accounting capability', () => {
     expect(() =>
       f.db.prepare("DELETE FROM retained_coding_facts WHERE kind='worker'").run(),
     ).toThrow('cannot be deleted');
+  });
+  it('keeps checkpoint, qualified coding and original-stop capabilities separate', async () => {
+    const f = fixture();
+    f.qualify();
+    expect(() => f.roots.owned(f.request.id, () => f.roots.assertWorkerAllowed('pod'))).toThrow();
+    expect(() => f.coding.owned(f.request.id, () => f.roots.assertWorkerAllowed('pod'))).toThrow();
+    expect(f.owned(() => f.roots.assertWorkerAllowed('pod'))).toBe(true);
+    expect(f.owned(() => ownsInfrastructureRecoveryStop(f.db, '1'.repeat(64)))).toBe(false);
+    expect(() => f.owned(() => f.roots.infrastructureEvent(f.request.id, 'stopped', {}))).toThrow(
+      'Owned infrastructure recovery required',
+    );
+    const stop = () => {
+      throw new Error('Original must never be stopped by coding custody');
+    };
+    await expect(f.owned(() => f.roots.stopOriginal(f.request.id, stop, () => {}))).rejects.toThrow(
+      'Only owned prepared original quiescence',
+    );
+    expect(f.db.prepare('SELECT * FROM retained_infrastructure_events').all()).toEqual([]);
+    expect(() =>
+      f.owned(() => assertCheckpointResourceNotRetained(f.db, '1'.repeat(64), true)),
+    ).toThrow();
   });
   it('does not turn failed or expired observations into coding permission', () => {
     for (const kind of ['failed', 'expired'] as const) {

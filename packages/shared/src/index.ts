@@ -242,6 +242,7 @@ export type {
   ApprovalRewriteRepairCheckRequest,
   ApprovalRewriteRepairRequest,
   CheckpointRecoveryRequest,
+  InfrastructureRecoveryRequest,
   RetainedContinuationCheckRequest,
   RetainedContinuationRequest,
 } from './types/checkpoint-recovery.js';

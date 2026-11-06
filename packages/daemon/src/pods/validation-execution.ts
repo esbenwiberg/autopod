@@ -195,6 +195,7 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
         const verifyRepair = async () => {
           if (
             (repair?.binding.approvalRewrite ||
+              repair?.binding.continuation?.infrastructure?.mode === 'rework' ||
               podRepo.retainedCoding?.finalSource(podId, pod.lifecycleGeneration)) &&
             repair?.activated?.generation === pod.lifecycleGeneration
           ) {

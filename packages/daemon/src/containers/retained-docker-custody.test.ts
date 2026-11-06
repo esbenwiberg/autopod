@@ -21,7 +21,12 @@ function database() {
   databases.push(db);
   return db;
 }
-function hold(db: Database.Database, activated = false, containerId = original) {
+function hold(
+  db: Database.Database,
+  activated = false,
+  containerId = original,
+  infrastructure = false,
+) {
   db.prepare('INSERT INTO retained_checkpoint_recoveries VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(
     'repair',
     'pod',
@@ -33,7 +38,21 @@ function hold(db: Database.Database, activated = false, containerId = original) 
     'request-hash',
     JSON.stringify({ type: 'human', userId: 'operator' }),
     'Retain original evidence',
-    JSON.stringify({ continuation: { prepareOnly: true } }),
+    JSON.stringify({
+      continuation: {
+        prepareOnly: true,
+        ...(infrastructure
+          ? {
+              infrastructure: {
+                version: 1,
+                mode: 'checks',
+                originalTree: 'b'.repeat(40),
+                qualification: 'Owner selected preservation-safe recovery',
+              },
+            }
+          : {}),
+      },
+    }),
     JSON.stringify({ result: {} }),
     'now',
   );
@@ -76,6 +95,51 @@ function dockerFixture(db: Database.Database | undefined) {
 }
 
 describe('retained Docker constructor custody (real SQLite, provider doubles)', () => {
+  it('permits one private prepared-original stop, never exec, wake, deletion or an out-of-scope stop', async () => {
+    const db = database();
+    hold(db, false, original, true);
+    const repo = createRetainedCheckpointRepository(db);
+    const f = dockerFixture(db);
+    const assertCurrent = vi.fn();
+    await expect(f.manager.stop(original)).rejects.toThrow('Original continuation resource');
+    await expect(
+      repo.stopOriginal('repair', () => f.manager.stop(original), assertCurrent),
+    ).rejects.toThrow('owned prepared');
+    repo.append('repair', 'prepared', {
+      worktree: '/independent',
+      head: 'a'.repeat(40),
+      tree: 'b'.repeat(40),
+    });
+    await expect(
+      repo.stopOriginal('repair', () => f.manager.stop(original), assertCurrent),
+    ).rejects.toThrow('owned prepared');
+    await repo.owned('repair', async () => {
+      await repo.stopOriginal(
+        'repair',
+        async () => {
+          expect(repo.get('repair')?.infrastructure?.stopDispatched).toBe(true);
+          await expect(f.manager.kill(original)).rejects.toThrow('Original continuation resource');
+          await expect(f.manager.start(original)).rejects.toThrow('Original continuation resource');
+          await expect(f.manager.execInContainer(original, ['true'])).rejects.toThrow(
+            'Original continuation resource',
+          );
+          await f.manager.stop(original);
+        },
+        assertCurrent,
+      );
+      await repo.stopOriginal('repair', () => f.manager.stop(original), assertCurrent);
+    });
+    expect(f.stale.stop).toHaveBeenCalledTimes(1);
+    expect(f.stale.remove).not.toHaveBeenCalled();
+    expect(f.stale.start).not.toHaveBeenCalled();
+    await expect(f.manager.stop(original)).rejects.toThrow('Original continuation resource');
+    const reopened = createRetainedCheckpointRepository(db);
+    await reopened.owned('repair', () =>
+      reopened.stopOriginal('repair', () => f.manager.stop(original), assertCurrent),
+    );
+    expect(f.stale.stop).toHaveBeenCalledTimes(1);
+    expect(assertCurrent).toHaveBeenCalled();
+  });
   it('refuses to stop/remove the held name collision before retrying create', async () => {
     const db = database();
     hold(db);

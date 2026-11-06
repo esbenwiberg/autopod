@@ -1440,6 +1440,22 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     podRepo.retainedFinalizations?.assertAvailable(podId);
     if (retainedFinalization?.isActive(podId))
       checkpointError('Retained finalization preflight owns this control.');
+    // Reply admission is rechecked inside its own scoped facade capability.
+    // An active repair question must not inherit generic resume/mutation permission.
+    if (
+      operation === 'sendMessage' &&
+      podRepo.retainedCheckpoints?.repairDecision(podRepo.getOrThrow(podId))
+    ) {
+      sandboxRecovery.assertAvailable(podId, operation);
+      assertValidationMutationSettled(podRepo, podId);
+      podRepo.validationExecutions?.assertNoPendingRecovery(podId);
+      if (podRepo.sourceAdoptions?.hasCustody(podId))
+        sourceAdoptionError(
+          'Source/report custody blocks this repair reply.',
+          'SOURCE_CUSTODY_HELD',
+        );
+      return;
+    }
     const metadataOnly = new Set([
       'interruptValidation',
       'notifyEscalation',
@@ -1479,6 +1495,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'nudgeSession',
         'refreshReadinessAfterQualityScore',
         'authorizeValidationRecoveryBudget',
+        ...(podRepo.retainedCheckpoints?.ownsRepairExecution(podId)
+          ? ['consumeAgentEvents', 'handleCompletion']
+          : []),
         ...(((!continuation.checked && continuation.activated) || successorChecks) &&
         podRepo.getOrThrow(podId).status === 'running'
           ? ['triggerValidation']
@@ -1486,7 +1505,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       ].includes(operation)
     )
       checkpointError(
-        'Retained continuation owns this source. Use exact candidate selection or fresh human approval; legacy Rework, budget resets and competing source changes are not authorized.',
+        `Retained continuation owns this source. Use exact candidate selection or fresh human approval; legacy Rework, budget resets and competing source changes are not authorized (${operation}).`,
         'CONTINUATION_SOURCE_HELD',
       );
     if (

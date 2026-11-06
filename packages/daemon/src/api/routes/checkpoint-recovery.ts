@@ -13,6 +13,8 @@ export function checkpointRecoveryRoutes(
     | 'recoverCheckpoint'
     | 'reconcileCheckpointOutcome'
     | 'continueRetained'
+    | 'recoverInfrastructure'
+    | 'reconcileInfrastructure'
     | 'previewRetainedExecution'
     | 'checkRetainedCandidate'
     | 'prepareRewriteRepair'
@@ -75,6 +77,47 @@ export function checkpointRecoveryRoutes(
     reply.header('Cache-Control', 'no-store');
     return reply.code(202).send({ operation });
   });
+
+  for (const reconcile of [false, true]) {
+    app.post(
+      `/pods/:podId/infrastructure-recovery${reconcile ? '/reconcile' : ''}`,
+      async (request, reply) => {
+        if (!request.user?.oid)
+          throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
+        const { podId } = params.parse(request.params);
+        const input = z
+          .object({
+            id: z.string().regex(/^[a-zA-Z0-9-]{1,64}$/),
+            expectedGeneration: z.number().int().min(1),
+            expectedResultHash: z.string().regex(/^[a-f0-9]{64}$/),
+            checkpointHead: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
+            mode: z.enum(['checks', 'rework']),
+            qualification: z.string().min(20).max(4000),
+            reason: z.string().trim().min(10).max(4000),
+            instructions: z
+              .object({
+                content: z.string().min(10).max(65536),
+                sha256: z.string().regex(/^[a-f0-9]{64}$/),
+              })
+              .strict()
+              .optional(),
+            executionProfileId: z.string().min(1).max(128).optional(),
+            expectedExecutionDigest: z
+              .string()
+              .regex(/^[a-f0-9]{64}$/)
+              .optional(),
+          })
+          .strict()
+          .parse(request.body);
+        const actor = { type: 'human' as const, userId: request.user.oid };
+        const operation = await (reconcile
+          ? manager.reconcileInfrastructure(podId, input, actor)
+          : manager.recoverInfrastructure(podId, input, actor));
+        reply.header('Cache-Control', 'no-store');
+        return reply.code(202).send({ operation });
+      },
+    );
+  }
 
   app.get('/pods/:podId/retained-continuation/execution', async (request, reply) => {
     if (!request.user?.oid)

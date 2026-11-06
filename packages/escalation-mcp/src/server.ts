@@ -149,7 +149,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
   const executionPrerequisites = bridge.getExecutionPrerequisites?.(podId);
   server.tool(
     'report_blocker',
-    'Report a true executor/environment failure or missing required input without requesting a human answer. Stop blocked attempts, preserve work, summarize incomplete checks and finish; Autopod holds completion after execution settles. Expected external/Mac verification belongs in report_task_summary.deferredChecks, not here; required gates still apply.',
+    'Report a true executor/environment failure or missing required input without requesting a human answer. Stop blocked attempts, preserve work, summarize incomplete checks and finish; Autopod holds completion after execution settles. Do not use for expected host-only macOS checks explicitly deferred to a Mac or other expected external verification: record those as not run in report_task_summary.deferredChecks; required gates still apply. Required Mac runner failures remain blockers.',
     {
       description: z
         .string()

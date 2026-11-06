@@ -167,6 +167,11 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('macOS desktop validation is host-only');
     expect(md).toContain('NEVER attempt desktop `swift test`, `xcodebuild`');
     expect(md).toContain('deferred Mac/human verification');
+    expect(md).toContain('Expected host-only deferral is not an infrastructure failure');
+    expect(md).toContain('DEFERRED_NATIVE_CHECKS (exit 2, not a pass)');
+    expect(md).toContain('Record the exact source SHA');
+    expect(md).toContain('A failed required Mac runner');
+    expect(md).not.toContain('unavailable platform checks belong in report_blocker');
     expect(md).toContain('tests: `npm test`');
   });
 

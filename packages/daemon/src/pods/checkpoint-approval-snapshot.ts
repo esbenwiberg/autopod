@@ -40,10 +40,12 @@ export async function verifiedCheckpointApprovalSnapshot(input: {
     branch: pod.branch,
     head:
       podRepo.retainedCoding?.finalSource(pod.id, pod.lifecycleGeneration)?.head ??
+      recovery.infrastructure?.candidate?.head ??
       recovery.selected?.head ??
       prepared.head,
     tree:
       podRepo.retainedCoding?.finalSource(pod.id, pod.lifecycleGeneration)?.tree ??
+      recovery.infrastructure?.candidate?.tree ??
       recovery.selected?.tree ??
       prepared.tree,
     worktreeManager,

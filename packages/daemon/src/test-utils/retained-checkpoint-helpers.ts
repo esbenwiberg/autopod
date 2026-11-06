@@ -218,6 +218,8 @@ export async function retainedCheckpointFixture(
   kind: 'validation' | 'wakeup' = 'validation',
   native = false,
   independentReview = false,
+  independentRoute = false,
+  target: 'local' | 'sandbox' = 'sandbox',
   executionRequirements?: import('@autopod/shared').ExecutionRequirements,
   repositoryContext?: Partial<
     Pick<import('@autopod/shared').RepositorySetup, 'buildEnv' | 'buildWorkDir'>
@@ -268,6 +270,22 @@ export async function retainedCheckpointFixture(
         },
       });
     }
+    if (independentRoute) {
+      const ai = nativeConfiguration.store.get('ai', 'ai');
+      nativeConfiguration.store.write({
+        id: ai.id,
+        kind: 'ai',
+        name: ai.name,
+        expectedRevision: ai.revision,
+        payload: {
+          ...ai.payload,
+          reviewer: {
+            mode: 'independent',
+            route: { ...ai.payload.main, model: 'claude-opus-4-6' },
+          },
+        },
+      });
+    }
     if (independentReview) {
       const flow = nativeConfiguration.store.get('workflow', 'flow');
       nativeConfiguration.store.write({
@@ -280,7 +298,7 @@ export async function retainedCheckpointFixture(
     }
     vi.mocked(nativeConfiguration.services.executionCapabilities).mockResolvedValue({
       ...testExecutionCapabilities,
-      target: 'sandbox',
+      target,
     });
     const accounts = createProviderAccountStore(ctx.db);
     accounts.create({
@@ -334,7 +352,7 @@ export async function retainedCheckpointFixture(
                   },
                 }
               : {}),
-            overrides: { execution: { target: 'sandbox' } },
+            overrides: { execution: { target } },
           },
           actorId: 'operator',
           services: nativeConfiguration.services,
@@ -389,7 +407,7 @@ export async function retainedCheckpointFixture(
   const resourceKey = `https://management.swedencentral.azuredevcompute.io/subscriptions/test/resourcegroups/test/sandboxgroups/test/sandboxes/${containerId}`;
   ctx.podRepo.update(created.id, {
     status: kind === 'validation' ? 'review_required' : 'validated',
-    executionTarget: 'sandbox',
+    executionTarget: target,
     containerId,
     worktreePath: path.join(root, 'original'),
     lastValidationResult: result,

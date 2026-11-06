@@ -33,6 +33,7 @@ import { createPodManager } from './pod-manager.js';
 import { createPodRepository } from './pod-repository.js';
 import { createProviderAttemptRepository } from './provider-attempt-repository.js';
 import { createRetainedCheckpointRecovery } from './retained-checkpoint-recovery.js';
+import { resolveRetainedSource } from './retained-finalization-source.js';
 import { unavailableWorkerInputs, workerBindingHash } from './worker-retry-history.js';
 
 const exec = promisify(execFile);
@@ -54,18 +55,21 @@ async function git(cwd: string, ...args: string[]) {
     })
   ).stdout.trim();
 }
-type RepositoryContext = NonNullable<Parameters<typeof retainedCheckpointFixture>[4]>;
+type RepositoryContext = NonNullable<Parameters<typeof retainedCheckpointFixture>[6]>;
 type TestLaunchConfiguration = NonNullable<
   Awaited<ReturnType<typeof retainedCheckpointFixture>>['ctx']['deps']['launchConfiguration']
 >;
 async function fixture(
   repositoryContext?: RepositoryContext,
   configureLaunch?: (launch: TestLaunchConfiguration) => void,
+  target: 'local' | 'sandbox' = 'sandbox',
 ) {
   const f = await retainedCheckpointFixture(
     'validation',
     true,
     true,
+    target === 'local',
+    target,
     requirements,
     repositoryContext,
   );
@@ -98,7 +102,7 @@ async function fixture(
     runtime: f.pod().runtime,
     model: f.pod().model,
     providerAccountId: 'account',
-    resource: { containerId: f.containerId, executionTarget: 'sandbox' },
+    resource: { containerId: f.containerId, executionTarget: target },
   });
   const retries = f.ctx.podRepo.workerRetries!;
   // Import the already-settled original before the read-only preview; preview itself cannot write.
@@ -310,6 +314,37 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 describe('conditional retained coding continuation', () => {
+  it('arbitrates concurrent infrastructure checks and qualified coding on the same retained root', async () => {
+    const f = await fixture(undefined, undefined, 'local');
+    const coding = await f.request();
+    const infrastructure = {
+      ...f.input,
+      id: 'competing-infrastructure-checks',
+      mode: 'checks' as const,
+      qualification:
+        'Operator selected preserved source for independent checks, without coding authority',
+    };
+    const outcomes = await Promise.allSettled([
+      f.manager.authorizeRepairContinuation(f.podId, coding, f.actor),
+      f.manager.recoverInfrastructure(f.podId, infrastructure, f.actor),
+    ]);
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(1);
+    const root = await waitPreparation(f);
+    expect(root?.blocked, JSON.stringify(root)).toBeNull();
+    expect(root?.activated).not.toBeNull();
+    expect(f.ctx.podRepo.retainedCheckpoints!.list(f.podId)).toHaveLength(1);
+    const companion = f.ctx.podRepo.retainedCoding!.latest(f.podId);
+    if (root?.binding.continuation?.infrastructure) {
+      expect(companion).toBeNull();
+      expect(f.pod().skipAgent).toBe(true);
+    } else {
+      expect(companion?.id).toBe(root?.id);
+      expect(f.pod().skipAgent).toBe(false);
+    }
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+  });
   it('feeds actual inspection/qualified/failed/final projections to clients without rewriting immutable IDs', async () => {
     const f = await fixture();
     const inspection = f.manager.inspectRepairContinuation(f.podId);
@@ -422,6 +457,17 @@ describe('conditional retained coding continuation', () => {
       publicationAuthorized: false,
     });
     expect(operation.codingFinalSource?.source.head).not.toBe(input.sourceHead);
+    const config = f.ctx.deps.launchConfiguration!.read(f.podId)!;
+    const anchor = resolveRetainedSource(
+      f.ctx.podRepo,
+      f.pod(),
+      config.repository!.config.remote,
+      f.pod().baseBranch ?? 'main',
+    );
+    expect(anchor.head).toBe(operation.codingFinalSource?.source.head);
+    expect(anchor.tree).toBe(operation.codingFinalSource?.source.tree);
+    expect(anchor.head).not.toBe(preparedRoot?.prepared?.head);
+    expect(f.ctx.db.prepare('SELECT * FROM retained_infrastructure_events').all()).toEqual([]);
     expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
     expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
     expect(f.ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();

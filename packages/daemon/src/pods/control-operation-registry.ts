@@ -33,6 +33,8 @@ export function createControlOperationRegistry(
           key === 'continueRetained' ||
           key === 'authorizeRepairContinuation' ||
           key === 'previewRepairContinuation' ||
+          key === 'recoverInfrastructure' ||
+          key === 'reconcileInfrastructure' ||
           key === 'previewRetainedExecution' ||
           key === 'checkRetainedCandidate' ||
           key === 'reconcileCheckpointOutcome' ||
