@@ -26,6 +26,58 @@ private func bodyData(_ request: URLRequest) throws -> Data {
 }
 
 @MainActor @Suite struct RepairContinuationTransportTests {
+  @Test(arguments: ["qualified", "failed", "validated"])
+  func consumesRealBackendProjectionsWithoutRewritingOperationOrCustodyIdentity(stage: String) async throws {
+    // Captured by the real manager lifecycle + operation() producer, not a client-authored DTO.
+    // Set REPAIR_CLIENT_PRODUCER_FIXTURE to consume a fresh backend test run directly.
+    let url = ProcessInfo.processInfo.environment["REPAIR_CLIENT_PRODUCER_FIXTURE"].map { URL(fileURLWithPath: $0) }
+      ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/repair-continuation-backend.json")
+    let all = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    let wire = all[stage] as! [String: Any]
+    let body = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
+    let raw = try JSONDecoder().decode(RepairContinuationOperationV1.self, from: Data(body.utf8))
+    try await withPodStoreLifetimeFixture { f in
+      let task = f.startResult {
+        do {
+          let value = try await f.apiA.observeRepairContinuation(raw.podId, requestId: raw.request.id)
+          #expect(value == raw && value.operationId != value.request.id)
+          #expect(value.qualification?.binding.operationId == value.operationId)
+          #expect(value.qualification?.binding.custodyId == value.operationId)
+          if let final = value.codingFinalSource { #expect(final.operationId == value.operationId) }
+          return "ok"
+        } catch { return error.localizedDescription }
+      }
+      try await f.next(f.a, "/pods/\(raw.podId)/repair-continuation-v1/requests/\(raw.request.id)").respond(body: body)
+      #expect(await task.value == "ok")
+      #expect(f.a.requests.count == 1)
+    }
+  }
+
+  @Test(arguments: ["operation", "custody", "final", "missing-public-id"])
+  func rejectsProofOrFinalIdentityChangedToExternalReplayKey(field: String) async throws {
+    let raw = try JSONDecoder().decode(RepairContinuationOperationV1.self, from: Data(repairFixture("validatedOperation").utf8))
+    var wire = try JSONSerialization.jsonObject(with: Data(repairFixture("validatedOperation").utf8)) as! [String: Any]
+    if field == "operation" || field == "custody" {
+      var qualification = wire["qualification"] as! [String: Any]
+      var binding = qualification["binding"] as! [String: Any]
+      binding[field == "operation" ? "operationId" : "custodyId"] = raw.request.id
+      qualification["binding"] = binding; wire["qualification"] = qualification
+    }
+    if field == "final" { var final = wire["codingFinalSource"] as! [String: Any]; final["operationId"] = raw.request.id; wire["codingFinalSource"] = final }
+    if field == "missing-public-id" { wire.removeValue(forKey: "operationId") }
+    let body = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
+    try await withPodStoreLifetimeFixture { f in
+      let task = f.startResult {
+        do { _ = try await f.apiA.observeRepairContinuation(raw.podId, requestId: raw.request.id); return "unexpected success" }
+        catch { return error.localizedDescription }
+      }
+      try await f.next(f.a, "/pods/\(raw.podId)/repair-continuation-v1/requests/\(raw.request.id)").respond(body: body)
+      #expect(await task.value != "unexpected success")
+      #expect(f.a.requests.count == 1)
+    }
+  }
+
   @Test func inspectionPreviewObserveNeverPostAndConditionalEligibilityIsNotProof() async throws {
     try await withPodStoreLifetimeFixture { f in
       let inspect = f.startResult {

@@ -291,6 +291,7 @@ export function createRepairContinuation(deps: Dependencies) {
                         ? 'preparing'
                         : 'claimed';
     return repairContinuationOperationV1Schema.parse({
+      operationId: record.id,
       version: 1,
       intent,
       podId,

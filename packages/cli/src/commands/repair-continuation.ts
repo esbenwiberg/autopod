@@ -100,6 +100,7 @@ function selection(opts: Options) {
 
 function renderOperation(value: RepairContinuationOperationV1) {
   console.log(`Repair request ${safeText(value.request.id)}: ${value.state}`);
+  console.log(`Retained operation/custody: ${safeText(value.operationId)}`);
   console.log(
     `Qualification: ${value.qualification?.outcome ?? 'not run'}; coding admission: ${value.codingAdmission}; checks: ${value.checks}`,
   );

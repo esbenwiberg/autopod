@@ -5,11 +5,14 @@ import { promisify } from 'node:util';
 import type {
   AgentEvent,
   ExecutionRequirements,
+  RepairContinuationOperationV1,
   RepairContinuationRequestV1,
 } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+// Test-only producer/consumer boundary: production packages remain independent.
+import { repairInspection, repairOperation } from '../../../cli/src/api/repair-continuation.js';
 import { repairContinuationRoutes } from '../api/routes/repair-continuation.js';
 import { configurationDigest } from '../configuration/configuration-digest.js';
 import {
@@ -307,6 +310,87 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 describe('conditional retained coding continuation', () => {
+  it('feeds actual inspection/qualified/failed/final projections to clients without rewriting immutable IDs', async () => {
+    const f = await fixture();
+    const inspection = f.manager.inspectRepairContinuation(f.podId);
+    expect(inspection).toMatchObject({ available: true, sourceHead: null });
+    expect(repairInspection(inspection, f.podId)).toEqual(inspection);
+    const preview = await f.preview();
+    const request = await f.request('stable-external-request');
+    const claimed = await f.manager.authorizeRepairContinuation(f.podId, request, f.actor);
+    expect(claimed.operationId).not.toBe(request.id);
+    expect(repairOperation(claimed, f.podId, request.id, request)).toEqual(claimed);
+    await waitPreparation(f);
+    let qualified: RepairContinuationOperationV1 | undefined;
+    const store = f.ctx.podRepo.retainedCoding!;
+    const append = store.append.bind(store);
+    vi.spyOn(store, 'append').mockImplementation((id, kind, evidence) => {
+      append(id, kind, evidence);
+      if (kind === 'qualified') {
+        qualified = f.manager.getRepairContinuation(f.podId, request.id);
+        expect(qualified.state).toBe('qualified');
+        expect(qualified.qualification?.outcome).toBe('qualified');
+        expect(qualified.qualification?.binding.operationId).toBe(qualified.operationId);
+        expect(qualified.qualification?.binding.custodyId).toBe(qualified.operationId);
+        expect(repairOperation(qualified, f.podId, request.id, request)).toEqual(qualified);
+      }
+    });
+    await f.manager.processPod(f.podId);
+    expect(qualified).toBeDefined();
+    const validated = f.manager.getRepairContinuation(f.podId, request.id);
+    expect(validated.state).toBe('validated');
+    expect(validated.codingFinalSource?.operationId).toBe(validated.operationId);
+    expect(repairOperation(validated, f.podId, request.id, request)).toEqual(validated);
+    // A failed actual-source probe produces immutable failed evidence without a worker.
+    const failedFixture = await fixture();
+    const failedRequest = await failedFixture.request('failed-external-request');
+    const exec = vi.mocked(failedFixture.cm.execInContainer).getMockImplementation()!;
+    vi.mocked(failedFixture.cm.execInContainer).mockImplementation(async (id, command, options) =>
+      command[2] === QUALIFICATION_SOURCE_PROBE
+        ? {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              platform: 'linux/amd64',
+              uid: 1000,
+              cwd: '/workspace',
+              head: 'e'.repeat(40),
+              tree: 'e'.repeat(40),
+              clean: true,
+              baseAncestor: true,
+            }),
+            stderr: '',
+          }
+        : exec(id, command, options),
+    );
+    await failedFixture.manager.authorizeRepairContinuation(
+      failedFixture.podId,
+      failedRequest,
+      failedFixture.actor,
+    );
+    await waitPreparation(failedFixture);
+    await expect(failedFixture.manager.processPod(failedFixture.podId)).rejects.toThrow();
+    const failed = failedFixture.manager.getRepairContinuation(
+      failedFixture.podId,
+      failedRequest.id,
+    );
+    expect(failed.state).toBe('failed');
+    expect(failed.qualification?.outcome).toBe('failed');
+    expect(failed.qualification?.binding.operationId).toBe(failed.operationId);
+    expect(failed.qualification?.binding.custodyId).toBe(failed.operationId);
+    expect(repairOperation(failed, failed.podId, failedRequest.id, failedRequest)).toEqual(failed);
+    expect(failedFixture.ctx.runtime.spawn).not.toHaveBeenCalled();
+    // Explicit opt-in capture is used by the native regression. Normal tests never rewrite fixtures.
+    const capture = process.env.REPAIR_CLIENT_PRODUCER_FIXTURE;
+    if (capture)
+      await writeFile(
+        capture,
+        JSON.stringify(
+          { inspection, preview, request, claimed, qualified, failed, validated },
+          null,
+          2,
+        ) + '\n',
+      );
+  });
   it('qualifies the actual candidate, spawns once, seals descendant source and runs real checks without delivery', async () => {
     const f = await fixture();
     const before = f.pod();

@@ -73,7 +73,9 @@ public struct RepairContinuationActions: Sendable {
     guard canPreview, (10...4000).contains(length), let snapshot, snapshot.refusals.isEmpty, let preview,
       preview.conditionalAttemptEligible, preview.configurationOnly, preview.actualQualification == "not_run",
       preview.refusals.isEmpty, preview.configurationDiff != nil, let selected = preview.selection else { return false }
-    return selected.sourceHead == hostHead && selected.sourceHead == snapshot.sourceHead
+    // Inspection deliberately does not read host source. The successful source-checked
+    // preview binds the exact user HEAD; a provided inspection HEAD must still agree.
+    return selected.sourceHead == hostHead && (snapshot.sourceHead == nil || selected.sourceHead == snapshot.sourceHead)
       && selected.executionProfileId == profileId && selected.expectedGeneration == snapshot.generation
       && selected.expectedResultHash == snapshot.expectedResultHash && selected.expectedReportSetHash == snapshot.expectedReportSetHash
       && selected.requirementsHash == snapshot.requirementsHash

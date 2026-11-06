@@ -1,0 +1,543 @@
+{
+  "inspection": {
+    "version": 1,
+    "intent": "qualify_then_code_once",
+    "podId": "related-constrictor",
+    "generation": 1,
+    "available": true,
+    "expectedResultHash": "c8fc64cb0cdcd2e3cfaa15667ca95874924107714525cb3c760808f1ec3500e3",
+    "expectedReportSetHash": "979a4ab7a5d12ddeb1641a0cc46001ffc4fbe5b5cb68339fad3f35628923994d",
+    "sourceHead": null,
+    "requirementsHash": "d35f7a057af21299d445422321f8cc9c76cb0cbe4ab4b1ba8ee23afa83f6cad6",
+    "operation": null,
+    "refusals": []
+  },
+  "preview": {
+    "version": 1,
+    "intent": "qualify_then_code_once",
+    "podId": "related-constrictor",
+    "configurationOnly": true,
+    "actualQualification": "not_run",
+    "conditionalAttemptEligible": true,
+    "selection": {
+      "expectedGeneration": 1,
+      "expectedResultHash": "c8fc64cb0cdcd2e3cfaa15667ca95874924107714525cb3c760808f1ec3500e3",
+      "expectedReportSetHash": "979a4ab7a5d12ddeb1641a0cc46001ffc4fbe5b5cb68339fad3f35628923994d",
+      "sourceHead": "32d60125ea6213d80b4082253ad4427d6bac249b",
+      "executionProfileId": "profile",
+      "expectedExecutionDigest": "fe81eac588974a8ff50b7654742ed4c1352140bdc1605e2a2c93e00b281b12b7",
+      "expectedBindingDigest": "d97c53e99cb8c1659f1718cbc650a5a1834b3e85ec990f73efdad88efbbca275",
+      "requirementsHash": "d35f7a057af21299d445422321f8cc9c76cb0cbe4ab4b1ba8ee23afa83f6cad6",
+      "target": "local"
+    },
+    "configurationDiff": {
+      "before": {
+        "target": "sandbox",
+        "template": "node22",
+        "imageKey": "2f6a4ee5731861b8f5df3ef922ed2f74c4020288a730d8628d6bfaa5c2ffe234",
+        "platform": "linux/amd64",
+        "memoryGb": 2,
+        "cpus": 1
+      },
+      "after": {
+        "target": "local",
+        "template": "node22",
+        "imageKey": "2f6a4ee5731861b8f5df3ef922ed2f74c4020288a730d8628d6bfaa5c2ffe234",
+        "platform": "linux/amd64",
+        "memoryGb": 2,
+        "cpus": 1
+      }
+    },
+    "refusals": []
+  },
+  "request": {
+    "version": 1,
+    "intent": "qualify_then_code_once",
+    "id": "stable-external-request",
+    "expectedGeneration": 1,
+    "expectedResultHash": "c8fc64cb0cdcd2e3cfaa15667ca95874924107714525cb3c760808f1ec3500e3",
+    "expectedReportSetHash": "979a4ab7a5d12ddeb1641a0cc46001ffc4fbe5b5cb68339fad3f35628923994d",
+    "sourceHead": "32d60125ea6213d80b4082253ad4427d6bac249b",
+    "executionProfileId": "profile",
+    "expectedExecutionDigest": "fe81eac588974a8ff50b7654742ed4c1352140bdc1605e2a2c93e00b281b12b7",
+    "expectedBindingDigest": "d97c53e99cb8c1659f1718cbc650a5a1834b3e85ec990f73efdad88efbbca275",
+    "reason": "Authorize reviewed environment and one conditional fresh coding segment"
+  },
+  "claimed": {
+    "operationId": "repair-3ed4779d80eb9c946ea19bfc0fc8460942aa4068a7cac96d",
+    "version": 1,
+    "intent": "qualify_then_code_once",
+    "podId": "related-constrictor",
+    "request": {
+      "version": 1,
+      "intent": "qualify_then_code_once",
+      "id": "stable-external-request",
+      "expectedGeneration": 1,
+      "expectedResultHash": "c8fc64cb0cdcd2e3cfaa15667ca95874924107714525cb3c760808f1ec3500e3",
+      "expectedReportSetHash": "979a4ab7a5d12ddeb1641a0cc46001ffc4fbe5b5cb68339fad3f35628923994d",
+      "sourceHead": "32d60125ea6213d80b4082253ad4427d6bac249b",
+      "executionProfileId": "profile",
+      "expectedExecutionDigest": "fe81eac588974a8ff50b7654742ed4c1352140bdc1605e2a2c93e00b281b12b7",
+      "expectedBindingDigest": "d97c53e99cb8c1659f1718cbc650a5a1834b3e85ec990f73efdad88efbbca275",
+      "reason": "Authorize reviewed environment and one conditional fresh coding segment"
+    },
+    "state": "claimed",
+    "createdAt": "2026-11-06T19:46:54.771Z",
+    "updatedAt": "2026-11-06T19:46:54.771Z",
+    "originalGeneration": 1,
+    "candidateGeneration": null,
+    "qualification": null,
+    "codingFinalSource": null,
+    "codingAdmission": "not_admitted",
+    "checks": "not_started",
+    "refusals": [],
+    "originalResourcesRetained": true,
+    "requiresHumanApproval": true,
+    "publicationAuthorized": false
+  },
+  "qualified": {
+    "operationId": "repair-3ed4779d80eb9c946ea19bfc0fc8460942aa4068a7cac96d",
+    "version": 1,
+    "intent": "qualify_then_code_once",
+    "podId": "related-constrictor",
+    "request": {
+      "version": 1,
+      "intent": "qualify_then_code_once",
+      "id": "stable-external-request",
+      "expectedGeneration": 1,
+      "expectedResultHash": "c8fc64cb0cdcd2e3cfaa15667ca95874924107714525cb3c760808f1ec3500e3",
+      "expectedReportSetHash": "979a4ab7a5d12ddeb1641a0cc46001ffc4fbe5b5cb68339fad3f35628923994d",
+      "sourceHead": "32d60125ea6213d80b4082253ad4427d6bac249b",
+      "executionProfileId": "profile",
+      "expectedExecutionDigest": "fe81eac588974a8ff50b7654742ed4c1352140bdc1605e2a2c93e00b281b12b7",
+      "expectedBindingDigest": "d97c53e99cb8c1659f1718cbc650a5a1834b3e85ec990f73efdad88efbbca275",
+      "reason": "Authorize reviewed environment and one conditional fresh coding segment"
+    },
+    "state": "qualified",
+    "createdAt": "2026-11-06T19:46:54.771Z",
+    "updatedAt": "2026-11-06T19:46:55.276Z",
+    "originalGeneration": 1,
+    "candidateGeneration": 2,
+    "qualification": {
+      "version": 1,
+      "binding": {
+        "version": 1,
+        "operationId": "repair-3ed4779d80eb9c946ea19bfc0fc8460942aa4068a7cac96d",
+        "requestHash": "64635ced7b3f273c3b99995d923567820aee0c7d4911d9e8fff0d6f4bf56401d",
+        "podId": "related-constrictor",
+        "taskId": "task:5617d5d7-2341-4e66-9a3d-aa6c696b36b2",
+        "executionId": "execution:9a42f336-c22e-4a46-84da-2ed54d8221ea",
+        "custodyId": "repair-3ed4779d80eb9c946ea19bfc0fc8460942aa4068a7cac96d",
+        "originalGeneration": 1,
+        "candidateGeneration": 2,
+        "originalResultHash": "c8fc64cb0cdcd2e3cfaa15667ca95874924107714525cb3c760808f1ec3500e3",
+        "reportSetHash": "979a4ab7a5d12ddeb1641a0cc46001ffc4fbe5b5cb68339fad3f35628923994d",
+        "requirementsHash": "d35f7a057af21299d445422321f8cc9c76cb0cbe4ab4b1ba8ee23afa83f6cad6",
+        "originalLaunchDigest": "3d9911d00afaa59f2954683d523f5bba5f1c8464d322b04c37198526f644c0c4",
+        "replacementLaunchDigest": "fe81eac588974a8ff50b7654742ed4c1352140bdc1605e2a2c93e00b281b12b7",
+        "configurationHash": "da45604bad1a88f3aab4aafda345254f8491d45180c345075d83aa6c922dba6b",
+        "sourceEpoch": "70826fb8890f4fcbd6c419aaeba335481eea4de67ba9e5d22924f619d46b0174",
+        "credentialEpoch": "171ec2b7792d11f3bf2146fd1104a43866cab53e1ba3fa374ee353d18397a20a",
+        "resourceEpoch": "d99e6de12de235b6fc4164525cd088729ea8efaafa65931b7d0e0d9b14aa821a",
+        "source": {
+          "repository": "https://github.com/org/repo-a",
+          "head": "32d60125ea6213d80b4082253ad4427d6bac249b",
+          "tree": "ac03322b2a3f65ae41274174506cc905b23bc04d",
+          "baseCommitSha": "32d60125ea6213d80b4082253ad4427d6bac249b"
+        },
+        "target": "local",
+        "containerId": "2222222222222222222222222222222222222222222222222222222222222222",
+        "resourceKey": "docker://fixture/2222222222222222222222222222222222222222222222222222222222222222",
+        "expectedImage": {
+          "kind": "docker-image-id",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "platform": "linux/amd64",
+        "executionContextHash": "e9c661ece9ff3a34b30c59ecc71ac72ca6e1b4338e80a9bbf19779102fc2791d"
+      },
+      "bindingDigest": "febca98248b25a36c2bf1970b99f1c0c41968d26e90ae7e2247877ee5905d339",
+      "probeVersion": 1,
+      "daemonCommit": null,
+      "implementationHash": null,
+      "startedAt": "2026-11-06T19:46:55.246Z",
+      "finishedAt": "2026-11-06T19:46:55.276Z",
+      "expiresAt": "2026-11-06T19:51:55.276Z",
+      "outcome": "qualified",
+      "observations": [
+        {
+          "prerequisite": "preparation",
+          "outcome": "qualified",
+          "code": "PREPARATION_COMPLETED",
+          "detail": "Normal candidate preparation completed; no repair shell was run."
+        },
+        {
+          "prerequisite": "resource_identity",
+          "outcome": "qualified",
+          "code": "RESOURCE_IDENTITY_MATCH",
+          "detail": "Exact candidate Docker engine/container identity observed."
+        },
+        {
+          "prerequisite": "image",
+          "outcome": "qualified",
+          "code": "ACTUAL_IMAGE_IDENTITY",
+          "detail": "Actual Docker image ID must equal the normally prepared immutable image ID."
+        },
+        {
+          "prerequisite": "memory",
+          "outcome": "qualified",
+          "code": "ACTUAL_MEMORY_LIMIT",
+          "detail": "Effective enforced memory must meet frozen profile and manifest minimum."
+        },
+        {
+          "prerequisite": "cpu",
+          "outcome": "qualified",
+          "code": "ACTUAL_CPU_LIMIT",
+          "detail": "Effective enforced CPU must meet the frozen manifest minimum."
+        },
+        {
+          "prerequisite": "streaming",
+          "outcome": "qualified",
+          "code": "STREAMING_EXEC",
+          "detail": "Known streaming support required before coding."
+        },
+        {
+          "prerequisite": "agent_cli",
+          "outcome": "qualified",
+          "code": "AGENT_CLI_PREFLIGHT",
+          "detail": "Configured CLI must have an observed path and compatible version; this is not execution completion."
+        },
+        {
+          "prerequisite": "launcher",
+          "launcher": "jq",
+          "outcome": "qualified",
+          "code": "DECLARED_LAUNCHER_LOOKUP",
+          "detail": "Lookup only: no builder, private access or validation operation is certified."
+        },
+        {
+          "prerequisite": "platform",
+          "outcome": "qualified",
+          "code": "ACTUAL_WORKER_PLATFORM_CONTEXT",
+          "detail": "Observed Linux architecture, worker UID and working directory must match frozen context."
+        },
+        {
+          "prerequisite": "source",
+          "outcome": "qualified",
+          "code": "ACTUAL_SELECTED_SOURCE",
+          "detail": "Actual clean candidate HEAD/tree must equal selected host source with pinned-base ancestry."
+        }
+      ],
+      "provenanceId": null
+    },
+    "codingFinalSource": null,
+    "codingAdmission": "not_admitted",
+    "checks": "not_started",
+    "refusals": [],
+    "originalResourcesRetained": true,
+    "requiresHumanApproval": true,
+    "publicationAuthorized": false
+  },
+  "failed": {
+    "operationId": "repair-f9a0fbeb22ccc6bfdb8576659387ef9c0c47b6853680eb12",
+    "version": 1,
+    "intent": "qualify_then_code_once",
+    "podId": "dual-catshark",
+    "request": {
+      "version": 1,
+      "intent": "qualify_then_code_once",
+      "id": "failed-external-request",
+      "expectedGeneration": 1,
+      "expectedResultHash": "256c5983ceebb9fdf6c068393a940375de94345f527add85ac08ebc9154b15ee",
+      "expectedReportSetHash": "d6f52053662583393b4059609a8941bfaae4cb8dd69cadb35f5de364e769df09",
+      "sourceHead": "26adcb81781f922f1804e5d0d2d37fc7b348cc8f",
+      "executionProfileId": "profile",
+      "expectedExecutionDigest": "bbda83fbea331bc629fc0d4c22fa91e2cce62c2863d0654d591ac59c3698f05b",
+      "expectedBindingDigest": "9c65c97f4e9671924e3e7202f16bfb938e86d6b2119b1f8cb7beaf44e9079c08",
+      "reason": "Authorize reviewed environment and one conditional fresh coding segment"
+    },
+    "state": "failed",
+    "createdAt": "2026-11-06T19:46:55.792Z",
+    "updatedAt": "2026-11-06T19:46:56.255Z",
+    "originalGeneration": 1,
+    "candidateGeneration": 2,
+    "qualification": {
+      "version": 1,
+      "binding": {
+        "version": 1,
+        "operationId": "repair-f9a0fbeb22ccc6bfdb8576659387ef9c0c47b6853680eb12",
+        "requestHash": "aa742b15e102a5916a2e89c05cb881a08bb01bc453b31265f621d2cfc67b820f",
+        "podId": "dual-catshark",
+        "taskId": "task:7e3bb80b-57a2-4cac-a5ed-8ebdcdf20fd3",
+        "executionId": "execution:2cde55c0-bb20-471e-a46b-3aaaf756d26d",
+        "custodyId": "repair-f9a0fbeb22ccc6bfdb8576659387ef9c0c47b6853680eb12",
+        "originalGeneration": 1,
+        "candidateGeneration": 2,
+        "originalResultHash": "256c5983ceebb9fdf6c068393a940375de94345f527add85ac08ebc9154b15ee",
+        "reportSetHash": "d6f52053662583393b4059609a8941bfaae4cb8dd69cadb35f5de364e769df09",
+        "requirementsHash": "d35f7a057af21299d445422321f8cc9c76cb0cbe4ab4b1ba8ee23afa83f6cad6",
+        "originalLaunchDigest": "ee51e57aeef7049a1452974f720457242034b8bcb87d9d529d868c054b07152c",
+        "replacementLaunchDigest": "bbda83fbea331bc629fc0d4c22fa91e2cce62c2863d0654d591ac59c3698f05b",
+        "configurationHash": "2d99575c710ca29119cf23e3cf36525f518e8eecd1071ffe27321ec1ab0646ad",
+        "sourceEpoch": "c7d9c852b6cf877ef9f4456a3ba68fee9ad495ba38a2d6a18e49fcb1cab5607f",
+        "credentialEpoch": "0ba646029337a76c96091fd5e3bf2afac830e7c6d9f9b56624b6bcc57f712587",
+        "resourceEpoch": "d99e6de12de235b6fc4164525cd088729ea8efaafa65931b7d0e0d9b14aa821a",
+        "source": {
+          "repository": "https://github.com/org/repo-a",
+          "head": "26adcb81781f922f1804e5d0d2d37fc7b348cc8f",
+          "tree": "ac03322b2a3f65ae41274174506cc905b23bc04d",
+          "baseCommitSha": "26adcb81781f922f1804e5d0d2d37fc7b348cc8f"
+        },
+        "target": "local",
+        "containerId": "2222222222222222222222222222222222222222222222222222222222222222",
+        "resourceKey": "docker://fixture/2222222222222222222222222222222222222222222222222222222222222222",
+        "expectedImage": {
+          "kind": "docker-image-id",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "platform": "linux/amd64",
+        "executionContextHash": "e9c661ece9ff3a34b30c59ecc71ac72ca6e1b4338e80a9bbf19779102fc2791d"
+      },
+      "bindingDigest": "7c83e3e35c81a8e3f62a657619271c7e3d80f846ef8435ef767f01c3950f5897",
+      "probeVersion": 1,
+      "daemonCommit": null,
+      "implementationHash": null,
+      "startedAt": "2026-11-06T19:46:56.251Z",
+      "finishedAt": "2026-11-06T19:46:56.255Z",
+      "expiresAt": "2026-11-06T19:51:56.255Z",
+      "outcome": "failed",
+      "observations": [
+        {
+          "prerequisite": "preparation",
+          "outcome": "qualified",
+          "code": "PREPARATION_COMPLETED",
+          "detail": "Normal candidate preparation completed; no repair shell was run."
+        },
+        {
+          "prerequisite": "resource_identity",
+          "outcome": "qualified",
+          "code": "RESOURCE_IDENTITY_MATCH",
+          "detail": "Exact candidate Docker engine/container identity observed."
+        },
+        {
+          "prerequisite": "image",
+          "outcome": "qualified",
+          "code": "ACTUAL_IMAGE_IDENTITY",
+          "detail": "Actual Docker image ID must equal the normally prepared immutable image ID."
+        },
+        {
+          "prerequisite": "memory",
+          "outcome": "qualified",
+          "code": "ACTUAL_MEMORY_LIMIT",
+          "detail": "Effective enforced memory must meet frozen profile and manifest minimum."
+        },
+        {
+          "prerequisite": "cpu",
+          "outcome": "qualified",
+          "code": "ACTUAL_CPU_LIMIT",
+          "detail": "Effective enforced CPU must meet the frozen manifest minimum."
+        },
+        {
+          "prerequisite": "streaming",
+          "outcome": "qualified",
+          "code": "STREAMING_EXEC",
+          "detail": "Known streaming support required before coding."
+        },
+        {
+          "prerequisite": "agent_cli",
+          "outcome": "qualified",
+          "code": "AGENT_CLI_PREFLIGHT",
+          "detail": "Configured CLI must have an observed path and compatible version; this is not execution completion."
+        },
+        {
+          "prerequisite": "launcher",
+          "launcher": "jq",
+          "outcome": "qualified",
+          "code": "DECLARED_LAUNCHER_LOOKUP",
+          "detail": "Lookup only: no builder, private access or validation operation is certified."
+        },
+        {
+          "prerequisite": "platform",
+          "outcome": "qualified",
+          "code": "ACTUAL_WORKER_PLATFORM_CONTEXT",
+          "detail": "Observed Linux architecture, worker UID and working directory must match frozen context."
+        },
+        {
+          "prerequisite": "source",
+          "outcome": "failed",
+          "code": "ACTUAL_SELECTED_SOURCE",
+          "detail": "Actual clean candidate HEAD/tree must equal selected host source with pinned-base ancestry."
+        }
+      ],
+      "provenanceId": null
+    },
+    "codingFinalSource": null,
+    "codingAdmission": "not_admitted",
+    "checks": "not_started",
+    "refusals": [
+      {
+        "code": "unavailable",
+        "message": "CHECKPOINT_CHECKS_UNVERIFIED"
+      }
+    ],
+    "originalResourcesRetained": true,
+    "requiresHumanApproval": true,
+    "publicationAuthorized": false
+  },
+  "validated": {
+    "operationId": "repair-3ed4779d80eb9c946ea19bfc0fc8460942aa4068a7cac96d",
+    "version": 1,
+    "intent": "qualify_then_code_once",
+    "podId": "related-constrictor",
+    "request": {
+      "version": 1,
+      "intent": "qualify_then_code_once",
+      "id": "stable-external-request",
+      "expectedGeneration": 1,
+      "expectedResultHash": "c8fc64cb0cdcd2e3cfaa15667ca95874924107714525cb3c760808f1ec3500e3",
+      "expectedReportSetHash": "979a4ab7a5d12ddeb1641a0cc46001ffc4fbe5b5cb68339fad3f35628923994d",
+      "sourceHead": "32d60125ea6213d80b4082253ad4427d6bac249b",
+      "executionProfileId": "profile",
+      "expectedExecutionDigest": "fe81eac588974a8ff50b7654742ed4c1352140bdc1605e2a2c93e00b281b12b7",
+      "expectedBindingDigest": "d97c53e99cb8c1659f1718cbc650a5a1834b3e85ec990f73efdad88efbbca275",
+      "reason": "Authorize reviewed environment and one conditional fresh coding segment"
+    },
+    "state": "validated",
+    "createdAt": "2026-11-06T19:46:54.771Z",
+    "updatedAt": "2026-11-06T19:46:55.276Z",
+    "originalGeneration": 1,
+    "candidateGeneration": 2,
+    "qualification": {
+      "version": 1,
+      "binding": {
+        "version": 1,
+        "operationId": "repair-3ed4779d80eb9c946ea19bfc0fc8460942aa4068a7cac96d",
+        "requestHash": "64635ced7b3f273c3b99995d923567820aee0c7d4911d9e8fff0d6f4bf56401d",
+        "podId": "related-constrictor",
+        "taskId": "task:5617d5d7-2341-4e66-9a3d-aa6c696b36b2",
+        "executionId": "execution:9a42f336-c22e-4a46-84da-2ed54d8221ea",
+        "custodyId": "repair-3ed4779d80eb9c946ea19bfc0fc8460942aa4068a7cac96d",
+        "originalGeneration": 1,
+        "candidateGeneration": 2,
+        "originalResultHash": "c8fc64cb0cdcd2e3cfaa15667ca95874924107714525cb3c760808f1ec3500e3",
+        "reportSetHash": "979a4ab7a5d12ddeb1641a0cc46001ffc4fbe5b5cb68339fad3f35628923994d",
+        "requirementsHash": "d35f7a057af21299d445422321f8cc9c76cb0cbe4ab4b1ba8ee23afa83f6cad6",
+        "originalLaunchDigest": "3d9911d00afaa59f2954683d523f5bba5f1c8464d322b04c37198526f644c0c4",
+        "replacementLaunchDigest": "fe81eac588974a8ff50b7654742ed4c1352140bdc1605e2a2c93e00b281b12b7",
+        "configurationHash": "da45604bad1a88f3aab4aafda345254f8491d45180c345075d83aa6c922dba6b",
+        "sourceEpoch": "70826fb8890f4fcbd6c419aaeba335481eea4de67ba9e5d22924f619d46b0174",
+        "credentialEpoch": "171ec2b7792d11f3bf2146fd1104a43866cab53e1ba3fa374ee353d18397a20a",
+        "resourceEpoch": "d99e6de12de235b6fc4164525cd088729ea8efaafa65931b7d0e0d9b14aa821a",
+        "source": {
+          "repository": "https://github.com/org/repo-a",
+          "head": "32d60125ea6213d80b4082253ad4427d6bac249b",
+          "tree": "ac03322b2a3f65ae41274174506cc905b23bc04d",
+          "baseCommitSha": "32d60125ea6213d80b4082253ad4427d6bac249b"
+        },
+        "target": "local",
+        "containerId": "2222222222222222222222222222222222222222222222222222222222222222",
+        "resourceKey": "docker://fixture/2222222222222222222222222222222222222222222222222222222222222222",
+        "expectedImage": {
+          "kind": "docker-image-id",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "platform": "linux/amd64",
+        "executionContextHash": "e9c661ece9ff3a34b30c59ecc71ac72ca6e1b4338e80a9bbf19779102fc2791d"
+      },
+      "bindingDigest": "febca98248b25a36c2bf1970b99f1c0c41968d26e90ae7e2247877ee5905d339",
+      "probeVersion": 1,
+      "daemonCommit": null,
+      "implementationHash": null,
+      "startedAt": "2026-11-06T19:46:55.246Z",
+      "finishedAt": "2026-11-06T19:46:55.276Z",
+      "expiresAt": "2026-11-06T19:51:55.276Z",
+      "outcome": "qualified",
+      "observations": [
+        {
+          "prerequisite": "preparation",
+          "outcome": "qualified",
+          "code": "PREPARATION_COMPLETED",
+          "detail": "Normal candidate preparation completed; no repair shell was run."
+        },
+        {
+          "prerequisite": "resource_identity",
+          "outcome": "qualified",
+          "code": "RESOURCE_IDENTITY_MATCH",
+          "detail": "Exact candidate Docker engine/container identity observed."
+        },
+        {
+          "prerequisite": "image",
+          "outcome": "qualified",
+          "code": "ACTUAL_IMAGE_IDENTITY",
+          "detail": "Actual Docker image ID must equal the normally prepared immutable image ID."
+        },
+        {
+          "prerequisite": "memory",
+          "outcome": "qualified",
+          "code": "ACTUAL_MEMORY_LIMIT",
+          "detail": "Effective enforced memory must meet frozen profile and manifest minimum."
+        },
+        {
+          "prerequisite": "cpu",
+          "outcome": "qualified",
+          "code": "ACTUAL_CPU_LIMIT",
+          "detail": "Effective enforced CPU must meet the frozen manifest minimum."
+        },
+        {
+          "prerequisite": "streaming",
+          "outcome": "qualified",
+          "code": "STREAMING_EXEC",
+          "detail": "Known streaming support required before coding."
+        },
+        {
+          "prerequisite": "agent_cli",
+          "outcome": "qualified",
+          "code": "AGENT_CLI_PREFLIGHT",
+          "detail": "Configured CLI must have an observed path and compatible version; this is not execution completion."
+        },
+        {
+          "prerequisite": "launcher",
+          "launcher": "jq",
+          "outcome": "qualified",
+          "code": "DECLARED_LAUNCHER_LOOKUP",
+          "detail": "Lookup only: no builder, private access or validation operation is certified."
+        },
+        {
+          "prerequisite": "platform",
+          "outcome": "qualified",
+          "code": "ACTUAL_WORKER_PLATFORM_CONTEXT",
+          "detail": "Observed Linux architecture, worker UID and working directory must match frozen context."
+        },
+        {
+          "prerequisite": "source",
+          "outcome": "qualified",
+          "code": "ACTUAL_SELECTED_SOURCE",
+          "detail": "Actual clean candidate HEAD/tree must equal selected host source with pinned-base ancestry."
+        }
+      ],
+      "provenanceId": null
+    },
+    "codingFinalSource": {
+      "version": 1,
+      "operationId": "repair-3ed4779d80eb9c946ea19bfc0fc8460942aa4068a7cac96d",
+      "generation": 2,
+      "taskRunId": "3b28d3e2-3141-4408-b956-be709f944830",
+      "selectedHead": "32d60125ea6213d80b4082253ad4427d6bac249b",
+      "source": {
+        "repository": "https://github.com/org/repo-a",
+        "head": "ff8686f611239b2da8663d7500d0f41bb5cfc191",
+        "tree": "d24c2ac86e8007b78a2971cfa598d71ad1b55c7c",
+        "baseCommitSha": "32d60125ea6213d80b4082253ad4427d6bac249b"
+      },
+      "clean": true,
+      "descendant": true,
+      "workerSettled": true,
+      "sealedAt": "2026-11-06T19:46:55.469Z",
+      "reportsHash": "a7981873989ecf7d0cb175e072e9b5996889ef94df23a8a31da61acfdf062ce5"
+    },
+    "codingAdmission": "consumed",
+    "checks": "passed",
+    "refusals": [],
+    "originalResourcesRetained": true,
+    "requiresHumanApproval": true,
+    "publicationAuthorized": false
+  }
+}

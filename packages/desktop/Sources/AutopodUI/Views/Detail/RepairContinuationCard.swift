@@ -85,6 +85,7 @@ struct RepairContinuationSheet: View {
           }
           if let operation = model.operation {
             Text("Observed operation: \(operation.state.rawValue)").font(.headline).accessibilityIdentifier("repair-continuation-stage")
+            Text("Retained operation/custody: \(operation.operationId)").font(.caption.monospaced()).textSelection(.enabled)
             Text("Qualification: \(operation.qualification?.outcome.rawValue ?? "not run")\nCoding admission: \(operation.codingAdmission.rawValue)\nChecks: \(operation.checks.rawValue)")
               .textSelection(.enabled)
             if let proof = operation.qualification {

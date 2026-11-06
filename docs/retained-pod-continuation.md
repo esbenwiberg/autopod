@@ -403,6 +403,13 @@ proof or permission to skip probes. Unsupported/unknown static eligibility stays
 disabled. Authorization permits the daemon's bounded provision/prepare/qualify/code/
 seal/check sequence, not an unrestricted repair runner.
 
+Inspection may return `available: true` with `sourceHead: null`: it deliberately
+does not inspect host source. Enter the exact user-selected host HEAD and reviewed
+profile for preview. Only a successful source-checked preview binds that HEAD,
+profile, generation, result/report-set hashes and requirements. A non-null inspection
+HEAD must agree; a null inspection HEAD is neither source proof nor a reason to
+require a pre-qualified future candidate.
+
 The daemon must qualify the **actual candidate** under the normal worker context
 and consume its exact resource/source/configuration/requirements/report-set/epoch
 binding before any coding stream. Qualification evidence expires after five minutes
@@ -449,6 +456,15 @@ Shared strict schemas and public types live in
   202 direct `RepairContinuationOperationV1`, not a result or wrapped empty success.
 - `GET /pods/:podId/repair-continuation-v1/requests/:requestId`: direct operation;
   observe the same saved key. Absence is not proof no dispatch occurred.
+
+Each operation response includes required `operationId`, the opaque internal
+retained operation/custody ID. It is distinct from `request.id`, the caller's stable
+external replay key used in the observation URL. Qualification
+`binding.operationId` **and** `binding.custodyId`, and sealed final-source
+`operationId`, must correlate to the response's `operationId`, never to the external
+request key. Immutable qualification/final-source evidence is not rewritten to
+look like a request. Older responses missing this identity are unavailable rather
+than accepted without correlation.
 
 The request includes only `version`, `intent`, `id`, `expectedGeneration`,
 `expectedResultHash`, `expectedReportSetHash`, `sourceHead`, `executionProfileId`,

@@ -20,7 +20,7 @@
     "available": true,
     "expectedResultHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "expectedReportSetHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "sourceHead": "cccccccccccccccccccccccccccccccccccccccc",
+    "sourceHead": null,
     "requirementsHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
     "operation": null,
     "refusals": []
@@ -64,6 +64,7 @@
     "refusals": []
   },
   "operation": {
+    "operationId": "opaque-retained-operation",
     "version": 1,
     "intent": "qualify_then_code_once",
     "podId": "pod",
@@ -95,6 +96,7 @@
     "publicationAuthorized": false
   },
   "validatedOperation": {
+    "operationId": "opaque-retained-operation",
     "version": 1,
     "intent": "qualify_then_code_once",
     "podId": "pod",
@@ -120,12 +122,12 @@
       "version": 1,
       "binding": {
         "version": 1,
-        "operationId": "stable-request",
+        "operationId": "opaque-retained-operation",
         "requestHash": "0000000000000000000000000000000000000000000000000000000000000000",
         "podId": "pod",
         "taskId": "task",
         "executionId": "execution",
-        "custodyId": "custody",
+        "custodyId": "opaque-retained-operation",
         "originalGeneration": 2,
         "candidateGeneration": 3,
         "originalResultHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -174,7 +176,7 @@
     },
     "codingFinalSource": {
       "version": 1,
-      "operationId": "stable-request",
+      "operationId": "opaque-retained-operation",
       "generation": 3,
       "taskRunId": "task-run",
       "selectedHead": "cccccccccccccccccccccccccccccccccccccccc",

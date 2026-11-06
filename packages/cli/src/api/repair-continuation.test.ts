@@ -31,6 +31,59 @@ beforeEach(() => {
   token.mockClear();
 });
 describe('repair continuation versioned transport', () => {
+  it('consumes captured real backend qualified/failed/final projections with distinct operation/custody IDs', async () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        new URL(
+          '../../../desktop/Tests/Fixtures/repair-continuation-backend.json',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    );
+    fetch.mockResolvedValueOnce(reply(fixture.inspection));
+    expect(
+      (await client.inspectRepairContinuation(fixture.inspection.podId)).sourceHead,
+    ).toBeNull();
+    for (const key of ['qualified', 'failed', 'validated']) {
+      const wire = fixture[key];
+      fetch.mockResolvedValueOnce(reply(wire));
+      const result = await client.observeRepairContinuation(wire.podId, wire.request.id);
+      expect(result).toEqual(wire);
+      expect(result.operationId).not.toBe(result.request.id);
+      expect(result.qualification?.binding.operationId).toBe(result.operationId);
+      expect(result.qualification?.binding.custodyId).toBe(result.operationId);
+      if (result.codingFinalSource)
+        expect(result.codingFinalSource.operationId).toBe(result.operationId);
+    }
+    expect(fetch.mock.calls.map(([, init]) => init.method)).toEqual(['GET', 'GET', 'GET', 'GET']);
+  });
+  it.each([
+    'operation',
+    'custody',
+    'final',
+    'missing-public-id',
+  ])('refuses %s identity drift instead of dropping proof correlation', async (field) => {
+    const fixture = JSON.parse(
+      readFileSync(
+        new URL(
+          '../../../desktop/Tests/Fixtures/repair-continuation-backend.json',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    );
+    const wire = structuredClone(fixture.validated);
+    if (field === 'operation') wire.qualification.binding.operationId = wire.request.id;
+    if (field === 'custody') wire.qualification.binding.custodyId = wire.request.id;
+    if (field === 'final') wire.codingFinalSource.operationId = wire.request.id;
+    if (field === 'missing-public-id') delete wire.operationId;
+    fetch.mockResolvedValueOnce(reply(wire));
+    await expect(client.observeRepairContinuation(wire.podId, wire.request.id)).rejects.toThrow(
+      'uncorrelated',
+    );
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
   it('keeps native fixtures compatible with the pinned shared schemas including sealed source', () => {
     const fixture = JSON.parse(
       readFileSync(

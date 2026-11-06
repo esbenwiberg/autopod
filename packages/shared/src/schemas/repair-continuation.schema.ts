@@ -290,6 +290,8 @@ export const repairCodingFinalSourceV1Schema = z
   .strict();
 export const repairContinuationOperationV1Schema = z
   .object({
+    /** Opaque retained operation/custody ID; request.id remains the external replay key. */
+    operationId: id,
     version: z.literal(1),
     intent: z.literal('qualify_then_code_once'),
     podId: id,

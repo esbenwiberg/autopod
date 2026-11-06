@@ -31,12 +31,12 @@ const request = {
 const source = { repository: 'https://github.com/org/repo', head, tree: head, baseCommitSha: head };
 const binding = {
   version: 1,
-  operationId: 'repair-1',
+  operationId: 'opaque-retained-operation',
   requestHash: hash,
   podId: 'pod',
   taskId: 'task:1',
   executionId: 'execution:1',
-  custodyId: 'custody',
+  custodyId: 'opaque-retained-operation',
   originalGeneration: 2,
   candidateGeneration: 3,
   originalResultHash: hash,
@@ -92,6 +92,8 @@ describe('repair continuation v1 contracts', () => {
     expect(repairContinuationRequestV1Schema.parse(request)).toEqual(request);
     for (const extra of [
       'actor',
+      'operationId',
+      'custodyId',
       'qualification',
       'receipt',
       'epoch',
@@ -263,7 +265,7 @@ describe('repair continuation v1 contracts', () => {
   it('projects a sealed final source separately and never authorizes publication', () => {
     const final = {
       version: 1,
-      operationId: 'repair-1',
+      operationId: 'opaque-retained-operation',
       generation: 3,
       taskRunId: 'run',
       selectedHead: head,
@@ -279,6 +281,7 @@ describe('repair continuation v1 contracts', () => {
       repairCodingFinalSourceV1Schema.safeParse({ ...final, workerSettled: false }).success,
     ).toBe(false);
     const operation = {
+      operationId: 'opaque-retained-operation',
       version: 1,
       intent: 'qualify_then_code_once',
       podId: 'pod',
@@ -298,6 +301,15 @@ describe('repair continuation v1 contracts', () => {
       publicationAuthorized: false,
     };
     expect(repairContinuationOperationV1Schema.parse(operation)).toEqual(operation);
+    expect(operation.operationId).not.toBe(request.id);
+    expect(operation.qualification.binding.operationId).toBe(operation.operationId);
+    expect(operation.qualification.binding.custodyId).toBe(operation.operationId);
+    expect(operation.codingFinalSource.operationId).toBe(operation.operationId);
+    const { operationId: _operationId, ...legacy } = operation;
+    expect(repairContinuationOperationV1Schema.safeParse(legacy).success).toBe(false);
+    expect(
+      repairContinuationOperationV1Schema.safeParse({ ...operation, operationId: '' }).success,
+    ).toBe(false);
     expect(
       repairContinuationOperationV1Schema.safeParse({ ...operation, publicationAuthorized: true })
         .success,

@@ -19,6 +19,7 @@ export const repairRequest: RepairContinuationRequestV1 = {
   reason: 'Use reviewed software without expanding authority',
 };
 export const repairOperation: RepairContinuationOperationV1 = {
+  operationId: 'opaque-retained-operation',
   version: 1,
   intent: 'qualify_then_code_once',
   podId: 'pod',
@@ -45,7 +46,7 @@ export const repairInspection: RepairContinuationInspectionV1 = {
   available: true,
   expectedResultHash: repairRequest.expectedResultHash,
   expectedReportSetHash: repairRequest.expectedReportSetHash,
-  sourceHead: repairRequest.sourceHead,
+  sourceHead: null,
   requirementsHash: 'f'.repeat(64),
   operation: null,
   refusals: [],

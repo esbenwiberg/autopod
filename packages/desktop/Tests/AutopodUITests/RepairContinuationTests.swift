@@ -64,6 +64,7 @@ private func repairUIOperation(_ request: RepairContinuationRequestV1, changed: 
   }
   func prepare(_ model: RepairContinuationModel) async {
     await model.refresh(actions)
+    model.hostHead = String(repeating: "c", count: 40) // Explicit operator input; actual inspection returns null.
     model.profileId = "reviewed-profile"; model.reason = "Use reviewed software without expanding authority"
     await model.loadPreview(actions)
   }
@@ -71,10 +72,69 @@ private func repairUIOperation(_ request: RepairContinuationRequestV1, changed: 
 }
 
 @Suite(.serialized) @MainActor struct RepairContinuationTests {
+  @Test func productionNullHeadInspectionBindsUserSourceCheckedPreviewForOneConditionalPost() async throws {
+    let f = RepairUIFixture(); defer { f.clean() }
+    let url = ProcessInfo.processInfo.environment["REPAIR_CLIENT_PRODUCER_FIXTURE"].map { URL(fileURLWithPath: $0) }
+      ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/repair-continuation-backend.json")
+    let all = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    let inspection = try JSONDecoder().decode(RepairContinuationInspectionV1.self, from: JSONSerialization.data(withJSONObject: all["inspection"]!))
+    let preview = try JSONDecoder().decode(RepairContinuationPreviewV1.self, from: JSONSerialization.data(withJSONObject: all["preview"]!))
+    let selected = try #require(preview.selection)
+    let actions = RepairContinuationActions(scope: f.scope, draftScope: "producer-gate", journalDirectory: f.directory,
+      load: { _ in f.loads += 1; return inspection },
+      preview: { pod, head, profile in
+        #expect(pod == inspection.podId && head == selected.sourceHead && profile == selected.executionProfileId)
+        f.previews += 1; return preview
+      }, submit: { _, request in
+        f.posts += 1; f.request = request
+        #expect(request.sourceHead == selected.sourceHead && request.expectedReportSetHash == selected.expectedReportSetHash)
+        throw DaemonError.networkError("Unconfirmed conditional request; no qualified evidence fabricated")
+      }, observe: { _, _ in Issue.record("No automatic observe/POST replay"); throw URLError(.unsupportedURL) })
+    let model = RepairContinuationModel(podId: inspection.podId, actions: actions)
+    await model.refresh(actions)
+    #expect(model.snapshot?.available == true && model.snapshot?.sourceHead == nil && !model.canPreview)
+    model.hostHead = selected.sourceHead; model.profileId = selected.executionProfileId
+    model.reason = "Authorize one bounded conditional repair against the exact preview"
+    await model.loadPreview(actions)
+    #expect(model.canAuthorize && model.preview?.actualQualification == "not_run" && model.operation == nil)
+    await model.authorize(actions); await model.authorize(actions)
+    #expect(f.loads == 1 && f.previews == 1 && f.posts == 1)
+    #expect(model.pending == f.request && !model.canAuthorize && model.operation == nil)
+  }
+
+  @Test(arguments: ["head", "generation", "result", "reports", "requirements"])
+  func nullHeadCorrectionDoesNotRelaxOtherSnapshotOrUserSelectionFences(field: String) async throws {
+    let f = RepairUIFixture(); defer { f.clean() }
+    let preview = try JSONDecoder().decode(RepairContinuationPreviewV1.self, from: repairUIFixture("preview"))
+    let inspection = try JSONDecoder().decode(RepairContinuationInspectionV1.self, from: repairUIFixture("inspection") {
+      var value = $0
+      switch field {
+      case "head": value["sourceHead"] = String(repeating: "1", count: 40)
+      case "generation": value["generation"] = 3
+      case "result": value["expectedResultHash"] = String(repeating: "1", count: 64)
+      case "reports": value["expectedReportSetHash"] = String(repeating: "1", count: 64)
+      default: value["requirementsHash"] = String(repeating: "1", count: 64)
+      }
+      return value
+    })
+    let actions = RepairContinuationActions(scope: f.scope, draftScope: "stale", journalDirectory: f.directory,
+      load: { _ in inspection }, preview: { _, _, _ in preview },
+      submit: { _, request in f.posts += 1; return try repairUIOperation(request) },
+      observe: { _, _ in throw URLError(.unsupportedURL) })
+    let model = RepairContinuationModel(podId: "pod", actions: actions)
+    await model.refresh(actions)
+    model.hostHead = preview.selection!.sourceHead; model.profileId = preview.selection!.executionProfileId
+    model.reason = "Review exact conditional source before authorization"
+    await model.loadPreview(actions); await model.authorize(actions)
+    #expect(!model.canAuthorize && f.posts == 0 && model.pending == nil)
+  }
+
   @Test func supportedConditionalAttemptCanAuthorizeBeforeQualificationButCannotSkipProbes() async throws {
     let f = RepairUIFixture(); defer { f.clean() }
     let model = RepairContinuationModel(podId: "pod", actions: f.actions)
     await f.prepare(model)
+    #expect(model.snapshot?.available == true && model.snapshot?.sourceHead == nil)
     #expect(model.canAuthorize && model.preview?.actualQualification == "not_run")
     #expect(model.operation == nil && f.posts == 0 && f.loads == 1 && f.previews == 1)
     await model.authorize(f.actions)
@@ -188,6 +248,7 @@ private func repairUIOperation(_ request: RepairContinuationRequestV1, changed: 
     defer { host.close() }
     try await host.wait { model.snapshot != nil && !model.busy }
     #expect(!host.enabled("repair-continuation-authorize") && f.posts == 0)
+    model.hostHead = String(repeating: "c", count: 40)
     model.profileId = "reviewed-profile"; model.reason = "Use reviewed software without expanding authority"
     await model.loadPreview(f.actions)
     try await host.wait { host.enabled("repair-continuation-authorize") }

@@ -32,7 +32,8 @@ export function repairOperation(
   const proof = operation.qualification;
   if (
     proof &&
-    (proof.binding.operationId !== id ||
+    (proof.binding.operationId !== operation.operationId ||
+      proof.binding.custodyId !== operation.operationId ||
       proof.binding.podId !== podId ||
       proof.binding.originalGeneration !== input.expectedGeneration ||
       proof.binding.originalResultHash !== input.expectedResultHash ||
@@ -45,7 +46,7 @@ export function repairOperation(
   const final = operation.codingFinalSource;
   if (
     final &&
-    (final.operationId !== id ||
+    (final.operationId !== operation.operationId ||
       final.selectedHead !== input.sourceHead ||
       final.generation !== operation.candidateGeneration)
   )

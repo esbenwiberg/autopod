@@ -1,6 +1,6 @@
 import Foundation
 
-// Wire mirrors of @autopod/shared repair-continuation.schema.ts, contract 09cdb195.
+// Wire mirrors of @autopod/shared repair-continuation.schema.ts (including required retained operationId).
 // Preview is STATIC conditional eligibility; only daemon qualification/admission starts coding.
 public struct RepairContinuationRequestV1: Codable, Equatable, Sendable {
   public let version: Int
@@ -229,6 +229,8 @@ public struct RepairCodingFinalSourceV1: Codable, Equatable, Sendable {
   }
 }
 public struct RepairContinuationOperationV1: Codable, Equatable, Sendable {
+  /// Internal retained operation/custody identity, not the external request replay key.
+  public let operationId: String
   public let version: Int
   public let intent: String
   public let podId: String
@@ -249,21 +251,21 @@ public struct RepairContinuationOperationV1: Codable, Equatable, Sendable {
 
   public func validate(podId: String, requestId: String, expected: RepairContinuationRequestV1? = nil) throws {
     try request.validate(); try RepairWire.refusals(refusals)
-    try RepairWire.require(version == 1 && intent == "qualify_then_code_once" && self.podId == podId
+    try RepairWire.require(RepairWire.id(operationId) && version == 1 && intent == "qualify_then_code_once" && self.podId == podId
       && request.id == requestId && originalGeneration == request.expectedGeneration && (expected == nil || expected == request)
       && (candidateGeneration == nil || RepairWire.generation(candidateGeneration!)) && RepairWire.date(createdAt) != nil
       && RepairWire.date(updatedAt) != nil && originalResourcesRetained && requiresHumanApproval && !publicationAuthorized)
     if let qualification {
       try qualification.validate()
       let binding = qualification.binding
-      try RepairWire.require(binding.operationId == requestId && binding.podId == podId && binding.originalGeneration == request.expectedGeneration
+      try RepairWire.require(binding.operationId == operationId && binding.custodyId == operationId && binding.podId == podId && binding.originalGeneration == request.expectedGeneration
         && binding.originalResultHash == request.expectedResultHash && binding.reportSetHash == request.expectedReportSetHash
         && binding.replacementLaunchDigest == request.expectedExecutionDigest && binding.source.head == request.sourceHead
         && binding.candidateGeneration == candidateGeneration)
     }
     if let final = codingFinalSource {
       try final.validate()
-      try RepairWire.require(final.operationId == requestId && final.selectedHead == request.sourceHead && final.generation == candidateGeneration)
+      try RepairWire.require(final.operationId == operationId && final.selectedHead == request.sourceHead && final.generation == candidateGeneration)
     }
     try RepairWire.require((codingAdmission != .consumed && state != .qualified) || qualification?.outcome == .qualified)
     try RepairWire.require(codingFinalSource == nil || codingAdmission == .consumed)
