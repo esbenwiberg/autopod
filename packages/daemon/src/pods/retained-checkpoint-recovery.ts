@@ -87,6 +87,7 @@ export function createRetainedCheckpointRecovery(deps: {
   prepare?: typeof prepareRetainedCheckpointWorkspace;
   qualifyCoding?: Parameters<typeof createRepairContinuation>[0]['qualify'];
   beforeCodingActivation?(pod: Pod): void;
+  isCodingWorkerActive?(podId: string, runId: string): boolean;
 }) {
   const repo =
     deps.podRepo.retainedCheckpoints ?? checkpointError('Checkpoint recovery ledger unavailable');
@@ -993,6 +994,41 @@ export function createRetainedCheckpointRecovery(deps: {
         : {}),
     };
   }
+  async function replyToCoding(podId: string, actor: OperatorActor, send: () => Promise<void>) {
+    if (actor.type !== 'human' || !actor.userId.trim())
+      checkpointError('Authenticated human reply required');
+    const store = deps.podRepo.retainedCoding ?? checkpointError('Coding custody unavailable');
+    const pod = deps.podRepo.getOrThrow(podId);
+    const record =
+      store.workerDecision(pod) ??
+      checkpointError('Only the live typed worker pending question may be answered');
+    const root = repo.get(record.id) ?? checkpointError('Coding root unavailable');
+    const question = checkpointHash(pod.pendingEscalation);
+    const assertCurrent = () => {
+      const current = deps.podRepo.getOrThrow(podId);
+      const decision = store.workerDecision(current);
+      if (
+        decision?.id !== record.id ||
+        checkpointHash(current.pendingEscalation) !== question ||
+        !deps.isCodingWorkerActive?.(podId, record.facts.worker!.runId) ||
+        configuration(current) !== root.binding.continuation?.execution?.configurationHash ||
+        store.reports(podId, root.generation).hash !== record.binding.reportSetHash ||
+        deps.podRepo.hasInfrastructureBlocker?.(podId)
+      )
+        checkpointError('Typed worker question ownership changed before reply');
+    };
+    assertCurrent();
+    // This is the typed worker's own scope, never infrastructure stop/Rework
+    // authority. No qualification TTL is re-applied after worker admission.
+    return repo.owned(record.id, () =>
+      store.owned(record.id, () => {
+        repo.assertAvailable(podId);
+        store.assertOwned(podId);
+        assertCurrent();
+        return send();
+      }),
+    );
+  }
   async function replyToRepair(podId: string, actor: OperatorActor, send: () => Promise<void>) {
     if (actor.type !== 'human' || !actor.userId.trim())
       checkpointError('Authenticated human reply required');
@@ -1585,6 +1621,7 @@ export function createRetainedCheckpointRecovery(deps: {
     recoverInfrastructure,
     reconcileInfrastructure,
     replyToRepair,
+    replyToCoding,
     previewExecution,
     checkCandidate,
     process,

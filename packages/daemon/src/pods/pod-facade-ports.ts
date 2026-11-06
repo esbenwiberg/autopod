@@ -133,7 +133,7 @@ export interface PodFacadeOwners {
     | 'approveFactWaiver'
     | 'forceApprove'
   >;
-  podRepo: Pick<PodRepository, 'getOrThrow'>;
+  podRepo: Pick<PodRepository, 'getOrThrow' | 'retainedCheckpoints' | 'retainedCoding'>;
   validationEnvironmentForPod: ReturnType<
     typeof createValidationEnvironment
   >['validationEnvironmentForPod'];

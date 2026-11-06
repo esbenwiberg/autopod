@@ -191,6 +191,97 @@ export function createRetainedCodingRepository(db: Database.Database) {
     append,
     assertOwned,
     assertQualified,
+    /** Reply observation only: consumed worker authority, never fresh/TTL admission. */
+    workerDecision(pod: Pod): RetainedCodingRecord | null {
+      const record = latest(pod.id);
+      const root = createRetainedCheckpointRepository(db).latest(pod.id);
+      const worker = record?.facts.worker;
+      const candidate = record?.facts.candidate;
+      const question = pod.pendingEscalation;
+      if (
+        !record ||
+        !root ||
+        root.id !== record.id ||
+        !root.binding.continuation ||
+        root.binding.continuation.infrastructure ||
+        root.binding.approvalRewrite ||
+        root.blocked ||
+        root.checked ||
+        root.checking ||
+        !root.prepared ||
+        !worker ||
+        !candidate ||
+        record.facts.blocked ||
+        record.facts.final_source ||
+        record.facts.entered?.processEpoch !== processEpoch ||
+        record.facts.qualified?.processEpoch !== processEpoch ||
+        record.facts.qualified.evidence.outcome !== 'qualified' ||
+        pod.status !== 'awaiting_input' ||
+        pod.pauseReason ||
+        !question ||
+        question.type !== 'ask_human' ||
+        question.podId !== pod.id ||
+        question.response !== null ||
+        root.activated?.generation !== pod.lifecycleGeneration ||
+        candidate.generation !== pod.lifecycleGeneration ||
+        candidate.containerId !== pod.containerId ||
+        pod.containerId === root.containerId ||
+        root.prepared.worktree !== pod.worktreePath ||
+        pod.launchConfigDigest !== record.binding.executionDigest ||
+        pod.finalization?.generation !== pod.lifecycleGeneration ||
+        pod.finalization.cycle !== worker.cycle ||
+        pod.finalization.agentSettledAt
+      )
+        return null;
+      const run = db
+        .prepare(`SELECT r.binding FROM task_agent_runs r
+        JOIN task_retry_attempts a ON a.id=r.id AND a.stage='worker'
+        JOIN provider_attempts p ON p.pod_id=r.pod_id AND p.ordinal=?
+        WHERE r.id=? AND r.pod_id=? AND r.generation=? AND r.cycle=?
+        AND r.ended_at IS NULL AND r.failure_category IS NOT 'execution_termination_unverified'
+        AND a.started_at IS NOT NULL AND a.ended_at IS NULL AND p.ended_at IS NULL
+        AND p.runtime=? AND p.model=? AND p.provider IS ? AND p.provider_account_id IS ?`)
+        .get(
+          worker.providerOrdinal,
+          worker.runId,
+          pod.id,
+          pod.lifecycleGeneration,
+          worker.cycle,
+          pod.runtime,
+          pod.model,
+          pod.providerIdSnapshot,
+          pod.providerAccountIdSnapshot,
+        ) as { binding: string } | undefined;
+      if (!run) return null;
+      const binding = JSON.parse(run.binding);
+      if (
+        binding.runtime !== pod.runtime ||
+        binding.model !== pod.model ||
+        binding.providerAccountId !== pod.providerAccountIdSnapshot ||
+        binding.resource?.containerId !== candidate.containerId ||
+        binding.resource?.executionTarget !== pod.executionTarget ||
+        db
+          .prepare('SELECT 1 FROM completion_decisions WHERE pod_id=? AND decision_id=?')
+          .get(pod.id, question.id)
+      )
+        return null;
+      // Native runtime questions may have no MCP row. When one exists, it must
+      // be the same still-unanswered question, not merely the same mutable ID.
+      const saved = db
+        .prepare('SELECT pod_id AS podId,type,payload,response FROM escalations WHERE id=?')
+        .get(question.id) as
+        | { podId: string; type: string; payload: string; response: string | null }
+        | undefined;
+      if (
+        saved &&
+        (saved.podId !== pod.id ||
+          saved.type !== 'ask_human' ||
+          saved.response !== null ||
+          checkpointHash(JSON.parse(saved.payload)) !== checkpointHash(question.payload))
+      )
+        return null;
+      return record;
+    },
     reports(podId: string, generation: number) {
       const rows = db
         .prepare(`SELECT substr(id,1,129) AS id,substr(created_at,1,129) AS timestamp,substr(payload,1,65537) AS payload,CASE WHEN response IS NULL THEN NULL ELSE 'present' END AS response FROM escalations

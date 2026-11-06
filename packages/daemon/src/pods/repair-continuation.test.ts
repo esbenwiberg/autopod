@@ -1090,3 +1090,225 @@ describe('conditional retained coding continuation', () => {
     expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
   });
 });
+
+describe('typed retained worker active-question replies', () => {
+  afterEach(() => vi.useRealTimers());
+  const answer = 'Use the original acceptance case; preserve all required checks';
+  async function questioningFixture(acknowledge = true) {
+    const f = await fixture();
+    const originalRun = vi.mocked(f.ctx.runtime.spawn).getMockImplementation()!;
+    let release = () => {};
+    const proceed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const question = {
+      id: 'typed-worker-question',
+      podId: f.podId,
+      type: 'ask_human' as const,
+      timestamp: new Date().toISOString(),
+      payload: { question: 'Which original acceptance case should guide this implementation?' },
+      response: null,
+    };
+    vi.mocked(f.ctx.runtime.spawn).mockImplementation(async function* (options) {
+      question.timestamp = new Date().toISOString();
+      f.ctx.escalationRepo.insert(question);
+      yield {
+        type: 'escalation',
+        timestamp: question.timestamp,
+        escalationType: 'ask_human',
+        payload: question,
+      } as const;
+      await proceed;
+      const guidance = f.ctx.nudgeRepo.readPending(f.podId);
+      if (acknowledge && guidance)
+        f.ctx.nudgeRepo.acknowledgeDelivery(f.podId, guidance.deliveryId);
+      yield* originalRun(options);
+    });
+    const request = await f.request();
+    await f.manager.authorizeRepairContinuation(f.podId, request, f.actor);
+    await waitPreparation(f);
+    const result = f.manager.processPod(f.podId).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    try {
+      await vi.waitFor(() => expect(f.pod().status).toBe('awaiting_input'));
+    } catch (error) {
+      release();
+      await result;
+      throw error;
+    }
+    return {
+      ...f,
+      question,
+      result,
+      finish: () => {
+        release();
+        return result;
+      },
+    };
+  }
+  it.each([
+    true,
+    false,
+  ])('records the exact live answer, requiring guidance acknowledgement (ack=%s)', async (acknowledge) => {
+    const f = await questioningFixture(acknowledge);
+    const pods = f.ctx.podRepo;
+    const before = f.pod();
+    const worker = pods.retainedCoding!.latest(f.podId)!;
+    const queue = f.ctx.nudgeRepo.queue.bind(f.ctx.nudgeRepo);
+    vi.spyOn(f.ctx.nudgeRepo, 'queue').mockImplementation((id, message) => {
+      expect(pods.retainedCoding!.isOwner(id)).toBe(true);
+      expect(pods.retainedCheckpoints!.ownsRepairExecution(id)).toBe(false);
+      expect(() =>
+        pods.retainedCheckpoints!.infrastructureEvent(worker.id, 'stopped', {}),
+      ).toThrow();
+      expect(() => pods.retainedCheckpoints!.assertWorkerAllowed(id)).toThrow();
+      return queue(id, message);
+    });
+    try {
+      await expect(
+        f.manager.sendMessage(f.podId, answer, { type: 'automation', id: 'not-human' }),
+      ).rejects.toThrow('Authenticated human');
+      const guard = vi
+        .spyOn(pods.validationExecutions!, 'assertNoPendingRecovery')
+        .mockImplementation(() => {
+          throw new Error('Concurrent validation recovery is held');
+        });
+      await expect(f.manager.sendMessage(f.podId, answer, f.actor)).rejects.toThrow(
+        'Concurrent validation recovery',
+      );
+      guard.mockRestore();
+      await f.manager.sendMessage(f.podId, answer, f.actor);
+      expect(f.pod().status).toBe('running');
+      expect(f.ctx.escalationRepo.getOrThrow(f.question.id).response).toMatchObject({
+        actor: f.actor,
+        response: answer,
+      });
+      expect(f.ctx.nudgeRepo.readPending(f.podId)?.messages).toContain(answer);
+      await expect(
+        f.manager.sendMessage(f.podId, 'Second reply cannot resume or spawn', f.actor),
+      ).rejects.toThrow('Retained continuation owns');
+      expect(f.pod().budgetExtensionsUsed).toBe(before.budgetExtensionsUsed);
+      expect(f.pod().lifecycleGeneration).toBe(before.lifecycleGeneration);
+    } finally {
+      await f.finish();
+    }
+    if (acknowledge) {
+      expect(await f.result).toBeNull();
+      expect(f.pod().status, f.pod().failureReason ?? '').toBe('validated');
+      expect(f.ctx.nudgeRepo.hasPending(f.podId)).toBe(false);
+    } else {
+      expect(await f.result).not.toBeNull();
+      expect(f.pod().status).not.toBe('validated');
+      expect(f.ctx.nudgeRepo.hasPending(f.podId)).toBe(true);
+      expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+    }
+    expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    expect(f.ctx.db.prepare('SELECT * FROM retained_infrastructure_events').all()).toEqual([]);
+  });
+  it('answers a long-running live question after the consumed qualification receipt expires', async () => {
+    const f = await questioningFixture();
+    const receipt = f.ctx.podRepo.retainedCoding!.latest(f.podId)!.facts.qualified!;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.parse(receipt.expiresAt) + 60_000);
+    try {
+      expect(Date.now()).toBeGreaterThan(Date.parse(receipt.expiresAt));
+      await f.manager.sendMessage(f.podId, answer, f.actor);
+    } finally {
+      await f.finish();
+    }
+    expect(await f.result).toBeNull();
+    expect(f.pod().status, f.pod().failureReason ?? '').toBe('validated');
+    expect(f.ctx.nudgeRepo.hasPending(f.podId)).toBe(false);
+    expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+  });
+  it.each([
+    'dead-run',
+    'generation',
+    'candidate',
+    'authority',
+    'credential',
+    'budget-pause',
+    'question-race',
+    'cold-manager',
+    'process-epoch',
+  ] as const)('refuses a stale or non-live question without recording guidance or replaying execution: %s', async (fault) => {
+    const f = await questioningFixture();
+    const pods = f.ctx.podRepo;
+    const originalStore = pods.retainedCoding!;
+    const record = originalStore.latest(f.podId)!;
+    let manager = f.manager;
+    let restore = () => {};
+    const owned = <T>(run: () => T) =>
+      pods.retainedCheckpoints!.owned(record.id, () => originalStore.owned(record.id, run));
+    try {
+      // Construct drift within the fixture's existing owner, not by relaxing
+      // production custody guards or editing immutable worker/qualification facts.
+      if (fault === 'dead-run')
+        pods.taskExecutions!.finishRun(record.facts.worker!.runId, 'completed', null);
+      if (fault === 'generation') owned(() => pods.incrementLifecycleGeneration(f.podId));
+      if (fault === 'candidate') owned(() => pods.update(f.podId, { containerId: '3'.repeat(64) }));
+      if (fault === 'authority')
+        owned(() =>
+          pods.update(f.podId, { providerAccountIdSnapshot: 'not-the-admitted-account' }),
+        );
+      if (fault === 'credential')
+        owned(() =>
+          pods.update(f.podId, {
+            pendingEscalation: {
+              ...f.question,
+              type: 'request_credential',
+              payload: { service: 'github', reason: 'No credential permit' },
+            },
+          }),
+        );
+      if (fault === 'budget-pause') owned(() => pods.update(f.podId, { pauseReason: 'budget' }));
+      if (fault === 'cold-manager') manager = createPodManager(f.ctx.deps);
+      if (fault === 'process-epoch') {
+        vi.resetModules();
+        const { createRetainedCodingRepository } = await import('./retained-coding-repository.js');
+        pods.retainedCoding = createRetainedCodingRepository(f.ctx.db);
+        expect(pods.retainedCoding.processEpoch).not.toBe(originalStore.processEpoch);
+        restore = () => {
+          pods.retainedCoding = originalStore;
+        };
+      }
+      if (fault === 'question-race') {
+        const roots = pods.retainedCheckpoints!;
+        const owned = roots.owned.bind(roots);
+        const spy = vi.spyOn(roots, 'owned').mockImplementation((id, run) =>
+          owned(id, () => {
+            pods.update(f.podId, {
+              pendingEscalation: {
+                ...f.question,
+                payload: { question: 'Different question after reply admission' },
+              },
+            });
+            return run();
+          }),
+        );
+        restore = () => spy.mockRestore();
+      }
+      const before = f.pod();
+      await expect(manager.sendMessage(f.podId, answer, f.actor)).rejects.toThrow(
+        fault === 'question-race'
+          ? 'Typed worker question ownership changed'
+          : 'Retained continuation owns',
+      );
+      expect(f.ctx.escalationRepo.getOrThrow(f.question.id).response).toBeNull();
+      expect(f.ctx.nudgeRepo.hasPending(f.podId)).toBe(false);
+      expect(f.pod().budgetExtensionsUsed).toBe(before.budgetExtensionsUsed);
+      expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+      expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+    } finally {
+      restore();
+      await f.finish();
+    }
+    expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+  });
+});

@@ -1433,15 +1433,25 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityStatus,
   });
 
+  const isCodingWorkerActive = (podId: string, runId: string): boolean => {
+    const owner = activeAgentRuns.get(podId);
+    return owner?.taskRunId === runId && owner.isCurrent?.() === true;
+  };
   const controlOperations = createControlOperationRegistry((podId, operation) => {
     podRepo.retainedFinalizations?.assertAvailable(podId);
     if (retainedFinalization?.isActive(podId))
       checkpointError('Retained finalization preflight owns this control.');
     // Reply admission is rechecked inside its own scoped facade capability.
     // An active repair question must not inherit generic resume/mutation permission.
+    const codingDecision =
+      operation === 'sendMessage'
+        ? podRepo.retainedCoding?.workerDecision(podRepo.getOrThrow(podId))
+        : null;
     if (
       operation === 'sendMessage' &&
-      podRepo.retainedCheckpoints?.repairDecision(podRepo.getOrThrow(podId))
+      (podRepo.retainedCheckpoints?.repairDecision(podRepo.getOrThrow(podId)) ||
+        (codingDecision?.facts.worker &&
+          isCodingWorkerActive(podId, codingDecision.facts.worker.runId)))
     ) {
       sandboxRecovery.assertAvailable(podId, operation);
       assertValidationMutationSettled(podRepo, podId);
@@ -1599,6 +1609,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           getContainerManager: (target = 'sandbox') => containerManagerFactory.get(target),
           readLaunch: deps.launchConfiguration?.read,
           beforeCodingActivation: (pod) => closeProviderAttempt(pod.id, 'aborted'),
+          isCodingWorkerActive,
           qualifyCoding: async (binding, input, assertCurrent) => {
             const result = await qualifyExecutionEnvironment({
               binding,

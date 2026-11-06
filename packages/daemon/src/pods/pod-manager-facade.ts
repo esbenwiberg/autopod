@@ -371,6 +371,12 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
       message: string,
       actor: OperatorActor = { type: 'automation', id: 'direct-pod-manager' },
     ): Promise<void> {
+      if (captured.podRepo.retainedCoding?.latest(podId))
+        return (
+          captured.checkpointRecovery ?? checkpointError('Coding reply unavailable')
+        ).replyToCoding(podId, actor, () =>
+          operatorMessages.sendMessage.call(this, podId, message, actor),
+        );
       if (
         captured.podRepo.retainedCheckpoints?.latest(podId)?.binding.continuation?.infrastructure
           ?.mode === 'rework'
