@@ -12,6 +12,7 @@
 <p align="center">
   <a href="#why-autopod">Why Autopod</a> ·
   <a href="#how-it-works">How it works</a> ·
+  <a href="#action-control-plane">Actions</a> ·
   <a href="#security-boundaries">Security</a> ·
   <a href="#see-it-in-action">See it in action</a> ·
   <a href="#getting-started">Get started</a> ·
@@ -35,6 +36,12 @@ independent checks, and feedback loops—so **you're not the glue holding every
 task together.**
 
 [![Why Autopod: parallel agents, independent validation, feedback loops, model and infrastructure choice, repeatable workflows, and human control. How it works: describe, run an isolated agent, verify, decide, and deliver under your configured policy.](assets/readme/features.png)](assets/readme/features.png)
+
+## Action control plane
+
+[![The pod requests execute_action; policy checks gate the daemon handler, configured response controls process the result, and the worker receives data and outcome. Examples include GitHub, Azure DevOps, logs, preconfigured PIM, and HTTP integrations. Executed actions have audit evidence; not every pre-dispatch denial is recorded.](assets/readme/acp.png)](assets/readme/acp.png)
+
+[Action configuration, scopes, and PIM restrictions →](docs/security-overview.md#brokered-tools-not-ambient-authority)
 
 ## Security boundaries
 

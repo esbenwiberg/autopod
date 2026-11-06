@@ -1,8 +1,8 @@
 # README media
 
 The desktop screenshots and tour show **real SwiftUI/AppKit components with
-offline fixture data**. `features.png` and `security.png` are editorial product
-and security overviews, not screenshots. None of these images is a live task execution, benchmark,
+offline fixture data**. `features.png`, `security.png`, and `acp.png` are editorial
+product, security, and action-flow diagrams, not screenshots. None of these images is a live task execution, benchmark,
 passing validation claim, or proof that a PR was delivered. The redesigned desktop interface is enabled in
 the preview; it can also be selected in the app's Appearance settings.
 
@@ -77,6 +77,29 @@ full-size and around 850 pixels wide. Keep the egress exceptions, configuration
 scope, and non-immunity footer readable; never replace them with absolute
 “no credentials leave” or “zero outbound” claims.
 
+## Dedicated Action Control Plane diagram
+
+`acp.png` gives ACP its own visual: pod request → policy gate → daemon handler →
+configured response controls → result. A separate denial/approval branch stops
+before handler execution; the audit band explicitly avoids promising a record
+for every pre-dispatch denial. Example integrations are GitHub, Azure DevOps,
+Azure/application logs, preconfigured PIM, and configured HTTP operations.
+
+The diagram follows the source-checked [action boundary guide](../../docs/security-overview.md#brokered-tools-not-ambient-authority).
+Approvals and response filters are conditional on configuration. PIM choices,
+scopes, durations, eligibility and tenant policy remain constraints; no arbitrary
+elevation or live activation is implied. This is the action engine's response
+path, not the remote-MCP proxy's unwired optional filters.
+
+```bash
+python3 assets/readme/acp.py
+```
+
+The same Python/Pillow/macOS fonts are required. Inspect the full image and an
+850px-wide version, including arrow directions, denial branch and footer.
+Keep its content in the image with descriptive alt text and a guide link, not a
+second visible copy in the README.
+
 ## Regenerate native media
 
 Requires macOS 15+, Xcode with local signing available, Git, Python 3, and Pillow.
@@ -109,12 +132,12 @@ durations are time-relative and need not be byte-identical on regeneration.
 
 ## Checks before publishing
 
-- Open all four PNGs and inspect every GIF chapter, not just its first frame.
+- Open all five PNGs and inspect every GIF chapter, not just its first frame.
 - Check that labels are readable, no private information is shown, and the
   sample-data disclosure remains visible.
 - Keep total published media below 3 MiB. PNGs are 1624×1044 (desktop),
-  1280×800 (readiness), 1624×1256 (features), and 1624×1162 (security);
-  the GIF is 1280×800, 20 frames,
+  1280×800 (readiness), 1624×1256 (features), 1624×1162 (security),
+  and 1624×1104 (ACP); the GIF is 1280×800, 20 frames,
   and approximately 14.6 seconds per loop.
 - Keep a static alternative in the README and meaningful image alt text.
 - Run `bash -n scripts/capture-readme.sh` and `git diff --check`.
