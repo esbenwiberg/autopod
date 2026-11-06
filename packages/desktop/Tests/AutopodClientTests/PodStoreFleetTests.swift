@@ -6,6 +6,114 @@ import AutopodUI
 
 @Suite(.serialized)
 struct PodStoreFleetTests {
+@MainActor @Test func compactDiscoveryBuildsDependencyDAGWithoutDetailRequests() async throws {
+  let recorder = FleetRequestRecorder()
+  let mode = FleetMode()
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [FleetURLProtocol.self]
+  FleetURLProtocol.handler = { request in
+    await recorder.record(request.url!)
+    if request.url?.path == "/pods/scores" { return SelfResponse.json("[]", for: request) }
+    let newer = await mode.isNewer
+    let parents: [(String, [String])] = [("root", []), ("chain", ["root"]), ("merge", ["root", "chain"])]
+    let records = try parents.map { id, dependencies -> [String: Any] in
+      let page = compactPage(id: id, hasNext: false,
+        updatedAt: newer ? "2026-07-01T00:20:00Z" : "2026-07-01T00:00:00Z")
+      let body = try #require(JSONSerialization.jsonObject(with: Data(page.utf8)) as? [String: Any])
+      var pod = try #require((body["pods"] as? [[String: Any]])?.first)
+      pod["dependsOnPodIds"] = dependencies
+      pod["seriesId"] = "dependency-series"
+      return pod
+    }
+    let data = try JSONSerialization.data(withJSONObject: ["pods": records, "nextCursor": NSNull()])
+    return SelfResponse.json(String(decoding: data, as: UTF8.self), for: request)
+  }
+  defer { FleetURLProtocol.handler = nil }
+  let store = PodStore()
+  store.configure(api: DaemonAPI(baseURL: URL(string: "https://daemon.example.com")!, token: "test", session: URLSession(configuration: configuration)))
+  for refresh in 0..<2 {
+    if refresh == 1 { await mode.advance() }
+    await store.loadSessions()
+    let layout = PipelineDAGLayout.layout(store.pods.map { .init(id: $0.id, parentIds: $0.dependsOnPodIds) })
+    #expect(Set(layout.edges.map { "\($0.from)->\($0.to)" }) == ["root->chain", "root->merge", "chain->merge"])
+    #expect(layout.nodes.first(where: { $0.id == "root" })?.rank == 0)
+    #expect(layout.nodes.first(where: { $0.id == "merge" })?.rank == 2)
+    #expect(store.selectedSessionId == nil)
+  }
+  #expect(await recorder.detailPaths.isEmpty)
+}
+
+@MainActor @Test(arguments: [false, true])
+func compactDependenciesRespectAbsenceEmptyAndFreshness(hydrate: Bool) async throws {
+  let mode = FleetMode()
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [FleetURLProtocol.self]
+  FleetURLProtocol.handler = { request in
+    if request.url?.path == "/pods/scores" { return SelfResponse.json("[]", for: request) }
+    if request.url?.path == "/pods/child" {
+      return SelfResponse.json(fullPod(id: "child").replacingOccurrences(of: "\"task\":", with: "\"dependsOnPodIds\":[\"parent\"],\"task\":"), for: request)
+    }
+    let newer = await mode.isNewer
+    // The first response is from an older daemon. The upgraded response explicitly clears parents.
+    var page = compactPage(id: "child", hasNext: false,
+      updatedAt: newer ? "2026-07-01T00:30:00Z" : "2026-07-01T00:20:00Z")
+    if newer { page = page.replacingOccurrences(of: "\"title\":", with: "\"dependsOnPodIds\":[],\"title\":") }
+    return SelfResponse.json(page, for: request)
+  }
+  defer { FleetURLProtocol.handler = nil }
+  let store = PodStore()
+  store.configure(api: DaemonAPI(baseURL: URL(string: "https://daemon.example.com")!, token: "test", session: URLSession(configuration: configuration)))
+  await store.loadSessions() // Old payload decodes with absent dependency metadata.
+  #expect(store.pods.first?.dependsOnPodIds == [])
+  if hydrate {
+    await store.hydrateSessionIfNeeded("child")
+  } else {
+    var child = try #require(store.pods.first)
+    child.dependsOnPodIds = ["parent"]
+    store.upsertSession(child)
+  }
+  #expect(store.pods.first?.dependsOnPodIds == ["parent"])
+  await store.loadSessions() // A newer/equal old-daemon compact response must preserve known parents.
+  #expect(store.pods.first?.dependsOnPodIds == ["parent"])
+  await mode.advance()
+  await store.loadSessions()
+  #expect(store.pods.first?.dependsOnPodIds == [])
+}
+
+@MainActor @Test(arguments: [false, true])
+func dependencyMetadataEnrichesEqualVersionsButCannotRegressNewerRecords(hydrate: Bool) async throws {
+  let mode = FleetMode()
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [FleetURLProtocol.self]
+  FleetURLProtocol.handler = { request in
+    if request.url?.path == "/pods/scores" { return SelfResponse.json("[]", for: request) }
+    if request.url?.path == "/pods/child" { return SelfResponse.json(fullPod(id: "child"), for: request) }
+    let upgraded = await mode.isNewer
+    let page = compactPage(id: "child", hasNext: false,
+      updatedAt: upgraded ? "2026-07-01T00:10:00Z" : "2026-07-01T00:00:00Z")
+      .replacingOccurrences(of: "\"title\":", with: "\"dependsOnPodIds\":[\"parent\"],\"title\":")
+    return SelfResponse.json(page, for: request)
+  }
+  defer { FleetURLProtocol.handler = nil }
+  let store = PodStore()
+  store.configure(api: DaemonAPI(baseURL: URL(string: "https://daemon.example.com")!, token: "test", session: URLSession(configuration: configuration)))
+  await store.loadSessions()
+  if hydrate {
+    await store.hydrateSessionIfNeeded("child")
+  } else {
+    var child = try #require(store.pods.first)
+    child.updatedAt = PodMapper.parseDate("2026-07-01T00:10:00Z")
+    child.dependsOnPodIds = []
+    store.upsertSession(child)
+  }
+  #expect(store.pods.first?.dependsOnPodIds == [])
+  await store.loadSessions() // Older compact metadata must not overwrite a newer record.
+  #expect(store.pods.first?.dependsOnPodIds == [])
+  await mode.advance()
+  await store.loadSessions() // Equal timestamp can acquire newly available dependency metadata.
+  #expect(store.pods.first?.dependsOnPodIds == ["parent"])
+}
+
 @MainActor
 @Test func findingsReceiptSurvivesEqualCompactRefreshAndRehydratesAfterAcceptanceEvent() async throws {
   let mode = FleetMode()

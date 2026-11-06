@@ -1577,6 +1577,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
             if (row[`${field}_oversized`])
               pod.recordDiagnostics?.push({ field, code: 'size_limit' });
           }
+          if (row.depends_on_pod_id_oversized)
+            pod.recordDiagnostics?.push({ field: 'depends_on_pod_id', code: 'size_limit' });
           return {
             ...pod,
             repositoryDisplay: displayRepository(row, pod.profileSnapshot?.repoUrl ?? undefined),

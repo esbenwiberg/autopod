@@ -710,6 +710,8 @@ export interface PodFleetDisplay {
 }
 
 export interface CompactPod {
+  /** Normalized parents; absent on older daemons or when compact metadata is unavailable. */
+  dependsOnPodIds?: string[];
   fleetArchivedAt?: string | null;
   completionPolicy?: Pod['completionPolicy'];
   /** Absent on older daemons; present with null progress means no reported milestone. */

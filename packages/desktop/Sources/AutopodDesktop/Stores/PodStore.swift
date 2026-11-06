@@ -230,6 +230,7 @@ public final class PodStore {
     merged.briefTitle = incoming.briefTitle
     merged.seriesId = incoming.seriesId
     merged.seriesName = incoming.seriesName
+    merged.dependsOnPodIds = incoming.dependsOnPodIds
     merged.runningAt = incoming.runningAt
     merged.inputTokens = incoming.inputTokens
     merged.outputTokens = incoming.outputTokens
@@ -256,6 +257,7 @@ public final class PodStore {
       let responses = try await api.listAllCompactPods(includeArchived: true)
       guard epoch == configurationEpoch else { return }
       let fresh = PodMapper.map(responses, baseURL: api.baseURL)
+      let dependencyMetadataIds = Set(responses.filter { $0.dependsOnPodIds != nil }.map(\.id))
       let currentById = Dictionary(uniqueKeysWithValues: pods.map { ($0.id, $0) })
       let staleHydratedIds: Set<String> = Set(
         fresh.compactMap { pod -> String? in
@@ -275,8 +277,16 @@ public final class PodStore {
       let removedIds = Set(currentById.keys)
         .subtracting(discoveredIds)
         .subtracting(retainedIds)
-      let merged = fresh.map { pod in
-        if hydratedPodIds.contains(pod.id), let current = currentById[pod.id] {
+      let merged = fresh.map { incoming in
+        var pod = incoming
+        var current = currentById[pod.id]
+        if !dependencyMetadataIds.contains(pod.id) {
+          pod.dependsOnPodIds = current?.dependsOnPodIds ?? []
+        } else if let existing = current, pod.updatedAt >= existing.updatedAt {
+          // Equal-version refreshes can enrich records discovered before a daemon upgrade.
+          current?.dependsOnPodIds = pod.dependsOnPodIds
+        }
+        if hydratedPodIds.contains(pod.id), let current {
           return mergeCompactPod(
             pod,
             with: current,
@@ -289,7 +299,7 @@ public final class PodStore {
         }
         return mergeRestPod(
           pod,
-          with: currentById[pod.id],
+          with: current,
           preferIncomingOnEqual: false,
           preserveCurrentStatus:
             statusRevisions[pod.id, default: 0]

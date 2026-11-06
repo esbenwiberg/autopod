@@ -176,6 +176,13 @@ function compactPod(
   ) as string;
   return {
     id: pod.id,
+    dependsOnPodIds: pod.recordDiagnostics?.some(
+      (diagnostic) =>
+        ['depends_on_pod_ids', 'depends_on_pod_id'].includes(diagnostic.field) &&
+        diagnostic.code === 'size_limit',
+    )
+      ? undefined
+      : pod.dependsOnPodIds,
     fleetArchivedAt: pod.fleetArchivedAt,
     completionPolicy: pod.completionPolicy,
     recordDiagnostics: pod.recordDiagnostics,

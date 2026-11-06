@@ -125,6 +125,7 @@ public enum PodMapper {
       briefTitle: response.title,
       seriesId: response.seriesId,
       seriesName: response.seriesName,
+      dependsOnPodIds: response.dependsOnPodIds ?? [],
       runningAt: response.runningAt.map { parseDate($0) }
     )
     result.fleetArchivedAt = response.fleetArchivedAt
