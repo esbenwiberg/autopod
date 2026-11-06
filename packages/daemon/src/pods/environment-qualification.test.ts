@@ -1,5 +1,15 @@
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -21,6 +31,7 @@ import {
   qualificationExecutionContextHash,
   qualifyExecutionEnvironment,
 } from './environment-qualification.js';
+import { WORKSPACE_FILE_SNAPSHOT_SCRIPT } from './workspace-file-observer.js';
 
 const hash = 'a'.repeat(64);
 const head = 'b'.repeat(40);
@@ -406,5 +417,282 @@ describe('actual resource environment qualification (evidence only)', () => {
     expect((await qualifyExecutionEnvironment(input)).evidence.outcome).toBe('unsupported');
     expect(cm.execInContainer).not.toHaveBeenCalled();
     expect(cm.getResourceKey).not.toHaveBeenCalled();
+  });
+});
+
+// Always-on real disposable-Git source logic below. This is NOT Docker/platform qualification.
+const directories: string[] = [];
+afterEach(() => {
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true });
+});
+function repository() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'qualification-git-safety-')));
+  directories.push(root);
+  const cwd = join(root, 'source');
+  mkdirSync(cwd);
+  const env = {
+    PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+    HOME: root,
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+  };
+  const gitInput = (args: string[], input?: string) =>
+    execFileSync('/usr/bin/git', args, {
+      cwd,
+      env,
+      input,
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  const git = (...args: string[]) => gitInput(args);
+  git('init', '-q', '-b', 'base');
+  git('config', 'user.name', 'Qualification Git fixture');
+  git('config', 'user.email', 'fixture@example.invalid');
+  git('config', 'core.hooksPath', '/dev/null');
+  git('config', 'commit.gpgsign', 'false');
+  writeFileSync(join(cwd, 'source.txt'), 'unchanged selected source\n');
+  git('add', 'source.txt');
+  git('commit', '-qm', 'original base');
+  const base = git('rev-parse', 'HEAD');
+  const tree = git('rev-parse', 'HEAD^{tree}');
+  const script = QUALIFICATION_SOURCE_PROBE.replace(
+    "const root='/workspace'",
+    `const root=${JSON.stringify(cwd)}`,
+  );
+  const probeResult = (ancestor = base) =>
+    spawnSync(process.execPath, ['-e', script, ancestor], {
+      cwd,
+      env,
+      encoding: 'utf8',
+      timeout: 15000,
+      maxBuffer: 65536,
+    });
+  const probe = (ancestor = base) => {
+    const result = probeResult(ancestor);
+    expect(result.status, result.stderr).toBe(0);
+    return JSON.parse(result.stdout) as {
+      head: string;
+      tree: string;
+      clean: boolean;
+      baseAncestor: boolean;
+    };
+  };
+  const observe = () =>
+    JSON.parse(
+      execFileSync(process.execPath, ['-e', WORKSPACE_FILE_SNAPSHOT_SCRIPT], {
+        cwd,
+        env,
+        encoding: 'utf8',
+        timeout: 15000,
+        maxBuffer: 4 * 1024 * 1024,
+      }),
+    );
+  return { root, cwd, env, git, gitInput, base, tree, probe, probeResult, observe };
+}
+
+describe('source attestation against repository-controlled Git execution and graph views', () => {
+  it('never executes a clean filter across qualification, real observer baseline and repeated pre-dispatch source probe', () => {
+    const f = repository();
+    writeFileSync(join(f.cwd, '.gitattributes'), 'source.txt filter=reviewprobe\n');
+    f.git('add', '.gitattributes');
+    f.git('commit', '-qm', 'declared source attributes');
+    const selected = f.git('rev-parse', 'HEAD');
+    const tree = f.git('rev-parse', 'HEAD^{tree}');
+    const filter = join(f.cwd, '.git/review-filter.sh');
+    writeFileSync(
+      filter,
+      `#!/bin/sh
+cat >/dev/null
+count=$(cat .git/filter-count 2>/dev/null || echo 0)
+count=$((count+1))
+printf '%s' "$count" > .git/filter-count
+if [ "$count" -ge 2 ]; then printf 'corrupted during trusted source probe\\n' > source.txt; fi
+printf 'unchanged selected source\\n'
+printf executed > .git/filter-ran
+`,
+      { mode: 0o755 },
+    );
+    f.git('config', 'filter.reviewprobe.clean', filter);
+    // Force Git to consider conversion rather than accepting its cached stat record.
+    utimesSync(join(f.cwd, 'source.txt'), new Date('2030-01-01'), new Date('2030-01-01'));
+    const index = readFileSync(join(f.cwd, '.git/index'));
+    const config = readFileSync(join(f.cwd, '.git/config'));
+    const first = f.probe();
+    expect(readFileSync(join(f.cwd, '.git/index')), 'initial source probe index').toEqual(index);
+    expect(f.observe()).toMatchObject({ version: 1, complete: true });
+    // Existing observer may refresh cached index stat data; do not misattribute that
+    // to the source probes. Each source probe itself must leave its input index intact.
+    const observerIndex = readFileSync(join(f.cwd, '.git/index'));
+    const second = f.probe();
+    expect({
+      first,
+      second,
+      filterExecuted: existsSync(join(f.cwd, '.git/filter-ran')),
+      count: existsSync(join(f.cwd, '.git/filter-count'))
+        ? readFileSync(join(f.cwd, '.git/filter-count'), 'utf8')
+        : '0',
+      bytes: readFileSync(join(f.cwd, 'source.txt'), 'utf8'),
+    }).toMatchObject({
+      first: { head: selected, tree, clean: true, baseAncestor: true },
+      second: { head: selected, tree, clean: true, baseAncestor: true },
+      filterExecuted: false,
+      count: '0',
+      bytes: 'unchanged selected source\n',
+    });
+    expect(readFileSync(join(f.cwd, '.git/index'))).toEqual(observerIndex);
+    expect(readFileSync(join(f.cwd, '.git/config'))).toEqual(config);
+  });
+
+  it('neutralizes clean/smudge/process/required keys including included configuration and duplicate drivers, without writing config or index', () => {
+    const f = repository();
+    writeFileSync(join(f.cwd, '.gitattributes'), 'source.txt filter=review.probe\n');
+    f.git('add', '.gitattributes');
+    f.git('commit', '-qm', 'filter attribute');
+    const marker = join(f.cwd, '.git/filter-executed');
+    for (const key of ['clean', 'smudge', 'process'])
+      f.git('config', `filter.review.probe.${key}`, `touch ${marker}; cat`);
+    f.git('config', '--add', 'filter.review.probe.clean', `touch ${marker}; cat`);
+    f.git('config', 'filter.review.probe.required', 'true');
+    const extra = join(f.cwd, '.git/included-filter-config');
+    writeFileSync(
+      extra,
+      `[filter "review.probe"]\n  required = true\n  process = touch ${marker}; cat\n`,
+    );
+    f.git('config', 'include.path', extra);
+    utimesSync(join(f.cwd, 'source.txt'), new Date('2030-01-01'), new Date('2030-01-01'));
+    const index = readFileSync(join(f.cwd, '.git/index'));
+    const config = readFileSync(join(f.cwd, '.git/config'));
+    const included = readFileSync(extra);
+    expect(f.probe().clean).toBe(true);
+    expect(existsSync(marker)).toBe(false);
+    expect(readFileSync(join(f.cwd, '.git/index'))).toEqual(index);
+    expect(readFileSync(join(f.cwd, '.git/config'))).toEqual(config);
+    expect(readFileSync(extra)).toEqual(included);
+    // Configured conversion must never turn real nonmatching bytes into a passing proof.
+    writeFileSync(join(f.cwd, 'source.txt'), 'not the selected bytes\n');
+    expect(f.probe().clean).toBe(false);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it('refuses ambiguous equals-bearing filter names rather than retargeting command-line overrides and executing them', () => {
+    const f = repository();
+    writeFileSync(join(f.cwd, '.gitattributes'), 'source.txt filter=driver=trap\n');
+    f.git('add', '.gitattributes');
+    f.git('commit', '-qm', 'ambiguous driver attribute');
+    const config = join(f.cwd, '.git/config');
+    writeFileSync(
+      config,
+      readFileSync(config, 'utf8') +
+        '\n[filter "driver=trap"]\n  clean = touch .git/filter-ran; cat\n  required = true\n',
+    );
+    utimesSync(join(f.cwd, 'source.txt'), new Date('2030-01-01'), new Date('2030-01-01'));
+    const result = f.probeResult();
+    expect({ exit: result.status, executed: existsSync(join(f.cwd, '.git/filter-ran')) }).toEqual({
+      exit: 2,
+      executed: false,
+    });
+  });
+
+  it('refuses missing-object promisor context without invoking its local upload-pack helper or changing source/index/config', () => {
+    const f = repository();
+    const remote = join(f.root, 'local-empty.git');
+    f.git('init', '--bare', '-q', remote);
+    const marker = join(f.cwd, '.git/upload-pack-ran');
+    const helper = join(f.cwd, '.git/local-upload-pack');
+    writeFileSync(helper, `#!/bin/sh\nprintf called > "${marker}"\nexit 1\n`, { mode: 0o755 });
+    f.git('config', 'core.repositoryformatversion', '1');
+    f.git('config', 'extensions.partialclone', 'fixture');
+    f.git('config', 'remote.fixture.url', `file://${remote}`);
+    f.git('config', 'remote.fixture.promisor', 'true');
+    f.git('config', 'remote.fixture.uploadpack', helper);
+    // Force an actual object read to need the local promisor transport if lazy fetch is allowed.
+    unlinkSync(join(f.cwd, '.git/objects', f.tree.slice(0, 2), f.tree.slice(2)));
+    const index = readFileSync(join(f.cwd, '.git/index'));
+    const config = readFileSync(join(f.cwd, '.git/config'));
+    const result = f.probeResult();
+    expect({ exit: result.status, fetched: existsSync(marker) }).toEqual({
+      exit: 2,
+      fetched: false,
+    });
+    expect(result.stdout).toBe('');
+    expect(readFileSync(join(f.cwd, '.git/index'))).toEqual(index);
+    expect(readFileSync(join(f.cwd, '.git/config'))).toEqual(config);
+    expect(readFileSync(join(f.cwd, 'source.txt'), 'utf8')).toBe('unchanged selected source\n');
+    expect(QUALIFICATION_SOURCE_PROBE).toContain("env.GIT_NO_LAZY_FETCH='1'");
+  });
+
+  it('refuses an overbound filter set without truncating it into a passing executable-filter context', () => {
+    const f = repository();
+    const config = join(f.cwd, '.git/config');
+    writeFileSync(
+      config,
+      readFileSync(config, 'utf8') +
+        Array.from(
+          { length: 257 },
+          (_, i) => `\n[filter "driver${i}"]\n  clean = touch .git/filter-ran; cat\n`,
+        ).join(''),
+    );
+    const index = readFileSync(join(f.cwd, '.git/index'));
+    const result = f.probeResult();
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe('');
+    expect(existsSync(join(f.cwd, '.git/filter-ran'))).toBe(false);
+    expect(readFileSync(join(f.cwd, '.git/index'))).toEqual(index);
+  });
+
+  it('rejects unrelated same-tree B even when a bundled/imported replacement ref supplies fake A ancestry', () => {
+    const f = repository();
+    const unrelated = f.gitInput(['commit-tree', f.tree], 'unrelated selected head\n');
+    f.git('switch', '-q', '-C', 'task', unrelated);
+    const replacement = f.gitInput(
+      ['commit-tree', f.tree, '-p', f.base],
+      'replacement parents only\n',
+    );
+    f.git('replace', unrelated, replacement);
+    const bundle = join(f.root, 'source.bundle');
+    const imported = join(f.root, 'candidate.git');
+    f.git('bundle', 'create', bundle, '--all');
+    f.git('clone', '-q', '--bare', '--no-local', '--', bundle, imported);
+    f.git(
+      '-C',
+      imported,
+      'fetch',
+      '--no-write-fetch-head',
+      '--no-tags',
+      '--',
+      bundle,
+      '+refs/*:refs/*',
+    );
+    expect(f.git('-C', imported, 'show-ref', `refs/replace/${unrelated}`)).toBe(
+      `${replacement} refs/replace/${unrelated}`,
+    );
+    const truth = spawnSync(
+      '/usr/bin/git',
+      ['--no-replace-objects', 'merge-base', '--is-ancestor', f.base, unrelated],
+      { cwd: f.cwd, env: f.env },
+    );
+    expect(truth.status).toBe(1);
+    const result = f.probeResult();
+    expect(
+      result.status,
+      `Source probe must not attest forged ancestry: ${result.stdout}`,
+    ).not.toBe(0);
+    expect(result.stdout).not.toContain('"baseAncestor":true');
+  });
+
+  it('ignores replacement objects for tree/HEAD reads too, not only the final ancestry command', () => {
+    const f = repository();
+    const emptyTree = f.gitInput(['hash-object', '-t', 'tree', '-w', '--stdin'], '');
+    const replacement = f.gitInput(['commit-tree', emptyTree], 'replacement empty tree\n');
+    f.git('replace', f.base, replacement);
+    expect(f.git('rev-parse', 'HEAD^{tree}')).toBe(emptyTree); // Adversarial default graph really differs.
+    expect(f.probe(f.base)).toMatchObject({
+      head: f.base,
+      tree: f.tree,
+      clean: true,
+      baseAncestor: true,
+    });
   });
 });

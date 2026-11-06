@@ -17,10 +17,12 @@ import { DockerContainerManager } from '../containers/docker-container-manager.j
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import {
   type EnvironmentQualificationInput,
+  QUALIFICATION_SOURCE_PROBE,
   qualificationExecutionContextHash,
   qualifyExecutionEnvironment,
 } from './environment-qualification.js';
 import { createProvisioningWorkspacePopulation } from './provisioning-workspace-population.js';
+import { WORKSPACE_FILE_SNAPSHOT_SCRIPT } from './workspace-file-observer.js';
 
 /** Opt-in, cached immutable image + explicit LOCAL socket only. Never pulls/builds images.
  * AUTOPOD_QUALIFICATION_DOCKER_IMAGE=sha256:... AUTOPOD_QUALIFICATION_DOCKER_SOCKET=/.../docker.sock
@@ -125,6 +127,7 @@ it.skipIf(!process.env.AUTOPOD_QUALIFICATION_DOCKER_IMAGE)(
       mkdirSync(join(seed, 'pkg'));
       writeFileSync(join(seed, 'README.md'), 'Synthetic qualification input only\n');
       writeFileSync(join(seed, 'pkg/source.txt'), 'selected synthetic bytes\n');
+      writeFileSync(join(seed, '.gitattributes'), 'pkg/source.txt filter=reviewprobe\n');
       git(seed, 'add', '.');
       git(
         seed,
@@ -359,6 +362,36 @@ it.skipIf(!process.env.AUTOPOD_QUALIFICATION_DOCKER_IMAGE)(
         save(); // Preserve actual failures BEFORE assertions/cleanup.
         return result.evidence;
       };
+      // Simulate allowed repository preparation configuring an executable clean filter.
+      // It returns canonical bytes while corrupting source on its SECOND invocation.
+      // Qualification/observer/pre-dispatch observations must never execute it at all.
+      await cm.writeFile(
+        containerId,
+        '/workspace/.git/review-filter.sh',
+        `#!/bin/sh
+cat >/dev/null
+count=$(cat /workspace/.git/filter-count 2>/dev/null || echo 0)
+count=$((count+1))
+printf '%s' "$count" > /workspace/.git/filter-count
+if [ "$count" -ge 2 ]; then printf 'corrupted by configured filter\\n' > /workspace/pkg/source.txt; fi
+printf 'selected synthetic bytes\\n'
+printf executed > /workspace/.git/filter-ran
+`,
+        { mode: 0o755 },
+      );
+      await checkedExec([
+        '/usr/bin/git',
+        '-C',
+        '/workspace',
+        'config',
+        'filter.reviewprobe.clean',
+        '/workspace/.git/review-filter.sh',
+      ]);
+      await checkedExec([
+        '/usr/local/bin/node',
+        '-e',
+        `require('node:fs').utimesSync('/workspace/pkg/source.txt',new Date('2030-01-01'),new Date('2030-01-01'))`,
+      ]);
       const positive = await qualify('positive', inputFor(['git']));
       expect(positive.outcome, JSON.stringify(positive.observations)).toBe('qualified');
       for (const prerequisite of [
@@ -374,6 +407,77 @@ it.skipIf(!process.env.AUTOPOD_QUALIFICATION_DOCKER_IMAGE)(
         expect(positive.observations).toContainEqual(
           expect.objectContaining({ prerequisite, outcome: 'qualified' }),
         );
+      const observer = await cm.execInContainer(
+        containerId,
+        ['/usr/local/bin/node', '-e', WORKSPACE_FILE_SNAPSHOT_SCRIPT],
+        {
+          user: 'autopod',
+          cwd: '/workspace',
+          timeout: 10_000,
+          maxOutputBytes: 4 * 1024 * 1024,
+          assertCurrent,
+        },
+      );
+      expect(observer.exitCode, observer.stderr).toBe(0);
+      expect(JSON.parse(observer.stdout)).toMatchObject({ version: 1, complete: true });
+      const indexBeforeRedispatch = await cm.readFileBinary(containerId, '/workspace/.git/index');
+      const redispatch = await cm.execInContainer(
+        containerId,
+        ['/usr/local/bin/node', '-e', QUALIFICATION_SOURCE_PROBE, head],
+        {
+          user: 'autopod',
+          cwd: '/workspace/pkg',
+          env: profile.buildEnv ?? undefined,
+          timeout: 10_000,
+          maxOutputBytes: 65536,
+          assertCurrent,
+        },
+      );
+      stages.push({ name: 'source-redispatch-after-observer', result: redispatch });
+      save();
+      expect(redispatch.exitCode, redispatch.stderr).toBe(0);
+      expect(JSON.parse(redispatch.stdout)).toMatchObject({
+        head,
+        tree,
+        clean: true,
+        baseAncestor: true,
+        uid: 1000,
+        platform,
+      });
+      expect(await cm.readFileBinary(containerId, '/workspace/.git/index')).toEqual(
+        indexBeforeRedispatch,
+      );
+      const filterState = async () => {
+        const state = await checkedExec([
+          '/usr/local/bin/node',
+          '-e',
+          `const fs=require('node:fs'); process.stdout.write(JSON.stringify({executed:fs.existsSync('/workspace/.git/filter-ran'),count:fs.existsSync('/workspace/.git/filter-count')?fs.readFileSync('/workspace/.git/filter-count','utf8'):'0'}))`,
+        ]);
+        return JSON.parse(state.stdout);
+      };
+      expect(await filterState()).toEqual({ executed: false, count: '0' });
+      expect(await cm.readFile(containerId, '/workspace/pkg/source.txt')).toBe(
+        'selected synthetic bytes\n',
+      );
+      for (const key of ['smudge', 'process', 'required'])
+        await checkedExec([
+          '/usr/bin/git',
+          '-C',
+          '/workspace',
+          'config',
+          `filter.reviewprobe.${key}`,
+          key === 'required' ? 'true' : '/workspace/.git/review-filter.sh',
+        ]);
+      const filterConfig = await cm.readFile(containerId, '/workspace/.git/config');
+      const indexWithProcess = await cm.readFileBinary(containerId, '/workspace/.git/index');
+      expect(
+        (await qualify('clean-smudge-process-required-neutralized', inputFor(['git']))).outcome,
+      ).toBe('qualified');
+      expect(await cm.readFile(containerId, '/workspace/.git/config')).toBe(filterConfig);
+      expect(await cm.readFileBinary(containerId, '/workspace/.git/index')).toEqual(
+        indexWithProcess,
+      );
+      expect(await filterState()).toEqual({ executed: false, count: '0' });
       const missing = await qualify(
         'missing-launcher',
         inputFor([`autopod_missing_${run.replaceAll('-', '_')}`]),
@@ -390,10 +494,21 @@ it.skipIf(!process.env.AUTOPOD_QUALIFICATION_DOCKER_IMAGE)(
       const beforeWrongResource = commands.length;
       expect((await qualify('wrong-resource', wrongResource)).outcome).toBe('failed');
       expect(commands).toHaveLength(beforeWrongResource);
+      // This is fixture mutation, not attestation. Do not execute the deliberately
+      // hostile filters while arranging the hidden-dirty negative source case.
       await checkedExec([
         '/usr/bin/git',
+        '--no-replace-objects',
         '-C',
         '/workspace',
+        '-c',
+        'filter.reviewprobe.clean=',
+        '-c',
+        'filter.reviewprobe.smudge=',
+        '-c',
+        'filter.reviewprobe.process=',
+        '-c',
+        'filter.reviewprobe.required=false',
         'update-index',
         '--assume-unchanged',
         'pkg/source.txt',
@@ -401,7 +516,22 @@ it.skipIf(!process.env.AUTOPOD_QUALIFICATION_DOCKER_IMAGE)(
       await cm.writeFile(container.id, '/workspace/pkg/source.txt', 'changed synthetic bytes\n');
       expect(
         (
-          await checkedExec(['/usr/bin/git', '-C', '/workspace', 'status', '--porcelain'])
+          await checkedExec([
+            '/usr/bin/git',
+            '--no-replace-objects',
+            '-C',
+            '/workspace',
+            '-c',
+            'filter.reviewprobe.clean=',
+            '-c',
+            'filter.reviewprobe.smudge=',
+            '-c',
+            'filter.reviewprobe.process=',
+            '-c',
+            'filter.reviewprobe.required=false',
+            'status',
+            '--porcelain',
+          ])
         ).stdout.trim(),
       ).toBe('');
       const changed = await qualify('hidden-changed-source', inputFor(['git']));
@@ -409,6 +539,70 @@ it.skipIf(!process.env.AUTOPOD_QUALIFICATION_DOCKER_IMAGE)(
       expect(changed.observations).toContainEqual(
         expect.objectContaining({ prerequisite: 'source', outcome: 'failed' }),
       );
+      expect(await filterState()).toEqual({ executed: false, count: '0' });
+      await cm.writeFile(containerId, '/workspace/pkg/source.txt', 'selected synthetic bytes\n');
+      const unrelated = (
+        await checkedExec([
+          '/usr/bin/git',
+          '--no-replace-objects',
+          '-C',
+          '/workspace',
+          'commit-tree',
+          tree,
+          '-m',
+          'unrelated selected B',
+        ])
+      ).stdout.trim();
+      const replacement = (
+        await checkedExec([
+          '/usr/bin/git',
+          '--no-replace-objects',
+          '-C',
+          '/workspace',
+          'commit-tree',
+          tree,
+          '-p',
+          head,
+          '-m',
+          'fake A parent C',
+        ])
+      ).stdout.trim();
+      await checkedExec(['/usr/bin/git', '-C', '/workspace', 'update-ref', 'HEAD', unrelated]);
+      await checkedExec(['/usr/bin/git', '-C', '/workspace', 'replace', unrelated, replacement]);
+      const rawAncestry = await cm.execInContainer(
+        containerId,
+        [
+          '/usr/bin/git',
+          '--no-replace-objects',
+          '-C',
+          '/workspace',
+          'merge-base',
+          '--is-ancestor',
+          head,
+          unrelated,
+        ],
+        { user: 'autopod', timeout: 10000, maxOutputBytes: 65536, assertCurrent },
+      );
+      stages.push({ name: 'real-unrelated-ancestry', result: rawAncestry });
+      save();
+      expect(rawAncestry.exitCode).toBe(1);
+      await checkedExec([
+        '/usr/bin/git',
+        '-C',
+        '/workspace',
+        'merge-base',
+        '--is-ancestor',
+        head,
+        unrelated,
+      ]); // Demonstrate adversarial default view.
+      const ancestryInput = inputFor(['git']);
+      ancestryInput.binding.source.head = unrelated;
+      const ancestry = await qualify('replacement-ref-false-ancestry', ancestryInput);
+      expect(ancestry.outcome).not.toBe('qualified');
+      expect(ancestry.observations).toContainEqual(
+        expect.objectContaining({ prerequisite: 'source', outcome: 'unknown' }),
+      );
+      expect(await filterState()).toEqual({ executed: false, count: '0' });
       expect(readFileSync(join(worktree, '.git'), 'utf8')).toBe(originalGitlink);
       expect(readFileSync(join(worktree, 'pkg/source.txt'), 'utf8')).toBe(
         'selected synthetic bytes\n',

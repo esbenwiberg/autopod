@@ -32,9 +32,32 @@ const base = process.argv[1];
 if(!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(base)) process.exit(2);
 const env = {...process.env};
 for(const key of Object.keys(env)) if(key.startsWith('GIT_')) delete env[key];
-env.GIT_CONFIG_NOSYSTEM='1'; env.GIT_CONFIG_GLOBAL='/dev/null'; env.GIT_OPTIONAL_LOCKS='0';
-const git = (args,maxBuffer=65536) => cp.execFileSync('/usr/bin/git', ['--git-dir='+root+'/.git','--work-tree='+root,'-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null',...args],
-  {cwd:root,env,encoding:'utf8',timeout:2000,maxBuffer});
+env.GIT_CONFIG_NOSYSTEM='1'; env.GIT_CONFIG_GLOBAL='/dev/null'; env.GIT_OPTIONAL_LOCKS='0'; env.GIT_NO_REPLACE_OBJECTS='1'; env.GIT_NO_LAZY_FETCH='1';
+// Config discovery is read-only, never a source/graph observation or a repository program.
+// Every Git call, including discovery and ancestry, uses the raw non-replacement graph.
+const gitBase=['--no-replace-objects','--no-optional-locks','--git-dir='+root+'/.git','--work-tree='+root,'-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null'];
+const gitOptions={cwd:root,env,encoding:'utf8',timeout:2000,maxBuffer:65536};
+// Attestation requires complete local objects. Reject declared promisor/partial
+// context before object reads too, including Git versions that ignore NO_LAZY_FETCH.
+let promisorKeys='';
+try {
+  promisorKeys=cp.execFileSync('/usr/bin/git', [...gitBase,'config','--null','--name-only','--get-regexp','^(extensions[.]partialclone|remote[.].*[.]promisor)$'],gitOptions);
+} catch(error) { if(error.status!==1) throw error; }
+if(promisorKeys) process.exit(2);
+let configuredFilters='';
+try {
+  configuredFilters=cp.execFileSync('/usr/bin/git', [...gitBase,'config','--null','--name-only','--get-regexp','^filter\\\\..*\\\\.(clean|smudge|process|required)$'],gitOptions);
+} catch(error) { if(error.status!==1) throw error; }
+const filterKeys=[...new Set(configuredFilters.split(String.fromCharCode(0)).filter(Boolean))];
+// Reject ambiguous/non-ASCII key names rather than misparse key=value overrides
+// (e.g. a driver containing '=' could otherwise leave its real filter executable).
+if(filterKeys.length>256||Buffer.byteLength(filterKeys.join(String.fromCharCode(0)))>32768||
+  filterKeys.some(key=>!/^filter[.][A-Za-z0-9_.:+-]+[.](clean|smudge|process|required)$/.test(key))) process.exit(2);
+// Do not let status run a clean/process filter AFTER tracked-byte hashing. Blank all
+// executable conversions and disable required=true without modifying config/index.
+const filterOverrides=filterKeys.flatMap(key=>['-c',key+(key.endsWith('.required')?'=false':'=')]);
+const git = (args,maxBuffer=65536) => cp.execFileSync('/usr/bin/git', [...gitBase,...filterOverrides,...args],
+  {...gitOptions,maxBuffer});
 const head=git(['rev-parse','--verify','HEAD']).trim();
 const tree=git(['rev-parse','--verify','HEAD^{tree}']).trim();
 const entries=git(['ls-tree','-r','-z','HEAD'],4*1024*1024).split(String.fromCharCode(0)).filter(Boolean);
