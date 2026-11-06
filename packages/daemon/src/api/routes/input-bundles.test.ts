@@ -9,6 +9,7 @@ import { createTestDb } from '../../test-utils/mock-helpers.js';
 import { referencePreview } from '../../test-utils/reference-preview-helpers.js';
 import { errorHandler } from '../error-handler.js';
 import { authenticateOperatorRequest, authPlugin } from '../plugins/auth.js';
+import { requestLoggerPlugin } from '../plugins/request-logger.js';
 import { inputBundleRoutes } from './input-bundles.js';
 
 const closers: Array<() => Promise<void>> = [];
@@ -19,6 +20,7 @@ async function fixture(previews?: (store: InputBundleStore) => ReferencePreviewS
   const db = createTestDb();
   const store = new InputBundleStore(db);
   const app = Fastify();
+  requestLoggerPlugin(app);
   app.setErrorHandler(errorHandler);
   app.addHook('preHandler', async (request) => {
     request.user = { oid: String(request.headers['x-owner'] ?? 'owner') } as typeof request.user;
@@ -55,6 +57,7 @@ async function authenticatedNetworkFixture(bodyTimeout = 30_000) {
   };
   app.setErrorHandler(errorHandler);
   authPlugin(app, auth);
+  requestLoggerPlugin(app);
   await inputBundleRoutes(
     app,
     store,
@@ -116,6 +119,39 @@ async function authenticatedNetworkFixture(bodyTimeout = 30_000) {
 }
 
 describe('owner-scoped reference uploads', () => {
+  it('releases slots for sequential multi-file uploads with request logging enabled', async () => {
+    const { app, store } = await fixture();
+    const contents = Array.from({ length: 8 }, (_, index) => Buffer.from(`Reference ${index}`));
+    const bundle = store.create(
+      {
+        requestKey: randomUUID(),
+        files: contents.map((bytes, index) => ({
+          path: `reference-${index}.txt`,
+          mediaType: 'text/plain',
+          byteLength: bytes.length,
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+        })),
+      },
+      'owner',
+    );
+
+    for (const [index, bytes] of contents.entries()) {
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/input-bundles/${bundle.id}/files/${index}`,
+        headers: { 'content-type': 'application/octet-stream' },
+        payload: bytes,
+      });
+      expect(response.statusCode).toBe(204);
+    }
+
+    const seal = await app.inject({ method: 'POST', url: `/input-bundles/${bundle.id}/seal` });
+    expect(seal.statusCode).toBe(200);
+    expect(seal.json().status).toBe('sealed');
+    for (const [index, bytes] of contents.entries()) {
+      expect(store.read(bundle.id, 'owner', index)).toEqual(bytes);
+    }
+  });
   it('rejects four unauthenticated unfinished PUT bodies before reserving upload capacity', async () => {
     const f = await authenticatedNetworkFixture();
     const stalled = Array.from({ length: 4 }, () => f.stalled());

@@ -38,7 +38,7 @@ export function sanitizeRequestUrl(rawUrl: string): string {
 }
 
 export function requestLoggerPlugin(app: FastifyInstance): void {
-  app.addHook('onResponse', (request, reply) => {
+  app.addHook('onResponse', async (request, reply) => {
     const duration = reply.elapsedTime;
     request.log.info(
       {

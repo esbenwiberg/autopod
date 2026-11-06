@@ -1,5 +1,24 @@
-import { describe, expect, it } from 'vitest';
-import { sanitizeRequestUrl } from './request-logger.js';
+import Fastify from 'fastify';
+import { describe, expect, it, vi } from 'vitest';
+import { requestLoggerPlugin, sanitizeRequestUrl } from './request-logger.js';
+
+describe('requestLoggerPlugin', () => {
+  it('continues to downstream response hooks after logging', async () => {
+    const app = Fastify();
+    const afterLogger = vi.fn(async () => {});
+    requestLoggerPlugin(app);
+    app.addHook('onResponse', afterLogger);
+    app.get('/test', async () => ({ ok: true }));
+
+    try {
+      const response = await app.inject({ method: 'GET', url: '/test' });
+      expect(response.statusCode).toBe(200);
+      expect(afterLogger).toHaveBeenCalledOnce();
+    } finally {
+      await app.close();
+    }
+  });
+});
 
 describe('sanitizeRequestUrl', () => {
   it('redacts sensitive query parameters before logging', () => {
