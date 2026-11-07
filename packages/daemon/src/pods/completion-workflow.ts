@@ -138,6 +138,7 @@ export function createCompletionWorkflow(
       return;
     }
 
+    if (podRepo.retainedCoding?.isOwner(podId)) podRepo.retainedCoding.assertCompletedWorker(podId);
     const heldCompletion = holdCompletionForHumanWork(pod);
     if (heldCompletion) {
       await heldCompletion;
@@ -159,6 +160,13 @@ export function createCompletionWorkflow(
     }
     const preparedSource = await prepareSourceForCompletion(pod);
     if (!preparedSource) return;
+    if (podRepo.retainedCoding?.isOwner(podId)) {
+      if (!captured.sealRetainedCodingSource)
+        throw new Error('Coding final-source seal unavailable');
+      await captured.sealRetainedCodingSource(podRepo.getOrThrow(podId));
+      await this.triggerValidation(podId, { validationOnly: true });
+      return;
+    }
     await applyCompletionDecision(pod, preparedSource, (id) => this.triggerValidation(id));
   }
   const infrastructureCompletions = new Map<string, Promise<void>>();

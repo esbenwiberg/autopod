@@ -70,8 +70,13 @@ export async function exportSandboxWorkspace(
     const directories: Array<{ name: string; mode: number }> = [];
     const seen = new Set<string>();
     const files = new Set<string>();
+    const pendingEntries = new Set<Promise<void>>();
     unpack.on('entry', (header, stream, next) => {
-      void (async () => {
+      // Destroying the extractor also destroys its active child entry. Attach
+      // before any ownership/path checks or awaits, including for skipped entries
+      // which never get a file pipeline, so that error rejects this export only.
+      stream.on('error', (error: Error) => unpack.destroy(error));
+      const entry = (async () => {
         assertDirectoryExtractionCurrent(options);
         const name = archiveRelativePath(header.name);
         if (seen.has(name)) throw new Error('Duplicate sandbox archive entry');
@@ -111,10 +116,13 @@ export async function exportSandboxWorkspace(
         } else {
           throw new Error(`Unsupported sandbox archive entry type: ${header.type}`);
         }
-      })().then(
-        () => next(),
-        (error: Error) => unpack.destroy(error),
-      );
+      })()
+        .then(() => next())
+        .catch((error: Error) => {
+          unpack.destroy(error);
+        });
+      pendingEntries.add(entry);
+      void entry.then(() => pendingEntries.delete(entry));
     });
     async function* chunks() {
       for (const part of parts) {
@@ -126,7 +134,13 @@ export async function exportSandboxWorkspace(
         yield content;
       }
     }
-    await pipeline(Readable.from(chunks()), createGunzip(), unpack);
+    try {
+      await pipeline(Readable.from(chunks()), createGunzip(), unpack);
+    } finally {
+      // Pipeline destruction can precede an entry's pending mkdir/write/chmod.
+      // Do not let a caller remove staging while those callbacks still own it.
+      await Promise.all(pendingEntries);
+    }
     assertDirectoryExtractionCurrent(options);
     const linkPaths = new Set(links.map((link) => link.relative));
     for (const name of seen) {

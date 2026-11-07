@@ -1,5 +1,10 @@
 # Recovering failed validation
 
+If a task still displays `running` with unresolved worker ownership after restart,
+use [Inspect stalled execution in the desktop](desktop-stalled-worker-recovery.md)
+first. Its explicit stop-and-retain action is not validation repair or a pass;
+existing infrastructure, guidance and retry-admission fences remain in force.
+
 The desktop's current Validation tab exposes two different operations:
 
 - **Fix validation** requests a coding-worker correction followed by normal validation

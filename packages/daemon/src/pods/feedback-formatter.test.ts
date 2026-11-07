@@ -314,7 +314,7 @@ describe('formatFeedback', () => {
       expect(output).not.toContain('report_blocker');
     });
 
-    it('tells the agent to report factDeviations for unavailable fact commands', () => {
+    it('reports unavailable external facts as NOT-RUN without automatically requesting waivers', () => {
       const validation = mockValidationResult({});
       validation.factValidation = {
         status: 'pending_human',
@@ -342,11 +342,13 @@ describe('formatFeedback', () => {
         maxAttempts: 3,
       });
 
-      expect(output).toContain('Required Fact Deviation Requests Needed');
+      expect(output).toContain('Required Verification Pending');
       expect(output).toContain('Do not report these as ordinary plan deviations');
       expect(output).toContain('`report_task_summary`');
-      expect(output).toContain('"factId": "fact-swift-only"');
-      expect(output).toContain('"action": "waive"');
+      expect(output).toContain('"requiredFactId": "fact-swift-only"');
+      expect(output).toContain('`deferredChecks`');
+      expect(output).toContain('Required checks remain pending');
+      expect(output).not.toContain('"action": "waive"');
       expect(output).not.toContain('Required Fact Failures');
     });
 

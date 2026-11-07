@@ -110,13 +110,13 @@ import { createWorkspaceTransfer } from './workspace-transfer.js';
 
 export { buildActionableFailureSummary, buildPrFixTask } from './fix-policy.js';
 
+import { qualifyExecutionEnvironment } from './environment-qualification.js';
 import { createFixAdmission } from './fix-admission.js';
 import { createFixControls } from './fix-controls.js';
 import { createFixDelivery } from './fix-delivery.js';
 import { createFixFeedback } from './fix-feedback.js';
 import { createFixParking } from './fix-parking.js';
 import { createFixProviderBinding } from './fix-provider-binding.js';
-
 import { createOperatorControls } from './operator-controls.js';
 import { createOperatorKill } from './operator-kill.js';
 import { createOperatorMessages } from './operator-messages.js';
@@ -124,7 +124,6 @@ import { createOperatorPause } from './operator-pause.js';
 import { createOperatorRejection } from './operator-rejection.js';
 import { createOperatorPauseState } from './operator-state.js';
 import { createOperatorTools } from './operator-tools.js';
-
 import {
   allocateHostPort,
   CONTAINER_APP_PORT,
@@ -132,6 +131,7 @@ import {
   hostnameFromUrl,
   portFromUrl,
 } from './resource-policy.js';
+import { sealRetainedCodingSource } from './retained-coding-source.js';
 
 export type { NetworkManager } from './resource-contracts.js';
 
@@ -152,6 +152,7 @@ export type { PodCreator } from './workspace-contracts.js';
 
 import { mergeOverrides, warnIfSinglePrSeriesMissingSeriesMeta } from './admission-policy.js';
 import { createSandboxRecovery } from './sandbox-recovery.js';
+import { createStalledWorkerRecovery } from './stalled-worker-recovery.js';
 import { createWorkspaceArtifactObservation } from './workspace-artifact-observation.js';
 import { createWorkspaceBranchSource } from './workspace-branch-source.js';
 import { createWorkspaceBranchSync } from './workspace-branch-sync.js';
@@ -458,6 +459,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     podRepo,
   });
   const workspaceWatchdog = createWorkspaceWatchdog(deps, {
+    ownsAgentRun: (podId) => activeAgentRuns.get(podId)?.isCurrent?.() === true,
     logger,
     podRepo,
     stopSandboxPreviewProxy,
@@ -993,6 +995,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
   });
 
   const provisioningWorkflow = createProvisioningWorkflow(deps, {
+    // Keep live dependencies by reference; this private integration callback is
+    // captured separately so late-bound cooldown/provider controls stay live.
+    qualifyCodingCandidate: async (input) => {
+      if (podRepo.retainedCoding?.isOwner(input.pod.id))
+        await checkpointRecovery!.repair!.qualify(input);
+    },
     materializeSpecFiles,
     captureDeployBaselineHashes,
     podRepo,
@@ -1035,6 +1043,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityStatus,
   });
   const processWorkflow = createAgentProcessWorkflow(deps, {
+    assertCodingCandidateCurrent: (id) => checkpointRecovery!.repair!.assertCandidateCurrent(id),
     podRepo,
     logger,
     emitActivityStatus,
@@ -1101,6 +1110,13 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     finalizeArtifactPod,
     prepareSourceForCompletion,
     applyCompletionDecision,
+    sealRetainedCodingSource: (pod) =>
+      sealRetainedCodingSource({
+        pod,
+        podRepo,
+        worktreeManager,
+        containerManager: containerManagerFactory.get(pod.executionTarget),
+      }),
   });
   const { prepareApprovalDelivery } = createApprovalDeliveryPreparation({
     podRepo,
@@ -1419,10 +1435,39 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityStatus,
   });
 
+  const isCodingWorkerActive = (podId: string, runId: string): boolean => {
+    const owner = activeAgentRuns.get(podId);
+    return owner?.taskRunId === runId && owner.isCurrent?.() === true;
+  };
   const controlOperations = createControlOperationRegistry((podId, operation) => {
+    podRepo.stalledRecoveries?.assertAvailable(podId);
+    if (stalledWorkerRecovery?.isActive(podId))
+      checkpointError('Stop-and-retain preflight owns this control.');
     podRepo.retainedFinalizations?.assertAvailable(podId);
     if (retainedFinalization?.isActive(podId))
       checkpointError('Retained finalization preflight owns this control.');
+    // Reply admission is rechecked inside its own scoped facade capability.
+    // An active repair question must not inherit generic resume/mutation permission.
+    const codingDecision =
+      operation === 'sendMessage'
+        ? podRepo.retainedCoding?.workerDecision(podRepo.getOrThrow(podId))
+        : null;
+    if (
+      operation === 'sendMessage' &&
+      (podRepo.retainedCheckpoints?.repairDecision(podRepo.getOrThrow(podId)) ||
+        (codingDecision?.facts.worker &&
+          isCodingWorkerActive(podId, codingDecision.facts.worker.runId)))
+    ) {
+      sandboxRecovery.assertAvailable(podId, operation);
+      assertValidationMutationSettled(podRepo, podId);
+      podRepo.validationExecutions?.assertNoPendingRecovery(podId);
+      if (podRepo.sourceAdoptions?.hasCustody(podId))
+        sourceAdoptionError(
+          'Source/report custody blocks this repair reply.',
+          'SOURCE_CUSTODY_HELD',
+        );
+      return;
+    }
     const metadataOnly = new Set([
       'interruptValidation',
       'notifyEscalation',
@@ -1448,6 +1493,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
 
     if (
       continuation?.binding.continuation &&
+      !(
+        podRepo.retainedCoding?.isOwner(podId) &&
+        ['consumeAgentEvents', 'handleCompletion', 'reconcileInfrastructureBlocker'].includes(
+          operation,
+        )
+      ) &&
       ![
         'approveSession',
         'processPod',
@@ -1456,6 +1507,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
         'nudgeSession',
         'refreshReadinessAfterQualityScore',
         'authorizeValidationRecoveryBudget',
+        ...(podRepo.retainedCheckpoints?.ownsRepairExecution(podId)
+          ? ['consumeAgentEvents', 'handleCompletion']
+          : []),
         ...(((!continuation.checked && continuation.activated) || successorChecks) &&
         podRepo.getOrThrow(podId).status === 'running'
           ? ['triggerValidation']
@@ -1463,7 +1517,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       ].includes(operation)
     )
       checkpointError(
-        'Retained continuation owns this source. Use exact candidate selection or fresh human approval; legacy Rework, budget resets and competing source changes are not authorized.',
+        `Retained continuation owns this source. Use exact candidate selection or fresh human approval; legacy Rework, budget resets and competing source changes are not authorized (${operation}).`,
         'CONTINUATION_SOURCE_HELD',
       );
     if (
@@ -1484,6 +1538,12 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       rewriteError(
         `Rewrite ${rewrite.id} owns candidate checks/publication. Competing source mutation is not authorized.`,
       );
+    if (
+      operation === 'triggerValidation' &&
+      podRepo.retainedCoding?.latest(podId) &&
+      !podRepo.retainedCoding.finalSource(podId, podRepo.getOrThrow(podId).lifecycleGeneration)
+    )
+      checkpointError('Coding must positively settle and seal source before checks');
     sandboxRecovery.assertAvailable(podId, operation);
     if (operation !== 'processPod') podRepo.retainedCheckpoints?.assertAvailable(podId);
     if (!metadataOnly.has(operation)) assertValidationMutationSettled(podRepo, podId);
@@ -1498,6 +1558,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     podRepo,
     getContainerManager: () => containerManagerFactory.get('sandbox'),
     isActive: (id, exceptCurrent) =>
+      Boolean(stalledWorkerRecovery?.isActive(id)) ||
       Boolean(retainedFinalization?.isActive(id)) ||
       controlOperations.isActive(id, exceptCurrent) ||
       activeAgentRuns.has(id) ||
@@ -1517,6 +1578,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       Boolean(deps.launchConfiguration?.goals?.get(podId)),
     assertGuidanceCollected,
     assertIdle: (podId) => {
+      if (stalledWorkerRecovery?.isActive(podId))
+        checkpointError('Stop-and-retain preflight is active.');
+      podRepo.stalledRecoveries?.assertAvailable(podId);
       if (retainedFinalization?.isActive(podId))
         checkpointError('Finalization preflight is active.');
       podRepo.retainedFinalizations?.assertAvailable(podId);
@@ -1553,9 +1617,30 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           worktreeManager,
           getContainerManager: (target = 'sandbox') => containerManagerFactory.get(target),
           readLaunch: deps.launchConfiguration?.read,
+          beforeCodingActivation: (pod) => closeProviderAttempt(pod.id, 'aborted'),
+          isCodingWorkerActive,
+          qualifyCoding: async (binding, input, assertCurrent) => {
+            const result = await qualifyExecutionEnvironment({
+              binding,
+              pod: input.pod,
+              profile: input.profile,
+              launchConfig: input.launchConfig!,
+              containerManager: input.containerManager,
+              preparationCompleted: true,
+              assertCurrent,
+            });
+            if (result.provenance)
+              podRepo.executionProvenance?.record(
+                input.pod.id,
+                input.pod.lifecycleGeneration,
+                result.provenance,
+              );
+            return result.evidence;
+          },
           executionSettings: deps.launchConfiguration?.executionSettings,
           previewExecution: deps.launchConfiguration?.previewRetainedExecution,
           isIdle: (id) =>
+            !stalledWorkerRecovery?.isActive(id) &&
             !retainedFinalization?.isActive(id) &&
             !controlOperations.isActive(id) &&
             !activeAgentRuns.has(id) &&
@@ -1592,6 +1677,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           eventBus,
           getContainerManager: (target) => containerManagerFactory.get(target),
           isIdle: (id) =>
+            !stalledWorkerRecovery?.isActive(id) &&
             !checkpointRecovery?.isActive(id) &&
             !controlOperations.isActive(id) &&
             !activeAgentRuns.has(id) &&
@@ -1610,6 +1696,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     podRepo,
     getContainerManager: () => containerManagerFactory.get('sandbox'),
     isIdle: (id) =>
+      !stalledWorkerRecovery?.isActive(id) &&
       !retainedFinalization?.isActive(id) &&
       !controlOperations.isActive(id) &&
       !activeAgentRuns.has(id) &&
@@ -1623,8 +1710,49 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       Boolean(deps.launchConfiguration?.goals?.get(id)),
     deleteSession: workspaceDeletion.deleteSession,
   });
+  const stalledWorkerRecovery: ReturnType<typeof createStalledWorkerRecovery> | undefined =
+    podRepo.stalledRecoveries
+      ? createStalledWorkerRecovery({
+          podRepo,
+          getContainerManager: () => containerManagerFactory.get('local'),
+          worktreeManager,
+          isIdle: (id) =>
+            !controlOperations.isActive(id) &&
+            !activeAgentRuns.has(id) &&
+            !validationAbortControllers.has(id) &&
+            !validationResumeRuns.has(id) &&
+            !artifactResumeRuns.has(id) &&
+            !artifactCompletionRuns.has(id) &&
+            !attemptExtensionRuns.has(id) &&
+            !checkpointRecovery?.isActive(id) &&
+            !retainedFinalization?.isActive(id),
+          isGoal: (id) =>
+            deps.launchConfiguration?.read(id)?.intent === 'goal' ||
+            Boolean(deps.launchConfiguration?.goals?.get(id)),
+          assertGuidanceCollected,
+          preserveWorkspace: (pod, archivePath) =>
+            syncWorkspaceBack(
+              pod.containerId!,
+              pod.worktreePath!,
+              containerManagerFactory.get('local'),
+              pod.id,
+              'local',
+              { archiveOnly: true, preservedWorkspace: archivePath },
+            ).then(() => {}),
+          transition,
+          emit: emitActivityStatus,
+          root: path.join(
+            process.env.DATA_DIR ??
+              (process.env.DB_PATH
+                ? path.dirname(path.resolve(process.env.DB_PATH))
+                : path.join(process.cwd(), '.autopod-data')),
+            'stalled-worker-recoveries',
+          ),
+        })
+      : undefined;
   return controlOperations.wrap(
     createPodManagerFacade({
+      stalledWorkerRecovery,
       sandboxRecovery,
       retainedFinalization,
       checkpointRecovery,

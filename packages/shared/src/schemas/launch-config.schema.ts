@@ -537,11 +537,43 @@ const savedLaunchOptions = launchOptions.omit({
   expectedDigest: true,
   requestId: true,
 });
-export const savedLaunchSelectionSchema = z.union([
+// Name the exact object shapes at union boundaries. Otherwise declaration emit
+// repeatedly serializes the full overrides/work graph in each arm and consumer.
+type SavedLaunchOptionsShape = typeof savedLaunchOptions.shape;
+type RepositorySelectionShape = z.core.util.Extend<
+  SavedLaunchOptionsShape,
+  { repositoryId: typeof id; repositorySetupId: z.ZodOptional<typeof id> }
+>;
+type EmptyWorkspaceSelectionShape = z.core.util.Extend<
+  SavedLaunchOptionsShape,
+  { emptyWorkspace: z.ZodLiteral<true>; profileId: typeof id }
+>;
+type SavedLaunchSelectionSchema = z.ZodUnion<
+  readonly [
+    z.ZodObject<RepositorySelectionShape, z.core.$strict>,
+    z.ZodObject<EmptyWorkspaceSelectionShape, z.core.$strict>,
+  ]
+>;
+export const savedLaunchSelectionSchema: SavedLaunchSelectionSchema = z.union([
   savedLaunchOptions.extend({ repositoryId: id, repositorySetupId: id.optional() }).strict(),
   savedLaunchOptions.extend({ emptyWorkspace: z.literal(true), profileId: id }).strict(),
 ]);
-export const launchRequestSchema = z
+type LaunchOptionsShape = typeof launchOptions.shape;
+type RepositoryRequestShape = z.core.util.Extend<
+  LaunchOptionsShape,
+  { repositoryId: typeof id; repositorySetupId: z.ZodOptional<typeof id> }
+>;
+type EmptyWorkspaceRequestShape = z.core.util.Extend<
+  LaunchOptionsShape,
+  { emptyWorkspace: z.ZodLiteral<true>; profileId: typeof id }
+>;
+type LaunchRequestSchema = z.ZodUnion<
+  readonly [
+    z.ZodObject<RepositoryRequestShape, z.core.$strict>,
+    z.ZodObject<EmptyWorkspaceRequestShape, z.core.$strict>,
+  ]
+>;
+export const launchRequestSchema: LaunchRequestSchema = z
   .union([
     launchOptions.extend({ repositoryId: id, repositorySetupId: id.optional() }).strict(),
     launchOptions.extend({ emptyWorkspace: z.literal(true), profileId: id }).strict(),

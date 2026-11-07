@@ -16468,8 +16468,11 @@ describe('PodManager', () => {
       await manager.triggerValidation(pod.id);
 
       const resumeCalls = vi.mocked(ctx.runtime.resume).mock.calls;
-      expect(resumeCalls[0]?.[1]).toContain('Required Fact Deviation Requests Needed');
-      expect(resumeCalls[0]?.[1]).toContain('"factId": "fact-swift-only"');
+      expect(resumeCalls[0]?.[1]).toContain('Required Verification Pending');
+      expect(resumeCalls[0]?.[1]).toContain('"requiredFactId": "fact-swift-only"');
+      expect(resumeCalls[0]?.[1]).toContain(
+        'Required checks remain pending; a deferral does not waive or replace a fact.',
+      );
       expect(resumeCalls[0]?.[1]).toContain('Do not report these as ordinary plan deviations');
     });
 

@@ -46,6 +46,36 @@ describe('formatActivity', () => {
     expect(out.text).toContain('(2/5)');
   });
 
+  it('warns about NOT-RUN checks before truncating the narrative, without treating them as passes', () => {
+    const out = formatActivity(
+      {
+        type: 'task_summary',
+        timestamp: 't',
+        actualSummary: 'Done '.repeat(100),
+        deviations: [],
+        deferredChecks: [
+          {
+            id: 'mac',
+            check: 'xcodebuild test',
+            reason: 'Linux',
+            expectedExecutor: 'Mac owner',
+            lifecycleGeneration: 1,
+          },
+        ],
+      },
+      0,
+    );
+    expect(out.tone).toBe('warn');
+    expect(out.text).toContain('1 reported NOT-RUN check(s); gates still apply');
+    expect(out.text.length).toBeLessThanOrEqual(161);
+    expect(
+      formatActivity(
+        { type: 'task_summary', timestamp: 't', actualSummary: 'Legacy', deviations: [] },
+        0,
+      ).text,
+    ).toBe('Legacy');
+  });
+
   it('renders error with danger tone when fatal', () => {
     const out = formatActivity(
       ev({ type: 'error', timestamp: 't', message: 'boom', fatal: true }),

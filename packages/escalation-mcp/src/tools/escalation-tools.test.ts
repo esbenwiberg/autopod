@@ -400,6 +400,48 @@ describe('reportBlocker', () => {
     expect(bridge.callAdvisorModel).not.toHaveBeenCalled();
   });
 
+  it('preserves a strict prospective launcher claim but never worker proof or generation', async () => {
+    const bridge = makeBridge();
+    const prerequisiteBlocker = {
+      version: 1 as const,
+      kind: 'missing-execution-prerequisites' as const,
+      requirementsHash: 'a'.repeat(64),
+      launchers: ['jq'],
+    };
+    const input = {
+      description: 'jq missing',
+      attempted: [],
+      needs: 'Declared jq launcher',
+      phase: 'coding',
+      prerequisiteBlocker,
+    };
+    await reportBlocker('sess-1', input, bridge, pendingRequests);
+    expect(bridge.createEscalation).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: expect.objectContaining({ prerequisiteBlocker }) }),
+    );
+    for (const field of [
+      'lifecycleGeneration',
+      'receipt',
+      'qualification',
+      'actor',
+      'command',
+      'retryGrant',
+    ]) {
+      await expect(
+        reportBlocker('sess-1', { ...input, [field]: true }, bridge, pendingRequests),
+      ).rejects.toThrow();
+    }
+    await expect(
+      reportBlocker(
+        'sess-1',
+        { ...input, prerequisiteBlocker: { ...prerequisiteBlocker, resolved: true } } as never,
+        bridge,
+        pendingRequests,
+      ),
+    ).rejects.toThrow();
+    expect(bridge.createEscalation).toHaveBeenCalledTimes(1);
+  });
+
   it('increments escalation count', async () => {
     const bridge = makeBridge({
       getAutoPauseCount: vi.fn().mockReturnValue(0),

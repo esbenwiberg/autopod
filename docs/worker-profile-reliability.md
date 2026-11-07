@@ -64,6 +64,15 @@ reproduce or certify the native CI failure. Fresh native CI remains required.
 The declaration-size regression protects against renewed expansion, not against
 every possible compiler-memory regression.
 
+Conditional repair integration later reproduced declaration-worker exhaustion on
+local Node24 with the same 4 GiB default, in both direct daemon and root typecheck.
+Exact named launch-union shape boundaries remove another repeated serialization
+of overrides/work schemas: shared declarations fall from 707,701 to 648,413 bytes,
+with byte-identical runtime JavaScript and schema/input/output equality proofs.
+All 82 extended daemon entries remain checked. Direct and root default-heap checks,
+including a forced serialized root run, passed locally; this is not Linux/native-CI
+or combined-source qualification. The heap policy and declaration scope are unchanged.
+
 Disk-reopen fixtures should use the production `createDatabase` connection
 policy, including WAL and `synchronous=NORMAL`, rather than paying a separate
 full-sync rollback-journal transaction for every schema version. The retained

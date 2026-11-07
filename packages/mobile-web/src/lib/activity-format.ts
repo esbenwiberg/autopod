@@ -69,8 +69,12 @@ export function formatActivity(event: AgentEvent, index: number): FormattedActiv
         key,
         timestamp: event.timestamp,
         glyph: 'Σ',
-        tone: 'ok',
-        text: shorten(event.actualSummary),
+        tone: event.deferredChecks?.length ? 'warn' : 'ok',
+        text: shorten(
+          event.deferredChecks?.length
+            ? `${event.deferredChecks.length} reported NOT-RUN check(s); gates still apply. ${event.actualSummary}`
+            : event.actualSummary,
+        ),
       };
     case 'escalation':
       return {

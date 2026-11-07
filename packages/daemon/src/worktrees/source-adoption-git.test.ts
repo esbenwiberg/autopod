@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   applyPinnedAdoption,
   inspectAdoptionGit,
+  inspectPreservationGit,
   preparePinnedAdoption,
 } from './source-adoption-git.js';
 
@@ -63,6 +64,20 @@ async function fixture() {
   return { root, local, git, old, target, config, prepare };
 }
 describe('real Git exact-source adoption', () => {
+  it('observes dirty preservation without granting clean adoption or executing fsmonitor', async () => {
+    const f = await fixture();
+    const sentinel = path.join(f.root, 'fsmonitor-must-not-execute');
+    await f.git(['config', 'core.fsmonitor', `touch ${sentinel}`]);
+    await writeFile(path.join(f.local, 'code.txt'), 'uncommitted preserved source');
+    const source = await inspectPreservationGit(f.git, 'repair');
+    expect(source.head).toBe(f.old);
+    expect(source.worktreeClean).toBe(false);
+    await expect(inspectAdoptionGit(f.git, 'repair')).rejects.toThrow('cleanliness');
+    await expect(access(sentinel)).rejects.toMatchObject({ code: 'ENOENT' });
+    await f.git(['config', 'filter.unsafe.clean', `touch ${sentinel}`]);
+    await expect(inspectPreservationGit(f.git, 'repair')).rejects.toThrow('Executable filters');
+    await expect(access(sentinel)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
   it('refuses repository-local executable filters before status can invoke them', async () => {
     const f = await fixture();
     await writeFile(path.join(f.local, '.gitattributes'), 'code.txt filter=source-policy\n');

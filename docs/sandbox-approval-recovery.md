@@ -94,5 +94,20 @@ ordinary approval. Do not delete the sandbox, skip preservation, or restart an
 agent to bypass a wakeup or export failure. Late extraction cannot publish a
 snapshot or replace
 a previous receipt; stale lifecycle ownership cannot publish or trigger cleanup.
+Export cancellation, invalid archive members and failed downloads reject the
+collection without allowing a tar entry error to terminate the daemon. Export
+waits for pending entry filesystem work before returning control for staging
+cleanup; failed or late copies still cannot replace a previous snapshot.
+
+After a daemon restart, a retained unsettled worker is not an owned silent run.
+The watchdog records **Watchdog paused** and leaves its resource untouched when
+there is no current daemon run owner, termination is unverified, or ownership
+cannot be read. A later MCP summary or heartbeat does not restore the original
+completion stream. `running` in this situation is not proof of a live worker;
+inspect `ap status POD --json` and `ap reconcile-termination POD --json`. Preserve
+source and reports from the original resource before selecting recovery: the
+host checkout can still be an older checkpoint or even the launch baseline.
+Silence, restart and container suspension do not settle the original execution.
+
 A copy timeout from older versions covered wakeup and export together and cannot
 identify which stage stalled without additional evidence.

@@ -20,6 +20,7 @@ export function createWorkspaceWatchdog(
     eventBus,
     enqueueSession,
     validationRepo,
+    ownsAgentRun,
   } = captured;
   let stuckPodWatchdog: ReturnType<typeof setInterval> | null = null;
   let unsubscribeWakeRecovery: (() => void) | null = null;
@@ -37,6 +38,7 @@ export function createWorkspaceWatchdog(
 
     const WAKE_GRACE_MS = 60_000;
     let lastWakeAt: number | null = null;
+    const reportedHolds = new Map<string, string>();
     const retainReport = async (podId: string) => {
       try {
         await this.reconcileInfrastructureBlocker(podId);
@@ -44,7 +46,41 @@ export function createWorkspaceWatchdog(
         logger.warn({ err, podId }, 'Watchdog: infrastructure custody remains held');
       }
     };
-    const inspect = (expected: Pod): { pod: Pod; state: 'owned' | 'reported' | 'superseded' } => {
+    const retainUnownedExecution = (pod: Pod): boolean => {
+      try {
+        const ledger = podRepo.taskExecutions;
+        if (!ledger) throw new Error('Worker ownership evidence unavailable');
+        if (
+          !ledger.hasUnverifiedTermination(pod.id) &&
+          (!ledger.hasActiveRun(pod.id) || ownsAgentRun(pod.id))
+        ) {
+          reportedHolds.delete(pod.id);
+          return false;
+        }
+      } catch (err) {
+        logger.warn({ err, podId: pod.id }, 'Watchdog: worker ownership could not be verified');
+      }
+      const reason =
+        `Watchdog paused: worker execution ownership or termination is unresolved. ` +
+        `Original source and resources retained; inspect ap reconcile-termination ${pod.id} before recovery.`;
+      const identity = JSON.stringify([
+        pod.lifecycleGeneration,
+        pod.finalization?.cycle,
+        pod.executionTarget,
+        pod.containerId,
+        pod.worktreePath,
+      ]);
+      if (reportedHolds.get(pod.id) !== identity) {
+        // lastCorrectionMessage also carries rework admission state. A watchdog
+        // notice must not overwrite it or invent persisted execution settlement.
+        emitActivityStatus(pod.id, reason);
+        reportedHolds.set(pod.id, identity);
+      }
+      return true;
+    };
+    const inspect = (
+      expected: Pod,
+    ): { pod: Pod; state: 'owned' | 'reported' | 'retained' | 'superseded' } => {
       const pod = podRepo.getOrThrow(expected.id);
       if (
         pod.status !== 'running' ||
@@ -56,6 +92,7 @@ export function createWorkspaceWatchdog(
       )
         return { pod, state: 'superseded' };
       if (podRepo.hasInfrastructureBlocker?.(pod.id)) return { pod, state: 'reported' };
+      if (retainUnownedExecution(pod)) return { pod, state: 'retained' };
       if (
         pod.lastAgentEventAt !== expected.lastAgentEventAt ||
         pod.lastHeartbeatAt !== expected.lastHeartbeatAt ||
@@ -73,6 +110,10 @@ export function createWorkspaceWatchdog(
           return;
         }
         const running = podRepo.list({ status: 'running' as PodStatus });
+        const runningIds = new Set(running.map((pod) => pod.id));
+        for (const id of reportedHolds.keys()) {
+          if (!runningIds.has(id)) reportedHolds.delete(id);
+        }
         const now = Date.now();
         for (const listed of running) {
           const pod = podRepo.getOrThrow(listed.id);
@@ -87,6 +128,9 @@ export function createWorkspaceWatchdog(
             // The narrow owner alone can preserve a positively settled source.
             continue;
           }
+          // Restart can leave a durable run alive without a local stream owner.
+          // A late MCP heartbeat/summary does not reattach it or prove its exit.
+          if (retainUnownedExecution(pod)) continue;
           // Reference is the most recent of (lastAgentEventAt, lastHeartbeatAt,
           // startedAt) — all are real liveness signals scoped to the current run.
           // MCP tools can legitimately stay open while validation runs without

@@ -29,6 +29,9 @@ describe('human-only retained checkpoint selection', () => {
       recoverCheckpoint: f.recovery.submit,
       getCheckpointRecoveries: f.recovery.list,
       getCheckpointRecoverySelection: f.recovery.selection,
+      inspectRetainedContinuation: (...args) => f.recovery.inspect(...args),
+      recoverInfrastructure: f.recovery.recoverInfrastructure,
+      reconcileInfrastructure: f.recovery.reconcileInfrastructure,
       reconcileCheckpointOutcome: f.recovery.reconcileOutcome,
       continueRetained: f.recovery.continueRetained,
       checkRetainedCandidate: (...args: Parameters<typeof f.recovery.checkCandidate>) =>
@@ -43,6 +46,43 @@ describe('human-only retained checkpoint selection', () => {
     f.ctx.db.close();
     await rm(f.root, { recursive: true, force: true });
     vi.unstubAllEnvs();
+  });
+  it('authenticates and strictly validates preservation-safe infrastructure admission and reconciliation', async () => {
+    const input = {
+      ...f.input,
+      mode: 'checks',
+      qualification: 'Explicit owner diagnosis of the recorded needs, not a passing result',
+    };
+    for (const suffix of ['', '/reconcile']) {
+      const url = `/pods/${f.podId}/infrastructure-recovery${suffix}`;
+      for (const authorization of [undefined, 'Bearer pod-token']) {
+        const response = await app.inject({
+          method: 'POST',
+          url,
+          payload: input,
+          headers: authorization ? { authorization } : {},
+        });
+        expect(response.statusCode).toBe(401);
+      }
+      for (const extra of [
+        { actor: f.actor },
+        { force: true },
+        { result: { overall: 'pass' } },
+        { sourcePath: '/other' },
+        { prepareOnly: true },
+        { remoteHead: 'a'.repeat(40) },
+        { mode: 'other' },
+        { instructions: { content: 'Different bytes', sha256: 'bad' } },
+      ]) {
+        expect(
+          (await app.inject({ method: 'POST', url, headers, payload: { ...input, ...extra } }))
+            .statusCode,
+        ).toBe(400);
+      }
+    }
+    expect(f.cm.getStatus).not.toHaveBeenCalled();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.recovery.list(f.podId)).toEqual([]);
   });
   it('exposes authenticated report-bound selection without inventing a validation result', async () => {
     const evidence = recordPreValidationInfrastructure(f);
@@ -59,6 +99,7 @@ describe('human-only retained checkpoint selection', () => {
     expect(response.headers['cache-control']).toBe('no-store');
     expect(response.json()).toEqual({
       operations: [],
+      inspection: f.recovery.inspect(f.podId),
       selection: {
         expectedGeneration: f.pod().lifecycleGeneration,
         expectedResultHash: f.input.expectedResultHash,
@@ -75,6 +116,76 @@ describe('human-only retained checkpoint selection', () => {
     expect(accepted.statusCode).toBe(202);
     await f.recovery.wait(f.input.id);
     expect(f.recovery.list(f.podId)[0]?.activated).toEqual({ generation: 2 });
+  });
+  it.each([
+    'incomplete',
+    'oversized',
+  ])('GET displays bounded needs and null selection for %s report evidence', async (kind) => {
+    const evidence = recordPreValidationInfrastructure(f);
+    f.ctx.db.prepare('UPDATE escalations SET payload=? WHERE id=?').run(
+      JSON.stringify({
+        ...evidence.report.payload,
+        ...(kind === 'incomplete' ? { phase: undefined } : { needs: 'n'.repeat(70000) }),
+      }),
+      evidence.report.id,
+    );
+    const before = f.pod();
+    const report = f.ctx.escalationRepo.getOrThrow(evidence.report.id);
+    f.ctx.db.pragma('query_only=ON');
+    const response = await app.inject({ url: endpoint(), headers });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    const body = response.json();
+    expect(body.selection).toBeNull();
+    expect(body.selectionRefusal).toMatchObject({ code: 'CHECKPOINT_RECOVERY_BLOCKED' });
+    expect(body.inspection).toMatchObject({
+      status: 'blocked',
+      selection: null,
+      infrastructure: {
+        state: 'reported',
+        needs: [
+          {
+            id: evidence.report.id,
+            needs: kind === 'incomplete' ? evidence.report.payload.needs : 'n'.repeat(1024),
+            truncated: kind === 'oversized',
+          },
+        ],
+      },
+    });
+    expect(body.inspection.checks).toContainEqual(
+      expect.objectContaining({
+        id: 'selection_evidence',
+        code: 'CHECKPOINT_RECOVERY_BLOCKED',
+        state: 'blocked',
+      }),
+    );
+    expect(f.pod()).toEqual(before);
+    expect(f.ctx.escalationRepo.getOrThrow(evidence.report.id)).toEqual(report);
+    expect(f.cm.getStatus).not.toHaveBeenCalled();
+    expect(f.deps.enqueue).not.toHaveBeenCalled();
+  });
+  it.each([
+    { error: new Error('Selection DB failure'), status: 500 },
+    { error: new AutopodError('Selection programming failure', 'UNEXPECTED', 409), status: 409 },
+    {
+      error: new AutopodError('Selection authentication failure', 'UNAUTHORIZED', 401),
+      status: 401,
+    },
+    {
+      error: new AutopodError('Selection storage failure', 'CHECKPOINT_RECOVERY_BLOCKED', 500),
+      status: 500,
+    },
+  ])('GET propagates unexpected selection failure: $status', async ({ error, status }) => {
+    const repo = f.ctx.podRepo.retainedCheckpoints;
+    if (!repo) throw new Error('Missing checkpoint repository');
+    vi.spyOn(repo, 'selectionEvidence').mockImplementation(() => {
+      throw error;
+    });
+    const response = await app.inject({ url: endpoint(), headers });
+    expect(response.statusCode).toBe(status);
+    expect(response.json().inspection).toBeUndefined();
+    expect(response.json().selectionRefusal).toBeUndefined();
+    expect(f.deps.enqueue).not.toHaveBeenCalled();
   });
   it('strictly authenticates new continuation and candidate selection without accepting caller proof', async () => {
     const url = `/pods/${f.podId}/retained-continuation`;
@@ -243,11 +354,24 @@ describe('human-only retained checkpoint selection', () => {
     expect(result.headers['cache-control']).toBe('no-store');
     expect(result.json()).toEqual({
       operations: [],
+      inspection: f.recovery.inspect(f.podId),
       selection: {
         expectedGeneration: f.pod().lifecycleGeneration,
         expectedResultHash: f.input.expectedResultHash,
       },
     });
+    expect(f.cm.getStatus).not.toHaveBeenCalled();
+    expect(f.deps.enqueue).not.toHaveBeenCalled();
+  });
+  it('fails closed when inspection storage fails rather than returning an eligible projection', async () => {
+    const repo = f.ctx.podRepo.retainedCheckpoints;
+    if (!repo) throw new Error('Missing checkpoint repository');
+    vi.spyOn(repo, 'infrastructureNeeds').mockImplementation(() => {
+      throw new Error('Synthetic report inspection storage failure');
+    });
+    const response = await app.inject({ url: endpoint(), headers });
+    expect(response.statusCode).toBe(500);
+    expect(response.json().inspection).toBeUndefined();
     expect(f.cm.getStatus).not.toHaveBeenCalled();
     expect(f.deps.enqueue).not.toHaveBeenCalled();
   });

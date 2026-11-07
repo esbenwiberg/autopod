@@ -1,0 +1,299 @@
+@testable import AutopodClient
+import AutopodDesktop
+import Foundation
+import Testing
+
+private func repairFixture(_ key: String) throws -> String {
+  let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+    .appendingPathComponent("Fixtures/repair-continuation-v1.json")
+  let all = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+  return String(decoding: try JSONSerialization.data(withJSONObject: all[key]!), as: UTF8.self)
+}
+private func backendRepairFixture(_ key: String) throws -> Data {
+  let url = ProcessInfo.processInfo.environment["REPAIR_CLIENT_PRODUCER_FIXTURE"].map { URL(fileURLWithPath: $0) }
+    ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+      .appendingPathComponent("Fixtures/repair-continuation-backend.json")
+  let all = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+  return try JSONSerialization.data(withJSONObject: all[key]!)
+}
+private func repairInput() throws -> RepairContinuationRequestV1 {
+  try JSONDecoder().decode(RepairContinuationRequestV1.self, from: Data(repairFixture("request").utf8))
+}
+private func bodyData(_ request: URLRequest) throws -> Data {
+  if let data = request.httpBody { return data }
+  guard let stream = request.httpBodyStream else { throw URLError(.badServerResponse) }
+  stream.open(); defer { stream.close() }
+  var data = Data(); var buffer = [UInt8](repeating: 0, count: 2048)
+  while stream.hasBytesAvailable {
+    let count = stream.read(&buffer, maxLength: buffer.count)
+    if count < 0 { throw stream.streamError ?? URLError(.badServerResponse) }
+    if count == 0 { break }; data.append(contentsOf: buffer.prefix(count))
+  }
+  return data
+}
+
+@MainActor @Suite struct RepairContinuationTransportTests {
+  @Test(arguments: ["qualified", "failed", "validated", "restartedSealed", "restartedValidated", "restartedFailedChecks", "restartedUnsettled"])
+  func consumesRealBackendProjectionsWithoutRewritingOperationOrCustodyIdentity(stage: String) async throws {
+    // Captured by the real manager lifecycle + operation() producer, not a client-authored DTO.
+    // Set REPAIR_CLIENT_PRODUCER_FIXTURE to consume a fresh backend test run directly.
+    let url = ProcessInfo.processInfo.environment["REPAIR_CLIENT_PRODUCER_FIXTURE"].map { URL(fileURLWithPath: $0) }
+      ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/repair-continuation-backend.json")
+    let all = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    let wire = all[stage] as! [String: Any]
+    let body = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
+    let raw = try JSONDecoder().decode(RepairContinuationOperationV1.self, from: Data(body.utf8))
+    try await withPodStoreLifetimeFixture { f in
+      let task = f.startResult {
+        do {
+          let value = try await f.apiA.observeRepairContinuation(raw.podId, requestId: raw.request.id)
+          #expect(value == raw && value.operationId != value.request.id)
+          #expect(value.qualification?.binding.operationId == value.operationId)
+          #expect(value.qualification?.binding.custodyId == value.operationId)
+          if let final = value.codingFinalSource { #expect(final.operationId == value.operationId) }
+          return "ok"
+        } catch { return error.localizedDescription }
+      }
+      try await f.next(f.a, "/pods/\(raw.podId)/repair-continuation-v1/requests/\(raw.request.id)").respond(body: body)
+      #expect(await task.value == "ok")
+      #expect(f.a.requests.count == 1)
+    }
+  }
+
+  @Test func canonicalBindingBytesMatchBackendWithoutLossyCodableRoundtrip() throws {
+    struct Vector: Decodable {
+      let name: String
+      let wire: String
+      let bindingSubset: Bool
+      let canonical: String
+      let digest: String
+    }
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+      .appendingPathComponent("Fixtures/configuration-digest-vectors.json")
+    let vectors = try JSONDecoder().decode([Vector].self, from: Data(contentsOf: url))
+    for vector in vectors {
+      if vector.bindingSubset {
+        let raw = try JSONDecoder().decode(RepairBindingCanonicalJSON.self, from: Data(vector.wire.utf8))
+        #expect(raw.canonical.utf8.elementsEqual(vector.canonical.utf8), "\(vector.name)")
+        #expect(raw.digest == vector.digest, "\(vector.name)")
+      } else {
+        // These are valid daemon configuration values but outside the hashed v1
+        // binding schema: no float spelling/rounding, bool→Int, array/null coercion.
+        #expect(throws: (any Error).self) {
+          _ = try JSONDecoder().decode(RepairBindingCanonicalJSON.self, from: Data(vector.wire.utf8))
+        }
+      }
+    }
+    #expect(throws: (any Error).self) {
+      _ = try JSONDecoder().decode(RepairBindingCanonicalJSON.self, from: Data(#""\ud800""#.utf8))
+    }
+  }
+
+  @Test(arguments: ["restartedSealedInspection", "restartedValidatedInspection", "restartedFailedChecksInspection", "restartedUnsettledInspection"])
+  func inspectionAcceptsDurableRestartReceipts(stage: String) async throws {
+    let url = ProcessInfo.processInfo.environment["REPAIR_CLIENT_PRODUCER_FIXTURE"].map { URL(fileURLWithPath: $0) }
+      ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/repair-continuation-backend.json")
+    let all = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    let body = String(decoding: try JSONSerialization.data(withJSONObject: all[stage]!), as: UTF8.self)
+    let raw = try JSONDecoder().decode(RepairContinuationInspectionV1.self, from: Data(body.utf8))
+    try await withPodStoreLifetimeFixture { f in
+      let task = f.startResult {
+        do { let value = try await f.apiA.inspectRepairContinuation(raw.podId); #expect(value == raw); return "ok" }
+        catch { return error.localizedDescription }
+      }
+      try await f.next(f.a, "/pods/\(raw.podId)/repair-continuation-v1").respond(body: body)
+      #expect(await task.value == "ok")
+      #expect(f.a.requests.count == 1 && f.a.requests[0].httpMethod == "GET")
+    }
+  }
+
+  @Test(arguments: ["operation", "custody", "final", "missing-public-id", "binding-digest", "resource", "repository", "base", "unknown-field", "unknown-source-field", "bool-version", "fraction-generation", "unsafe-generation"])
+  func rejectsProofOrFinalIdentityChangedToExternalReplayKey(field: String) async throws {
+    let raw = try JSONDecoder().decode(RepairContinuationOperationV1.self, from: backendRepairFixture("validated"))
+    var wire = try JSONSerialization.jsonObject(with: backendRepairFixture("validated")) as! [String: Any]
+    if field == "operation" || field == "custody" {
+      var qualification = wire["qualification"] as! [String: Any]
+      var binding = qualification["binding"] as! [String: Any]
+      binding[field == "operation" ? "operationId" : "custodyId"] = raw.request.id
+      qualification["binding"] = binding; wire["qualification"] = qualification
+    }
+    if field == "final" { var final = wire["codingFinalSource"] as! [String: Any]; final["operationId"] = raw.request.id; wire["codingFinalSource"] = final }
+    if field == "missing-public-id" { wire.removeValue(forKey: "operationId") }
+    if ["binding-digest", "resource", "unknown-field", "unknown-source-field", "bool-version", "fraction-generation", "unsafe-generation"].contains(field) {
+      var q = wire["qualification"] as! [String: Any]
+      var b = q["binding"] as! [String: Any]
+      if field == "binding-digest" { q["bindingDigest"] = String(repeating: "0", count: 64) }
+      if field == "resource" { b["resourceKey"] = "other-resource" }
+      if field == "unknown-field" { b["extra"] = "must not be dropped" }
+      if field == "unknown-source-field" {
+        var s = b["source"] as! [String: Any]; s["extra"] = 1; b["source"] = s
+      }
+      if field == "bool-version" { b["version"] = true }
+      if field == "fraction-generation" { b["candidateGeneration"] = 3.25 }
+      if field == "unsafe-generation" { b["originalGeneration"] = 9_007_199_254_740_992 }
+      q["binding"] = b; wire["qualification"] = q
+    }
+    if field == "repository" || field == "base" {
+      var final = wire["codingFinalSource"] as! [String: Any]
+      var source = final["source"] as! [String: Any]
+      source[field == "repository" ? "repository" : "baseCommitSha"] = field == "repository"
+        ? "https://fixture.invalid/other" : String(repeating: "0", count: 40)
+      final["source"] = source; wire["codingFinalSource"] = final
+    }
+    if ["operation", "custody", "unknown-field", "unknown-source-field"].contains(field) {
+      var q = wire["qualification"] as! [String: Any]
+      let rawBinding = try JSONDecoder().decode(RepairBindingCanonicalJSON.self,
+        from: JSONSerialization.data(withJSONObject: q["binding"]!))
+      q["bindingDigest"] = rawBinding.digest; wire["qualification"] = q
+    }
+    let body = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
+    try await withPodStoreLifetimeFixture { f in
+      let task = f.startResult {
+        do { _ = try await f.apiA.observeRepairContinuation(raw.podId, requestId: raw.request.id); return "unexpected success" }
+        catch { return error.localizedDescription }
+      }
+      try await f.next(f.a, "/pods/\(raw.podId)/repair-continuation-v1/requests/\(raw.request.id)").respond(body: body)
+      #expect(await task.value != "unexpected success")
+      #expect(f.a.requests.count == 1)
+    }
+  }
+
+  @Test func inspectionPreviewObserveNeverPostAndConditionalEligibilityIsNotProof() async throws {
+    try await withPodStoreLifetimeFixture { f in
+      let inspect = f.startResult {
+        do { let value = try await f.apiA.inspectRepairContinuation("pod"); #expect(value.operation == nil); return "ok" }
+        catch { return error.localizedDescription }
+      }
+      try await f.next(f.a, "/pods/pod/repair-continuation-v1").respond(body: repairFixture("inspection"))
+      #expect(await inspect.value == "ok")
+      let input = try repairInput()
+      let preview = f.startResult {
+        do {
+          let value = try await f.apiA.previewRepairContinuation("pod", sourceHead: input.sourceHead, profileId: input.executionProfileId)
+          #expect(value.conditionalAttemptEligible && value.actualQualification == "not_run" && value.configurationOnly)
+          return "ok"
+        } catch { return error.localizedDescription }
+      }
+      let query = try await f.next(f.a, "/pods/pod/repair-continuation-v1/preview")
+      let fields = URLComponents(url: query.request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+      #expect(fields.contains(URLQueryItem(name: "sourceHead", value: input.sourceHead)))
+      #expect(fields.contains(URLQueryItem(name: "executionProfileId", value: input.executionProfileId)))
+      query.respond(body: try repairFixture("preview"))
+      #expect(await preview.value == "ok")
+      let observe = f.startResult {
+        do { let value = try await f.apiA.observeRepairContinuation("pod", requestId: input.id); #expect(value.codingAdmission == .notAdmitted && value.qualification == nil); return "ok" }
+        catch { return error.localizedDescription }
+      }
+      try await f.next(f.a, "/pods/pod/repair-continuation-v1/requests/stable-request").respond(body: repairFixture("operation"))
+      #expect(await observe.value == "ok")
+      #expect(f.a.requests.count == 3 && f.a.requests.allSatisfy { $0.httpMethod == "GET" })
+    }
+  }
+
+  @Test func exactAuthorizationBodyAndSeparateFinalSourceDecodeWithoutPublication() async throws {
+    try await withPodStoreLifetimeFixture { f in
+      let input = try repairInput()
+      let task = f.startResult {
+        do {
+          let result = try await f.apiA.authorizeRepairContinuation("pod", input: input)
+          #expect(result.state == .claimed && result.qualification == nil && result.codingAdmission == .notAdmitted)
+          return "ok"
+        } catch { return error.localizedDescription }
+      }
+      let post = try await f.a.next()
+      #expect(post.request.url?.path == "/pods/pod/repair-continuation-v1" && post.request.httpMethod == "POST")
+      #expect(post.request.value(forHTTPHeaderField: "Authorization") == "Bearer synthetic")
+      let body = try bodyData(post.request)
+      #expect(try JSONDecoder().decode(RepairContinuationRequestV1.self, from: body) == input)
+      #expect(Set((try JSONSerialization.jsonObject(with: body) as! [String: Any]).keys) == ["version", "intent", "id", "expectedGeneration", "expectedResultHash", "expectedReportSetHash", "sourceHead", "executionProfileId", "expectedExecutionDigest", "expectedBindingDigest", "reason"])
+      post.respond(status: 202, body: try repairFixture("operation"))
+      #expect(await task.value == "ok")
+      let final = try JSONDecoder().decode(RepairContinuationOperationV1.self, from: Data(repairFixture("validatedOperation").utf8))
+      try final.validate(podId: "pod", requestId: input.id, expected: input)
+      #expect(final.state == .validated && final.checks == .passed && final.codingAdmission == .consumed)
+      #expect(final.codingFinalSource?.source.head != input.sourceHead && final.requiresHumanApproval && !final.publicationAuthorized)
+      #expect(f.a.requests.count == 1)
+    }
+  }
+
+  @Test(arguments: ["401", "404", "409", "malformed202", "lost", "wrong-request", "unproven-coding", "old-version"])
+  func failuresNeverFallbackOrRepeatAuthorization(kind: String) async throws {
+    try await withPodStoreLifetimeFixture { f in
+      let input = try repairInput()
+      let task = f.startResult {
+        do { _ = try await f.apiA.authorizeRepairContinuation("pod", input: input); return "unexpected success" }
+        catch { return error.localizedDescription }
+      }
+      let post = try await f.a.next()
+      if let status = Int(kind) { post.respond(status: status, body: #"{"error":"Refused or unsupported"}"#) }
+      else if kind == "lost" { post.fail(URLError(.timedOut)) }
+      else {
+        var value = try JSONSerialization.jsonObject(with: Data(repairFixture("operation").utf8)) as! [String: Any]
+        if kind == "wrong-request" { var request = value["request"] as! [String: Any]; request["reason"] = "Different saved authorization reason"; value["request"] = request }
+        if kind == "unproven-coding" { value["codingAdmission"] = "consumed" }
+        if kind == "old-version" { value["version"] = 99 }
+        let body = kind == "malformed202" ? "{}" : String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        post.respond(status: 202, body: body)
+      }
+      #expect(await task.value != "unexpected success")
+      #expect(f.a.requests.count == 1 && f.b.requests.isEmpty)
+      #expect(f.a.requests.allSatisfy { $0.url?.path == "/pods/pod/repair-continuation-v1" })
+    }
+  }
+
+  @Test(arguments: ["unknown-static", "qualified-preview", "wrong-source", "missing-diff", "sandbox-replacement", "native-platform"])
+  func malformedOrUnsupportedStaticPreviewCannotEnableAuthorization(kind: String) async throws {
+    try await withPodStoreLifetimeFixture { f in
+      let input = try repairInput()
+      var value = try JSONSerialization.jsonObject(with: Data(repairFixture("preview").utf8)) as! [String: Any]
+      if kind == "unknown-static" { value.removeValue(forKey: "conditionalAttemptEligible") }
+      if kind == "qualified-preview" { value["actualQualification"] = "qualified" }
+      if kind == "wrong-source" { var selection = value["selection"] as! [String: Any]; selection["sourceHead"] = String(repeating: "1", count: 40); value["selection"] = selection }
+      if kind == "missing-diff" { value["configurationDiff"] = NSNull() }
+      if kind == "sandbox-replacement" || kind == "native-platform" {
+        var diff = value["configurationDiff"] as! [String: Any]; var after = diff["after"] as! [String: Any]
+        after[kind == "sandbox-replacement" ? "target" : "platform"] = kind == "sandbox-replacement" ? "sandbox" : "darwin/arm64"
+        diff["after"] = after; value["configurationDiff"] = diff
+      }
+      let body = String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+      let task = f.startResult {
+        do { _ = try await f.apiA.previewRepairContinuation("pod", sourceHead: input.sourceHead, profileId: input.executionProfileId); return "unexpected success" }
+        catch { return error.localizedDescription }
+      }
+      try await f.next(f.a, "/pods/pod/repair-continuation-v1/preview").respond(body: body)
+      #expect(await task.value != "unexpected success")
+      #expect(f.a.requests.count == 1 && f.a.requests[0].httpMethod == "GET")
+    }
+  }
+
+  @Test(arguments: ["inspect", "preview", "submit", "observe"], [200, 404, 503])
+  func lateResponsesAndErrorsCannotCrossDaemonOwnership(mode: String, status: Int) async throws {
+    try await withPodStoreLifetimeFixture { f in
+      let input = try repairInput()
+      let handler = ActionHandler(api: f.apiA, podStore: f.store, profileStore: ProfileStore())
+      let actions = handler.actions.repairContinuation
+      let task = f.startResult {
+        do {
+          switch mode {
+          case "inspect": _ = try await actions.load("pod")
+          case "preview": _ = try await actions.preview("pod", input.sourceHead, input.executionProfileId)
+          case "submit": _ = try await actions.submit("pod", input)
+          default: _ = try await actions.observe("pod", input.id)
+          }
+          return "unexpected success"
+        } catch { return error.localizedDescription }
+      }
+      let call = try await f.a.next()
+      f.store.configure(api: f.apiB); f.seed("pod", task: "new owner")
+      let key = mode == "inspect" ? "inspection" : mode == "preview" ? "preview" : "operation"
+      call.respond(status: status, body: status == 200 ? try repairFixture(key) : #"{"error":"Old owner error"}"#)
+      #expect(await task.value?.contains("Connection changed") == true)
+      #expect(f.store.pods.first?.task == "new owner" && f.b.requests.isEmpty && f.a.requests.count == 1)
+      // Obsolete closures cannot send anything, even after the old request returned.
+      do { _ = try await actions.submit("pod", input); Issue.record("Obsolete submit accepted") } catch {}
+      #expect(f.a.requests.count == 1)
+    }
+  }
+}

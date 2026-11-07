@@ -392,3 +392,104 @@ execution_requirements:
   expect(parsed.diagnostics).toEqual([]);
   expect(parsed.contract?.executionRequirements).toEqual(requirements);
 });
+
+function strictRequirements() {
+  return {
+    version: 2,
+    executables: ['node'],
+    platform: 'linux/amd64',
+    minimumMemoryBytes: 1024 ** 3,
+    minimumCpu: 1,
+    requiredReferenceRepositories: [{ repositoryId: 'works', commitSha: 'a'.repeat(40) }],
+    requiresImageBuild: true,
+  };
+}
+
+it('preserves v2 fields without defaulting them into absent or v1 contracts', () => {
+  const inspect = (executionRequirements: unknown) =>
+    inspectSpecContract({ ...validDomainContract(), executionRequirements });
+  expect(inspect(strictRequirements()).diagnostics).toEqual([]);
+  expect(inspect(strictRequirements()).contract?.executionRequirements).toEqual(
+    strictRequirements(),
+  );
+  expect(inspect({ version: 2, executables: [] }).contract?.executionRequirements).toEqual({
+    version: 2,
+    executables: [],
+  });
+  expect(inspectSpecContract(validDomainContract()).contract).not.toHaveProperty(
+    'executionRequirements',
+  );
+  // v1 duplicates remain accepted; its nonempty executable list and strict object are unchanged.
+  expect(inspect({ version: 1, executables: ['node', 'node'] }).diagnostics).toEqual([]);
+  expect(inspect({ version: 1, executables: [] }).diagnostics.length).toBeGreaterThan(0);
+  expect(
+    inspect({ version: 1, executables: ['node'], platform: 'linux/amd64' }).diagnostics.length,
+  ).toBeGreaterThan(0);
+});
+
+it.each([
+  { version: 3 },
+  { executables: undefined },
+  { executables: ['node', 'node'] },
+  { executables: Array.from({ length: 65 }, (_, i) => `tool${i}`) },
+  { executables: ['-v'] },
+  { executables: ['node;whoami'] },
+  { executables: ['x'.repeat(257)] },
+  { minimumCpu: 0 },
+  { minimumCpu: 1025 },
+  { minimumMemoryBytes: 1.5 },
+  { minimumMemoryBytes: 1024 ** 4 + 1 },
+  { platform: 'macos/arm64' },
+  { requiresImageBuild: false },
+  { unknownQualification: true },
+  { requiredReferenceRepositories: [{ repositoryId: 'bad/id', commitSha: 'a'.repeat(40) }] },
+  { requiredReferenceRepositories: [{ repositoryId: 'x'.repeat(129), commitSha: 'a'.repeat(40) }] },
+  { requiredReferenceRepositories: [{ repositoryId: 'works', commitSha: 'A'.repeat(40) }] },
+  { requiredReferenceRepositories: [{ repositoryId: 'works', commitSha: 'a'.repeat(41) }] },
+  { requiredReferenceRepositories: [{ repositoryId: 'works', commitSha: 'main' }] },
+  {
+    requiredReferenceRepositories: [
+      { repositoryId: 'works', commitSha: 'a'.repeat(40), token: 'no' },
+    ],
+  },
+  {
+    requiredReferenceRepositories: [
+      { repositoryId: 'works', commitSha: 'a'.repeat(40) },
+      { repositoryId: 'works', commitSha: 'b'.repeat(40) },
+    ],
+  },
+  {
+    requiredReferenceRepositories: Array.from({ length: 17 }, (_, i) => ({
+      repositoryId: `ref${i}`,
+      commitSha: 'a'.repeat(40),
+    })),
+  },
+])('rejects malformed strict execution requirements: %j', (replacement) => {
+  const result = inspectSpecContract({
+    ...validDomainContract(),
+    executionRequirements: { ...strictRequirements(), ...replacement },
+  });
+  expect(result.contract).toBeUndefined();
+  expect(result.diagnostics.length).toBeGreaterThan(0);
+});
+
+it.each([
+  'linux/amd64',
+  'linux/arm64',
+  'darwin/amd64',
+  'darwin/arm64',
+])('accepts the explicit v2 platform %s and exact SHA-256 reference revision', (platform) => {
+  const requirements = {
+    ...strictRequirements(),
+    platform,
+    requiredReferenceRepositories: [{ repositoryId: 'works', commitSha: 'b'.repeat(64) }],
+  };
+  const parsed = inspectSpecContractYaml(`contract_version: 1
+title: Strict execution
+scenarios: []
+required_facts: []
+execution_requirements: ${JSON.stringify(requirements)}
+`);
+  expect(parsed.diagnostics).toEqual([]);
+  expect(parsed.contract?.executionRequirements).toEqual(requirements);
+});

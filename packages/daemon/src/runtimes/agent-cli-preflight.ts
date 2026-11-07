@@ -1,5 +1,5 @@
 import { AutopodError, processContent, type RuntimeType } from '@autopod/shared';
-import type { ContainerManager } from '../interfaces/container-manager.js';
+import type { ContainerManager, ExecOptions } from '../interfaces/container-manager.js';
 
 const cliByRuntime: Record<RuntimeType, string> = {
   claude: 'claude',
@@ -23,12 +23,23 @@ export async function verifyAgentCli(
   containerId: string,
   runtime: RuntimeType,
   model?: string | null,
+  options: Pick<ExecOptions, 'assertCurrent' | 'cwd' | 'env' | 'user' | 'maxOutputBytes'> = {},
 ): Promise<VerifiedAgentCli> {
+  const exec = async (command: string[]) => {
+    options.assertCurrent?.();
+    try {
+      return await cm.execInContainer(containerId, command, { ...options, timeout: 10000 });
+    } finally {
+      options.assertCurrent?.();
+    }
+  };
   const cli = cliByRuntime[runtime];
   const minimum = codexMinimum(model).join('.');
-  const location = await cm.execInContainer(containerId, ['sh', '-lc', `command -v ${cli}`], {
-    timeout: 10000,
-  });
+  const location = await exec([
+    options.user ? '/bin/sh' : 'sh',
+    options.user ? '-c' : '-lc',
+    `command -v ${cli}`,
+  ]);
   const detail = processContent((location.stderr || location.stdout).slice(0, 400), {
     sanitization: { preset: 'standard' },
   }).text.trim();
@@ -38,7 +49,7 @@ export async function verifyAgentCli(
       'PREFLIGHT_RUNTIME_UNAVAILABLE',
       409,
     );
-  const result = await cm.execInContainer(containerId, [cli, '--version'], { timeout: 10000 });
+  const result = await exec([cli, '--version']);
   const output = (result.stdout || result.stderr).trim();
   const match = output.length <= 4096 ? output.match(/\b(\d+)\.(\d+)\.(\d+)\b/) : null;
   const version = match?.slice(1).map(Number);

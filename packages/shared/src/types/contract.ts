@@ -44,13 +44,22 @@ export interface ValidationEvidenceManifest {
   environmentRevision: string;
 }
 
-export interface ExecutionRequirements {
-  version: 1;
+export type ExecutionRequirements = {
   /** Explicit launcher dependencies for dynamic shell commands. */
   executables: string[];
   minimumMemoryBytes?: number;
   minimumCpu?: number;
-}
+} & (
+  | { version: 1 }
+  | {
+      /** Opt-in strict prerequisites; unknown explicit launchers block execution. */
+      version: 2;
+      platform?: 'linux/amd64' | 'linux/arm64' | 'darwin/amd64' | 'darwin/arm64';
+      requiredReferenceRepositories?: Array<{ repositoryId: string; commitSha: string }>;
+      /** Unsupported until an actual worker build operation is qualified. */
+      requiresImageBuild?: true;
+    }
+);
 export interface SpecContract {
   executionRequirements?: ExecutionRequirements;
   validationEvidence?: ValidationEvidenceManifest;

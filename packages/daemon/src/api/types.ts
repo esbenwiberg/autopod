@@ -7,6 +7,6 @@ declare module 'fastify' {
   }
 
   interface FastifyContextConfig {
-    auth?: boolean;
+    auth?: boolean | 'pod-token';
   }
 }

@@ -2,6 +2,7 @@ import type { EffectiveLaunchConfig } from '@autopod/shared';
 import { environmentImageKey } from '../images/environment-image-key.js';
 import { configurationDigest } from './configuration-digest.js';
 import { configurationError } from './configuration-store.js';
+import { assertLaunchRequirements } from './launch-requirement-preflight.js';
 
 /** Server-resolved software/resources only. No repository, credential, network or workflow override. */
 export interface RetainedExecutionSelection {
@@ -73,6 +74,7 @@ export function retainedContinuationLaunch(
     },
   };
   const config = { ...next, digest: configurationDigest(next) };
+  assertLaunchRequirements(config);
   if (selection.digest && config.digest !== selection.digest)
     configurationError(
       'Replacement execution preview changed',

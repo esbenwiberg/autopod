@@ -8,11 +8,16 @@ import {
 } from '../test-utils/admission-queries-helpers.js';
 import { createPodManager } from './pod-manager.js';
 import { createPodManagerFacade } from './pod-manager-facade.js';
+import { createProvisioningWorkflow } from './provisioning-workflow.js';
 import type { ValidationWorkflowCalls } from './validation-workflow-ports.js';
 
 vi.mock('./pod-manager-facade.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('./pod-manager-facade.js')>();
   return { ...original, createPodManagerFacade: vi.fn(original.createPodManagerFacade) };
+});
+vi.mock('./provisioning-workflow.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./provisioning-workflow.js')>();
+  return { ...original, createProvisioningWorkflow: vi.fn(original.createProvisioningWorkflow) };
 });
 function instance(disk = false) {
   const f = createAdmissionFixture(disk);
@@ -31,7 +36,12 @@ function instance(disk = false) {
 describe('composed pod manager facade boundary', () => {
   it('adds no extra infrastructure construction effects and preserves actual shorthand function identities', () => {
     const f = instance();
-    expect(Object.keys(f.manager)).toHaveLength(98);
+    expect(Object.keys(f.manager)).toHaveLength(107);
+    expect(f.manager.inspectStalledWorkerRecovery).toBeTypeOf('function');
+    expect(f.manager.recoverStalledWorker).toBeTypeOf('function');
+    expect(f.manager.inspectRetainedContinuation).toBeTypeOf('function');
+    expect(f.manager.recoverInfrastructure).toBeTypeOf('function');
+    expect(f.manager.reconcileInfrastructure).toBeTypeOf('function');
     expect(f.manager.getCheckpointRecoverySelection).toBeTypeOf('function');
     expect(f.manager.getCheckpointRecoverySelection('prepare')).toBeNull();
     expect(f.manager.inspectRetainedFinalization).toBeTypeOf('function');
@@ -65,6 +75,30 @@ describe('composed pod manager facade boundary', () => {
     expect(f.cm.spawn).not.toHaveBeenCalled();
     expect(f.cm.stop).not.toHaveBeenCalled();
     expect(f.cm.kill).not.toHaveBeenCalled();
+    expect(f.ctx.enqueuedSessions).toEqual([]);
+  });
+  it('keeps provisioning dependencies live while capturing the private coding qualifier separately', () => {
+    const f = instance();
+    const call = vi.mocked(createProvisioningWorkflow).mock.calls.at(-1);
+    expect(call?.[0]).toBe(f.deps);
+    expect(call?.[1]).toMatchObject({ qualifyCodingCandidate: expect.any(Function) });
+    expect(f.deps).not.toHaveProperty('qualifyCodingCandidate');
+  });
+  it('forwards read-only retained inspection and preserves inspection failures', () => {
+    const f = instance();
+    const inspection = f.manager.inspectRetainedContinuation('prepare');
+    const inspect = vi.fn(() => inspection);
+    if (!f.owners.checkpointRecovery) throw new Error('Missing checkpoint owner');
+    f.owners.checkpointRecovery.inspect = inspect;
+    expect(f.manager.inspectRetainedContinuation('prepare')).toBe(inspection);
+    expect(inspect).toHaveBeenCalledExactlyOnceWith('prepare');
+    const error = new Error('Inspection unavailable');
+    inspect.mockImplementation(() => {
+      throw error;
+    });
+    expect(() => f.manager.inspectRetainedContinuation('prepare')).toThrow(error);
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+    expect(f.cm.start).not.toHaveBeenCalled();
     expect(f.ctx.enqueuedSessions).toEqual([]);
   });
   it('preserves synchronous errors and direct returned promise identity at the API boundary', async () => {

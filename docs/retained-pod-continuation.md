@@ -1,5 +1,11 @@
 # Retention-safe continuation of existing work
 
+The existing `ap retained-continuation` sections below describe **checks-only**
+continuation. For the separate, prospective typed-launcher repair-and-code protocol,
+see [Conditional environment repair and one coding continuation](#conditional-environment-repair-and-one-coding-continuation).
+Machine wakeup, checks-only continuation, Resume delivery and coding authorization
+are different operations, never fallbacks for one another.
+
 Use this explicit human operation when existing source or infrastructure needs
 repair but ordinary Rework would replace/delete the original resource. It reuses
 the retained-checkpoint ledger, credential epochs and task accounting. It does
@@ -9,6 +15,12 @@ A failed approval rewrite retains its own publication/source authority. Use the
 [dedicated rewrite-owned repair continuation](approval-rewrite-repair.md) for an
 eligible settled sandbox selection; these ordinary continuation operations remain
 refused while a rewrite owns source.
+
+For a failed **running but settled local Docker original**, do not manually stop
+it to satisfy the stopped-original prerequisite. The separate
+[preservation-safe infrastructure recovery](infrastructure-recovery.md) control
+acquires custody before its one non-destructive stop and explicitly distinguishes
+checks-only from an independently provisioned coding repair.
 
 ## Authority and limits
 
@@ -58,6 +70,41 @@ ap reconcile-validation POD --json
 ap retry-state POD --stage validation --json
 ap retained-continuation POD --json
 ```
+
+The default `ap retained-continuation POD` view leads with recorded infrastructure
+needs and policy refusals. `--json` includes the full additive `inspection` field
+alongside the existing `selection` and `operations`. This is authenticated,
+read-only inspection: no provider GET, wakeup, source fetch/preparation, credential
+epoch rotation, report changes or queue dispatch is performed.
+
+`requires_selection` and `no_recorded_blocker` are **not admission permission**.
+Inspection reuses the continuation policy's first conservative refusal and exposes
+worker/guidance/custody observations, but source cleanliness/identity, provider
+resource state, actual environment qualification and retry admission remain
+`not_checked`. A recorded host path or preservation marker is not proof of final
+original sandbox bytes; uncollected files/reports remain retained there. Needs
+are worker-reported context, not diagnosed prerequisites or repaired evidence.
+Displayed needs are read independently of selection eligibility and bounded in
+SQLite (20 current-generation reports, 256-character ID/owner/phase, 1024-character
+need). Truncation is explicit and original selection evidence remains unchanged.
+Needs remain visible with an existing validation result or missing settlement/source
+preservation; displaying them neither supplies missing evidence nor permits execution.
+Old-generation reports are excluded, and missing/non-text fields remain unrecorded
+rather than being inferred from prose. If settled pre-validation report evidence
+is incomplete or exceeds selection bounds, inspection still displays bounded
+needs and the refusal: `selection` is null, the GET response includes
+`selectionRefusal`, and inspection records a blocked `selection_evidence` check.
+No usable hash is invented. Only the expected `CHECKPOINT_RECOVERY_BLOCKED` (409)
+selection refusal is displayed this way; unexpected storage/programming/auth errors
+still fail the request. Selection and admission themselves remain unchanged.
+An older daemon without this projection displays inspection unavailable, never
+assumed eligibility. Storage/inspection errors do not produce an eligible result.
+
+Use execution preview only to inspect a proposed configuration; qualify the actual
+environment separately. Waking the original sandbox is machine recovery, not task
+continuation. Preparation, candidate selection, checks, retry authorization and
+fresh human approval retain their existing independent fences. No coding worker
+or generic in-place repair operation is added by this inspection.
 
 ### Infrastructure reported before validation
 
@@ -320,3 +367,132 @@ Related: [legacy checkpoint recovery](retained-checkpoint-recovery.md),
 [source adoption](source-adoption-recovery.md),
 [approval source leases](merge-operator-recovery.md), and
 [validation execution recovery](validation-execution-recovery.md).
+
+## Conditional environment repair and one coding continuation
+
+`ap repair-continuation` and the desktop **Inspect repair & continuation…** sheet
+use the separate authenticated `repair-continuation-v1` protocol. CLI help or a
+local desktop build does not prove a deployed daemon supports it. A 404, unknown
+version, malformed response or static refusal disables authorization; clients never
+fall back to Rework, Resume, `/validate` or retained checks-only mutation.
+
+### Supported selection, not inferred repairability
+
+This first slice is for an ordinary frozen automatic PR/branch task with configured
+validation and independent review, exact retained **host HEAD**, and a reviewed
+local-Docker software/resource replacement. All current original-generation
+infrastructure reports must carry the supported version-1
+`missing-execution-prerequisites` envelope, bound to the original v2 manifest's
+requirements hash and explicitly declared missing launcher names. The complete
+canonical report-set hash is additional to the existing result hash, even when a
+validation result exists. Old/free-text, mixed, truncated or unsupported needs
+cannot be inferred, backfilled, cleared or waived by an operator reason.
+
+Launcher lookup is not a working Docker builder, private release/credential access,
+native Mac proof, filesystem repair or a completed required check. Resource minima
+still apply, but resource-only blocker mapping is not supported. Unknown execution,
+competing custody, uncollected guidance, pending decisions, waivers, linked fixes,
+Goals/interactive tasks and sidecars remain refused by backend policy. No in-place
+install commands, remote source substitution or manually edited future candidate
+are selected by this protocol.
+
+### Inspect, preview, explicitly authorize, observe
+
+```sh
+# Read-only inspection with original report/preservation and budget/retry context:
+ap repair-continuation POD
+ap repair-continuation POD --json
+
+# Read-only STATIC eligibility/configuration diff; use the exact inspected host SHA:
+ap repair-continuation POD --preview-execution REVIEWED_PROFILE_ID --head EXACT_HOST_SHA --json
+
+# Save the exact request fields and stable ID before running this explicit action.
+# Copy hashes/digests from that preview; do not substitute branch names or recompute null.
+ap repair-continuation POD --apply --request-id STABLE_SAVED_ID \
+  --generation ORIGINAL_GENERATION --result-hash EXACT_RESULT_HASH \
+  --report-set-hash EXACT_COMPLETE_REPORT_SET_HASH --head EXACT_HOST_SHA \
+  --execution-profile REVIEWED_PROFILE_ID --execution-digest EXACT_PREVIEW_DIGEST \
+  --binding-digest EXACT_BINDING_DIGEST \
+  --reason 'Select this reviewed environment for one conditional coding attempt'
+
+# Read-only, including after timeout/lost/malformed responses; never resubmits:
+ap repair-continuation POD --observe STABLE_SAVED_ID --json
+```
+
+Preview returns `configurationOnly: true`, `actualQualification: not_run`, and
+`conditionalAttemptEligible`. Supported, fully bound static selection may enable
+**Authorize repair and one coding continuation IF it qualifies**. It does **not**
+require proof from a not-yet-provisioned resource, nor is it itself qualified
+proof or permission to skip probes. Unsupported/unknown static eligibility stays
+disabled. Authorization permits the daemon's bounded provision/prepare/qualify/code/
+seal/check sequence, not an unrestricted repair runner.
+
+Inspection may return `available: true` with `sourceHead: null`: it deliberately
+does not inspect host source. Enter the exact user-selected host HEAD and reviewed
+profile for preview. Only a successful source-checked preview binds that HEAD,
+profile, generation, result/report-set hashes and requirements. A non-null inspection
+HEAD must agree; a null inspection HEAD is neither source proof nor a reason to
+require a pre-qualified future candidate.
+
+The daemon must qualify the **actual candidate** under the normal worker context
+and consume its exact resource/source/configuration/requirements/report-set/epoch
+binding before any coding stream. Qualification evidence expires after five minutes
+or earlier identity/restart/wake/mutation changes. False, unknown, timed-out or
+mismatched evidence cannot start coding. A disabled client button is not an
+admission fence: the daemon owns settlement, atomic one-use accounting, custody
+and duplicate-worker prevention.
+
+Clients distinguish claimed/provisioning/qualification/coding admission/checks and
+final approval. Accepted is not qualified; admitted is not completed; checks passed
+is not delivery approval. A separately sealed clean descendant final source goes
+through the genuine configured checks and independent review, with no automatic
+second coding segment. Success stops validated for separate human approval; no
+publication, autoapproval, dependents, token reset or implicit retry grant follows.
+
+The selected Git source is not a claim to contain original final sandbox bytes.
+Original host work, ignored/unsynced files, reports and resources stay retained,
+including after failed/unknown attempts. Historical NOT-RUN checks stay visible
+and incomplete in retained history/new reviews; qualification does not pass them.
+Repository/task/AI/account/runtime/model/workflow/network/PIM/actions/tool packs/
+permissions and cumulative budgets remain frozen. Worker/startup/validation retry
+state and cumulative recorded usage are displayed separately; unavailable is not
+zero or retry permission, and recorded budget admission is not a future spending
+reservation. Use existing owning controls for any separate grant/budget decision.
+
+The CLI requires a caller-supplied stable ID and prints the exact unchanged request
+plus an observe command on an unconfirmed authorization response. It has no hidden
+mutable request database. Preserve those fields; do not change IDs after an
+uncertain result. Desktop journals the exact request in protected per-daemon/pod
+storage **before** POST; reopen/refresh only inspect/observe and never auto-send.
+Corrupt/conflicting journals block new authorization rather than silently replacing
+the request. Connection changes fence late responses/errors. No data-loss checkbox
+or “clear blocker” control exists in the repair sheet.
+
+### Versioned API
+
+Shared strict schemas and public types live in
+`packages/shared/src/schemas/repair-continuation.schema.ts`:
+
+- `GET /pods/:podId/repair-continuation-v1`: direct `RepairContinuationInspectionV1`.
+- `GET /pods/:podId/repair-continuation-v1/preview?sourceHead=SHA&executionProfileId=ID`:
+  direct `RepairContinuationPreviewV1` (configuration/static eligibility only).
+- `POST /pods/:podId/repair-continuation-v1`: strict `RepairContinuationRequestV1`;
+  202 direct `RepairContinuationOperationV1`, not a result or wrapped empty success.
+- `GET /pods/:podId/repair-continuation-v1/requests/:requestId`: direct operation;
+  observe the same saved key. Absence is not proof no dispatch occurred.
+
+Each operation response includes required `operationId`, the opaque internal
+retained operation/custody ID. It is distinct from `request.id`, the caller's stable
+external replay key used in the observation URL. Qualification
+`binding.operationId` **and** `binding.custodyId`, and sealed final-source
+`operationId`, must correlate to the response's `operationId`, never to the external
+request key. Immutable qualification/final-source evidence is not rewritten to
+look like a request. Older responses missing this identity are unavailable rather
+than accepted without correlation.
+
+The request includes only `version`, `intent`, `id`, `expectedGeneration`,
+`expectedResultHash`, `expectedReportSetHash`, `sourceHead`, `executionProfileId`,
+`expectedExecutionDigest`, `expectedBindingDigest` and `reason`. Caller-authored
+proof, actor, epochs, arbitrary shell commands, retry grants and reset flags are
+not accepted. Read-only report/accounting composition uses existing checkpoint,
+task-execution and retry-state endpoints; their failures remain visibly unavailable.

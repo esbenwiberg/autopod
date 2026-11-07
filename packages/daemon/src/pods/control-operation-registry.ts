@@ -25,12 +25,17 @@ export function createControlOperationRegistry(
         const value = Reflect.get(object, key, receiver);
         if (
           typeof value !== 'function' ||
+          key === 'recoverStalledWorker' ||
           key === 'finalizeRetained' ||
           key === 'adoptSource' ||
           key === 'recoverCheckpoint' ||
           key === 'prepareRewriteRepair' ||
           key === 'checkRewriteRepair' ||
           key === 'continueRetained' ||
+          key === 'authorizeRepairContinuation' ||
+          key === 'previewRepairContinuation' ||
+          key === 'recoverInfrastructure' ||
+          key === 'reconcileInfrastructure' ||
           key === 'previewRetainedExecution' ||
           key === 'checkRetainedCandidate' ||
           key === 'reconcileCheckpointOutcome' ||

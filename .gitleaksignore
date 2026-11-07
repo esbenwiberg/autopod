@@ -18,3 +18,24 @@ fe619fa27b3e7742229e9c81041ef1c5d7684526:docs/analysis/2026-09-07/execution/rece
 6db2b82db9781a26f3dbc10e9bdd20ff24ab3d4c:docs/analysis/2026-09-07/execution/receipts/checkpoint-95-browser-fixture.txt:generic-api-key:3
 6db2b82db9781a26f3dbc10e9bdd20ff24ab3d4c:docs/analysis/2026-09-07/execution/receipts/checkpoint-98-browser-server.txt:generic-api-key:2
 6db2b82db9781a26f3dbc10e9bdd20ff24ab3d4c:docs/analysis/2026-09-07/execution/receipts/sandbox-startup-browser-server.txt:generic-api-key:2
+
+# PR #533 synthetic producer DTOs, exact historical findings only.
+# credentialEpoch is SHA256(JSON.stringify(record.id)), a public operation-id marker,
+# not credential material; imageKey is the public resolved software/cache identity.
+# Captures are verbatim test-producer output. No path/rule/regex-wide exclusion.
+3baeaf7ed60390c5d0c4650b504e1c74fc507949:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:140
+3baeaf7ed60390c5d0c4650b504e1c74fc507949:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:281
+3baeaf7ed60390c5d0c4650b504e1c74fc507949:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:427
+3baeaf7ed60390c5d0c4650b504e1c74fc507949:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:585
+3baeaf7ed60390c5d0c4650b504e1c74fc507949:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:753
+3baeaf7ed60390c5d0c4650b504e1c74fc507949:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:918
+3baeaf7ed60390c5d0c4650b504e1c74fc507949:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:1086
+3baeaf7ed60390c5d0c4650b504e1c74fc507949:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:1251
+3baeaf7ed60390c5d0c4650b504e1c74fc507949:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:1419
+3baeaf7ed60390c5d0c4650b504e1c74fc507949:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:1584
+3baeaf7ed60390c5d0c4650b504e1c74fc507949:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:1740
+e510ee97ed4211c5234ffd01bf85a135463cc1ea:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:37
+e510ee97ed4211c5234ffd01bf85a135463cc1ea:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:45
+e510ee97ed4211c5234ffd01bf85a135463cc1ea:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:140
+e510ee97ed4211c5234ffd01bf85a135463cc1ea:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:281
+e510ee97ed4211c5234ffd01bf85a135463cc1ea:packages/desktop/Tests/Fixtures/repair-continuation-backend.json:generic-api-key:427

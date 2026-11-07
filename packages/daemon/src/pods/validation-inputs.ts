@@ -25,7 +25,10 @@ const CONTAINER_APP_PORT = 3000;
 interface ValidationInputsDependencies {
   logger: Logger;
   worktreeManager: Pick<WorktreeManager, 'getDiff' | 'getCommitLog' | 'getChangedPathsAgainstBase'>;
-  podRepo: Pick<PodRepository, 'update' | 'approvalRewrites' | 'retainedCheckpoints'>;
+  podRepo: Pick<
+    PodRepository,
+    'update' | 'approvalRewrites' | 'retainedCheckpoints' | 'retainedCoding'
+  >;
   validationRepo?: Pick<ValidationRepository, 'getLatest' | 'getLatestReviewBatch'>;
   overrideSource: { pendingOverrideRepo?: Pick<PendingOverrideRepository, 'flush'> };
   validationEnvironmentForPod(
@@ -182,7 +185,7 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
       validationSuite,
       task:
         continuation && !retained?.binding.approvalRewrite
-          ? `${pod.task}\n\nRetained source continuation: independently review the current selected source against its pinned base. Historical worker reports and selection reasons are context, not passing evidence or waivers.${requiredRecoveryReview ? '\nMandatory additional recovery check: independent-v1. Run fresh independent review even if the original workflow omitted it; this is not historical review evidence.' : ''}\nSelection reason: ${retained?.selected?.reason ?? retained?.reason ?? ''}\nHistorical worker summary: ${pod.taskSummary?.actualSummary ?? 'None'}`
+          ? `${pod.task}\n\nRetained source continuation: independently review the current selected source against its pinned base. Historical worker reports and selection reasons are context, not passing evidence or waivers.${requiredRecoveryReview ? '\nMandatory additional recovery check: independent-v1. Run fresh independent review even if the original workflow omitted it; this is not historical review evidence.' : ''}\nSelection reason: ${retained?.selected?.reason ?? retained?.reason ?? ''}\nHistorical worker summary: ${podRepo.retainedCoding?.latest(podId)?.context.taskSummary?.actualSummary ?? pod.taskSummary?.actualSummary ?? 'None'}`
           : pod.task,
       diff,
       testCommand: profile.testCommand,
@@ -202,7 +205,16 @@ export function createValidationInputs(deps: ValidationInputsDependencies): {
       codeReviewSkill,
       commitLog: commitLog || undefined,
       plan: pod.plan ?? undefined,
-      taskSummary: continuation ? undefined : (pod.taskSummary ?? undefined),
+      taskSummary:
+        continuation && !podRepo.retainedCoding?.latest(podId)
+          ? undefined
+          : (pod.taskSummary ?? undefined),
+      // Keep inherited fact evidence/deviation approvals excluded. Only NOT-RUN
+      // reports cross this boundary as historical, non-authoritative review context.
+      historicalDeferredChecks: continuation
+        ? (podRepo.retainedCoding?.latest(podId)?.context.taskSummary?.deferredChecks ??
+          pod.taskSummary?.deferredChecks)
+        : undefined,
       briefTouches: pod.touches ?? undefined,
       briefDoesNotTouch: pod.doesNotTouch ?? undefined,
       worktreePath: pod.worktreePath ?? undefined,

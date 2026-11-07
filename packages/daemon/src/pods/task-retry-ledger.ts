@@ -52,6 +52,7 @@ export interface TaskRetryLedger {
     identity: TaskRetryIdentity,
     bindingHash: string,
     backoffs: number[],
+    readOnly?: boolean,
   ): { notBefore: string; authorizationAvailable: boolean };
   start(id: string): void;
   finish(
@@ -159,9 +160,21 @@ export function createTaskRetryLedger(
   });
   const authorizationSelect =
     'SELECT a.*, u.attempt_id FROM task_retry_authorizations a LEFT JOIN task_retry_authorization_uses u ON u.authorization_id = a.id';
-  const state = (podId: string, workerRunId?: string): TaskRetryState => {
+  const state = (podId: string, workerRunId?: string, readOnly = false): TaskRetryState => {
     const { taskId } = membership(podId, true);
-    if (stage === 'worker') retainWorkerRetryHistory(db, taskId, workerRunId);
+    if (
+      stage === 'worker' &&
+      readOnly &&
+      db
+        .prepare(
+          `SELECT 1 FROM retained_task_agent_runs r JOIN retained_task_executions e ON e.pod_id=r.pod_id WHERE e.task_id=? AND NOT EXISTS(SELECT 1 FROM task_retry_attempts a WHERE a.id=r.id) LIMIT 1`,
+        )
+        .get(taskId)
+    )
+      throw new TaskRetryBlockedError(
+        'Worker retry history requires reconciliation before a read-only preview',
+      );
+    if (stage === 'worker' && !readOnly) retainWorkerRetryHistory(db, taskId, workerRunId);
     const policy = db
       .prepare(`SELECT backoffs FROM task_retry_policies WHERE task_id = ? AND stage = '${stage}'`)
       .get(taskId) as { backoffs: string } | undefined;
@@ -223,6 +236,7 @@ export function createTaskRetryLedger(
     bindingHash: string,
     backoffs: number[],
     workerRunId?: string,
+    readOnly = false,
   ) => {
     createDeletionOwnership(db).assertTaskAvailable(podId);
     createValidationExecutionLedger(db).assertTaskSettled(podId);
@@ -240,7 +254,7 @@ export function createTaskRetryLedger(
       backoffs.some((value) => !Number.isSafeInteger(value) || value < 0 || value > 300000)
     )
       throw new TaskRetryBlockedError('Invalid task retry backoff policy');
-    const task = state(podId, workerRunId);
+    const task = state(podId, workerRunId, readOnly);
     // Existing persisted recovery counters are lower bounds, not new telemetry.
     // Consume their known allowance when first introducing this stage's policy.
     const legacyUsed =
@@ -388,8 +402,16 @@ export function createTaskRetryLedger(
   };
   return {
     state,
-    preview(podId, generation, identity, bindingHash, backoffs) {
-      const result = evaluate(podId, generation, identity, bindingHash, backoffs);
+    preview(podId, generation, identity, bindingHash, backoffs, readOnly = false) {
+      const result = evaluate(
+        podId,
+        generation,
+        identity,
+        bindingHash,
+        backoffs,
+        undefined,
+        readOnly,
+      );
       return {
         notBefore: new Date(result.notBefore).toISOString(),
         authorizationAvailable: !!result.useAuthorization,

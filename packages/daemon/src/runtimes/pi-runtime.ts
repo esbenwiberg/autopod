@@ -34,6 +34,7 @@ export class PiRuntime implements Runtime {
   ) {}
 
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
+    this.sessionIds.delete(config.podId);
     this.aborted.delete(config.podId);
     this.suspended.delete(config.podId);
     this.spawnConfigs.set(config.podId, config);

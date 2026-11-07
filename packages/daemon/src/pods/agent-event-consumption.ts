@@ -186,6 +186,16 @@ export function createAgentEventConsumption(
             )
           : undefined;
         const providerOrdinal = ensureProviderAttempt(currentPod, currentProfile)?.ordinal;
+        if (podRepo.retainedCoding?.isOwner(podId)) {
+          if (!runId || !workerAdmission || providerOrdinal === undefined)
+            throw new Error('Coding requires durable worker/retry/provider accounting');
+          const cycle = podRepo.completionJournal?.get(
+            podId,
+            currentPod.lifecycleGeneration,
+          )?.cycle;
+          if (cycle === undefined) throw new Error('Coding completion cycle unavailable');
+          podRepo.retainedCoding.bindWorker(podId, runId, cycle, providerOrdinal);
+        }
         return { currentPod, currentProfile, runId, providerOrdinal, workerAdmission };
       });
       attemptPod = initialized.currentPod;
@@ -696,7 +706,11 @@ export function createAgentEventConsumption(
                 PROVIDER_FAILOVER_HANDOFF_PATH,
                 runOwner.providerOrdinal,
               );
-              if (!podRepo.hasInfrastructureBlocker?.(podId))
+              if (
+                terminalClassification &&
+                !podRepo.hasInfrastructureBlocker?.(podId) &&
+                !podRepo.retainedCoding?.isOwner(podId)
+              )
                 await handleProviderLimit(podId, terminalClassification);
             } else if (
               current.pauseReason === 'provider_limit' &&

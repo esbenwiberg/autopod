@@ -36,6 +36,20 @@ it.each([
     pendingEscalation: null,
     lastValidationResult: null,
     skipValidation: false,
+    taskSummary: {
+      actualSummary: 'Implemented',
+      deviations: [],
+      deferredChecks: [
+        {
+          id: 'mac',
+          check: 'xcodebuild test',
+          reason: 'Linux worker',
+          expectedExecutor: 'Mac owner',
+          lifecycleGeneration: 3,
+          requiredFactId: 'mac-fact',
+        },
+      ],
+    },
   } as Pod;
   const initial = usePodsStore.getState();
   usePodsStore.setState({ pods: [pod] });
@@ -74,6 +88,12 @@ it.each([
       );
     });
     expect(container.textContent).toContain(reason);
+    const deferred = container.querySelector('[aria-label="Deferred verification"]');
+    expect(deferred?.textContent).toContain('NOT-RUN [mac]: xcodebuild test');
+    expect(deferred?.textContent).toContain('not a pass, waiver or repair receipt');
+    expect(deferred?.textContent).toContain('Mac owner');
+    expect(deferred?.textContent).toContain('Reported lifecycle: 3');
+    expect(deferred?.textContent).toContain('Required fact: mac-fact');
     expect(mutations).toEqual([]);
     if (status === 'failed' && !unverified) {
       await act(async () => {

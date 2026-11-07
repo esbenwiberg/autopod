@@ -1,7 +1,11 @@
 import type { FactEvidence } from './contract.js';
 import type { NativeGoalProcessHooks, NativeGoalSession } from './goal.js';
 import type { ExecutionTarget, ReasoningEffort } from './profile.js';
-import type { MemoryOutcomeItem, ReviewFeedbackResponseItem } from './task-summary.js';
+import type {
+  DeferredCheckReport,
+  MemoryOutcomeItem,
+  ReviewFeedbackResponseItem,
+} from './task-summary.js';
 
 export type RuntimeType = 'claude' | 'codex' | 'copilot' | 'pi';
 
@@ -178,6 +182,8 @@ export interface AgentTaskSummaryEvent {
     kind?: 'constraint' | 'tradeoff' | 'scope' | 'bugfix' | 'other';
     impact?: string;
   }>;
+  /** Preserved worker-reported NOT-RUN context, with daemon lifecycle attribution. */
+  deferredChecks?: DeferredCheckReport[];
   /** Agent-reported evidence for required executable facts. */
   factEvidence?: FactEvidence[];
   /** Final outcome for each memory selected/injected for this pod. */

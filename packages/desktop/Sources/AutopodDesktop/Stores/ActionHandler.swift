@@ -253,6 +253,20 @@ public final class ActionHandler {
       guard let self else { throw DaemonError.networkError("Connection is unavailable") }
       return try await self.perform { try await self.api.getReworkRequest(id, requestKey: key) }
     }
+    result.stalledWorkerRecovery = StalledWorkerRecoveryActions(
+      scope: replyContextID.uuidString,
+      draftScope: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",
+      journalDirectory: journalRoot?.appendingPathComponent("stalled-worker-recovery", isDirectory: true),
+      isCurrent: { [weak self] in
+        guard let self else { return false }
+        return self.podStore.isCurrent(self.ownership)
+      }, load: { [weak self] id in
+        guard let self else { throw DaemonError.networkError("Connection unavailable") }
+        return try await self.perform { try await self.api.inspectStalledWorkerRecovery(id) }
+      }, submit: { [weak self] id, input in
+        guard let self else { throw DaemonError.networkError("Connection unavailable") }
+        return try await self.perform { try await self.api.recoverStalledWorker(id, input: input) }
+      })
     result.retainedFinalization = RetainedFinalizationActions(
       scope: replyContextID.uuidString,
       draftScope: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",
@@ -265,6 +279,44 @@ public final class ActionHandler {
         // Only daemon events/observations change local status; pending is not success.
         return try await self.perform { try await self.api.finalizeRetained(id, input: input) }
       })
+    result.repairContinuation = RepairContinuationActions(
+      scope: replyContextID.uuidString,
+      draftScope: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",
+      journalDirectory: journalRoot?.appendingPathComponent("repair-continuation-v1", isDirectory: true),
+      isCurrent: { [weak self] in
+        guard let self else { return false }
+        return self.podStore.isCurrent(self.ownership)
+      }, load: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.inspectRepairContinuation(id) }
+      }, preview: { [weak self] id, head, profile in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.previewRepairContinuation(id, sourceHead: head, profileId: profile) }
+      }, submit: { [weak self] id, input in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.authorizeRepairContinuation(id, input: input) }
+      }, observe: { [weak self] id, requestId in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.observeRepairContinuation(id, requestId: requestId) }
+      })
+    result.repairContinuation.context = { [weak self] id in
+      guard let self else { throw URLError(.notConnectedToInternet) }
+      return try await self.perform {
+        var details = RepairContinuationContext()
+        do { details.retained = try await self.api.getRepairRetainedContext(id) }
+        catch { details.unavailable.append("Original report/preservation observation unavailable: \(error.localizedDescription)") }
+        try self.requireCurrent()
+        do { details.budget = try await self.api.getTaskExecution(id) }
+        catch { details.unavailable.append("Cumulative budget unavailable: \(error.localizedDescription)") }
+        try self.requireCurrent()
+        for stage in ["worker", "sandbox_startup", "validation"] {
+          do { details.retries.append(try await self.api.getRetryState(id, stage: stage)) }
+          catch { details.unavailable.append("\(stage) retry accounting unavailable: \(error.localizedDescription)") }
+          try self.requireCurrent()
+        }
+        return details
+      }
+    }
     result.taskBudget = TaskBudgetActions(scope: replyContextID.uuidString, load: { [weak self] id in
       guard let self else { throw DaemonError.networkError("Connection is unavailable") }
       return try await self.perform { try await self.api.getTaskExecution(id) }
