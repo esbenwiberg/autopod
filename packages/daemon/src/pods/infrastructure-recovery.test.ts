@@ -706,7 +706,10 @@ describe('qualified infrastructure recovery from real incident shapes', () => {
     expect(vi.mocked(f.cm.stop).mock.calls.filter(([id]) => id === f.containerId)).toHaveLength(1);
   });
 
-  it('refuses guidance arriving after candidate sealing before certifying fresh checks', async () => {
+  it.each([
+    'validation',
+    'source-inspection',
+  ] as const)('refuses guidance arriving during %s after sealing before certifying checks', async (arrival) => {
     const f = await fixture('rework');
     f.deps.assertGuidanceCollected = createCompletionGuards({
       podRepo: f.ctx.podRepo,
@@ -715,10 +718,30 @@ describe('qualified infrastructure recovery from real incident shapes', () => {
     passingReview(f);
     const validate = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation();
     if (!validate) throw new Error('Missing configured validation');
+    let afterChecks = false;
     vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => {
       expect(f.recovery.list(f.podId)[0]?.infrastructure?.candidate).toBeTruthy();
-      f.ctx.deps.nudgeRepo.queue(f.podId, 'Guidance arrived after the repair candidate was sealed');
-      return validate(config);
+      if (arrival === 'validation')
+        f.ctx.deps.nudgeRepo.queue(
+          f.podId,
+          'Guidance arrived after the repair candidate was sealed',
+        );
+      const result = await validate(config);
+      afterChecks = true;
+      return result;
+    });
+    const inspect = vi.mocked(f.worktrees.inspectSourceAdoption).getMockImplementation();
+    if (!inspect) throw new Error('Missing source inspection');
+    vi.mocked(f.worktrees.inspectSourceAdoption).mockImplementation(async (directory, branch) => {
+      const result = await inspect(directory, branch);
+      if (arrival === 'source-inspection' && afterChecks) {
+        afterChecks = false;
+        f.ctx.deps.nudgeRepo.queue(
+          f.podId,
+          'Guidance arrived during final asynchronous source verification',
+        );
+      }
+      return result;
     });
     await f.recovery.recoverInfrastructure(f.podId, f.request, f.actor);
     await f.recovery.wait(f.input.id);

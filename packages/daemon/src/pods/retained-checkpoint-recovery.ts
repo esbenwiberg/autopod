@@ -115,6 +115,7 @@ export function createRetainedCheckpointRecovery(deps: {
     repair?: CheckpointRecoveryBinding['approvalRewrite'],
     addReview = false,
     infrastructure?: NonNullable<CheckpointRecoveryBinding['continuation']>['infrastructure'],
+    guidanceRecord?: CheckpointRecoveryRecord,
   ) {
     deps.podRepo.retainedFinalizations?.assertAvailable(pod.id);
     if (infrastructure?.mode === 'rework' && repo.hasTypedPrerequisiteBlocker(pod))
@@ -246,7 +247,7 @@ export function createRetainedCheckpointRecovery(deps: {
     // Only the explicitly selected one-worker repair may collect saved guidance.
     // Checks-only admission and every sealed-candidate check still require ACK.
     const collectingGuidance =
-      infrastructure?.mode === 'rework' && !repo.latest(pod.id)?.infrastructure?.candidate;
+      infrastructure?.mode === 'rework' && !guidanceRecord?.infrastructure?.candidate;
     if (!collectingGuidance) deps.assertGuidanceCollected(pod.id);
     if (
       continuation &&
@@ -276,6 +277,7 @@ export function createRetainedCheckpointRecovery(deps: {
       record.binding.approvalRewrite,
       record.binding.continuation?.reviewPolicy === 'independent-v1',
       record.binding.continuation?.infrastructure,
+      record,
     );
     if (
       current.lifecycleGeneration !== record.generation ||
@@ -1540,6 +1542,13 @@ export function createRetainedCheckpointRecovery(deps: {
           'Fresh checks no longer match the selected source/configuration',
           'CHECKPOINT_SOURCE_CHANGED',
         );
+      if (
+        record.binding.continuation?.infrastructure?.mode === 'rework' &&
+        repo.get(record.id)?.infrastructure?.worker
+      ) {
+        deps.podRepo.taskExecutions?.assertCanDelete(podId);
+        deps.assertGuidanceCollected(podId);
+      }
     };
     const final = deps.podRepo.retainedCoding?.finalSource(podId, record.activated.generation);
     if (final) {
@@ -1558,13 +1567,6 @@ export function createRetainedCheckpointRecovery(deps: {
         cycle: record.binding.cycle,
       });
     assertCurrent();
-    if (
-      record.binding.continuation?.infrastructure?.mode === 'rework' &&
-      record.infrastructure?.worker
-    ) {
-      deps.podRepo.taskExecutions?.assertCanDelete(podId);
-      deps.assertGuidanceCollected(podId);
-    }
     if (
       record.binding.continuation?.infrastructure?.mode === 'rework' &&
       record.infrastructure?.worker &&
