@@ -1730,14 +1730,14 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
             deps.launchConfiguration?.read(id)?.intent === 'goal' ||
             Boolean(deps.launchConfiguration?.goals?.get(id)),
           assertGuidanceCollected,
-          preserveWorkspace: (pod) =>
+          preserveWorkspace: (pod, archivePath) =>
             syncWorkspaceBack(
               pod.containerId!,
               pod.worktreePath!,
               containerManagerFactory.get('local'),
               pod.id,
               'local',
-              { archiveOnly: true },
+              { archiveOnly: true, preservedWorkspace: archivePath },
             ).then(() => {}),
           transition,
           emit: emitActivityStatus,

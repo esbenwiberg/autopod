@@ -28,7 +28,7 @@ export function createStalledWorkerRecovery(deps: {
   isIdle(podId: string): boolean;
   isGoal(podId: string): boolean;
   assertGuidanceCollected(podId: string): void;
-  preserveWorkspace(pod: Pod): Promise<void>;
+  preserveWorkspace(pod: Pod, archivePath: string): Promise<void>;
   transition(pod: Pod, status: 'failed'): void;
   emit(podId: string, message: string): void;
   root: string;
@@ -445,7 +445,7 @@ export function createStalledWorkerRecovery(deps: {
         'Host source changed before workspace preservation; archive and original remain held.',
       );
     check();
-    await journal.preserve(podId, () => deps.preserveWorkspace(original.pod));
+    await journal.preserve(podId, () => deps.preserveWorkspace(original.pod, selected.archivePath));
     check();
     const preservedSource = await source(original.pod);
     check();

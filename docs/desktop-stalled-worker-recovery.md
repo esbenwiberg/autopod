@@ -53,7 +53,11 @@ not use Kick/Kill, raw Docker operations or database edits to bypass the hold.
 Source/report/configuration, completion cycle, generation or provider drift fails
 closed. Incomplete preservation retains the old run and resources. A completed
 archive is sealed with Git identity and a complete bounded byte/mode inventory;
-reconciliation verifies it instead of overwriting it. If canonical sync/import
+reconciliation verifies it instead of overwriting it. Canonical import reads that
+exact sealed archive (including its Git storage), not a second provider export.
+Directory/symlink type changes are mirrored without following old destination
+aliases or deleting excluded caches. Older already-sealed representations remain
+unchanged; a failed import retains the same request and never dispatches another stop. If canonical sync/import
 has not reached that exact Git identity and synced source bytes, settlement remains blocked. Ignored
 bytes are retained in the full archive even when ordinary sync excludes caches.
 Archive paths remain protected from application worktree mutation/orphan cleanup.
