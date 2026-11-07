@@ -16,7 +16,7 @@ function pathExists(location: string): boolean {
     lstatSync(location);
     return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return false;
     throw error;
   }
 }
@@ -70,6 +70,7 @@ export function mirrorStagedDirectory(
   hostPath: string,
   excludes?: string[],
   stagingBase?: string,
+  options: { protectExcludedParents?: boolean } = {},
 ): void {
   if (!lstatSync(stagingPath).isDirectory())
     throw new Error('Mirror source root must be a real directory, not a symlink');
@@ -82,6 +83,23 @@ export function mirrorStagedDirectory(
       if (entry.isDirectory() && !entry.isSymbolicLink() && containsExcluded(child)) return true;
     }
     return false;
+  }
+  // The sealed import refuses BEFORE modifying a checkout whose excluded cache
+  // parents cannot agree with the archive. Ordinary extraction keeps legacy prune.
+  if (options.protectExcludedParents) {
+    for (const relative of collectRelativeEntries(hostPath, excludes, stagingBase)) {
+      if (!lstatSync(join(hostPath, relative)).isDirectory() || !containsExcluded(relative))
+        continue;
+      const source = join(stagingPath, relative);
+      if (!pathExists(source))
+        throw new Error(
+          `Mirror retains excluded entries in directory missing from selected source: ${relative}`,
+        );
+      if (!lstatSync(source).isDirectory())
+        throw new Error(
+          `Mirror type change at ${relative} would remove excluded destination entries`,
+        );
+    }
   }
   // Copy directories ourselves: Node's recursive cp cannot replace a directory
   // with a symlink and its native directory path can materialize directory links.
@@ -128,7 +146,11 @@ export function mirrorStagedDirectory(
     for (const relative of hostEntries) {
       if (!pathExists(join(stagingPath, relative))) {
         const target = join(hostPath, relative);
-        if (lstatSync(target).isDirectory() && containsExcluded(relative))
+        if (
+          options.protectExcludedParents &&
+          lstatSync(target).isDirectory() &&
+          containsExcluded(relative)
+        )
           throw new Error(
             `Mirror retains excluded entries in directory missing from selected source: ${relative}`,
           );

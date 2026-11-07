@@ -32,6 +32,7 @@ import {
   fingerprintPreservedWorkspace,
 } from './artifact-snapshot-receipt.js';
 import { createPodManager } from './pod-manager.js';
+import { UNRESOLVED_EXECUTION_RECOVERY_MESSAGE } from './reconciliation-ownership.js';
 import { assertCheckpointResourceNotRetained } from './retained-checkpoint-repository.js';
 import { assertSourceAvailable } from './source-custody-guards.js';
 import { createStalledWorkerRecovery } from './stalled-worker-recovery.js';
@@ -211,6 +212,33 @@ describe('desktop stalled Docker recovery', () => {
     expect(f.containerManager.stop).not.toHaveBeenCalled();
     expect(f.podRepo.stalledRecoveries!.latest(f.id)).toBeNull();
   });
+  it('retains a pre-validation orphan with the exact daemon restart hold without inventing result or usage', async () => {
+    const f = await fixture();
+    f.podRepo.update(f.id, {
+      status: 'failed',
+      lastValidationResult: null,
+      failureReason: null,
+      lastCorrectionMessage: UNRESOLVED_EXECUTION_RECOVERY_MESSAGE,
+    });
+    const before = f.podRepo.taskExecutions!.snapshot(f.id);
+    const view = f.service.inspectStalledWorkerRecovery(f.id);
+    expect(view.canStop).toBe(true);
+    f.input.expectedBinding = view.binding;
+    expect((await f.submit()).state).toBe('settled');
+    expect(f.pod().lastValidationResult).toBeNull();
+    const after = f.podRepo.taskExecutions!.snapshot(f.id);
+    expect(after.agentRunCount).toBe(before.agentRunCount);
+    expect(after.recordedTotalTokens).toBe(before.recordedTotalTokens);
+    expect(f.containerManager.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not infer pre-validation recovery eligibility from an arbitrary restart diagnostic', async () => {
+    const f = await fixture();
+    f.podRepo.update(f.id, { lastValidationResult: null, failureReason: null });
+    expect(f.service.inspectStalledWorkerRecovery(f.id).canStop).toBe(false);
+    expect(f.containerManager.stop).not.toHaveBeenCalled();
+  });
+
   it('stops once, archives before settlement and exposes existing checks-only eligibility without starting anything', async () => {
     const f = await fixture(),
       before = f.pod();

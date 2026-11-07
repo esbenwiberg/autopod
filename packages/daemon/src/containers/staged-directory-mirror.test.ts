@@ -103,11 +103,21 @@ describe('staged directory mirror type and alias preservation', () => {
     mkdirSync(path.join(target, 'app/node_modules'), { recursive: true });
     writeFileSync(path.join(target, 'app/node_modules/keep.txt'), 'cached');
     writeFileSync(path.join(target, 'app/stale.txt'), 'old source');
-    expect(() => mirrorStagedDirectory(source, target, ['node_modules'])).toThrow(
-      'missing from selected source: app',
-    );
+    expect(() =>
+      mirrorStagedDirectory(source, target, ['node_modules'], undefined, {
+        protectExcludedParents: true,
+      }),
+    ).toThrow('missing from selected source: app');
     expect(readFileSync(path.join(target, 'app/node_modules/keep.txt'), 'utf8')).toBe('cached');
-    expect(() => lstatSync(path.join(target, 'app/stale.txt'))).toThrow();
+    expect(readFileSync(path.join(target, 'app/stale.txt'), 'utf8')).toBe('old source');
+  });
+
+  it('retains legacy missing-parent pruning outside sealed archive imports', () => {
+    const { source, target } = fixture();
+    mkdirSync(path.join(target, 'app/node_modules'), { recursive: true });
+    writeFileSync(path.join(target, 'app/node_modules/old.txt'), 'old cache');
+    mirrorStagedDirectory(source, target, ['node_modules']);
+    expect(() => lstatSync(path.join(target, 'app'))).toThrow();
   });
 
   it('refuses a symlink source root before copying foreign host Git bytes', () => {

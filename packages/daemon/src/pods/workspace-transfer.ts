@@ -421,6 +421,8 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
               : path.join(preservedWorkspace, '.git'),
             destination,
             excludes,
+            undefined,
+            { protectExcludedParents: true },
           );
         } else {
           await cm.extractDirectoryFromContainer(

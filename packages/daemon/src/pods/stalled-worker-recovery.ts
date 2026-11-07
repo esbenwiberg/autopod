@@ -12,6 +12,7 @@ import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import { fingerprintPreservedWorkspace } from './artifact-snapshot-receipt.js';
 import type { PodRepository } from './pod-repository.js';
+import { UNRESOLVED_EXECUTION_RECOVERY_MESSAGE } from './reconciliation-ownership.js';
 import {
   type StalledRecord,
   stalledError,
@@ -94,6 +95,10 @@ export function createStalledWorkerRecovery(deps: {
         pod.lastRecoveryTrigger &&
         pod.lastCorrectionMessage &&
         pod.lastValidationResult?.overall === 'fail'
+      ) &&
+      !(
+        ['restart', 'wake'].includes(pod.lastRecoveryTrigger ?? '') &&
+        pod.lastCorrectionMessage === UNRESOLVED_EXECUTION_RECOVERY_MESSAGE
       )
     )
       stalledError('No recorded infrastructure/restart blocker requires stalled-worker recovery.');
