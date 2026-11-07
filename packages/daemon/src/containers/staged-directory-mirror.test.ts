@@ -98,14 +98,28 @@ describe('staged directory mirror type and alias preservation', () => {
     expect(readFileSync(path.join(target, 'app/node_modules/keep.txt'), 'utf8')).toBe('cached');
   });
 
-  it('prunes stale source files without deleting an excluded cache in their missing parent', () => {
+  it('names a missing parent containing excluded cache rather than deleting it or certifying a full mirror', () => {
     const { source, target } = fixture();
     mkdirSync(path.join(target, 'app/node_modules'), { recursive: true });
     writeFileSync(path.join(target, 'app/node_modules/keep.txt'), 'cached');
     writeFileSync(path.join(target, 'app/stale.txt'), 'old source');
-    mirrorStagedDirectory(source, target, ['node_modules']);
+    expect(() => mirrorStagedDirectory(source, target, ['node_modules'])).toThrow(
+      'missing from selected source: app',
+    );
     expect(readFileSync(path.join(target, 'app/node_modules/keep.txt'), 'utf8')).toBe('cached');
     expect(() => lstatSync(path.join(target, 'app/stale.txt'))).toThrow();
+  });
+
+  it('refuses a symlink source root before copying foreign host Git bytes', () => {
+    const { source, target, outside } = fixture();
+    writeFileSync(path.join(outside, 'config'), 'unrelated host git');
+    writeFileSync(path.join(target, 'keep.txt'), 'unchanged');
+    const rootLink = path.join(source, '.git');
+    symlinkSync(outside, rootLink);
+    expect(() => mirrorStagedDirectory(rootLink, target)).toThrow('real directory');
+    expect(readFileSync(path.join(target, 'keep.txt'), 'utf8')).toBe('unchanged');
+    expect(() => lstatSync(path.join(target, 'config'))).toThrow();
+    expect(readFileSync(path.join(outside, 'config'), 'utf8')).toBe('unrelated host git');
   });
 
   it('replaces a file hardlink without changing an unrelated alias', () => {

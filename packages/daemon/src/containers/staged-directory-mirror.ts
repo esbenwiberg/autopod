@@ -71,6 +71,8 @@ export function mirrorStagedDirectory(
   excludes?: string[],
   stagingBase?: string,
 ): void {
+  if (!lstatSync(stagingPath).isDirectory())
+    throw new Error('Mirror source root must be a real directory, not a symlink');
   const directories: Array<{ target: string; mode: number; atime: Date; mtime: Date }> = [];
   function containsExcluded(relative: string): boolean {
     if (!excludes?.length) return false;
@@ -107,7 +109,9 @@ export function mirrorStagedDirectory(
       // Unlink only the selected destination entry; preserve its former target,
       // and avoid truncating any external hardlink alias of an old regular file.
       if (pathExists(target) && lstatSync(target).isDirectory() && containsExcluded(relative))
-        throw new Error('Mirror type change would remove excluded destination entries');
+        throw new Error(
+          `Mirror type change at ${relative} would remove excluded destination entries`,
+        );
       rmSync(target, { recursive: true, force: true });
       if (sourceStat.isSymbolicLink()) {
         symlinkSync(readlinkSync(source), target);
@@ -124,7 +128,10 @@ export function mirrorStagedDirectory(
     for (const relative of hostEntries) {
       if (!pathExists(join(stagingPath, relative))) {
         const target = join(hostPath, relative);
-        if (lstatSync(target).isDirectory() && containsExcluded(relative)) continue;
+        if (lstatSync(target).isDirectory() && containsExcluded(relative))
+          throw new Error(
+            `Mirror retains excluded entries in directory missing from selected source: ${relative}`,
+          );
         rmSync(target, { recursive: true, force: true });
       }
     }
