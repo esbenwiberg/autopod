@@ -372,7 +372,7 @@ export class CodexRuntime implements Runtime {
         this.containerManager.extractDirectoryFromContainer(
           containerId,
           CONTAINER_CODEX_SESSIONS_PATH,
-          codexStateDirForPod(podId),
+          codexStateDirForPod(this.podRepo.retainedCoding?.sessionNamespace(podId) ?? podId),
         ),
         summaryRecoveryTimeoutMs(),
       );
@@ -386,7 +386,10 @@ export class CodexRuntime implements Runtime {
     // A resumed Codex session appends multiple turns to the same rollout file.
     // Start at the current end before launching the new turn so live polling
     // cannot replay the previous turn's task_complete and close this exec early.
-    const rolloutTail = await createResumeRolloutTail(podId, sessionId);
+    const rolloutTail = await createResumeRolloutTail(
+      this.podRepo.retainedCoding?.sessionNamespace(podId) ?? podId,
+      sessionId,
+    );
 
     const prompt = sessionId
       ? message
@@ -918,7 +921,9 @@ export class CodexRuntime implements Runtime {
     modelHint?: string,
     rolloutTail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) },
   ): AsyncIterable<AgentEvent> {
-    const hostSessionsPath = codexStateDirForPod(podId);
+    const hostSessionsPath = codexStateDirForPod(
+      this.podRepo.retainedCoding?.sessionNamespace(podId) ?? podId,
+    );
     const timeoutMs = summaryRecoveryTimeoutMs();
 
     this.logger.warn(
@@ -1000,7 +1005,9 @@ export class CodexRuntime implements Runtime {
     modelHint?: string,
     rolloutTail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) },
   ): AsyncIterable<AgentEvent> {
-    const hostSessionsPath = codexStateDirForPod(podId);
+    const hostSessionsPath = codexStateDirForPod(
+      this.podRepo.retainedCoding?.sessionNamespace(podId) ?? podId,
+    );
     const timeoutMs = summaryRecoveryTimeoutMs();
     const extraction = await settlePromiseWithin(
       this.containerManager.extractDirectoryFromContainer(
@@ -1200,7 +1207,10 @@ export class CodexRuntime implements Runtime {
     rolloutTail: RolloutTailState = { path: null, offset: 0, carry: Buffer.alloc(0) },
   ): AsyncGenerator<AgentEvent, ParseStats, void> {
     const activeSessionId = this.codexSessionIds.get(podId);
-    const rollout = await findLatestCodexRollout(codexStateDirForPod(podId), activeSessionId);
+    const rollout = await findLatestCodexRollout(
+      codexStateDirForPod(this.podRepo.retainedCoding?.sessionNamespace(podId) ?? podId),
+      activeSessionId,
+    );
     if (!rollout) {
       this.logger.warn(
         {
@@ -1253,7 +1263,10 @@ export class CodexRuntime implements Runtime {
         // post-complete grace timer and terminate the live Codex exec.
         const activeSessionId = this.codexSessionIds.get(podId);
         const rollout = activeSessionId
-          ? await findLatestCodexRollout(codexStateDirForPod(podId), activeSessionId)
+          ? await findLatestCodexRollout(
+              codexStateDirForPod(this.podRepo.retainedCoding?.sessionNamespace(podId) ?? podId),
+              activeSessionId,
+            )
           : null;
         if (rollout) {
           const complete = await readRolloutDelta(rollout, tail);

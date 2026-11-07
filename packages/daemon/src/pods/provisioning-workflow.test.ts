@@ -48,6 +48,33 @@ describe('provisioning workflow', () => {
       expect.arrayContaining([AGENT_ENV_PATH, AGENT_SHIM_PATH]),
     );
   });
+  it('qualifies the exact fully prepared candidate before returning it for agent dispatch', async () => {
+    const f = fixture();
+    f.captured.qualifyCodingCandidate = vi.fn(async (prepared) => {
+      expect(prepared.containerManager).toBe(f.cm);
+      expect(prepared.pod).toMatchObject({ status: 'running', containerId: 'container-123' });
+      expect(vi.mocked(f.cm.writeFile).mock.calls.map((call) => call[1])).toContain(
+        AGENT_SHIM_PATH,
+      );
+      expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+      expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    });
+    const result = await f.workflow().preparePodExecution(f.input());
+    if (result.kind !== 'ready') throw new Error('Unexpected halt');
+    expect(f.captured.qualifyCodingCandidate).toHaveBeenCalledExactlyOnceWith(result.prepared);
+    expect(vi.mocked(f.captured.qualifyCodingCandidate).mock.calls[0]?.[0]).toBe(result.prepared);
+  });
+  it('does not return a prepared candidate when its captured qualifier refuses it', async () => {
+    const f = fixture();
+    const refusal = new Error('Actual environment qualification refused');
+    f.captured.qualifyCodingCandidate = vi.fn(async () => {
+      throw refusal;
+    });
+    await expect(f.workflow().preparePodExecution(f.input())).rejects.toBe(refusal);
+    expect(f.captured.qualifyCodingCandidate).toHaveBeenCalledOnce();
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+  });
   it('halts interactive setup before automatic credentials or dispatch material', async () => {
     const f = fixture();
     f.podRepo.update('prepare', {

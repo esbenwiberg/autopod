@@ -4,7 +4,7 @@ import type { AutopodClient } from '../api/client.js';
 import { registerRetainedContinuationCommand } from './retained-continuation.js';
 
 const client = {
-  getCheckpointRecoveries: vi.fn(async () => ({ operations: [] })),
+  getCheckpointRecoveries: vi.fn<() => Promise<unknown>>(async () => ({ operations: [] })),
   continueRetained: vi.fn(async () => ({ operation: { id: 'stable-id' } })),
   checkRetainedCandidate: vi.fn(async () => ({ operation: { id: 'stable-id' } })),
   previewRetainedExecution: vi.fn(async () => ({ digest: 'd'.repeat(64) })),
@@ -27,8 +27,54 @@ const fields = [
   '--reason',
   'Choose exact retained source for fresh independent checks',
 ];
+const inspection = {
+  version: 1,
+  mode: 'read_only',
+  generation: 2,
+  status: 'blocked',
+  selection: { expectedGeneration: 2, expectedResultHash: 'a'.repeat(64) },
+  infrastructure: {
+    state: 'reported',
+    truncated: false,
+    needs: [
+      {
+        id: 'report',
+        owner: 'validation',
+        phase: 'Build',
+        needs: 'Staged private source',
+        truncated: false,
+      },
+    ],
+  },
+  prerequisites: {
+    hostPathRecorded: true,
+    sourcePreservationRecorded: true,
+    workerSettlementRecorded: true,
+    pendingDecision: false,
+    hostSource: 'not_checked',
+    originalFilesAndReports: 'not_checked',
+    resourceStateAndIdentity: 'not_checked',
+    environmentQualification: 'not_checked',
+    retryAdmission: 'not_checked',
+  },
+  checks: [
+    {
+      id: 'human_guidance',
+      state: 'blocked',
+      code: 'UNCOLLECTED_HUMAN_GUIDANCE',
+      reason: 'Read saved guidance',
+    },
+  ],
+  nextSteps: ['Preview configuration, not qualification; no coding worker starts.'],
+};
+async function runHuman() {
+  const program = new Command().exitOverride();
+  registerRetainedContinuationCommand(program, getClient);
+  return program.parseAsync(['retained-continuation', 'retained-pod'], { from: 'user' });
+}
 beforeEach(() => {
   vi.clearAllMocks();
+  client.getCheckpointRecoveries.mockResolvedValue({ operations: [] });
   vi.spyOn(console, 'log').mockImplementation(() => {});
 });
 afterEach(() => vi.restoreAllMocks());
@@ -37,6 +83,145 @@ describe('retained continuation CLI', () => {
     await run();
     expect(client.getCheckpointRecoveries).toHaveBeenCalledWith('retained-pod');
     expect(client.continueRetained).not.toHaveBeenCalled();
+  });
+  it('renders actionable needs and blockers instead of a JSON wall or admission claim', async () => {
+    client.getCheckpointRecoveries.mockResolvedValue({ operations: [], inspection });
+    await runHuman();
+    const output = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(output).toContain('Need [validation / Build]: Staged private source');
+    expect(output).toContain(
+      'Blocked [human_guidance / UNCOLLECTED_HUMAN_GUIDANCE]: Read saved guidance',
+    );
+    expect(output).toContain('conditional, not execution permission');
+    expect(output).toContain('Not checked:');
+    expect(output).not.toContain('"operations"');
+    expect(output).not.toContain('Accepted');
+    expect(client.continueRetained).not.toHaveBeenCalled();
+  });
+  it.each([
+    'incomplete',
+    'oversized',
+  ])('renders %s selection refusal and bounded needs without a usable hash', async (kind) => {
+    const refusal = {
+      code: 'CHECKPOINT_RECOVERY_BLOCKED',
+      reason:
+        kind === 'incomplete'
+          ? 'Infrastructure report evidence is incomplete'
+          : 'Infrastructure report evidence exceeds its safe bound',
+    };
+    const response = {
+      operations: [],
+      selection: null,
+      selectionRefusal: refusal,
+      inspection: {
+        ...inspection,
+        selection: null,
+        checks: [{ id: 'selection_evidence', state: 'blocked', ...refusal }],
+        infrastructure: {
+          state: 'reported',
+          truncated: false,
+          needs: [
+            {
+              id: 'report',
+              owner: 'validation',
+              phase: kind === 'incomplete' ? undefined : 'Build',
+              needs: kind === 'incomplete' ? 'Staged private source' : 'n'.repeat(1024),
+              truncated: kind === 'oversized',
+            },
+          ],
+        },
+      },
+    };
+    client.getCheckpointRecoveries.mockResolvedValue(response);
+    await runHuman();
+    const output = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(output).toContain('Blocked [selection_evidence / CHECKPOINT_RECOVERY_BLOCKED]');
+    expect(output).toContain(
+      'Selection evidence unavailable; no result/report hash can be selected yet.',
+    );
+    expect(output).toContain(kind === 'incomplete' ? 'Staged private source' : 'n'.repeat(1024));
+    expect(output).not.toContain('a'.repeat(64));
+    const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    await run();
+    expect(JSON.parse(stdout.mock.calls[0]?.[0] as string)).toEqual(response);
+    expect(client.continueRetained).not.toHaveBeenCalled();
+    expect(client.checkRetainedCandidate).not.toHaveBeenCalled();
+  });
+  it('shows prepared operation identity without suggesting a replacement request', async () => {
+    client.getCheckpointRecoveries.mockResolvedValue({
+      inspection,
+      operations: [
+        {
+          id: 'existing-request',
+          prepared: { head: 'b'.repeat(40) },
+          activated: null,
+          checking: null,
+          checked: null,
+          blocked: null,
+        },
+      ],
+    });
+    await runHuman();
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Retained operation existing-request: prepared'),
+    );
+    expect(client.checkRetainedCandidate).not.toHaveBeenCalled();
+    expect(client.continueRetained).not.toHaveBeenCalled();
+  });
+  it('preserves the full structured inspection in JSON output', async () => {
+    const response = { operations: [], selection: inspection.selection, inspection };
+    client.getCheckpointRecoveries.mockResolvedValue(response);
+    const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    await run();
+    expect(JSON.parse(stdout.mock.calls[0]?.[0] as string)).toEqual(response);
+  });
+  it('marks old-daemon JSON inspection unavailable without losing existing operations or selection', async () => {
+    const old = {
+      operations: [],
+      selection: { expectedGeneration: 2, expectedResultHash: 'a'.repeat(64) },
+    };
+    client.getCheckpointRecoveries.mockResolvedValue(old);
+    const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    await run();
+    expect(JSON.parse(stdout.mock.calls[0]?.[0] as string)).toEqual({
+      ...old,
+      inspectionUnavailable: expect.stringContaining('no execution permission'),
+    });
+  });
+  it.each([
+    undefined,
+    { version: 99 },
+    { ...inspection, status: 'ready' },
+  ])('shows unavailable for absent or unsupported inspection: %j', async (value) => {
+    client.getCheckpointRecoveries.mockResolvedValue({ operations: [], inspection: value });
+    await runHuman();
+    expect(console.log).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining('inspection unavailable'),
+    );
+    expect(client.continueRetained).not.toHaveBeenCalled();
+  });
+  it('does not let report text insert terminal controls into human output', async () => {
+    client.getCheckpointRecoveries.mockResolvedValue({
+      operations: [],
+      inspection: {
+        ...inspection,
+        infrastructure: {
+          ...inspection.infrastructure,
+          needs: [
+            {
+              ...inspection.infrastructure.needs[0],
+              needs: '\u001b[2Jfake\nnext line',
+            },
+          ],
+        },
+      },
+    });
+    await runHuman();
+    const lines = vi.mocked(console.log).mock.calls.flat() as string[];
+    const need = lines.find((line) => line.startsWith('Need ['));
+    expect(need).toBeDefined();
+    expect(need).not.toContain('\u001b');
+    expect(need).not.toContain('\n');
   });
   it('previews replacement execution separately from admission', async () => {
     await run('--preview-execution', 'qualified-profile');

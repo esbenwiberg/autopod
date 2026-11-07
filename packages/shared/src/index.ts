@@ -1,3 +1,5 @@
+export { canonicalConfiguration } from './canonical-configuration.js';
+
 // Constants (runtime values)
 export {
   AUTOPOD_INSTRUCTIONS_PATH,
@@ -167,6 +169,7 @@ export {
   updateProviderAccountSchema,
 } from './schemas/provider-account.schema.js';
 export * from './schemas/reference-preview.schema.js';
+export * from './schemas/repair-continuation.schema.js';
 export * from './schemas/series-launch.schema.js';
 export * from './schemas/service-access.schema.js';
 // Series brief parsing (CLI + daemon share this)
@@ -613,6 +616,8 @@ export type {
   TaskRetryState,
 } from './types/task-retry.js';
 export type {
+  DeferredCheck,
+  DeferredCheckReport,
   DeviationItem,
   DeviationsAssessment,
   MemoryOutcomeItem,

@@ -102,7 +102,7 @@ const names=JSON.parse(process.argv[1]); const deadline=Date.now()+10000;
 if(!Array.isArray(names)||names.length>64||names.some(name=>typeof name!=='string'||name.length>256||name.startsWith('-'))) process.exit(1);
 const results=names.map(executable=> {
   if(Date.now()>deadline) return {executable,available:null};
-  const result=cp.spawnSync('sh',['-c','command -v "$1" >/dev/null 2>&1','autopod-command-preflight',executable],{timeout:1000,encoding:'utf8',maxBuffer:1024});
+  const result=cp.spawnSync('/bin/sh',['-c','command -v "$1" >/dev/null 2>&1','autopod-command-preflight',executable],{timeout:1000,encoding:'utf8',maxBuffer:1024});
   return {executable,available:result.error||result.signal ? null : result.status===0};
 });
 process.stdout.write(JSON.stringify(results));
@@ -112,7 +112,9 @@ export async function inspectRequiredCommands(
   containerId: string,
   pod: Pod,
   profile: PodExecutionSettings,
+  options: { assertCurrent?: () => void; user?: string; probeNodePath?: string } = {},
 ): Promise<CommandPreflight> {
+  options.assertCurrent?.();
   const validationCommands: Array<[string, string | null | undefined]> =
     pod.options?.validate && !pod.skipValidation
       ? [
@@ -130,19 +132,22 @@ export async function inspectRequiredCommands(
       (fact) => [`fact:${fact.id}`, fact.command] as [string, string],
     ),
   ];
+  const declared = pod.contract?.executionRequirements;
+  const explicitRequirements: CommandPreflight['requirements'] = (declared?.executables ?? []).map(
+    (executable) => ({ source: 'contract.executionRequirements', executable, available: null }),
+  );
   if (commands.length > 128)
     return {
-      requirements: [],
+      // Bounds must not erase a strict dependency and accidentally authorize dispatch.
+      requirements: declared?.version === 2 ? explicitRequirements : [],
       unresolvedSources: ['command scope exceeds 128 declarations'],
       deferredArtifacts: [],
-      explicitDependencies: false,
+      explicitDependencies: declared?.version === 2,
     };
-  const requirements: CommandPreflight['requirements'] = [];
+  const requirements = [...explicitRequirements];
   const unresolvedSources: string[] = [];
   const deferredArtifacts: string[] = [];
-  const explicitDependencies = !!pod.contract?.executionRequirements;
-  for (const executable of pod.contract?.executionRequirements?.executables ?? [])
-    requirements.push({ source: 'contract.executionRequirements', executable, available: null });
+  const explicitDependencies = !!declared;
   for (const [source, command] of commands) {
     if (!command?.trim()) continue;
     const executables = discoverCommandLaunchers(command);
@@ -170,22 +175,26 @@ export async function inspectRequiredCommands(
   const names = [...new Set(requirements.map((value) => value.executable))];
   if (names.length > 64)
     return {
-      requirements: [],
+      requirements: declared?.version === 2 ? explicitRequirements : [],
       deferredArtifacts,
-      explicitDependencies: false,
+      explicitDependencies: declared?.version === 2,
       unresolvedSources: [...unresolvedSources, 'command scope exceeds 64 launchers'],
     };
   if (names.length) {
     try {
       const probe = await cm.execInContainer(
         containerId,
-        ['node', '-e', COMMAND_PREFLIGHT_PROBE, JSON.stringify(names)],
+        [options.probeNodePath ?? 'node', '-e', COMMAND_PREFLIGHT_PROBE, JSON.stringify(names)],
         {
           cwd: profile.buildWorkDir ? `/workspace/${profile.buildWorkDir}` : '/workspace',
           timeout: 15000,
+          ...(options.user ? { maxOutputBytes: 65536 } : {}),
+          ...(options.assertCurrent ? { assertCurrent: options.assertCurrent } : {}),
+          ...(options.user ? { user: options.user } : {}),
           ...(profile.buildEnv ? { env: profile.buildEnv } : {}),
         },
       );
+      options.assertCurrent?.();
       if (probe.exitCode === 0 && probe.stdout.length <= 65536) {
         const values = JSON.parse(probe.stdout) as unknown;
         if (
@@ -205,8 +214,10 @@ export async function inspectRequiredCommands(
         }
       }
     } catch {
+      options.assertCurrent?.();
       /* Unavailable never becomes a successful availability check. */
     }
   }
+  options.assertCurrent?.();
   return { requirements, unresolvedSources, deferredArtifacts, explicitDependencies };
 }

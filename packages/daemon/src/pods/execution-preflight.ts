@@ -14,6 +14,14 @@ import { daemonRelease } from '../release.js';
 import { verifyAgentCli } from '../runtimes/agent-cli-preflight.js';
 import { inspectRequiredCommands } from './required-command-preflight.js';
 
+export interface ExecutionPreflightOptions {
+  assertCurrent?: () => void;
+  user?: string;
+  probeNodePath?: string;
+  /** Qualification never dispatches another probe after an uncertain CLI/metadata observation. */
+  stopOnProbeError?: boolean;
+}
+
 /** Read-only pre-agent evidence. Unknown capabilities are explicit diagnostics. */
 export async function inspectExecutionPreflight(
   cm: ContainerManager,
@@ -22,7 +30,9 @@ export async function inspectExecutionPreflight(
   profile: PodExecutionSettings,
   purpose: NonNullable<ExecutionProvenanceInput['purpose']> = 'coding',
   subject: NonNullable<ExecutionProvenanceInput['subject']> = 'worker',
+  options: ExecutionPreflightOptions = {},
 ): Promise<ExecutionProvenanceInput> {
+  options.assertCurrent?.();
   const result: ExecutionProvenanceInput = {
     version: 1,
     purpose,
@@ -59,10 +69,55 @@ export async function inspectExecutionPreflight(
     },
     diagnostics: [],
   };
+  const requirements = pod.contract?.executionRequirements;
+  const workerRequirementsApply =
+    subject === 'worker' && (purpose === 'coding' || purpose === 'validation');
+  // v1 keeps its historical phase behavior. v2 describes the worker, not an isolated reviewer.
+  const declared =
+    purpose !== 'completion' && (requirements?.version !== 2 || workerRequirementsApply)
+      ? requirements
+      : undefined;
+  if (declared?.version === 2) {
+    if (declared.requiresImageBuild) {
+      result.status = 'blocked';
+      result.diagnostics.push({
+        code: 'PREFLIGHT_IMAGE_BUILD_UNSUPPORTED',
+        detail:
+          'Worker image-build operations are not qualified. Docker presence/connectivity and capability labels cannot satisfy this requirement.',
+      });
+    }
+    if (
+      !pod.launchConfigDigest &&
+      (declared.platform || declared.requiredReferenceRepositories?.length)
+    ) {
+      result.status = 'blocked';
+      result.diagnostics.push({
+        code: 'PREFLIGHT_FROZEN_REQUIREMENTS_UNVERIFIED',
+        detail:
+          'Strict platform/reference prerequisites require frozen launch admission. Preview and launch with the exact environment and enrolled reference revisions; legacy worker metadata is not qualification.',
+      });
+    }
+  }
   const requiresCli = purpose === 'coding' || subject === 'reviewer';
   try {
-    Object.assign(result, await verifyAgentCli(cm, containerId, pod.runtime, pod.model));
+    Object.assign(
+      result,
+      await verifyAgentCli(cm, containerId, pod.runtime, pod.model, {
+        ...(options.assertCurrent ? { assertCurrent: options.assertCurrent } : {}),
+        ...(options.user ? { maxOutputBytes: 65536 } : {}),
+        ...(options.user
+          ? {
+              user: options.user,
+              cwd: profile.buildWorkDir ? `/workspace/${profile.buildWorkDir}` : '/workspace',
+              ...(profile.buildEnv ? { env: profile.buildEnv } : {}),
+            }
+          : {}),
+      }),
+    );
+    options.assertCurrent?.();
   } catch (error) {
+    options.assertCurrent?.();
+    if (options.stopOnProbeError) throw error;
     if (requiresCli) result.status = 'blocked';
     result.diagnostics.push({
       code: !requiresCli
@@ -78,7 +133,9 @@ export async function inspectExecutionPreflight(
     });
   }
   try {
+    options.assertCurrent?.();
     const metadata = await boundedMetadata(cm, containerId);
+    options.assertCurrent?.();
     if (metadata) {
       result.imageDigest =
         metadata.imageDigest && /^sha256:[a-f0-9]{64}$/.test(metadata.imageDigest)
@@ -98,7 +155,7 @@ export async function inspectExecutionPreflight(
           : null;
       const required = Math.max(
         (profile.containerMemoryGb ?? DEFAULT_CONTAINER_MEMORY_GB) * 1024 ** 3,
-        pod.contract?.executionRequirements?.minimumMemoryBytes ?? 0,
+        declared?.minimumMemoryBytes ?? 0,
       );
       if (
         purpose !== 'completion' &&
@@ -112,28 +169,52 @@ export async function inspectExecutionPreflight(
         });
       }
     }
-  } catch {
+  } catch (error) {
+    options.assertCurrent?.();
+    if (options.stopOnProbeError) throw error;
     result.diagnostics.push({
       code: 'ENVIRONMENT_METADATA_UNAVAILABLE',
       detail: 'Backend environment metadata could not be read.',
     });
   }
   if (purpose !== 'completion' && purpose !== 'review')
-    result.commands = await inspectRequiredCommands(cm, containerId, pod, profile);
+    result.commands = await inspectRequiredCommands(
+      cm,
+      containerId,
+      requirements?.version === 2 && !workerRequirementsApply && pod.contract
+        ? { ...pod, contract: { ...pod.contract, executionRequirements: undefined } }
+        : pod,
+      profile,
+      options,
+    );
+  options.assertCurrent?.();
   for (const requirement of result.commands.requirements) {
-    // Only a proven-missing launcher blocks. An unverified result is unknown,
-    // not unsafe: the probe needs `node` in the image and can time out, so
-    // treating null as missing turns image shape and flake into pod failures.
-    if (requirement.available === false) {
+    const strict =
+      declared?.version === 2 && requirement.source === 'contract.executionRequirements';
+    // Preserve v1's advisory unknowns. v2 only makes explicitly declared launchers mandatory;
+    // static inference is not a complete requirement declaration or execution proof.
+    const mandatory = declared?.version !== 2 || strict;
+    if (requirement.available === false && mandatory) {
       result.status = 'blocked';
       result.diagnostics.push({
         code: 'PREFLIGHT_COMMAND_UNAVAILABLE',
         detail: `Required launcher ${requirement.executable} (${requirement.source}) is missing. Reconcile the image or declared command before ${purpose}.`,
       });
+    } else if (requirement.available === null && strict) {
+      result.status = 'blocked';
+      result.diagnostics.push({
+        code: 'PREFLIGHT_COMMAND_UNVERIFIED',
+        detail: `Explicit strict launcher ${requirement.executable} is unverified; the read-only probe returned no usable result. Reconcile the image or probe before ${purpose}.`,
+      });
     } else if (requirement.available === null) {
       result.diagnostics.push({
         code: 'COMMAND_AVAILABILITY_UNVERIFIED',
         detail: `Launcher ${requirement.executable} (${requirement.source}) is unverified; the read-only probe returned no usable result. Execution remains a validation gate.`,
+      });
+    } else if (requirement.available === false) {
+      result.diagnostics.push({
+        code: 'INFERRED_COMMAND_UNAVAILABLE',
+        detail: `Inferred launcher ${requirement.executable} (${requirement.source}) is missing. Declare strict prerequisites explicitly; actual script execution remains a validation gate.`,
       });
     }
   }
@@ -147,10 +228,13 @@ export async function inspectExecutionPreflight(
         : 'COMMAND_DECLARATION_RECOMMENDED',
       detail: `Static launcher discovery could not resolve ${formatUnresolvedSources(
         result.commands.unresolvedSources,
-      )}. Declare contract.executionRequirements.executables to verify those launchers. Launcher availability is advisory; actual script execution remains a validation gate.`,
+      )}. Declare contract.executionRequirements.executables to verify those launchers. ${
+        declared?.version === 2
+          ? 'Explicit v2 launchers gate preflight; inferred availability remains advisory. Actual script execution remains a validation gate.'
+          : 'Launcher availability is advisory; actual script execution remains a validation gate.'
+      }`,
     });
   }
-  const declared = purpose === 'completion' ? undefined : pod.contract?.executionRequirements;
   if (
     (declared?.minimumMemoryBytes && result.capabilities.memoryLimitBytes === null) ||
     (declared?.minimumCpu &&
@@ -185,6 +269,7 @@ export async function inspectExecutionPreflight(
       code: 'RELEASE_IDENTITY_INCOMPLETE',
       detail: 'Build release or validation implementation identity is unavailable.',
     });
+  options.assertCurrent?.();
   return result;
 }
 

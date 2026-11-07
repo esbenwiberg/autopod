@@ -159,23 +159,26 @@ function formatValidationFailure(input: ValidationFeedback): string {
   if (result.factValidation) {
     const unavailableFacts = result.factValidation.results.filter(isUnavailableRequiredFact);
     if (unavailableFacts.length > 0) {
-      lines.push('### Required Fact Deviation Requests Needed');
+      lines.push('### Required Verification Pending');
       lines.push(
-        'These required facts could not run in this validation environment. Do not report these as ordinary plan deviations. Call `report_task_summary` again with `factDeviations` for each fact below, using `action: "waive"` unless you added a replacement proof that can run here.',
+        'These required facts could not run in this validation environment. Do not report these as ordinary plan deviations or passes. For expected external/Mac checks, call `report_task_summary` with `deferredChecks` (stable id, check, reason, expectedExecutor, requiredFactId). Required checks remain pending; a deferral does not waive or replace a fact. Use `factDeviations` only to explicitly request an owner decision to waive/replace, never as an automatic response to external verification. True missing inputs/executor failures still belong in `report_blocker`.',
       );
       lines.push('');
       for (const check of unavailableFacts) {
         lines.push(`**${check.factId}** (\`${check.artifactPath}\`):`);
         lines.push(`- ${check.reasoning}`);
-        lines.push('- Suggested `factDeviations` entry:');
+        lines.push(
+          '- Suggested `deferredChecks` entry for expected external verification (use the same id on replay):',
+        );
         lines.push('```json');
         lines.push(
           JSON.stringify(
             {
-              factId: check.factId,
-              action: 'waive',
-              reason: 'The required fact command cannot run in this validation environment.',
-              whyImpossible: check.reasoning,
+              id: `external-${check.factId}`,
+              check: check.command,
+              reason: check.reasoning,
+              expectedExecutor: 'External verification owner',
+              requiredFactId: check.factId,
             },
             null,
             2,

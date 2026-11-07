@@ -31,6 +31,7 @@ interface ValidationExecutionDependencies {
     | 'taskRetries'
     | 'validationExecutions'
     | 'retainedCheckpoints'
+    | 'retainedCoding'
     | 'atomically'
   >;
   validationEngine: Pick<ValidationEngine, 'validate'>;
@@ -194,8 +195,9 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
         const verifyRepair = async () => {
           if (
             (repair?.binding.approvalRewrite ||
-              repair?.binding.continuation?.infrastructure?.mode === 'rework') &&
-            repair.activated?.generation === pod.lifecycleGeneration
+              repair?.binding.continuation?.infrastructure?.mode === 'rework' ||
+              podRepo.retainedCoding?.finalSource(podId, pod.lifecycleGeneration)) &&
+            repair?.activated?.generation === pod.lifecycleGeneration
           ) {
             if (!deps.verifySelectedSource)
               throw new TaskRetryBlockedError('Rewrite repair source verification is unavailable');

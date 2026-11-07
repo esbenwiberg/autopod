@@ -31,6 +31,7 @@ function emptyCustodyDatabase() {
   const db = new Database(':memory:');
   db.exec('CREATE TABLE retained_checkpoint_recoveries(container_id TEXT, binding TEXT)');
   db.exec('CREATE TABLE retained_finalization_resources(container_id TEXT)');
+  db.exec('CREATE TABLE retained_coding_facts(kind TEXT,evidence TEXT)');
   custodyDatabases.push(db);
   return db;
 }
@@ -1127,6 +1128,29 @@ describe('DockerContainerManager', () => {
 
       expect(result.stdout).toBe('hello world');
       expect(result.exitCode).toBe(0);
+    });
+
+    it('bounds combined buffered output without claiming remote termination', async () => {
+      const muxStream = createMockMuxStream('hello', 'world');
+      const mockExec = { start: vi.fn().mockResolvedValue(muxStream), inspect: vi.fn() };
+      container.exec.mockResolvedValue(mockExec);
+      await expect(
+        manager.execInContainer('abc123', ['fixed-probe'], { maxOutputBytes: 9 }),
+      ).rejects.toMatchObject({ code: 'EXEC_OUTPUT_LIMIT' });
+      expect(mockExec.inspect).not.toHaveBeenCalled();
+      expect(container.stop).not.toHaveBeenCalled();
+    });
+
+    it('accepts bounded output exactly at its byte limit', async () => {
+      const muxStream = createMockMuxStream('hello', 'world');
+      const mockExec = {
+        start: vi.fn().mockResolvedValue(muxStream),
+        inspect: vi.fn().mockResolvedValue({ Running: false, ExitCode: 0 }),
+      };
+      container.exec.mockResolvedValue(mockExec);
+      await expect(
+        manager.execInContainer('abc123', ['fixed-probe'], { maxOutputBytes: 10 }),
+      ).resolves.toEqual({ stdout: 'hello', stderr: 'world', exitCode: 0 });
     });
 
     it('passes cwd option as WorkingDir', async () => {

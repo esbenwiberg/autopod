@@ -112,7 +112,11 @@ export function resolveRetainedSource(
         finalizationError(
           'Retained selection phase, generation or replacement resource is inconsistent.',
         );
-      const selected = record.infrastructure?.candidate ?? record.selected ?? record.prepared;
+      const selected =
+        pods.retainedCoding?.finalSource(pod.id, record.activated.generation) ??
+        record.infrastructure?.candidate ??
+        record.selected ??
+        record.prepared;
       if (record.checked?.snapshot && record.checked.snapshot.containerId !== pod.containerId)
         finalizationError('Current resource differs from the immutable checked-source snapshot.');
       if (record.checked?.source && record.checked.source.tree !== selected.tree)

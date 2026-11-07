@@ -233,6 +233,35 @@ async function publishAndComplete(
 }
 
 describe('qualified infrastructure recovery from real incident shapes', () => {
+  it('cannot route typed prerequisite coding through legacy infrastructure rework', async () => {
+    const f = await fixture('rework');
+    const report = f.ctx.db
+      .prepare("SELECT id,payload FROM escalations WHERE pod_id=? AND type='report_blocker'")
+      .get(f.podId) as { id: string; payload: string };
+    f.ctx.db.prepare('UPDATE escalations SET payload=? WHERE id=?').run(
+      JSON.stringify({
+        ...JSON.parse(report.payload),
+        prerequisiteBlocker: {
+          version: 1,
+          kind: 'missing-execution-prerequisites',
+          requirementsHash: 'a'.repeat(64),
+          launchers: ['jq'],
+        },
+      }),
+      report.id,
+    );
+    await expect(
+      f.recovery.recoverInfrastructure(f.podId, f.request, f.actor),
+    ).rejects.toMatchObject({
+      code: 'REPAIR_QUALIFICATION_REQUIRED',
+    });
+    expect(f.recovery.list(f.podId)).toEqual([]);
+    expect(f.ctx.podRepo.retainedCoding!.latest(f.podId)).toBeNull();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(f.deps.enqueue).not.toHaveBeenCalled();
+  });
   it('preserves the running original before one stop, runs checks without coding, and retains exact publication proof', async () => {
     const f = await fixture();
     const original = f.pod();
@@ -262,6 +291,20 @@ describe('qualified infrastructure recovery from real incident shapes', () => {
     }
     await f.recovery.wait(f.input.id);
     expect(f.recovery.list(f.podId)[0]?.blocked).toBeNull();
+    expect(() =>
+      f.ctx.podRepo.atomically!(() =>
+        f.ctx.podRepo.retainedCoding!.claim(admittedId, original, {}, 'b'.repeat(64), {
+          version: 1,
+          mode: 'qualify_then_code_once',
+          reportSetHash: 'a'.repeat(64),
+          requirementsHash: 'a'.repeat(64),
+          parentDigest: 'a'.repeat(64),
+          executionDigest: 'a'.repeat(64),
+          bindingDigest: 'a'.repeat(64),
+        }),
+      ),
+    ).toThrow('not another recovery protocol');
+    expect(f.ctx.podRepo.retainedCoding!.latest(f.podId)).toBeNull();
     expect(f.stopped()).toBe(true);
     expect(f.cm.stop).toHaveBeenCalledTimes(1);
     expect(f.pod()).toMatchObject({
@@ -297,6 +340,9 @@ describe('qualified infrastructure recovery from real incident shapes', () => {
     const provider = delivery(f);
     vi.mocked(f.ctx.runtime.spawn).mockImplementation(async function* (options) {
       expect(options.task).toContain(f.request.instructions!.content);
+      expect(f.ctx.podRepo.retainedCoding!.isOwner(f.podId)).toBe(false);
+      expect(() => f.ctx.podRepo.retainedCoding!.assertQualified(f.podId)).toThrow();
+      expect(f.ctx.podRepo.retainedCoding!.latest(f.podId)).toBeNull();
       const current = f.pod();
       expect(current.worktreePath).not.toBe(original.worktreePath);
       await writeFile(

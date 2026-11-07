@@ -4,6 +4,7 @@ import {
   githubMutationSchema,
   githubReadSchema,
   inputPathSchema,
+  prerequisiteBlockerV1Schema,
   serviceReadSchema,
 } from '@autopod/shared';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -27,7 +28,7 @@ import { renderReference } from './tools/render-reference.js';
 import { reportBlocker } from './tools/report-blocker.js';
 import { reportPlan } from './tools/report-plan.js';
 import { reportProgress } from './tools/report-progress.js';
-import { reportTaskSummary } from './tools/report-task-summary.js';
+import { deferredChecksSchema, reportTaskSummary } from './tools/report-task-summary.js';
 import { validateInBrowser } from './tools/validate-in-browser.js';
 import { validateLocally } from './tools/validate-locally.js';
 
@@ -106,7 +107,7 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
 
   server.tool(
     'ask_human',
-    'Request an actionable owner decision about scope, product choices or authority. Give a concise question, recommendation with reason, and choices with consequences. Use report_blocker for infrastructure or missing capabilities; a reply is not an execution receipt or gate waiver.',
+    'Request an actionable owner decision about scope, product choices or authority. Give a concise question, recommendation with reason, and choices with consequences. Use report_blocker for true executor failures or missing required inputs; expected external/Mac verification goes in report_task_summary.deferredChecks. A reply is not an execution receipt or gate waiver.',
     {
       kind: z.literal('decision').default('decision'),
       question: z.string().trim().min(1).describe('Concise question the owner can actually answer'),
@@ -145,9 +146,10 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
     },
   );
 
+  const executionPrerequisites = bridge.getExecutionPrerequisites?.(podId);
   server.tool(
     'report_blocker',
-    'Report genuine infrastructure or unexpected missing capabilities without requesting a human answer. Do not use for expected host-only macOS checks explicitly deferred to a Mac: record those as not run in report_task_summary. Required Mac runner failures remain blockers. Stop blocked attempts, preserve work, summarize incomplete checks and finish; Autopod holds completion after execution settles.',
+    'Report a true executor/environment failure or missing required input without requesting a human answer. Stop blocked attempts, preserve work, summarize incomplete checks and finish; Autopod holds completion after execution settles. Do not use for expected host-only macOS checks explicitly deferred to a Mac or other expected external verification: record those as not run in report_task_summary.deferredChecks; required gates still apply. Required Mac runner failures remain blockers.',
     {
       description: z
         .string()
@@ -162,6 +164,11 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         .describe('Required repair or missing input; say when no supported recovery exists'),
       owner: z.enum(['autopod', 'parent', 'validation']).default('autopod'),
       phase: z.string().optional().describe('Failing execution or validation phase'),
+      prerequisiteBlocker: prerequisiteBlockerV1Schema
+        .optional()
+        .describe(
+          `Optional prospective lookup-only launcher need referencing the original frozen v2 requirements hash and declared names. Not a repair claim, builder/private/native proof, receipt, permission or retry grant. Omit for legacy/unsupported needs; never infer a mapping from text. ${executionPrerequisites ? `Frozen declaration (NOT evidence): ${JSON.stringify(executionPrerequisites)}` : 'No frozen v2 declaration is available; omit this envelope.'}`,
+        ),
     },
     async (input) => {
       const response = await reportBlocker(podId, input, bridge, pendingRequests);
@@ -242,6 +249,11 @@ export function createEscalationMcpServer(deps: EscalationMcpDeps): {
         )
         .describe(
           'Deviations from the original plan. Use an empty array if you followed the plan exactly.',
+        ),
+      deferredChecks: deferredChecksSchema
+        .optional()
+        .describe(
+          'Expected external/Mac checks reported NOT-RUN, not pass/waive/repaired evidence. Use stable IDs; entries are preserved, conflicting reuse is rejected, and required checks still gate. Max 50 preserved entries; legacy fix-pod recycling may replace the entire summary.',
         ),
       factEvidence: z
         .array(

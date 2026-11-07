@@ -49,6 +49,7 @@ export interface PrBodyConfig {
    * Maximum character budget for the rendered body. When set, lower-priority sections are
    * dropped (rather than truncated mid-sentence) until the body fits within the budget.
    * Drop order: screenshots → previewUrl → deviations table → AI review details block.
+   * Deferred verification warnings are retained; impossibly small budgets fail explicitly.
    */
   budgetChars?: number;
 }
@@ -127,6 +128,17 @@ export function buildPrBody(config: PrBodyConfig): string {
   const reviewFocus = narrative?.reviewFocus;
 
   const sections: string[] = [];
+
+  // Retained NOT-RUN context must not disappear behind generated narrative.
+  if (taskSummary?.deferredChecks?.length) {
+    const checks = taskSummary.deferredChecks.map(
+      (check) =>
+        `- **NOT-RUN** [${escapeMd(check.id)}] ${escapeMd(check.check)} — ${escapeMd(check.reason)}; expected executor: ${escapeMd(check.expectedExecutor)}; reported lifecycle: ${check.lifecycleGeneration}${check.requiredFactId ? `; required fact: ${escapeMd(check.requiredFactId)}` : ''}`,
+    );
+    sections.push(
+      `## Verification pending\n\nWorker-reported NOT-RUN context, not a pass, waiver or repair receipt. Historical reports are retained; authoritative required gates still apply independently.\n\n${checks.join('\n')}`,
+    );
+  }
 
   // ── Narrative: Why / What / How / Review Focus ────────────────────────────
 
@@ -362,7 +374,26 @@ function applyBudget(sections: string[], budgetChars: number): string {
   );
   if (join(trimmed).length <= budgetChars) return join(trimmed);
 
-  // Last resort: hard-truncate the body (shouldn't be needed after the drops above)
+  // Never truncate away a verification warning or half an entry. Extremely
+  // small budgets retain a compact warning or fail explicitly, never overrun.
+  const pending = trimmed.find((section) => section.startsWith('## Verification pending'));
+  if (pending) {
+    const warning =
+      pending.length <= budgetChars
+        ? pending
+        : '## Verification pending\n\nWorker-reported NOT-RUN checks remain in the task summary. This is not a pass, waiver or repair receipt; required gates still apply.';
+    if (warning.length > budgetChars) {
+      throw new Error('PR body budget too small to retain deferred-verification warning');
+    }
+    const rest = join(trimmed.filter((section) => section !== pending));
+    return (
+      warning +
+      (budgetChars > warning.length + 2
+        ? `\n\n${rest.slice(0, budgetChars - warning.length - 2)}`
+        : '')
+    );
+  }
+  // Legacy bodies without deferrals retain their previous budget behavior.
   return join(trimmed).slice(0, budgetChars);
 }
 

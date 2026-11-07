@@ -1,8 +1,10 @@
 import type {
   ActionDefinition,
   ActionResponse,
+  DeferredCheck,
   EscalationRequest,
   EscalationResponse,
+  ExecutionRequirements,
   FactEvidence,
   GitHubMutation,
   GitHubReadRequest,
@@ -42,6 +44,11 @@ export interface ScopedPodTools {
 export interface PodBridge {
   renderReference?(podId: string, path: string): Promise<ReferencePreviewResponse>;
   getScopedTools?(podId: string): ScopedPodTools | undefined;
+  /** Read-only declaration for the report tool schema; never qualification, status or authority. */
+  getExecutionPrerequisites?(podId: string): {
+    requirements: Extract<ExecutionRequirements, { version: 2 }>;
+    requirementsHash: string;
+  } | null;
   createEscalation(escalation: EscalationRequest): void;
   resolveEscalation(escalationId: string, response: EscalationResponse): void;
   getAiEscalationCount(podId: string): number;
@@ -105,6 +112,7 @@ export interface PodBridge {
     }>,
     memoryOutcomes?: MemoryOutcomeItem[],
     reviewFeedbackResponses?: ReviewFeedbackResponseItem[],
+    deferredChecks?: DeferredCheck[],
   ): void;
   /** Reading retains guidance until the current worker acknowledges its receipt. */
   readOperatorGuidance(podId: string): OperatorGuidanceDelivery | null;

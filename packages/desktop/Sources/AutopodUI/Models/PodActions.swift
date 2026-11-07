@@ -42,6 +42,7 @@ public struct PodActions: Sendable {
   public var repair: PodRepairActions = .unavailable
   public var taskBudget: TaskBudgetActions = .unavailable
   public var retainedFinalization: RetainedFinalizationActions = .unavailable
+  public var repairContinuation: RepairContinuationActions = .unavailable
   public var sandboxRecovery: SandboxRecoveryActions = .unavailable
   public var approve: @MainActor @Sendable (String, String?) async -> Void
   public var reject: @MainActor @Sendable (String, String?) async -> Void

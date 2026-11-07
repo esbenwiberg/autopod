@@ -359,6 +359,12 @@ public struct DetailPanelView: View {
                     .id(actions.retainedFinalization.scope + ":" + pod.id)
             }
 
+            if actions.repairContinuation.available && !pod.isWorkspace &&
+                [.failed, .reviewRequired, .validated].contains(pod.status) {
+                RepairContinuationCard(podId: pod.id, actions: actions.repairContinuation)
+                    .id(actions.repairContinuation.scope + ":" + pod.id)
+            }
+
             // Tab bar
             tabBar
 

@@ -48,6 +48,7 @@ import { deriveLaunch } from './derive-launch.js';
 import { createLaunchExecutionCredentials } from './execution-credentials.js';
 import { admitLaunch } from './launch-admission.js';
 import { resolveLaunchExecutionSettings } from './launch-execution-settings.js';
+import { assertLaunchRequirements } from './launch-requirement-preflight.js';
 import {
   configurationDigest,
   type LaunchResolutionServices,
@@ -155,6 +156,8 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
   const assertPimAllowed = (selection: Parameters<typeof policy.assertPimAllowed>[0]) =>
     policy.assertPimAllowed(selection);
   async function assertCurrent(config: EffectiveLaunchConfig) {
+    // Check the final work contract, not only templates that happened to use resolveLaunch().
+    assertLaunchRequirements(config);
     policy.assertLaunch(config);
     if (config.repository?.setup.integrations.deployment?.enabled) {
       if (!deployments)

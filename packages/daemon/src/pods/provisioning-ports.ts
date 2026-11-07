@@ -82,6 +82,7 @@ export interface ProvisioningLiveDependencies {
 }
 
 export interface ProvisioningCaptured {
+  qualifyCodingCandidate?(input: PreparedExecution): Promise<void>;
   containerManagerFactory: { get(target: ExecutionTarget): ContainerManager };
   logger: Logger;
   podRepo: PodRepository;

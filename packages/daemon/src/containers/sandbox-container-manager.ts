@@ -646,6 +646,12 @@ for root in sys.argv[1:]:
   ): Promise<ExecResult> {
     if (this.managedDatabase)
       assertFinalizationResourceAvailable(this.managedDatabase, containerId);
+    if (options?.maxOutputBytes !== undefined)
+      throw new AutopodError(
+        'Bounded buffered exec output is unavailable on this backend',
+        'EXEC_OUTPUT_BOUND_UNSUPPORTED',
+        409,
+      );
     const result = await this.client.exec(containerId, command, toSandboxExecOptions(options));
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
   }

@@ -26,6 +26,7 @@ import { deriveFeedName } from '../pods/registry-injector.js';
 import { assertAnalysisWorkspace } from './analysis-workspace.js';
 import { type ConfigurationStore, configurationError } from './configuration-store.js';
 import { deriveLaunch } from './derive-launch.js';
+import { assertLaunchRequirements } from './launch-requirement-preflight.js';
 import { resolveExecution } from './resolve-execution.js';
 
 export { canonicalConfiguration, configurationDigest } from './configuration-digest.js';
@@ -86,6 +87,7 @@ export async function resolveLaunch(
   actorId?: string,
 ): Promise<EffectiveLaunchConfig> {
   const config = await resolveLaunchRequest(raw, services);
+  assertLaunchRequirements(config);
   if (config.work.inputBundle) {
     if (!services.assertInputBundle)
       configurationError(

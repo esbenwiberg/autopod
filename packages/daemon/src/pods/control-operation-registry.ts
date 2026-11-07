@@ -31,6 +31,8 @@ export function createControlOperationRegistry(
           key === 'prepareRewriteRepair' ||
           key === 'checkRewriteRepair' ||
           key === 'continueRetained' ||
+          key === 'authorizeRepairContinuation' ||
+          key === 'previewRepairContinuation' ||
           key === 'recoverInfrastructure' ||
           key === 'reconcileInfrastructure' ||
           key === 'previewRetainedExecution' ||

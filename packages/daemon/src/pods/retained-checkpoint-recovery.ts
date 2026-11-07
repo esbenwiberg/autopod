@@ -12,6 +12,7 @@ import type {
   RetainedContinuationCheckRequest,
   RetainedContinuationRequest,
 } from '@autopod/shared';
+import { AutopodError } from '@autopod/shared';
 import type { Logger } from 'pino';
 import {
   type RetainedExecutionSelection,
@@ -29,7 +30,10 @@ import {
 } from '../worktrees/retained-checkpoint-workspace.js';
 import { rewriteConfiguration } from './approval-source-rewrite.js';
 import { rewriteHash } from './approval-source-rewrite-repository.js';
+import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
+import { assertQualificationExecutionContextSupported } from './environment-qualification.js';
 import type { PodRepository } from './pod-repository.js';
+import { createRepairContinuation } from './repair-continuation.js';
 import {
   type CheckpointOutcomeRequest,
   type CheckpointRecoveryBinding,
@@ -39,6 +43,7 @@ import {
   checkpointHash,
   type PreparedCheckpoint,
 } from './retained-checkpoint-repository.js';
+import type { CodingBinding } from './retained-coding-repository.js';
 import {
   assertValidationExecutionSettled,
   requiresValidationSettlement,
@@ -47,6 +52,21 @@ import {
   getPodValidationSkipPhases,
   isPodValidationDisabled,
 } from './validation-workflow-policy.js';
+
+/** Read-only diagnostics may retain expected selection refusals, never invent evidence. */
+export function observeCheckpointSelection<T>(read: () => T) {
+  try {
+    return { selection: read(), refusal: null };
+  } catch (error) {
+    if (
+      !(error instanceof AutopodError) ||
+      error.code !== 'CHECKPOINT_RECOVERY_BLOCKED' ||
+      error.statusCode !== 409
+    )
+      throw error;
+    return { selection: null, refusal: { code: error.code, reason: error.message } };
+  }
+}
 
 export function createRetainedCheckpointRecovery(deps: {
   podRepo: PodRepository;
@@ -65,6 +85,9 @@ export function createRetainedCheckpointRecovery(deps: {
   root: string;
   logger: Pick<Logger, 'error'>;
   prepare?: typeof prepareRetainedCheckpointWorkspace;
+  qualifyCoding?: Parameters<typeof createRepairContinuation>[0]['qualify'];
+  beforeCodingActivation?(pod: Pod): void;
+  isCodingWorkerActive?(podId: string, runId: string): boolean;
 }) {
   const repo =
     deps.podRepo.retainedCheckpoints ?? checkpointError('Checkpoint recovery ledger unavailable');
@@ -94,6 +117,11 @@ export function createRetainedCheckpointRecovery(deps: {
     infrastructure?: NonNullable<CheckpointRecoveryBinding['continuation']>['infrastructure'],
   ) {
     deps.podRepo.retainedFinalizations?.assertAvailable(pod.id);
+    if (infrastructure?.mode === 'rework' && repo.hasTypedPrerequisiteBlocker(pod))
+      checkpointError(
+        'Typed prerequisite repair requires actual environment qualification through repair continuation, not infrastructure rework',
+        'REPAIR_QUALIFICATION_REQUIRED',
+      );
     if (
       infrastructure &&
       (pod.executionTarget !== 'local' ||
@@ -253,7 +281,102 @@ export function createRetainedCheckpointRecovery(deps: {
       configuration(current) !== record.binding.configurationHash
     )
       checkpointError('Original checkpoint selection was superseded', 'STALE_CHECKPOINT_RECOVERY');
+    const coding = deps.podRepo.retainedCoding?.get(record.id);
+    if (
+      coding &&
+      deps.podRepo.retainedCoding?.reports(record.podId, record.generation).hash !==
+        coding.binding.reportSetHash
+    )
+      checkpointError('Original report set changed', 'STALE_CHECKPOINT_RECOVERY');
     return current;
+  }
+  /** Observation only. Successful row checks are not admission or environment qualification. */
+  function inspect(podId: string) {
+    const pod = deps.podRepo.getOrThrow(podId);
+    const check = (id: string, run: () => void) => {
+      try {
+        run();
+        return { id, state: 'no_recorded_blocker' as const, code: null, reason: null };
+      } catch (error) {
+        // Storage/programming failures must fail the request, never look eligible.
+        if (!(error instanceof AutopodError) || error.statusCode !== 409) throw error;
+        return { id, state: 'blocked' as const, code: error.code, reason: error.message };
+      }
+    };
+    const checks = [
+      // Reuse admission's policy verbatim, reporting its first conservative refusal.
+      check('continuation_policy', () => policy(pod, true)),
+      check('retained_custody', () => repo.assertAvailable(podId)),
+      check('worker_settlement', () => {
+        const tasks = deps.podRepo.taskExecutions ?? checkpointError('Task ledger unavailable');
+        tasks.assertCanDelete(podId); // This assertion reads only; no deletion is performed.
+      }),
+      check('validation_settlement', () => {
+        const validations =
+          deps.podRepo.validationExecutions ?? checkpointError('Validation ledger unavailable');
+        validations.assertNoActiveTaskExecution(podId);
+        if (validations.unsettled(podId))
+          checkpointError(
+            'An immutable validation dispatch requires its own exact-execution recovery',
+          );
+      }),
+      check('source_and_delivery_custody', () => {
+        const sources =
+          deps.podRepo.sourceAdoptions ?? checkpointError('Source ledger unavailable');
+        if (sources.hasCustody(podId)) checkpointError('Another source recovery retains custody');
+        sources.assertControlPlaneSettled(podId);
+        deps.podRepo.deletionOwnership?.assertTaskAvailable(podId);
+      }),
+      check('human_guidance', () => deps.assertGuidanceCollected(podId)),
+    ];
+    const observed = observeCheckpointSelection(() => repo.selectionEvidence(pod));
+    if (observed.refusal)
+      checks.push({ id: 'selection_evidence', state: 'blocked', ...observed.refusal });
+    const selection = observed.selection;
+    const infrastructure = repo.infrastructureNeeds(pod);
+    const currentFinalization = pod.finalization?.generation === pod.lifecycleGeneration;
+    return {
+      version: 1 as const,
+      mode: 'read_only' as const,
+      generation: pod.lifecycleGeneration,
+      status: checks.some((item) => item.state === 'blocked')
+        ? ('blocked' as const)
+        : ('requires_selection' as const),
+      selection: selection
+        ? {
+            expectedGeneration: selection.expectedGeneration,
+            expectedResultHash: selection.expectedResultHash,
+          }
+        : null,
+      infrastructure: {
+        state: infrastructure.needs.length ? ('reported' as const) : ('none_recorded' as const),
+        ...infrastructure,
+      },
+      prerequisites: {
+        hostPathRecorded: Boolean(pod.worktreePath),
+        sourcePreservationRecorded: Boolean(
+          currentFinalization && pod.finalization?.sourcePreservedAt,
+        ),
+        workerSettlementRecorded: Boolean(currentFinalization && pod.finalization?.agentSettledAt),
+        pendingDecision: Boolean(
+          pod.pendingEscalation || deps.podRepo.hasUnansweredDecision?.(podId),
+        ),
+        hostSource: 'not_checked' as const,
+        originalFilesAndReports: 'not_checked' as const,
+        resourceStateAndIdentity: 'not_checked' as const,
+        environmentQualification: 'not_checked' as const,
+        retryAdmission: 'not_checked' as const,
+      },
+      checks,
+      nextSteps: [
+        'Inspect recorded needs and resolve pending decisions/guidance or custody through their owning controls; never clear a hold to retry.',
+        'Select the exact retained host HEAD and generation/result hash. Host preservation does not collect unsynced original files or reports.',
+        'Use --preview-execution PROFILE for configuration only; it does not qualify the actual environment. Sandbox wakeup is machine-only, not task continuation.',
+        'Use --apply --prepare-only for an independent repair checkout, or --apply for checks-only selection. All existing admission/source/resource checks still apply; no coding worker starts.',
+        'After preparation, use --check with the exact committed candidate. Inspect ap retry-state POD --stage validation; any authorize-retry is a separate human action, not implied by selection.',
+        'Fresh configured checks and independent review must run on the selected source. A pass still requires separate human approval; historical reports and budgets remain retained.',
+      ],
+    };
   }
   async function quiesce(id: string): Promise<boolean> {
     let record = repo.get(id) ?? checkpointError('Recovery unavailable');
@@ -339,7 +462,16 @@ export function createRetainedCheckpointRecovery(deps: {
       assertCurrent,
     });
     assertCurrent();
-    if (record.binding.continuation && !record.binding.approvalRewrite) {
+    const coding = deps.podRepo.retainedCoding?.get(record.id);
+    if (coding) {
+      prepared = {
+        ...prepared,
+        baseCommitSha:
+          original(record).startCommitSha ??
+          checkpointError('Pinned original review base unavailable'),
+      };
+    }
+    if (record.binding.continuation && !record.binding.approvalRewrite && !coding) {
       const select =
         deps.worktreeManager.selectRetainedContinuationSource ??
         checkpointError('Independent remote source selection is unavailable');
@@ -387,6 +519,7 @@ export function createRetainedCheckpointRecovery(deps: {
     atomically(() => {
       const pod = original(record);
       if (selection) repo.select(record.id, selection);
+      if (deps.podRepo.retainedCoding?.get(record.id)) deps.beforeCodingActivation?.(pod);
       const generation = deps.podRepo.incrementLifecycleGeneration(record.podId);
       const execution = selection?.execution ?? record.binding.continuation?.execution;
       // Detach only after durable original custody (and confirmed stop for infrastructure recovery); never delete it.
@@ -396,7 +529,22 @@ export function createRetainedCheckpointRecovery(deps: {
         worktreePath: prepared.worktree,
         recoveryWorktreePath: prepared.worktree,
         containerId: null,
-        skipAgent: infrastructure?.mode !== 'rework',
+        skipAgent:
+          !deps.podRepo.retainedCoding?.get(record.id) && infrastructure?.mode !== 'rework',
+        ...(deps.podRepo.retainedCoding?.get(record.id)
+          ? {
+              taskSummary: null,
+              plan: null,
+              progress: null,
+              readinessReview: null,
+              lastRecoveryTrigger: null,
+              lastCorrectionMessage: null,
+              completedAt: null,
+              pauseReason: null,
+              reworkReason: null,
+              infrastructureFailure: null,
+            }
+          : {}),
         ...(infrastructure?.mode === 'rework'
           ? {
               reworkReason: `Qualified infrastructure repair of preserved source ${record.binding.head}. Original resource/source/reports remain retained. Work only on this independent checkout within the original task and authority. No publication is authorized.\nDiagnosis: ${infrastructure.qualification}\nOperator-supplied repair context (not passing evidence):\n${infrastructure.instructions?.content ?? ''}`,
@@ -428,7 +576,7 @@ export function createRetainedCheckpointRecovery(deps: {
     });
     deps.emit(
       record.podId,
-      infrastructure?.mode === 'rework'
+      infrastructure?.mode === 'rework' || deps.podRepo.retainedCoding?.get(record.id)
         ? 'Preserved source queued for one owned coding repair, then fresh checks and independent review. Original resource/reports remain retained; no delivery was authorized.'
         : 'Selected retained source queued for fresh checks only. Original resource, execution and reports remain quarantined; no coding worker or delivery was authorized.',
     );
@@ -441,7 +589,15 @@ export function createRetainedCheckpointRecovery(deps: {
     continuation = false,
     repair?: CheckpointRecoveryBinding['approvalRewrite'],
     infrastructureRequest?: InfrastructureRecoveryRequest,
+    codingClaim?: {
+      request: unknown;
+      requestHash: string;
+      binding: CodingBinding;
+      assertCurrent(): void;
+    },
   ) {
+    if (codingClaim && infrastructureRequest)
+      checkpointError('Recovery protocols cannot share a coding capability');
     if (
       actor.type !== 'human' ||
       !actor.userId.trim() ||
@@ -481,6 +637,7 @@ export function createRetainedCheckpointRecovery(deps: {
       checkpointError('Exact provider namespace and clean source inspection are required');
     const anchor = configuration(pod);
     const assertCurrent = () => {
+      codingClaim?.assertCurrent();
       const current = deps.podRepo.getOrThrow(podId);
       policy(current, continuation, repair, addReview, infrastructure);
       if (
@@ -559,7 +716,34 @@ export function createRetainedCheckpointRecovery(deps: {
     let execution: RetainedExecutionSelection | undefined;
     const selection = input as RetainedContinuationRequest;
     if (continuation && selection.executionProfileId) {
-      execution = await resolveExecutionSelection(pod, selection, assertCurrent);
+      execution = await resolveExecutionSelection(
+        pod,
+        selection,
+        assertCurrent,
+        Boolean(codingClaim),
+      );
+    }
+    if (codingClaim) {
+      const finalOriginalKey = await containerManager.getResourceKey(containerId);
+      const afterKey = replay();
+      if (afterKey) return afterKey;
+      assertCurrent();
+      const finalOriginalStatus = await containerManager.getStatus(containerId);
+      const afterStatus = replay();
+      if (afterStatus) return afterStatus;
+      assertCurrent();
+      if (finalOriginalKey !== resourceKey || finalOriginalStatus !== 'stopped')
+        checkpointError('Original resource identity/state changed before retained claim');
+      const parent = deps.readLaunch?.(podId) ?? checkpointError('Original launch unavailable');
+      const replacement = retainedContinuationLaunch(
+        parent,
+        podId,
+        execution ?? checkpointError('Coding replacement required'),
+      );
+      const settings =
+        deps.executionSettings?.(replacement) ??
+        checkpointError('Replacement execution settings unavailable');
+      assertQualificationExecutionContextSupported(settings);
     }
     const claimed = repo.claim({
       pod,
@@ -567,6 +751,18 @@ export function createRetainedCheckpointRecovery(deps: {
         podId,
       ).taskId,
       resourceKey,
+      ...(codingClaim
+        ? {
+            onClaim: () =>
+              deps.podRepo.retainedCoding?.claim(
+                input.id,
+                pod,
+                codingClaim.request,
+                codingClaim.requestHash,
+                codingClaim.binding,
+              ),
+          }
+        : {}),
       request: input,
       actor,
       assertCurrent,
@@ -707,6 +903,7 @@ export function createRetainedCheckpointRecovery(deps: {
     pod: Pod,
     input: Pick<RetainedContinuationRequest, 'executionProfileId' | 'expectedExecutionDigest'>,
     assertCurrent: () => void,
+    coding = false,
   ): Promise<RetainedExecutionSelection> {
     const execution = await previewExecution(pod.id, input.executionProfileId!);
     assertCurrent();
@@ -720,6 +917,7 @@ export function createRetainedCheckpointRecovery(deps: {
     const settings =
       deps.executionSettings?.(next) ??
       checkpointError('Replacement execution settings unavailable');
+    if (coding) assertQualificationExecutionContextSupported(settings);
     return {
       ...execution,
       configurationHash: configuration(
@@ -795,6 +993,41 @@ export function createRetainedCheckpointRecovery(deps: {
           }
         : {}),
     };
+  }
+  async function replyToCoding(podId: string, actor: OperatorActor, send: () => Promise<void>) {
+    if (actor.type !== 'human' || !actor.userId.trim())
+      checkpointError('Authenticated human reply required');
+    const store = deps.podRepo.retainedCoding ?? checkpointError('Coding custody unavailable');
+    const pod = deps.podRepo.getOrThrow(podId);
+    const record =
+      store.workerDecision(pod) ??
+      checkpointError('Only the live typed worker pending question may be answered');
+    const root = repo.get(record.id) ?? checkpointError('Coding root unavailable');
+    const question = checkpointHash(pod.pendingEscalation);
+    const assertCurrent = () => {
+      const current = deps.podRepo.getOrThrow(podId);
+      const decision = store.workerDecision(current);
+      if (
+        decision?.id !== record.id ||
+        checkpointHash(current.pendingEscalation) !== question ||
+        !deps.isCodingWorkerActive?.(podId, record.facts.worker!.runId) ||
+        configuration(current) !== root.binding.continuation?.execution?.configurationHash ||
+        store.reports(podId, root.generation).hash !== record.binding.reportSetHash ||
+        deps.podRepo.hasInfrastructureBlocker?.(podId)
+      )
+        checkpointError('Typed worker question ownership changed before reply');
+    };
+    assertCurrent();
+    // This is the typed worker's own scope, never infrastructure stop/Rework
+    // authority. No qualification TTL is re-applied after worker admission.
+    return repo.owned(record.id, () =>
+      store.owned(record.id, () => {
+        repo.assertAvailable(podId);
+        store.assertOwned(podId);
+        assertCurrent();
+        return send();
+      }),
+    );
   }
   async function replyToRepair(podId: string, actor: OperatorActor, send: () => Promise<void>) {
     if (actor.type !== 'human' || !actor.userId.trim())
@@ -1056,7 +1289,8 @@ export function createRetainedCheckpointRecovery(deps: {
       record.checking ||
       record.blocked ||
       pod.status !== 'queued' ||
-      (record.binding.continuation?.infrastructure?.mode === 'rework'
+      (deps.podRepo.retainedCoding?.get(record.id) ||
+      record.binding.continuation?.infrastructure?.mode === 'rework'
         ? pod.skipAgent
         : !pod.skipAgent) ||
       pod.lifecycleGeneration !== record.activated.generation ||
@@ -1065,13 +1299,17 @@ export function createRetainedCheckpointRecovery(deps: {
     )
       checkpointError('Checkpoint execution is not eligible for fresh queue dispatch');
     const generation = record.activated.generation;
+    const coding = deps.podRepo.retainedCoding?.get(record.id);
     const execution = repo
       .owned(record.id, async () => {
-        repo.append(record.id, 'checking', { generation });
+        if (coding)
+          deps.podRepo.retainedCoding!.enter(record.id, repo.providerIdentity(podId, generation));
+        else repo.append(record.id, 'checking', { generation });
         try {
           repo.assertAvailable(podId);
           await verifySource(podId);
-          await run();
+          if (coding) await deps.podRepo.retainedCoding!.owned(record.id, run);
+          else await run();
           const current = deps.podRepo.getOrThrow(podId);
           if (
             current.lastValidationResult &&
@@ -1299,6 +1537,17 @@ export function createRetainedCheckpointRecovery(deps: {
           'CHECKPOINT_SOURCE_CHANGED',
         );
     };
+    const final = deps.podRepo.retainedCoding?.finalSource(podId, record.activated.generation);
+    if (final) {
+      await verifyArtifactSnapshot(
+        final.snapshot,
+        path.dirname(final.snapshot),
+        final.generation,
+        final.cycle,
+        final.reportsHash,
+      );
+      assertCurrent();
+    }
     if (record.binding.approvalRewrite)
       await assertApprovalRepairStorage(record.prepared, record.binding.repository, assertCurrent, {
         generation: record.generation,
@@ -1338,13 +1587,30 @@ export function createRetainedCheckpointRecovery(deps: {
       podId,
       worktreePath: record.prepared.worktree,
       branch: record.binding.branch,
-      head: candidate?.head ?? record.selected?.head ?? record.prepared.head,
-      tree: candidate?.tree ?? record.selected?.tree ?? record.prepared.tree,
+      head: final?.head ?? candidate?.head ?? record.selected?.head ?? record.prepared.head,
+      tree: final?.tree ?? candidate?.tree ?? record.selected?.tree ?? record.prepared.tree,
       worktreeManager: deps.worktreeManager,
       assertCurrent,
     });
   }
+  const repair = deps.podRepo.retainedCoding
+    ? createRepairContinuation({
+        ...deps,
+        assertPolicy: (podId) => {
+          if (!deps.qualifyCoding || !deps.beforeCodingActivation)
+            checkpointError('Repair execution integration unavailable');
+          policy(deps.podRepo.getOrThrow(podId), true);
+        },
+        selection: (podId) => repo.selectionEvidence(deps.podRepo.getOrThrow(podId)),
+        previewExecution,
+        submitCoding: (podId, input, actor, claim) =>
+          submit(podId, input, actor, true, undefined, undefined, claim),
+        qualify:
+          deps.qualifyCoding ?? (() => checkpointError('Actual-resource qualifier unavailable')),
+      })
+    : undefined;
   return {
+    repair,
     isActive: (podId: string) =>
       executions.has(podId) ||
       [...pending.keys(), ...reconciliations.keys()].some((id) => repo.get(id)?.podId === podId),
@@ -1355,11 +1621,13 @@ export function createRetainedCheckpointRecovery(deps: {
     recoverInfrastructure,
     reconcileInfrastructure,
     replyToRepair,
+    replyToCoding,
     previewExecution,
     checkCandidate,
     process,
     verifySource,
     reconcileOutcome,
+    inspect,
     selection: (podId: string) => repo.selectionEvidence(deps.podRepo.getOrThrow(podId)),
     list: (podId: string) => repo.list(podId),
     wait: (id: string) => pending.get(id) ?? Promise.resolve(),

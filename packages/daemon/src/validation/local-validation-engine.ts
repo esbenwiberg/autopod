@@ -965,6 +965,15 @@ export function createLocalValidationEngine(
               context: boundedReviewPacketText({
                 plan: config.plan,
                 taskSummary: config.taskSummary,
+                ...(config.historicalDeferredChecks?.length
+                  ? {
+                      historicalDeferredChecks: {
+                        notice:
+                          'Historical worker-reported NOT-RUN context only, not current passing evidence, waivers or repair receipts. Required facts and configured gates still apply independently.',
+                        reports: config.historicalDeferredChecks,
+                      },
+                    }
+                  : {}),
                 reviewContext,
               }),
               executableContract: boundedReviewPacketText(config.contract),
@@ -3489,7 +3498,25 @@ export function buildReviewPrompt(
               )
               .join('\n')}\n`
           : ''
+      }\n${
+        config.taskSummary.deferredChecks?.length
+          ? `\n## WORKER-REPORTED NOT-RUN CHECKS\nNot pass, waiver or repair receipts. Reports retain their original lifecycle attribution; required facts and configured gates still apply independently.\n${config.taskSummary.deferredChecks
+              .map(
+                (check) =>
+                  `- ${check.id}: ${check.check}; reason: ${check.reason}; expected executor: ${check.expectedExecutor}; reported lifecycle: ${check.lifecycleGeneration}${check.requiredFactId ? `; required fact: ${check.requiredFactId}` : ''}`,
+              )
+              .join('\n')}\n`
+          : ''
       }\n`
+    : '';
+
+  const historicalDeferredChecksSection = config.historicalDeferredChecks?.length
+    ? `\n## HISTORICAL WORKER-REPORTED NOT-RUN CHECKS\nHistorical context only, not current passing evidence, waivers or repair receipts. Required facts and configured gates still apply independently.\n${config.historicalDeferredChecks
+        .map(
+          (check) =>
+            `- ${check.id}: ${check.check}; reason: ${check.reason}; expected executor: ${check.expectedExecutor}; reported lifecycle: ${check.lifecycleGeneration}${check.requiredFactId ? `; required fact: ${check.requiredFactId}` : ''}`,
+        )
+        .join('\n')}\n`
     : '';
 
   const repoRulesSection = config.codeReviewSkill
@@ -3544,7 +3571,7 @@ ${REVIEW_STAGE_INSTRUCTIONS}
 ## TASK
 
 ${config.task}
-${contractSection}${noneSection}${planSection}${taskSummarySection}${briefScopeSection}
+${contractSection}${noneSection}${planSection}${taskSummarySection}${historicalDeferredChecksSection}${briefScopeSection}
 ${commitLogSection}${contextSection}## DIFF
 
 ${config.diff}

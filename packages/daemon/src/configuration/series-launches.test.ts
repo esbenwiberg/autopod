@@ -1,4 +1,8 @@
-import type { EffectiveLaunchConfig, SeriesLaunchRequest } from '@autopod/shared';
+import type {
+  EffectiveLaunchConfig,
+  ExecutionRequirements,
+  SeriesLaunchRequest,
+} from '@autopod/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPodRepository } from '../pods/pod-repository.js';
 import { createTaskHistoryArchive } from '../pods/task-history-archive.js';
@@ -65,6 +69,43 @@ function fixture() {
   };
 }
 describe('Atomic composable series', () => {
+  it.each([
+    [{ version: 2, executables: [], platform: 'darwin/arm64' }, 'EXECUTION_PLATFORM_MISMATCH'],
+    [
+      {
+        version: 2,
+        executables: [],
+        requiredReferenceRepositories: [
+          { repositoryId: 'missing-input', commitSha: 'a'.repeat(40) },
+        ],
+      },
+      'EXECUTION_REFERENCE_MISSING',
+    ],
+    [
+      { version: 2, executables: [], requiresImageBuild: true },
+      'EXECUTION_IMAGE_BUILD_UNSUPPORTED',
+    ],
+  ] satisfies Array<
+    [ExecutionRequirements, string]
+  >)('validates the final brief contract attached after template capability checks: %j', async (executionRequirements, code) => {
+    const f = fixture();
+    const first = f.request.briefs[0];
+    if (!first) throw new Error('Missing first brief');
+    first.contract = {
+      contractVersion: 1,
+      title: 'Strict brief',
+      dependsOn: [],
+      scenarios: [],
+      requiredFacts: [],
+      humanReview: [],
+      executionRequirements,
+    };
+    await expect(f.launches.create(f.request, 'operator')).rejects.toMatchObject({ code });
+    expect(f.services.assertCapabilities).toHaveBeenCalled();
+    expect(f.create).not.toHaveBeenCalled();
+    for (const table of ['pods', 'pod_launch_snapshots', 'series_launch_receipts'])
+      expect(f.db.prepare(`SELECT count(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });
+  });
   it('freezes one selection and serializes single-PR branches without changing approval', async () => {
     const f = fixture();
     f.request.briefs.push({ title: 'Another root', task: 'Independent brief', dependsOn: [] });

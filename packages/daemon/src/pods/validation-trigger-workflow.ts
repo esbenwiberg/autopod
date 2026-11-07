@@ -897,6 +897,7 @@ export function createValidationTriggerWorkflow(
 
         if (
           options?.validationOnly ||
+          podRepo.retainedCoding?.isOwner(podId) ||
           podRepo.retainedCheckpoints?.latest(podId)?.binding.continuation?.infrastructure
         ) {
           emitActivityStatus(podId, 'Validation-only resume failed — agent rework was not started');

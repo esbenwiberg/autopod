@@ -10,6 +10,7 @@ import {
   type TaskRetryAuthorization,
   type ValidationResult,
 } from '@autopod/shared';
+import { createRetainedCodingRepository } from './retained-coding-repository.js';
 import {
   assertFinalizationResourceAvailable,
   createRetainedFinalizationRepository,
@@ -224,8 +225,17 @@ export function retainedCheckpointResourceIds(db: Database.Database): string[] {
 export function assertCheckpointResourceNotRetained(
   db: Database.Database,
   containerId: string,
+  allowCodingMutation = false,
 ): void {
   assertFinalizationResourceAvailable(db, containerId);
+  if (createRetainedCodingRepository(db).retains(containerId)) {
+    if (!allowCodingMutation)
+      checkpointError(
+        'Coding candidate retains source/report custody; no release is authorized',
+        'REPAIR_CANDIDATE_RETAINED',
+      );
+    createRetainedCodingRepository(db).assertMutationAllowed(containerId);
+  }
   const retained = db
     .prepare('SELECT binding FROM retained_checkpoint_recoveries WHERE container_id=?')
     .get(containerId) as { binding: string } | undefined;
@@ -256,6 +266,46 @@ export function checkpointDetachedWakeup(
 }
 
 export function createRetainedCheckpointRepository(db: Database.Database) {
+  /** Diagnostic projection only: neither settlement nor selection/admission evidence.
+   * Bound fields inside SQLite before crossing into JS; never load whole payloads.
+   * Keep this independent of originalEvidence and its immutable hash meaning.
+   */
+  function infrastructureNeeds(pod: Pick<Pod, 'id' | 'lifecycleGeneration'>) {
+    const rows = db
+      .prepare(`WITH reports AS (
+      SELECT id,created_at,CASE WHEN json_valid(payload) THEN payload END AS data
+      FROM escalations WHERE pod_id=? AND type='report_blocker'
+    ) SELECT substr(id,1,257) AS id,
+      CASE WHEN json_type(data,'$.owner')='text'
+        THEN substr(json_extract(data,'$.owner'),1,257) END AS owner,
+      CASE WHEN json_type(data,'$.phase')='text'
+        THEN substr(json_extract(data,'$.phase'),1,257) END AS phase,
+      CASE WHEN json_type(data,'$.needs')='text'
+        THEN substr(json_extract(data,'$.needs'),1,1025) END AS needs
+      FROM reports WHERE json_extract(data,'$.kind')='infrastructure'
+      AND json_extract(data,'$.lifecycleGeneration')=?
+      ORDER BY created_at,reports.id LIMIT 21`)
+      .all(pod.id, pod.lifecycleGeneration) as {
+      id: string;
+      owner: string | null;
+      phase: string | null;
+      needs: string | null;
+    }[];
+    return {
+      truncated: rows.length > 20,
+      needs: rows.slice(0, 20).map((row) => ({
+        id: row.id.slice(0, 256),
+        owner: row.owner?.slice(0, 256),
+        phase: row.phase?.slice(0, 256),
+        needs: row.needs?.slice(0, 1024),
+        truncated:
+          row.id.length > 256 ||
+          (row.owner?.length ?? 0) > 256 ||
+          (row.phase?.length ?? 0) > 256 ||
+          (row.needs?.length ?? 0) > 1024,
+      })),
+    };
+  }
   function originalEvidence(pod: Pod): CheckpointRecoveryRecord['originalEvidence'] | null {
     if (pod.lastValidationResult)
       return { result: pod.lastValidationResult, preSubmitReview: pod.preSubmitReview };
@@ -628,7 +678,10 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
           execution.parentDigest,
           record.generation + 1,
           record.prepared.worktree,
-          record.binding.continuation?.infrastructure?.mode === 'rework' ? 0 : 1,
+          createRetainedCodingRepository(db).get(id) ||
+            record.binding.continuation?.infrastructure?.mode === 'rework'
+            ? 0
+            : 1,
           execution.target,
         ).changes;
       if (changed !== 1)
@@ -716,6 +769,18 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       return scope(db).run(id, operation);
     },
     selectionEvidence,
+    infrastructureNeeds,
+    hasTypedPrerequisiteBlocker(pod: Pick<Pod, 'id' | 'lifecycleGeneration'>): boolean {
+      return Boolean(
+        db
+          .prepare(`SELECT 1 FROM escalations WHERE pod_id=? AND type='report_blocker'
+          AND json_extract(CASE WHEN json_valid(payload) THEN payload END,'$.kind')='infrastructure'
+          AND json_extract(CASE WHEN json_valid(payload) THEN payload END,'$.lifecycleGeneration')=?
+          AND json_type(CASE WHEN json_valid(payload) THEN payload END,'$.prerequisiteBlocker') IS NOT NULL
+          LIMIT 1`)
+          .get(pod.id, pod.lifecycleGeneration),
+      );
+    },
     claim(input: {
       pod: Pod;
       taskId: string;
@@ -724,6 +789,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       actor: OperatorActor;
       binding: CheckpointRecoveryBinding;
       assertCurrent(): void;
+      onClaim?(): void;
     }): { record: CheckpointRecoveryRecord; acquired: boolean } {
       return db.transaction(() => {
         const { pod, request, actor } = input;
@@ -799,6 +865,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
           JSON.stringify(evidence),
           new Date().toISOString(),
         );
+        input.onClaim?.();
         return {
           record: get(request.id) ?? checkpointError('Recovery claim was not retained'),
           acquired: true,
@@ -906,6 +973,11 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
     },
     assertWorkerAllowed(podId: string): boolean {
       const current = latest(podId);
+      if (current && createRetainedCodingRepository(db).get(current.id)) {
+        assertAvailable(podId);
+        createRetainedCodingRepository(db).assertWorkerAllowed(podId);
+        return true;
+      }
       if (current?.binding.continuation?.infrastructure?.mode === 'rework' && !current.checked) {
         assertAvailable(podId);
         const pod = db

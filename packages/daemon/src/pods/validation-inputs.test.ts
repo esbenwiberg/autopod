@@ -12,6 +12,7 @@ import type {
 import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDatabase } from '../db/connection.js';
+import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { ReviewerExecutor } from '../interfaces/reviewer-executor.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
@@ -21,10 +22,13 @@ import {
   insertTestProfile,
   logger,
 } from '../test-utils/mock-helpers.js';
+import { createLocalValidationEngine } from '../validation/local-validation-engine.js';
+import * as reviewBatchRunner from '../validation/review-batch-runner.js';
 import { truncateDiffAtFileBoundary } from '../worktrees/diff-utils.js';
 import type { PendingOverrideRepository } from './pending-override-repository.js';
 import { createPendingOverrideRepository } from './pending-override-repository.js';
 import { createPodRepository } from './pod-repository.js';
+import type { CheckpointRecoveryRecord } from './retained-checkpoint-repository.js';
 import { createValidationInputs } from './validation-inputs.js';
 import type { ValidationRepository } from './validation-repository.js';
 import { createValidationRepository } from './validation-repository.js';
@@ -647,6 +651,214 @@ describe('validation inputs persisted effects', () => {
       expect(f.batch).not.toHaveBeenCalled();
       f.queue();
       await expect(f.run()).rejects.toMatchObject({ code: 'DELIVERY_RECONCILIATION_REQUIRED' });
+    } finally {
+      f.close();
+    }
+  });
+
+  it('carries only historical NOT-RUN context through retained input assembly to broad review and council', async () => {
+    const f = fixture();
+    try {
+      const report = {
+        id: 'mac-release-tests',
+        check: 'xcodebuild -scheme Autopod -configuration Release test',
+        reason: 'Native Mac verification cannot run in the Linux worker',
+        expectedExecutor: 'Mac verification owner',
+        requiredFactId: 'mac-fact',
+        lifecycleGeneration: f.pod.lifecycleGeneration,
+      };
+      const reports = [report];
+      f.pod.lifecycleGeneration += 1;
+      f.pod.taskSummary = {
+        actualSummary: 'Worker done; Mac verification deferred',
+        deviations: [],
+        deferredChecks: reports,
+        factEvidence: [
+          {
+            factId: 'mac-fact',
+            artifactPath: 'old-proof',
+            command: 'old-fact-command',
+            result: 'passed',
+          },
+        ],
+        factDeviations: [
+          {
+            factId: 'mac-fact',
+            action: 'waive',
+            reason: 'inherited-waiver-reason',
+            whyImpossible: 'old environment',
+            decision: 'approved_waive',
+          },
+        ],
+      };
+      f.pod.preSubmitReview = {
+        status: 'pass',
+        diffHash: 'old-diff',
+        reasoning: 'old pass',
+        issues: [],
+        model: 'old model',
+        checkedAt: '2026-10-17T12:00:00Z',
+      };
+      f.history.insert('worker', 1, validation(1, reviewBatch('old-source')));
+      f.pod.worktreePath = f.directory;
+      const retained: CheckpointRecoveryRecord = {
+        id: 'selected-continuation',
+        podId: f.pod.id,
+        taskId: f.pod.id,
+        generation: f.pod.lifecycleGeneration - 1,
+        containerId: 'original-container',
+        resourceKey: 'original-resource',
+        worktreePath: '/original',
+        requestHash: 'request',
+        actor: { type: 'human', userId: 'operator' },
+        reason: 'Review selected source',
+        binding: {
+          branch: f.pod.branch,
+          head: 'a'.repeat(40),
+          repository: 'repository',
+          cycle: 0,
+          resultHash: 'result',
+          configurationHash: 'configuration',
+          continuation: { prepareOnly: false },
+        },
+        originalEvidence: { result: validation(1), preSubmitReview: f.pod.preSubmitReview },
+        createdAt: '2026-10-17T12:00:00Z',
+        prepared: {
+          worktree: f.directory,
+          bare: '/bare',
+          snapshot: '/snapshot',
+          bundle: '/bundle',
+          bundleHash: 'bundle',
+          head: 'a'.repeat(40),
+          tree: 'c'.repeat(40),
+          hostInventoryHash: 'inventory',
+          baseCommitSha: 'b'.repeat(40),
+        },
+        selected: {
+          head: 'a'.repeat(40),
+          tree: 'c'.repeat(40),
+          actor: { type: 'human', userId: 'operator' },
+          reason: 'Independent checks',
+          requestHash: 'selection',
+        },
+        activated: { generation: f.pod.lifecycleGeneration },
+        checking: { generation: f.pod.lifecycleGeneration },
+        checked: null,
+        blocked: null,
+        reconciled: null,
+      };
+      if (!f.repo.retainedCheckpoints) throw new Error('Missing retained checkpoint ledger');
+      vi.spyOn(f.repo.retainedCheckpoints, 'latest').mockReturnValue(retained);
+      // Only inference and execution are stubbed. Keep real input, prompt,
+      // frozen packet and council assembly so propagation omissions fail here.
+      f.profile.buildCommand = '';
+      f.profile.startCommand = '';
+      f.profile.testCommand = null;
+      f.profile.lintCommand = null;
+      f.profile.sastCommand = null;
+      f.profile.validationSetupCommand = null;
+      f.profile.smokePages = [];
+      f.profile.hasWebUi = false;
+      f.skip.mockReturnValue([]);
+      const prompts: string[] = [];
+      vi.mocked(f.executor).mockImplementation(async ({ prompt }) => {
+        prompts.push(prompt);
+        return {
+          stdout: JSON.stringify(
+            prompt.includes('frozen review council')
+              ? { findings: [] }
+              : prompt.includes('synthesizer')
+                ? { decisions: [] }
+                : { status: 'pass', reasoning: 'Current independent review', issues: [] },
+          ),
+        };
+      });
+      const batch = vi.spyOn(reviewBatchRunner, 'runReviewBatch');
+      const out = await f.run();
+      const config = out.validationConfig;
+      expect(out.previousValidation).toBeNull();
+      expect(config.taskSummary).toBeUndefined();
+      expect(config.preSubmitReview).toBeUndefined();
+      expect(config.priorReviewBatch).toBeUndefined();
+      expect(config.overrides).toBeUndefined();
+      expect(config.historicalDeferredChecks).toEqual(reports);
+      expect(config.startCommitSha).toBe('b'.repeat(40));
+      expect(f.latest).not.toHaveBeenCalled();
+      expect(f.batch).not.toHaveBeenCalled();
+      const execInContainer = vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 }));
+      const engine = createLocalValidationEngine({
+        execInContainer,
+      } as unknown as ContainerManager);
+      const result = await engine.validate(config);
+      expect(result.taskReview?.reviewBatch).toBeDefined();
+      expect(batch).toHaveBeenCalledOnce();
+      const broad = prompts.find((prompt) =>
+        prompt.includes('HISTORICAL WORKER-REPORTED NOT-RUN CHECKS'),
+      );
+      expect(broad).toBeDefined();
+      if (!broad) throw new Error('Broad review did not receive historical deferrals');
+      expect(broad).toContain(
+        'Historical context only, not current passing evidence, waivers or repair receipts',
+      );
+      for (const value of [
+        report.check,
+        report.reason,
+        report.expectedExecutor,
+        'required fact: mac-fact',
+        `reported lifecycle: ${report.lifecycleGeneration}`,
+      ]) {
+        expect(broad).toContain(value);
+      }
+      const packet = batch.mock.calls[0]?.[0].packet;
+      if (!packet) throw new Error('Council did not receive a frozen packet');
+      const context = JSON.parse(packet.context);
+      expect(context.historicalDeferredChecks.reports).toEqual(reports);
+      expect(context.historicalDeferredChecks.notice).toContain(
+        'Historical worker-reported NOT-RUN context only',
+      );
+      expect(context.taskSummary).toBeUndefined();
+      const axes = prompts.filter((prompt) => prompt.includes('frozen review council'));
+      expect(axes).toHaveLength(5);
+      for (const prompt of [broad, ...axes]) {
+        expect(prompt).toContain(report.check);
+        expect(prompt).toContain(report.expectedExecutor);
+        expect(prompt).not.toContain('old-proof');
+        expect(prompt).not.toContain('old-fact-command');
+        expect(prompt).not.toContain('factEvidence');
+        expect(prompt).not.toContain('factDeviations');
+        expect(prompt).not.toContain('inherited-waiver-reason');
+        expect(prompt).not.toContain('approved_waive');
+      }
+      // A mandatory current Mac fact still gates: the historical approval above
+      // must not reach deterministic validation through the new context channel.
+      f.pod.contract = {
+        contractVersion: 1,
+        title: 'Required Mac proof',
+        dependsOn: [],
+        scenarios: [],
+        humanReview: [],
+        requiredFacts: [
+          {
+            id: 'mac-fact',
+            proves: [],
+            kind: 'unit-test',
+            command: 'swift test',
+            artifact: { path: 'packages/desktop/Tests/Proof.swift', change: 'update' },
+          },
+        ],
+      };
+      const requiredConfig = (await f.run()).validationConfig;
+      expect(requiredConfig.taskSummary).toBeUndefined();
+      const pending = await engine.validate(requiredConfig);
+      expect(pending.overall).toBe('fail');
+      expect(pending.factValidation?.results[0]).toMatchObject({
+        factId: 'mac-fact',
+        status: 'pending_human',
+        passed: false,
+      });
+      // These new review results do not rewrite historical reports or approvals.
+      expect(f.pod.taskSummary.deferredChecks).toEqual(reports);
+      expect(f.pod.taskSummary.factDeviations?.[0]?.decision).toBe('approved_waive');
     } finally {
       f.close();
     }

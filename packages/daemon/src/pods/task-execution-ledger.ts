@@ -602,8 +602,8 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       const retained = createRetainedCheckpointRepository(db);
       const repairWorker = retained.assertWorkerAllowed(podId);
       assertSourceAvailable(db, podId, '');
-      // Worker admission is not publication authority. Only this owned repair
-      // capability may start before the independent post-repair checks exist.
+      // Worker admission is not publication authority. Only an owned recovery
+      // worker may start before independent post-repair checks exist.
       if (!repairWorker) assertSourceDeliveryAllowed(db, podId);
       createDeletionOwnership(db).assertTaskAvailable(podId);
       createValidationExecutionLedger(db).assertTaskSettled(podId);

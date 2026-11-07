@@ -73,6 +73,12 @@ task to bypass a denial.
 ## Independent execution and delivery
 
 `checks` provisions the selected preserved source and runs no coding worker.
+A current-generation structured `prerequisiteBlocker` cannot authorize `rework`
+through this API. Typed missing-launcher repair must use
+[conditional repair continuation](retained-pod-continuation.md#conditional-environment-repair-and-one-coding-continuation),
+which qualifies the actual replacement environment before consuming one coding
+admission. This control's operator diagnosis is not that qualification receipt;
+checks-only recovery remains available without acquiring coding authority.
 `rework` increments the normal Rework count, provisions an independent checkout,
 and admits one resource/generation-bound worker atomically with its task-run
 receipt. Normal task/token and retry accounting still applies. No original worker

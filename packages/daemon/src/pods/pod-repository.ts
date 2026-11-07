@@ -78,6 +78,10 @@ import {
   type RetainedCheckpointRepository,
 } from './retained-checkpoint-repository.js';
 import {
+  createRetainedCodingRepository,
+  type RetainedCodingRepository,
+} from './retained-coding-repository.js';
+import {
   assertFinalizationPathAvailable,
   assertFinalizationResourceAvailable,
   createRetainedFinalizationRepository,
@@ -312,6 +316,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   validationExecutions?: ValidationExecutionLedger;
   retainedFinalizations?: RetainedFinalizationRepository;
   retainedCheckpoints?: RetainedCheckpointRepository;
+  retainedCoding?: RetainedCodingRepository;
   sandboxStartupRetries?: TaskRetryLedger;
   codexInterruptionRetries?: TaskRetryLedger;
   workerRetries?: TaskRetryLedger;
@@ -864,6 +869,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     validationExecutions: createValidationExecutionLedger(db),
     retainedFinalizations: createRetainedFinalizationRepository(db),
     retainedCheckpoints: createRetainedCheckpointRepository(db),
+    retainedCoding: createRetainedCodingRepository(db),
     sandboxStartupRetries: createTaskRetryLedger(db, 'sandbox_startup'),
     codexInterruptionRetries: createTaskRetryLedger(db, 'codex_interruption'),
     workerRetries: createTaskRetryLedger(db, 'worker'),
@@ -1644,7 +1650,8 @@ export function createPodRepository(db: Database.Database): PodRepository {
            UNION SELECT sandbox_id AS container_id FROM sandbox_recovery_requests
            WHERE action='abandon' AND completed_at IS NULL
            UNION SELECT json_extract(binding,'$.containerId') AS container_id FROM source_adoptions
-           UNION SELECT container_id FROM retained_checkpoint_recoveries`,
+           UNION SELECT container_id FROM retained_checkpoint_recoveries
+           UNION SELECT json_extract(evidence,'$.containerId') FROM retained_coding_facts WHERE kind='candidate'`,
         )
         .all() as { container_id: string }[];
       return [

@@ -792,6 +792,12 @@ human_review: []
     expect(md).toContain('never conceal known failures or relabel them as passes');
     expect(md).toContain('Run relevant Linux-compatible checks for affected work');
     expect(md).toContain('deferred Mac/human verification');
+    expect(md).toContain('`report_task_summary.deferredChecks`, not `report_blocker`');
+    expect(md).toContain('Omission or an empty list does not resolve a check');
+    expect(md).not.toContain('unavailable platform checks belong in report_blocker');
+    if (overrides.outputMode === 'artifact') {
+      expect(md).toContain('A fallback path does not satisfy a mandatory exact-path contract');
+    }
     if (overrides.outputMode !== 'artifact') {
       expect(md).toContain('after relevant self-checks and diff self-review');
       expect(md).toContain('a successful `validate_locally` call is not required');

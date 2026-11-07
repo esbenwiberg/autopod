@@ -56,6 +56,7 @@ export interface AgentExecutionLiveDependencies {
 }
 
 export interface AgentProcessCaptured {
+  assertCodingCandidateCurrent?(podId: string): Promise<unknown>;
   podRepo: PodRepository;
   logger: Logger;
   emitActivityStatus: (podId: string, message: string) => void;

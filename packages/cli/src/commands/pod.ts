@@ -24,6 +24,7 @@ import { registerBudgetCommand } from './budget.js';
 import { registerGoalCommands } from './goal.js';
 import { registerInfrastructureRecoveryCommand } from './infrastructure-recovery.js';
 import { registerLaunchCommand } from './launch.js';
+import { registerRepairContinuationCommand } from './repair-continuation.js';
 import { registerRetainedContinuationCommand } from './retained-continuation.js';
 import { registerRetainedFinalizationCommand } from './retained-finalization.js';
 import { registerReviewerRunsCommand } from './reviewer-runs.js';
@@ -147,6 +148,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   registerReviewerRunsCommand(program, getClient);
   registerSourceRecoveryCommand(program, getClient);
   registerRetainedContinuationCommand(program, getClient);
+  registerRepairContinuationCommand(program, getClient);
   registerInfrastructureRecoveryCommand(program, getClient);
   registerApprovalRewriteRepairCommand(program, getClient);
   registerRetainedFinalizationCommand(program, getClient);

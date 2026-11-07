@@ -1,5 +1,40 @@
 # Human decisions and infrastructure blockers
 
+## Expected external verification is not executor failure
+
+Report expected external/Mac checks in `report_task_summary.deferredChecks`:
+`{ id, check, reason, expectedExecutor, requiredFactId? }`. These are bounded,
+worker-reported **NOT-RUN** entries, never pass/waive/repaired evidence.
+Use stable IDs; conflicting reuse is rejected. The daemon stamps the lifecycle
+and preserves entries across summary updates and generations; empty/omitted lists
+cannot discharge them. Replaying an identical ID retains its original attribution.
+At most 50 entries are retained in the summary (id/fact id 128 chars, check/reason
+2000, expected executor 256). Unknown fact references and authority fields are
+rejected. Missing entries are not proof that verification occurred. Existing fix-pod
+recycling replaces the entire task summary (`fix-admission.ts`); this milestone
+neither changes that lifecycle nor supplies a separate lifetime report ledger.
+Deduplication/preservation is conservative within the surviving summary context,
+not a claim of exact pod-lifetime deduplication.
+
+Required facts and configured gates still gate independently. Required Mac facts
+remain `pending_human`, not passed; no external proof importer is introduced.
+A check mandatory only in task prose is not made a deterministic gate by a summary
+entry. Keep key limits in the human-readable summary as well; deferred context is
+also included in review prompts, PR bodies and mobile detail/activity views.
+Historical entries are retained context, not an authoritative claim about current
+gate state. Native desktop/CLI renderers do not yet expose the structured list.
+
+True executor/environment failure or missing required input still uses
+`report_blocker` and retains all existing holds. A mixed summary of external
+checks plus a true blocker does not clear that blocker. Do not automatically
+request a waiver simply because external verification is pending.
+
+Artifact output is collected from `/workspace`. Disclose requested and actual
+paths when an alternative is permitted; a fallback never silently satisfies a
+mandatory exact-path contract. Source/test failures remain failures, not deferrals.
+
+## Infrastructure reports
+
 New `report_blocker` requests are infrastructure reports, never questions. They
 carry `kind: infrastructure`, responsible `owner` (Autopod, parent or validation),
 optional failing `phase`, plain description, attempted work and missing needs.

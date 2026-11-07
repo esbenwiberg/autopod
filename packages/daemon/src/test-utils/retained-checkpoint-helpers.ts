@@ -220,6 +220,10 @@ export async function retainedCheckpointFixture(
   independentReview = false,
   independentRoute = false,
   target: 'local' | 'sandbox' = 'sandbox',
+  executionRequirements?: import('@autopod/shared').ExecutionRequirements,
+  repositoryContext?: Partial<
+    Pick<import('@autopod/shared').RepositorySetup, 'buildEnv' | 'buildWorkDir'>
+  >,
 ) {
   const ctx = createTestContext();
   vi.mocked(ctx.profileStore.get).mockReturnValue({
@@ -253,6 +257,19 @@ export async function retainedCheckpointFixture(
     ? createLaunchSnapshotRepository(ctx.db, nativeConfiguration.store)
     : null;
   if (nativeConfiguration && snapshots) {
+    if (repositoryContext) {
+      const repo = nativeConfiguration.store.get('repository', 'repo-a');
+      nativeConfiguration.store.write({
+        id: repo.id,
+        kind: 'repository',
+        name: repo.name,
+        expectedRevision: repo.revision,
+        payload: {
+          ...repo.payload,
+          setups: repo.payload.setups.map((setup) => ({ ...setup, ...repositoryContext })),
+        },
+      });
+    }
     if (independentRoute) {
       const ai = nativeConfiguration.store.get('ai', 'ai');
       nativeConfiguration.store.write({
@@ -320,6 +337,21 @@ export async function retainedCheckpointFixture(
             repositoryId: 'repo-a',
             profileId: 'profile',
             task,
+            ...(executionRequirements
+              ? {
+                  work: {
+                    contract: {
+                      contractVersion: 1 as const,
+                      title: 'Retained typed launcher task',
+                      dependsOn: [],
+                      scenarios: [],
+                      requiredFacts: [],
+                      humanReview: [],
+                      executionRequirements,
+                    },
+                  },
+                }
+              : {}),
             overrides: { execution: { target } },
           },
           actorId: 'operator',
