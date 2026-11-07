@@ -36,7 +36,13 @@ development or deliberately authorized source changes to build tooling.
   Do not disable those gates for documentation changes. Report exact commands,
   results, scope rationale, failures and deferred checks; never conceal known
   failures or relabel them as passes. Linux workers cannot validate macOS desktop code:
-  defer Xcode/Swift checks to a Mac. Mock, unit, or browser results do not prove
+  defer Xcode/Swift checks to a Mac. An expected host-only check explicitly
+  delegated to Mac/CI is not a worker infrastructure failure: record its exact
+  source SHA, command and deferred/not-run status in `report_task_summary`, not
+  `report_blocker`. `scripts/test-desktop.sh` refuses non-macOS hosts before Swift
+  with `DEFERRED_NATIVE_CHECKS` and exit 2 (not a pass). A failed required Mac
+  runner, or a contract requiring native proof without authorized deferral,
+  remains a genuine blocker. Mock, unit, or browser results do not prove
   unavailable hardware or live infrastructure works.
 - **Delivery:** Follow the active worker's delivery instructions: commit changes
   and leave pushing/PR creation to the host when it owns delivery, rather than

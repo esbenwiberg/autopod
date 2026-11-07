@@ -20,7 +20,7 @@ export function safeAdoptionGit(run: AdoptionGit): AdoptionGit {
       ...args,
     ]);
 }
-export async function inspectAdoptionGit(run: AdoptionGit, branch: string) {
+async function inspectSourceGit(run: AdoptionGit, branch: string, allowDirty: boolean) {
   const git = safeAdoptionGit(run);
   const config = (await git(['config', '--null', '--list'])).stdout.split('\0');
   if (
@@ -55,7 +55,7 @@ export async function inspectAdoptionGit(run: AdoptionGit, branch: string) {
     );
   if (
     name !== branch ||
-    dirty ||
+    (!allowDirty && dirty) ||
     !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(head) ||
     !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(tree)
   )
@@ -66,7 +66,15 @@ export async function inspectAdoptionGit(run: AdoptionGit, branch: string) {
   const branchAfter = (await git(['symbolic-ref', '--short', 'HEAD'])).stdout.trim();
   if (after !== head || branchAfter !== name)
     sourceAdoptionError('Source identity changed during observation');
+  return { head, tree, worktreeClean: dirty.length === 0 };
+}
+export async function inspectAdoptionGit(run: AdoptionGit, branch: string) {
+  const { head, tree } = await inspectSourceGit(run, branch, false);
   return { head, tree };
+}
+/** Same executable-config/sparse/submodule safeguards, without claiming dirty source is clean. */
+export async function inspectPreservationGit(run: AdoptionGit, branch: string) {
+  return inspectSourceGit(run, branch, true);
 }
 export async function preparePinnedAdoption(
   config: PrepareSourceAdoption,

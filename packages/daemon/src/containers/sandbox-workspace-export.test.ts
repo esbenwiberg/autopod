@@ -1,12 +1,56 @@
+import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, readlink, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
+import { buildSync } from 'esbuild';
 import { pack } from 'tar-stream';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SandboxApiClient } from './sandbox-api-client.js';
 import { exportSandboxWorkspace } from './sandbox-workspace-export.js';
+
+describe('export failure process isolation', () => {
+  let fixtureRoot: string;
+  let fixture: string;
+  beforeAll(async () => {
+    fixtureRoot = await mkdtemp(join(tmpdir(), 'sandbox-export-child-'));
+    fixture = join(fixtureRoot, 'fixture.cjs');
+    buildSync({
+      entryPoints: [
+        fileURLToPath(new URL('../test-utils/sandbox-export-failure-fixture.ts', import.meta.url)),
+      ],
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      outfile: fixture,
+    });
+  });
+  afterAll(async () => {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  });
+  it.each([
+    'control',
+    'abort',
+    'supersede',
+    'unsafe',
+    'excluded-download',
+  ])('contains %s without an uncaught tar entry error or lost cleanup', (mode) => {
+    const child = spawnSync(process.execPath, [fixture, mode], {
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    expect(child.error).toBeUndefined();
+    expect(child.signal).toBeNull();
+    expect(child.stderr).toBe('');
+    expect(child.status).toBe(0);
+    expect(JSON.parse(child.stdout)).toEqual({
+      mode,
+      outcome: mode === 'control' ? 'completed' : 'rejected',
+    });
+  });
+});
 
 let root: string;
 beforeEach(async () => {
@@ -21,7 +65,10 @@ async function archive(entries: Array<{ header: Header; content?: Buffer }>): Pr
   const tar = pack();
   const chunks: Buffer[] = [];
   const result = (async () => {
-    for await (const chunk of tar) chunks.push(Buffer.from(chunk));
+    for await (const chunk of tar) {
+      if (!Buffer.isBuffer(chunk)) throw new Error('Unexpected nonbinary archive chunk');
+      chunks.push(Buffer.from(chunk));
+    }
     return gzipSync(Buffer.concat(chunks));
   })();
   for (const { header, content } of entries) {

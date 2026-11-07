@@ -119,6 +119,50 @@ export async function materializeCheckpointFixture(
   });
 }
 
+/** A settled worker reported infrastructure before any validation result existed. */
+export async function preValidationCheckpointFixture() {
+  return recordPreValidationInfrastructure(await retainedCheckpointFixture());
+}
+
+export function recordPreValidationInfrastructure(
+  f: Awaited<ReturnType<typeof retainedCheckpointFixture>>,
+) {
+  f.ctx.podRepo.update(f.podId, { status: 'failed', lastValidationResult: null });
+  const journal = f.ctx.podRepo.completionJournal;
+  if (!journal) throw new Error('Missing completion journal fixture');
+  journal.settle(f.pod(), 'Implementation preserved; runner unavailable');
+  journal.mark(f.pod(), 'ready', true);
+  const report = {
+    id: 'prevalidation-infrastructure',
+    podId: f.podId,
+    type: 'report_blocker' as const,
+    timestamp: '2026-11-06T12:00:00.000Z',
+    response: null,
+    payload: {
+      kind: 'infrastructure' as const,
+      lifecycleGeneration: f.pod().lifecycleGeneration,
+      requiresResponse: false,
+      owner: 'validation' as const,
+      phase: 'Native desktop verification',
+      description: 'Worker cannot run native Mac checks',
+      attempted: ['Configured Linux worker'],
+      needs: 'Qualified verification of the preserved candidate',
+    },
+  };
+  f.ctx.escalationRepo.insert(report);
+  const originalReport = f.ctx.escalationRepo.getOrThrow(report.id);
+  const infrastructureReports = [
+    { id: report.id, timestamp: originalReport.createdAt, payload: report.payload },
+  ];
+  f.input.expectedResultHash = checkpointHash({ result: null, infrastructureReports });
+  f.worktrees.selectRetainedContinuationSource = vi.fn(async () => ({
+    head: f.prepared.head,
+    tree: f.prepared.tree,
+    baseCommitSha: '1'.repeat(40),
+  }));
+  return { ...f, report, originalReport, infrastructureReports };
+}
+
 /** Exercise a real replacement dispatch and published failure, then model the
  * old final-source comparator rejecting a daemon-only no-op capture.
  */
@@ -174,6 +218,12 @@ export async function retainedCheckpointFixture(
   kind: 'validation' | 'wakeup' = 'validation',
   native = false,
   independentReview = false,
+  independentRoute = false,
+  target: 'local' | 'sandbox' = 'sandbox',
+  executionRequirements?: import('@autopod/shared').ExecutionRequirements,
+  repositoryContext?: Partial<
+    Pick<import('@autopod/shared').RepositorySetup, 'buildEnv' | 'buildWorkDir'>
+  >,
 ) {
   const ctx = createTestContext();
   vi.mocked(ctx.profileStore.get).mockReturnValue({
@@ -207,6 +257,35 @@ export async function retainedCheckpointFixture(
     ? createLaunchSnapshotRepository(ctx.db, nativeConfiguration.store)
     : null;
   if (nativeConfiguration && snapshots) {
+    if (repositoryContext) {
+      const repo = nativeConfiguration.store.get('repository', 'repo-a');
+      nativeConfiguration.store.write({
+        id: repo.id,
+        kind: 'repository',
+        name: repo.name,
+        expectedRevision: repo.revision,
+        payload: {
+          ...repo.payload,
+          setups: repo.payload.setups.map((setup) => ({ ...setup, ...repositoryContext })),
+        },
+      });
+    }
+    if (independentRoute) {
+      const ai = nativeConfiguration.store.get('ai', 'ai');
+      nativeConfiguration.store.write({
+        id: ai.id,
+        kind: 'ai',
+        name: ai.name,
+        expectedRevision: ai.revision,
+        payload: {
+          ...ai.payload,
+          reviewer: {
+            mode: 'independent',
+            route: { ...ai.payload.main, model: 'claude-opus-4-6' },
+          },
+        },
+      });
+    }
     if (independentReview) {
       const flow = nativeConfiguration.store.get('workflow', 'flow');
       nativeConfiguration.store.write({
@@ -219,7 +298,7 @@ export async function retainedCheckpointFixture(
     }
     vi.mocked(nativeConfiguration.services.executionCapabilities).mockResolvedValue({
       ...testExecutionCapabilities,
-      target: 'sandbox',
+      target,
     });
     const accounts = createProviderAccountStore(ctx.db);
     accounts.create({
@@ -258,7 +337,22 @@ export async function retainedCheckpointFixture(
             repositoryId: 'repo-a',
             profileId: 'profile',
             task,
-            overrides: { execution: { target: 'sandbox' } },
+            ...(executionRequirements
+              ? {
+                  work: {
+                    contract: {
+                      contractVersion: 1 as const,
+                      title: 'Retained typed launcher task',
+                      dependsOn: [],
+                      scenarios: [],
+                      requiredFacts: [],
+                      humanReview: [],
+                      executionRequirements,
+                    },
+                  },
+                }
+              : {}),
+            overrides: { execution: { target } },
           },
           actorId: 'operator',
           services: nativeConfiguration.services,
@@ -313,7 +407,7 @@ export async function retainedCheckpointFixture(
   const resourceKey = `https://management.swedencentral.azuredevcompute.io/subscriptions/test/resourcegroups/test/sandboxgroups/test/sandboxes/${containerId}`;
   ctx.podRepo.update(created.id, {
     status: kind === 'validation' ? 'review_required' : 'validated',
-    executionTarget: 'sandbox',
+    executionTarget: target,
     containerId,
     worktreePath: path.join(root, 'original'),
     lastValidationResult: result,

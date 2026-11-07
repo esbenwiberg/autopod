@@ -67,6 +67,8 @@ export class ClaudeRuntime implements Runtime {
   }
 
   async *spawn(config: SpawnConfig): AsyncIterable<AgentEvent> {
+    // A fresh segment must not expose an earlier resource's native session.
+    this.claudeSessionIds.delete(config.podId);
     // Write MCP config to a file inside the container so Claude CLI can read it
     // via --mcp-config <path>. Passing inline JSON breaks due to shell escaping
     // inside containerManager.execStreaming().

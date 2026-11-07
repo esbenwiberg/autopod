@@ -1,9 +1,134 @@
 import type { Command } from 'commander';
+import { z } from 'zod';
 import type { AutopodClient } from '../api/client.js';
 import { withJsonOutput } from '../output/json.js';
 import { resolvePodId } from '../utils/id-resolver.js';
 
 const sha = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+const inspectionResponse = z.object({
+  operations: z
+    .array(
+      z.object({
+        id: z.string(),
+        prepared: z.unknown(),
+        activated: z.unknown(),
+        checking: z.unknown(),
+        checked: z.unknown(),
+        blocked: z.object({ code: z.string() }).nullable(),
+      }),
+    )
+    .optional(),
+  inspection: z.object({
+    version: z.literal(1),
+    mode: z.literal('read_only'),
+    generation: z.number().int().positive(),
+    status: z.enum(['blocked', 'requires_selection']),
+    selection: z
+      .object({ expectedGeneration: z.number(), expectedResultHash: z.string() })
+      .nullable(),
+    infrastructure: z.object({
+      state: z.enum(['reported', 'not_checked', 'none_recorded']),
+      truncated: z.boolean(),
+      needs: z.array(
+        z.object({
+          id: z.string(),
+          owner: z.string().optional(),
+          phase: z.string().optional(),
+          needs: z.string().optional(),
+          truncated: z.boolean(),
+        }),
+      ),
+    }),
+    prerequisites: z.object({
+      hostPathRecorded: z.boolean(),
+      sourcePreservationRecorded: z.boolean(),
+      workerSettlementRecorded: z.boolean(),
+      pendingDecision: z.boolean(),
+      hostSource: z.literal('not_checked'),
+      originalFilesAndReports: z.literal('not_checked'),
+      resourceStateAndIdentity: z.literal('not_checked'),
+      environmentQualification: z.literal('not_checked'),
+      retryAdmission: z.literal('not_checked'),
+    }),
+    checks: z.array(
+      z.object({
+        id: z.string(),
+        state: z.enum(['blocked', 'no_recorded_blocker']),
+        code: z.string().nullable(),
+        reason: z.string().nullable(),
+      }),
+    ),
+    nextSteps: z.array(z.string()),
+  }),
+});
+// Report text is untrusted; do not let terminal controls masquerade as CLI instructions.
+const terminalText = (value: string) =>
+  Array.from(value, (character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || (code >= 127 && code <= 159) || code === 8232 || code === 8233
+      ? ' '
+      : character;
+  }).join('');
+function renderInspection(value: unknown) {
+  const parsed = inspectionResponse.safeParse(value);
+  if (!parsed.success) {
+    console.log(
+      'Retained-continuation inspection unavailable (older daemon or unsupported response). No execution permission is implied.',
+    );
+    return;
+  }
+  const inspection = parsed.data.inspection;
+  console.log(
+    `Retained continuation: ${inspection.status === 'blocked' ? 'blocked' : 'requires exact selection'} (read-only)`,
+  );
+  for (const need of inspection.infrastructure.needs)
+    console.log(
+      `Need [${terminalText(need.owner ?? 'unknown owner')} / ${terminalText(need.phase ?? 'unknown phase')}]: ${terminalText(need.needs ?? 'not recorded')}${need.truncated ? ' [truncated; inspect original report]' : ''}`,
+    );
+  if (inspection.infrastructure.truncated)
+    console.log('More needs omitted; inspect the retained reports.');
+  if (inspection.infrastructure.state === 'not_checked')
+    console.log(
+      'Infrastructure needs are not available in selection evidence; inspect original reports.',
+    );
+  for (const check of inspection.checks.filter((item) => item.state === 'blocked'))
+    console.log(
+      `Blocked [${terminalText(check.id)} / ${terminalText(check.code ?? 'unknown')}]: ${terminalText(check.reason ?? 'Inspection refused')}`,
+    );
+  for (const operation of (parsed.data.operations ?? []).slice(0, 3)) {
+    const stage = operation.blocked
+      ? `blocked (${operation.blocked.code})`
+      : operation.checked
+        ? 'checked'
+        : operation.checking
+          ? 'checking'
+          : operation.activated
+            ? 'selected'
+            : operation.prepared
+              ? 'prepared'
+              : 'claimed';
+    console.log(
+      `Retained operation ${terminalText(operation.id.slice(0, 256))}: ${terminalText(stage)}. Observe/reuse its request ID; do not create another to bypass custody.`,
+    );
+  }
+  const prerequisites = inspection.prerequisites;
+  console.log(
+    `Generation: ${inspection.generation}; pending decision: ${prerequisites.pendingDecision ? 'yes' : 'none recorded'}`,
+  );
+  console.log(
+    `Host path: ${prerequisites.hostPathRecorded ? 'recorded' : 'missing'}; source preservation: ${prerequisites.sourcePreservationRecorded ? 'recorded' : 'not recorded'}; worker settlement: ${prerequisites.workerSettlementRecorded ? 'recorded' : 'not recorded'}`,
+  );
+  console.log(
+    inspection.selection
+      ? `Selection: generation ${inspection.selection.expectedGeneration}, result/report hash ${terminalText(inspection.selection.expectedResultHash)}`
+      : 'Selection evidence unavailable; no result/report hash can be selected yet.',
+  );
+  console.log(
+    'Not checked: exact host source, original uncollected files/reports, resource state/identity, environment qualification and retry admission.',
+  );
+  console.log('Next steps (conditional, not execution permission):');
+  for (const step of inspection.nextSteps) console.log(`- ${terminalText(step)}`);
+}
 export function registerRetainedContinuationCommand(
   program: Command,
   getClient: () => AutopodClient,
@@ -21,7 +146,7 @@ export function registerRetainedContinuationCommand(
     )
     .option('--request-id <id>', 'Stable recovery ID; reuse to observe an uncertain response')
     .option('--generation <number>', 'Exact original lifecycle generation')
-    .option('--result-hash <sha256>', 'Exact original stored result hash')
+    .option('--result-hash <sha256>', 'Exact result or pre-validation report hash from inspection')
     .option('--head <sha>', 'Exact original retained host HEAD')
     .option(
       '--remote-head <sha>',
@@ -174,10 +299,30 @@ export function registerRetainedContinuationCommand(
                   reason: opts.reason as string,
                 })
               : await client.getCheckpointRecoveries(podId);
-        withJsonOutput(opts, result, (value) => {
+        const inspectionUnavailable =
+          !opts.apply &&
+          !opts.check &&
+          !opts.previewExecution &&
+          !inspectionResponse.safeParse(result).success;
+        const output = inspectionUnavailable
+          ? {
+              ...(result && typeof result === 'object' && !Array.isArray(result)
+                ? result
+                : { response: result }),
+              inspectionUnavailable:
+                'Read-only inspection unavailable; no execution permission is implied.',
+            }
+          : result;
+        withJsonOutput(opts, output, (value) => {
+          if (!opts.apply && !opts.check && !opts.previewExecution) {
+            renderInspection(value);
+            return;
+          }
           console.log(JSON.stringify(value, null, 2));
           console.log(
-            'Accepted is not passing checks. Originals remain retained; retry permission, qualified infrastructure and fresh approval are separate.',
+            opts.previewExecution
+              ? 'Configuration preview only; actual environment qualification and task continuation are separate.'
+              : 'Accepted is not passing checks. Originals remain retained; retry permission, qualified infrastructure and fresh approval are separate.',
           );
         });
       },

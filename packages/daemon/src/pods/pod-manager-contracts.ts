@@ -191,6 +191,12 @@ export interface PodManagerDependencies {
 }
 
 export interface PodManager {
+  inspectStalledWorkerRecovery(podId: string): import('@autopod/shared').StalledWorkerRecoveryView;
+  recoverStalledWorker(
+    podId: string,
+    request: import('@autopod/shared').StalledWorkerRecoveryRequest,
+    actor: OperatorActor,
+  ): Promise<import('@autopod/shared').StalledWorkerRecoveryReceipt>;
   inspectRetainedFinalization(podId: string): import('@autopod/shared').RetainedFinalizationView;
   finalizeRetained(
     podId: string,
@@ -438,6 +444,12 @@ export interface PodManager {
   previewRetainedExecution: ReturnType<
     typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
   >['previewExecution'];
+  recoverInfrastructure: ReturnType<
+    typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
+  >['recoverInfrastructure'];
+  reconcileInfrastructure: ReturnType<
+    typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
+  >['reconcileInfrastructure'];
   continueRetained: ReturnType<
     typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
   >['continueRetained'];
@@ -450,6 +462,16 @@ export interface PodManager {
   reconcileCheckpointOutcome: ReturnType<
     typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
   >['reconcileOutcome'];
+  inspectRepairContinuation: import('./repair-continuation.js').RepairContinuation['inspect'];
+  previewRepairContinuation: import('./repair-continuation.js').RepairContinuation['preview'];
+  authorizeRepairContinuation: import('./repair-continuation.js').RepairContinuation['authorize'];
+  getRepairContinuation: import('./repair-continuation.js').RepairContinuation['operation'];
+  inspectRetainedContinuation: ReturnType<
+    typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
+  >['inspect'];
+  getCheckpointRecoverySelection: ReturnType<
+    typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
+  >['selection'];
   getCheckpointRecoveries: ReturnType<
     typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
   >['list'];

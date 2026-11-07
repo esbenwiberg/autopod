@@ -83,3 +83,36 @@ it('records a launcher repeated across chained segments once per source', async 
     { source: 'profile.test', executable: 'npx', available: true },
   ]);
 });
+
+it.each([
+  'declarations',
+  'launchers',
+] as const)('retains unknown v2 explicit dependencies when inferred %s exceed the probe bound', async (bound) => {
+  const cm = createMockContainerManager();
+  const pod = {
+    options: { validate: true },
+    contract: {
+      executionRequirements: { version: 2, executables: ['required'] },
+      requiredFacts:
+        bound === 'declarations'
+          ? Array.from({ length: 129 }, (_, i) => ({
+              id: `fact${i}`,
+              command: 'node existing.js',
+              artifact: { path: 'existing.js', change: 'touch' },
+            }))
+          : [],
+    },
+  } as Pod;
+  const result = await inspectRequiredCommands(cm, 'container', pod, {
+    buildCommand:
+      bound === 'launchers'
+        ? Array.from({ length: 64 }, (_, i) => `inferred${i}`).join(' && ')
+        : '',
+  } as Profile);
+  expect(result.requirements).toEqual([
+    { source: 'contract.executionRequirements', executable: 'required', available: null },
+  ]);
+  expect(result.explicitDependencies).toBe(true);
+  expect(result.unresolvedSources[0]).toContain('scope exceeds');
+  expect(cm.execInContainer).not.toHaveBeenCalled();
+});

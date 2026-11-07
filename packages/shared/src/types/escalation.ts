@@ -37,6 +37,8 @@ export interface AskAiPayload {
 }
 
 export interface ReportBlockerPayload {
+  /** Prospective launcher-only claim; daemon validates against the original frozen v2 manifest. */
+  prerequisiteBlocker?: import('../schemas/repair-continuation.schema.js').PrerequisiteBlockerV1;
   /** New reports are noninteractive; omitted legacy records retain their reply flow. */
   kind?: 'infrastructure';
   owner?: 'autopod' | 'parent' | 'validation';

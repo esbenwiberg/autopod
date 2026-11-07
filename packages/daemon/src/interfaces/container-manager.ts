@@ -8,6 +8,8 @@ export interface ContainerStartOptions {
 
 /** Guard publication of a collected directory after asynchronous extraction. */
 export interface DirectoryExtractionOptions {
+  /** Private full-workspace archives may retain the source root mode; ordinary host sync keeps its root permissions. */
+  preserveRootMode?: boolean;
   /** Called after verified wakeup, before export; permits separate wake/copy budgets. */
   onExportStarted?: () => void;
   signal?: AbortSignal;
@@ -95,6 +97,8 @@ export interface ExecOptions {
   assertCurrent?: () => void;
   cwd?: string;
   timeout?: number;
+  /** Bound buffered stdout + stderr; exceeding it is uncertain execution, never verified termination. */
+  maxOutputBytes?: number;
   /** Run the command as this user inside the container (e.g. 'root'). */
   user?: string;
   /**

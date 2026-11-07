@@ -171,6 +171,7 @@ describe('createEscalationMcpServer memory reporting schema', () => {
         { memoryId: 'mem-3', outcome: 'harmful_stale', reason: 'Contradicted current code.' },
       ],
       undefined,
+      undefined,
     );
     expect(result.content[0]?.text).toContain('3 memory outcomes recorded');
   });
@@ -220,6 +221,7 @@ describe('createEscalationMcpServer memory reporting schema', () => {
           response: 'This request conflicts with the existing public API.',
         },
       ],
+      undefined,
     );
     expect(result.content[0]?.text).toContain('2 review feedback responses recorded');
   });
@@ -349,6 +351,91 @@ describe('operator-message interlock', () => {
   });
 });
 
+describe('structured deferred check tool contract', () => {
+  beforeEach(() => {
+    toolRegistrations.length = 0;
+  });
+
+  const check = {
+    id: 'mac-tests',
+    check: 'xcodebuild test',
+    reason: 'Linux worker',
+    expectedExecutor: 'Mac',
+  };
+
+  it('forwards NOT-RUN context without creating a blocker', async () => {
+    const { createEscalationMcpServer } = await import('./server.js');
+    const bridge = makeBridge();
+    createEscalationMcpServer({ podId: 'pod', bridge });
+    const tool = getTool('report_task_summary');
+    const input = z.object(tool.schema).parse({
+      actualSummary: 'Implemented; Mac checks deferred',
+      deviations: [],
+      deferredChecks: [check],
+    });
+    const result = await tool.handler(input);
+    expect(bridge.reportTaskSummary).toHaveBeenCalledWith(
+      'pod',
+      input.actualSummary,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      [check],
+    );
+    expect(result.content[0]?.text).toContain('NOT-RUN');
+    expect(bridge.createEscalation).not.toHaveBeenCalled();
+    expect(bridge.incrementEscalationCount).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'status',
+    'required',
+    'actor',
+    'decision',
+    'lifecycleGeneration',
+    'repaired',
+  ])('rejects worker authority field %s', async (field) => {
+    const { createEscalationMcpServer } = await import('./server.js');
+    const bridge = makeBridge();
+    createEscalationMcpServer({ podId: 'pod', bridge });
+    const schema = z.object(getTool('report_task_summary').schema);
+    expect(() =>
+      schema.parse({
+        actualSummary: 'Done',
+        deviations: [],
+        deferredChecks: [{ ...check, [field]: 'approved' }],
+      }),
+    ).toThrow();
+    expect(bridge.reportTaskSummary).not.toHaveBeenCalled();
+  });
+
+  it('bounds count and all strings without breaking legacy summaries', async () => {
+    const { createEscalationMcpServer } = await import('./server.js');
+    createEscalationMcpServer({ podId: 'pod', bridge: makeBridge() });
+    const schema = z.object(getTool('report_task_summary').schema);
+    const summary = { actualSummary: 'Done', deviations: [] };
+    expect(schema.parse(summary)).not.toHaveProperty('deferredChecks');
+    expect(() => schema.parse({ ...summary, deferredChecks: Array(51).fill(check) })).toThrow();
+    for (const [field, max] of Object.entries({
+      id: 128,
+      check: 2000,
+      reason: 2000,
+      expectedExecutor: 256,
+      requiredFactId: 128,
+    })) {
+      expect(() =>
+        schema.parse({ ...summary, deferredChecks: [{ ...check, [field]: ' '.repeat(2) }] }),
+      ).toThrow();
+      expect(() =>
+        schema.parse({ ...summary, deferredChecks: [{ ...check, [field]: 'x'.repeat(max + 1) }] }),
+      ).toThrow();
+    }
+  });
+});
+
 describe('decision and infrastructure tool contracts', () => {
   beforeEach(() => {
     toolRegistrations.length = 0;
@@ -376,10 +463,45 @@ describe('decision and infrastructure tool contracts', () => {
     expect(getTool('ask_human').description).toContain('report_blocker');
   });
 
+  it('offers the original frozen manifest hash as declaration metadata, never a qualification tool', async () => {
+    const { createEscalationMcpServer } = await import('./server.js');
+    const declaration = {
+      requirementsHash: 'a'.repeat(64),
+      requirements: { version: 2 as const, executables: ['jq'] },
+    };
+    createEscalationMcpServer({
+      podId: 'pod',
+      bridge: makeBridge({ getExecutionPrerequisites: () => declaration }),
+    });
+    const schema = getTool('report_blocker').schema.prerequisiteBlocker;
+    expect(schema?.description).toContain(declaration.requirementsHash);
+    expect(schema?.description).toContain('Frozen declaration (NOT evidence)');
+    expect(toolRegistrations.map((tool) => tool.name)).not.toContain('qualify_environment');
+    expect(
+      z.object(getTool('report_blocker').schema).safeParse({
+        description: 'jq missing',
+        attempted: [],
+        needs: 'jq',
+        phase: 'coding',
+        prerequisiteBlocker: {
+          version: 1,
+          kind: 'missing-execution-prerequisites',
+          requirementsHash: declaration.requirementsHash,
+          launchers: ['jq'],
+        },
+      }).success,
+    ).toBe(true);
+  });
+
   it('defaults infrastructure ownership without accepting worker-selected response or lifecycle authority', async () => {
     const { createEscalationMcpServer } = await import('./server.js');
     createEscalationMcpServer({ podId: 'husky-booby', bridge: makeBridge() });
-    const schema = z.object(getTool('report_blocker').schema);
+    const tool = getTool('report_blocker');
+    expect(tool.description).toContain(
+      'expected host-only macOS checks explicitly deferred to a Mac',
+    );
+    expect(tool.description).toContain('Required Mac runner failures remain blockers');
+    const schema = z.object(tool.schema);
     const report = schema.parse({
       description: 'Runner unavailable',
       attempted: [],

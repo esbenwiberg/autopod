@@ -129,6 +129,7 @@ public enum PodMapper {
       runningAt: response.runningAt.map { parseDate($0) }
     )
     result.fleetArchivedAt = response.fleetArchivedAt
+    result.executionRecoveryNote = response.lastRecoveryTrigger != nil ? response.lastCorrectionMessage : nil
     result.completionPolicy = response.completionPolicy
     return result
   }
@@ -551,6 +552,7 @@ public enum PodMapper {
     result.validationWaiver = mapValidationWaiver(response.validationWaiver)
     result.preSubmitReview = mapPreSubmitReview(response.preSubmitReview)
     result.fixIteration = response.fixIteration ?? 0
+    result.executionRecoveryNote = response.lastRecoveryTrigger != nil ? response.lastCorrectionMessage : nil
     result.completionPolicy = response.completionPolicy
     result.researchFindings = response.researchFindings
     result.queueLength = response.queueLength ?? 0

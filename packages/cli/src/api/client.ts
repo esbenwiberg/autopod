@@ -35,6 +35,8 @@ import type {
   PublicProviderAccount,
   PublicProviderCatalog,
   ReadinessStatus,
+  RepairContinuationPreviewQueryV1,
+  RepairContinuationRequestV1,
   RetainedFinalizationReceipt,
   RetainedFinalizationRequest,
   RetainedFinalizationView,
@@ -71,6 +73,8 @@ import {
   InvalidStateTransitionError,
   PodNotFoundError,
   ProfileNotFoundError,
+  repairContinuationPreviewQueryV1Schema,
+  repairContinuationRequestV1Schema,
   ValidationError,
 } from '@autopod/shared';
 
@@ -151,6 +155,7 @@ export interface UpdatePodsitterConfigurationRequest {
 }
 
 import { fetch } from 'undici';
+import { repairInspection, repairOperation, repairPreview } from './repair-continuation.js';
 
 export class DaemonUnreachableError extends AutopodError {
   constructor(url: string) {
@@ -603,6 +608,45 @@ export class AutopodClient {
     return receipt;
   }
 
+  async inspectRepairContinuation(id: string) {
+    return repairInspection(
+      await this.request('GET', `/pods/${encodeURIComponent(id)}/repair-continuation-v1`),
+      id,
+    );
+  }
+  async previewRepairContinuation(id: string, input: RepairContinuationPreviewQueryV1) {
+    const query = repairContinuationPreviewQueryV1Schema.parse(input);
+    const search = new URLSearchParams(query).toString();
+    return repairPreview(
+      await this.request(
+        'GET',
+        `/pods/${encodeURIComponent(id)}/repair-continuation-v1/preview?${search}`,
+      ),
+      id,
+      query,
+    );
+  }
+  async authorizeRepairContinuation(id: string, input: RepairContinuationRequestV1) {
+    const request = repairContinuationRequestV1Schema.parse(input);
+    return repairOperation(
+      await this.request('POST', `/pods/${encodeURIComponent(id)}/repair-continuation-v1`, request),
+      id,
+      request.id,
+      request,
+    );
+  }
+  async observeRepairContinuation(id: string, requestId: string) {
+    repairContinuationRequestV1Schema.shape.id.parse(requestId);
+    return repairOperation(
+      await this.request(
+        'GET',
+        `/pods/${encodeURIComponent(id)}/repair-continuation-v1/requests/${encodeURIComponent(requestId)}`,
+      ),
+      id,
+      requestId,
+    );
+  }
+
   async previewRetainedExecution(id: string, profileId: string): Promise<unknown> {
     return this.request(
       'GET',
@@ -624,6 +668,17 @@ export class AutopodClient {
     input: import('@autopod/shared').ApprovalRewriteRepairCheckRequest,
   ): Promise<unknown> {
     return this.request('POST', `/pods/${id}/approval-rewrite-repair/${recoveryId}/check`, input);
+  }
+  async recoverInfrastructure(
+    id: string,
+    input: import('@autopod/shared').InfrastructureRecoveryRequest,
+    reconcile = false,
+  ): Promise<unknown> {
+    return this.request(
+      'POST',
+      `/pods/${id}/infrastructure-recovery${reconcile ? '/reconcile' : ''}`,
+      input,
+    );
   }
   async continueRetained(
     id: string,

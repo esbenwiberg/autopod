@@ -1,5 +1,26 @@
-import type { FactEvidence, MemoryOutcomeItem, ReviewFeedbackResponseItem } from '@autopod/shared';
+import type {
+  DeferredCheck,
+  FactEvidence,
+  MemoryOutcomeItem,
+  ReviewFeedbackResponseItem,
+} from '@autopod/shared';
+import { z } from 'zod';
 import type { PodBridge } from '../pod-bridge.js';
+
+// Keep bounds/strictness aligned with the daemon's independent write boundary.
+export const deferredChecksSchema = z
+  .array(
+    z
+      .object({
+        id: z.string().trim().min(1).max(128),
+        check: z.string().trim().min(1).max(2000),
+        reason: z.string().trim().min(1).max(2000),
+        expectedExecutor: z.string().trim().min(1).max(256),
+        requiredFactId: z.string().trim().min(1).max(128).optional(),
+      })
+      .strict(),
+  )
+  .max(50);
 
 export interface ReportTaskSummaryInput {
   actualSummary: string;
@@ -12,6 +33,7 @@ export interface ReportTaskSummaryInput {
     kind?: 'constraint' | 'tradeoff' | 'scope' | 'bugfix' | 'other';
     impact?: string;
   }>;
+  deferredChecks?: DeferredCheck[];
   factEvidence?: FactEvidence[];
   factDeviations?: Array<{
     factId: string;
@@ -34,6 +56,10 @@ export async function reportTaskSummary(
   input: ReportTaskSummaryInput,
   bridge: PodBridge,
 ): Promise<string> {
+  const deferredChecks =
+    input.deferredChecks === undefined
+      ? undefined
+      : deferredChecksSchema.parse(input.deferredChecks);
   bridge.reportTaskSummary(
     podId,
     input.actualSummary,
@@ -43,6 +69,7 @@ export async function reportTaskSummary(
     input.factDeviations,
     input.memoryOutcomes,
     input.reviewFeedbackResponses,
+    deferredChecks,
   );
   const deviationCount = input.deviations.length;
   const deviationNote =
@@ -61,5 +88,8 @@ export async function reportTaskSummary(
   const reviewFeedbackNote = input.reviewFeedbackResponses?.length
     ? ` ${input.reviewFeedbackResponses.length} review feedback response${input.reviewFeedbackResponses.length === 1 ? '' : 's'} recorded for host-side PR replies.`
     : '';
-  return `Task summary registered. ${deviationNote}${factNote}${factDeviationNote}${memoryNote}${reviewFeedbackNote} The reviewer will assess any deviations.`;
+  const deferredNote = deferredChecks?.length
+    ? ` ${deferredChecks.length} deferred check(s) reported NOT-RUN; required checks remain incomplete. This is not a pass, waiver or repair receipt.`
+    : '';
+  return `Task summary registered. ${deviationNote}${factNote}${factDeviationNote}${memoryNote}${reviewFeedbackNote}${deferredNote} The reviewer will assess any deviations.`;
 }

@@ -904,6 +904,8 @@ public struct Pod: Identifiable, Sendable {
     public var phase: PhaseProgress?
     public var latestActivity: String?
     public var errorSummary: String?
+    /// Recorded restart/wakeup hold, not a timer-based inference of process exit.
+    public var executionRecoveryNote: String? = nil
     public var attempts: AttemptInfo?
     public var queuePosition: Int?
 
@@ -1000,6 +1002,10 @@ public struct Pod: Identifiable, Sendable {
     public var outputMode: OutputMode { pod.legacyOutputMode }
 
     public var isWorkspace: Bool { pod.agentMode == .interactive }
+
+    public var needsExecutionInspection: Bool {
+        status == .running && executionRecoveryNote != nil && errorSummary != nil
+    }
 
     public var hasUnansweredDecision: Bool {
         status == .awaitingInput || escalationId != nil || pendingDecisionId != nil

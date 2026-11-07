@@ -5,15 +5,18 @@ import {
   type CheckpointRecoveryRequest,
   type OperatorActor,
   type Pod,
+  type ReportBlockerPayload,
   type RewriteRepairRetryTarget,
   type TaskRetryAuthorization,
   type ValidationResult,
 } from '@autopod/shared';
+import { createRetainedCodingRepository } from './retained-coding-repository.js';
 import {
   assertFinalizationResourceAvailable,
   createRetainedFinalizationRepository,
   ownsRetainedFinalization,
 } from './retained-finalization-repository.js';
+import { assertStalledRecoveryResourceAvailable } from './stalled-worker-recovery-repository.js';
 
 export type { CheckpointRecoveryRequest } from '@autopod/shared';
 
@@ -71,7 +74,18 @@ export interface CheckpointRecoveryBinding {
   continuation?: {
     remoteHead?: string;
     prepareOnly: boolean;
+    /** Additive checks-only gate; never rewrites or removes frozen workflow phases. */
+    reviewPolicy?: 'independent-v1';
     execution?: RetainedExecutionSelection;
+    infrastructure?: {
+      version: 1;
+      mode: 'checks' | 'rework';
+      qualification: string;
+      instructions?: { content: string; sha256: string };
+      originalTree: string;
+      /** Exact completed failed repair whose sealed source is selected again. */
+      predecessorRepairId?: string;
+    };
   };
 }
 export type PreparedCheckpoint = Awaited<ReturnType<typeof prepareRetainedCheckpointWorkspace>> & {
@@ -106,7 +120,11 @@ export interface CheckpointRecoveryRecord {
   actor: OperatorActor;
   reason: string;
   binding: CheckpointRecoveryBinding;
-  originalEvidence: { result: ValidationResult; preSubmitReview: Pod['preSubmitReview'] };
+  originalEvidence: {
+    result: ValidationResult | null;
+    preSubmitReview: Pod['preSubmitReview'];
+    infrastructureReports?: { id: string; timestamp: string; payload: ReportBlockerPayload }[];
+  };
   createdAt: string;
   prepared: PreparedCheckpoint | null;
   selected: {
@@ -128,6 +146,19 @@ export interface CheckpointRecoveryRecord {
   } | null;
   blocked: { code: string } | null;
   reconciled: CheckpointOutcomeReceipt | null;
+  infrastructure?: {
+    stopDispatched: boolean;
+    stopped: boolean;
+    worker: { runId: string; generation: number; containerId: string; cycle: number } | null;
+    candidate: {
+      head: string;
+      tree: string;
+      runId: string;
+      generation: number;
+      cycle: number;
+      containerId: string;
+    } | null;
+  };
 }
 /** Exact prospective candidate authorization; actual Git proof is required at selection. */
 export function rewriteRepairRetryBinding(
@@ -145,6 +176,27 @@ export function rewriteRepairRetryBinding(
     rewriteId: owner.id,
     failedDispatchId: owner.dispatchId,
   };
+}
+const stopScopes = new WeakMap<
+  Database.Database,
+  AsyncLocalStorage<{ id: string; assertCurrent(): void }>
+>();
+export function ownsInfrastructureRecoveryStop(
+  db: Database.Database,
+  containerId: string,
+): boolean {
+  const owner = stopScopes.get(db)?.getStore();
+  if (!owner) return false;
+  owner.assertCurrent();
+  const record = createRetainedCheckpointRepository(db).get(owner.id);
+  return Boolean(
+    record?.binding.continuation?.infrastructure &&
+      record.containerId === containerId &&
+      record.infrastructure?.stopDispatched &&
+      !record.infrastructure.stopped &&
+      !record.activated &&
+      !record.blocked,
+  );
 }
 const scopes = new WeakMap<Database.Database, AsyncLocalStorage<string>>();
 function scope(db: Database.Database) {
@@ -177,8 +229,18 @@ export function retainedCheckpointResourceIds(db: Database.Database): string[] {
 export function assertCheckpointResourceNotRetained(
   db: Database.Database,
   containerId: string,
+  allowCodingMutation = false,
 ): void {
+  assertStalledRecoveryResourceAvailable(db, containerId);
   assertFinalizationResourceAvailable(db, containerId);
+  if (createRetainedCodingRepository(db).retains(containerId)) {
+    if (!allowCodingMutation)
+      checkpointError(
+        'Coding candidate retains source/report custody; no release is authorized',
+        'REPAIR_CANDIDATE_RETAINED',
+      );
+    createRetainedCodingRepository(db).assertMutationAllowed(containerId);
+  }
   const retained = db
     .prepare('SELECT binding FROM retained_checkpoint_recoveries WHERE container_id=?')
     .get(containerId) as { binding: string } | undefined;
@@ -209,6 +271,113 @@ export function checkpointDetachedWakeup(
 }
 
 export function createRetainedCheckpointRepository(db: Database.Database) {
+  /** Diagnostic projection only: neither settlement nor selection/admission evidence.
+   * Bound fields inside SQLite before crossing into JS; never load whole payloads.
+   * Keep this independent of originalEvidence and its immutable hash meaning.
+   */
+  function infrastructureNeeds(pod: Pick<Pod, 'id' | 'lifecycleGeneration'>) {
+    const rows = db
+      .prepare(`WITH reports AS (
+      SELECT id,created_at,CASE WHEN json_valid(payload) THEN payload END AS data
+      FROM escalations WHERE pod_id=? AND type='report_blocker'
+    ) SELECT substr(id,1,257) AS id,
+      CASE WHEN json_type(data,'$.owner')='text'
+        THEN substr(json_extract(data,'$.owner'),1,257) END AS owner,
+      CASE WHEN json_type(data,'$.phase')='text'
+        THEN substr(json_extract(data,'$.phase'),1,257) END AS phase,
+      CASE WHEN json_type(data,'$.needs')='text'
+        THEN substr(json_extract(data,'$.needs'),1,1025) END AS needs
+      FROM reports WHERE json_extract(data,'$.kind')='infrastructure'
+      AND json_extract(data,'$.lifecycleGeneration')=?
+      ORDER BY created_at,reports.id LIMIT 21`)
+      .all(pod.id, pod.lifecycleGeneration) as {
+      id: string;
+      owner: string | null;
+      phase: string | null;
+      needs: string | null;
+    }[];
+    return {
+      truncated: rows.length > 20,
+      needs: rows.slice(0, 20).map((row) => ({
+        id: row.id.slice(0, 256),
+        owner: row.owner?.slice(0, 256),
+        phase: row.phase?.slice(0, 256),
+        needs: row.needs?.slice(0, 1024),
+        truncated:
+          row.id.length > 256 ||
+          (row.owner?.length ?? 0) > 256 ||
+          (row.phase?.length ?? 0) > 256 ||
+          (row.needs?.length ?? 0) > 1024,
+      })),
+    };
+  }
+  function originalEvidence(pod: Pod): CheckpointRecoveryRecord['originalEvidence'] | null {
+    if (pod.lastValidationResult)
+      return { result: pod.lastValidationResult, preSubmitReview: pod.preSubmitReview };
+    const finalization = pod.finalization;
+    if (
+      pod.status !== 'failed' ||
+      finalization?.generation !== pod.lifecycleGeneration ||
+      finalization.phase !== 'ready' ||
+      !finalization.agentSettledAt ||
+      !finalization.sourcePreservedAt
+    )
+      return null;
+    const rows = db
+      .prepare(`SELECT id,created_at AS timestamp,substr(payload,1,65537) AS payload FROM escalations
+      WHERE pod_id=? AND type='report_blocker'
+      AND json_extract(CASE WHEN json_valid(payload) THEN payload END,'$.kind')='infrastructure'
+      AND json_extract(CASE WHEN json_valid(payload) THEN payload END,'$.lifecycleGeneration')=?
+      ORDER BY created_at,id LIMIT 101`)
+      .all(pod.id, pod.lifecycleGeneration) as {
+      id: string;
+      timestamp: string;
+      payload: string;
+    }[];
+    if (!rows.length) return null;
+    if (
+      rows.length > 100 ||
+      rows.some((row) => Buffer.byteLength(row.payload) > 65536) ||
+      rows.reduce((size, row) => size + Buffer.byteLength(row.payload), 0) > 1048576
+    )
+      checkpointError('Infrastructure report evidence exceeds its safe bound');
+    const infrastructureReports = rows.map((row) => {
+      const payload = JSON.parse(row.payload) as ReportBlockerPayload;
+      if (
+        payload.kind !== 'infrastructure' ||
+        payload.lifecycleGeneration !== pod.lifecycleGeneration ||
+        payload.requiresResponse !== false ||
+        !['autopod', 'parent', 'validation'].includes(payload.owner ?? '') ||
+        typeof payload.phase !== 'string' ||
+        !payload.phase.trim() ||
+        typeof payload.description !== 'string' ||
+        !payload.description.trim() ||
+        typeof payload.needs !== 'string' ||
+        !payload.needs.trim() ||
+        !Array.isArray(payload.attempted) ||
+        payload.attempted.some((item) => typeof item !== 'string')
+      )
+        checkpointError('Infrastructure report evidence is incomplete');
+      return { id: row.id, timestamp: row.timestamp, payload };
+    });
+    return { result: null, preSubmitReview: pod.preSubmitReview, infrastructureReports };
+  }
+  const evidenceHash = (evidence: CheckpointRecoveryRecord['originalEvidence']) =>
+    checkpointHash(
+      evidence.result ?? { result: null, infrastructureReports: evidence.infrastructureReports },
+    );
+  function selectionEvidence(pod: Pod) {
+    const evidence = originalEvidence(pod);
+    return evidence
+      ? {
+          expectedGeneration: pod.lifecycleGeneration,
+          expectedResultHash: evidenceHash(evidence),
+          ...(evidence.infrastructureReports
+            ? { infrastructureReports: evidence.infrastructureReports }
+            : {}),
+        }
+      : null;
+  }
   function get(id: string): CheckpointRecoveryRecord | null {
     const raw = db
       .prepare(`SELECT id,pod_id AS podId,task_id AS taskId,generation,
@@ -265,6 +434,31 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       checked: event<CheckpointRecoveryRecord['checked']>('checked') ?? reconciled?.checked ?? null,
       blocked: event('blocked'),
       reconciled,
+      ...(JSON.parse(raw.binding).continuation?.infrastructure
+        ? {
+            infrastructure: (() => {
+              const rows = db
+                .prepare(
+                  'SELECT kind,evidence FROM retained_infrastructure_events WHERE recovery_id=?',
+                )
+                .all(id) as { kind: string; evidence: string }[];
+              const read = <T>(kind: string): T | null => {
+                const row = rows.find((entry) => entry.kind === kind);
+                return row ? (JSON.parse(row.evidence) as T) : null;
+              };
+              return {
+                stopDispatched: rows.some((row) => row.kind === 'stop-dispatched'),
+                stopped: rows.some((row) => row.kind === 'stopped'),
+                worker:
+                  read<NonNullable<CheckpointRecoveryRecord['infrastructure']>['worker']>('worker'),
+                candidate:
+                  read<NonNullable<CheckpointRecoveryRecord['infrastructure']>['candidate']>(
+                    'candidate',
+                  ),
+              };
+            })(),
+          }
+        : {}),
     };
   }
   function latest(podId: string) {
@@ -324,9 +518,55 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
         );
     }
   }
+  function infrastructureEvent(
+    id: string,
+    kind: 'stop-dispatched' | 'stopped' | 'worker' | 'candidate',
+    evidence: unknown,
+  ) {
+    const record = get(id) ?? checkpointError('Recovery unavailable');
+    if (
+      !record.binding.continuation?.infrastructure ||
+      scope(db).getStore() !== id ||
+      record.blocked ||
+      record.checked
+    )
+      checkpointError('Owned infrastructure recovery required');
+    assertAvailable(record.podId);
+    db.prepare('INSERT INTO retained_infrastructure_events VALUES(?,?,?,?)').run(
+      id,
+      kind,
+      JSON.stringify(evidence),
+      new Date().toISOString(),
+    );
+  }
   return {
     get,
     latest,
+    infrastructureEvent,
+    async stopOriginal(id: string, stop: () => Promise<void>, assertCurrent: () => void) {
+      const record = get(id) ?? checkpointError('Recovery unavailable');
+      if (
+        !record.binding.continuation?.infrastructure ||
+        !record.prepared ||
+        record.activated ||
+        record.checked ||
+        record.blocked ||
+        scope(db).getStore() !== id
+      )
+        checkpointError('Only owned prepared original quiescence may dispatch a stop');
+      if (record.infrastructure?.stopDispatched) return;
+      assertCurrent();
+      infrastructureEvent(id, 'stop-dispatched', {
+        containerId: record.containerId,
+        resourceKey: record.resourceKey,
+      });
+      let storage = stopScopes.get(db);
+      if (!storage) {
+        storage = new AsyncLocalStorage();
+        stopScopes.set(db, storage);
+      }
+      await storage.run({ id, assertCurrent }, stop);
+    },
     /** Only the owned, once-entered checks invocation can consume this allowance.
      * Existing started retry admissions are its durable one-shot use receipt.
      */
@@ -378,6 +618,39 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
         .get(record.taskId, pod.id, pod.lifecycleGeneration);
       return { ...budget, recoveryId: record.id, used: Boolean(used) };
     },
+    requiredReview(pod: Pod): boolean {
+      const record = latest(pod.id);
+      if (!record?.binding.continuation?.reviewPolicy) return false;
+      if (
+        record.checked &&
+        record.activated &&
+        pod.lifecycleGeneration > record.activated.generation
+      )
+        return false;
+      assertAvailable(pod.id);
+      const task = db
+        .prepare('SELECT task_id AS id FROM task_executions WHERE pod_id=?')
+        .get(pod.id) as { id: string } | undefined;
+      if (
+        record.binding.continuation.reviewPolicy !== 'independent-v1' ||
+        task?.id !== record.taskId ||
+        scope(db).getStore() !== record.id ||
+        !record.checking ||
+        record.checked ||
+        record.blocked ||
+        record.generation + 1 !== pod.lifecycleGeneration ||
+        record.activated?.generation !== pod.lifecycleGeneration ||
+        record.checking.generation !== pod.lifecycleGeneration ||
+        record.prepared?.worktree !== pod.worktreePath ||
+        pod.status !== 'validating' ||
+        !pod.containerId ||
+        pod.containerId === record.containerId
+      )
+        checkpointError(
+          'Mandatory continuation review no longer matches its owned source/generation',
+        );
+      return true;
+    },
     providerIdentity(podId: string, generation: number): string {
       const record = latest(podId);
       return record?.binding.continuation && record.activated?.generation === generation
@@ -402,7 +675,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
         checkpointError('Only owned atomic continuation activation can select execution');
       const changed = db
         .prepare(
-          'UPDATE pods SET launch_config_digest=? WHERE id=? AND launch_config_digest=? AND lifecycle_generation=? AND container_id IS NULL AND worktree_path=? AND skip_agent=1 AND execution_target=?',
+          'UPDATE pods SET launch_config_digest=? WHERE id=? AND launch_config_digest=? AND lifecycle_generation=? AND container_id IS NULL AND worktree_path=? AND skip_agent=? AND execution_target=?',
         )
         .run(
           execution.digest,
@@ -410,6 +683,10 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
           execution.parentDigest,
           record.generation + 1,
           record.prepared.worktree,
+          createRetainedCodingRepository(db).get(id) ||
+            record.binding.continuation?.infrastructure?.mode === 'rework'
+            ? 0
+            : 1,
           execution.target,
         ).changes;
       if (changed !== 1)
@@ -496,6 +773,19 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
     owned<T>(id: string, operation: () => T): T {
       return scope(db).run(id, operation);
     },
+    selectionEvidence,
+    infrastructureNeeds,
+    hasTypedPrerequisiteBlocker(pod: Pick<Pod, 'id' | 'lifecycleGeneration'>): boolean {
+      return Boolean(
+        db
+          .prepare(`SELECT 1 FROM escalations WHERE pod_id=? AND type='report_blocker'
+          AND json_extract(CASE WHEN json_valid(payload) THEN payload END,'$.kind')='infrastructure'
+          AND json_extract(CASE WHEN json_valid(payload) THEN payload END,'$.lifecycleGeneration')=?
+          AND json_type(CASE WHEN json_valid(payload) THEN payload END,'$.prerequisiteBlocker') IS NOT NULL
+          LIMIT 1`)
+          .get(pod.id, pod.lifecycleGeneration),
+      );
+    },
     claim(input: {
       pod: Pod;
       taskId: string;
@@ -504,6 +794,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       actor: OperatorActor;
       binding: CheckpointRecoveryBinding;
       assertCurrent(): void;
+      onClaim?(): void;
     }): { record: CheckpointRecoveryRecord; acquired: boolean } {
       return db.transaction(() => {
         const { pod, request, actor } = input;
@@ -527,9 +818,14 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
         }
         input.assertCurrent();
         assertAvailable(pod.id);
+        const evidence = originalEvidence(pod);
+        if (!evidence || (!evidence.result && !input.binding.continuation))
+          checkpointError(
+            'Original source/resource/result or preserved infrastructure evidence required',
+          );
         if (
           request.expectedGeneration !== pod.lifecycleGeneration ||
-          request.expectedResultHash !== checkpointHash(pod.lastValidationResult) ||
+          request.expectedResultHash !== evidenceHash(evidence) ||
           input.binding.head !== request.checkpointHead ||
           input.binding.resultHash !== request.expectedResultHash
         )
@@ -537,8 +833,8 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
             'Expected generation, result and checkpoint must match',
             'STALE_CHECKPOINT_RECOVERY',
           );
-        if (!pod.containerId || !pod.worktreePath || !pod.lastValidationResult)
-          checkpointError('Original source/resource/result required');
+        if (!pod.containerId || !pod.worktreePath)
+          checkpointError('Original source/resource required');
         const current = db
           .prepare(
             'SELECT lifecycle_generation,container_id,worktree_path,last_validation_result,status FROM pods WHERE id=?',
@@ -550,7 +846,8 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
           current.status !== pod.status ||
           current.container_id !== pod.containerId ||
           current.worktree_path !== pod.worktreePath ||
-          current.last_validation_result !== JSON.stringify(pod.lastValidationResult)
+          current.last_validation_result !==
+            (pod.lastValidationResult ? JSON.stringify(pod.lastValidationResult) : null)
         )
           checkpointError(
             'Original pod changed before recovery claim',
@@ -570,25 +867,154 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
           JSON.stringify(actor),
           request.reason.trim(),
           JSON.stringify(input.binding),
-          JSON.stringify({
-            result: pod.lastValidationResult,
-            preSubmitReview: pod.preSubmitReview,
-          }),
+          JSON.stringify(evidence),
           new Date().toISOString(),
         );
+        input.onClaim?.();
         return {
           record: get(request.id) ?? checkpointError('Recovery claim was not retained'),
           acquired: true,
         };
       })();
     },
-    assertWorkerAllowed(podId: string) {
+    repairDecision(pod: Pod): CheckpointRecoveryRecord | null {
+      const record = latest(pod.id);
+      const worker = record?.infrastructure?.worker;
+      if (
+        record?.binding.continuation?.infrastructure?.mode !== 'rework' ||
+        !worker ||
+        record.checked ||
+        record.blocked ||
+        record.infrastructure?.candidate ||
+        !record.checking ||
+        record.activated?.generation !== pod.lifecycleGeneration ||
+        worker.generation !== pod.lifecycleGeneration ||
+        record.checking.generation !== pod.lifecycleGeneration ||
+        worker.containerId !== pod.containerId ||
+        record.prepared?.worktree !== pod.worktreePath ||
+        pod.status !== 'awaiting_input' ||
+        pod.pauseReason ||
+        pod.pendingEscalation?.type !== 'ask_human'
+      )
+        return null;
+      const run = db
+        .prepare('SELECT ended_at FROM task_agent_runs WHERE id=? AND pod_id=? AND generation=?')
+        .get(worker.runId, pod.id, pod.lifecycleGeneration) as
+        | { ended_at: string | null }
+        | undefined;
+      return run && !run.ended_at ? record : null;
+    },
+    ownsRepairExecution(podId: string): boolean {
+      const record = latest(podId);
+      if (
+        record?.binding.continuation?.infrastructure?.mode !== 'rework' ||
+        scope(db).getStore() !== record.id ||
+        !record.checking ||
+        record.checked ||
+        record.blocked
+      )
+        return false;
+      assertAvailable(podId);
+      const pod = db
+        .prepare(
+          'SELECT lifecycle_generation AS generation,container_id AS containerId,worktree_path AS worktreePath FROM pods WHERE id=?',
+        )
+        .get(podId) as
+        | { generation: number; containerId: string | null; worktreePath: string }
+        | undefined;
+      return Boolean(
+        pod &&
+          pod.generation === record.activated?.generation &&
+          pod.generation === record.checking.generation &&
+          pod.worktreePath === record.prepared?.worktree &&
+          pod.containerId &&
+          pod.containerId !== record.containerId,
+      );
+    },
+    freezeRepairCandidate(id: string, source: { head: string; tree: string }) {
+      const record = get(id) ?? checkpointError('Recovery unavailable');
+      const worker = record.infrastructure?.worker;
+      if (
+        !worker ||
+        record.binding.continuation?.infrastructure?.mode !== 'rework' ||
+        record.infrastructure?.candidate
+      )
+        checkpointError('Exactly one completed repair source is required');
+      const run = db
+        .prepare(
+          'SELECT generation,cycle,binding,ended_at,outcome FROM task_agent_runs WHERE id=? AND pod_id=?',
+        )
+        .get(worker.runId, record.podId) as
+        | {
+            generation: number;
+            cycle: number;
+            binding: string;
+            ended_at: string | null;
+            outcome: string;
+          }
+        | undefined;
+      if (
+        !run?.ended_at ||
+        run.outcome !== 'completed' ||
+        run.generation !== worker.generation ||
+        run.cycle !== worker.cycle ||
+        JSON.parse(run.binding).resource?.containerId !== worker.containerId
+      )
+        checkpointError('Repair worker termination/source ownership remains unverified');
+      infrastructureEvent(id, 'candidate', { ...source, ...worker });
+    },
+    recordRepairWorker(
+      podId: string,
+      runId: string,
+      generation: number,
+      cycle: number,
+      containerId: string | null,
+    ) {
+      const record = latest(podId);
+      if (record?.binding.continuation?.infrastructure?.mode !== 'rework') return;
+      if (!containerId || !db.inTransaction)
+        checkpointError('Atomic resource-bound repair worker required');
+      infrastructureEvent(record.id, 'worker', { runId, generation, cycle, containerId });
+    },
+    assertWorkerAllowed(podId: string): boolean {
       const current = latest(podId);
+      if (current && createRetainedCodingRepository(db).get(current.id)) {
+        assertAvailable(podId);
+        createRetainedCodingRepository(db).assertWorkerAllowed(podId);
+        return true;
+      }
+      if (current?.binding.continuation?.infrastructure?.mode === 'rework' && !current.checked) {
+        assertAvailable(podId);
+        const pod = db
+          .prepare(
+            'SELECT lifecycle_generation AS generation,worktree_path AS worktreePath,container_id AS containerId,status FROM pods WHERE id=?',
+          )
+          .get(podId) as
+          | { generation: number; worktreePath: string; containerId: string; status: string }
+          | undefined;
+        if (
+          scope(db).getStore() !== current.id ||
+          !current.infrastructure?.stopped ||
+          current.infrastructure.worker ||
+          current.blocked ||
+          !current.checking ||
+          !pod ||
+          pod.generation !== current.activated?.generation ||
+          pod.generation !== current.checking.generation ||
+          pod.worktreePath !== current.prepared?.worktree ||
+          !pod.containerId ||
+          pod.containerId === current.containerId ||
+          pod.status !== 'running'
+        )
+          checkpointError('Only one owned repair worker on the selected replacement is authorized');
+        return true;
+      }
       if (current && !current.checked)
         checkpointError(
           'Checkpoint recovery admits fresh checks only, never a coding worker',
           'CHECKPOINT_CHECKS_ONLY',
         );
+      return false;
     },
   };
 }

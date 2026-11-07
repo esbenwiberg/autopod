@@ -167,6 +167,11 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('macOS desktop validation is host-only');
     expect(md).toContain('NEVER attempt desktop `swift test`, `xcodebuild`');
     expect(md).toContain('deferred Mac/human verification');
+    expect(md).toContain('Expected host-only deferral is not an infrastructure failure');
+    expect(md).toContain('DEFERRED_NATIVE_CHECKS (exit 2, not a pass)');
+    expect(md).toContain('Record the exact source SHA');
+    expect(md).toContain('A failed required Mac runner');
+    expect(md).not.toContain('unavailable platform checks belong in report_blocker');
     expect(md).toContain('tests: `npm test`');
   });
 
@@ -787,6 +792,12 @@ human_review: []
     expect(md).toContain('never conceal known failures or relabel them as passes');
     expect(md).toContain('Run relevant Linux-compatible checks for affected work');
     expect(md).toContain('deferred Mac/human verification');
+    expect(md).toContain('`report_task_summary.deferredChecks`, not `report_blocker`');
+    expect(md).toContain('Omission or an empty list does not resolve a check');
+    expect(md).not.toContain('unavailable platform checks belong in report_blocker');
+    if (overrides.outputMode === 'artifact') {
+      expect(md).toContain('A fallback path does not satisfy a mandatory exact-path contract');
+    }
     if (overrides.outputMode !== 'artifact') {
       expect(md).toContain('after relevant self-checks and diff self-review');
       expect(md).toContain('a successful `validate_locally` call is not required');

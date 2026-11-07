@@ -1,4 +1,4 @@
-import type { Pod, Profile } from '@autopod/shared';
+import type { ExecutionRequirements, Pod, Profile } from '@autopod/shared';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createMockContainerManager } from '../test-utils/mock-helpers.js';
 import { inspectExecutionPreflight } from './execution-preflight.js';
@@ -135,4 +135,243 @@ it('blocks a proven-missing launcher but not an unverifiable probe', async () =>
   expect(advisory.diagnostics.map((item) => item.code)).toContain(
     'COMMAND_AVAILABILITY_UNVERIFIED',
   );
+});
+
+function requiring(requirements: ExecutionRequirements): Pod {
+  return {
+    ...pod,
+    contract: {
+      contractVersion: 1,
+      title: 'Execution',
+      dependsOn: [],
+      scenarios: [],
+      requiredFacts: [],
+      humanReview: [],
+      executionRequirements: requirements,
+    },
+  };
+}
+
+it.each([
+  false,
+  null,
+])('blocks a v2 explicit launcher that is %s without changing v1', async (available) => {
+  const cm = withProbeResult({
+    stdout: JSON.stringify([{ executable: 'node', available }]),
+    stderr: '',
+    exitCode: 0,
+  });
+  const strict = await inspectExecutionPreflight(
+    cm,
+    'container',
+    requiring({ version: 2, executables: ['node'] }),
+    profile,
+  );
+  expect(strict.status).toBe('blocked');
+  expect(strict.commands.requirements[0]?.available).toBe(available);
+  expect(strict.diagnostics.map((item) => item.code)).toContain(
+    available === false ? 'PREFLIGHT_COMMAND_UNAVAILABLE' : 'PREFLIGHT_COMMAND_UNVERIFIED',
+  );
+  const legacy = await inspectExecutionPreflight(
+    cm,
+    'container',
+    requiring({ version: 1, executables: ['node'] }),
+    profile,
+  );
+  expect(legacy.status).toBe(available === false ? 'blocked' : 'checked');
+});
+
+it.each([
+  { stdout: '', stderr: 'node: not found', exitCode: 127 },
+  { stdout: 'malformed', stderr: '', exitCode: 0 },
+  { stdout: JSON.stringify([{ executable: 'other', available: true }]), stderr: '', exitCode: 0 },
+])('never qualifies an explicit v2 launcher from unusable probe output: %j', async (probe) => {
+  const result = await inspectExecutionPreflight(
+    withProbeResult(probe),
+    'container',
+    requiring({ version: 2, executables: ['node'] }),
+    profile,
+  );
+  expect(result.status).toBe('blocked');
+  expect(result.commands.requirements).toContainEqual({
+    source: 'contract.executionRequirements',
+    executable: 'node',
+    available: null,
+  });
+});
+
+it('blocks strict unknowns on a thrown probe timeout while inferred commands remain advisory', async () => {
+  const cm = createMockContainerManager();
+  const original = cm.execInContainer;
+  cm.execInContainer = vi.fn(async (id, args, options) => {
+    if (args[2]?.includes('autopod-command-preflight-v1')) throw new Error('Probe timed out');
+    return original(id, args, options);
+  });
+  const strict = await inspectExecutionPreflight(
+    cm,
+    'container',
+    requiring({ version: 2, executables: ['node'] }),
+    profile,
+  );
+  expect(strict.status).toBe('blocked');
+  const inferred = await inspectExecutionPreflight(
+    cm,
+    'container',
+    requiring({ version: 2, executables: [] }),
+    { ...profile, testCommand: 'npm test' },
+  );
+  expect(inferred.status).toBe('checked');
+  expect(inferred.diagnostics.map((item) => item.code)).toContain(
+    'COMMAND_AVAILABILITY_UNVERIFIED',
+  );
+});
+
+it('keeps v2 inferred missing and dynamic commands advisory without suppressing validation', async () => {
+  const result = await inspectExecutionPreflight(
+    withProbeResult({
+      stdout: JSON.stringify([
+        { executable: 'node', available: true },
+        { executable: 'npm', available: false },
+      ]),
+      stderr: '',
+      exitCode: 0,
+    }),
+    'container',
+    requiring({ version: 2, executables: ['node'] }),
+    {
+      ...profile,
+      buildCommand: 'npm run build',
+      testCommand: '$RUNNER test',
+    },
+  );
+  expect(result.status).toBe('checked');
+  expect(result.commands.unresolvedSources).toEqual(['profile.test']);
+  expect(result.diagnostics.map((item) => item.code)).toEqual(
+    expect.arrayContaining(['INFERRED_COMMAND_UNAVAILABLE', 'COMMAND_DISCOVERY_PARTIAL']),
+  );
+});
+
+it('keeps actual unknown image/resource metadata diagnostic and blocks explicit unknown resources', async () => {
+  const cm = createMockContainerManager();
+  const result = await inspectExecutionPreflight(
+    cm,
+    'container',
+    requiring({ version: 2, executables: ['node'] }),
+    profile,
+  );
+  expect(result.status).toBe('checked');
+  expect(result.imageDigest).toBeNull();
+  expect(result.capabilities.memoryLimitBytes).toBeNull();
+  expect(result.capabilities.cpuLimit).toBeNull();
+  expect(result.diagnostics.map((item) => item.code)).toEqual(
+    expect.arrayContaining(['IMAGE_IDENTITY_UNAVAILABLE', 'MEMORY_CAPACITY_UNVERIFIED']),
+  );
+  const required = await inspectExecutionPreflight(
+    cm,
+    'container',
+    requiring({ version: 2, executables: [], minimumMemoryBytes: 1024 ** 3, minimumCpu: 1 }),
+    profile,
+  );
+  expect(required.status).toBe('blocked');
+  expect(required.diagnostics.map((item) => item.code)).toContain(
+    'PREFLIGHT_RESOURCE_REQUIREMENT_UNVERIFIED',
+  );
+});
+
+it('does not reuse previous image/resource success after metadata becomes unavailable', async () => {
+  const cm = createMockContainerManager();
+  cm.getExecutionMetadata = vi
+    .fn()
+    .mockResolvedValueOnce({
+      imageDigest: `sha256:${'a'.repeat(64)}`,
+      memoryLimitBytes: 8 * 1024 ** 3,
+      cpuLimit: 2,
+      networkMode: 'isolated',
+    })
+    .mockRejectedValueOnce(new Error('Backend inspection unavailable'));
+  const task = requiring({
+    version: 2,
+    executables: [],
+    minimumMemoryBytes: 1024 ** 3,
+    minimumCpu: 1,
+  });
+  const previous = await inspectExecutionPreflight(cm, 'original-container', task, profile);
+  expect(previous.status).toBe('checked');
+  expect(previous.imageDigest).toBe(`sha256:${'a'.repeat(64)}`);
+  const current = await inspectExecutionPreflight(cm, 'replacement-container', task, profile);
+  expect(current.status).toBe('blocked');
+  expect(current.imageDigest).toBeNull();
+  expect(current.capabilities.memoryLimitBytes).toBeNull();
+  expect(current.capabilities.cpuLimit).toBeNull();
+  expect(current.diagnostics.map((item) => item.code)).toContain(
+    'PREFLIGHT_RESOURCE_REQUIREMENT_UNVERIFIED',
+  );
+});
+
+it('does not accept an image-build requirement based on successful executable probes', async () => {
+  const result = await inspectExecutionPreflight(
+    createMockContainerManager(),
+    'container',
+    requiring({ version: 2, executables: ['docker'], requiresImageBuild: true }),
+    profile,
+  );
+  expect(result.commands.requirements[0]?.available).toBe(true);
+  expect(result.status).toBe('blocked');
+  expect(result.diagnostics.map((item) => item.code)).toContain(
+    'PREFLIGHT_IMAGE_BUILD_UNSUPPORTED',
+  );
+});
+
+it.each([
+  { platform: 'darwin/arm64' as const },
+  { requiredReferenceRepositories: [{ repositoryId: 'works', commitSha: 'a'.repeat(40) }] },
+])('requires frozen admission rather than guessing legacy platform/reference qualification: %j', async (requirement) => {
+  const result = await inspectExecutionPreflight(
+    createMockContainerManager(),
+    'container',
+    requiring({ version: 2, executables: [], ...requirement }),
+    profile,
+  );
+  expect(result.status).toBe('blocked');
+  expect(result.diagnostics.map((item) => item.code)).toContain(
+    'PREFLIGHT_FROZEN_REQUIREMENTS_UNVERIFIED',
+  );
+});
+
+it.each([
+  'review',
+  'completion',
+] as const)('does not impose v2 worker prerequisites on %s', async (purpose) => {
+  const result = await inspectExecutionPreflight(
+    createMockContainerManager(),
+    'container',
+    requiring({
+      version: 2,
+      executables: ['missing'],
+      minimumMemoryBytes: 1024 ** 3,
+      minimumCpu: 8,
+      requiresImageBuild: true,
+      platform: 'darwin/arm64',
+    }),
+    profile,
+    purpose,
+    purpose === 'review' ? 'reviewer' : 'worker',
+  );
+  expect(result.status).toBe('checked');
+  expect(result.commands.requirements).toEqual([]);
+  expect(
+    result.diagnostics.map((item) => item.code).filter((code) => code.startsWith('PREFLIGHT_')),
+  ).toEqual([]);
+});
+
+it('applies v2 strict launchers during worker validation as well as coding', async () => {
+  const result = await inspectExecutionPreflight(
+    withProbeResult({ stdout: '', stderr: '', exitCode: 1 }),
+    'container',
+    requiring({ version: 2, executables: ['node'] }),
+    profile,
+    'validation',
+  );
+  expect(result.status).toBe('blocked');
+  expect(result.diagnostics.map((item) => item.code)).toContain('PREFLIGHT_COMMAND_UNVERIFIED');
 });

@@ -40,6 +40,80 @@ describe('buildPrBody', () => {
     previewUrl: null,
   };
 
+  it('shows NOT-RUN context even when a generated narrative claims completion', () => {
+    const body = buildPrBody({
+      ...baseConfig,
+      narrative: { why: 'Requested', what: 'Complete', how: 'Implemented', reviewFocus: [] },
+      taskSummary: {
+        actualSummary: 'Implemented',
+        deviations: [],
+        deferredChecks: [
+          {
+            id: 'mac',
+            check: 'xcodebuild test',
+            reason: 'Linux',
+            expectedExecutor: 'Mac owner',
+            requiredFactId: 'mac-fact',
+            lifecycleGeneration: 4,
+          },
+        ],
+      },
+    });
+    expect(body).toContain('## Verification pending');
+    expect(body).toContain('**NOT-RUN**');
+    expect(body).toContain('xcodebuild test');
+    expect(body).toContain('required fact: mac-fact');
+    expect(body).toContain('reported lifecycle: 4');
+    expect(body).toContain('not a pass, waiver or repair receipt');
+  });
+
+  it.each([250, 1000])('retains a NOT-RUN warning under a %s-character budget', (budgetChars) => {
+    const body = buildPrBody({
+      ...baseConfig,
+      budgetChars,
+      task: 'Task '.repeat(1000),
+      taskSummary: {
+        actualSummary: 'Done',
+        deviations: [],
+        deferredChecks: [
+          {
+            id: 'mac',
+            check: 'xcodebuild test',
+            reason: 'Linux',
+            expectedExecutor: 'Mac owner',
+            lifecycleGeneration: 1,
+          },
+        ],
+      },
+    });
+    expect(body).toContain('## Verification pending');
+    expect(body).toContain('NOT-RUN');
+    expect(body).toContain('waiver or repair receipt');
+    expect(body.length).toBeLessThanOrEqual(budgetChars);
+  });
+
+  it('refuses a budget too small to retain a verification warning', () => {
+    expect(() =>
+      buildPrBody({
+        ...baseConfig,
+        budgetChars: 1,
+        taskSummary: {
+          actualSummary: 'Done',
+          deviations: [],
+          deferredChecks: [
+            {
+              id: 'mac',
+              check: 'xcodebuild test',
+              reason: 'Linux',
+              expectedExecutor: 'Mac owner',
+              lifecycleGeneration: 1,
+            },
+          ],
+        },
+      }),
+    ).toThrow(/budget too small/);
+  });
+
   it('includes Why section with task', () => {
     const body = buildPrBody(baseConfig);
     expect(body).toContain('## Why');

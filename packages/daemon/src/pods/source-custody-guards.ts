@@ -6,6 +6,7 @@ import {
   createRetainedCheckpointRepository,
 } from './retained-checkpoint-repository.js';
 import { sourceAdoptionError } from './source-adoption-identity.js';
+import { assertStalledRecoveryAvailable } from './stalled-worker-recovery-repository.js';
 import { assertValidationResourceReleasable } from './validation-execution-evidence.js';
 
 export function assertSourceResourceReleasable(db: Database.Database, containerId: string): void {
@@ -37,6 +38,7 @@ export function assertSourceAvailable(
   podId: string,
   owner = sourceOwnerScope(db).getStore(),
 ): void {
+  assertStalledRecoveryAvailable(db, podId, true);
   createRetainedCheckpointRepository(db).assertAvailable(podId);
   const blocked = db
     .prepare(`SELECT s.id,s.pod_id AS podId,s.error,

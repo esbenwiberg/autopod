@@ -391,7 +391,9 @@ export function createProvisioningContainer(
     let claudeStateDir: string | null = null;
     if (pod.runtime === 'claude') {
       try {
-        claudeStateDir = await ensureClaudeStateDir(podId);
+        claudeStateDir = await ensureClaudeStateDir(
+          podRepo.retainedCoding?.sessionNamespace(podId) ?? podId,
+        );
       } catch (err) {
         logger.warn(
           { err, podId },
@@ -403,7 +405,9 @@ export function createProvisioningContainer(
     let codexStateDir: string | null = null;
     if (pod.runtime === 'codex') {
       try {
-        codexStateDir = await ensureCodexStateDir(podId);
+        codexStateDir = await ensureCodexStateDir(
+          podRepo.retainedCoding?.sessionNamespace(podId) ?? podId,
+        );
       } catch (err) {
         logger.warn(
           { err, podId },
@@ -419,6 +423,13 @@ export function createProvisioningContainer(
     );
     const seriesArtifactsHostPath = await ensureSeriesArtifactsDir(pod, logger);
 
+    if (podRepo.retainedCoding?.isOwner(podId) && !/^sha256:[a-f0-9]{64}$/.test(spawnImage))
+      throw new AutopodError(
+        'Repair requires a prepared immutable Docker image ID',
+        'REPAIR_IMAGE_UNVERIFIED',
+        409,
+      );
+    if (podRepo.retainedCoding?.isOwner(podId)) podRepo.retainedCoding.assertOwned(podId);
     let containerId: string;
     try {
       containerId = await containerManager.spawn({
@@ -465,6 +476,16 @@ export function createProvisioningContainer(
           : resolveContainerNanoCpus(process.env.CONTAINER_CPUS),
         onProgress: emitStatus,
       });
+      const coding = podRepo.retainedCoding?.latest(podId);
+      if (coding && podRepo.retainedCoding?.isOwner(podId)) {
+        // Retain the returned identity before any further awaited preparation.
+        podRepo.retainedCoding.append(coding.id, 'candidate', {
+          containerId,
+          generation: pod.lifecycleGeneration,
+          expectedImage: spawnImage,
+        });
+        podRepo.update(podId, { containerId });
+      }
       if (inputBundle) {
         try {
           const verification = await containerManager.execInContainer(

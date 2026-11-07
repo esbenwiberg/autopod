@@ -97,6 +97,8 @@ export function PodDetail(): JSX.Element {
   }
 
   const data = pod;
+  const deferredChecks =
+    data.taskSummary?.deferredChecks ?? data.researchFindings?.summary.deferredChecks ?? [];
   const recoveryNote = data.lastRecoveryTrigger ? data.lastCorrectionMessage : null;
   const recoveryReason =
     data.status === 'merge_pending'
@@ -207,6 +209,25 @@ export function PodDetail(): JSX.Element {
       ) : (
         <ValidationSummary result={data.lastValidationResult} history={validationHistory} />
       )}
+
+      {deferredChecks.length > 0 ? (
+        <section className="info-panel" aria-label="Deferred verification">
+          <h2>Deferred verification</h2>
+          <p>
+            Worker-reported NOT-RUN context, not a pass, waiver or repair receipt. Required gates
+            still apply independently; historical reports are retained.
+          </p>
+          <ul>
+            {deferredChecks.map((check) => (
+              <li key={check.id}>
+                NOT-RUN [{check.id}]: {check.check} — {check.reason}. Expected executor:{' '}
+                {check.expectedExecutor}. Reported lifecycle: {check.lifecycleGeneration}.
+                {check.requiredFactId ? ` Required fact: ${check.requiredFactId}.` : ''}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <ActionBar pod={data} />
 

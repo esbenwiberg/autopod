@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  cpSync,
+  chmodSync,
   linkSync,
   lstatSync,
   mkdirSync,
@@ -31,8 +31,15 @@ import type {
   StreamingExecResult,
 } from '../interfaces/container-manager.js';
 import { extractManagedDockerOutput } from '../managed/output-extraction.js';
-import { assertCheckpointResourceNotRetained } from '../pods/retained-checkpoint-repository.js';
+import {
+  assertCheckpointResourceNotRetained,
+  ownsInfrastructureRecoveryStop,
+} from '../pods/retained-checkpoint-repository.js';
 import { ownsRetainedFinalizationStop } from '../pods/retained-finalization-repository.js';
+import {
+  ownsStalledWorkerArchive,
+  ownsStalledWorkerStop,
+} from '../pods/stalled-worker-recovery-repository.js';
 import { assertDirectoryExtractionCurrent } from './directory-extraction-ownership.js';
 import {
   boundedDockerCall,
@@ -45,6 +52,7 @@ import {
   isExpectedDockerError,
 } from './docker-helpers.js';
 import { isObservedExitCode, unverifiedExecExit } from './exec-exit-evidence.js';
+import { isExcludedPath, mirrorStagedDirectory } from './staged-directory-mirror.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -99,24 +107,6 @@ function pathExists(path: string): boolean {
   }
 }
 
-function normalizeExtractPath(pathname: string): string {
-  return pathname.split('/').filter(Boolean).join('/');
-}
-
-function isExcludedPath(relPath: string, excludes?: string[]): boolean {
-  if (!excludes?.length) return false;
-  const normalizedRel = normalizeExtractPath(relPath);
-  const segments = normalizedRel.split('/');
-  return excludes.some((exclude) => {
-    const normalizedExclude = normalizeExtractPath(exclude);
-    if (!normalizedExclude) return false;
-    if (!normalizedExclude.includes('/')) {
-      return segments.includes(normalizedExclude);
-    }
-    return normalizedRel === normalizedExclude || normalizedRel.startsWith(`${normalizedExclude}/`);
-  });
-}
-
 function removeStaleSyncStagingDirs(hostPath: string): void {
   for (const entry of readdirSync(hostPath)) {
     if (entry.startsWith('.autopod-sync-') || entry.startsWith('.autopod-extract-')) {
@@ -127,59 +117,6 @@ function removeStaleSyncStagingDirs(hostPath: string): void {
 
 function archiveEntryRelativePath(name: string, prefix: string): string {
   return name.startsWith(prefix) ? name.slice(prefix.length) : name;
-}
-
-function collectRelativeEntries(
-  root: string,
-  excludes?: string[],
-  skipTopLevel?: string,
-): string[] {
-  const entries: string[] = [];
-
-  function walk(relativeDir: string): void {
-    const absoluteDir = relativeDir ? join(root, relativeDir) : root;
-    for (const dirent of readdirSync(absoluteDir, { withFileTypes: true })) {
-      const relPath = relativeDir ? `${relativeDir}/${dirent.name}` : dirent.name;
-      const topLevel = relPath.split('/')[0];
-      if (topLevel === skipTopLevel || isExcludedPath(relPath, excludes)) {
-        continue;
-      }
-      entries.push(relPath);
-      if (dirent.isDirectory() && !dirent.isSymbolicLink()) {
-        walk(relPath);
-      }
-    }
-  }
-
-  walk('');
-  return entries;
-}
-
-function mirrorStagedDirectory(
-  stagingPath: string,
-  hostPath: string,
-  excludes?: string[],
-  stagingBase?: string,
-): void {
-  for (const entry of readdirSync(stagingPath)) {
-    cpSync(join(stagingPath, entry), join(hostPath, entry), {
-      recursive: true,
-      force: true,
-      errorOnExist: false,
-      dereference: false,
-      verbatimSymlinks: true,
-      preserveTimestamps: true,
-    });
-  }
-
-  const hostEntries = collectRelativeEntries(hostPath, excludes, stagingBase).sort(
-    (a, b) => b.length - a.length,
-  );
-  for (const relPath of hostEntries) {
-    if (!pathExists(join(stagingPath, relPath))) {
-      rmSync(join(hostPath, relPath), { recursive: true, force: true });
-    }
-  }
 }
 
 function isLocalAutopodWarmImage(image: string): boolean {
@@ -204,13 +141,14 @@ interface ImagePuller {
 }
 
 export class DockerContainerManager implements ContainerManager {
+  readonly supportsStreamingExec = true;
   private docker: Dockerode;
   private logger: Logger;
   private imagePuller: ImagePuller | null;
   private managedDatabase?: Database.Database;
   private assertNotRetained(containerId: string) {
     if (this.managedDatabase)
-      assertCheckpointResourceNotRetained(this.managedDatabase, containerId);
+      assertCheckpointResourceNotRetained(this.managedDatabase, containerId, true);
   }
   readonly supportsExecRecovery = true;
 
@@ -523,7 +461,9 @@ export class DockerContainerManager implements ContainerManager {
   async stop(containerId: string): Promise<void> {
     if (
       !this.managedDatabase ||
-      !ownsRetainedFinalizationStop(this.managedDatabase, containerId, 'local')
+      (!ownsRetainedFinalizationStop(this.managedDatabase, containerId, 'local') &&
+        !ownsStalledWorkerStop(this.managedDatabase, containerId) &&
+        !ownsInfrastructureRecoveryStop(this.managedDatabase, containerId))
     )
       this.assertNotRetained(containerId);
     try {
@@ -598,6 +538,8 @@ export class DockerContainerManager implements ContainerManager {
   }
 
   async start(containerId: string, options: ContainerStartOptions = {}): Promise<void> {
+    if (this.managedDatabase)
+      assertCheckpointResourceNotRetained(this.managedDatabase, containerId);
     this.assertNotRetained(containerId);
     try {
       options.assertCurrent?.();
@@ -628,6 +570,8 @@ export class DockerContainerManager implements ContainerManager {
   }
 
   async kill(containerId: string): Promise<void> {
+    if (this.managedDatabase)
+      assertCheckpointResourceNotRetained(this.managedDatabase, containerId);
     this.assertNotRetained(containerId);
     try {
       const container = this.docker.getContainer(containerId);
@@ -828,7 +772,11 @@ export class DockerContainerManager implements ContainerManager {
     excludes?: string[],
     options?: DirectoryExtractionOptions,
   ): Promise<void> {
-    this.assertNotRetained(containerId);
+    if (
+      !this.managedDatabase ||
+      !ownsStalledWorkerArchive(this.managedDatabase, containerId, containerPath)
+    )
+      this.assertNotRetained(containerId);
     assertDirectoryExtractionCurrent(options);
     const container = this.docker.getContainer(containerId);
     // getArchive works on stopped containers — safe to call after container exits
@@ -854,6 +802,8 @@ export class DockerContainerManager implements ContainerManager {
     const prefix = `${basename(containerPath)}/`;
     const extract = tar.extract();
     const pendingHardlinks: Array<{ fullPath: string; targetPath: string }> = [];
+    const directoryModes: Array<{ fullPath: string; mode: number }> = [];
+    let rootMode: number | undefined;
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -861,6 +811,8 @@ export class DockerContainerManager implements ContainerManager {
           const rel = archiveEntryRelativePath(header.name, prefix);
 
           if (!rel) {
+            if (header.type === 'directory' && typeof header.mode === 'number')
+              rootMode = header.mode & 0o777;
             // Root directory entry itself — skip
             stream.resume();
             stream.on('end', next);
@@ -877,6 +829,7 @@ export class DockerContainerManager implements ContainerManager {
 
           if (header.type === 'directory') {
             mkdirSync(fullPath, { recursive: true });
+            directoryModes.push({ fullPath, mode: (header.mode ?? 0o755) & 0o777 });
             stream.resume();
             stream.on('end', next);
           } else if (header.type === 'symlink') {
@@ -908,6 +861,8 @@ export class DockerContainerManager implements ContainerManager {
             stream.on('end', () => {
               try {
                 writeFileSync(fullPath, Buffer.concat(chunks));
+                // Retain ordinary permission/executable bits, never setuid/setgid/sticky.
+                chmodSync(fullPath, (header.mode ?? 0o644) & 0o777);
                 next();
               } catch (err) {
                 reject(err);
@@ -938,7 +893,10 @@ export class DockerContainerManager implements ContainerManager {
       });
 
       assertDirectoryExtractionCurrent(options);
+      for (const entry of directoryModes.sort((a, b) => b.fullPath.length - a.fullPath.length))
+        chmodSync(entry.fullPath, entry.mode);
       mirrorStagedDirectory(stagingPath, hostPath, excludes, options ? undefined : stagingBase);
+      if (options?.preserveRootMode && rootMode !== undefined) chmodSync(hostPath, rootMode);
     } finally {
       rmSync(stagingPath, { recursive: true, force: true });
     }
@@ -1040,7 +998,12 @@ export class DockerContainerManager implements ContainerManager {
       containerId,
     });
 
-    const { stdout, stderr } = await collectDemuxedOutput(stream, this.docker, options?.timeout);
+    const { stdout, stderr } = await collectDemuxedOutput(
+      stream,
+      this.docker,
+      options?.timeout,
+      options?.maxOutputBytes,
+    );
 
     let exitCode = 1;
     try {
@@ -1338,23 +1301,42 @@ function collectDemuxedOutput(
   stream: NodeJS.ReadableStream,
   docker: Dockerode,
   timeout?: number,
+  maxOutputBytes?: number,
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     let stdoutBuf = '';
     let stderrBuf = '';
+    let outputBytes = 0;
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
+    const append = (chunk: Buffer, channel: 'stdout' | 'stderr') => {
+      if (settled) return;
+      outputBytes += chunk.length;
+      if (maxOutputBytes !== undefined && outputBytes > maxOutputBytes) {
+        // Closing a transport is not a remote termination receipt. Caller retains uncertainty.
+        settle(
+          new AutopodError(
+            'Buffered execution output exceeded its evidence bound',
+            'EXEC_OUTPUT_LIMIT',
+            409,
+          ),
+        );
+        (stream as NodeJS.ReadableStream & { destroy?: () => void }).destroy?.();
+        return;
+      }
+      if (channel === 'stdout') stdoutBuf += chunk.toString('utf-8');
+      else stderrBuf += chunk.toString('utf-8');
+    };
     const stdoutWriter = new Writable({
       write(chunk: Buffer, _encoding, cb) {
-        stdoutBuf += chunk.toString('utf-8');
+        append(chunk, 'stdout');
         cb();
       },
     });
-
     const stderrWriter = new Writable({
       write(chunk: Buffer, _encoding, cb) {
-        stderrBuf += chunk.toString('utf-8');
+        append(chunk, 'stderr');
         cb();
       },
     });

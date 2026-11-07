@@ -1,0 +1,72 @@
+[
+  {
+    "name": "nested-strings-safe-integers",
+    "bindingSubset": true,
+    "canonical": "{\"a\":{\"candidateGeneration\":3,\"originalGeneration\":0,\"version\":1},\"z\":9007199254740991}",
+    "wire": "{\"z\":9007199254740991,\"a\":{\"version\":1,\"originalGeneration\":0,\"candidateGeneration\":3}}",
+    "digest": "a2e7a1b239a6986bff8b1d069c7c18614de056bb63c25384fd8415db0aae692c"
+  },
+  {
+    "name": "utf16-order-and-unicode",
+    "bindingSubset": true,
+    "canonical": "{\"a\":\"中文/😀  \",\"😀\":\"é\",\"�\":\"é\"}",
+    "wire": "{\"�\":\"é\",\"😀\":\"é\",\"a\":\"中文/😀  \"}",
+    "digest": "6e4aee21465e66d313fee06fe00667199061940187a9cfecd4bc971ab0286ceb"
+  },
+  {
+    "name": "escaping",
+    "bindingSubset": true,
+    "canonical": "{\"resourceKey\":\"docker://host/\\\"quoted\\\"\\\\\\b\\t\\n\\f\\r\\u0000\\u0001\\u001f\"}",
+    "wire": "{\"resourceKey\":\"docker://host/\\\"quoted\\\"\\\\\\b\\t\\n\\f\\r\\u0000\\u0001\\u001f\"}",
+    "digest": "f8685d482e8048f29d17eaa66a6dca5f62dd306972672ac6f4ecc6233ef5309b"
+  },
+  {
+    "name": "nested-array-null-bool",
+    "bindingSubset": false,
+    "canonical": "{\"z\":[null,true,false,{\"a\":null,\"b\":[\"é\",2,1]}]}",
+    "wire": "{\"z\":[null,true,false,{\"b\":[\"é\",2,1],\"a\":null}]}",
+    "digest": "e24ae7da5446084c7b3e34e9fc59c4b6d08e78bd428c595c7b146d5b851c3e20"
+  },
+  {
+    "name": "resource-floats",
+    "bindingSubset": false,
+    "canonical": "{\"boundary\":0.000001,\"cpus\":1.25,\"large\":1e+21,\"memoryGb\":0.5,\"negativeZero\":0,\"tiny\":1e-7}",
+    "wire": "{\"memoryGb\":0.5,\"cpus\":1.25,\"tiny\":1e-7,\"boundary\":0.000001,\"large\":1e+21,\"negativeZero\":0}",
+    "digest": "f10e6bcabbd15756d7478d5db31f01193180df0cd66fdc2ec64177d3009750a1"
+  },
+  {
+    "name": "bool-not-integer",
+    "bindingSubset": false,
+    "canonical": "{\"version\":true}",
+    "wire": "{\"version\":true}",
+    "digest": "b2687bcd56318d3dd4f1720a16d3e0d5c1c88bdebb0ba56b9e989c80b6850f7e"
+  },
+  {
+    "name": "null-not-object",
+    "bindingSubset": false,
+    "canonical": "{\"source\":null}",
+    "wire": "{\"source\":null}",
+    "digest": "150d37b719634588cad196cde1b52494cce62f8f3fe6093c30b468c3db54bfb1"
+  },
+  {
+    "name": "fraction-not-generation",
+    "bindingSubset": false,
+    "canonical": "{\"candidateGeneration\":1.5}",
+    "wire": "{\"candidateGeneration\":1.5}",
+    "digest": "febffc71e98b89cfd07b1204b3a8f580b20f48cefd174aeb6f803aba97309273"
+  },
+  {
+    "name": "unsafe-integer",
+    "bindingSubset": false,
+    "canonical": "{\"originalGeneration\":9007199254740992}",
+    "wire": "{\"originalGeneration\":9007199254740992}",
+    "digest": "8a12065ecd065599ff6faff10384f97624e1f51bd72257ca21611ac76c473e5d"
+  },
+  {
+    "name": "alternate-wire-escaping",
+    "bindingSubset": true,
+    "wire": "{\"resourceKey\":\"\\u00e9\\/\\ud83d\\ude00\\n\",\"version\":1.0}",
+    "canonical": "{\"resourceKey\":\"é/😀\\n\",\"version\":1}",
+    "digest": "b8a854b84df61f00a1ab98a8bf3969fd6a8427d11b0b7fbfcc23e003bca4cee0"
+  }
+]

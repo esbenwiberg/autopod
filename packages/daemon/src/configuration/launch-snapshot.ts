@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3';
 import { createScanReportRepository } from '../scheduled-jobs/scan-report-repository.js';
 import { type ConfigurationStore, configurationError } from './configuration-store.js';
 import { deriveLaunch } from './derive-launch.js';
+import { assertLaunchRequirements } from './launch-requirement-preflight.js';
 import { assertFindingsWorkflow, configurationDigest } from './launch-resolver.js';
 import {
   type RetainedExecutionSelection,
@@ -308,6 +309,9 @@ export function createLaunchSnapshotRepository(
             'CONFIG_CHANGED',
             409,
           );
+        // Constructors may attach work after resolving a template (watcher/series/scan/fix).
+        // Validate the final immutable config here, after durable replay and before pod effects.
+        assertLaunchRequirements(input.config);
         if (input.scanRepair) {
           const { reportId, selectionId } = input.scanRepair;
           const source = readScanConfiguration(db, reportId);
