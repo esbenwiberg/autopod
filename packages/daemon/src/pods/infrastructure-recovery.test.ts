@@ -122,6 +122,21 @@ function passingReview(f: Awaited<ReturnType<typeof fixture>>) {
   }));
 }
 
+async function failedRepairFixture() {
+  const f = await fixture('rework');
+  qualifiedExecution(f);
+  delivery(f);
+  const validate = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
+  vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => ({
+    ...(await validate(config)),
+    overall: 'fail',
+    test: { status: 'fail', stdout: 'Fresh real check failed', stderr: '', duration: 1 },
+  }));
+  await f.recovery.recoverInfrastructure(f.podId, f.request, f.actor);
+  await f.recovery.wait(f.input.id);
+  await f.manager.processPod(f.podId);
+  return { f, first: f.recovery.list(f.podId)[0]! };
+}
 function qualifiedExecution(f: Awaited<ReturnType<typeof fixture>>) {
   const parent = f.launch.read(f.podId)!;
   const environment = { ...parent.environment, template: 'node24' as const };
@@ -411,6 +426,142 @@ describe('qualified infrastructure recovery from real incident shapes', () => {
     expect(() => f.manager.assertCanRework(f.podId)).toThrow('Retained continuation owns');
     expect(reopened.ownsRepairExecution(f.podId)).toBe(false);
     await publishAndComplete(f, provider);
+  });
+
+  it.each([
+    'checks',
+    'rework',
+  ] as const)('requires a new explicit %s selection after failed checks of a sealed repair', async (mode) => {
+    const { f, first } = await failedRepairFixture();
+    expect(first.checked?.result.overall).toBe('fail');
+    expect(first.infrastructure?.candidate).toBeTruthy();
+    expect(f.pod().status).toBe('failed');
+    expect(f.pod().finalization?.sourcePreservedAt).toBeFalsy();
+    expect(f.ctx.podRepo.hasInfrastructureBlocker!(f.podId)).toBe(false);
+    expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+    const priorResource = f.pod().containerId!;
+    const before = f.ctx.podRepo.taskExecutions!.snapshot(f.podId);
+    const stopped = new Set([f.containerId]);
+    vi.mocked(f.cm.getStatus).mockImplementation(async (id) =>
+      stopped.has(id) ? 'stopped' : 'running',
+    );
+    vi.mocked(f.cm.stop).mockImplementation(async (id) => {
+      const current = f.recovery.list(f.podId)[0]!;
+      expect(current.infrastructure?.stopDispatched).toBe(true);
+      expect(() => assertCheckpointResourceNotRetained(f.ctx.db, id)).toThrow();
+      stopped.add(id);
+    });
+    const request: InfrastructureRecoveryRequest = {
+      id: 'explicit-successor',
+      expectedGeneration: f.pod().lifecycleGeneration,
+      expectedResultHash: first.checked!.resultHash,
+      checkpointHead: first.infrastructure!.candidate!.head,
+      mode,
+      reason: 'Explicitly select a successor for the failed sealed repair',
+      qualification: 'Fresh failed checks are retained; changed conditions need full new checks',
+      ...(mode === 'rework' ? { instructions: f.request.instructions } : {}),
+    };
+    const reopened = createRetainedCheckpointRecovery(f.deps);
+    await reopened.recoverInfrastructure(f.podId, request, f.actor);
+    await reopened.wait(request.id);
+    const next = reopened.list(f.podId)[0]!;
+    expect(next.blocked).toBeNull();
+    expect(next.binding.continuation?.infrastructure).toMatchObject({
+      predecessorRepairId: first.id,
+    });
+    expect(next.activated?.generation).toBe(3);
+    expect(next.containerId).toBe(priorResource);
+    await createRetainedCheckpointRecovery(f.deps).recoverInfrastructure(f.podId, request, f.actor);
+    expect(vi.mocked(f.cm.stop).mock.calls.filter(([id]) => id === priorResource)).toHaveLength(1);
+    expect(reopened.list(f.podId).find((item) => item.id === first.id)).toEqual(first);
+    expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1); // admission never auto-dispatches a worker
+    expect(f.ctx.podRepo.taskExecutions!.snapshot(f.podId).agentRunCount).toBe(
+      before.agentRunCount,
+    );
+    expect(f.ctx.podRepo.taskExecutions!.snapshot(f.podId).taskId).toBe(before.taskId);
+    expect(f.cm.kill).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'generation',
+    'resource',
+    'result',
+    'missing-source',
+    'wrong-task',
+    'source-drift',
+    'clean-source-drift',
+    'active-validator',
+  ])('refuses successor repair when predecessor proof changes: %s', async (fault) => {
+    const { f, first } = await failedRepairFixture();
+    const request: InfrastructureRecoveryRequest = {
+      id: 'refused-successor',
+      expectedGeneration: f.pod().lifecycleGeneration,
+      expectedResultHash: first.checked!.resultHash,
+      checkpointHead: first.infrastructure!.candidate!.head,
+      mode: 'checks',
+      reason: 'Select a new source-bound attempt without ignoring predecessor drift',
+      qualification: 'Original failure must remain bound and all settlement gates must pass',
+    };
+    if (fault === 'generation') f.ctx.podRepo.incrementLifecycleGeneration(f.podId);
+    if (fault === 'resource') f.ctx.podRepo.update(f.podId, { containerId: 'different' });
+    if (fault === 'result') {
+      const result = structuredClone(f.pod().lastValidationResult!);
+      result.test!.duration++;
+      f.ctx.podRepo.update(f.podId, { lastValidationResult: result });
+    }
+    // Simulate unsupported parsed historical receipts without changing immutable stored facts.
+    if (fault === 'missing-source' || fault === 'wrong-task') {
+      const observed = structuredClone(first);
+      if (fault === 'missing-source' && observed.checked) delete observed.checked.source;
+      if (fault === 'wrong-task') observed.taskId = 'other-task';
+      vi.spyOn(f.ctx.podRepo.retainedCheckpoints!, 'latest').mockReturnValue(observed);
+    }
+    if (fault === 'source-drift')
+      await writeFile(path.join(f.pod().worktreePath!, 'source.ts'), 'unsealed changes');
+    if (fault === 'clean-source-drift') {
+      const cwd = f.pod().worktreePath!;
+      await writeFile(path.join(cwd, 'source.ts'), 'export const unsealed = true;');
+      await exec('git', ['add', 'source.ts'], { cwd });
+      await exec(
+        'git',
+        [
+          '-c',
+          'user.name=Fixture',
+          '-c',
+          'user.email=fixture@example.invalid',
+          'commit',
+          '-m',
+          'Unsealed clean successor',
+        ],
+        { cwd },
+      );
+      request.checkpointHead = (
+        await f.worktrees.inspectSourceAdoption(cwd, f.pod().branch)
+      ).commitSha;
+    }
+    if (fault === 'active-validator')
+      vi.spyOn(
+        f.ctx.podRepo.validationExecutions!,
+        'assertNoActiveTaskExecution',
+      ).mockImplementation(() => {
+        throw new Error('Validator still owns this task');
+      });
+    const stops = vi.mocked(f.cm.stop).mock.calls.length;
+    const refusal =
+      fault === 'clean-source-drift'
+        ? 'Selected source differs from completed failed repair'
+        : fault === 'source-drift'
+          ? 'Selected commit must match the clean retained host checkpoint'
+          : fault === 'active-validator'
+            ? 'Validator still owns this task'
+            : 'Infrastructure recovery requires a native idle failed Docker task';
+    await expect(f.recovery.recoverInfrastructure(f.podId, request, f.actor)).rejects.toThrow(
+      refusal,
+    );
+    expect(f.recovery.list(f.podId)).toHaveLength(1);
+    expect(f.cm.stop).toHaveBeenCalledTimes(stops);
+    expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+    expect(f.cm.kill).not.toHaveBeenCalled();
   });
 
   it('does not replay an uncertain stop, including through a reconstructed controller', async () => {

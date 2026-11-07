@@ -897,7 +897,7 @@ export class LocalWorktreeManager implements WorktreeManager {
           // Handle "branch already used by worktree at X" — stale/orphaned worktree from a
           // previous pod run (e.g. old branch-name-derived paths before sessionId naming).
           const msg = addErr instanceof Error ? addErr.message : String(addErr);
-          const match = /already used by worktree at '(.+)'/.exec(msg);
+          const match = /already (?:used by worktree|checked out) at '(.+)'/.exec(msg);
           if (match?.[1]) {
             const conflictPath = match[1];
             this.assertPathMutable(conflictPath);

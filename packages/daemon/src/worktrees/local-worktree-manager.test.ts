@@ -1944,6 +1944,51 @@ describe('LocalWorktreeManager', () => {
   // -------------------------------------------------------------------------
 
   describe('create', () => {
+    it.each([
+      'used by worktree',
+      'checked out',
+    ])('keeps retained source protected for Git already %s conflicts', async (wording) => {
+      const held = '/retained/original';
+      const refusal = Object.assign(new Error('Retained original source'), {
+        code: 'RETAINED_FINALIZATION_BLOCKED',
+      });
+      manager = new LocalWorktreeManager({
+        cacheDir,
+        worktreeDir,
+        logger,
+        githubAuth: fakeGitHubAuth(),
+        assertPathMutable: (location) => {
+          if (location === held) throw refusal;
+        },
+      });
+      execFileMock.mockImplementation(
+        (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
+          const cb = resolveCallback(arg3, arg4);
+          if (args[0] === 'worktree' && args[1] === 'add')
+            cb(new Error(`fatal: 'retained' is already ${wording} at '${held}'`), {
+              stdout: '',
+              stderr: '',
+            });
+          else cb(null, { stdout: '', stderr: '' });
+          return {} as ChildProcess;
+        },
+      );
+      await expect(
+        manager.create({
+          repoUrl: 'https://github.com/org/repo.git',
+          branch: 'retained',
+          baseBranch: 'main',
+          sessionId: 'successor',
+        }),
+      ).rejects.toBe(refusal);
+      expect(fsRmMock.mock.calls.some(([location]) => location === held)).toBe(false);
+      expect(
+        execFileMock.mock.calls.some(
+          ([, args]) => args[0] === 'worktree' && args[1] === 'remove' && args.includes(held),
+        ),
+      ).toBe(false);
+    });
+
     const credentialUrls = [
       (() => {
         const url = new URL('https://github.com/org/repo.git');
