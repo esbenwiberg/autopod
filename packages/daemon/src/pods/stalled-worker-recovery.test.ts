@@ -1,5 +1,17 @@
 import { execFileSync } from 'node:child_process';
-import { cp, mkdir, mkdtemp, open, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  cp,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readdir,
+  readFile,
+  readlink,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { Pod, StalledWorkerRecoveryRequest } from '@autopod/shared';
@@ -20,6 +32,7 @@ import {
   fingerprintPreservedWorkspace,
 } from './artifact-snapshot-receipt.js';
 import { createPodManager } from './pod-manager.js';
+import { UNRESOLVED_EXECUTION_RECOVERY_MESSAGE } from './reconciliation-ownership.js';
 import { assertCheckpointResourceNotRetained } from './retained-checkpoint-repository.js';
 import { assertSourceAvailable } from './source-custody-guards.js';
 import { createStalledWorkerRecovery } from './stalled-worker-recovery.js';
@@ -199,6 +212,33 @@ describe('desktop stalled Docker recovery', () => {
     expect(f.containerManager.stop).not.toHaveBeenCalled();
     expect(f.podRepo.stalledRecoveries!.latest(f.id)).toBeNull();
   });
+  it('retains a pre-validation orphan with the exact daemon restart hold without inventing result or usage', async () => {
+    const f = await fixture();
+    f.podRepo.update(f.id, {
+      status: 'failed',
+      lastValidationResult: null,
+      failureReason: null,
+      lastCorrectionMessage: UNRESOLVED_EXECUTION_RECOVERY_MESSAGE,
+    });
+    const before = f.podRepo.taskExecutions!.snapshot(f.id);
+    const view = f.service.inspectStalledWorkerRecovery(f.id);
+    expect(view.canStop).toBe(true);
+    f.input.expectedBinding = view.binding;
+    expect((await f.submit()).state).toBe('settled');
+    expect(f.pod().lastValidationResult).toBeNull();
+    const after = f.podRepo.taskExecutions!.snapshot(f.id);
+    expect(after.agentRunCount).toBe(before.agentRunCount);
+    expect(after.recordedTotalTokens).toBe(before.recordedTotalTokens);
+    expect(f.containerManager.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not infer pre-validation recovery eligibility from an arbitrary restart diagnostic', async () => {
+    const f = await fixture();
+    f.podRepo.update(f.id, { lastValidationResult: null, failureReason: null });
+    expect(f.service.inspectStalledWorkerRecovery(f.id).canStop).toBe(false);
+    expect(f.containerManager.stop).not.toHaveBeenCalled();
+  });
+
   it('stops once, archives before settlement and exposes existing checks-only eligibility without starting anything', async () => {
     const f = await fixture(),
       before = f.pod();
@@ -360,9 +400,9 @@ describe('desktop stalled Docker recovery', () => {
     await expect(f.submit()).rejects.toThrow('Host Git source changed');
     expect(f.podRepo.taskExecutions!.hasActiveRun(f.id)).toBe(true);
   });
-  it.skipIf(!process.env.AUTOPOD_STALLED_DOCKER_FIXTURE_IMAGE)(
-    'preserves committed and ignored bytes with one real disposable Docker stop',
-    async () => {
+  it.skipIf(!process.env.AUTOPOD_STALLED_DOCKER_FIXTURE_IMAGE).each([false, true])(
+    'preserves committed and ignored bytes with one real disposable Docker stop (materialized archive: %s)',
+    async (materializedArchive) => {
       const image = process.env.AUTOPOD_STALLED_DOCKER_FIXTURE_IMAGE;
       const socketPath = process.env.AUTOPOD_STALLED_DOCKER_FIXTURE_SOCKET;
       if (!image?.startsWith('sha256:') || !socketPath)
@@ -403,12 +443,33 @@ describe('desktop stalled Docker recovery', () => {
           }
         }
         await add(f.worktree, 'workspace');
+        for (const name of [
+          'workspace/.agents',
+          'workspace/.agents/skills',
+          'workspace/.agents/skills/example',
+          'workspace/.claude',
+        ])
+          pack.entry({ name, type: 'directory', uid: 1000, gid: 1000, mode: 0o755 });
+        pack.entry(
+          { name: 'workspace/.agents/skills/example/SKILL.md', uid: 1000, gid: 1000, mode: 0o644 },
+          'pinned skill',
+        );
+        pack.entry({
+          name: 'workspace/.claude/skills',
+          type: 'symlink',
+          linkname: '../.agents/skills',
+          uid: 1000,
+          gid: 1000,
+        });
         pack.entry(
           { name: 'workspace/ignored-unsynced.txt', uid: 1000, gid: 1000, mode: 0o600 },
           'Retain me',
         );
         pack.finalize();
         await upload;
+        // A prior sync can have materialized this generated alias as a directory.
+        // Empty directories keep the original canonical Git source clean.
+        await mkdir(path.join(f.worktree, '.claude/skills'), { recursive: true });
         const cm = new DockerContainerManager({ docker, logger, managedDatabase: f.db });
         const gitManager = new LocalWorktreeManager({
           logger,
@@ -422,7 +483,16 @@ describe('desktop stalled Docker recovery', () => {
         f.containerManager.getStatus = vi.fn(cm.getStatus.bind(cm));
         f.containerManager.stop = vi.fn(cm.stop.bind(cm));
         f.containerManager.extractDirectoryFromContainer = vi.fn(
-          cm.extractDirectoryFromContainer.bind(cm),
+          async (...args: Parameters<DockerContainerManager['extractDirectoryFromContainer']>) => {
+            await cm.extractDirectoryFromContainer(...args);
+            if (materializedArchive && args[1] === '/workspace' && args[4]?.preserveRootMode) {
+              // Simulate the former adapter BEFORE the controller seals this archive.
+              // Reconciliation must preserve its recorded representation unchanged.
+              const alias = path.join(args[2], '.claude/skills');
+              await rm(alias);
+              await cp(path.join(args[2], '.agents/skills'), alias, { recursive: true });
+            }
+          },
         );
         f.containerManager.execInContainer = vi.fn(cm.execInContainer.bind(cm));
         vi.stubEnv('DATA_DIR', path.join(f.root, 'manager-data'));
@@ -430,6 +500,7 @@ describe('desktop stalled Docker recovery', () => {
         const result = await facade.recoverStalledWorker(f.id, f.input, f.actor);
         expect(result.state).toBe('settled');
         expect(f.containerManager.execInContainer).not.toHaveBeenCalled();
+        expect(f.containerManager.extractDirectoryFromContainer).toHaveBeenCalledTimes(1);
         const archive = f.podRepo.stalledRecoveries!.latest(f.id)!.archivePath;
         expect(await readFile(path.join(archive, 'ignored-unsynced.txt'), 'utf8')).toBe(
           'Retain me',
@@ -443,6 +514,16 @@ describe('desktop stalled Docker recovery', () => {
         expect(await readFile(path.join(f.worktree, 'source.swift'), 'utf8')).toBe(
           'let uncommitted = true\n',
         );
+        for (const root of [archive, f.worktree]) {
+          expect((await lstat(path.join(root, '.claude/skills'))).isSymbolicLink()).toBe(
+            !materializedArchive,
+          );
+          if (!materializedArchive)
+            expect(await readlink(path.join(root, '.claude/skills'))).toBe('../.agents/skills');
+          expect(await readFile(path.join(root, '.claude/skills/example/SKILL.md'), 'utf8')).toBe(
+            'pinned skill',
+          );
+        }
         expect((await stat(path.join(archive, 'check.sh'))).mode & 0o777).toBe(0o751);
         expect((await stat(path.join(f.worktree, 'check.sh'))).mode & 0o777).toBe(0o751);
         expect(f.git('status', '--porcelain')).not.toBe('');

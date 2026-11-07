@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
-  cpSync,
   linkSync,
   lstatSync,
   mkdirSync,
@@ -53,6 +52,7 @@ import {
   isExpectedDockerError,
 } from './docker-helpers.js';
 import { isObservedExitCode, unverifiedExecExit } from './exec-exit-evidence.js';
+import { isExcludedPath, mirrorStagedDirectory } from './staged-directory-mirror.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -107,24 +107,6 @@ function pathExists(path: string): boolean {
   }
 }
 
-function normalizeExtractPath(pathname: string): string {
-  return pathname.split('/').filter(Boolean).join('/');
-}
-
-function isExcludedPath(relPath: string, excludes?: string[]): boolean {
-  if (!excludes?.length) return false;
-  const normalizedRel = normalizeExtractPath(relPath);
-  const segments = normalizedRel.split('/');
-  return excludes.some((exclude) => {
-    const normalizedExclude = normalizeExtractPath(exclude);
-    if (!normalizedExclude) return false;
-    if (!normalizedExclude.includes('/')) {
-      return segments.includes(normalizedExclude);
-    }
-    return normalizedRel === normalizedExclude || normalizedRel.startsWith(`${normalizedExclude}/`);
-  });
-}
-
 function removeStaleSyncStagingDirs(hostPath: string): void {
   for (const entry of readdirSync(hostPath)) {
     if (entry.startsWith('.autopod-sync-') || entry.startsWith('.autopod-extract-')) {
@@ -135,59 +117,6 @@ function removeStaleSyncStagingDirs(hostPath: string): void {
 
 function archiveEntryRelativePath(name: string, prefix: string): string {
   return name.startsWith(prefix) ? name.slice(prefix.length) : name;
-}
-
-function collectRelativeEntries(
-  root: string,
-  excludes?: string[],
-  skipTopLevel?: string,
-): string[] {
-  const entries: string[] = [];
-
-  function walk(relativeDir: string): void {
-    const absoluteDir = relativeDir ? join(root, relativeDir) : root;
-    for (const dirent of readdirSync(absoluteDir, { withFileTypes: true })) {
-      const relPath = relativeDir ? `${relativeDir}/${dirent.name}` : dirent.name;
-      const topLevel = relPath.split('/')[0];
-      if (topLevel === skipTopLevel || isExcludedPath(relPath, excludes)) {
-        continue;
-      }
-      entries.push(relPath);
-      if (dirent.isDirectory() && !dirent.isSymbolicLink()) {
-        walk(relPath);
-      }
-    }
-  }
-
-  walk('');
-  return entries;
-}
-
-function mirrorStagedDirectory(
-  stagingPath: string,
-  hostPath: string,
-  excludes?: string[],
-  stagingBase?: string,
-): void {
-  for (const entry of readdirSync(stagingPath)) {
-    cpSync(join(stagingPath, entry), join(hostPath, entry), {
-      recursive: true,
-      force: true,
-      errorOnExist: false,
-      dereference: false,
-      verbatimSymlinks: true,
-      preserveTimestamps: true,
-    });
-  }
-
-  const hostEntries = collectRelativeEntries(hostPath, excludes, stagingBase).sort(
-    (a, b) => b.length - a.length,
-  );
-  for (const relPath of hostEntries) {
-    if (!pathExists(join(stagingPath, relPath))) {
-      rmSync(join(hostPath, relPath), { recursive: true, force: true });
-    }
-  }
 }
 
 function isLocalAutopodWarmImage(image: string): boolean {

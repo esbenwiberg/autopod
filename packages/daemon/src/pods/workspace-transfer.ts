@@ -6,6 +6,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { ExecutionTarget } from '@autopod/shared';
 import type { Logger } from 'pino';
+import { mirrorStagedDirectory } from '../containers/staged-directory-mirror.js';
 import type { ContainerManager } from '../interfaces/index.js';
 import { deriveBareRepoPath, pushCommitsToBareViaStagingRef } from '../worktrees/bare-push.js';
 import {
@@ -16,6 +17,12 @@ import {
 } from './workspace-mirror.js';
 
 const execFileAsync = promisify(execFile);
+
+interface WorkspaceSyncOptions {
+  archiveOnly?: boolean;
+  /** Only the stop-and-retain owner supplies its already sealed private archive. */
+  preservedWorkspace?: string;
+}
 
 export interface WorkspaceTransferDependencies {
   captureAuthority(podId: string, containerId: string, worktreePath: string): () => void;
@@ -71,19 +78,14 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
     cm: ContainerManager,
     podId: string,
     executionTarget: ExecutionTarget = 'local',
-    options: { archiveOnly?: boolean } = {},
+    options: WorkspaceSyncOptions = {},
   ) {
     const check = deps.captureAuthority(podId, containerId, worktreePath);
     check();
+    if (options.preservedWorkspace && !options.archiveOnly)
+      throw new Error('Sealed workspace sync requires explicit archive-only ownership');
     return authority.run(check, () =>
-      syncWorkspaceBackOwned(
-        containerId,
-        worktreePath,
-        cm,
-        podId,
-        executionTarget,
-        options.archiveOnly ?? false,
-      ),
+      syncWorkspaceBackOwned(containerId, worktreePath, cm, podId, executionTarget, options),
     );
   }
   async function recoverWorktreeFromContainer(
@@ -199,13 +201,12 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
     cm: ContainerManager,
     podId: string,
     executionTarget: ExecutionTarget = 'local',
-    archiveOnly = false,
+    options: WorkspaceSyncOptions = {},
   ): Promise<{ pushed: boolean }> {
     return withEngineStallRetry(
       containerId,
       cm,
-      () =>
-        syncWorkspaceBackOnce(containerId, worktreePath, cm, podId, executionTarget, archiveOnly),
+      () => syncWorkspaceBackOnce(containerId, worktreePath, cm, podId, executionTarget, options),
       'syncWorkspaceBack',
     );
   }
@@ -216,14 +217,20 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
     cm: ContainerManager,
     podId: string,
     executionTarget: ExecutionTarget,
-    archiveOnly: boolean,
+    options: WorkspaceSyncOptions,
   ): Promise<{ pushed: boolean }> {
     let pushed = false;
-    if (executionTarget === 'sandbox' || archiveOnly) {
+    if (executionTarget === 'sandbox' || options.archiveOnly) {
       // The stop-and-retain owner already verified stopped Docker. Its explicit
       // archive-only path must never exec/wake; ordinary transfer retains its
       // existing call ordering and authority/retry semantics.
-      return extractWorkspaceBackAndRecoverGit(containerId, worktreePath, cm, podId);
+      return extractWorkspaceBackAndRecoverGit(
+        containerId,
+        worktreePath,
+        cm,
+        podId,
+        options.preservedWorkspace,
+      );
     }
     try {
       // Read the bare repo path from the alternates file written during gitlink conversion.
@@ -394,18 +401,43 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
     worktreePath: string,
     cm: ContainerManager,
     podId: string,
+    preservedWorkspace?: string,
   ): Promise<{ pushed: boolean }> {
     let pushed = false;
-    // Extract workspace files excluding .git so the host gitlink is preserved.
-    await owned(() =>
-      cm.extractDirectoryFromContainer(
-        containerId,
-        '/workspace',
-        worktreePath,
-        WORKSPACE_SYNC_EXCLUDES,
-        { assertCurrent: assertTransferCurrent },
-      ),
-    );
+    const extractInto = (
+      containerPath: '/workspace' | '/workspace/.git',
+      destination: string,
+      excludes?: string[],
+    ) =>
+      owned(async () => {
+        if (preservedWorkspace) {
+          // Reconciliation must import the exact sealed source, not re-export a
+          // potentially different representation from the provider a second time.
+          await mkdir(destination, { recursive: true });
+          assertTransferCurrent();
+          mirrorStagedDirectory(
+            containerPath === '/workspace'
+              ? preservedWorkspace
+              : path.join(preservedWorkspace, '.git'),
+            destination,
+            excludes,
+            undefined,
+            { protectExcludedParents: true },
+          );
+        } else {
+          await cm.extractDirectoryFromContainer(
+            containerId,
+            containerPath,
+            destination,
+            excludes,
+            {
+              assertCurrent: assertTransferCurrent,
+            },
+          );
+        }
+      });
+    // Keep the canonical host gitlink, excluded caches, and the sealed archive intact.
+    await extractInto('/workspace', worktreePath, WORKSPACE_SYNC_EXCLUDES);
 
     // Try to recover commits: extract the container's .git to a temp dir and push to bare.
     let bareRepoPath: string | null = null;
@@ -421,11 +453,7 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
         await owned(() => mkdir(tmpGitDir, { recursive: true }));
         // Extract /workspace/.git into tmpGitDir — the alternates inside point at the bare,
         // so git can resolve baseline objects and push only the new ones.
-        await owned(() =>
-          cm.extractDirectoryFromContainer(containerId, '/workspace/.git', tmpGitDir, undefined, {
-            assertCurrent: assertTransferCurrent,
-          }),
-        );
+        await extractInto('/workspace/.git', tmpGitDir);
         const result = await pushCommitsToBareViaStagingRef(
           async (args) => {
             try {

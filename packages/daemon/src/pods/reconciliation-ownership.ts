@@ -1,6 +1,9 @@
 import type { PodRepository } from './pod-repository.js';
 import { assertValidationMutationSettled } from './validation-recovery-policy.js';
 
+export const UNRESOLVED_EXECUTION_RECOVERY_MESSAGE =
+  'Recovery paused: task execution or cleanup ownership remains unresolved. Source and resources are retained. Verify the original execution/resource identity and observed termination before retrying; restart or elapsed time is not proof.';
+
 /** Restart/wake is not evidence that a saved worker or cleanup request has stopped. */
 export function retainUnresolvedReconciliation(
   podId: string,
@@ -30,8 +33,7 @@ export function retainUnresolvedReconciliation(
     try {
       podRepo.update(podId, {
         lastRecoveryTrigger: trigger,
-        lastCorrectionMessage:
-          'Recovery paused: task execution or cleanup ownership remains unresolved. Source and resources are retained. Verify the original execution/resource identity and observed termination before retrying; restart or elapsed time is not proof.',
+        lastCorrectionMessage: UNRESOLVED_EXECUTION_RECOVERY_MESSAGE,
       });
     } catch {
       // Keep the resource untouched even when the database cannot accept a hint.

@@ -53,7 +53,11 @@ not use Kick/Kill, raw Docker operations or database edits to bypass the hold.
 Source/report/configuration, completion cycle, generation or provider drift fails
 closed. Incomplete preservation retains the old run and resources. A completed
 archive is sealed with Git identity and a complete bounded byte/mode inventory;
-reconciliation verifies it instead of overwriting it. If canonical sync/import
+reconciliation verifies it instead of overwriting it. Canonical import reads that
+exact sealed archive (including its Git storage), not a second provider export.
+Directory/symlink type changes are mirrored without following old destination
+aliases or deleting excluded caches. Older already-sealed representations remain
+unchanged; a failed import retains the same request and never dispatches another stop. If canonical sync/import
 has not reached that exact Git identity and synced source bytes, settlement remains blocked. Ignored
 bytes are retained in the full archive even when ordinary sync excludes caches.
 Archive paths remain protected from application worktree mutation/orphan cleanup.
@@ -63,7 +67,10 @@ original resource; it does not delete this archive or historical failure evidenc
 ## Deliberate limits
 
 - Only an ordinary blocked `running` or `failed` local Docker task with one exact
-  unsettled current-generation/current-cycle worker claim is eligible. The
+  unsettled current-generation/current-cycle worker claim is eligible. A pre-validation
+  orphan may use the exact daemon-owned unresolved restart/wake hold; it does not
+  need an invented failed result, report or token measurement. An arbitrary
+  diagnostic is not that hold. The
   identity must be a dispatch-recorded **full 64-character Docker ID**, not a
   name or a guess from a mutable pod pointer. A fresh exact-ID inspection selects
   its Docker engine namespace; it does not pretend an absent historical engine

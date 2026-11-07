@@ -12,6 +12,7 @@ import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import { fingerprintPreservedWorkspace } from './artifact-snapshot-receipt.js';
 import type { PodRepository } from './pod-repository.js';
+import { UNRESOLVED_EXECUTION_RECOVERY_MESSAGE } from './reconciliation-ownership.js';
 import {
   type StalledRecord,
   stalledError,
@@ -28,7 +29,7 @@ export function createStalledWorkerRecovery(deps: {
   isIdle(podId: string): boolean;
   isGoal(podId: string): boolean;
   assertGuidanceCollected(podId: string): void;
-  preserveWorkspace(pod: Pod): Promise<void>;
+  preserveWorkspace(pod: Pod, archivePath: string): Promise<void>;
   transition(pod: Pod, status: 'failed'): void;
   emit(podId: string, message: string): void;
   root: string;
@@ -94,6 +95,10 @@ export function createStalledWorkerRecovery(deps: {
         pod.lastRecoveryTrigger &&
         pod.lastCorrectionMessage &&
         pod.lastValidationResult?.overall === 'fail'
+      ) &&
+      !(
+        ['restart', 'wake'].includes(pod.lastRecoveryTrigger ?? '') &&
+        pod.lastCorrectionMessage === UNRESOLVED_EXECUTION_RECOVERY_MESSAGE
       )
     )
       stalledError('No recorded infrastructure/restart blocker requires stalled-worker recovery.');
@@ -445,7 +450,7 @@ export function createStalledWorkerRecovery(deps: {
         'Host source changed before workspace preservation; archive and original remain held.',
       );
     check();
-    await journal.preserve(podId, () => deps.preserveWorkspace(original.pod));
+    await journal.preserve(podId, () => deps.preserveWorkspace(original.pod, selected.archivePath));
     check();
     const preservedSource = await source(original.pod);
     check();
