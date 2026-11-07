@@ -183,7 +183,8 @@ struct OverviewTab: View {
     }
 
     private var overviewStatusIcon: String {
-        switch pod.status {
+        if pod.needsExecutionInspection { return "exclamationmark.triangle.fill" }
+        return switch pod.status {
         case .failed: "xmark.seal.fill"
         case .reviewRequired, .awaitingInput: "exclamationmark.triangle.fill"
         case .complete: "checkmark.seal.fill"
@@ -194,6 +195,7 @@ struct OverviewTab: View {
     }
 
     private var overviewStatusTitle: String {
+        if pod.needsExecutionInspection { return "Execution requires recovery inspection" }
         if pod.worktreeCompromised { return "Worktree needs recovery" }
         if pod.isFixDeliveryFailure { return "Fix validated, push failed" }
         switch pod.status {
@@ -208,6 +210,7 @@ struct OverviewTab: View {
     }
 
     private var overviewStatusSubtitle: String {
+        if pod.needsExecutionInspection { return pod.executionRecoveryNote ?? "Execution state is unverified; inspect recovery before retrying." }
         if pod.worktreeCompromised {
             return "Recover the worktree before retrying or continuing this pod."
         }

@@ -191,6 +191,12 @@ export interface PodManagerDependencies {
 }
 
 export interface PodManager {
+  inspectStalledWorkerRecovery(podId: string): import('@autopod/shared').StalledWorkerRecoveryView;
+  recoverStalledWorker(
+    podId: string,
+    request: import('@autopod/shared').StalledWorkerRecoveryRequest,
+    actor: OperatorActor,
+  ): Promise<import('@autopod/shared').StalledWorkerRecoveryReceipt>;
   inspectRetainedFinalization(podId: string): import('@autopod/shared').RetainedFinalizationView;
   finalizeRetained(
     podId: string,

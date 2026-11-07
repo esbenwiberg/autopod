@@ -81,6 +81,20 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     terminationReconciliation,
   } = captured;
   return {
+    inspectStalledWorkerRecovery(podId: string) {
+      return (
+        captured.stalledWorkerRecovery ?? checkpointError('Stalled recovery unavailable')
+      ).inspectStalledWorkerRecovery(podId);
+    },
+    recoverStalledWorker(
+      podId: string,
+      request: import('@autopod/shared').StalledWorkerRecoveryRequest,
+      actor: OperatorActor,
+    ) {
+      return (
+        captured.stalledWorkerRecovery ?? checkpointError('Stalled recovery unavailable')
+      ).recoverStalledWorker(podId, request, actor);
+    },
     inspectRepairContinuation(podId: string) {
       return (captured.checkpointRecovery?.repair ?? checkpointError('Repair unavailable')).inspect(
         podId,

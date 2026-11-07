@@ -253,6 +253,20 @@ public final class ActionHandler {
       guard let self else { throw DaemonError.networkError("Connection is unavailable") }
       return try await self.perform { try await self.api.getReworkRequest(id, requestKey: key) }
     }
+    result.stalledWorkerRecovery = StalledWorkerRecoveryActions(
+      scope: replyContextID.uuidString,
+      draftScope: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",
+      journalDirectory: journalRoot?.appendingPathComponent("stalled-worker-recovery", isDirectory: true),
+      isCurrent: { [weak self] in
+        guard let self else { return false }
+        return self.podStore.isCurrent(self.ownership)
+      }, load: { [weak self] id in
+        guard let self else { throw DaemonError.networkError("Connection unavailable") }
+        return try await self.perform { try await self.api.inspectStalledWorkerRecovery(id) }
+      }, submit: { [weak self] id, input in
+        guard let self else { throw DaemonError.networkError("Connection unavailable") }
+        return try await self.perform { try await self.api.recoverStalledWorker(id, input: input) }
+      })
     result.retainedFinalization = RetainedFinalizationActions(
       scope: replyContextID.uuidString,
       draftScope: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",

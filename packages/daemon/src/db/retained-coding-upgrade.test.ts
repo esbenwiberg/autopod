@@ -54,7 +54,8 @@ it('upgrades an existing infrastructure-recovery v242 database without losing it
     db.close();
     db = new Database(filename);
     runMigrations(db, migrations, logger);
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 243 });
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 244 });
+    expect(db.prepare('SELECT * FROM stalled_worker_recoveries').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM retained_checkpoint_recoveries').all()).toEqual(priorRows);
     expect(db.prepare('SELECT * FROM retained_infrastructure_events ORDER BY kind').all()).toEqual(
       priorEvents,
@@ -66,6 +67,10 @@ it('upgrades an existing infrastructure-recovery v242 database without losing it
     }[];
     expect(triggers.map((row) => row.name)).toEqual(
       expect.arrayContaining([
+        'stalled_worker_recovery_immutable',
+        'stalled_worker_recovery_no_delete',
+        'stalled_worker_new_run_fence',
+        'stalled_worker_new_admission_fence',
         'retained_coding_no_update',
         'retained_coding_no_delete',
         'retained_coding_facts_no_update',

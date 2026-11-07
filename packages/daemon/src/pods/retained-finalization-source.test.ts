@@ -448,7 +448,7 @@ describe('immutable retained source authority', () => {
         checkedHead: before.checked!.source!.head,
       },
     });
-  });
+  }, 30_000);
   it('refuses replacement of the recorded checked repair container even with a refreshed request', async () => {
     const f = await fixture('checked-repair');
     f.ctx.db

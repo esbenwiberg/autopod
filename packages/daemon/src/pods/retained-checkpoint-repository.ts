@@ -16,6 +16,7 @@ import {
   createRetainedFinalizationRepository,
   ownsRetainedFinalization,
 } from './retained-finalization-repository.js';
+import { assertStalledRecoveryResourceAvailable } from './stalled-worker-recovery-repository.js';
 
 export type { CheckpointRecoveryRequest } from '@autopod/shared';
 
@@ -227,6 +228,7 @@ export function assertCheckpointResourceNotRetained(
   containerId: string,
   allowCodingMutation = false,
 ): void {
+  assertStalledRecoveryResourceAvailable(db, containerId);
   assertFinalizationResourceAvailable(db, containerId);
   if (createRetainedCodingRepository(db).retains(containerId)) {
     if (!allowCodingMutation)

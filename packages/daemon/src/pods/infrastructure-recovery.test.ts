@@ -739,17 +739,21 @@ describe('qualified infrastructure recovery from real incident shapes', () => {
     const f = await fixture(mode);
     f.manager = createPodManager(f.ctx.deps);
     await f.manager.recoverInfrastructure(f.podId, f.request, f.actor);
-    await vi.waitFor(() =>
-      expect(
-        f.manager.getCheckpointRecoveries(f.podId)[0]?.activated,
-        f.pod().failureReason ?? '',
-      ).toEqual({ generation: 2 }),
+    // Real Git preparation can outlive waitFor's 1s default on a busy runner.
+    // Observe the actual activation before teardown closes its custody database.
+    await vi.waitFor(
+      () =>
+        expect(
+          f.manager.getCheckpointRecoveries(f.podId)[0]?.activated,
+          f.pod().failureReason ?? '',
+        ).toEqual({ generation: 2 }),
+      { timeout: 10_000 },
     );
     expect(f.manager.getCheckpointRecoveries(f.podId)[0]?.blocked).toBeNull();
     expect(f.pod().skipAgent).toBe(mode === 'checks');
     expect(f.cm.stop).toHaveBeenCalledTimes(1);
     expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
-  });
+  }, 30_000);
 
   it.skipIf(!process.env.AUTOPOD_RECOVERY_DOCKER_FIXTURE_IMAGE)(
     'qualifies controller-owned stop against one disposable local Docker container, without mounts, network or deletion',

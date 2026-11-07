@@ -152,6 +152,7 @@ export type { PodCreator } from './workspace-contracts.js';
 
 import { mergeOverrides, warnIfSinglePrSeriesMissingSeriesMeta } from './admission-policy.js';
 import { createSandboxRecovery } from './sandbox-recovery.js';
+import { createStalledWorkerRecovery } from './stalled-worker-recovery.js';
 import { createWorkspaceArtifactObservation } from './workspace-artifact-observation.js';
 import { createWorkspaceBranchSource } from './workspace-branch-source.js';
 import { createWorkspaceBranchSync } from './workspace-branch-sync.js';
@@ -1439,6 +1440,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return owner?.taskRunId === runId && owner.isCurrent?.() === true;
   };
   const controlOperations = createControlOperationRegistry((podId, operation) => {
+    podRepo.stalledRecoveries?.assertAvailable(podId);
+    if (stalledWorkerRecovery?.isActive(podId))
+      checkpointError('Stop-and-retain preflight owns this control.');
     podRepo.retainedFinalizations?.assertAvailable(podId);
     if (retainedFinalization?.isActive(podId))
       checkpointError('Retained finalization preflight owns this control.');
@@ -1554,6 +1558,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     podRepo,
     getContainerManager: () => containerManagerFactory.get('sandbox'),
     isActive: (id, exceptCurrent) =>
+      Boolean(stalledWorkerRecovery?.isActive(id)) ||
       Boolean(retainedFinalization?.isActive(id)) ||
       controlOperations.isActive(id, exceptCurrent) ||
       activeAgentRuns.has(id) ||
@@ -1573,6 +1578,9 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       Boolean(deps.launchConfiguration?.goals?.get(podId)),
     assertGuidanceCollected,
     assertIdle: (podId) => {
+      if (stalledWorkerRecovery?.isActive(podId))
+        checkpointError('Stop-and-retain preflight is active.');
+      podRepo.stalledRecoveries?.assertAvailable(podId);
       if (retainedFinalization?.isActive(podId))
         checkpointError('Finalization preflight is active.');
       podRepo.retainedFinalizations?.assertAvailable(podId);
@@ -1632,6 +1640,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           executionSettings: deps.launchConfiguration?.executionSettings,
           previewExecution: deps.launchConfiguration?.previewRetainedExecution,
           isIdle: (id) =>
+            !stalledWorkerRecovery?.isActive(id) &&
             !retainedFinalization?.isActive(id) &&
             !controlOperations.isActive(id) &&
             !activeAgentRuns.has(id) &&
@@ -1668,6 +1677,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           eventBus,
           getContainerManager: (target) => containerManagerFactory.get(target),
           isIdle: (id) =>
+            !stalledWorkerRecovery?.isActive(id) &&
             !checkpointRecovery?.isActive(id) &&
             !controlOperations.isActive(id) &&
             !activeAgentRuns.has(id) &&
@@ -1686,6 +1696,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     podRepo,
     getContainerManager: () => containerManagerFactory.get('sandbox'),
     isIdle: (id) =>
+      !stalledWorkerRecovery?.isActive(id) &&
       !retainedFinalization?.isActive(id) &&
       !controlOperations.isActive(id) &&
       !activeAgentRuns.has(id) &&
@@ -1699,8 +1710,49 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       Boolean(deps.launchConfiguration?.goals?.get(id)),
     deleteSession: workspaceDeletion.deleteSession,
   });
+  const stalledWorkerRecovery: ReturnType<typeof createStalledWorkerRecovery> | undefined =
+    podRepo.stalledRecoveries
+      ? createStalledWorkerRecovery({
+          podRepo,
+          getContainerManager: () => containerManagerFactory.get('local'),
+          worktreeManager,
+          isIdle: (id) =>
+            !controlOperations.isActive(id) &&
+            !activeAgentRuns.has(id) &&
+            !validationAbortControllers.has(id) &&
+            !validationResumeRuns.has(id) &&
+            !artifactResumeRuns.has(id) &&
+            !artifactCompletionRuns.has(id) &&
+            !attemptExtensionRuns.has(id) &&
+            !checkpointRecovery?.isActive(id) &&
+            !retainedFinalization?.isActive(id),
+          isGoal: (id) =>
+            deps.launchConfiguration?.read(id)?.intent === 'goal' ||
+            Boolean(deps.launchConfiguration?.goals?.get(id)),
+          assertGuidanceCollected,
+          preserveWorkspace: (pod) =>
+            syncWorkspaceBack(
+              pod.containerId!,
+              pod.worktreePath!,
+              containerManagerFactory.get('local'),
+              pod.id,
+              'local',
+              { archiveOnly: true },
+            ).then(() => {}),
+          transition,
+          emit: emitActivityStatus,
+          root: path.join(
+            process.env.DATA_DIR ??
+              (process.env.DB_PATH
+                ? path.dirname(path.resolve(process.env.DB_PATH))
+                : path.join(process.cwd(), '.autopod-data')),
+            'stalled-worker-recoveries',
+          ),
+        })
+      : undefined;
   return controlOperations.wrap(
     createPodManagerFacade({
+      stalledWorkerRecovery,
       sandboxRecovery,
       retainedFinalization,
       checkpointRecovery,
