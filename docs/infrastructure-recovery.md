@@ -5,8 +5,15 @@ failed **local Docker** task whose worker has settled and whose exact clean Git
 source was preserved before a current-generation infrastructure report. It is
 not ordinary Resume/Rework, a waiver, a retry-budget reset, or completion.
 Interactive/Goal tasks, sidecars, shared resources, active or unknown executions,
-uncollected guidance, disabled/thin validation, and missing independent review
-remain ineligible.
+disabled/thin validation, and missing independent review remain ineligible.
+Uncollected guidance blocks checks-only recovery. An explicitly selected `rework`
+may admit its one owned worker to collect the still-saved guidance through normal
+`check_messages` delivery/acknowledgement. No operator marks it read: pending
+human decisions still block admission, and unread or newly arriving guidance
+blocks candidate sealing, fresh-check certification and delivery, including across
+asynchronous final source inspection. Ordinary retained-continuation inspection
+still describes checks-only eligibility; its unread-guidance refusal is not a
+refusal of the separate explicitly selected one-worker `rework` operation.
 
 ## Inspect, qualify, select
 
