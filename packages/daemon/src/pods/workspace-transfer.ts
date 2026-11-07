@@ -71,11 +71,19 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
     cm: ContainerManager,
     podId: string,
     executionTarget: ExecutionTarget = 'local',
+    options: { archiveOnly?: boolean } = {},
   ) {
     const check = deps.captureAuthority(podId, containerId, worktreePath);
     check();
     return authority.run(check, () =>
-      syncWorkspaceBackOwned(containerId, worktreePath, cm, podId, executionTarget),
+      syncWorkspaceBackOwned(
+        containerId,
+        worktreePath,
+        cm,
+        podId,
+        executionTarget,
+        options.archiveOnly ?? false,
+      ),
     );
   }
   async function recoverWorktreeFromContainer(
@@ -191,11 +199,13 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
     cm: ContainerManager,
     podId: string,
     executionTarget: ExecutionTarget = 'local',
+    archiveOnly = false,
   ): Promise<{ pushed: boolean }> {
     return withEngineStallRetry(
       containerId,
       cm,
-      () => syncWorkspaceBackOnce(containerId, worktreePath, cm, podId, executionTarget),
+      () =>
+        syncWorkspaceBackOnce(containerId, worktreePath, cm, podId, executionTarget, archiveOnly),
       'syncWorkspaceBack',
     );
   }
@@ -206,14 +216,13 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
     cm: ContainerManager,
     podId: string,
     executionTarget: ExecutionTarget,
+    archiveOnly: boolean,
   ): Promise<{ pushed: boolean }> {
     let pushed = false;
-    if (
-      executionTarget === 'sandbox' ||
-      (await owned(() => cm.getStatus(containerId))) === 'stopped'
-    ) {
-      // Stopped Docker preservation must use read-only archives, never attempt exec
-      // or wake the resource (including while an owned stop-and-retain fence holds it).
+    if (executionTarget === 'sandbox' || archiveOnly) {
+      // The stop-and-retain owner already verified stopped Docker. Its explicit
+      // archive-only path must never exec/wake; ordinary transfer retains its
+      // existing call ordering and authority/retry semantics.
       return extractWorkspaceBackAndRecoverGit(containerId, worktreePath, cm, podId);
     }
     try {

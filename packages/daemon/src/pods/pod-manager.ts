@@ -1737,6 +1737,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
               containerManagerFactory.get('local'),
               pod.id,
               'local',
+              { archiveOnly: true },
             ).then(() => {}),
           transition,
           emit: emitActivityStatus,
