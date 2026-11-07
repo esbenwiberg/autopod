@@ -170,6 +170,9 @@ export interface PodFacadeOwners {
   >;
   providerContinuation: Pick<ReturnType<typeof createProviderContinuation>, 'continueProvider'>;
   terminationReconciliation: ReturnType<typeof createTerminationReconciliation>;
+  stalledWorkerRecovery?: ReturnType<
+    typeof import('./stalled-worker-recovery.js').createStalledWorkerRecovery
+  >;
   workspaceEscapeControls: Pick<
     ReturnType<typeof createWorkspaceEscapeControls>,
     'forceComplete' | 'kickPod'

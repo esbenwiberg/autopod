@@ -208,7 +208,12 @@ export function createWorkspaceTransfer(deps: WorkspaceTransferDependencies) {
     executionTarget: ExecutionTarget,
   ): Promise<{ pushed: boolean }> {
     let pushed = false;
-    if (executionTarget === 'sandbox') {
+    if (
+      executionTarget === 'sandbox' ||
+      (await owned(() => cm.getStatus(containerId))) === 'stopped'
+    ) {
+      // Stopped Docker preservation must use read-only archives, never attempt exec
+      // or wake the resource (including while an owned stop-and-retain fence holds it).
       return extractWorkspaceBackAndRecoverGit(containerId, worktreePath, cm, podId);
     }
     try {

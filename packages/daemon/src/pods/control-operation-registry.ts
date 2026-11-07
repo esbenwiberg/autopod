@@ -25,6 +25,7 @@ export function createControlOperationRegistry(
         const value = Reflect.get(object, key, receiver);
         if (
           typeof value !== 'function' ||
+          key === 'recoverStalledWorker' ||
           key === 'finalizeRetained' ||
           key === 'adoptSource' ||
           key === 'recoverCheckpoint' ||

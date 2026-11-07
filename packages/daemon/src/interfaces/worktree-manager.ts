@@ -250,6 +250,11 @@ export interface WorktreeManager {
   }): Promise<{ head: string; tree: string; baseCommitSha: string }>;
   assertSourceDescendsFrom?(worktreePath: string, head: string): Promise<void>;
   /** Strict clean identity, refusing hidden indexes, executable filters and submodules before status. */
+  /** Hardened identity/dirty observation for preserved source; never a clean/adoption receipt. */
+  inspectSourcePreservation?(
+    worktreePath: string,
+    branch: string,
+  ): Promise<{ branch: string; commitSha: string; treeSha: string; worktreeClean: boolean }>;
   inspectSourceAdoption?(
     worktreePath: string,
     branch: string,

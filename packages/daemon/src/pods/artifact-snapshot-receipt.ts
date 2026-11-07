@@ -12,9 +12,26 @@ const MAX_FILE_ENTRIES = 100_000;
 const MAX_DIRECTORY_ENTRIES = 100_000;
 const MAX_BYTES = 1_073_741_824;
 
-export async function fingerprintArtifactSnapshot(
+export function fingerprintArtifactSnapshot(root: string, captureFile?: string) {
+  return fingerprintSnapshot(root, captureFile);
+}
+
+/** Full owned stopped-workspace inventory, not an artifact/API evidence upload.
+ * Stream every byte including caches without applying the artifact-output cap.
+ * Export/disk errors still retain the original. Exclusions compare the ordinary
+ * sync projection only; the retained archive always includes every entry.
+ */
+export function fingerprintPreservedWorkspace(
+  root: string,
+  assertCurrent: () => void,
+  exclude?: (relative: string) => boolean,
+) {
+  return fingerprintSnapshot(root, undefined, { assertCurrent, exclude });
+}
+async function fingerprintSnapshot(
   root: string,
   captureFile?: string,
+  workspace?: { assertCurrent(): void; exclude?: (relative: string) => boolean },
 ): Promise<{ sha256: string; entries: number; bytes: number; captured?: Buffer }> {
   const digest = createHash('sha256');
   let entries = 0;
@@ -23,27 +40,31 @@ export async function fingerprintArtifactSnapshot(
   let bytes = 0;
   let captured: Buffer | undefined;
   async function visit(relative: string): Promise<void> {
+    workspace?.assertCurrent();
+    if (workspace?.exclude?.(relative)) return;
     entries++;
     const fullPath = path.join(root, relative);
     const before = await lstat(fullPath);
-    const metadata = { path: relative, mode: before.mode };
+    const metadata = { path: relative, mode: !relative && workspace?.exclude ? 0 : before.mode };
     if (before.isSymbolicLink()) {
-      if (++fileEntries > MAX_FILE_ENTRIES)
+      if (++fileEntries > MAX_FILE_ENTRIES && !workspace)
         throw new Error('Artifact inventory exceeds 100000 file or link entries');
       if (!relative) throw new Error('Artifact snapshot root cannot be a symlink');
       digest.update(JSON.stringify({ ...metadata, link: await readlink(fullPath) }));
     } else if (before.isDirectory()) {
-      if (++directories > MAX_DIRECTORY_ENTRIES)
+      if (++directories > MAX_DIRECTORY_ENTRIES && !workspace)
         throw new Error('Artifact inventory exceeds 100000 directory entries');
       digest.update(JSON.stringify({ ...metadata, type: 'directory' }));
       for (const name of (await readdir(fullPath)).sort()) await visit(path.join(relative, name));
     } else if (before.isFile()) {
       const capture = relative === captureFile;
       if (capture && before.size > 5 * 1024 * 1024) throw new Error('Evidence file exceeds 5 MiB');
-      if (++fileEntries > MAX_FILE_ENTRIES)
+      if (++fileEntries > MAX_FILE_ENTRIES && !workspace)
         throw new Error('Artifact inventory exceeds 100000 file or link entries');
       bytes += before.size;
-      if (bytes > MAX_BYTES) throw new Error('Artifact inventory exceeds 1 GiB');
+      if (bytes > MAX_BYTES && !workspace) throw new Error('Artifact inventory exceeds 1 GiB');
+      if (!Number.isSafeInteger(bytes))
+        throw new Error('Workspace byte inventory exceeds safe integer accounting');
       digest.update(JSON.stringify({ ...metadata, type: 'file', size: before.size }));
       const handle = await open(fullPath, constants.O_RDONLY | constants.O_NOFOLLOW);
       try {
@@ -53,6 +74,7 @@ export async function fingerprintArtifactSnapshot(
         let readBytes = 0;
         const chunks: Buffer[] = [];
         for await (const chunk of handle.createReadStream({ autoClose: false })) {
+          workspace?.assertCurrent();
           readBytes += chunk.length;
           if (readBytes > before.size) throw new Error('Artifact file grew during inventory');
           digest.update(chunk);
@@ -75,6 +97,7 @@ export async function fingerprintArtifactSnapshot(
     }
   }
   await visit('');
+  workspace?.assertCurrent();
   return { sha256: digest.digest('hex'), entries, bytes, ...(captured ? { captured } : {}) };
 }
 

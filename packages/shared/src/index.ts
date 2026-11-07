@@ -602,6 +602,11 @@ export type {
   SourceAdoptionStage,
   SourceAdoptionState,
 } from './types/source-adoption.js';
+export type {
+  StalledWorkerRecoveryReceipt,
+  StalledWorkerRecoveryRequest,
+  StalledWorkerRecoveryView,
+} from './types/stalled-worker-recovery.js';
 export type { TaskExecutionSummary } from './types/task-execution.js';
 export type {
   ReworkEligibility,

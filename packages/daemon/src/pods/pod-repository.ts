@@ -96,6 +96,12 @@ import {
   createSourcePublicationLedger,
   type SourcePublicationLedger,
 } from './source-publication-ledger.js';
+import {
+  assertStalledRecoveryAvailable,
+  assertStalledRecoveryResourceAvailable,
+  createStalledWorkerRecoveryRepository,
+  type StalledWorkerRecoveryRepository,
+} from './stalled-worker-recovery-repository.js';
 import { createTaskRetryLedger, type TaskRetryLedger } from './task-retry-ledger.js';
 import { assertTaskValidationDeletable } from './validation-execution-evidence.js';
 import {
@@ -315,6 +321,7 @@ export interface PodRepository extends Partial<UnitOfWork> {
   taskRetries?: TaskRetryLedger;
   validationExecutions?: ValidationExecutionLedger;
   retainedFinalizations?: RetainedFinalizationRepository;
+  stalledRecoveries?: StalledWorkerRecoveryRepository;
   retainedCheckpoints?: RetainedCheckpointRepository;
   retainedCoding?: RetainedCodingRepository;
   sandboxStartupRetries?: TaskRetryLedger;
@@ -868,6 +875,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     taskRetries: createTaskRetryLedger(db),
     validationExecutions: createValidationExecutionLedger(db),
     retainedFinalizations: createRetainedFinalizationRepository(db),
+    stalledRecoveries: createStalledWorkerRecoveryRepository(db),
     retainedCheckpoints: createRetainedCheckpointRepository(db),
     retainedCoding: createRetainedCodingRepository(db),
     sandboxStartupRetries: createTaskRetryLedger(db, 'sandbox_startup'),
@@ -1036,8 +1044,12 @@ export function createPodRepository(db: Database.Database): PodRepository {
       ).map((row) => JSON.parse(row.receipt) as NonNullable<Pod['researchFindings']>);
     },
     update(id: string, changes: PodUpdates): void {
+      assertStalledRecoveryAvailable(db, id);
       createRetainedFinalizationRepository(db).assertAvailable(id);
-      if (changes.containerId) assertFinalizationResourceAvailable(db, changes.containerId);
+      if (changes.containerId) {
+        assertStalledRecoveryResourceAvailable(db, changes.containerId);
+        assertFinalizationResourceAvailable(db, changes.containerId);
+      }
       if (changes.worktreePath) assertFinalizationPathAvailable(db, changes.worktreePath);
       if (changes.recoveryWorktreePath)
         assertFinalizationPathAvailable(db, changes.recoveryWorktreePath);
@@ -1528,6 +1540,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
       })();
     },
     incrementLifecycleGeneration(id: string): number {
+      assertStalledRecoveryAvailable(db, id);
       createRetainedFinalizationRepository(db).assertAvailable(id);
       assertSourceAvailable(db, id);
       deletionOwnership.assertTaskAvailable(id);
@@ -1680,6 +1693,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
     },
 
     delete: db.transaction((id: string): void => {
+      assertStalledRecoveryAvailable(db, id);
       createRetainedFinalizationRepository(db).assertAvailable(id);
       if (createRetainedCheckpointRepository(db).latest(id))
         checkpointError(

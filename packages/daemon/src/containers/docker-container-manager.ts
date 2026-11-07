@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  chmodSync,
   cpSync,
   linkSync,
   lstatSync,
@@ -36,6 +37,10 @@ import {
   ownsInfrastructureRecoveryStop,
 } from '../pods/retained-checkpoint-repository.js';
 import { ownsRetainedFinalizationStop } from '../pods/retained-finalization-repository.js';
+import {
+  ownsStalledWorkerArchive,
+  ownsStalledWorkerStop,
+} from '../pods/stalled-worker-recovery-repository.js';
 import { assertDirectoryExtractionCurrent } from './directory-extraction-ownership.js';
 import {
   boundedDockerCall,
@@ -528,6 +533,7 @@ export class DockerContainerManager implements ContainerManager {
     if (
       !this.managedDatabase ||
       (!ownsRetainedFinalizationStop(this.managedDatabase, containerId, 'local') &&
+        !ownsStalledWorkerStop(this.managedDatabase, containerId) &&
         !ownsInfrastructureRecoveryStop(this.managedDatabase, containerId))
     )
       this.assertNotRetained(containerId);
@@ -837,7 +843,11 @@ export class DockerContainerManager implements ContainerManager {
     excludes?: string[],
     options?: DirectoryExtractionOptions,
   ): Promise<void> {
-    this.assertNotRetained(containerId);
+    if (
+      !this.managedDatabase ||
+      !ownsStalledWorkerArchive(this.managedDatabase, containerId, containerPath)
+    )
+      this.assertNotRetained(containerId);
     assertDirectoryExtractionCurrent(options);
     const container = this.docker.getContainer(containerId);
     // getArchive works on stopped containers — safe to call after container exits
@@ -863,6 +873,8 @@ export class DockerContainerManager implements ContainerManager {
     const prefix = `${basename(containerPath)}/`;
     const extract = tar.extract();
     const pendingHardlinks: Array<{ fullPath: string; targetPath: string }> = [];
+    const directoryModes: Array<{ fullPath: string; mode: number }> = [];
+    let rootMode: number | undefined;
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -870,6 +882,8 @@ export class DockerContainerManager implements ContainerManager {
           const rel = archiveEntryRelativePath(header.name, prefix);
 
           if (!rel) {
+            if (header.type === 'directory' && typeof header.mode === 'number')
+              rootMode = header.mode & 0o777;
             // Root directory entry itself — skip
             stream.resume();
             stream.on('end', next);
@@ -886,6 +900,7 @@ export class DockerContainerManager implements ContainerManager {
 
           if (header.type === 'directory') {
             mkdirSync(fullPath, { recursive: true });
+            directoryModes.push({ fullPath, mode: (header.mode ?? 0o755) & 0o777 });
             stream.resume();
             stream.on('end', next);
           } else if (header.type === 'symlink') {
@@ -917,6 +932,8 @@ export class DockerContainerManager implements ContainerManager {
             stream.on('end', () => {
               try {
                 writeFileSync(fullPath, Buffer.concat(chunks));
+                // Retain ordinary permission/executable bits, never setuid/setgid/sticky.
+                chmodSync(fullPath, (header.mode ?? 0o644) & 0o777);
                 next();
               } catch (err) {
                 reject(err);
@@ -947,7 +964,10 @@ export class DockerContainerManager implements ContainerManager {
       });
 
       assertDirectoryExtractionCurrent(options);
+      for (const entry of directoryModes.sort((a, b) => b.fullPath.length - a.fullPath.length))
+        chmodSync(entry.fullPath, entry.mode);
       mirrorStagedDirectory(stagingPath, hostPath, excludes, options ? undefined : stagingBase);
+      if (options?.preserveRootMode && rootMode !== undefined) chmodSync(hostPath, rootMode);
     } finally {
       rmSync(stagingPath, { recursive: true, force: true });
     }

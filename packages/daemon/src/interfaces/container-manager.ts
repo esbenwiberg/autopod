@@ -8,6 +8,8 @@ export interface ContainerStartOptions {
 
 /** Guard publication of a collected directory after asynchronous extraction. */
 export interface DirectoryExtractionOptions {
+  /** Private full-workspace archives may retain the source root mode; ordinary host sync keeps its root permissions. */
+  preserveRootMode?: boolean;
   /** Called after verified wakeup, before export; permits separate wake/copy budgets. */
   onExportStarted?: () => void;
   signal?: AbortSignal;

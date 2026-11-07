@@ -459,6 +459,15 @@ public actor DaemonAPI {
     try await request("GET", "/pods/\(id)/checkpoint-recovery")
   }
 
+  public func inspectStalledWorkerRecovery(_ id: String) async throws -> StalledWorkerRecoveryView {
+    try await request("GET", "/pods/\(id)/stalled-worker-recovery")
+  }
+
+  /// Single HTTP attempt; an uncertain response requires observation of the saved request.
+  public func recoverStalledWorker(_ id: String, input: StalledWorkerRecoveryRequest) async throws -> StalledWorkerRecoveryReceipt {
+    try await request("POST", "/pods/\(id)/stalled-worker-recovery", body: encode(input), timeout: 180)
+  }
+
   public func inspectRetainedFinalization(_ id: String) async throws -> RetainedFinalizationView {
     try await request("GET", "/pods/\(id)/retained-finalization")
   }

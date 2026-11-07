@@ -48,6 +48,7 @@ import { prepareRetainedCheckpointWorkspace } from './retained-checkpoint-worksp
 import {
   applyPinnedAdoption,
   inspectAdoptionGit,
+  inspectPreservationGit,
   preparePinnedAdoption,
 } from './source-adoption-git.js';
 
@@ -582,6 +583,19 @@ export class LocalWorktreeManager implements WorktreeManager {
     await applyPinnedAdoption(config, (args) =>
       git(args, { cwd: config.worktreePath, timeout: 60_000, env: SOURCE_GIT_ENV }),
     );
+  }
+
+  async inspectSourcePreservation(worktreePath: string, branch: string) {
+    const source = await inspectPreservationGit(
+      (args) => git(args, { cwd: worktreePath, timeout: 30000, env: SOURCE_GIT_ENV }),
+      branch,
+    );
+    return {
+      branch,
+      commitSha: source.head,
+      treeSha: source.tree,
+      worktreeClean: source.worktreeClean,
+    };
   }
 
   async inspectSourceAdoption(worktreePath: string, branch: string) {

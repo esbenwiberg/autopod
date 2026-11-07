@@ -32,6 +32,7 @@ function emptyCustodyDatabase() {
   db.exec('CREATE TABLE retained_checkpoint_recoveries(container_id TEXT, binding TEXT)');
   db.exec('CREATE TABLE retained_finalization_resources(container_id TEXT)');
   db.exec('CREATE TABLE retained_coding_facts(kind TEXT,evidence TEXT)');
+  db.exec('CREATE TABLE stalled_worker_recoveries(container_id TEXT,receipt TEXT)');
   custodyDatabases.push(db);
   return db;
 }
