@@ -120,4 +120,5 @@ it('upgrades an existing infrastructure-recovery v242 database without losing it
     if (db.open) db.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
-});
+  // Two full on-disk migration passes can exceed Vitest's 5s default on bounded workers.
+}, 30_000);

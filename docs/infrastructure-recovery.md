@@ -4,6 +4,18 @@
 failed **local Docker** task whose worker has settled and whose exact clean Git
 source was preserved before a current-generation infrastructure report. It is
 not ordinary Resume/Rework, a waiver, a retry-budget reset, or completion.
+
+After an owned `rework` has sealed its exact candidate and completed fresh checks
+with a recorded failure, a human may explicitly select a **new** operation against
+that failed result. This narrowly supported successor uses the prior immutable
+candidate/check receipt, not a fabricated infrastructure report or backfilled
+completion marker. The prior task, generation, resource, worktree, source HEAD/tree
+and result hash must still match. Its ID is durably bound into the new operation;
+source cleanliness and all ordinary settlement/accounting gates are rechecked.
+Old/free-text failures without this sealed, completed repair proof do not acquire
+this permission. No second worker starts automatically, no failed check becomes a
+pass, and unknown/active executions remain ineligible.
+
 Interactive/Goal tasks, sidecars, shared resources, active or unknown executions,
 disabled/thin validation, and missing independent review remain ineligible.
 Uncollected guidance blocks checks-only recovery. An explicitly selected `rework`

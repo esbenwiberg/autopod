@@ -109,6 +109,44 @@ export function createRetainedCheckpointRecovery(deps: {
       pod.providerAccountIdSnapshot,
       settings,
     ]);
+  /** A sealed failed repair is separate positive evidence, never an invented blocker/marker. */
+  function failedRepairPredecessor(
+    pod: Pod,
+    infrastructure?: NonNullable<CheckpointRecoveryBinding['continuation']>['infrastructure'],
+  ): CheckpointRecoveryRecord | null {
+    const prior = infrastructure?.predecessorRepairId
+      ? repo.get(infrastructure.predecessorRepairId)
+      : repo.latest(pod.id);
+    const candidate = prior?.infrastructure?.candidate;
+    const worker = prior?.infrastructure?.worker;
+    const checked = prior?.checked;
+    if (
+      !prior ||
+      prior.podId !== pod.id ||
+      prior.taskId !== deps.podRepo.taskExecutions?.snapshot(pod.id).taskId ||
+      prior.blocked ||
+      prior.binding.continuation?.infrastructure?.mode !== 'rework' ||
+      !candidate ||
+      !worker ||
+      candidate.runId !== worker.runId ||
+      candidate.containerId !== worker.containerId ||
+      candidate.generation !== worker.generation ||
+      candidate.cycle !== worker.cycle ||
+      worker.generation !== pod.lifecycleGeneration ||
+      worker.containerId !== pod.containerId ||
+      prior.activated?.generation !== pod.lifecycleGeneration ||
+      prior.checking?.generation !== pod.lifecycleGeneration ||
+      prior.prepared?.worktree !== pod.worktreePath ||
+      checked?.result.overall !== 'fail' ||
+      checked.resultHash !== checkpointHash(checked.result) ||
+      checked.resultHash !== repo.selectionEvidence(pod)?.expectedResultHash ||
+      checked.source?.head !== candidate.head ||
+      checked.source?.tree !== candidate.tree ||
+      (infrastructure?.originalTree && infrastructure.originalTree !== candidate.tree)
+    )
+      return null;
+    return prior;
+  }
   function policy(
     pod: Pod,
     continuation = false,
@@ -118,6 +156,9 @@ export function createRetainedCheckpointRecovery(deps: {
     guidanceRecord?: CheckpointRecoveryRecord,
   ) {
     deps.podRepo.retainedFinalizations?.assertAvailable(pod.id);
+    const predecessor = infrastructure ? failedRepairPredecessor(pod, infrastructure) : null;
+    if (infrastructure?.predecessorRepairId && !predecessor)
+      checkpointError('Selected failed repair predecessor changed', 'STALE_CHECKPOINT_RECOVERY');
     if (infrastructure?.mode === 'rework' && repo.hasTypedPrerequisiteBlocker(pod))
       checkpointError(
         'Typed prerequisite repair requires actual environment qualification through repair continuation, not infrastructure rework',
@@ -128,11 +169,12 @@ export function createRetainedCheckpointRecovery(deps: {
       (pod.executionTarget !== 'local' ||
         pod.status !== 'failed' ||
         deps.readLaunch?.(pod.id)?.ai.reviewer.mode !== 'independent' ||
-        !deps.podRepo.hasInfrastructureBlocker?.(pod.id) ||
-        pod.finalization?.generation !== pod.lifecycleGeneration ||
-        pod.finalization.phase !== 'ready' ||
-        !pod.finalization.agentSettledAt ||
-        !pod.finalization.sourcePreservedAt)
+        (!predecessor &&
+          (!deps.podRepo.hasInfrastructureBlocker?.(pod.id) ||
+            pod.finalization?.generation !== pod.lifecycleGeneration ||
+            pod.finalization.phase !== 'ready' ||
+            !pod.finalization.agentSettledAt ||
+            !pod.finalization.sourcePreservedAt)))
     )
       checkpointError(
         'Infrastructure recovery requires a native idle failed Docker task with preserved settled source and current recorded needs',
@@ -287,6 +329,9 @@ export function createRetainedCheckpointRecovery(deps: {
       configuration(current) !== record.binding.configurationHash
     )
       checkpointError('Original checkpoint selection was superseded', 'STALE_CHECKPOINT_RECOVERY');
+    const predecessorId = record.binding.continuation?.infrastructure?.predecessorRepairId;
+    if (predecessorId && record.binding.head !== repo.get(predecessorId)?.checked?.source?.head)
+      checkpointError('Selected failed repair source changed', 'STALE_CHECKPOINT_RECOVERY');
     const coding = deps.podRepo.retainedCoding?.get(record.id);
     if (
       coding &&
@@ -628,6 +673,7 @@ export function createRetainedCheckpointRecovery(deps: {
     if (prior) return prior; // Lost responses/restarts never repeat preparation or dispatch.
     const pod = deps.podRepo.getOrThrow(podId);
     const addReview = continuation && !repair;
+    const predecessor = infrastructureRequest ? failedRepairPredecessor(pod) : null;
     const infrastructure = infrastructureRequest
       ? {
           version: 1 as const,
@@ -635,9 +681,12 @@ export function createRetainedCheckpointRecovery(deps: {
           qualification: infrastructureRequest.qualification,
           instructions: infrastructureRequest.instructions,
           originalTree: '',
+          ...(predecessor ? { predecessorRepairId: predecessor.id } : {}),
         }
       : undefined;
     policy(pod, continuation, repair, addReview, infrastructure);
+    if (predecessor && input.checkpointHead !== predecessor.checked?.source?.head)
+      checkpointError('Selected source differs from completed failed repair');
     const containerManager = deps.getContainerManager(pod.executionTarget);
     if (!containerManager.getResourceKey || !deps.worktreeManager.inspectSourceAdoption)
       checkpointError('Exact provider namespace and clean source inspection are required');
@@ -683,6 +732,8 @@ export function createRetainedCheckpointRecovery(deps: {
       source.branch !== pod.branch
     )
       checkpointError('Selected commit must match the clean retained host checkpoint');
+    if (predecessor && source.treeSha !== predecessor.checked?.source?.tree)
+      checkpointError('Selected source tree differs from completed failed repair');
     if (infrastructure) {
       deps.podRepo.validationExecutions?.assertResourceUnshared(pod.id, containerId);
       infrastructure.originalTree = source.treeSha;

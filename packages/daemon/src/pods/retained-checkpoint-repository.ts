@@ -83,6 +83,8 @@ export interface CheckpointRecoveryBinding {
       qualification: string;
       instructions?: { content: string; sha256: string };
       originalTree: string;
+      /** Exact completed failed repair whose sealed source is selected again. */
+      predecessorRepairId?: string;
     };
   };
 }
@@ -153,6 +155,7 @@ export interface CheckpointRecoveryRecord {
       tree: string;
       runId: string;
       generation: number;
+      cycle: number;
       containerId: string;
     } | null;
   };
