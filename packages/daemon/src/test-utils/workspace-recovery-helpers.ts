@@ -133,6 +133,7 @@ export function createWorkspaceFixture(disk = false) {
       (id, outcome) => f.nativeAttempts.closeProviderAttempt(id, outcome),
     ),
     validationRepo: f.deps.validationRepo,
+    ownsAgentRun: (id: string) => f.registry.activeAgentRuns.get(id)?.isCurrent?.() === true,
   };
   const watchdog = createWorkspaceWatchdog(live, common);
   closes.push(() => watchdog.stopStuckPodWatchdog());

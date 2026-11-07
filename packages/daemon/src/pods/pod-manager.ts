@@ -458,6 +458,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     podRepo,
   });
   const workspaceWatchdog = createWorkspaceWatchdog(deps, {
+    ownsAgentRun: (podId) => activeAgentRuns.get(podId)?.isCurrent?.() === true,
     logger,
     podRepo,
     stopSandboxPreviewProxy,

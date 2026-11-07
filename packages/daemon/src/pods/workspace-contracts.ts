@@ -254,6 +254,8 @@ export interface WorkspaceObservationCaptured {
 }
 
 export interface WorkspaceWatchdogCaptured {
+  /** True only for a current run owned by this daemon, not a retained ledger row. */
+  ownsAgentRun(podId: string): boolean;
   logger: Logger;
   podRepo: PodRepository;
   stopSandboxPreviewProxy: ReturnType<typeof createResourcePreview>['stopSandboxPreviewProxy'];
