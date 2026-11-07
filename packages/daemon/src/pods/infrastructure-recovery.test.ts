@@ -24,6 +24,7 @@ import {
 } from '../test-utils/retained-checkpoint-helpers.js';
 import { terminationAuth } from '../test-utils/termination-reconciliation-helpers.js';
 import { LocalWorktreeManager } from '../worktrees/local-worktree-manager.js';
+import { createCompletionGuards } from './completion-guards.js';
 import { createPodManager } from './pod-manager.js';
 import { createRetainedCheckpointRecovery } from './retained-checkpoint-recovery.js';
 import {
@@ -606,8 +607,14 @@ describe('qualified infrastructure recovery from real incident shapes', () => {
   it.each([
     true,
     false,
-  ])('answers only the owned repair question, preserving guidance acknowledgement (ack=%s)', async (acknowledge) => {
+  ])('collects preexisting guidance and answers only the owned repair question (ack=%s)', async (acknowledge) => {
     const f = await fixture('rework');
+    f.deps.assertGuidanceCollected = createCompletionGuards({
+      podRepo: f.ctx.podRepo,
+      nudgeRepo: f.ctx.deps.nudgeRepo,
+    }).assertGuidanceCollected;
+    f.ctx.deps.nudgeRepo.queue(f.podId, 'Saved guidance from the stopped original worker');
+    expect(f.ctx.deps.nudgeRepo.hasPending(f.podId)).toBe(true);
     passingReview(f);
     let release = () => {};
     const proceed = new Promise<void>((resolve) => {
@@ -631,6 +638,7 @@ describe('qualified infrastructure recovery from real incident shapes', () => {
       };
       await proceed;
       const guidance = f.ctx.deps.nudgeRepo.readPending(f.podId);
+      expect(guidance?.messages).toContain('Saved guidance from the stopped original worker');
       expect(guidance?.messages).toContain(
         'Use the actual pinned schema and preserve the original acceptance requirements',
       );
@@ -696,6 +704,32 @@ describe('qualified infrastructure recovery from real incident shapes', () => {
     expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
     expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
     expect(vi.mocked(f.cm.stop).mock.calls.filter(([id]) => id === f.containerId)).toHaveLength(1);
+  });
+
+  it('refuses guidance arriving after candidate sealing before certifying fresh checks', async () => {
+    const f = await fixture('rework');
+    f.deps.assertGuidanceCollected = createCompletionGuards({
+      podRepo: f.ctx.podRepo,
+      nudgeRepo: f.ctx.deps.nudgeRepo,
+    }).assertGuidanceCollected;
+    passingReview(f);
+    const validate = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation();
+    if (!validate) throw new Error('Missing configured validation');
+    vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => {
+      expect(f.recovery.list(f.podId)[0]?.infrastructure?.candidate).toBeTruthy();
+      f.ctx.deps.nudgeRepo.queue(f.podId, 'Guidance arrived after the repair candidate was sealed');
+      return validate(config);
+    });
+    await f.recovery.recoverInfrastructure(f.podId, f.request, f.actor);
+    await f.recovery.wait(f.input.id);
+    await expect(f.manager.processPod(f.podId)).rejects.toThrow();
+    const operation = f.recovery.list(f.podId)[0];
+    expect(operation?.checked).toBeNull();
+    expect(operation?.blocked).toBeTruthy();
+    expect(f.ctx.deps.nudgeRepo.hasPending(f.podId)).toBe(true);
+    expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+    expect(f.ctx.worktreeManager.pushBranch).not.toHaveBeenCalled();
+    expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
   });
 
   it('rejects changed actor/context on replay or reconciliation', async () => {

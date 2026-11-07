@@ -1,8 +1,13 @@
 import { rm } from 'node:fs/promises';
 import { AutopodError } from '@autopod/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { preValidationCheckpointFixture } from '../test-utils/retained-checkpoint-helpers.js';
+import {
+  preValidationCheckpointFixture,
+  recordPreValidationInfrastructure,
+  retainedCheckpointFixture,
+} from '../test-utils/retained-checkpoint-helpers.js';
 import { createCompletionGuards } from './completion-guards.js';
+import { createRetainedCheckpointRecovery } from './retained-checkpoint-recovery.js';
 import { checkpointHash } from './retained-checkpoint-repository.js';
 
 const fixtures: Awaited<ReturnType<typeof preValidationCheckpointFixture>>[] = [];
@@ -21,6 +26,30 @@ afterEach(async () => {
 });
 
 describe('read-only retained-continuation inspection', () => {
+  it.each([
+    true,
+    false,
+  ])('matches additive-review admission for omitted workflow review (frozen route=%s)', async (independentRoute) => {
+    const f = recordPreValidationInfrastructure(
+      await retainedCheckpointFixture('validation', true, false, independentRoute, 'local'),
+    );
+    fixtures.push(f);
+    const launch = f.ctx.deps.launchConfiguration;
+    if (!launch) throw new Error('Missing native launch');
+    f.deps.readLaunch = launch.read;
+    const controller = createRetainedCheckpointRecovery(f.deps);
+    const before = launch.read(f.podId);
+    f.ctx.db.pragma('query_only = ON');
+    const inspection = controller.inspect(f.podId);
+    expect(inspection.status).toBe(independentRoute ? 'requires_selection' : 'blocked');
+    expect(inspection.checks.find((check) => check.id === 'continuation_policy')?.state).toBe(
+      independentRoute ? 'no_recorded_blocker' : 'blocked',
+    );
+    expect(launch.read(f.podId)).toEqual(before);
+    expect(f.deps.enqueue).not.toHaveBeenCalled();
+    expect(f.cm.getStatus).not.toHaveBeenCalled();
+    f.ctx.db.pragma('query_only = OFF');
+  });
   it('shows report-bound selection without qualifying source/resources or changing any durable state', async () => {
     const f = await fixture();
     const before = f.pod();

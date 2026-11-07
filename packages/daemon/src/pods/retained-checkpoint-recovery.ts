@@ -243,7 +243,11 @@ export function createRetainedCheckpointRecovery(deps: {
     deps.podRepo.deletionOwnership?.assertTaskAvailable(pod.id);
     for (const id of deps.podRepo.sourceAdoptions.taskPodIds(pod.id))
       if (!deps.isIdle(id)) checkpointError('A task invocation is still active');
-    deps.assertGuidanceCollected(pod.id);
+    // Only the explicitly selected one-worker repair may collect saved guidance.
+    // Checks-only admission and every sealed-candidate check still require ACK.
+    const collectingGuidance =
+      infrastructure?.mode === 'rework' && !repo.latest(pod.id)?.infrastructure?.candidate;
+    if (!collectingGuidance) deps.assertGuidanceCollected(pod.id);
     if (
       continuation &&
       (pod.options.validationSuite === 'thin' ||
@@ -305,7 +309,7 @@ export function createRetainedCheckpointRecovery(deps: {
     };
     const checks = [
       // Reuse admission's policy verbatim, reporting its first conservative refusal.
-      check('continuation_policy', () => policy(pod, true)),
+      check('continuation_policy', () => policy(pod, true, undefined, true)),
       check('retained_custody', () => repo.assertAvailable(podId)),
       check('worker_settlement', () => {
         const tasks = deps.podRepo.taskExecutions ?? checkpointError('Task ledger unavailable');
@@ -547,7 +551,7 @@ export function createRetainedCheckpointRecovery(deps: {
           : {}),
         ...(infrastructure?.mode === 'rework'
           ? {
-              reworkReason: `Qualified infrastructure repair of preserved source ${record.binding.head}. Original resource/source/reports remain retained. Work only on this independent checkout within the original task and authority. No publication is authorized.\nDiagnosis: ${infrastructure.qualification}\nOperator-supplied repair context (not passing evidence):\n${infrastructure.instructions?.content ?? ''}`,
+              reworkReason: `Qualified infrastructure repair of preserved source ${record.binding.head}. Original resource/source/reports remain retained. Work only on this independent checkout within the original task and authority. No publication is authorized. Collect and acknowledge all saved check_messages guidance before completing the repair; unread guidance blocks candidate sealing and checks.\nDiagnosis: ${infrastructure.qualification}\nOperator-supplied repair context (not passing evidence):\n${infrastructure.instructions?.content ?? ''}`,
               reworkCount: pod.reworkCount + 1,
             }
           : {}),
@@ -1556,11 +1560,16 @@ export function createRetainedCheckpointRecovery(deps: {
     assertCurrent();
     if (
       record.binding.continuation?.infrastructure?.mode === 'rework' &&
-      record.infrastructure?.worker &&
-      !record.infrastructure.candidate
+      record.infrastructure?.worker
     ) {
       deps.podRepo.taskExecutions?.assertCanDelete(podId);
       deps.assertGuidanceCollected(podId);
+    }
+    if (
+      record.binding.continuation?.infrastructure?.mode === 'rework' &&
+      record.infrastructure?.worker &&
+      !record.infrastructure.candidate
+    ) {
       const source = await deps.worktreeManager.inspectSourceAdoption(
         record.prepared.worktree,
         record.binding.branch,
