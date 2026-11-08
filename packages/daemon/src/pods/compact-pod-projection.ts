@@ -16,6 +16,7 @@ export type CompactPodSource = Pick<
 
 export const COMPACT_JSON_MAX_BYTES = 64 * 1024;
 export const COMPACT_JSON_FIELDS = [
+  'depends_on_pod_ids',
   'task_summary',
   'pending_escalation',
   'progress',
@@ -36,6 +37,8 @@ export const COMPACT_POD_COLUMNS = [
   'base_branch',
   'series_id',
   'series_name',
+  `CASE WHEN length(CAST(depends_on_pod_id AS BLOB)) <= ${COMPACT_JSON_MAX_BYTES} THEN depends_on_pod_id END AS depends_on_pod_id`,
+  `length(CAST(depends_on_pod_id AS BLOB)) > ${COMPACT_JSON_MAX_BYTES} AS depends_on_pod_id_oversized`,
   'output_mode',
   'agent_mode',
   'output_target',

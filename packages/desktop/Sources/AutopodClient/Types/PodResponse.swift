@@ -92,6 +92,8 @@ public struct PodFleetDisplayResponse: Codable, Sendable {
 }
 
 public struct CompactPodResponse: Codable, Sendable {
+  // nil means an older daemon did not provide dependency metadata; [] is a root.
+  public let dependsOnPodIds: [String]?
   public let fleetArchivedAt: String?
   public let display: PodFleetDisplayResponse?
   public let recordDiagnostics: [RecordDiagnosticResponse]?

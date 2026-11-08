@@ -85,6 +85,7 @@ describe('GET /pods/:podId provider-attempt projection', () => {
   let db: Database.Database;
   let app: FastifyInstance;
   let eventRepo: ReturnType<typeof createEventRepository>;
+  let podRepo: ReturnType<typeof createPodRepository>;
   let qualityScoreRepo: ReturnType<typeof createQualityScoreRepository>;
 
   beforeEach(async () => {
@@ -100,7 +101,7 @@ describe('GET /pods/:podId provider-attempt projection', () => {
       )
     `).run();
     app = Fastify({ logger: false });
-    const podRepo = createPodRepository(db);
+    podRepo = createPodRepository(db);
     eventRepo = createEventRepository(db);
     const escalationRepo = createEscalationRepository(db);
     qualityScoreRepo = createQualityScoreRepository(db);
@@ -520,6 +521,68 @@ describe('GET /pods/:podId provider-attempt projection', () => {
     });
     for (const pod of pods.filter((p) => p.id.startsWith('invalid-progress-')))
       expect(pod.display.progress).toBeNull();
+  });
+
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])('preserves dependency roots, chains, fan-in and legacy parents (paged=%s, fallback=%s)', async (paged, fallback) => {
+    if (fallback) podRepo.listCompactForDisplay = undefined;
+    const parents = {
+      root: [],
+      chain: ['root'],
+      fanin: ['root', 'chain'],
+      legacy: ['chain'],
+      normalized: ['root'],
+      explicitRoot: [],
+    };
+    for (const [id, dependencies] of Object.entries(parents)) {
+      insertPod(db, { id, status: 'complete' });
+      db.prepare('UPDATE pods SET depends_on_pod_ids = ?, depends_on_pod_id = ? WHERE id = ?').run(
+        id === 'legacy'
+          ? null
+          : id === 'normalized'
+            ? '["root", "", 42, null]'
+            : JSON.stringify(dependencies),
+        id === 'explicitRoot' ? 'root' : (dependencies[0] ?? null),
+        id,
+      );
+    }
+    const response = await app.inject({
+      method: 'GET',
+      url: `/pods?compact=true${paged ? '&page=true&limit=10' : ''}`,
+    });
+    expect(response.statusCode).toBe(200);
+    const records = paged ? response.json().pods : response.json();
+    expect(
+      Object.fromEntries(
+        records.map((pod: { id: string; dependsOnPodIds: string[] }) => [
+          pod.id,
+          pod.dependsOnPodIds,
+        ]),
+      ),
+    ).toEqual(parents);
+  });
+
+  it('omits oversized dependency metadata instead of emitting a false root or partial legacy chain', async () => {
+    insertPod(db, { id: 'legacy-parent', status: 'complete' });
+    insertPod(db, { id: 'huge-parents', status: 'complete' });
+    db.prepare('UPDATE pods SET depends_on_pod_ids = ?, depends_on_pod_id = ? WHERE id = ?').run(
+      JSON.stringify(['parent'.repeat(20_000)]),
+      'legacy-parent',
+      'huge-parents',
+    );
+    const response = await app.inject({ method: 'GET', url: '/pods?compact=true' });
+    expect(response.statusCode).toBe(200);
+    const pod = response.json().find((record: { id: string }) => record.id === 'huge-parents');
+    expect(pod).not.toHaveProperty('dependsOnPodIds');
+    expect(pod.recordDiagnostics).toContainEqual({
+      field: 'depends_on_pod_ids',
+      code: 'size_limit',
+    });
+    expect(Buffer.byteLength(response.body)).toBeLessThan(16 * 1024);
   });
 
   it('projects compact history without parsing large unrelated evidence or returning settled output', async () => {
