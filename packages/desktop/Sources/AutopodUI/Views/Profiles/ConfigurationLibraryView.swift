@@ -1,6 +1,26 @@
 import AutopodClient
 import SwiftUI
 
+enum ConfigurationAdvisoryBrowserQA {
+  static func isEnabled(_ payload: [String: ConfigurationJSON]) -> Bool {
+    payload["advisoryBrowserQaEnabled"]?.bool == true
+      && (payload["validationPhases"]?.array?.contains(.string("advisory")) ?? false)
+  }
+
+  static func setEnabled(_ enabled: Bool, in payload: inout [String: ConfigurationJSON]) {
+    var retainedAdvisory = false
+    var phases = (payload["validationPhases"]?.array ?? []).filter { phase in
+      guard phase == .string("advisory") else { return true }
+      guard enabled && !retainedAdvisory else { return false }
+      retainedAdvisory = true
+      return true
+    }
+    if enabled && !retainedAdvisory { phases.append(.string("advisory")) }
+    payload["validationPhases"] = .array(phases)
+    payload["advisoryBrowserQaEnabled"] = .bool(enabled)
+  }
+}
+
 private enum ConfigurationLibraryPage: String {
   case profiles, buildingBlocks, repositories, watchers, deployments
 }
@@ -1393,7 +1413,7 @@ struct ConfigurationEditorSheet: View {
             ], alignment: .leading, spacing: 10
           ) {
             ForEach(
-              ["setup", "lint", "sast", "build", "test", "health", "pages", "facts", "review", "advisory"],
+              ["setup", "lint", "sast", "build", "test", "health", "pages", "facts", "review"],
               id: \.self
             ) { phase in
               Toggle(
@@ -1407,7 +1427,10 @@ struct ConfigurationEditorSheet: View {
                   }))
             }
           }
-          Toggle("Advisory browser QA", isOn: boolBinding("advisoryBrowserQaEnabled"))
+          Toggle("Advisory browser QA", isOn: Binding(
+            get: { ConfigurationAdvisoryBrowserQA.isEnabled(payload) },
+            set: { ConfigurationAdvisoryBrowserQA.setEnabled($0, in: &payload) }))
+            .accessibilityIdentifier("workflow-advisory-browser-qa")
         Stepper("Validation attempts: \(workflowInteger("maxValidationAttempts", fallback: 3))", value: integerBinding("maxValidationAttempts", fallback: 3), in: 1...10)
       }
       }

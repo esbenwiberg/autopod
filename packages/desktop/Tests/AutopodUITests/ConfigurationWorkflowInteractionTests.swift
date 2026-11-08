@@ -5,6 +5,51 @@ import Testing
 @testable import AutopodUI
 
 @Suite(.serialized) @MainActor struct ConfigurationWorkflowInteractionTests {
+  @Test(arguments: [false, true], [false, true])
+  func advisoryCheckboxSavesAndReopensLegacySettings(phase: Bool, flag: Bool) async throws {
+    let fixture = try WorkflowEditorFixture()
+    fixture.document.payload["validationPhases"] = .array(phase
+      ? [.string("test"), .string("advisory"), .string("review")]
+      : [.string("test"), .string("review")])
+    fixture.document.payload["advisoryBrowserQaEnabled"] = .bool(flag)
+    let original = fixture.document.payload
+    let host = fixture.host(.validation)
+    defer { host.close() }
+    try await host.wait { host.has("workflow-advisory-browser-qa") }
+    #expect(!host.enabled("configuration-editor-save"))
+    #expect(fixture.document.payload == original)
+    // Inspect the rendered accessibility tree, not the Swift source.
+    let labels = host.nodes.compactMap { node -> String? in
+      let selector = NSSelectorFromString("accessibilityLabel")
+      guard node.responds(to: selector) else { return nil }
+      return node.value(forKey: "accessibilityLabel") as? String
+    }
+    #expect(!labels.contains("Advisory"))
+    #expect(labels.contains("Advisory browser QA"))
+    #expect(host.nodes.filter { node in
+      node.responds(to: NSSelectorFromString("accessibilityPerformPress"))
+        && node.responds(to: NSSelectorFromString("accessibilityLabel"))
+        && node.value(forKey: "accessibilityLabel") as? String == "Advisory browser QA"
+    }.count == 1)
+    try host.press("workflow-advisory-browser-qa")
+    try host.press("configuration-editor-save")
+    try await host.wait { fixture.writes.count == 1 }
+    let expected = !(phase && flag)
+    #expect(ConfigurationAdvisoryBrowserQA.isEnabled(fixture.document.payload) == expected)
+    #expect(fixture.document.payload["advisoryBrowserQaEnabled"] == .bool(expected))
+    #expect(fixture.document.payload["validationPhases"]?.array?.filter { $0 != .string("advisory") }
+      == [.string("test"), .string("review")])
+    #expect(fixture.document.payload["futureField"] == .string("retain"))
+    let reopened = fixture.host(.validation)
+    defer { reopened.close() }
+    try await reopened.wait { reopened.has("workflow-advisory-browser-qa") }
+    #expect(!reopened.enabled("configuration-editor-save"))
+    try reopened.press("workflow-advisory-browser-qa")
+    try reopened.press("configuration-editor-save")
+    try await reopened.wait { fixture.writes.count == 2 }
+    #expect(ConfigurationAdvisoryBrowserQA.isEnabled(fixture.document.payload) == !expected)
+  }
+
   @Test(arguments: [false, true]) func securityFromAbsentOrNullSavesReopensAndResetsToDefault(null: Bool) async throws {
     let fixture = try WorkflowEditorFixture()
     if null { fixture.document.payload["securityScan"] = .null }
