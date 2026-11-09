@@ -155,6 +155,9 @@ export interface TerminalSession {
 }
 
 export interface ContainerExecutionMetadata {
+  /** Immutable Docker creation labels; absence is not proof of retained execution ownership. */
+  podId?: string;
+  resourceIdentity?: string;
   imageDigest: string | null;
   memoryLimitBytes: number | null;
   cpuLimit: number | null;

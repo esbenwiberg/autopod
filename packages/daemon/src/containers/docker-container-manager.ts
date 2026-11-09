@@ -934,6 +934,12 @@ export class DockerContainerManager implements ContainerManager {
       containerId,
     });
     return {
+      ...(typeof info.Config?.Labels?.['com.autopod.pod-id'] === 'string'
+        ? { podId: info.Config.Labels['com.autopod.pod-id'] }
+        : {}),
+      ...(typeof info.Config?.Labels?.['com.autopod.resource-identity'] === 'string'
+        ? { resourceIdentity: info.Config.Labels['com.autopod.resource-identity'] }
+        : {}),
       imageDigest: /^sha256:[a-f0-9]{64}$/.test(info.Image) ? info.Image : null,
       memoryLimitBytes:
         (info.HostConfig?.Memory ?? 0) > 0 ? (info.HostConfig?.Memory ?? null) : null,

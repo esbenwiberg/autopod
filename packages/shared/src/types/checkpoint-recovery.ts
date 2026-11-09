@@ -16,6 +16,8 @@ export interface RetainedContinuationRequest extends CheckpointRecoveryRequest {
   /** Explicitly previewed software/resources; repository, AI, workflow and network remain frozen. */
   executionProfileId?: string;
   expectedExecutionDigest?: string;
+  /** Paired with an execution preview: move only these public frozen values to the build phase. */
+  buildOnlyEnvironmentKeys?: string[];
 }
 
 export interface RetainedContinuationCheckRequest {
@@ -37,6 +39,8 @@ export interface InfrastructureRecoveryRequest extends CheckpointRecoveryRequest
   qualification: string;
   /** Explicit credential-free repair context; hash binds the exact UTF-8 bytes. */
   instructions?: { content: string; sha256: string };
+  /** Checks-only, owner-selected public tool environment correction; never coding authority. */
+  buildOnlyEnvironmentKeys?: string[];
   executionProfileId?: string;
   expectedExecutionDigest?: string;
 }
