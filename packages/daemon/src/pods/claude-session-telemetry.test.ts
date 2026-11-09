@@ -1,7 +1,9 @@
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { tokenTelemetryRoutes } from '../api/routes/token-telemetry.js';
 import { createTestContext } from '../test-utils/mock-helpers.js';
 import { createClaudeSessionTelemetry, parseClaudeSession } from './claude-session-telemetry.js';
 import { createPodManager } from './pod-manager.js';
@@ -12,6 +14,8 @@ const session = '92cf0f30-809f-4037-8948-2bbccdccd854';
 const startedAt = '2026-11-06T18:00:00.000Z';
 const endedAt = '2026-11-07T11:00:00.000Z';
 const model = 'claude-opus-5-5';
+const owner = { oid: 'operator', roles: [] };
+const unrelated = { oid: 'other-account', roles: [] };
 const window = { startedAt, endedAt };
 const cleanup: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -206,10 +210,122 @@ async function fixture() {
   return { ...ctx, id, attempts, file, service, runId };
 }
 describe('scoped settled Claude reconciliation', () => {
+  it('uses real per-pod routes/service for owner authorization, receipt isolation and unchanged bulk permissions', async () => {
+    const f = await fixture();
+    async function appFor(principal: typeof owner) {
+      const app = Fastify();
+      cleanup.push(() => app.close());
+      app.decorateRequest('user', null);
+      app.addHook('preHandler', async (request) => {
+        request.user = principal;
+      });
+      tokenTelemetryRoutes(app, { run: vi.fn(), claudeSession: f.service() });
+      await app.ready();
+      return app;
+    }
+    const own = await appFor(owner),
+      other = await appFor(unrelated);
+    const url = `/pods/${f.id}/claude-telemetry`;
+    expect((await other.inject({ method: 'GET', url })).statusCode).toBe(403);
+    const preview = await own.inject({ method: 'GET', url });
+    expect(preview.statusCode).toBe(200);
+    const request = {
+      expectedBinding: preview.json().expectedBinding,
+      reason: 'Owner explicitly reconciles the genuine retained session',
+    };
+    expect((await other.inject({ method: 'POST', url, payload: request })).statusCode).toBe(403);
+    expect(
+      (await own.inject({ method: 'POST', url, payload: { ...request, userId: unrelated.oid } }))
+        .statusCode,
+    ).toBe(400);
+    const applied = await own.inject({ method: 'POST', url, payload: request });
+    expect(applied.statusCode).toBe(200);
+    expect(applied.json()).toMatchObject({ userId: owner.oid, authorizationBasis: 'pod_owner' });
+    expect((await other.inject({ method: 'GET', url })).statusCode).toBe(403);
+    expect((await own.inject({ method: 'GET', url })).json().mode).toBe('recorded');
+    expect(
+      (
+        await own.inject({
+          method: 'POST',
+          url: '/admin/token-telemetry/repair',
+          payload: { apply: true, confirmation: 'APPLY_TOKEN_TELEMETRY_REPAIR' },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(f.containerManager.stop).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    unrelated,
+    { oid: '', roles: ['admin'] },
+    { oid: '  ', roles: ['operator'] },
+  ])('refuses a non-owner or empty subject before reading native evidence: %j', async (principal) => {
+    const f = await fixture();
+    vi.mocked(f.containerManager.getStatus).mockClear();
+    await expect(f.service().inspect(f.id, principal)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      f.service().apply(
+        f.id,
+        {
+          expectedBinding: 'a'.repeat(64),
+          reason: 'No token body or UI connection may grant ownership',
+        },
+        principal,
+      ),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(f.containerManager.getStatus).not.toHaveBeenCalled();
+    expect(
+      f.db.prepare('SELECT COUNT(*) AS n FROM claude_session_telemetry_receipts').get(),
+    ).toEqual({ n: 0 });
+  });
+  it.each([
+    'admin',
+    'operator',
+  ])('retains explicit %s authority for another pod owner', async (role) => {
+    const f = await fixture();
+    const principal = { oid: 'privileged-account', roles: [role] };
+    const preview = await f.service().inspect(f.id, principal);
+    if (preview.mode !== 'preview') throw Error('Preview required');
+    const receipt = await f.service().apply(
+      f.id,
+      {
+        expectedBinding: preview.expectedBinding,
+        reason: 'Explicit privileged reconciliation of this exact stopped task',
+      },
+      principal,
+    );
+    expect(receipt).toMatchObject({
+      userId: principal.oid,
+      authorizationBasis: 'admin_or_operator',
+    });
+  });
+  it('rechecks the pod owner after asynchronous Docker observation before applying', async () => {
+    const f = await fixture();
+    const preview = await f.service().inspect(f.id, owner);
+    if (preview.mode !== 'preview') throw Error('Preview required');
+    vi.mocked(f.containerManager.getStatus).mockImplementationOnce(async () => {
+      f.db.prepare('UPDATE pods SET user_id=? WHERE id=?').run('different-owner', f.id);
+      return 'stopped';
+    });
+    await expect(
+      f.service().apply(
+        f.id,
+        {
+          expectedBinding: preview.expectedBinding,
+          reason: 'Changed ownership must fence the pending owner request',
+        },
+        owner,
+      ),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(f.attempts.getActive(f.id)?.outcome).toBeNull();
+    expect(
+      f.db.prepare('SELECT COUNT(*) AS n FROM claude_session_telemetry_receipts').get(),
+    ).toEqual({ n: 0 });
+  });
   it('previews read-only, appends evidence once, aborts only the positively stopped segment and preserves cumulative spend', async () => {
     const f = await fixture();
     const original = f.attempts.listRaw(f.id)[0]!;
-    const preview = await f.service().inspect(f.id);
+    const preview = await f.service().inspect(f.id, owner);
     if (preview.mode !== 'preview') throw Error('Preview required');
     expect(f.attempts.listRaw(f.id)[0]).toEqual(original);
     expect(
@@ -219,7 +335,8 @@ describe('scoped settled Claude reconciliation', () => {
       expectedBinding: preview.expectedBinding,
       reason: 'Reconcile genuine session before a separately authorized budget change',
     };
-    const receipt = await f.service().apply(f.id, request, 'operator');
+    const receipt = await f.service().apply(f.id, request, owner);
+    expect(receipt.authorizationBasis).toBe('pod_owner');
     expect(receipt).not.toHaveProperty('attempt');
     const stored = f.db
       .prepare('SELECT receipt FROM claude_session_telemetry_receipts WHERE pod_id=?')
@@ -250,8 +367,14 @@ describe('scoped settled Claude reconciliation', () => {
     expect(f.db.prepare('SELECT outcome FROM task_agent_runs WHERE id=?').get(f.runId)).toEqual({
       outcome: null,
     });
-    expect(await f.service().apply(f.id, request, 'operator')).toEqual(receipt);
-    await expect(f.service().apply(f.id, request, 'other')).rejects.toThrow('Conflicting');
+    expect(await f.service().apply(f.id, request, owner)).toEqual(receipt);
+    await expect(
+      f.service().apply(f.id, request, { oid: 'other', roles: ['operator'] }),
+    ).rejects.toThrow('Conflicting');
+    await expect(f.service().inspect(f.id, unrelated)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(f.service().apply(f.id, request, unrelated)).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
     expect(() => f.db.prepare('DELETE FROM claude_session_telemetry_receipts').run()).toThrow(
       'retained',
     );
@@ -280,7 +403,7 @@ describe('scoped settled Claude reconciliation', () => {
     'symlink-session',
   ])('refuses %s without changing accounting or starting/stopping execution', async (fault) => {
     const f = await fixture();
-    const preview = await f.service().inspect(f.id);
+    const preview = await f.service().inspect(f.id, owner);
     if (preview.mode !== 'preview') throw Error('Preview required');
     const request = {
       expectedBinding: preview.expectedBinding,
@@ -311,7 +434,7 @@ describe('scoped settled Claude reconciliation', () => {
       await rm(f.file);
       await symlink('/etc/passwd', f.file);
     }
-    await expect(f.service().apply(f.id, request, 'operator')).rejects.toThrow();
+    await expect(f.service().apply(f.id, request, owner)).rejects.toThrow();
     expect(
       f.db.prepare('SELECT COUNT(*) AS n FROM claude_session_telemetry_receipts').get(),
     ).toEqual({ n: 0 });
