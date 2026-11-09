@@ -18,6 +18,7 @@ import {
   type RetainedExecutionSelection,
   retainedContinuationLaunch,
 } from '../configuration/retained-continuation-launch.js';
+import { boundedDockerCall } from '../containers/docker-bounds.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { PodExecutionSettings } from '../interfaces/pod-execution-settings.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
@@ -30,7 +31,10 @@ import {
 } from '../worktrees/retained-checkpoint-workspace.js';
 import { rewriteConfiguration } from './approval-source-rewrite.js';
 import { rewriteHash } from './approval-source-rewrite-repository.js';
-import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
+import {
+  fingerprintPreservedWorkspace,
+  verifyArtifactSnapshot,
+} from './artifact-snapshot-receipt.js';
 import { assertQualificationExecutionContextSupported } from './environment-qualification.js';
 import type { PodRepository } from './pod-repository.js';
 import { createRepairContinuation } from './repair-continuation.js';
@@ -156,6 +160,18 @@ export function createRetainedCheckpointRecovery(deps: {
     guidanceRecord?: CheckpointRecoveryRecord,
   ) {
     deps.podRepo.retainedFinalizations?.assertAvailable(pod.id);
+    const sealed = repo.prevalidationSource(pod);
+    if (
+      sealed &&
+      (!continuation ||
+        repair ||
+        infrastructure ||
+        deps.readLaunch?.(pod.id)?.digest !== pod.launchConfigDigest ||
+        deps.readLaunch?.(pod.id)?.ai.reviewer.mode !== 'independent')
+    )
+      checkpointError(
+        'Sealed pre-validation source requires native checks-only continuation with independent review',
+      );
     const predecessor = infrastructure ? failedRepairPredecessor(pod, infrastructure) : null;
     if (infrastructure?.predecessorRepairId && !predecessor)
       checkpointError('Selected failed repair predecessor changed', 'STALE_CHECKPOINT_RECOVERY');
@@ -332,6 +348,16 @@ export function createRetainedCheckpointRecovery(deps: {
     const predecessorId = record.binding.continuation?.infrastructure?.predecessorRepairId;
     if (predecessorId && record.binding.head !== repo.get(predecessorId)?.checked?.source?.head)
       checkpointError('Selected failed repair source changed', 'STALE_CHECKPOINT_RECOVERY');
+    const sealed = record.originalEvidence.prevalidationSource;
+    if (
+      sealed &&
+      (record.binding.head !== sealed.head ||
+        record.resourceKey !== sealed.resourceKey ||
+        record.binding.cycle !== sealed.cycle ||
+        record.generation !== sealed.generation ||
+        record.taskId !== sealed.taskId)
+    )
+      checkpointError('Sealed pre-validation selection changed', 'STALE_CHECKPOINT_RECOVERY');
     const coding = deps.podRepo.retainedCoding?.get(record.id);
     if (
       coding &&
@@ -384,6 +410,9 @@ export function createRetainedCheckpointRecovery(deps: {
     if (observed.refusal)
       checks.push({ id: 'selection_evidence', state: 'blocked', ...observed.refusal });
     const selection = observed.selection;
+    const sealedPrevalidation = Boolean(
+      selection && !pod.lastValidationResult && !selection.infrastructureReports,
+    );
     const infrastructure = repo.infrastructureNeeds(pod);
     const currentFinalization = pod.finalization?.generation === pod.lifecycleGeneration;
     return {
@@ -423,8 +452,12 @@ export function createRetainedCheckpointRecovery(deps: {
         'Inspect recorded needs and resolve pending decisions/guidance or custody through their owning controls; never clear a hold to retry.',
         'Select the exact retained host HEAD and generation/result hash. Host preservation does not collect unsynced original files or reports.',
         'Use --preview-execution PROFILE for configuration only; it does not qualify the actual environment. Sandbox wakeup is machine-only, not task continuation.',
-        'Use --apply --prepare-only for an independent repair checkout, or --apply for checks-only selection. All existing admission/source/resource checks still apply; no coding worker starts.',
-        'After preparation, use --check with the exact committed candidate. Inspect ap retry-state POD --stage validation; any authorize-retry is a separate human action, not implied by selection.',
+        sealedPrevalidation
+          ? 'This is sealed pre-validation source: use --apply with the exact sealed HEAD for checks only. No prepare-only repair or remote source substitution is supported; the private archive will be reverified.'
+          : 'Use --apply --prepare-only for an independent repair checkout, or --apply for checks-only selection. All existing admission/source/resource checks still apply; no coding worker starts.',
+        sealedPrevalidation
+          ? 'Inspect ap retry-state POD --stage validation before selection. A new null-result source receipt is not retry permission, a prior pass or coding authority.'
+          : 'After preparation, use --check with the exact committed candidate. Inspect ap retry-state POD --stage validation; any authorize-retry is a separate human action, not implied by selection.',
         'Fresh configured checks and independent review must run on the selected source. A pass still requires separate human approval; historical reports and budgets remain retained.',
       ],
     };
@@ -545,6 +578,45 @@ export function createRetainedCheckpointRecovery(deps: {
     if (record.binding.approvalRewrite) {
       const rewrite = deps.podRepo.approvalRewrites?.get(record.binding.approvalRewrite.id);
       prepared = { ...prepared, baseCommitSha: rewrite?.binding.baseCommitSha };
+    }
+    const sealed = record.originalEvidence.prevalidationSource;
+    if (sealed) {
+      if (prepared.head !== sealed.head || prepared.tree !== sealed.tree)
+        checkpointError('Prepared source differs from sealed pre-validation evidence');
+      let inventoryChecks = 0;
+      const archive = await fingerprintPreservedWorkspace(sealed.archivePath, () => {
+        if (inventoryChecks++ % 128 === 0) assertCurrent();
+      });
+      assertCurrent();
+      if (archive.sha256 !== sealed.archiveSha256)
+        checkpointError('Sealed pre-validation archive changed; original source remains retained');
+      const cm = deps.getContainerManager('local');
+      const key = await boundedDockerCall(cm.getResourceKey!(record.containerId), {
+        label: 'prevalidation-prepared-identity',
+        timeoutMs: 5000,
+        containerId: record.containerId,
+      });
+      assertCurrent();
+      const source = await deps.worktreeManager.inspectSourceAdoption!(
+        record.worktreePath,
+        record.binding.branch,
+      );
+      assertCurrent();
+      const state = await boundedDockerCall(cm.getStatus(record.containerId), {
+        label: 'prevalidation-prepared-status',
+        timeoutMs: 5000,
+        containerId: record.containerId,
+      });
+      assertCurrent();
+      if (
+        key !== sealed.resourceKey ||
+        state !== 'stopped' ||
+        !source.worktreeClean ||
+        source.commitSha !== sealed.head ||
+        source.treeSha !== sealed.tree ||
+        source.branch !== record.binding.branch
+      )
+        checkpointError('Sealed pre-validation original changed before activation');
     }
     repo.append(id, 'prepared', prepared);
     if (record.binding.continuation?.infrastructure && !(await quiesce(record.id))) return;
@@ -673,6 +745,19 @@ export function createRetainedCheckpointRecovery(deps: {
     if (prior) return prior; // Lost responses/restarts never repeat preparation or dispatch.
     const pod = deps.podRepo.getOrThrow(podId);
     const addReview = continuation && !repair;
+    const prevalidation = repo.prevalidationSource(pod);
+    if (
+      prevalidation &&
+      (!continuation ||
+        repair ||
+        infrastructureRequest ||
+        codingClaim ||
+        (input as RetainedContinuationRequest).prepareOnly ||
+        (input as RetainedContinuationRequest).remoteHead)
+    )
+      checkpointError(
+        'Sealed pre-validation source supports exact checks only, not coding or source replacement',
+      );
     const predecessor = infrastructureRequest ? failedRepairPredecessor(pod) : null;
     const infrastructure = infrastructureRequest
       ? {
@@ -732,6 +817,15 @@ export function createRetainedCheckpointRecovery(deps: {
       source.branch !== pod.branch
     )
       checkpointError('Selected commit must match the clean retained host checkpoint');
+    if (
+      prevalidation &&
+      (input.checkpointHead !== prevalidation.head ||
+        source.treeSha !== prevalidation.tree ||
+        resourceKey !== prevalidation.resourceKey)
+    )
+      checkpointError('Selected source/resource differs from sealed pre-validation evidence');
+    if (prevalidation)
+      deps.podRepo.validationExecutions?.assertResourceUnshared(pod.id, containerId);
     if (predecessor && source.treeSha !== predecessor.checked?.source?.tree)
       checkpointError('Selected source tree differs from completed failed repair');
     if (infrastructure) {
@@ -801,6 +895,26 @@ export function createRetainedCheckpointRecovery(deps: {
         deps.executionSettings?.(replacement) ??
         checkpointError('Replacement execution settings unavailable');
       assertQualificationExecutionContextSupported(settings);
+    }
+    if (prevalidation) {
+      const key = await boundedDockerCall(containerManager.getResourceKey(containerId), {
+        label: 'prevalidation-final-identity',
+        timeoutMs: 5000,
+        containerId,
+      });
+      const afterKey = replay();
+      if (afterKey) return afterKey;
+      assertCurrent();
+      const state = await boundedDockerCall(containerManager.getStatus(containerId), {
+        label: 'prevalidation-final-status',
+        timeoutMs: 5000,
+        containerId,
+      });
+      const afterStatus = replay();
+      if (afterStatus) return afterStatus;
+      assertCurrent();
+      if (key !== prevalidation.resourceKey || state !== 'stopped')
+        checkpointError('Sealed pre-validation original identity/state changed');
     }
     const claimed = repo.claim({
       pod,

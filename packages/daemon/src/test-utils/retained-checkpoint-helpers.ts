@@ -215,7 +215,7 @@ export async function blockedCheckpointOutcomeFixture(
 }
 
 export async function retainedCheckpointFixture(
-  kind: 'validation' | 'wakeup' = 'validation',
+  kind: 'validation' | 'wakeup' | 'prevalidation' = 'validation',
   native = false,
   independentReview = false,
   independentRoute = false,
@@ -378,19 +378,21 @@ export async function retainedCheckpointFixture(
     reviewerModel: resolveReviewerModel(profile),
     reviewerProvider: resolveReviewerProvider(profile),
   });
-  const previousAdmission = ctx.podRepo.taskRetries!.admit(
-    created.id,
-    created.lifecycleGeneration,
-    { source: null, contract: null, commands: null, environment: null, implementation: null },
-    retryBinding,
-    [],
-  );
-  ctx.podRepo.taskRetries!.start(previousAdmission.id);
-  ctx.podRepo.taskRetries!.finish(
-    previousAdmission.id,
-    kind === 'validation' ? 'nonretryable' : 'pass',
-    302000,
-  );
+  if (kind !== 'prevalidation') {
+    const previousAdmission = ctx.podRepo.taskRetries!.admit(
+      created.id,
+      created.lifecycleGeneration,
+      { source: null, contract: null, commands: null, environment: null, implementation: null },
+      retryBinding,
+      [],
+    );
+    ctx.podRepo.taskRetries!.start(previousAdmission.id);
+    ctx.podRepo.taskRetries!.finish(
+      previousAdmission.id,
+      kind === 'validation' ? 'nonretryable' : 'pass',
+      302000,
+    );
+  }
   const result =
     kind === 'validation'
       ? createFailingValidationResult(created.id)
@@ -406,11 +408,12 @@ export async function retainedCheckpointFixture(
   const containerId = '9d1515b6-2ea6-4fde-8641-2723925d014a';
   const resourceKey = `https://management.swedencentral.azuredevcompute.io/subscriptions/test/resourcegroups/test/sandboxgroups/test/sandboxes/${containerId}`;
   ctx.podRepo.update(created.id, {
-    status: kind === 'validation' ? 'review_required' : 'validated',
+    status:
+      kind === 'prevalidation' ? 'failed' : kind === 'validation' ? 'review_required' : 'validated',
     executionTarget: target,
     containerId,
     worktreePath: path.join(root, 'original'),
-    lastValidationResult: result,
+    lastValidationResult: kind === 'prevalidation' ? null : result,
     validationAttempts: native ? (kind === 'validation' ? 0 : 2) : 1,
     options: { ...created.options, validationSuite: 'custom', validate: true },
     autoApprove: false,
