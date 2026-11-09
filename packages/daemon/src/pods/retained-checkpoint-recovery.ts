@@ -45,6 +45,7 @@ import {
   type CheckpointRecoveryRequest,
   checkpointError,
   checkpointHash,
+  checkpointResourceIdentity,
   type PreparedCheckpoint,
 } from './retained-checkpoint-repository.js';
 import type { CodingBinding } from './retained-coding-repository.js';
@@ -151,6 +152,39 @@ export function createRetainedCheckpointRecovery(deps: {
       return null;
     return prior;
   }
+  function failedChecksPredecessor(
+    pod: Pod,
+    infrastructure?: NonNullable<CheckpointRecoveryBinding['continuation']>['infrastructure'],
+  ): CheckpointRecoveryRecord | null {
+    const prior = infrastructure?.predecessorChecksId
+      ? repo.get(infrastructure.predecessorChecksId)
+      : repo.latest(pod.id);
+    if (
+      !prior ||
+      prior.podId !== pod.id ||
+      prior.taskId !== deps.podRepo.taskExecutions?.snapshot(pod.id).taskId ||
+      !prior.binding.continuation ||
+      prior.binding.approvalRewrite ||
+      deps.podRepo.retainedCoding?.get(prior.id) ||
+      prior.blocked ||
+      prior.binding.continuation.infrastructure?.mode === 'rework' ||
+      prior.infrastructure?.worker ||
+      (prior.binding.continuation.infrastructure && !prior.checked?.source) ||
+      (prior.checked?.snapshot && prior.checked.snapshot.containerId !== pod.containerId) ||
+      !prior.prepared ||
+      prior.prepared.worktree !== pod.worktreePath ||
+      prior.activated?.generation !== pod.lifecycleGeneration ||
+      prior.checking?.generation !== pod.lifecycleGeneration ||
+      prior.checked?.result.overall !== 'fail' ||
+      prior.checked.resultHash !== checkpointHash(prior.checked.result) ||
+      prior.checked.resultHash !== repo.selectionEvidence(pod)?.expectedResultHash ||
+      !repo.completedChecksAdmission(pod)
+    )
+      return null;
+    return prior;
+  }
+  const predecessorSource = (prior: CheckpointRecoveryRecord) =>
+    prior.checked?.source ?? prior.selected ?? prior.prepared;
   function policy(
     pod: Pod,
     continuation = false,
@@ -172,8 +206,20 @@ export function createRetainedCheckpointRecovery(deps: {
       checkpointError(
         'Sealed pre-validation source requires native checks-only continuation with independent review',
       );
-    const predecessor = infrastructure ? failedRepairPredecessor(pod, infrastructure) : null;
-    if (infrastructure?.predecessorRepairId && !predecessor)
+    const predecessor = infrastructure
+      ? infrastructure.predecessorChecksId
+        ? infrastructure.mode === 'checks' && !infrastructure.predecessorRepairId
+          ? failedChecksPredecessor(pod, infrastructure)
+          : null
+        : (failedRepairPredecessor(pod, infrastructure) ??
+          (!infrastructure.predecessorRepairId && infrastructure.mode === 'checks'
+            ? failedChecksPredecessor(pod, infrastructure)
+            : null))
+      : null;
+    if (
+      (infrastructure?.predecessorRepairId || infrastructure?.predecessorChecksId) &&
+      !predecessor
+    )
       checkpointError('Selected failed repair predecessor changed', 'STALE_CHECKPOINT_RECOVERY');
     if (infrastructure?.mode === 'rework' && repo.hasTypedPrerequisiteBlocker(pod))
       checkpointError(
@@ -329,6 +375,11 @@ export function createRetainedCheckpointRecovery(deps: {
   }
   function original(record: CheckpointRecoveryRecord) {
     const current = deps.podRepo.getOrThrow(record.podId);
+    if (
+      record.binding.continuation?.execution?.buildOnlyEnvironmentKeys &&
+      (record.actor.type !== 'human' || current.userId !== record.actor.userId)
+    )
+      throw new AutopodError('Build-only environment selection owner changed', 'FORBIDDEN', 403);
     policy(
       current,
       Boolean(record.binding.continuation),
@@ -348,6 +399,16 @@ export function createRetainedCheckpointRecovery(deps: {
     const predecessorId = record.binding.continuation?.infrastructure?.predecessorRepairId;
     if (predecessorId && record.binding.head !== repo.get(predecessorId)?.checked?.source?.head)
       checkpointError('Selected failed repair source changed', 'STALE_CHECKPOINT_RECOVERY');
+    const checksPredecessorId = record.binding.continuation?.infrastructure?.predecessorChecksId;
+    if (checksPredecessorId) {
+      const prior = repo.get(checksPredecessorId);
+      if (
+        !prior ||
+        record.binding.head !== predecessorSource(prior)?.head ||
+        record.binding.continuation?.infrastructure?.originalTree !== predecessorSource(prior)?.tree
+      )
+        checkpointError('Selected failed-check checkpoint changed', 'STALE_CHECKPOINT_RECOVERY');
+    }
     const sealed = record.originalEvidence.prevalidationSource;
     if (
       sealed &&
@@ -741,6 +802,18 @@ export function createRetainedCheckpointRecovery(deps: {
         );
       return prior;
     };
+    const assertScopeOwner = () => {
+      if (
+        (input as RetainedContinuationRequest).buildOnlyEnvironmentKeys !== undefined &&
+        deps.podRepo.getOrThrow(podId).userId !== actor.userId
+      )
+        throw new AutopodError(
+          'Build-only environment selection requires the authenticated pod owner',
+          'FORBIDDEN',
+          403,
+        );
+    };
+    assertScopeOwner();
     const prior = replay();
     if (prior) return prior; // Lost responses/restarts never repeat preparation or dispatch.
     const pod = deps.podRepo.getOrThrow(podId);
@@ -758,25 +831,34 @@ export function createRetainedCheckpointRecovery(deps: {
       checkpointError(
         'Sealed pre-validation source supports exact checks only, not coding or source replacement',
       );
-    const predecessor = infrastructureRequest ? failedRepairPredecessor(pod) : null;
-    const infrastructure = infrastructureRequest
-      ? {
-          version: 1 as const,
-          mode: infrastructureRequest.mode,
-          qualification: infrastructureRequest.qualification,
-          instructions: infrastructureRequest.instructions,
-          originalTree: '',
-          ...(predecessor ? { predecessorRepairId: predecessor.id } : {}),
-        }
-      : undefined;
+    const predecessor = infrastructureRequest
+      ? (failedRepairPredecessor(pod) ??
+        (infrastructureRequest.mode === 'checks' ? failedChecksPredecessor(pod) : null))
+      : null;
+    const infrastructure: NonNullable<CheckpointRecoveryBinding['continuation']>['infrastructure'] =
+      infrastructureRequest
+        ? {
+            version: 1 as const,
+            mode: infrastructureRequest.mode,
+            qualification: infrastructureRequest.qualification,
+            instructions: infrastructureRequest.instructions,
+            originalTree: '',
+            ...(predecessor
+              ? predecessor.binding.continuation?.infrastructure?.mode === 'rework'
+                ? { predecessorRepairId: predecessor.id }
+                : { predecessorChecksId: predecessor.id }
+              : {}),
+          }
+        : undefined;
     policy(pod, continuation, repair, addReview, infrastructure);
-    if (predecessor && input.checkpointHead !== predecessor.checked?.source?.head)
+    if (predecessor && input.checkpointHead !== predecessorSource(predecessor)?.head)
       checkpointError('Selected source differs from completed failed repair');
     const containerManager = deps.getContainerManager(pod.executionTarget);
     if (!containerManager.getResourceKey || !deps.worktreeManager.inspectSourceAdoption)
       checkpointError('Exact provider namespace and clean source inspection are required');
     const anchor = configuration(pod);
     const assertCurrent = () => {
+      assertScopeOwner();
       codingClaim?.assertCurrent();
       const current = deps.podRepo.getOrThrow(podId);
       policy(current, continuation, repair, addReview, infrastructure);
@@ -826,8 +908,29 @@ export function createRetainedCheckpointRecovery(deps: {
       checkpointError('Selected source/resource differs from sealed pre-validation evidence');
     if (prevalidation)
       deps.podRepo.validationExecutions?.assertResourceUnshared(pod.id, containerId);
-    if (predecessor && source.treeSha !== predecessor.checked?.source?.tree)
+    if (predecessor && source.treeSha !== predecessorSource(predecessor)?.tree)
       checkpointError('Selected source tree differs from completed failed repair');
+    if (infrastructure?.predecessorChecksId) {
+      const metadata =
+        containerManager.getExecutionMetadata &&
+        (await boundedDockerCall(containerManager.getExecutionMetadata(containerId), {
+          label: 'failed-check-resource-identity',
+          timeoutMs: 5000,
+          containerId,
+        }));
+      assertCurrent();
+      if (
+        !metadata ||
+        metadata.podId !== pod.id ||
+        metadata.resourceIdentity !==
+          checkpointResourceIdentity(
+            pod.id,
+            infrastructure.predecessorChecksId,
+            pod.lifecycleGeneration,
+          )
+      )
+        checkpointError('Exact failed-check Docker creation identity is unavailable');
+    }
     if (infrastructure) {
       deps.podRepo.validationExecutions?.assertResourceUnshared(pod.id, containerId);
       infrastructure.originalTree = source.treeSha;
@@ -1049,19 +1152,41 @@ export function createRetainedCheckpointRecovery(deps: {
       checkpointError('Unsupported rewrite repair authority');
     return checkCandidate(podId, recoveryId, input, actor, true);
   }
-  async function previewExecution(podId: string, profileId: string) {
+  async function previewExecution(
+    podId: string,
+    profileId: string,
+    buildOnlyEnvironmentKeys?: string[],
+  ) {
     if (!profileId.trim() || profileId.length > 128)
       checkpointError('Explicit replacement profile required');
     const pod = deps.podRepo.getOrThrow(podId);
     policy(pod, true, undefined, true);
     const preview =
       deps.previewExecution ?? checkpointError('Explicit execution selection is unavailable');
-    return preview(podId, profileId);
+    const execution = await preview(podId, profileId);
+    if (buildOnlyEnvironmentKeys === undefined) return execution;
+    const parent = deps.readLaunch?.(podId) ?? checkpointError('Original launch unavailable');
+    const selected = { ...execution, buildOnlyEnvironmentKeys, digest: '' };
+    const next = retainedContinuationLaunch(parent, podId, selected);
+    return { ...selected, digest: next.digest };
   }
   function validateExecutionSelection(
-    input: Pick<RetainedContinuationRequest, 'executionProfileId' | 'expectedExecutionDigest'>,
+    input: Pick<
+      RetainedContinuationRequest,
+      'executionProfileId' | 'expectedExecutionDigest' | 'buildOnlyEnvironmentKeys'
+    >,
   ) {
+    const keys = input.buildOnlyEnvironmentKeys;
     if (
+      (keys !== undefined &&
+        (!Array.isArray(keys) ||
+          !keys.length ||
+          keys.length > 16 ||
+          new Set(keys).size !== keys.length ||
+          keys.some(
+            (key) => typeof key !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key),
+          ))) ||
+      (input.buildOnlyEnvironmentKeys !== undefined && !input.executionProfileId) ||
       Boolean(input.executionProfileId) !== Boolean(input.expectedExecutionDigest) ||
       (input.expectedExecutionDigest !== undefined &&
         !/^[a-f0-9]{64}$/.test(input.expectedExecutionDigest))
@@ -1072,11 +1197,18 @@ export function createRetainedCheckpointRecovery(deps: {
   }
   async function resolveExecutionSelection(
     pod: Pod,
-    input: Pick<RetainedContinuationRequest, 'executionProfileId' | 'expectedExecutionDigest'>,
+    input: Pick<
+      RetainedContinuationRequest,
+      'executionProfileId' | 'expectedExecutionDigest' | 'buildOnlyEnvironmentKeys'
+    >,
     assertCurrent: () => void,
     coding = false,
   ): Promise<RetainedExecutionSelection> {
-    const execution = await previewExecution(pod.id, input.executionProfileId!);
+    const execution = await previewExecution(
+      pod.id,
+      input.executionProfileId!,
+      input.buildOnlyEnvironmentKeys,
+    );
     assertCurrent();
     if (execution.digest !== input.expectedExecutionDigest)
       checkpointError(
@@ -1111,6 +1243,7 @@ export function createRetainedCheckpointRecovery(deps: {
       'mode',
       'qualification',
       'instructions',
+      'buildOnlyEnvironmentKeys',
       'executionProfileId',
       'expectedExecutionDigest',
     ];
@@ -1121,6 +1254,7 @@ export function createRetainedCheckpointRecovery(deps: {
       input.qualification.trim().length < 20 ||
       input.qualification.length > 4000 ||
       (input.mode === 'checks' && input.instructions !== undefined) ||
+      (input.mode !== 'checks' && input.buildOnlyEnvironmentKeys !== undefined) ||
       (input.mode === 'rework' &&
         (!input.instructions ||
           typeof input.instructions.content !== 'string' ||
@@ -1156,6 +1290,9 @@ export function createRetainedCheckpointRecovery(deps: {
               sha256: input.instructions.sha256,
             },
           }
+        : {}),
+      ...(input.buildOnlyEnvironmentKeys
+        ? { buildOnlyEnvironmentKeys: input.buildOnlyEnvironmentKeys }
         : {}),
       ...(input.executionProfileId
         ? {
@@ -1233,6 +1370,15 @@ export function createRetainedCheckpointRecovery(deps: {
   ) {
     const record = repo.get(input.id) ?? checkpointError('Recovery unavailable');
     if (
+      record.binding.continuation?.execution?.buildOnlyEnvironmentKeys &&
+      (actor.type !== 'human' || deps.podRepo.getOrThrow(podId).userId !== actor.userId)
+    )
+      throw new AutopodError(
+        'Build-only environment selection requires the current pod owner',
+        'FORBIDDEN',
+        403,
+      );
+    if (
       record.podId !== podId ||
       !record.binding.continuation?.infrastructure ||
       record.requestHash !== checkpointHash([podId, infrastructureRequest(input), actor])
@@ -1279,6 +1425,8 @@ export function createRetainedCheckpointRecovery(deps: {
       !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(input.candidateHead)
     )
       checkpointError('Authenticated human and exact candidate selection with reason required');
+    if ('buildOnlyEnvironmentKeys' in input)
+      checkpointError('Build-only environment scoping must be selected at initial preparation');
     validateExecutionSelection(input);
     if (
       input.testBudget &&
@@ -1689,6 +1837,15 @@ export function createRetainedCheckpointRecovery(deps: {
     const assertCurrent = () => {
       repo.assertAvailable(podId);
       const current = deps.podRepo.getOrThrow(podId);
+      if (
+        record.binding.continuation?.execution?.buildOnlyEnvironmentKeys &&
+        (record.actor.type !== 'human' || current.userId !== record.actor.userId)
+      )
+        throw new AutopodError(
+          'Build-only environment selection owner changed before checks',
+          'FORBIDDEN',
+          403,
+        );
       const worker = repo.get(record.id)?.infrastructure?.worker;
       if (
         (worker &&

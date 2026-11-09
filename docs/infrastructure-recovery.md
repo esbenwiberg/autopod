@@ -16,6 +16,22 @@ Old/free-text failures without this sealed, completed repair proof do not acquir
 this permission. No second worker starts automatically, no failed check becomes a
 pass, and unknown/active executions remain ineligible.
 
+A separate narrow successor also supports a completed **checks-only retained
+continuation** that genuinely failed, without inventing an infrastructure report.
+It requires the same logical task/current generation, exact immutable checked
+failure/result hash, completed latest validation admission, unchanged selected
+host checkpoint/worktree, frozen independent reviewer, and a positive Docker
+creation-label observation matching the prior recovery/generation namespace.
+Missing, foreign or legacy labels fail closed before custody/stop. The new
+operation records `predecessorChecksId`; it authorizes checks only, never a coding
+worker. With no recorded post-check source field, only the already selected
+prepared checkpoint is supported, not an inferred final container export.
+Unsynced files/reports and the whole original container remain retained.
+
+This is the continuation/quiescence protocol, **not** `finalize-retained
+--stop-retain`: finalization permanently owns the task and would prevent further
+continuation. Do not use finalization to make an original appear stopped.
+
 Interactive/Goal tasks, sidecars, shared resources, active or unknown executions,
 disabled/thin validation, and missing independent review remain ineligible.
 Uncollected guidance blocks checks-only recovery. An explicitly selected `rework`
@@ -50,6 +66,10 @@ Save an exact request JSON file (128 KiB maximum), containing:
 - optionally `executionProfileId` and `expectedExecutionDigest`: a separately
   previewed software/resource replacement. Original repository, AI/reviewer,
   workflow, network, credentials, tools and other authority remain frozen;
+- for `checks` only, optional `buildOnlyEnvironmentKeys`: explicit owner-selected
+  public tool variables restricted to build, paired with the exact scoped execution
+  preview/digest. See [build-only correction](retained-pod-continuation.md#explicit-build-only-tool-environment-correction).
+  This does not replace assertions or allow a different test command;
 - for `rework` only, `instructions: {content, sha256}`: credential-free operator
   repair context, at most 64 KiB of exact UTF-8 bytes with its SHA-256. It does not
   rewrite the original task or count as review/check evidence.

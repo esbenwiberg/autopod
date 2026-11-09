@@ -647,10 +647,14 @@ export class AutopodClient {
     );
   }
 
-  async previewRetainedExecution(id: string, profileId: string): Promise<unknown> {
+  async previewRetainedExecution(
+    id: string,
+    profileId: string,
+    buildOnlyEnvironmentKeys?: string[],
+  ): Promise<unknown> {
     return this.request(
       'GET',
-      `/pods/${id}/retained-continuation/execution?profileId=${encodeURIComponent(profileId)}`,
+      `/pods/${id}/retained-continuation/execution?profileId=${encodeURIComponent(profileId)}${buildOnlyEnvironmentKeys ? `&buildOnlyEnvironmentKeys=${encodeURIComponent(buildOnlyEnvironmentKeys.join(','))}` : ''}`,
     );
   }
   async getRewriteRepairs(id: string): Promise<unknown> {

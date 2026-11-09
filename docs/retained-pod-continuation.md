@@ -160,6 +160,42 @@ frozen worker image. In particular, full Autopod declaration work needs qualifie
 local capacity rather than silently overallocating a 4 GiB sandbox. See
 [worker profile reliability](worker-profile-reliability.md).
 
+### Explicit build-only tool environment correction
+
+An authenticated pod owner can select `--build-only-env KEY[,KEY...]` with an
+execution preview and initial `--apply` (not late `--check`). This is an explicit
+exception to frozen repository environment inheritance, not arbitrary command or
+workflow replacement. For example, a global `XPM_BICEP` tool-path override can
+correctly select the pinned Bicep executable during build yet violate Node
+identity tests that require an otherwise clean application environment.
+
+```sh
+ap retained-continuation POD --preview-execution SAME_REVIEWED_PROFILE \
+  --build-only-env XPM_BICEP --json
+```
+
+The derived digest binds the selected 1–16 unique keys, their existing public
+literal values and the unchanged original build script. The daemon removes those
+keys from globally inherited `buildEnv` and quotes their assignments around the
+original build command in a build-phase-only shell. No caller values, secret
+references, new commands, skipped assertions or altered phases/reviewer are
+accepted. The original snapshot stays immutable; the selected configuration and
+human actor are retained. Missing keys/build command, changed preview, malformed
+keys or oversized wrapped commands fail before custody. Existing selections with
+no scoping retain their digest semantics. Older daemons reject the new field or
+query; never fall back to an unscoped request.
+
+Supply the same keys and the **scoped** preview digest with initial `--apply`, or
+include `buildOnlyEnvironmentKeys` in a saved checks-only infrastructure recovery
+request. A prepared execution cannot be amended later, and this option cannot
+authorize coding. Owner identity is rechecked after asynchronous observation and
+before preparation/checks. All source, settlement, retry, task-budget and independent
+review gates remain. A preset edit alone does not repair a frozen launch.
+Scoping changes the effective command/environment identity, so the existing
+changed-conditions policy may admit a retry within the unchanged task budget.
+It does not grant an unchanged-input override or reset attempts; if that policy
+refuses admission, a separate explicit retry authorization is still required.
+
 ## Select source for fresh checks
 
 Choose a stable recovery ID before submission. Supply the exact original result

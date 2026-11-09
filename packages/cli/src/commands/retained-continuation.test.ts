@@ -79,6 +79,52 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 describe('retained continuation CLI', () => {
+  it('binds a build-only environment scope to preview and exact initial selection', async () => {
+    await run('--preview-execution', 'qualified', '--build-only-env', 'XPM_BICEP');
+    expect(client.previewRetainedExecution).toHaveBeenCalledWith('retained-pod', 'qualified', [
+      'XPM_BICEP',
+    ]);
+    expect(client.continueRetained).not.toHaveBeenCalled();
+    await run(
+      '--apply',
+      ...fields,
+      '--head',
+      'b'.repeat(40),
+      '--execution-profile',
+      'qualified',
+      '--execution-digest',
+      'd'.repeat(64),
+      '--build-only-env',
+      'XPM_BICEP',
+    );
+    expect(client.continueRetained).toHaveBeenCalledWith(
+      'retained-pod',
+      expect.objectContaining({
+        buildOnlyEnvironmentKeys: ['XPM_BICEP'],
+        expectedExecutionDigest: 'd'.repeat(64),
+      }),
+    );
+  });
+  it.each([
+    '',
+    'XPM_BICEP,XPM_BICEP',
+    'XPM_BICEP;echo unsafe',
+    ',XPM_BICEP',
+  ])('rejects malformed build-only keys %j before creating a client', async (keys) => {
+    await expect(
+      run('--preview-execution', 'qualified', '--build-only-env', keys),
+    ).rejects.toThrow();
+    expect(getClient).not.toHaveBeenCalled();
+  });
+  it('refuses scope-only inspection, late scoping or an unpaired execution choice', async () => {
+    for (const args of [
+      ['--build-only-env', 'XPM_BICEP'],
+      ['--apply', ...fields, '--head', 'b'.repeat(40), '--build-only-env', 'XPM_BICEP'],
+      ['--check', ...fields, '--candidate-head', 'b'.repeat(40), '--build-only-env', 'XPM_BICEP'],
+    ])
+      await expect(run(...args)).rejects.toThrow();
+    expect(getClient).not.toHaveBeenCalled();
+  });
   it('inspects by default with no mutation or provider probe', async () => {
     await run();
     expect(client.getCheckpointRecoveries).toHaveBeenCalledWith('retained-pod');

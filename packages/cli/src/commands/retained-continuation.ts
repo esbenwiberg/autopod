@@ -164,6 +164,10 @@ export function registerRetainedContinuationCommand(
     )
     .option('--execution-digest <sha256>', 'Exact replacement execution preview digest')
     .option(
+      '--build-only-env <keys>',
+      'Explicit comma-separated public environment keys to restrict to the build phase; preview/apply only',
+    )
+    .option(
       '--test-budget-seconds <seconds>',
       'One finite outer-test allowance at --check only (1–3600); not retry permission',
     )
@@ -187,10 +191,25 @@ export function registerRetainedContinuationCommand(
           previewExecution?: string;
           executionProfile?: string;
           executionDigest?: string;
+          buildOnlyEnv?: string;
           testBudgetSeconds?: string;
           testBudgetReason?: string;
         },
       ) => {
+        const buildOnlyEnvironmentKeys = opts.buildOnlyEnv?.split(',');
+        if (
+          buildOnlyEnvironmentKeys &&
+          ((!opts.previewExecution && !opts.apply) ||
+            opts.check ||
+            (!opts.previewExecution && !opts.executionProfile) ||
+            !buildOnlyEnvironmentKeys.length ||
+            buildOnlyEnvironmentKeys.length > 16 ||
+            new Set(buildOnlyEnvironmentKeys).size !== buildOnlyEnvironmentKeys.length ||
+            buildOnlyEnvironmentKeys.some((key) => !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key)))
+        )
+          throw new Error(
+            '--build-only-env requires explicit preview or apply with an execution selection and 1–16 unique environment keys.',
+          );
         const mutation =
           opts.prepareOnly ||
           opts.requestId ||
@@ -260,7 +279,13 @@ export function registerRetainedContinuationCommand(
         const client = getClient();
         const podId = await resolvePodId(client, id);
         const result = opts.previewExecution
-          ? await client.previewRetainedExecution(podId, opts.previewExecution)
+          ? buildOnlyEnvironmentKeys
+            ? await client.previewRetainedExecution(
+                podId,
+                opts.previewExecution,
+                buildOnlyEnvironmentKeys,
+              )
+            : await client.previewRetainedExecution(podId, opts.previewExecution)
           : opts.check
             ? await client.checkRetainedCandidate(podId, opts.requestId as string, {
                 expectedGeneration: Number(opts.generation),
@@ -290,6 +315,7 @@ export function registerRetainedContinuationCommand(
                   checkpointHead: opts.head as string,
                   ...(opts.remoteHead ? { remoteHead: opts.remoteHead } : {}),
                   prepareOnly: opts.prepareOnly ?? false,
+                  ...(buildOnlyEnvironmentKeys ? { buildOnlyEnvironmentKeys } : {}),
                   ...(opts.executionProfile
                     ? {
                         executionProfileId: opts.executionProfile,

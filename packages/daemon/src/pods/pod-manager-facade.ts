@@ -170,10 +170,14 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
         captured.checkpointRecovery ?? checkpointError('Rewrite repair unavailable')
       ).checkRewriteRepair(podId, recoveryId, input, actor);
     },
-    previewRetainedExecution(podId: string, profileId: string) {
+    previewRetainedExecution(
+      podId: string,
+      profileId: string,
+      buildOnlyEnvironmentKeys?: string[],
+    ) {
       return (
         captured.checkpointRecovery ?? checkpointError('Retained continuation unavailable')
-      ).previewExecution(podId, profileId);
+      ).previewExecution(podId, profileId, buildOnlyEnvironmentKeys);
     },
     recoverInfrastructure(
       podId: string,

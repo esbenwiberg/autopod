@@ -24,6 +24,11 @@ export function checkpointRecoveryRoutes(
     Partial<Pick<PodManager, 'inspectRetainedContinuation'>>,
 ) {
   const params = z.object({ podId: z.string().min(1).max(128) });
+  const buildOnlyKeys = z
+    .array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/))
+    .min(1)
+    .max(16)
+    .refine((keys) => new Set(keys).size === keys.length, 'Duplicate environment keys');
   const identity = {
     rewriteId: z.string().min(1).max(128),
     failedDispatchId: z.string().min(1).max(128),
@@ -101,6 +106,7 @@ export function checkpointRecoveryRoutes(
               })
               .strict()
               .optional(),
+            buildOnlyEnvironmentKeys: buildOnlyKeys.optional(),
             executionProfileId: z.string().min(1).max(128).optional(),
             expectedExecutionDigest: z
               .string()
@@ -123,12 +129,18 @@ export function checkpointRecoveryRoutes(
     if (!request.user?.oid)
       throw new AutopodError('Authenticated human identity required', 'UNAUTHORIZED', 401);
     const { podId } = params.parse(request.params);
-    const { profileId } = z
-      .object({ profileId: z.string().min(1).max(128) })
+    const { profileId, buildOnlyEnvironmentKeys } = z
+      .object({
+        profileId: z.string().min(1).max(128),
+        buildOnlyEnvironmentKeys: z
+          .string()
+          .transform((value) => buildOnlyKeys.parse(value.split(',')))
+          .optional(),
+      })
       .strict()
       .parse(request.query);
     reply.header('Cache-Control', 'no-store');
-    return manager.previewRetainedExecution(podId, profileId);
+    return manager.previewRetainedExecution(podId, profileId, buildOnlyEnvironmentKeys);
   });
   app.post('/pods/:podId/retained-continuation', async (request, reply) => {
     if (!request.user?.oid)
@@ -145,6 +157,7 @@ export function checkpointRecoveryRoutes(
           .regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/)
           .optional(),
         prepareOnly: z.boolean().default(false),
+        buildOnlyEnvironmentKeys: buildOnlyKeys.optional(),
         executionProfileId: z.string().min(1).max(128).optional(),
         expectedExecutionDigest: z
           .string()

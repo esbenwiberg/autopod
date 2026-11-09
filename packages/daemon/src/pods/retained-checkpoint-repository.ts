@@ -89,6 +89,8 @@ export interface CheckpointRecoveryBinding {
       originalTree: string;
       /** Exact completed failed repair whose sealed source is selected again. */
       predecessorRepairId?: string;
+      /** Exact completed checks-only failure; no original worker outcome is inferred. */
+      predecessorChecksId?: string;
     };
   };
 }
@@ -787,6 +789,29 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       return scope(db).run(id, operation);
     },
     selectionEvidence,
+    completedChecksAdmission(pod: Pod): boolean {
+      const row = db
+        .prepare(`SELECT pod_id AS podId,generation,started_at AS startedAt,ended_at AS endedAt,outcome
+        FROM task_retry_attempts WHERE task_id=(SELECT task_id FROM task_executions WHERE pod_id=?)
+        AND stage='validation' ORDER BY rowid DESC LIMIT 1`)
+        .get(pod.id) as
+        | {
+            podId: string;
+            generation: number;
+            startedAt: string | null;
+            endedAt: string | null;
+            outcome: string | null;
+          }
+        | undefined;
+      return Boolean(
+        row &&
+          row.podId === pod.id &&
+          row.generation === pod.lifecycleGeneration &&
+          row.startedAt &&
+          row.endedAt &&
+          ['nonretryable', 'transient'].includes(row.outcome ?? ''),
+      );
+    },
     prevalidationSource: (pod: Pod) => originalEvidence(pod)?.prevalidationSource ?? null,
     infrastructureNeeds,
     hasTypedPrerequisiteBlocker(pod: Pick<Pod, 'id' | 'lifecycleGeneration'>): boolean {
