@@ -16,6 +16,10 @@ import {
   createRetainedFinalizationRepository,
   ownsRetainedFinalization,
 } from './retained-finalization-repository.js';
+import {
+  type RetainedPrevalidationSource,
+  retainedPrevalidationSource,
+} from './retained-prevalidation-source.js';
 import { assertStalledRecoveryResourceAvailable } from './stalled-worker-recovery-repository.js';
 
 export type { CheckpointRecoveryRequest } from '@autopod/shared';
@@ -124,6 +128,7 @@ export interface CheckpointRecoveryRecord {
     result: ValidationResult | null;
     preSubmitReview: Pod['preSubmitReview'];
     infrastructureReports?: { id: string; timestamp: string; payload: ReportBlockerPayload }[];
+    prevalidationSource?: RetainedPrevalidationSource;
   };
   createdAt: string;
   prepared: PreparedCheckpoint | null;
@@ -334,7 +339,12 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       timestamp: string;
       payload: string;
     }[];
-    if (!rows.length) return null;
+    if (!rows.length) {
+      const source = retainedPrevalidationSource(db, pod);
+      return source
+        ? { result: null, preSubmitReview: pod.preSubmitReview, prevalidationSource: source }
+        : null;
+    }
     if (
       rows.length > 100 ||
       rows.some((row) => Buffer.byteLength(row.payload) > 65536) ||
@@ -364,7 +374,10 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
   }
   const evidenceHash = (evidence: CheckpointRecoveryRecord['originalEvidence']) =>
     checkpointHash(
-      evidence.result ?? { result: null, infrastructureReports: evidence.infrastructureReports },
+      evidence.result ??
+        (evidence.prevalidationSource
+          ? { result: null, prevalidationSource: evidence.prevalidationSource }
+          : { result: null, infrastructureReports: evidence.infrastructureReports }),
     );
   function selectionEvidence(pod: Pod) {
     const evidence = originalEvidence(pod);
@@ -774,6 +787,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       return scope(db).run(id, operation);
     },
     selectionEvidence,
+    prevalidationSource: (pod: Pod) => originalEvidence(pod)?.prevalidationSource ?? null,
     infrastructureNeeds,
     hasTypedPrerequisiteBlocker(pod: Pick<Pod, 'id' | 'lifecycleGeneration'>): boolean {
       return Boolean(

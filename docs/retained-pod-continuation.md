@@ -368,6 +368,38 @@ Related: [legacy checkpoint recovery](retained-checkpoint-recovery.md),
 [approval source leases](merge-operator-recovery.md), and
 [validation execution recovery](validation-execution-recovery.md).
 
+## Checks from sealed pre-validation source
+
+A stopped task does not need a fabricated failed result or infrastructure report
+to enter its **first real checks**. The existing `ap retained-continuation`
+checks-only selection also accepts an exact settled Docker stop-and-retain receipt
+when no validation dispatch, stored validation or validation retry admission exists
+for the logical task. This is source evidence, not an inferred worker outcome.
+
+The current frozen native task/generation/cycle, settled worker, Docker namespace
+and resource, original host path, preserved branch/clean HEAD/tree and private
+archive checksum must match the immutable receipt. Original result remains null.
+Admission and preparation observe the exact stopped resource; preparation rehashes
+the complete retained archive (including ignored files/Git data) and rechecks the
+original clean source before activation. Missing/changed archives or source hold
+the operation without starting checks.
+
+This slice supports **exact-source checks only**: no coding continuation,
+prepare-only/manual candidate, remote source substitution, original wake/exec,
+second stop, resource deletion, inferred pass or delivery. Existing guidance,
+ownership, settlement, retry, task-budget and frozen independent-review gates still
+apply. Changing a task token cap is a separate explicit human action; source
+selection does not reset usage, retries, execution history or other limits.
+
+Inspection supplies the ordinary generation/evidence hash. Select the exact sealed
+host HEAD using `ap retained-continuation POD --apply --request-id SAVED_ID
+--generation GENERATION --result-hash EVIDENCE_HASH --head SEALED_HEAD --reason ...`.
+A replacement execution selection remains separately previewed software/resources
+only; task/repository/AI/workflow/network authority stays frozen. Originals,
+archives, reports, unknown worker result and prior accounting remain retained.
+Fresh required checks and independent review stop at validated for separate human
+approval. A failed/unknown check is recorded, never an automatic coding retry.
+
 ## Conditional environment repair and one coding continuation
 
 `ap repair-continuation` and the desktop **Inspect repair & continuation…** sheet
