@@ -4,7 +4,10 @@ import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { AutopodError, type Pod, type RetainedFinalizationReceipt } from '@autopod/shared';
 import type Database from 'better-sqlite3';
-import { assertArtifactChecksPathAvailable } from './artifact-checks-recovery-repository.js';
+import {
+  assertArtifactChecksAvailable,
+  assertArtifactChecksPathAvailable,
+} from './artifact-checks-recovery-repository.js';
 import { retainedPathIdentity } from './retained-path-identity.js';
 import { assertStalledRecoveryPathAvailable } from './stalled-worker-recovery-repository.js';
 
@@ -247,6 +250,7 @@ export function createRetainedFinalizationRepository(db: Database.Database) {
       evidence: unknown,
     ) {
       db.transaction(() => {
+        assertArtifactChecksAvailable(db, receipt.podId);
         assertAvailable(receipt.podId);
         if (
           db

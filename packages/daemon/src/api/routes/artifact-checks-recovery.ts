@@ -32,6 +32,7 @@ export function artifactChecksRecoveryRoutes(
           type: 'human',
           userId: request.user.oid,
         },
+        suffix === '/reconcile',
       );
       reply.header('Cache-Control', 'no-store');
       return reply.code(202).send({ operation });

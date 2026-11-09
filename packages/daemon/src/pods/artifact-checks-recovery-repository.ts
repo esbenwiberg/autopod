@@ -164,6 +164,7 @@ export function createArtifactChecksRecoveryRepository(
         binding: ArtifactChecksBinding,
         requestHash: string,
         assertCurrent: () => void,
+        audit: unknown,
       ) => {
         const prior = get(id);
         if (prior) {
@@ -184,6 +185,12 @@ export function createArtifactChecksRecoveryRepository(
           binding.containerId,
           requestHash,
           JSON.stringify(binding),
+          new Date().toISOString(),
+        );
+        db.prepare('INSERT INTO artifact_checks_recovery_events VALUES(?,?,?,?)').run(
+          id,
+          'selected',
+          JSON.stringify(audit),
           new Date().toISOString(),
         );
         return get(id)!;
@@ -218,6 +225,7 @@ export interface ArtifactChecksRecoveryRepository {
     binding: ArtifactChecksBinding,
     requestHash: string,
     assertCurrent: () => void,
+    audit: unknown,
   ): ArtifactChecksRecord;
   append(id: string, kind: string, evidence: unknown): void;
   stop<T>(id: string, run: () => T): T;

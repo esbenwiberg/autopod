@@ -5099,6 +5099,18 @@ describe('validate() — pre-validation worktree reset', () => {
     expect(first.command[2]).toContain('git reset --hard HEAD');
     expect(first.command[2]).toContain('git clean -fd');
   });
+  it('verifies artifact source without any Git reset or baseline creation', async () => {
+    const { cm, calls } = recordingContainerManager();
+    const verify = vi.fn(async () => {});
+    const result = await createLocalValidationEngine(cm).validate(
+      minimalConfig({
+        artifactSource: { sha256: 'a'.repeat(64), verify },
+      }),
+    );
+    expect(verify).toHaveBeenCalledOnce();
+    expect(calls).toHaveLength(0);
+    expect(result.taskReview).toBeNull();
+  });
 
   it.each([
     true,

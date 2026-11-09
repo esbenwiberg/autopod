@@ -10,10 +10,14 @@ import { daemonRelease } from '../release.js';
 import type { createArtifactChecksRecovery } from './artifact-checks-recovery.js';
 import { artifactChecksError } from './artifact-checks-recovery-repository.js';
 import { collectArtifactSnapshot } from './artifact-preservation.js';
-import { verifyArtifactSnapshot } from './artifact-snapshot-receipt.js';
+import {
+  fingerprintArtifactSnapshot,
+  verifyArtifactSnapshot,
+} from './artifact-snapshot-receipt.js';
 import { inspectExecutionPreflight } from './execution-preflight.js';
 import type { PodRepository } from './pod-repository.js';
 import { resolveReviewerModel, resolveReviewerProvider } from './runtime-resolver.js';
+import { requiresValidationSettlement } from './validation-recovery-policy.js';
 import { getPodValidationSkipPhases } from './validation-workflow-policy.js';
 
 type Execute = Parameters<typeof createArtifactChecksRecovery>[0]['execute'];
@@ -90,6 +94,7 @@ export function createArtifactChecksExecution(deps: {
       artifactChecksError('Checks require a separate execution resource');
     const metadata = await deps.cm.getExecutionMetadata!(containerId);
     const resourceKey = await deps.cm.getResourceKey!(containerId);
+    deps.podRepo.validationExecutions?.assertResourceUnshared(pod.id, containerId);
     const requirements = pod.contract!.executionRequirements!;
     if (
       !resourceKey ||
@@ -181,6 +186,7 @@ export function createArtifactChecksExecution(deps: {
       },
       artifactSource: {
         sha256: input.sourceHash,
+        assertCurrent,
         verify: async () => {
           assertCurrent();
           await verifyArtifactSnapshot(
@@ -204,6 +210,8 @@ export function createArtifactChecksExecution(deps: {
     };
     await deps.assertCapabilities(launch);
     assertCurrent();
+    if ((await fingerprintArtifactSnapshot(input.workspace)).sha256 !== input.sourceHash)
+      artifactChecksError('Independent execution source changed before check dispatch');
     const retries =
       deps.podRepo.taskRetries ?? artifactChecksError('Task retry accounting unavailable');
     const admission = retries.admit(
@@ -239,9 +247,17 @@ export function createArtifactChecksExecution(deps: {
     record('engineResult', { result, sourceHash: input.sourceHash, resourceKey });
     retries.finish(
       admission.id,
-      result.overall === 'pass' ? 'pass' : 'nonretryable',
+      requiresValidationSettlement({ lastValidationResult: result })
+        ? 'unknown'
+        : result.overall === 'pass'
+          ? 'pass'
+          : 'nonretryable',
       Math.round(performance.now() - started),
     );
+    if (requiresValidationSettlement({ lastValidationResult: result }))
+      artifactChecksError(
+        'Checks termination is unverified; retain the exact execution and inspect its saved evidence',
+      );
     // Even failed/blocked results retain new reports and both original resources.
     const reports = await collectArtifactSnapshot({
       containerManager: deps.cm,

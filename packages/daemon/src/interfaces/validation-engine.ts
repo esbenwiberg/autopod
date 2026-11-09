@@ -18,7 +18,7 @@ import type { BeforeReviewerLaunch } from './reviewer-launch.js';
 
 export interface ValidationEngineConfig {
   /** Trusted artifact recovery source. No Git reset, baseline or diff-cache reuse. */
-  artifactSource?: { sha256: string; verify(): Promise<void> };
+  artifactSource?: { sha256: string; assertCurrent?(): void; verify(): Promise<void> };
   /** Trusted per-invocation preflight and ownership fence for actual container reviewer launches. */
   beforeReviewerLaunch?: BeforeReviewerLaunch;
   /** Trusted synchronous ownership fence for host/API reviewer dispatch and tool turns. */

@@ -428,6 +428,7 @@ export function createLocalValidationEngine(
       const crashController = new AbortController();
 
       function checkAbort(): void {
+        config.artifactSource?.assertCurrent?.();
         if (signal?.aborted) throw new ValidationInterruptedError('Validation interrupted by user');
         if (crashController.signal.aborted)
           throw new ValidationInterruptedError(
@@ -2046,6 +2047,7 @@ async function runFactValidation(
   let hostBrowserFactDependenciesPrepared = false;
 
   for (const fact of facts) {
+    config.artifactSource?.assertCurrent?.();
     const requestedDeviation = factDeviationMap.get(fact.id);
     if (requestedDeviation) {
       if (requestedDeviation.decision === 'rejected') {

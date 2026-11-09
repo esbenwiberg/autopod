@@ -10,7 +10,10 @@ import {
   type TaskRetryAuthorization,
   type ValidationResult,
 } from '@autopod/shared';
-import { assertArtifactChecksResourceAvailable } from './artifact-checks-recovery-repository.js';
+import {
+  assertArtifactChecksAvailable,
+  assertArtifactChecksResourceAvailable,
+} from './artifact-checks-recovery-repository.js';
 import { createRetainedCodingRepository } from './retained-coding-repository.js';
 import {
   assertFinalizationResourceAvailable,
@@ -512,6 +515,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
     ).run(id, kind, JSON.stringify(evidence), new Date().toISOString());
   }
   function assertAvailable(podId: string) {
+    assertArtifactChecksAvailable(db, podId);
     if (ownsRetainedFinalization(db, podId)) return;
     createRetainedFinalizationRepository(db).assertAvailable(podId);
     const rows = db

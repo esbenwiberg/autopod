@@ -1,5 +1,9 @@
 # Preservation-safe infrastructure recovery
 
+Held empty-workspace artifacts have a separate bounded
+[checks-only artifact route](artifact-checks-recovery.md). The Git-backed controls
+below do not admit them, and collecting files alone is not independent acceptance.
+
 `ap recover-infrastructure <pod>` is a separate, authenticated human control for a
 failed **local Docker** task whose worker has settled and whose exact clean Git
 source was preserved before a current-generation infrastructure report. It is

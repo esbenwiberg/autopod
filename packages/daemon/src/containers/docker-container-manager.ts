@@ -940,6 +940,18 @@ export class DockerContainerManager implements ContainerManager {
       containerId,
     });
     return {
+      workspaceStorage: !Array.isArray(info.Mounts)
+        ? 'unknown'
+        : info.Mounts.some((mount) => {
+              const destination = mount.Destination?.replace(/\/+$/, '') || '/';
+              return (
+                destination === '/' ||
+                destination === '/workspace' ||
+                destination.startsWith('/workspace/')
+              );
+            })
+          ? 'mounted'
+          : 'container',
       ...(typeof info.Config?.Labels?.['com.autopod.pod-id'] === 'string'
         ? { podId: info.Config.Labels['com.autopod.pod-id'] }
         : {}),

@@ -90,10 +90,11 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
       podId: string,
       input: import('@autopod/shared').ArtifactChecksRecoveryRequest,
       actor: OperatorActor,
+      reconcile = false,
     ) {
       return (
         captured.artifactChecksRecovery ?? checkpointError('Artifact checks unavailable')
-      ).submit(podId, input, actor);
+      ).submit(podId, input, actor, reconcile);
     },
     inspectStalledWorkerRecovery(podId: string) {
       return (

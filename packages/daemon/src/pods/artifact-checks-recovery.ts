@@ -46,6 +46,8 @@ export async function artifactReviewContents(root: string): Promise<string> {
         'Initial artifact review supports bounded regular UTF-8 source files only',
       );
     const raw = await readFile(file);
+    if (!/^[A-Za-z0-9_.+@/-]+$/.test(relative))
+      artifactChecksError('Artifact path cannot be represented unambiguously in a review packet');
     const content = new TextDecoder('utf-8', { fatal: true }).decode(raw);
     if (content.includes('\0')) artifactChecksError('Binary artifact review is unsupported');
     bytes += raw.length + Buffer.byteLength(relative) + 100;
@@ -96,6 +98,7 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
       launch.digest !== pod.launchConfigDigest ||
       launch.intent !== 'task' ||
       launch.repository ||
+      launch.references.length ||
       launch.ai.reviewer.mode !== 'independent' ||
       launch.workflow.agentMode !== 'auto' ||
       launch.pim.length ||
@@ -132,7 +135,12 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
       pod.referenceRepos?.length ||
       !pod.contract?.requiredFacts.length ||
       !['complete', 'repaired'].includes(pod.tokenTelemetryAccuracy) ||
-      pod.contract.requiredFacts.some((f) => !f.command.trim() || f.kind === 'browser-test') ||
+      pod.contract.requiredFacts.some(
+        (f) =>
+          !f.command.trim() ||
+          f.kind === 'browser-test' ||
+          !['create', 'touch'].includes(f.artifact.change),
+      ) ||
       getPodValidationSkipPhases(profile, pod).some((p) => ['facts', 'review'].includes(p))
     )
       artifactChecksError(
@@ -152,10 +160,7 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
     pods.sourceAdoptions?.assertControlPlaneSettled(podId);
     deps.assertGuidanceCollected(podId);
     const task = pods.taskExecutions.snapshot(podId);
-    if (
-      !['unlimited', 'below_recorded_limit'].includes(task.budgetCheck?.status ?? '') ||
-      task.podCount !== 1
-    )
+    if (task.budgetCheck?.status !== 'unlimited' || task.podCount !== 1)
       artifactChecksError(
         'Complete standalone task accounting and available frozen budget required',
       );
@@ -171,9 +176,15 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
   }
   async function binding(podId: string, owned = false): Promise<ArtifactChecksBinding> {
     const selected = selection(podId, owned);
-    if (!cm.getResourceKey || !cm.getExecutionMetadata || !cm.executionResourceScope)
+    if (!cm.getResourceKey || !cm.getExecutionMetadata)
       artifactChecksError('Exact Docker provider identity unavailable');
     const resourceKey = await cm.getResourceKey(selected.pod.containerId!);
+    const metadata = await cm.getExecutionMetadata(selected.pod.containerId!);
+    if (metadata.workspaceStorage !== 'container' || (metadata.podId && metadata.podId !== podId))
+      artifactChecksError(
+        'Original workspace must be positively observed private container storage',
+      );
+    pods.validationExecutions?.assertResourceUnshared(podId, selected.pod.containerId!);
     const current = selection(podId, owned);
     if (configurationDigest(current) !== configurationDigest(selected))
       artifactChecksError('Selection changed during observation');
@@ -198,6 +209,9 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
         selected.pod.inputTokens,
         selected.pod.outputTokens,
         selected.pod.tokenTelemetryAccuracy,
+        selected.pod.finalization,
+        selected.pod.taskSummary,
+        selected.pod.plan,
       ]),
     };
   }
@@ -236,11 +250,14 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
         current.pod.contract,
         current.pod.options,
         current.pod.providerIdSnapshot,
-          current.pod.providerAccountIdSnapshot,
-          current.task.tokenBudget,
-          current.pod.inputTokens,
-          current.pod.outputTokens,
-          current.pod.tokenTelemetryAccuracy,
+        current.pod.providerAccountIdSnapshot,
+        current.task.tokenBudget,
+        current.pod.inputTokens,
+        current.pod.outputTokens,
+        current.pod.tokenTelemetryAccuracy,
+        current.pod.finalization,
+        current.pod.taskSummary,
+        current.pod.plan,
       ]) !== record.binding.authorityHash
     )
       artifactChecksError(
@@ -378,7 +395,12 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
         append('blocked', { message: error instanceof Error ? error.message : String(error) });
     }
   }
-  async function submit(podId: string, input: ArtifactChecksRecoveryRequest, actor: OperatorActor) {
+  async function submit(
+    podId: string,
+    input: ArtifactChecksRecoveryRequest,
+    actor: OperatorActor,
+    reconcile = false,
+  ) {
     if (
       actor.type !== 'human' ||
       !actor.userId.trim() ||
@@ -396,12 +418,22 @@ export function createArtifactChecksRecovery(deps: Dependencies) {
       if (record.binding.podId !== podId || record.requestHash !== requestHash)
         artifactChecksError('Request identity conflicts with saved actor/selection');
     } else {
+      if (reconcile)
+        artifactChecksError(
+          'No saved request exists to reconcile; inspect before explicit selection',
+        );
       const selected = await binding(podId);
       if (configurationDigest(selected) !== input.expectedBindingHash)
         artifactChecksError('Inspected selection is stale');
-      record = store.admit(input.id, selected, requestHash, () => {
-        selection(podId);
-      });
+      record = store.admit(
+        input.id,
+        selected,
+        requestHash,
+        () => {
+          selection(podId);
+        },
+        { actor, request: input },
+      );
     }
     if (!pending.has(input.id)) {
       const saved = record;

@@ -155,6 +155,8 @@ export interface TerminalSession {
 }
 
 export interface ContainerExecutionMetadata {
+  /** Original artifact recovery requires private container-layer workspace storage. */
+  workspaceStorage?: 'container' | 'mounted' | 'unknown';
   /** Immutable Docker creation labels; absence is not proof of retained execution ownership. */
   podId?: string;
   resourceIdentity?: string;

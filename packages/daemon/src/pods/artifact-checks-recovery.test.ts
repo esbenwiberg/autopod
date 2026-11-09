@@ -12,6 +12,7 @@ import { configurationDigest } from '../configuration/configuration-digest.js';
 import { admitLaunch } from '../configuration/launch-admission.js';
 import { resolveLaunchExecutionSettings } from '../configuration/launch-execution-settings.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
+import { createDatabase } from '../db/connection.js';
 import { createProviderAccountStore } from '../provider-accounts/provider-account-store.js';
 import { createTestConfiguration } from '../test-utils/configuration-helpers.js';
 import { createPassingValidationResult, createTestContext } from '../test-utils/mock-helpers.js';
@@ -20,6 +21,7 @@ import { IsolatedReviewer } from '../validation/isolated-reviewer.js';
 import { ReviewerRunRepository } from '../validation/reviewer-run-repository.js';
 import { artifactReviewContents } from './artifact-checks-recovery.js';
 import { createPodManager } from './pod-manager.js';
+import { createPodRepository, type PodRepository } from './pod-repository.js';
 import { assertCheckpointResourceNotRetained } from './retained-checkpoint-repository.js';
 import { assertSourceAvailable, assertSourceDeliveryAllowed } from './source-custody-guards.js';
 
@@ -158,10 +160,10 @@ async function fixture() {
   let stopped = false;
   let spawned: Parameters<typeof cm.spawn>[0] | undefined;
   Object.assign(cm, {
-    executionResourceScope: 'docker:fixture',
     supportsStreamingExec: true,
     getResourceKey: vi.fn(async (id: string) => `docker:fixture:${id}`),
     getExecutionMetadata: vi.fn(async () => ({
+      workspaceStorage: 'container',
       podId,
       resourceIdentity: spawned?.resourceIdentity,
       imageDigest: image,
@@ -274,8 +276,8 @@ async function fixture() {
     operation,
     wait,
     original,
-    restart: () => {
-      manager = createPodManager(ctx.deps);
+    restart: (podRepo: PodRepository = ctx.podRepo) => {
+      manager = createPodManager({ ...ctx.deps, podRepo });
     },
     markStopped: () => {
       stopped = true;
@@ -353,6 +355,33 @@ describe('held empty-workspace artifact checks through production manager/API', 
         })
       ).statusCode,
     ).toBe(409);
+  });
+  it('reconciles checked identities from a reopened SQLite database without replay', async () => {
+    const f = await fixture();
+    await f.app.inject({ method: 'POST', url: f.url, headers: f.headers, payload: f.request });
+    await f.wait();
+    const file = path.join(path.dirname(f.original), 'reopened.db');
+    await writeFile(file, f.ctx.db.serialize());
+    const db = createDatabase(file, f.ctx.deps.logger);
+    cleanups.push(async () => {
+      db.close();
+    });
+    const pods = createPodRepository(db);
+    f.restart(pods);
+    const response = await f.app.inject({
+      method: 'POST',
+      url: `${f.url}/reconcile`,
+      headers: f.headers,
+      payload: f.request,
+    });
+    expect(response.statusCode).toBe(202);
+    expect(response.json().operation.events.selected).toMatchObject({
+      request: f.request,
+      actor: { type: 'human', userId: 'operator-oid' },
+    });
+    expect(response.json().operation.events.checked).toMatchObject({ outcome: 'pass' });
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledOnce();
+    expect(() => assertSourceAvailable(db, f.podId)).toThrow();
   });
   it('observes a lost stop response without issuing another stop', async () => {
     const f = await fixture();
@@ -438,6 +467,108 @@ describe('held empty-workspace artifact checks through production manager/API', 
     expect(f.operation().events.blocked).toBeTruthy();
     expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
     expect(f.cm.kill).not.toHaveBeenCalled();
+  });
+  it.each([
+    'unsettled',
+    'unqualified-needs',
+    'missing-reviewer',
+    'pending-decision',
+    'waiver',
+    'incomplete-accounting',
+    'mounted-source',
+  ])('fails closed before custody/stop for %s', async (mode) => {
+    const f = await fixture();
+    if (mode === 'unsettled') f.ctx.podRepo.completionJournal!.begin(f.pod());
+    if (mode === 'unqualified-needs')
+      f.ctx.db
+        .prepare(
+          "UPDATE escalations SET payload=json_remove(payload,'$.prerequisiteBlocker') WHERE id='launcher-report'",
+        )
+        .run();
+    if (mode === 'missing-reviewer') {
+      const read = f.ctx.deps.launchConfiguration!.read;
+      f.ctx.deps.launchConfiguration!.read = (id) => {
+        const config = read(id)!;
+        return { ...config, ai: { ...config.ai, reviewer: { mode: 'follow-main' } } };
+      };
+      f.restart();
+    }
+    if (mode === 'pending-decision')
+      f.ctx.podRepo.update(f.podId, {
+        pendingEscalation: {
+          id: 'pending',
+          podId: f.podId,
+          type: 'ask_human',
+          timestamp: new Date().toISOString(),
+          payload: { question: 'Choose' },
+          response: null,
+        },
+      });
+    if (mode === 'waiver') f.ctx.podRepo.update(f.podId, { skipValidation: true });
+    if (mode === 'incomplete-accounting')
+      f.ctx.podRepo.update(f.podId, { tokenTelemetryAccuracy: 'partial' });
+    if (mode === 'mounted-source')
+      vi.mocked(f.cm.getExecutionMetadata!).mockResolvedValue({
+        workspaceStorage: 'mounted',
+        imageDigest: null,
+        memoryLimitBytes: null,
+        cpuLimit: null,
+        networkMode: null,
+      });
+    const response = await f.app.inject({
+      method: 'POST',
+      url: f.url,
+      headers: f.headers,
+      payload: f.request,
+    });
+    expect(response.statusCode).toBe(409);
+    expect(f.operation()).toBeNull();
+    expect(f.cm.stop).not.toHaveBeenCalled();
+  });
+  it('refuses reconciliation that has no original saved request', async () => {
+    const f = await fixture();
+    expect(
+      (
+        await f.app.inject({
+          method: 'POST',
+          url: `${f.url}/reconcile`,
+          headers: f.headers,
+          payload: f.request,
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(f.cm.stop).not.toHaveBeenCalled();
+  });
+  it('rejects changed captured source even when a check boundary returns pass', async () => {
+    const f = await fixture();
+    const execute = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
+    vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => {
+      const result = await execute(config);
+      await writeFile(path.join(config.worktreePath!, 'source.js'), 'Changed captured bytes');
+      return result;
+    });
+    await f.app.inject({ method: 'POST', url: f.url, headers: f.headers, payload: f.request });
+    await f.wait();
+    expect(f.operation().events.checked).toBeUndefined();
+    expect(f.operation().events.blocked).toBeTruthy();
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledOnce();
+  });
+  it('retains an uncertain capture across restart without dispatching it again', async () => {
+    const f = await fixture();
+    vi.mocked(f.cm.extractDirectoryFromContainer).mockRejectedValue(
+      new Error('Capture response lost'),
+    );
+    await f.app.inject({ method: 'POST', url: f.url, headers: f.headers, payload: f.request });
+    await f.wait();
+    f.restart();
+    await f.app.inject({
+      method: 'POST',
+      url: `${f.url}/reconcile`,
+      headers: f.headers,
+      payload: f.request,
+    });
+    expect(f.cm.extractDirectoryFromContainer).toHaveBeenCalledOnce();
+    expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
   });
   it('does not use an empty or binary content packet as independent review', async () => {
     const f = await fixture();

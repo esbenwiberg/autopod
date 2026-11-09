@@ -3,8 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { Command } from 'commander';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AutopodClient } from '../api/client.js';
+import { AutopodClient } from '../api/client.js';
 import { registerArtifactChecksRecoveryCommand } from './artifact-checks-recovery.js';
+
+const transport = vi.hoisted(() => vi.fn());
+vi.mock('undici', () => ({ fetch: (...args: unknown[]) => transport(...args) }));
 
 const client = {
   inspectArtifactChecksRecovery: vi.fn(async () => ({
@@ -38,6 +41,38 @@ async function run(...args: string[]) {
   });
 }
 describe('checks-only artifact recovery CLI', () => {
+  it('uses the dedicated authenticated reconcile endpoint and preserves pending response bytes', async () => {
+    const pending = { operation: { id: input.id, events: { stopDispatched: true } } };
+    transport.mockResolvedValueOnce({
+      ok: true,
+      status: 202,
+      headers: { get: () => 'application/json' },
+      json: async () => pending,
+    });
+    const http = new AutopodClient({
+      baseUrl: 'http://localhost:3000',
+      getToken: async () => 'synthetic-token',
+    });
+    expect(await http.recoverArtifactChecks('synthetic-artifact', input, true)).toEqual(pending);
+    expect(transport).toHaveBeenCalledExactlyOnceWith(
+      'http://localhost:3000/pods/synthetic-artifact/artifact-checks-recovery/reconcile',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify(input) }),
+    );
+  });
+  it('fails closed on old-daemon 404 without falling back to Resume', async () => {
+    transport.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ error: 'Not found' }),
+    });
+    const http = new AutopodClient({
+      baseUrl: 'http://localhost:3000',
+      getToken: async () => 'synthetic-token',
+    });
+    await expect(http.recoverArtifactChecks('synthetic-artifact', input)).rejects.toThrow();
+    expect(transport).toHaveBeenCalledOnce();
+  });
   it('only inspects by default and displays a refusal honestly', async () => {
     await run();
     expect(client.inspectArtifactChecksRecovery).toHaveBeenCalledWith('synthetic-artifact');

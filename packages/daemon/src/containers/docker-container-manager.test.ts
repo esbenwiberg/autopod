@@ -33,6 +33,8 @@ function emptyCustodyDatabase() {
   db.exec('CREATE TABLE retained_finalization_resources(container_id TEXT)');
   db.exec('CREATE TABLE retained_coding_facts(kind TEXT,evidence TEXT)');
   db.exec('CREATE TABLE stalled_worker_recoveries(container_id TEXT,receipt TEXT)');
+  db.exec('CREATE TABLE artifact_checks_recoveries(id TEXT,container_id TEXT)');
+  db.exec('CREATE TABLE artifact_checks_recovery_events(recovery_id TEXT,kind TEXT,evidence TEXT)');
   custodyDatabases.push(db);
   return db;
 }
@@ -148,9 +150,11 @@ describe('DockerContainerManager', () => {
   it('captures immutable image and configured resources, retaining unknown values as null', async () => {
     container.inspect.mockResolvedValue({
       Image: `sha256:${'a'.repeat(64)}`,
+      Mounts: [],
       HostConfig: { Memory: 1024, NanoCpus: 2500000000, NetworkMode: 'none' },
     });
     expect(await manager.getExecutionMetadata('container')).toEqual({
+      workspaceStorage: 'container',
       imageDigest: `sha256:${'a'.repeat(64)}`,
       memoryLimitBytes: 1024,
       cpuLimit: 2.5,
@@ -158,11 +162,23 @@ describe('DockerContainerManager', () => {
     });
     container.inspect.mockResolvedValue({ Image: 'node:mutable', HostConfig: { Memory: 0 } });
     expect(await manager.getExecutionMetadata('container')).toEqual({
+      workspaceStorage: 'unknown',
       imageDigest: null,
       memoryLimitBytes: null,
       cpuLimit: null,
       networkMode: null,
     });
+  });
+  it.each([
+    '/workspace',
+    '/workspace/reports',
+    '/',
+  ])('identifies workspace mount %s as shared custody risk', async (destination) => {
+    container.inspect.mockResolvedValue({
+      Image: 'node:mutable',
+      Mounts: [{ Destination: destination }],
+    });
+    expect((await manager.getExecutionMetadata('container')).workspaceStorage).toBe('mounted');
   });
 
   // ─── spawn() ────────────────────────────────────────────
