@@ -269,6 +269,9 @@ describe('QualityScoreRepository', () => {
       source: 'codex_rollout',
       reason: 'fixture correction',
     });
+    db.prepare(
+      "INSERT INTO claude_session_telemetry_receipts VALUES('attempt-pod',1,125,25,1.5,'binding','{}')",
+    ).run();
     repo.insert(
       baseScore({
         podId: 'legacy-pod',
@@ -285,9 +288,9 @@ describe('QualityScoreRepository', () => {
         podId: 'attempt-pod',
         runtime: 'codex',
         model: 'gpt-5.6-terra',
-        inputTokens: 150,
-        outputTokens: 30,
-        costUsd: 1.5,
+        inputTokens: 175,
+        outputTokens: 35,
+        costUsd: 1.75,
       }),
     ]);
     expect(repo.list({ runtime: 'claude' }).map((score) => score.podId)).toEqual(['legacy-pod']);
@@ -311,9 +314,9 @@ describe('QualityScoreRepository', () => {
           podId: 'attempt-pod',
           runtime: 'codex',
           model: 'gpt-5.6-terra',
-          inputTokens: 150,
-          outputTokens: 30,
-          costUsd: 1.5,
+          inputTokens: 175,
+          outputTokens: 35,
+          costUsd: 1.75,
         }),
         expect.objectContaining({
           podId: 'legacy-pod',

@@ -21,13 +21,22 @@ export function readProviderUsage(
   const corrections = includeHistory
     ? 'retained_provider_attempt_telemetry_corrections'
     : 'provider_attempt_telemetry_corrections';
+  // Conversion rehearsals also read schemas predating the additive native receipt table.
+  const native = Boolean(
+    db.prepare("SELECT 1 FROM sqlite_master WHERE name='claude_session_telemetry_receipts'").get(),
+  );
+  const input = native ? 'n.input_tokens, c.input_tokens' : 'c.input_tokens';
+  const output = native ? 'n.output_tokens, c.output_tokens' : 'c.output_tokens';
+  const cost = native ? 'n.cost_usd, c.cost_usd' : 'c.cost_usd';
   return db
     .prepare(`SELECT COUNT(*) AS count, SUM(a.ended_at IS NOT NULL) AS settledCount,
-    SUM(COALESCE(c.input_tokens, a.input_tokens)) AS inputTokens,
-    SUM(COALESCE(c.output_tokens, a.output_tokens)) AS outputTokens,
-    SUM(COALESCE(c.cost_usd, a.cost_usd)) AS costUsd,
-    SUM(CASE WHEN c.source = 'codex_rollout' THEN c.cost_usd ELSE 0 END) AS knownEstimatedCostUsd
+    SUM(COALESCE(${input}, a.input_tokens)) AS inputTokens,
+    SUM(COALESCE(${output}, a.output_tokens)) AS outputTokens,
+    SUM(COALESCE(${cost}, a.cost_usd)) AS costUsd,
+    SUM(${native ? "COALESCE(n.cost_usd, CASE WHEN c.source = 'codex_rollout' THEN c.cost_usd ELSE 0 END)" : "CASE WHEN c.source = 'codex_rollout' THEN c.cost_usd ELSE 0 END"}) AS knownEstimatedCostUsd
     FROM ${attempts} a LEFT JOIN ${corrections} c
-      ON c.pod_id = a.pod_id AND c.ordinal = a.ordinal WHERE a.pod_id = ?`)
+      ON c.pod_id = a.pod_id AND c.ordinal = a.ordinal
+    ${native ? 'LEFT JOIN claude_session_telemetry_receipts n ON n.pod_id=a.pod_id AND n.ordinal=a.ordinal' : ''}
+    WHERE a.pod_id = ?`)
     .get(podId) as ProviderUsageProjection;
 }

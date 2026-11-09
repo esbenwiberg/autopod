@@ -219,12 +219,13 @@ function cheapestDollarPerPrForWindow(
        )
        SELECT a.model, p.status,
               CASE WHEN a.ordinal = (SELECT MAX(last.ordinal) FROM provider_attempts last WHERE last.pod_id = p.id) AND p.id = (SELECT owner.id FROM pods owner WHERE owner.pr_url = p.pr_url AND owner.status = 'complete' ORDER BY owner.completed_at, owner.id LIMIT 1) THEN p.pr_url END AS prUrl,
-              COALESCE(tc.input_tokens, a.input_tokens) AS inputTokens,
-              COALESCE(tc.output_tokens, a.output_tokens) AS outputTokens,
-              COALESCE(tc.cost_usd, a.cost_usd) AS costUsd
+              COALESCE(n.input_tokens, tc.input_tokens, a.input_tokens) AS inputTokens,
+              COALESCE(n.output_tokens, tc.output_tokens, a.output_tokens) AS outputTokens,
+              COALESCE(n.cost_usd, tc.cost_usd, a.cost_usd) AS costUsd
        FROM provider_attempts a
        LEFT JOIN provider_attempt_telemetry_corrections tc
          ON tc.pod_id = a.pod_id AND tc.ordinal = a.ordinal
+       LEFT JOIN claude_session_telemetry_receipts n ON n.pod_id=a.pod_id AND n.ordinal=a.ordinal
        JOIN cohort p ON p.id = a.pod_id
        UNION ALL
        SELECT p.model, p.status, CASE WHEN p.id = (SELECT owner.id FROM pods owner WHERE owner.pr_url = p.pr_url AND owner.status = 'complete' ORDER BY owner.completed_at, owner.id LIMIT 1) THEN p.pr_url END AS prUrl,
@@ -318,14 +319,15 @@ export function computeModelsAnalytics(
        SELECT p.id, a.model, a.runtime, p.status, p.pr_url AS prUrl,
               p.created_at AS createdAt,
               p.completed_at AS completedAt,
-              COALESCE(tc.input_tokens, a.input_tokens) AS inputTokens,
-              COALESCE(tc.output_tokens, a.output_tokens) AS outputTokens,
-              COALESCE(tc.cost_usd, a.cost_usd) AS costUsd,
+              COALESCE(n.input_tokens, tc.input_tokens, a.input_tokens) AS inputTokens,
+              COALESCE(n.output_tokens, tc.output_tokens, a.output_tokens) AS outputTokens,
+              COALESCE(n.cost_usd, tc.cost_usd, a.cost_usd) AS costUsd,
               a.ordinal AS attemptOrdinal,
               a.outcome AS attemptOutcome
        FROM provider_attempts a
        LEFT JOIN provider_attempt_telemetry_corrections tc
          ON tc.pod_id = a.pod_id AND tc.ordinal = a.ordinal
+       LEFT JOIN claude_session_telemetry_receipts n ON n.pod_id=a.pod_id AND n.ordinal=a.ordinal
        JOIN cohort p ON p.id = a.pod_id
        UNION ALL
        SELECT p.id, p.model, p.runtime, p.status, p.pr_url AS prUrl,
