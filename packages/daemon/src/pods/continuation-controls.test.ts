@@ -20,6 +20,31 @@ import { createPodGoalService } from './pod-goal-service.js';
 import { createPodRepository } from './pod-repository.js';
 
 const cleanups: Array<() => void> = [];
+it('keeps a held ready artifact out of ordinary Resume and checks retry', async () => {
+  const f = fixture();
+  f.pods.update('control', {
+    options: { ...f.pod().options, output: 'artifact' },
+    worktreePath: null,
+  });
+  f.pods.completionJournal!.begin(f.pod());
+  f.pods.completionJournal!.settle(f.pod(), 'Settled existing source');
+  f.pods.completionJournal!.mark(f.pod(), 'ready');
+  f.db
+    .prepare(`INSERT INTO escalations(id,pod_id,type,payload,created_at) VALUES(?,?,?,?,?)`)
+    .run(
+      'held-artifact',
+      'control',
+      'report_blocker',
+      JSON.stringify({ kind: 'infrastructure', lifecycleGeneration: 1, requiresResponse: false }),
+      new Date().toISOString(),
+    );
+  await expect(f.c.resumePod.call(f.calls, 'control')).rejects.toThrow();
+  expect(() => f.c.assertCanRetryValidation('control')).toThrow();
+  expect(f.calls.handleCompletion).not.toHaveBeenCalled();
+  expect(f.calls.revalidateSession).not.toHaveBeenCalled();
+  expect(f.captured.enqueueSession).not.toHaveBeenCalled();
+  expect(f.cm.spawn).not.toHaveBeenCalled();
+});
 afterEach(() => {
   vi.restoreAllMocks();
   for (const close of cleanups.splice(0).reverse()) close();

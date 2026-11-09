@@ -10,6 +10,7 @@ import {
   type TaskRetryAuthorization,
   type ValidationResult,
 } from '@autopod/shared';
+import { assertArtifactChecksResourceAvailable } from './artifact-checks-recovery-repository.js';
 import { createRetainedCodingRepository } from './retained-coding-repository.js';
 import {
   assertFinalizationResourceAvailable,
@@ -53,6 +54,16 @@ export function retainedCheckpointNetworkIdentities(db: Database.Database): Set<
         checkpointResourceIdentity(row.podId, row.id, JSON.parse(row.evidence).generation),
       );
   }
+  for (const row of db.prepare('SELECT pod_id FROM artifact_checks_recoveries').all() as {
+    pod_id: string;
+  }[])
+    identities.add(row.pod_id);
+  for (const row of db
+    .prepare(
+      "SELECT json_extract(evidence,'$.identity') AS identity FROM artifact_checks_recovery_events WHERE kind='allocated'",
+    )
+    .all() as { identity: string }[])
+    identities.add(row.identity);
   return identities;
 }
 
@@ -238,6 +249,7 @@ export function assertCheckpointResourceNotRetained(
   containerId: string,
   allowCodingMutation = false,
 ): void {
+  assertArtifactChecksResourceAvailable(db, containerId, allowCodingMutation);
   assertStalledRecoveryResourceAvailable(db, containerId);
   assertFinalizationResourceAvailable(db, containerId);
   if (createRetainedCodingRepository(db).retains(containerId)) {

@@ -305,6 +305,7 @@ export interface PodStats {
 }
 
 import { HISTORY_JSON_FIELDS, HISTORY_POD_COLUMNS } from '../history/history-pod-projection.js';
+import { createArtifactChecksRecoveryRepository } from './artifact-checks-recovery-repository.js';
 import { type CompletionJournal, createCompletionJournal } from './completion-journal.js';
 import { COST_POD_COLUMNS, type PodCostSource } from './cost-pod-projection.js';
 import { createDeliveryLedger, type DeliveryLedger } from './delivery-ledger.js';
@@ -317,6 +318,7 @@ import { createTaskExecutionLedger, type TaskExecutionLedger } from './task-exec
 import { createTaskHistoryArchive } from './task-history-archive.js';
 
 export interface PodRepository extends Partial<UnitOfWork> {
+  artifactChecks?: import('./artifact-checks-recovery-repository.js').ArtifactChecksRecoveryRepository;
   inputBundles?: InputBundleStore;
   taskRetries?: TaskRetryLedger;
   validationExecutions?: ValidationExecutionLedger;
@@ -872,6 +874,7 @@ export function createPodRepository(db: Database.Database): PodRepository {
         if (committed?.execution_id === execution.execution_id) effect();
       });
     },
+    artifactChecks: createArtifactChecksRecoveryRepository(db),
     taskRetries: createTaskRetryLedger(db),
     validationExecutions: createValidationExecutionLedger(db),
     retainedFinalizations: createRetainedFinalizationRepository(db),
@@ -1666,7 +1669,9 @@ export function createPodRepository(db: Database.Database): PodRepository {
            WHERE action='abandon' AND completed_at IS NULL
            UNION SELECT json_extract(binding,'$.containerId') AS container_id FROM source_adoptions
            UNION SELECT container_id FROM retained_checkpoint_recoveries
-           UNION SELECT json_extract(evidence,'$.containerId') FROM retained_coding_facts WHERE kind='candidate'`,
+           UNION SELECT json_extract(evidence,'$.containerId') FROM retained_coding_facts WHERE kind='candidate'
+           UNION SELECT container_id FROM artifact_checks_recoveries
+           UNION SELECT json_extract(evidence,'$.containerId') FROM artifact_checks_recovery_events WHERE kind='allocated'`,
         )
         .all() as { container_id: string }[];
       return [

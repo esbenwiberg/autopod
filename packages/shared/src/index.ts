@@ -233,6 +233,7 @@ export type {
   UnknownModelSample,
   ValidationStage,
 } from './types/analytics.js';
+export type { ArtifactChecksRecoveryRequest } from './types/artifact-checks-recovery.js';
 export type {
   AppRole,
   AuthToken,

@@ -81,6 +81,20 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     terminationReconciliation,
   } = captured;
   return {
+    inspectArtifactChecksRecovery(podId: string) {
+      return (
+        captured.artifactChecksRecovery ?? checkpointError('Artifact checks unavailable')
+      ).inspect(podId);
+    },
+    recoverArtifactChecks(
+      podId: string,
+      input: import('@autopod/shared').ArtifactChecksRecoveryRequest,
+      actor: OperatorActor,
+    ) {
+      return (
+        captured.artifactChecksRecovery ?? checkpointError('Artifact checks unavailable')
+      ).submit(podId, input, actor);
+    },
     inspectStalledWorkerRecovery(podId: string) {
       return (
         captured.stalledWorkerRecovery ?? checkpointError('Stalled recovery unavailable')

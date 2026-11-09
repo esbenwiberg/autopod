@@ -20,6 +20,7 @@ import { formatToolUse } from '../utils/formatToolUse.js';
 import { resolvePodId } from '../utils/id-resolver.js';
 import { followLogs } from '../utils/log-follow.js';
 import { registerApprovalRewriteRepairCommand } from './approval-rewrite-repair.js';
+import { registerArtifactChecksRecoveryCommand } from './artifact-checks-recovery.js';
 import { registerBudgetCommand } from './budget.js';
 import { registerGoalCommands } from './goal.js';
 import { registerInfrastructureRecoveryCommand } from './infrastructure-recovery.js';
@@ -150,6 +151,7 @@ export function registerPodCommands(program: Command, getClient: () => AutopodCl
   registerRetainedContinuationCommand(program, getClient);
   registerRepairContinuationCommand(program, getClient);
   registerInfrastructureRecoveryCommand(program, getClient);
+  registerArtifactChecksRecoveryCommand(program, getClient);
   registerApprovalRewriteRepairCommand(program, getClient);
   registerRetainedFinalizationCommand(program, getClient);
   program

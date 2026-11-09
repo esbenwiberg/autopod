@@ -19,6 +19,7 @@ import {
 } from '../inputs/reviewer-images.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { ReviewerExecutor } from '../interfaces/reviewer-executor.js';
+import { artifactChecksReviewAllowed } from '../pods/artifact-checks-recovery-repository.js';
 import type { ProviderAccountStore } from '../provider-accounts/provider-account-store.js';
 import { persistProviderAccountCredentials } from '../providers/credential-persistence.js';
 import { buildProviderAccountEnv } from '../providers/env-builder.js';
@@ -100,7 +101,10 @@ export class IsolatedReviewer {
         if (
           current.lifecycleGeneration !== pod.lifecycleGeneration ||
           current.launchConfigDigest !== config.digest ||
-          !['running', 'validating'].includes(current.status)
+          !(
+            ['running', 'validating'].includes(current.status) ||
+            artifactChecksReviewAllowed(current)
+          )
         )
           configurationError(
             'Reviewer no longer owns this pod attempt',
@@ -275,7 +279,7 @@ export class IsolatedReviewer {
         if (
           current.lifecycleGeneration !== pod.lifecycleGeneration ||
           current.launchConfigDigest !== config.digest ||
-          !(
+          (!(
             purpose === 'memory'
               ? [
                   'provisioning',
@@ -289,7 +293,8 @@ export class IsolatedReviewer {
               : purpose === 'advisor'
                 ? ['running', 'validating', 'awaiting_input']
                 : ['running', 'validating']
-          ).includes(current.status)
+          ).includes(current.status) &&
+            !artifactChecksReviewAllowed(current))
         )
           configurationError(
             'Reviewer no longer owns this pod attempt',

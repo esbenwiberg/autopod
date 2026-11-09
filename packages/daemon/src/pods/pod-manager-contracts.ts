@@ -447,6 +447,12 @@ export interface PodManager {
   recoverInfrastructure: ReturnType<
     typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
   >['recoverInfrastructure'];
+  inspectArtifactChecksRecovery: ReturnType<
+    typeof import('./artifact-checks-recovery.js').createArtifactChecksRecovery
+  >['inspect'];
+  recoverArtifactChecks: ReturnType<
+    typeof import('./artifact-checks-recovery.js').createArtifactChecksRecovery
+  >['submit'];
   reconcileInfrastructure: ReturnType<
     typeof import('./retained-checkpoint-recovery.js').createRetainedCheckpointRecovery
   >['reconcileInfrastructure'];

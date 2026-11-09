@@ -32,6 +32,10 @@ import type {
 } from '../interfaces/container-manager.js';
 import { extractManagedDockerOutput } from '../managed/output-extraction.js';
 import {
+  ownsArtifactChecksArchive,
+  ownsArtifactChecksStop,
+} from '../pods/artifact-checks-recovery-repository.js';
+import {
   assertCheckpointResourceNotRetained,
   ownsInfrastructureRecoveryStop,
 } from '../pods/retained-checkpoint-repository.js';
@@ -463,7 +467,8 @@ export class DockerContainerManager implements ContainerManager {
       !this.managedDatabase ||
       (!ownsRetainedFinalizationStop(this.managedDatabase, containerId, 'local') &&
         !ownsStalledWorkerStop(this.managedDatabase, containerId) &&
-        !ownsInfrastructureRecoveryStop(this.managedDatabase, containerId))
+        !ownsInfrastructureRecoveryStop(this.managedDatabase, containerId) &&
+        !ownsArtifactChecksStop(this.managedDatabase, containerId))
     )
       this.assertNotRetained(containerId);
     try {
@@ -774,7 +779,8 @@ export class DockerContainerManager implements ContainerManager {
   ): Promise<void> {
     if (
       !this.managedDatabase ||
-      !ownsStalledWorkerArchive(this.managedDatabase, containerId, containerPath)
+      (!ownsStalledWorkerArchive(this.managedDatabase, containerId, containerPath) &&
+        !ownsArtifactChecksArchive(this.managedDatabase, containerId, containerPath))
     )
       this.assertNotRetained(containerId);
     assertDirectoryExtractionCurrent(options);

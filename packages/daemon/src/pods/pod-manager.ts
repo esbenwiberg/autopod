@@ -1,3 +1,5 @@
+import { createArtifactChecksExecution } from './artifact-checks-execution.js';
+import { createArtifactChecksRecovery } from './artifact-checks-recovery.js';
 import { createProvisioningMaterials } from './provisioning-materials.js';
 import { buildCodeIntelligenceServers } from './provisioning-runtime-files.js';
 import { createProvisioningSandboxState } from './provisioning-sandbox-state.js';
@@ -1440,6 +1442,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return owner?.taskRunId === runId && owner.isCurrent?.() === true;
   };
   const controlOperations = createControlOperationRegistry((podId, operation) => {
+    podRepo.artifactChecks?.assertAvailable(podId);
     podRepo.stalledRecoveries?.assertAvailable(podId);
     if (stalledWorkerRecovery?.isActive(podId))
       checkpointError('Stop-and-retain preflight owns this control.');
@@ -1750,12 +1753,50 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ),
         })
       : undefined;
+  const artifactChecksRecovery =
+    podRepo.artifactChecks && deps.launchConfiguration
+      ? createArtifactChecksRecovery({
+          podRepo,
+          readLaunch: deps.launchConfiguration.read,
+          executionForPod,
+          cm: containerManagerFactory.get('local'),
+          assertGuidanceCollected,
+          isIdle: (id) =>
+            !controlOperations.isActive(id) &&
+            !activeAgentRuns.has(id) &&
+            !validationAbortControllers.has(id) &&
+            !validationResumeRuns.has(id) &&
+            !artifactResumeRuns.has(id) &&
+            !artifactCompletionRuns.has(id) &&
+            !attemptExtensionRuns.has(id) &&
+            !checkpointRecovery?.isActive(id) &&
+            !retainedFinalization?.isActive(id) &&
+            !stalledWorkerRecovery?.isActive(id),
+          root: path.join(
+            process.env.DATA_DIR ?? path.join(process.cwd(), '.autopod-data'),
+            'artifact-checks',
+          ),
+          execute: createArtifactChecksExecution({
+            podRepo,
+            cm: containerManagerFactory.get('local'),
+            network: networkManager,
+            prepareEnvironment: deps.launchConfiguration.prepareEnvironment,
+            assertCapabilities: deps.launchConfiguration.assertCurrentCapabilities,
+            executionForPod,
+            reviewer: getEffectiveReviewerConfig,
+            reviewerExecutor: getReviewerExecutor,
+            engine: validationEngine,
+            logger,
+          }),
+        })
+      : undefined;
   return controlOperations.wrap(
     createPodManagerFacade({
       stalledWorkerRecovery,
       sandboxRecovery,
       retainedFinalization,
       checkpointRecovery,
+      artifactChecksRecovery,
       acceptFindings,
       sourceAdoption,
       validationExecutionRecovery,

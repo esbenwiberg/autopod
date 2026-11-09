@@ -447,7 +447,8 @@ export function createLocalValidationEngine(
         // See `resetWorktreeToHead` for the full failure-mode rationale.
         checkAbort();
         try {
-          if (!config.reviewOnly) await resetWorktreeToHead(containerManager, config, log);
+          if (config.artifactSource) await config.artifactSource.verify();
+          else if (!config.reviewOnly) await resetWorktreeToHead(containerManager, config, log);
         } catch (err) {
           const resetInfrastructureFailure = classifyValidationInfrastructureFailure(
             'setup',
@@ -843,7 +844,7 @@ export function createLocalValidationEngine(
 
           // Gather enriched context from the worktree (Tier 0+1)
           let reviewContext: ReviewContext | undefined;
-          if (config.worktreePath) {
+          if (config.worktreePath && !config.artifactSource) {
             try {
               reviewContext = await gatherReviewContext(
                 config.worktreePath,
@@ -955,7 +956,14 @@ export function createLocalValidationEngine(
             !reviewRun.requiredReviewUnavailable &&
             config.validationSuite === 'full'
           ) {
-            const reviewedHead = await readReviewHead(config.worktreePath, config.startCommitSha);
+            const readSelectedSource = async () => {
+              if (config.artifactSource) {
+                await config.artifactSource.verify();
+                return `artifact:${config.artifactSource.sha256}`;
+              }
+              return readReviewHead(config.worktreePath, config.startCommitSha);
+            };
+            const reviewedHead = await readSelectedSource();
             const frozenDiff = boundedReviewPacketString(config.diff, 1_000_000);
             const packet = createFrozenReviewPacket({
               // The identity must attest to the exact bounded, sanitized bytes every axis receives.
@@ -1016,7 +1024,7 @@ export function createLocalValidationEngine(
             const batch = await runReviewBatch({
               packet,
               model: config.reviewerModel ?? 'auto',
-              readHead: () => readReviewHead(config.worktreePath, reviewedHead),
+              readHead: readSelectedSource,
               timeoutMs: councilTimeoutMs,
               onProgress: ({
                 stage,

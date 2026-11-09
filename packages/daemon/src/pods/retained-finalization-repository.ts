@@ -4,6 +4,7 @@ import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { AutopodError, type Pod, type RetainedFinalizationReceipt } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import { assertArtifactChecksPathAvailable } from './artifact-checks-recovery-repository.js';
 import { retainedPathIdentity } from './retained-path-identity.js';
 import { assertStalledRecoveryPathAvailable } from './stalled-worker-recovery-repository.js';
 
@@ -103,6 +104,7 @@ export function finalizationSourceLocations(locations: string[]): string[] {
   return [...held].sort();
 }
 export function assertFinalizationPathAvailable(db: Database.Database, location: string): void {
+  assertArtifactChecksPathAvailable(db, location);
   assertStalledRecoveryPathAvailable(db, location);
   const identities = (value: string) => [path.resolve(value), retainedPathIdentity(value)];
   const retained = db

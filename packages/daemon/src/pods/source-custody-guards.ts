@@ -2,6 +2,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type Database from 'better-sqlite3';
 import { createApprovalSourceRewriteRepository } from './approval-source-rewrite-repository.js';
 import {
+  assertArtifactChecksAvailable,
+  assertArtifactChecksResourceAvailable,
+} from './artifact-checks-recovery-repository.js';
+import {
   checkpointHash,
   createRetainedCheckpointRepository,
 } from './retained-checkpoint-repository.js';
@@ -10,6 +14,7 @@ import { assertStalledRecoveryAvailable } from './stalled-worker-recovery-reposi
 import { assertValidationResourceReleasable } from './validation-execution-evidence.js';
 
 export function assertSourceResourceReleasable(db: Database.Database, containerId: string): void {
+  assertArtifactChecksResourceAvailable(db, containerId);
   assertValidationResourceReleasable(db, containerId);
   if (
     db
@@ -38,6 +43,7 @@ export function assertSourceAvailable(
   podId: string,
   owner = sourceOwnerScope(db).getStore(),
 ): void {
+  assertArtifactChecksAvailable(db, podId);
   assertStalledRecoveryAvailable(db, podId, true);
   createRetainedCheckpointRepository(db).assertAvailable(podId);
   const blocked = db
@@ -73,6 +79,7 @@ export function assertSourceAvailable(
 }
 /** Delivery/release is NEVER implied by the private mutation capability or passing checks. */
 export function assertSourceDeliveryAllowed(db: Database.Database, podId: string): void {
+  assertArtifactChecksAvailable(db, podId);
   const recovery = createRetainedCheckpointRepository(db).latest(podId);
   if (recovery?.binding.continuation) {
     const current = db
