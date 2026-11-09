@@ -5,6 +5,8 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { canonicalModelKey, computeCostWithCache } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import type { ContainerManager } from '../interfaces/container-manager.js';
+import { createClaudeSessionTelemetry } from './claude-session-telemetry.js';
 import type { PodRepository } from './pod-repository.js';
 import type {
   ProviderAttemptRepository,
@@ -51,6 +53,7 @@ export interface TokenTelemetryRepairDeps {
   podRepo: PodRepository;
   providerAttemptRepo: ProviderAttemptRepository;
   stateRoot?: string;
+  getContainerManager?: () => ContainerManager;
   now?: () => Date;
 }
 
@@ -293,6 +296,7 @@ async function reconstructPod(
 }
 
 export interface TokenTelemetryRepair {
+  claudeSession?: ReturnType<typeof createClaudeSessionTelemetry>;
   run(options?: { apply?: boolean }): Promise<TokenTelemetryRepairReport>;
 }
 
@@ -304,6 +308,7 @@ export function createTokenTelemetryRepair(deps: TokenTelemetryRepairDeps): Toke
     path.join(os.homedir(), '.autopod', 'codex-state');
 
   return {
+    claudeSession: createClaudeSessionTelemetry(deps),
     async run(options = {}) {
       const mode = options.apply ? 'apply' : 'dry-run';
       const startedAt = now().toISOString();

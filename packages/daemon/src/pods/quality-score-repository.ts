@@ -78,28 +78,31 @@ const ATTEMPT_COMPATIBILITY_PROJECTION = `
          CASE WHEN EXISTS (
            SELECT 1 FROM provider_attempts a WHERE a.pod_id = q.pod_id
          ) THEN (
-           SELECT COALESCE(SUM(COALESCE(tc.input_tokens, a.input_tokens)), 0)
+           SELECT COALESCE(SUM(COALESCE(n.input_tokens, tc.input_tokens, a.input_tokens)), 0)
            FROM provider_attempts a
            LEFT JOIN provider_attempt_telemetry_corrections tc
              ON tc.pod_id = a.pod_id AND tc.ordinal = a.ordinal
+           LEFT JOIN claude_session_telemetry_receipts n ON n.pod_id=a.pod_id AND n.ordinal=a.ordinal
            WHERE a.pod_id = q.pod_id
          ) ELSE q.input_tokens END AS input_tokens,
          CASE WHEN EXISTS (
            SELECT 1 FROM provider_attempts a WHERE a.pod_id = q.pod_id
          ) THEN (
-           SELECT COALESCE(SUM(COALESCE(tc.output_tokens, a.output_tokens)), 0)
+           SELECT COALESCE(SUM(COALESCE(n.output_tokens, tc.output_tokens, a.output_tokens)), 0)
            FROM provider_attempts a
            LEFT JOIN provider_attempt_telemetry_corrections tc
              ON tc.pod_id = a.pod_id AND tc.ordinal = a.ordinal
+           LEFT JOIN claude_session_telemetry_receipts n ON n.pod_id=a.pod_id AND n.ordinal=a.ordinal
            WHERE a.pod_id = q.pod_id
          ) ELSE q.output_tokens END AS output_tokens,
          CASE WHEN EXISTS (
            SELECT 1 FROM provider_attempts a WHERE a.pod_id = q.pod_id
          ) THEN (
-           SELECT COALESCE(SUM(COALESCE(tc.cost_usd, a.cost_usd)), 0)
+           SELECT COALESCE(SUM(COALESCE(n.cost_usd, tc.cost_usd, a.cost_usd)), 0)
            FROM provider_attempts a
            LEFT JOIN provider_attempt_telemetry_corrections tc
              ON tc.pod_id = a.pod_id AND tc.ordinal = a.ordinal
+           LEFT JOIN claude_session_telemetry_receipts n ON n.pod_id=a.pod_id AND n.ordinal=a.ordinal
            WHERE a.pod_id = q.pod_id
          ) ELSE q.cost_usd END AS cost_usd
   FROM pod_quality_scores q`;

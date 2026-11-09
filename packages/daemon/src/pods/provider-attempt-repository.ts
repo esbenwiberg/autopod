@@ -187,12 +187,13 @@ function hydrate(row: AttemptRow): ProviderAttempt {
 export function createProviderAttemptRepository(db: Database.Database): ProviderAttemptRepository {
   const selectList = db.prepare(`
     SELECT a.*,
-      COALESCE(c.input_tokens, a.input_tokens) AS input_tokens,
-      COALESCE(c.output_tokens, a.output_tokens) AS output_tokens,
-      COALESCE(c.cost_usd, a.cost_usd) AS cost_usd
+      COALESCE(n.input_tokens, c.input_tokens, a.input_tokens) AS input_tokens,
+      COALESCE(n.output_tokens, c.output_tokens, a.output_tokens) AS output_tokens,
+      COALESCE(n.cost_usd, c.cost_usd, a.cost_usd) AS cost_usd
     FROM provider_attempts a
     LEFT JOIN provider_attempt_telemetry_corrections c
       ON c.pod_id = a.pod_id AND c.ordinal = a.ordinal
+    LEFT JOIN claude_session_telemetry_receipts n ON n.pod_id=a.pod_id AND n.ordinal=a.ordinal
     WHERE a.pod_id = ? ORDER BY a.ordinal ASC
   `);
   const selectRawList = db.prepare(
@@ -344,6 +345,12 @@ export function createProviderAttemptRepository(db: Database.Database): Provider
     },
 
     upsertTelemetryCorrection(input) {
+      if (
+        db
+          .prepare('SELECT 1 FROM claude_session_telemetry_receipts WHERE pod_id=? AND ordinal=?')
+          .get(input.podId, input.ordinal)
+      )
+        throw new Error('Native Claude receipt already owns this segment telemetry');
       if (!Number.isInteger(input.inputTokens) || input.inputTokens < 0) {
         throw new Error('Corrected inputTokens must be a non-negative integer');
       }
@@ -396,12 +403,13 @@ export function createProviderAttemptRepository(db: Database.Database): Provider
       const row = db
         .prepare(`
           SELECT
-            COALESCE(SUM(COALESCE(c.input_tokens, a.input_tokens)), 0) AS inputTokens,
-            COALESCE(SUM(COALESCE(c.output_tokens, a.output_tokens)), 0) AS outputTokens,
-            COALESCE(SUM(COALESCE(c.cost_usd, a.cost_usd)), 0) AS costUsd
+            COALESCE(SUM(COALESCE(n.input_tokens, c.input_tokens, a.input_tokens)), 0) AS inputTokens,
+            COALESCE(SUM(COALESCE(n.output_tokens, c.output_tokens, a.output_tokens)), 0) AS outputTokens,
+            COALESCE(SUM(COALESCE(n.cost_usd, c.cost_usd, a.cost_usd)), 0) AS costUsd
           FROM provider_attempts a
           LEFT JOIN provider_attempt_telemetry_corrections c
             ON c.pod_id = a.pod_id AND c.ordinal = a.ordinal
+          LEFT JOIN claude_session_telemetry_receipts n ON n.pod_id=a.pod_id AND n.ordinal=a.ordinal
           WHERE a.pod_id = ?
         `)
         .get(podId) as ProviderAttemptTotals;

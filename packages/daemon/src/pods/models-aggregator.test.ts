@@ -857,6 +857,31 @@ describe('computeModelsAnalytics', () => {
     });
   });
 
+  it('includes native Claude receipt estimates in model analytics instead of zero raw segments', () => {
+    const podId = insertPod(db, {
+      id: 'native-receipt',
+      runtime: 'claude',
+      model: 'claude-opus-4-7',
+      costUsd: 99,
+    });
+    insertProviderAttempt(db, {
+      podId,
+      ordinal: 1,
+      runtime: 'claude',
+      model: 'claude-opus-4-7',
+      outcome: 'aborted',
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    });
+    db.prepare(
+      "INSERT INTO claude_session_telemetry_receipts VALUES(?,1,264,20,0.25,'binding','{}')",
+    ).run(podId);
+    expect(
+      computeModelsAnalytics(db, 30).byModel.find((row) => row.model === 'claude-opus-4-7'),
+    ).toMatchObject({ totalCostUsd: 0.25 });
+  });
+
   it('provider-attempt preserves legacy pod attribution when no ledger rows exist', () => {
     insertPod(db, {
       runtime: 'claude',

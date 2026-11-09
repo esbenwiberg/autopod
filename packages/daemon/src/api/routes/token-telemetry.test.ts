@@ -50,6 +50,51 @@ describe('token telemetry repair route', () => {
     await app.close();
   });
 
+  it('binds scoped native repair to authenticated operator and exact preview; never accepts supplied usage', async () => {
+    const inspect = vi.fn().mockResolvedValue({ mode: 'preview', expectedBinding: 'a'.repeat(64) });
+    const apply = vi.fn().mockResolvedValue({ version: 1 });
+    const service = { run: vi.fn(), claudeSession: { inspect, apply } };
+    const app = await appFor(service);
+    expect(
+      (await app.inject({ method: 'GET', url: '/pods/exact/claude-telemetry' })).statusCode,
+    ).toBe(200);
+    expect(inspect).toHaveBeenCalledWith('exact');
+    const request = {
+      expectedBinding: 'a'.repeat(64),
+      reason: 'Reconcile the exact durable session',
+    };
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/pods/exact/claude-telemetry',
+          payload: { ...request, inputTokens: 0 },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(apply).not.toHaveBeenCalled();
+    expect(
+      (await app.inject({ method: 'POST', url: '/pods/exact/claude-telemetry', payload: request }))
+        .statusCode,
+    ).toBe(200);
+    expect(apply).toHaveBeenCalledWith('exact', request, 'operator');
+    await app.close();
+    const reader = await appFor(service, ['reader']);
+    expect(
+      (await reader.inject({ method: 'GET', url: '/pods/exact/claude-telemetry' })).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await reader.inject({
+          method: 'POST',
+          url: '/pods/exact/claude-telemetry',
+          payload: request,
+        })
+      ).statusCode,
+    ).toBe(403);
+    await reader.close();
+  });
+
   it('requires an admin or operator role', async () => {
     const app = await appFor({ run: vi.fn().mockResolvedValue(report) }, ['reader']);
     const response = await app.inject({ method: 'POST', url: '/admin/token-telemetry/repair' });
