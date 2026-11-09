@@ -3,10 +3,19 @@
 This operator control repairs accounting only. It never resumes a worker, passes a
 check, publishes source, increases a budget or replaces an unknown worker result.
 
-Authenticated admin/operator endpoints:
+Authenticated **pod owner or admin/operator** endpoints:
 - GET /pods/:podId/claude-telemetry: read-only exact-session preview or stored receipt.
 - POST /pods/:podId/claude-telemetry: strict body
   {"expectedBinding":"<preview SHA256>","reason":"<10–4000 characters>"}.
+
+The pod creator's exact authenticated subject (`oid` = stored `pod.userId`) may
+preview and apply without an Entra app role. Admin/operator access remains
+supported. A connected UI, matching email, another account for the same person,
+or caller-supplied identity/roles does not establish ownership. Authorization is
+checked before reading stored receipts and rechecked after asynchronous evidence
+observation and inside the apply transaction. The immutable receipt records the
+actor, ownership basis and original owner. The fleet-wide
+`/admin/token-telemetry/repair` endpoint remains admin/operator-only.
 
 Save preview, exact request and response before proceeding. On a lost response,
 inspect GET; never change a request to bypass an uncertain admission. The same

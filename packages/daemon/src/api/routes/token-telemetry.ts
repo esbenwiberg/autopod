@@ -16,18 +16,15 @@ export function tokenTelemetryRoutes(app: FastifyInstance, repair: TokenTelemetr
       reason: z.string().trim().min(10).max(4000),
     })
     .strict();
-  const operator = (roles: string[]) => {
-    if (!roles.includes('admin') && !roles.includes('operator'))
-      throw new AutopodError('Admin or operator role required', 'FORBIDDEN', 403);
-  };
   app.get<{ Params: { podId: string } }>('/pods/:podId/claude-telemetry', async (request) => {
-    operator(request.user.roles);
     if (!repair.claudeSession)
       throw new AutopodError('Native repair unavailable', 'NOT_SUPPORTED', 409);
-    return repair.claudeSession.inspect(request.params.podId);
+    return repair.claudeSession.inspect(request.params.podId, {
+      oid: request.user.oid,
+      roles: request.user.roles,
+    });
   });
   app.post<{ Params: { podId: string } }>('/pods/:podId/claude-telemetry', async (request) => {
-    operator(request.user.roles);
     const parsed = nativeRequest.safeParse(request.body);
     if (!parsed.success)
       throw new AutopodError(
@@ -36,14 +33,17 @@ export function tokenTelemetryRoutes(app: FastifyInstance, repair: TokenTelemetr
         400,
       );
     if (!request.user.oid?.trim())
-      throw new AutopodError('Authenticated operator required', 'FORBIDDEN', 403);
+      throw new AutopodError('Authenticated pod owner or operator required', 'FORBIDDEN', 403);
     if (!repair.claudeSession)
       throw new AutopodError('Native repair unavailable', 'NOT_SUPPORTED', 409);
     if (running)
       throw new AutopodError('A token telemetry repair is already running', 'REPAIR_RUNNING', 409);
     running = true;
     try {
-      return await repair.claudeSession.apply(request.params.podId, parsed.data, request.user.oid);
+      return await repair.claudeSession.apply(request.params.podId, parsed.data, {
+        oid: request.user.oid,
+        roles: request.user.roles,
+      });
     } finally {
       running = false;
     }

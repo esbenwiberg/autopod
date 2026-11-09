@@ -1,3 +1,4 @@
+import { AutopodError } from '@autopod/shared';
 import Fastify from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import type { TokenTelemetryRepair } from '../../pods/token-telemetry-repair.js';
@@ -58,7 +59,7 @@ describe('token telemetry repair route', () => {
     expect(
       (await app.inject({ method: 'GET', url: '/pods/exact/claude-telemetry' })).statusCode,
     ).toBe(200);
-    expect(inspect).toHaveBeenCalledWith('exact');
+    expect(inspect).toHaveBeenCalledWith('exact', { oid: 'operator', roles: ['admin'] });
     const request = {
       expectedBinding: 'a'.repeat(64),
       reason: 'Reconcile the exact durable session',
@@ -68,7 +69,7 @@ describe('token telemetry repair route', () => {
         await app.inject({
           method: 'POST',
           url: '/pods/exact/claude-telemetry',
-          payload: { ...request, inputTokens: 0 },
+          payload: { ...request, inputTokens: 0, oid: 'owner', roles: ['admin'] },
         })
       ).statusCode,
     ).toBe(400);
@@ -77,8 +78,26 @@ describe('token telemetry repair route', () => {
       (await app.inject({ method: 'POST', url: '/pods/exact/claude-telemetry', payload: request }))
         .statusCode,
     ).toBe(200);
-    expect(apply).toHaveBeenCalledWith('exact', request, 'operator');
+    expect(apply).toHaveBeenCalledWith('exact', request, { oid: 'operator', roles: ['admin'] });
     await app.close();
+    const roleless = await appFor(service, []);
+    expect(
+      (await roleless.inject({ method: 'GET', url: '/pods/exact/claude-telemetry' })).statusCode,
+    ).toBe(200);
+    expect(inspect).toHaveBeenLastCalledWith('exact', { oid: 'operator', roles: [] });
+    expect(
+      (
+        await roleless.inject({
+          method: 'POST',
+          url: '/pods/exact/claude-telemetry',
+          payload: request,
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(apply).toHaveBeenLastCalledWith('exact', request, { oid: 'operator', roles: [] });
+    await roleless.close();
+    inspect.mockRejectedValue(new AutopodError('Pod owner required', 'FORBIDDEN', 403));
+    apply.mockRejectedValue(new AutopodError('Pod owner required', 'FORBIDDEN', 403));
     const reader = await appFor(service, ['reader']);
     expect(
       (await reader.inject({ method: 'GET', url: '/pods/exact/claude-telemetry' })).statusCode,

@@ -176,18 +176,36 @@ async function sessionBytes(podId: string, sessionId: string) {
   }
 }
 
+export interface ClaudeTelemetryPrincipal {
+  oid: string;
+  roles: readonly string[];
+}
+
 export function createClaudeSessionTelemetry(deps: {
   db: Database.Database;
   podRepo: PodRepository;
   providerAttemptRepo: ProviderAttemptRepository;
   getContainerManager?: () => ContainerManager;
 }) {
+  function authorize(podId: string, principal: ClaudeTelemetryPrincipal) {
+    if (!principal.oid?.trim())
+      throw new AutopodError('Authenticated pod owner or operator required', 'FORBIDDEN', 403);
+    const pod = deps.podRepo.getOrThrow(podId);
+    if (
+      pod.userId !== principal.oid &&
+      !principal.roles.includes('admin') &&
+      !principal.roles.includes('operator')
+    )
+      throw new AutopodError('Pod owner or admin/operator role required', 'FORBIDDEN', 403);
+    return pod;
+  }
   const publicReceipt = (receipt: Record<string, unknown>) => ({
     version: receipt.version,
     podId: receipt.podId,
     expectedBinding: receipt.expectedBinding,
     reason: receipt.reason,
     userId: receipt.userId,
+    authorizationBasis: receipt.authorizationBasis,
     observedAt: receipt.observedAt,
     generation: receipt.generation,
     taskId: receipt.taskId,
@@ -223,9 +241,9 @@ export function createClaudeSessionTelemetry(deps: {
       .get(podId) as { receipt: string } | undefined;
     return row ? (JSON.parse(row.receipt) as Record<string, unknown>) : null;
   };
-  function binding(podId: string) {
+  function binding(podId: string, principal: ClaudeTelemetryPrincipal) {
     if (!/^[a-zA-Z0-9-]{1,64}$/.test(podId)) refuse('Invalid pod identity');
-    const pod = deps.podRepo.getOrThrow(podId);
+    const pod = authorize(podId, principal);
     if (
       pod.status !== 'failed' ||
       pod.executionTarget !== 'local' ||
@@ -314,6 +332,7 @@ export function createClaudeSessionTelemetry(deps: {
       taskId: deps.podRepo.taskExecutions.snapshot(podId).taskId,
       launchDigest: pod.launchConfigDigest,
       originalPod: {
+        userId: pod.userId,
         inputTokens: pod.inputTokens,
         outputTokens: pod.outputTokens,
         costUsd: pod.costUsd,
@@ -325,8 +344,8 @@ export function createClaudeSessionTelemetry(deps: {
       resourceKey: proof.resourceKey,
     };
   }
-  async function observe(podId: string) {
-    const before = binding(podId);
+  async function observe(podId: string, principal: ClaudeTelemetryPrincipal) {
+    const before = binding(podId, principal);
     const cm = deps.getContainerManager?.() ?? refuse('Provider observation unavailable');
     const assertStopped = async () => {
       if (
@@ -344,16 +363,17 @@ export function createClaudeSessionTelemetry(deps: {
       endedAt: before.run.ended_at!,
     });
     await assertStopped();
-    const after = binding(podId);
+    const after = binding(podId, principal);
     if (hash(before) !== hash(after)) refuse('Accounting ownership changed during observation');
     const evidence = { ...before, session: { sha256: source.sha256, bytes: source.bytes }, usage };
     return { expectedBinding: hash(evidence), evidence };
   }
   return {
-    async inspect(podId: string) {
+    async inspect(podId: string, principal: ClaudeTelemetryPrincipal) {
+      authorize(podId, principal);
       const receipt = stored(podId);
       if (receipt) return { mode: 'recorded' as const, receipt: publicReceipt(receipt) };
-      const result = await observe(podId);
+      const result = await observe(podId, principal);
       // Private snapshots are retained only on apply, never returned to the client.
       return {
         mode: 'preview' as const,
@@ -367,8 +387,10 @@ export function createClaudeSessionTelemetry(deps: {
     async apply(
       podId: string,
       request: { expectedBinding: string; reason: string },
-      userId: string,
+      principal: ClaudeTelemetryPrincipal,
     ) {
+      authorize(podId, principal);
+      const userId = principal.oid;
       const prior = stored(podId);
       if (prior) {
         if (
@@ -379,12 +401,12 @@ export function createClaudeSessionTelemetry(deps: {
           refuse('Conflicting telemetry reconciliation request');
         return publicReceipt(prior);
       }
-      const observed = await observe(podId);
+      const observed = await observe(podId, principal);
       if (observed.expectedBinding !== request.expectedBinding)
         refuse('Stale native telemetry preview');
       return deps.db.transaction(() => {
         if (
-          hash(binding(podId)) !==
+          hash(binding(podId, principal)) !==
           hash({ ...observed.evidence, session: undefined, usage: undefined })
         )
           refuse('Accounting ownership changed before apply');
@@ -395,6 +417,8 @@ export function createClaudeSessionTelemetry(deps: {
           expectedBinding: request.expectedBinding,
           reason: request.reason,
           userId,
+          authorizationBasis:
+            evidence.originalPod.userId === userId ? 'pod_owner' : 'admin_or_operator',
           observedAt: new Date().toISOString(),
           ...evidence,
         };
