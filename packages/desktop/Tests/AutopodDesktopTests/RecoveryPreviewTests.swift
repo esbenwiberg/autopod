@@ -5,6 +5,67 @@ import Testing
 @testable import AutopodDesktop
 
 @MainActor @Suite(.serialized) struct RecoveryPreviewTests {
+  @Test func offlineContinuationHasSeparateSampleChildHandoffAndSharedBudgetWithoutStartingOriginal() async throws {
+    let fixture = DesktopRecoveryFixtures()
+    defer { try? FileManager.default.removeItem(at: fixture.journalDirectory) }
+    let actions = fixture.applying(to: .preview)
+    let before = try await actions.sandboxRecovery.load(fixture.podId)
+    let inspection = try await actions.recoveryFork.inspect(fixture.podId)
+    try inspection.validate(podId: fixture.podId)
+    let source = try #require(inspection.source)
+    let file = try #require(source.files.first)
+    let input = RecoveryForkInput(expectedGeneration: inspection.generation, sourceHead: source.head,
+      executionProfileId: "sample-node-22", instructions: "Address the recorded Node mismatch, preserving the saved changes.",
+      files: [RecoveryForkSelectedFile(path: file.path, version: file.version)], acknowledgePartialSource: true)
+    let preview = try await actions.recoveryFork.preview(fixture.podId, input)
+    try preview.validate(podId: fixture.podId, input: input)
+    #expect(fixture.mutationCount == 0 && preview.budget?.taskId == inspection.budget?.taskId)
+    let binding = try #require(preview.expectedBinding)
+    let request = RecoveryForkRequest(expectedBinding: binding, input: input)
+    let result = try await actions.recoveryFork.create(fixture.podId, request)
+    try result.validate(podId: fixture.podId, request: request)
+    #expect(result.childPodId != fixture.podId && result.state == .queued && result.context.messages.count == 2)
+    #expect(try await actions.recoveryFork.create(fixture.podId, request) == result)
+    let after = try await actions.sandboxRecovery.load(fixture.podId)
+    #expect(before.resources.first?.providerState == after.resources.first?.providerState && fixture.mutationCount == 1)
+    let child = try #require(result.childPodId)
+    try await actions.recoveryFork.openPod(child)
+    #expect(fixture.openedExample == child && fixture.continuationPod?.id == child)
+    let childInspection = try await actions.recoveryFork.inspect(child)
+    try childInspection.validate(podId: child)
+    #expect(childInspection.lineage?.parentPodId == fixture.podId && childInspection.source == nil)
+    #expect(childInspection.budget?.taskId == inspection.budget?.taskId)
+  }
+  @Test func previewTruthfullyRefusesUnsupportedSandboxCandidateWithoutMutation() async throws {
+    let fixture = DesktopRecoveryFixtures()
+    defer { try? FileManager.default.removeItem(at: fixture.journalDirectory) }
+    let actions = fixture.applying(to: .preview).recoveryFork
+    let inspection = try await actions.inspect(fixture.podId)
+    let source = try #require(inspection.source)
+    let input = RecoveryForkInput(expectedGeneration: inspection.generation, sourceHead: source.head,
+      executionProfileId: "@original", instructions: "Use the original frozen environment after review.", files: [], acknowledgePartialSource: true)
+    let result = try await actions.preview(fixture.podId, input)
+    try result.validate(podId: fixture.podId, input: input)
+    #expect(!result.available && result.expectedBinding == nil && result.execution == nil)
+    #expect(result.blockers.first?.contains("Linux local-Docker") == true && fixture.mutationCount == 0)
+  }
+  @Test func sampleForkCannotBypassUnknownStartHoldOrScenarioChange() async throws {
+    let fixture = DesktopRecoveryFixtures()
+    defer { try? FileManager.default.removeItem(at: fixture.journalDirectory) }
+    let old = fixture.applying(to: .preview).recoveryFork
+    let inspection = try await old.inspect(fixture.podId)
+    let source = try #require(inspection.source)
+    let input = RecoveryForkInput(expectedGeneration: inspection.generation, sourceHead: source.head,
+      executionProfileId: "sample-node-22", instructions: "Continue only after the frozen checkpoint is reviewed.", files: [], acknowledgePartialSource: true)
+    let preview = try await old.preview(fixture.podId, input)
+    let binding = try #require(preview.expectedBinding)
+    fixture.scenario = .unknownStart
+    let current = fixture.applying(to: .preview).recoveryFork
+    #expect(!(try await current.inspect(fixture.podId)).available)
+    do { _ = try await old.create(fixture.podId, RecoveryForkRequest(expectedBinding: binding, input: input)); Issue.record("Old scenario mutated") } catch {}
+    do { _ = try await current.preview(fixture.podId, input); Issue.record("Unknown operation bypassed") } catch {}
+    #expect(fixture.mutationCount == 0 && fixture.continuationPod == nil)
+  }
   @Test func allScenariosSupplyCorrelatedObservationsWithoutExecutionAuthority() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }

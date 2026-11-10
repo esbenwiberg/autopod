@@ -17,13 +17,21 @@ import Observation
   public var scenario = Scenario.retained {
     didSet {
       guard scenario != oldValue else { return }
-      generation += 1; providerState = "stopped"; requests = [:]; receipts = [:]
+      generation += 1; providerState = "stopped"; requests = [:]; receipts = [:]; forkOperation = nil; openedExample = nil
     }
   }
   public private(set) var generation = 1
   public private(set) var mutationCount = 0
   public let journalDirectory: URL
   private let session = UUID().uuidString
+  public var openedExample: String?
+  public var continuationPod: Pod? {
+    guard let operation = forkOperation, let id = operation.childPodId else { return nil }
+    return Pod(id: id, status: .queued, branch: "sample/fresh-continuation", profileName: "Offline continuation sample",
+      task: "OFFLINE SAMPLE — no worker will run. " + operation.request.instructions, model: "Sample — no provider",
+      startedAt: Date(timeIntervalSince1970: 1794304800), latestActivity: "Example child of \(podId). Original retained; no coding or cloud access.")
+  }
+  private var forkOperation: RecoveryForkOperation?
   private var providerState = "stopped"
   private var requests: [String: SandboxRecoveryRequest] = [:]
   private var receipts: [String: SandboxRecoveryReceipt] = [:]
@@ -144,11 +152,85 @@ import Observation
       "excludes": [".git", ".env*", "credential locations", "caches", "symlinks and special files"]])
   }
 
+  private var forkContext: [String: Any] {
+    ["summary": "Continue the sample task without repeating its completed source changes.",
+      "failure": "Sample build failed: the retained environment used Node 20, but the package requires Node 22. No later passing check is recorded.",
+      "messages": [["role": "human", "text": "Update the recovery screen. Preserve existing permissions and original work.", "timestamp": date, "eventId": 1],
+        ["role": "assistant", "text": "The source changes are saved. The build could not complete because of the Node version mismatch.", "timestamp": date, "eventId": 2]],
+      "truncated": false, "omissions": ["Sample visible text only. No tools, hidden reasoning, saved sessions or approvals are imported."]]
+  }
+  private var forkSource: [String: Any] {
+    ["head": String(repeating: "a", count: 40), "tree": String(repeating: "b", count: 40),
+      "baseCommitSha": String(repeating: "c", count: 40), "branch": "autopod/sample-recovery", "repository": "https://example.com/sample.git",
+      "files": [["path": "recovery-notes.md", "size": 128, "version": String(repeating: "d", count: 64)]],
+      "truncated": false, "skippedEntries": 3, "caveats": ["Example host checkpoint only; the original environment may contain additional unsaved work."]]
+  }
+  private var forkBudget: [String: Any] {
+    ["taskId": "sample-original-task", "status": "below_recorded_limit", "tokenBudget": 150000,
+      "recordedTokens": 48000, "retryAuthorizationRequired": false]
+  }
+  private func forkBinding(_ input: RecoveryForkInput, epoch: Int) throws -> String {
+    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+    var data = try encoder.encode(input); data.append(contentsOf: "sample:\(session):\(epoch)".utf8)
+    return fileHash(data)
+  }
+  private func inspectFork(_ id: String, epoch: Int) throws -> RecoveryForkInspection {
+    try requireCurrent(epoch)
+    let available = scenario == .retained && id == podId && forkOperation == nil
+    let lineage: Any
+    if let operation = forkOperation, id == operation.childPodId { lineage = ["parentPodId": podId, "operationId": operation.id] }
+    else { lineage = NSNull() }
+    return try decode(["version": 1, "podId": id, "generation": epoch, "available": available,
+      "blockers": available ? [] : [forkOperation == nil ? "Sample unknown operation or custody hold blocks a new continuation." : "A sample continuation is already recorded. Observe it instead of starting another."],
+      "source": id == forkOperation?.childPodId ? NSNull() : forkSource, "context": forkContext, "budget": forkBudget,
+      "profiles": [["id": "@original", "label": "Original sandbox · Node 20 (unsupported candidate)"], ["id": "sample-node-22", "label": "Linux Docker · Node 22"]],
+      "operation": id == podId ? (try forkOperation.map { try wire($0) } ?? NSNull()) : NSNull(),
+      "lineage": lineage])
+  }
+
   /// Capture one scenario epoch so a menu change cannot retarget an open decision.
   public func applying(to base: PodActions) -> PodActions {
     let epoch = generation
     let scope = "recovery-preview:\(session):\(epoch)"
     var actions = base
+    actions.recoveryFork = RecoveryForkActions(scope: scope, draftScope: scope, isFixture: true,
+      journalDirectory: journalDirectory.appendingPathComponent("fork", isDirectory: true),
+      isCurrent: { self.generation == epoch }, inspect: { id in try self.inspectFork(id, epoch: epoch) },
+      preview: { id, input in
+        let inspection = try self.inspectFork(id, epoch: epoch)
+        guard inspection.available, input.isValid, input.expectedGeneration == epoch,
+          input.sourceHead == String(repeating: "a", count: 40),
+          ["@original", "sample-node-22"].contains(input.executionProfileId),
+          input.files.allSatisfy({ $0.path == "recovery-notes.md" && $0.version == String(repeating: "d", count: 64) }) else { throw self.unavailable() }
+        let supported = input.executionProfileId == "sample-node-22"
+        let execution: Any = supported ? ["profileId": input.executionProfileId, "target": "local", "template": "sample-node-22",
+          "platform": "linux/amd64", "memoryGb": 4, "cpus": 2, "originalTemplate": "sandbox-node-20", "sameEnvironment": false] : NSNull()
+        return try self.decode(["version": 1, "podId": id, "generation": epoch, "available": supported,
+          "blockers": supported ? [] : ["Only Linux local-Docker candidates can currently qualify. Choose the Linux Docker · Node 22 sample."],
+          "expectedBinding": supported ? (try self.forkBinding(input, epoch: epoch)) : NSNull(), "source": self.forkSource,
+          "context": self.forkContext, "budget": self.forkBudget, "execution": execution,
+          "input": self.wire(input)])
+      }, create: { id, request in
+        try self.requireCurrent(epoch)
+        if let old = self.forkOperation {
+          guard old.request == request, old.parentPodId == id else { throw self.unavailable() }; return old
+        }
+        let inspection = try self.inspectFork(id, epoch: epoch)
+        guard inspection.available, request.isValid, request.expectedGeneration == epoch, request.executionProfileId == "sample-node-22",
+          request.expectedBinding == (try self.forkBinding(request.input, epoch: epoch)) else { throw self.unavailable() }
+        let operation: RecoveryForkOperation = try self.decode(["version": 1, "id": request.id, "parentPodId": id, "generation": epoch,
+          "actorId": self.userId, "request": self.wire(request), "state": "queued", "childPodId": "sample-new-pod-\(epoch)", "childStatus": "sample only — no worker",
+          "sourceHead": request.sourceHead, "copiedFiles": request.files.map(\.path), "context": self.forkContext, "error": NSNull(), "createdAt": self.date])
+        self.forkOperation = operation; self.mutationCount += 1; return operation
+      }, observe: { id, requestId in
+        try self.requireCurrent(epoch)
+        guard let operation = self.forkOperation, operation.parentPodId == id, operation.id == requestId else { throw DaemonError.notFound("Sample operation is not recorded.") }
+        return operation
+      }, openPod: { id in
+        try self.requireCurrent(epoch)
+        guard self.forkOperation?.childPodId == id || id == self.podId else { throw self.unavailable() }
+        self.openedExample = id
+      })
     actions.fileRecovery = FileRecoveryActions(scope: scope, isFixture: true,
       isCurrent: { self.generation == epoch }, load: { id, includeOriginal in try self.inspectFiles(id, epoch: epoch, includeOriginal: includeOriginal) },
       read: { id, selection in

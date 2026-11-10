@@ -3,7 +3,7 @@ import Foundation
 import Observation
 
 enum RecoveryRoute: String, CaseIterable {
-  case overview, continueWork, recoverFiles, freeStorage, repair, stalled, finalization, checks
+  case overview, continueWork, recoverFiles, freeStorage, repair, stalled, finalization, checks, freshPod
 }
 
 func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
@@ -30,9 +30,11 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
   let finalization: RetainedFinalizationModel
   let sandbox: SandboxRecoveryModel
   let files: FileRecoveryModel
+  let fork: RecoveryForkModel
   private(set) var refreshing = false
   private(set) var inspected = false
   private(set) var checkedAt: Date?
+  private var inspectingFork = false
   private var inspectingSandbox = false
   private var inspectingRepair = false
   private var inspectingStalled = false
@@ -44,16 +46,17 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
     finalization = RetainedFinalizationModel(podId: podId, actions: actions.retainedFinalization)
     sandbox = SandboxRecoveryModel(podId: podId, actions: actions.sandboxRecovery)
     files = FileRecoveryModel(podId: podId, actions: actions.fileRecovery)
+    fork = RecoveryForkModel(podId: podId, actions: actions.recoveryFork)
   }
 
   static func scope(_ actions: PodActions) -> String {
     [actions.sandboxRecovery.scope, actions.repairContinuation.scope,
-     actions.retainedFinalization.scope, actions.stalledWorkerRecovery.scope, actions.fileRecovery.scope]
+     actions.retainedFinalization.scope, actions.stalledWorkerRecovery.scope, actions.fileRecovery.scope, actions.recoveryFork.scope]
       .map { "\($0.utf8.count):\($0)" }.joined()
   }
 
   static func available(_ actions: PodActions, workspace: Bool) -> Bool {
-    actions.fileRecovery.available || actions.sandboxRecovery.available || (!workspace && (actions.repairContinuation.available
+    actions.fileRecovery.available || actions.sandboxRecovery.available || (!workspace && (actions.recoveryFork.available || actions.repairContinuation.available
       || actions.retainedFinalization.available || actions.stalledWorkerRecovery.available))
   }
 
@@ -61,9 +64,10 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
     [.failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status)
   }
 
-  var busy: Bool { refreshing || repair.busy || stalled.busy || finalization.busy || sandbox.busy || files.busy }
+  var busy: Bool { refreshing || repair.busy || stalled.busy || finalization.busy || sandbox.busy || files.busy || fork.busy }
 
   var pendingRoute: RecoveryRoute? {
+    if fork.needsObservation || fork.invalidJournal { return .freshPod }
     if repair.pending != nil && ![.validated, .failed].contains(repair.operation?.state) { return .repair }
     if stalled.pending != nil && stalled.receipt?.state != .settled { return .stalled }
     if finalization.pending != nil && finalization.receipt?.state != .finalized { return .finalization }
@@ -74,16 +78,16 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
 
   var hasRetention: Bool {
     sandbox.snapshot?.resources.contains { $0.providerState != "deleted" } == true
-      || finalization.snapshot?.custody.isEmpty == false || repair.operation != nil
+      || finalization.snapshot?.custody.isEmpty == false || repair.operation != nil || fork.operation != nil
   }
 
   var errors: [String] {
-    [inspectingSandbox ? sandbox.error : nil, inspectingRepair ? repair.error : nil,
+    [inspectingFork ? fork.error : nil, inspectingSandbox ? sandbox.error : nil, inspectingRepair ? repair.error : nil,
      inspectingStalled ? stalled.error : nil, inspectingFinalization ? finalization.error : nil].compactMap { $0 }
   }
 
   var observationsDisagree: Bool {
-    let generations = [inspectingSandbox ? sandbox.snapshot?.generation : nil,
+    let generations = [inspectingFork ? fork.inspection?.generation : nil, inspectingSandbox ? sandbox.snapshot?.generation : nil,
       inspectingRepair ? repair.snapshot?.generation : nil,
       inspectingStalled ? stalled.snapshot?.generation : nil,
       inspectingFinalization ? finalization.snapshot?.generation : nil,
@@ -140,6 +144,8 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
 
   func explanation(for pod: Pod) -> String {
     if pendingRoute != nil { return "An earlier recovery decision needs an outcome check before a new action." }
+    if let child = fork.operation?.childPodId { return "A separate continuation pod is recorded: \(child). This original remains retained; inspect the linked pod for coding and check outcomes." }
+    if fork.inspection?.lineage != nil { return "This pod continues a retained checkpoint. The original and its history remain separately available; task spending and retry limits are shared." }
     switch pod.status {
     case .failed: return "This task stopped before successful completion. Review what was saved and choose how to proceed."
     case .reviewRequired: return "Checks or review need attention. Inspect the failure before deciding whether to retry or repair."
@@ -171,6 +177,8 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
     }
     guard !Task.isCancelled else { return }
     refreshing = true; inspected = false
+    inspectingFork = !pod.isWorkspace && actions.recoveryFork.available
+      && ([.failed, .reviewRequired].contains(pod.status) || fork.needsObservation || fork.operation != nil)
     inspectingSandbox = actions.sandboxRecovery.available && Self.canInspectSandbox(pod)
     inspectingFinalization = !pod.isWorkspace && actions.retainedFinalization.available && Self.canInspectSandbox(pod)
     inspectingStalled = !pod.isWorkspace && actions.stalledWorkerRecovery.available
@@ -178,6 +186,8 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
     inspectingRepair = !pod.isWorkspace && actions.repairContinuation.available
       && [.failed, .reviewRequired, .validated].contains(pod.status)
     defer { refreshing = false }
+    if inspectingFork { await fork.refresh(actions.recoveryFork) }
+    guard !Task.isCancelled else { return }
     if inspectingSandbox {
       await sandbox.refresh(actions.sandboxRecovery)
     }
