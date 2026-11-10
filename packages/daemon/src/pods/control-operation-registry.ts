@@ -26,6 +26,8 @@ export function createControlOperationRegistry(
         if (
           typeof value !== 'function' ||
           key === 'recoverStalledWorker' ||
+          key === 'previewRecoveryFork' ||
+          key === 'createRecoveryFork' ||
           key === 'finalizeRetained' ||
           key === 'adoptSource' ||
           key === 'recoverCheckpoint' ||

@@ -46,6 +46,7 @@ public struct PodActions: Sendable {
   public var repairContinuation: RepairContinuationActions = .unavailable
   public var sandboxRecovery: SandboxRecoveryActions = .unavailable
   public var fileRecovery: FileRecoveryActions = .unavailable
+  public var recoveryFork: RecoveryForkActions = .unavailable
   public var approve: @MainActor @Sendable (String, String?) async -> Void
   public var reject: @MainActor @Sendable (String, String?) async -> Void
   public var reply: @MainActor @Sendable (String, String) async -> Void

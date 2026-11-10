@@ -55,12 +55,13 @@ child.once('error', error => { console.error(error); process.exitCode = 1; });
 }
 
 for (const command of declarations) {
+  const defaultHeapMiB = command === 'typecheck' ? 6144 : 4096;
   for (const supplied of [undefined, '']) {
-    test(`declaration ${command} defaults to a bounded 4 GiB heap when NODE_OPTIONS is ${supplied === undefined ? 'absent' : 'empty'}`, () => {
+    test(`declaration ${command} defaults to a bounded ${defaultHeapMiB / 1024} GiB heap when NODE_OPTIONS is ${supplied === undefined ? 'absent' : 'empty'}`, () => {
       const result = probe(command, supplied);
       assert.equal(result.status, 0, result.stderr);
       assert.deepEqual(result.stdout.split('\n').slice(0, -1), [
-        '--max-old-space-size=4096',
+        `--max-old-space-size=${defaultHeapMiB}`,
         ...(command === 'typecheck' ? ['1', '--dts-only', '--out-dir', '.turbo/typecheck'] : ['']),
       ]);
     });
@@ -86,7 +87,9 @@ for (const command of declarations) {
     const result = probe(command, undefined, 0, true);
     assert.equal(result.status, 0, result.stderr);
     const limits = JSON.parse(result.stdout);
-    assert.ok(limits.main >= 4096 * 1024 * 1024, JSON.stringify(limits));
+    assert.ok(limits.main >= defaultHeapMiB * 1024 * 1024, JSON.stringify(limits));
+    // V8 adds a bounded young-generation allowance above the old-space limit.
+    assert.ok(limits.main <= (defaultHeapMiB + 512) * 1024 * 1024, JSON.stringify(limits));
     assert.equal(limits.worker, limits.main);
   });
 }

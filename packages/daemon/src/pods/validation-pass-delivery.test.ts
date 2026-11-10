@@ -6,6 +6,37 @@ import { GitCredentialError } from '../worktrees/local-worktree-manager.js';
 import { createValidationPassDelivery } from './validation-pass-delivery.js';
 
 describe('validation successful delivery lifetime', () => {
+  it('holds recovery-fork publication and automation after passing validation', async () => {
+    const f = createDeliveryFixture();
+    f.validating();
+    f.podRepo.update('prepare', { autoApprove: true });
+    // Exercise the delivery gate with a real retained lineage lookup; coding admission
+    // is tested separately through the real recovery orchestrator and qualification.
+    f.db
+      .prepare('INSERT INTO recovery_forks VALUES(?,?,?,?,?,?,?,?,?)')
+      .run(
+        'fork',
+        'retained-original',
+        'request',
+        'human',
+        'hash',
+        '{}',
+        '{"worktreePath":"/separate-original","sourceLocations":[]}',
+        'epoch',
+        'now',
+      );
+    f.db
+      .prepare('INSERT INTO recovery_fork_facts VALUES(?,?,?,?)')
+      .run('fork', 'admitted', '{"childPodId":"prepare"}', 'now');
+    await f.pass().completeValidationPass.call(f.calls, f.passContext());
+    expect(f.pod().status).toBe('validated');
+    expect(f.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.worktreeManager.pushArtifactBranch).not.toHaveBeenCalled();
+    expect(f.provider.createPr).not.toHaveBeenCalled();
+    expect(f.passCaptured.prManagerFactory).not.toHaveBeenCalled();
+    expect(f.passCaptured.maybeTriggerDependents).not.toHaveBeenCalled();
+    expect(f.calls.approveSession).not.toHaveBeenCalled();
+  });
   it.each([
     'old review finding',
     'unrelated finding',

@@ -389,6 +389,12 @@ export function createProvisioningWorkspace(
           await access(bareWorktreeDir);
           recoveryViable = true;
         } catch {
+          if (podRepo.recoveryForks?.child(podId))
+            throw new AutopodError(
+              'Prepared recovery-fork worktree is unavailable; remote substitution is forbidden.',
+              'RECOVERY_FORK_SOURCE_UNAVAILABLE',
+              409,
+            );
           const checkpoint = podRepo.retainedCheckpoints?.latest(podId);
           if (checkpoint?.activated?.generation === pod.lifecycleGeneration && !checkpoint.checked)
             throw new AutopodError(

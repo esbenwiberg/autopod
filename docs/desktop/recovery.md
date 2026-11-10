@@ -50,13 +50,63 @@ ending with work retained / verifying an already-merged PR. Opening a control
 is not execution authorization. Budget, retry, source custody, pending guidance
 and independent-check requirements still apply.
 
-The replacement view explains source selection, settings preview, actual
+The existing same-pod replacement view explains source selection, settings preview, actual
 qualification, coding and checks separately. It does not publish or merge.
 This first UI slice still requires an independently inspected full host commit
 and reviewed replacement profile ID: the existing inspection protocol does not
 discover a safe source automatically. Do not paste a guessed or historical SHA.
 Source cards and profile discovery require a separate correlated selection
 contract, not a client-invented default.
+
+#### Continue in a fresh pod
+
+This is separate from ordinary **Fork** and same-pod environment replacement.
+It creates a new pod identity while preserving the original and joining its
+logical task, spending and retry history. It is not an intentional rerun or a
+new budget, and does not inherit PR-fix lineage, approvals or published PRs.
+
+1. Review the exact, clean **host Git checkpoint** and its coverage. It is not a
+   promise that unsaved sandbox bytes were synchronized. The child uses independent
+   Git storage; the private original evidence is never mounted as its workspace.
+   Optional safe, nonignored additional files are individually selected (100 files / 50 MiB,
+   5 MiB per file). Unlisted, excluded and unselected files remain in the original.
+   Unsupported tracked credential/control/special paths block instead of silently
+   changing the claimed checkpoint.
+2. Choose a reviewed environment profile and preview software/resources. The
+   original frozen environment is available explicitly, with a warning that the
+   same software can repeat the failure. Repository, AI, credential, tools,
+   network, review and task authority remain frozen.
+3. Read the bounded visible conversation/failure handoff and provide explicit
+   continuation instructions. Historical text is reference data, not new
+   permission. Tool payloads, hidden reasoning, credential stores and provider
+   sessions are excluded; text redaction is not a complete secret scan.
+4. Review the frozen selection and shared budget, then confirm. The backend
+   preserves a durable claim before preparation, admits one separate child, and
+   qualifies its actual environment before coding. Failed/unknown qualification
+   cannot start coding. Delivery still requires separate human approval.
+5. Observe the exact saved decision and **Open new pod**. The receipt distinguishes
+   preparation, queueing, qualification, failure and uncertainty; it does not mean
+   work is complete or task checks passed. The child links back to the original.
+
+The first backend qualifier supports fresh **Linux local-Docker candidates**;
+a retained local-Docker or sandbox original can supply the host checkpoint.
+Sandbox replacement qualification is not newly authorized. Profiles targeting an
+unsupported candidate are refused at preview. Repositories with tracked sensitive
+control paths or links are also refused rather than silently altered.
+
+Eligibility is deliberately conservative: settled ordinary automatic tasks with
+an exact supported host source and frozen launch; unresolved activity/decisions,
+competing custody, Goals, sidecars/startup PIM, unavailable accounting or required
+retry authorization block. Originals and partial preparation remain retained;
+there is no automatic original release or storage cleanup in this workflow.
+
+A protected immutable request survives restart and connection changes. Discovery
+of an existing operation first preserves its exact request locally. A lost
+response permits observation, not another POST. Generic HTTP errors, including a
+POST 404 followed by an observation 404, do not permit a new decision. Explicit,
+request-correlated **rejected-before-claim** server evidence plus fresh absence is
+required before discarding a rejected draft. When its outcome is unconfirmed,
+current conversation data is not displayed as though it were the saved handoff.
 
 ### Recover files
 

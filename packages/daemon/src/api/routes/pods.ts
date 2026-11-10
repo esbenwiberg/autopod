@@ -54,6 +54,7 @@ import { CONTROL_PLANE_RATE_LIMIT_MAX, rateLimitIdentity } from '../plugins/rate
 import { resolvePublicPreviewOrigin, rewritePreviewUrlForBrowser } from '../preview-url.js';
 import { serializePodForWire, serializeValidationResult } from '../wire-serializers.js';
 import { checkpointRecoveryRoutes } from './checkpoint-recovery.js';
+import { recoveryForkRoutes } from './recovery-fork.js';
 import { repairContinuationRoutes } from './repair-continuation.js';
 import { retainedFinalizationRoutes } from './retained-finalization.js';
 import { reworkRoutes } from './rework.js';
@@ -842,6 +843,7 @@ export function podRoutes(
   checkpointRecoveryRoutes(app, podManager);
   repairContinuationRoutes(app, podManager);
   retainedFinalizationRoutes(app, podManager);
+  recoveryForkRoutes(app, podManager);
   stalledWorkerRecoveryRoutes(app, podManager);
   sandboxRecoveryRoutes(app, podManager);
 

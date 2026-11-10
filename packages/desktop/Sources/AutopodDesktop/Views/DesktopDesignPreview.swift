@@ -23,7 +23,7 @@ public struct DesktopDesignPreview: View {
       if usePerformanceFleet {
         DesktopPerformanceFixtures.mainView(selection: $performanceSelectedID)
       } else {
-    MainView(pods: Self.pods, managedPods: DesktopKnowledgeFixtures.managedPods, managedPodAPI: knowledge.api, selectedManagedPodId: $knowledge.selectedManagedID, scheduledJobs: scheduleFixtures.jobs, scheduledJobTemplates: scheduleFixtures.templates, selectedSessionId: $selectedID,
+    MainView(pods: Self.pods + (recoveryFixtures.continuationPod.map { [$0] } ?? []), managedPods: DesktopKnowledgeFixtures.managedPods, managedPodAPI: knowledge.api, selectedManagedPodId: $knowledge.selectedManagedID, scheduledJobs: scheduleFixtures.jobs, scheduledJobTemplates: scheduleFixtures.templates, selectedSessionId: $selectedID,
       isConnected: true, connectionLabel: "Design fixtures", connectionState: "Sample data",
       actions: recoveryFixtures.applying(to: Self.fixtureActions),
       profileNames: MockProfiles.all.map(\.name), profileDetails: MockProfiles.all,
@@ -72,6 +72,9 @@ public struct DesktopDesignPreview: View {
       memoryWorkspaceActions: knowledge.actions)
       }
     }
+      .onChange(of: recoveryFixtures.openedExample) { _, id in
+        guard let id else { return }; selectedID = id; recoveryFixtures.openedExample = nil
+      }
       .toolbar {
         ToolbarItem(placement: .principal) {
         HStack {

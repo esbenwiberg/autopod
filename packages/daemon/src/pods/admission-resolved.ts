@@ -28,6 +28,12 @@ export function createAdmissionResolved(
     creator?: PodCreator,
     actor?: OperatorActor,
   ): Pod {
+    if (config.derivation?.kind === 'recovery-fork')
+      throw new AutopodError(
+        'Recovery forks require operation-owned admission',
+        'CONFIG_DERIVATION_INVALID',
+        403,
+      );
     if (!deps.launchConfiguration)
       throw new AutopodError(
         'Composable launch execution is unavailable',

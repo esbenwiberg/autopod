@@ -17,7 +17,7 @@ struct RecoveryHubCard: View {
   }
 
   private var needsAttention: Bool {
-    [.failed, .reviewRequired].contains(pod.status) || model.pendingRoute != nil || model.hasRetention
+    [.failed, .reviewRequired].contains(pod.status) || model.pendingRoute != nil || model.hasRetention || model.fork.inspection?.lineage != nil
   }
 
   var body: some View {
@@ -46,7 +46,7 @@ struct RecoveryHubCard: View {
     }.tint(DesktopTheme.accent)
     .task(id: pod.status) {
       model.invalidateObservation()
-      if pod.status != .running || pod.needsExecutionInspection { await model.refresh(pod: pod, actions: actions) }
+      if pod.status != .running || pod.needsExecutionInspection || model.fork.needsObservation { await model.refresh(pod: pod, actions: actions) }
     }
     .sheet(isPresented: $showing, onDismiss: { Task { await model.refresh(pod: pod, actions: actions) } }) {
       RecoveryHubSheet(pod: pod, actions: actions, model: model, onOpenValidation: onOpenValidation,
@@ -127,6 +127,8 @@ struct RecoveryHubSheet: View {
             .font(.callout).foregroundStyle(RecoveryPalette.secondary)
         }
       }
+    case .freshPod:
+      RecoveryForkView(actions: actions.recoveryFork, model: model.fork, onNavigate: { dismiss() })
     case .repair:
       RepairContinuationSheet(podId: pod.id, actions: actions.repairContinuation, model: model.repair, embedded: true)
     case .stalled:
@@ -207,7 +209,7 @@ struct RecoveryHubSheet: View {
           RecoverySectionTitle(title: "How would you like to proceed?", subtitle: "Choose an outcome. Nothing runs when you open an option.")
           if !compact {
             HStack(alignment: .top, spacing: 12) {
-              goalCard("Continue work", detail: "Retry checks, repair code, or inspect a stalled run. No implicit publish or merge.",
+              goalCard("Continue work", detail: "Retry, repair, or continue a checkpoint in a fresh pod. No implicit publish or merge.",
                 icon: "arrow.right.circle", destination: .continueWork)
               goalCard("Recover files", detail: "Browse saved copies, inspect the original if needed, and save selected files to this Mac.",
                 icon: "doc.on.doc", destination: .recoverFiles)
@@ -216,7 +218,7 @@ struct RecoveryHubSheet: View {
             }.fixedSize(horizontal: false, vertical: true)
           } else {
             VStack(spacing: 10) {
-              option("Continue work", detail: "Retry checks, repair code, or inspect a stalled run. No implicit publish or merge.", icon: "arrow.right.circle", destination: .continueWork)
+              option("Continue work", detail: "Retry, repair, or continue a checkpoint in a fresh pod. No implicit publish or merge.", icon: "arrow.right.circle", destination: .continueWork)
               option("Recover files", detail: "Browse saved copies, inspect the original if needed, and save selected files to this Mac.", icon: "doc.on.doc", destination: .recoverFiles)
               option("Free storage", detail: "Review data loss before deleting. Safe archive-and-release is not yet available.", icon: "externaldrive.badge.minus", destination: .freeStorage)
             }
@@ -243,6 +245,9 @@ struct RecoveryHubSheet: View {
       VStack(alignment: .leading, spacing: 16) {
         RecoverySectionTitle(title: "Continue work", subtitle: "Choose the smallest next step. Opening an option checks eligibility; it does not start execution.")
         if !pod.isWorkspace {
+          if actions.recoveryFork.available {
+            option("Continue in a fresh pod", detail: "Carry a verified host checkpoint, visible history, failure context and your instructions. Keep the original and share task limits.", icon: "arrow.triangle.branch", destination: .freshPod)
+          }
           option("Retry checks or fix validation", detail: "Review the failed checks and current retry permission first.", icon: "checkmark.circle", destination: .checks)
           if actions.repairContinuation.available && [.failed, .reviewRequired, .validated].contains(pod.status) {
             option("Use a replacement environment", detail: "Review saved source and software changes. Coding starts only if the actual replacement qualifies.", icon: "wrench.and.screwdriver", destination: .repair)

@@ -19,6 +19,7 @@ import { hasUnansweredDecision } from './decision-admission.js';
 import { createDeletionOwnership } from './deletion-ownership.js';
 import { ensureMergeIdentityProjection } from './merge-identity-projection.js';
 import { readProviderUsage } from './provider-usage-projection.js';
+import { createRecoveryForkRepository } from './recovery-fork-repository.js';
 import { createRetainedCheckpointRepository } from './retained-checkpoint-repository.js';
 import { assertSourceAvailable, assertSourceDeliveryAllowed } from './source-custody-guards.js';
 import { createTerminationReconciliationRepository } from './termination-reconciliation-repository.js';
@@ -45,7 +46,7 @@ function isContainerReference(value: unknown): value is string {
 
 export interface TaskExecutionLedger
   extends ReturnType<typeof createTerminationReconciliationRepository> {
-  register(podId: string): void;
+  register(podId: string, executionParentPodId?: string): void;
   raiseBudget(
     podId: string,
     tokenBudget: number | null,
@@ -102,7 +103,13 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
     FROM retained_task_executions e JOIN logical_tasks t ON t.id = e.task_id WHERE e.pod_id = ?
   `)
       .get(podId) as Membership | undefined;
-  const register = db.transaction((podId: string) => {
+  const register = db.transaction((podId: string, executionParentPodId?: string) => {
+    // An insertion-only server capability, independent of PR feedback/delivery lineage.
+    // Membership is immutable: even a same-task override cannot rewrite an existing edge.
+    if (executionParentPodId !== undefined && membership(podId))
+      throw new AutopodError('Task membership already exists', 'TASK_IDENTITY_CONFLICT', 409);
+    if (executionParentPodId === podId)
+      throw new AutopodError('A task cannot parent itself', 'TASK_IDENTITY_CONFLICT', 409);
     const seen = new Set<string>();
     const assign = (id: string): Membership => {
       const existing = membership(id);
@@ -123,8 +130,17 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           'TASK_IDENTITY_UNAVAILABLE',
           409,
         );
-      const taskId = pod.parent ? assign(pod.parent).taskId : `task:${randomUUID()}`;
-      if (!pod.parent)
+      const parent = id === podId ? (executionParentPodId ?? pod.parent) : pod.parent;
+      // Recovery parents may have been retained by history. Never fabricate a new root.
+      const parentMember = parent ? membership(parent) : undefined;
+      if (id === podId && executionParentPodId && !parentMember)
+        throw new AutopodError(
+          'Retained execution parent unavailable',
+          'TASK_IDENTITY_UNAVAILABLE',
+          409,
+        );
+      const taskId = parent ? (parentMember ?? assign(parent)).taskId : `task:${randomUUID()}`;
+      if (!parent)
         db.prepare('INSERT INTO logical_tasks (id, root_pod_id, created_at) VALUES (?, ?, ?)').run(
           taskId,
           id,
@@ -132,7 +148,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
         );
       db.prepare(
         'INSERT INTO task_executions (pod_id, execution_id, task_id, parent_pod_id, created_at) VALUES (?, ?, ?, ?, ?)',
-      ).run(id, `execution:${randomUUID()}`, taskId, pod.parent, pod.createdAt);
+      ).run(id, `execution:${randomUUID()}`, taskId, parent, pod.createdAt);
       return membership(id) as Membership;
     };
     assign(podId);
@@ -599,12 +615,14 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
           .get(podId),
       ),
     beginRun: db.transaction((podId, generation, cycle, binding) => {
+      const forks = createRecoveryForkRepository(db);
+      const forkWorker = forks.assertWorkerAllowed(podId);
       const retained = createRetainedCheckpointRepository(db);
       const repairWorker = retained.assertWorkerAllowed(podId);
       assertSourceAvailable(db, podId, '');
       // Worker admission is not publication authority. Only an owned recovery
       // worker may start before independent post-repair checks exist.
-      if (!repairWorker) assertSourceDeliveryAllowed(db, podId);
+      if (!repairWorker && !forkWorker) assertSourceDeliveryAllowed(db, podId);
       createDeletionOwnership(db).assertTaskAvailable(podId);
       createValidationExecutionLedger(db).assertTaskSettled(podId);
       const encoded = JSON.stringify({
@@ -696,6 +714,7 @@ export function createTaskExecutionLedger(db: Database.Database): TaskExecutionL
       db.prepare(
         'INSERT INTO task_agent_runs (id, pod_id, generation, cycle, binding, started_at) VALUES (?, ?, ?, ?, ?, ?)',
       ).run(id, podId, generation, cycle, encoded, new Date().toISOString());
+      forks.bindWorker(podId, id, generation, cycle, current.containerId);
       if (repairWorker)
         retained.recordRepairWorker(podId, id, generation, cycle, current.containerId);
       return id;

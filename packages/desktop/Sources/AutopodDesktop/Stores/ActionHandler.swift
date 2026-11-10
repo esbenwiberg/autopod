@@ -216,6 +216,28 @@ public final class ActionHandler {
         await self?.updateFromBase(id) ?? nil
       }
     )
+    result.recoveryFork = RecoveryForkActions(scope: replyContextID.uuidString,
+      draftScope: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",
+      journalDirectory: journalRoot?.appendingPathComponent("recovery-fork", isDirectory: true),
+      isCurrent: { [weak self] in
+        guard let self else { return false }; return self.podStore.isCurrent(self.ownership)
+      }, inspect: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.inspectRecoveryFork(id) }
+      }, preview: { [weak self] id, input in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.previewRecoveryFork(id, input: input) }
+      }, create: { [weak self] id, request in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.createRecoveryFork(id, body: request) }
+      }, observe: { [weak self] id, requestId in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.getRecoveryFork(id, requestId: requestId) }
+      }, openPod: { [weak self] id in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        let response = try await self.perform { try await self.api.getPod(id) }
+        self.podStore.upsertSession(PodMapper.map(response)); self.podStore.selectedSessionId = id
+      })
     result.fileRecovery = FileRecoveryActions(scope: replyContextID.uuidString,
       isCurrent: { [weak self] in
         guard let self else { return false }; return self.podStore.isCurrent(self.ownership)

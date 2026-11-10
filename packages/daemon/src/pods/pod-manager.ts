@@ -191,6 +191,7 @@ export type {
 } from './pod-manager-contracts.js';
 
 import { createPodManagerFacade } from './pod-manager-facade.js';
+import { createRecoveryFork } from './recovery-fork.js';
 import { createTerminationReconciliation } from './termination-reconciliation.js';
 
 export type { ApproveAllSkippedPod, ApproveSessionOptions } from './approval-contracts.js';
@@ -998,7 +999,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     // Keep live dependencies by reference; this private integration callback is
     // captured separately so late-bound cooldown/provider controls stay live.
     qualifyCodingCandidate: async (input) => {
-      if (podRepo.retainedCoding?.isOwner(input.pod.id))
+      if (podRepo.recoveryForks?.child(input.pod.id)) await recoveryFork!.qualifyChild(input);
+      else if (podRepo.retainedCoding?.isOwner(input.pod.id))
         await checkpointRecovery!.repair!.qualify(input);
     },
     materializeSpecFiles,
@@ -1043,7 +1045,10 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     emitActivityStatus,
   });
   const processWorkflow = createAgentProcessWorkflow(deps, {
-    assertCodingCandidateCurrent: (id) => checkpointRecovery!.repair!.assertCandidateCurrent(id),
+    assertCodingCandidateCurrent: (id) =>
+      podRepo.recoveryForks?.child(id)
+        ? recoveryFork!.assertConsumptionCurrent(id)
+        : checkpointRecovery!.repair!.assertCandidateCurrent(id),
     podRepo,
     logger,
     emitActivityStatus,
@@ -1440,6 +1445,8 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
     return owner?.taskRunId === runId && owner.isCurrent?.() === true;
   };
   const controlOperations = createControlOperationRegistry((podId, operation) => {
+    podRepo.recoveryForks?.assertOriginalAvailable(podId);
+    podRepo.recoveryForks?.assertTaskExecutionAllowed(podId);
     podRepo.stalledRecoveries?.assertAvailable(podId);
     if (stalledWorkerRecovery?.isActive(podId))
       checkpointError('Stop-and-retain preflight owns this control.');
@@ -1666,6 +1673,56 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
           ),
         })
       : undefined;
+  const recoveryFork = podRepo.recoveryForks
+    ? createRecoveryFork({
+        pods: podRepo,
+        launch: deps.launchConfiguration,
+        events: deps.eventRepo,
+        worktrees: worktreeManager,
+        container: (target) => containerManagerFactory.get(target),
+        settings: executionForPod,
+        assertGuidanceCollected,
+        isIdle: (id) =>
+          !stalledWorkerRecovery?.isActive(id) &&
+          !retainedFinalization?.isActive(id) &&
+          !controlOperations.isActive(id) &&
+          !activeAgentRuns.has(id) &&
+          !validationAbortControllers.has(id) &&
+          !validationResumeRuns.has(id) &&
+          !artifactResumeRuns.has(id) &&
+          !artifactCompletionRuns.has(id) &&
+          !attemptExtensionRuns.has(id),
+        isGoal: (id) =>
+          deps.launchConfiguration?.read(id)?.intent === 'goal' ||
+          Boolean(deps.launchConfiguration?.goals?.get(id)),
+        enqueue: enqueueSession,
+        created: (pod) =>
+          eventBus.emit({
+            type: 'pod.created',
+            timestamp: new Date().toISOString(),
+            pod: {
+              id: pod.id,
+              profileName: pod.profileName,
+              task: pod.task,
+              status: pod.status,
+              model: pod.model,
+              runtime: pod.runtime,
+              branch: pod.branch,
+              baseBranch: pod.baseBranch,
+              duration: null,
+              filesChanged: pod.filesChanged,
+              createdAt: pod.createdAt,
+            },
+          }),
+        root: path.join(
+          process.env.DATA_DIR ??
+            (process.env.DB_PATH
+              ? path.dirname(path.resolve(process.env.DB_PATH))
+              : path.join(process.cwd(), '.autopod-data')),
+          'recovery-forks',
+        ),
+      })
+    : undefined;
   const retainedFinalization: ReturnType<typeof createRetainedFinalization> | undefined =
     podRepo.retainedFinalizations
       ? createRetainedFinalization({
@@ -1752,6 +1809,7 @@ export function createPodManager(deps: PodManagerDependencies): PodManager {
       : undefined;
   return controlOperations.wrap(
     createPodManagerFacade({
+      recoveryFork,
       stalledWorkerRecovery,
       sandboxRecovery,
       retainedFinalization,

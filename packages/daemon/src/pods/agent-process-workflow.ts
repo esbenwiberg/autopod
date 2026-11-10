@@ -285,7 +285,23 @@ export function createAgentProcessWorkflow(
         }
       }
 
-      if (podRepo.retainedCoding?.isOwner(podId)) {
+      if (podRepo.recoveryForks?.child(podId)) {
+        // Lazy fresh spawn: the exact consumption fence runs before selecting any worker.
+        events = (async function* () {
+          yield* runtime.spawn({
+            podId,
+            task: pod.task,
+            model: pod.model,
+            reasoningEffort,
+            workDir: '/workspace',
+            containerId,
+            customInstructions: runtimeInstructions,
+            env: secretEnv,
+            mcpServers,
+            executionTarget: pod.executionTarget,
+          });
+        })();
+      } else if (podRepo.retainedCoding?.isOwner(podId)) {
         // Explicit fresh segment, before native recovery/old-complete shortcuts.
         const original = podRepo.retainedCoding.latest(podId)!;
         const historicalSummary = original.context.taskSummary?.actualSummary;
@@ -608,7 +624,8 @@ export function createAgentProcessWorkflow(
 
       visibleFailurePhase = 'agent';
       const assertCodingCurrent = captured.assertCodingCandidateCurrent;
-      const isCoding = podRepo.retainedCoding?.isOwner(podId);
+      const isCoding =
+        podRepo.retainedCoding?.isOwner(podId) || Boolean(podRepo.recoveryForks?.child(podId));
       const observedEvents = (async function* () {
         if (isCoding) {
           if (!assertCodingCurrent) throw new Error('Coding consumption fence unavailable');

@@ -52,6 +52,7 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
     }: RevalidationPassContext,
   ): Promise<{ newCommits: boolean; result: 'pass' | 'fail' }> {
     assertValidationExecutionSettled({ ...s2, lastValidationResult: result });
+    const deliveryHeld = checksOnly || Boolean(podRepo.recoveryForks?.child(podId));
     const assertCurrent = captureValidationDispatchGuard(podRepo, s2);
     emitActivityStatus(
       podId,
@@ -60,7 +61,7 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
         : 'Revalidation passed — human fix worked!',
     );
     let prUrl: string | null = s2.prUrl ?? null;
-    const prManager = !checksOnly && prManagerFactory ? prManagerFactory(profile) : null;
+    const prManager = !deliveryHeld && prManagerFactory ? prManagerFactory(profile) : null;
     if (!checksOnly && prManager && s2.worktreePath && s2.options.output === 'pr') {
       // Same artifact ref as the validation-pass path — never the reviewed
       // branch. This path builds no PR body, so the ref is simply where a
@@ -191,7 +192,7 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
         validationConfig.advisoryBrowserQaEnabled &&
         !!validationEngine.runAdvisoryBrowserQa,
     });
-    if (!checksOnly) maybeTriggerDependents(revalidatedPod);
+    if (!deliveryHeld) maybeTriggerDependents(revalidatedPod);
     if (!checksOnly) {
       await runAdvisoryAfterValidation(
         podId,
@@ -248,7 +249,7 @@ export function createRevalidationPassDelivery(captured: RevalidationPassCapture
         logger.warn({ err, podId }, 'Failed to stop container post-revalidation');
       }
     }
-    if (!checksOnly && postAdvisoryPod.autoApprove) {
+    if (!deliveryHeld && postAdvisoryPod.autoApprove) {
       emitActivityStatus(podId, 'Auto-approving…');
       logger.info({ podId }, 'Auto-approving pod after revalidation');
       setImmediate(() => {

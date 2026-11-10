@@ -20,6 +20,12 @@ export function deriveLaunch(
   parent: EffectiveLaunchConfig,
   input: DerivedLaunchInput,
 ): EffectiveLaunchConfig {
+  if (input.source.kind === 'recovery-fork')
+    configurationError(
+      'Recovery forks require trusted durable operation admission',
+      'CONFIG_DERIVATION_INVALID',
+      403,
+    );
   if (parent.digest !== input.source.digest)
     configurationError('Derived launch source changed', 'CONFIG_SOURCE_CHANGED', 409);
   if (input.source.kind === 'goal-rework' && parent.intent !== 'goal')
