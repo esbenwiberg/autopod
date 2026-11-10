@@ -99,6 +99,29 @@ current observations and do not discard saved decisions. Inspectors that do not
 apply to the new lifecycle no longer contribute stale generations to the overview;
 their saved requests and outcomes remain available to their owning controls.
 
+## Isolated sample-data preview
+
+Build alongside the installed app, without installing or replacing it:
+
+```sh
+./scripts/build-desktop-preview.sh --fixtures
+open -n "packages/desktop/build-preview/Build/Products/Debug/Autopod Preview.app" --args --recovery-preview
+```
+
+This uses the separate preview bundle/preferences and credential identity. In
+fixture mode, saved connection restore, connection creation/testing/switching,
+deep-link connections and Microsoft sign-in/token refresh are disabled. It cannot
+be converted into a live session through the preview's Connect button or Settings.
+Build without `--fixtures` separately if a connected preview is deliberately wanted.
+
+Choose **Fixture options → Recovery scenario** for a retained environment, an
+unknown start outcome, or cleanup blocked by source custody. Start/discard receipts
+are in-memory simulations; journals use a new temporary session directory.
+Changing scenarios invalidates open actions rather than retargeting them. The
+sample never starts coding/checks, provisions, publishes, merges or deletes real
+resources; simulated deletion keeps the sample task history visible. These
+observations are not actual pod diagnostics or live recovery qualification.
+
 ## Not implemented by this UI change
 
 Verified archive-and-release, custody release for retained originals, resource

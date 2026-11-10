@@ -10,7 +10,8 @@ public struct DesktopDesignPreview: View {
   @State private var performanceSelectedID: String? = "perf-0000"
   @State private var simulateAnalyticsFailure = false
   @State private var scanFixtures = DesktopScanFixtures()
-  @State private var selectedID: String? = "retry-demo"
+  @State private var recoveryFixtures = DesktopRecoveryFixtures()
+  @State private var selectedID: String? = ProcessInfo.processInfo.arguments.contains("--recovery-preview") ? "cleanup-demo" : "retry-demo"
   @State private var showSettings = false
   @State private var configurationDocuments = DesktopConfigurationFixtures.documents
   @State private var simulateConfigurationConflict = false
@@ -24,7 +25,7 @@ public struct DesktopDesignPreview: View {
       } else {
     MainView(pods: Self.pods, managedPods: DesktopKnowledgeFixtures.managedPods, managedPodAPI: knowledge.api, selectedManagedPodId: $knowledge.selectedManagedID, scheduledJobs: scheduleFixtures.jobs, scheduledJobTemplates: scheduleFixtures.templates, selectedSessionId: $selectedID,
       isConnected: true, connectionLabel: "Design fixtures", connectionState: "Sample data",
-      actions: Self.fixtureActions,
+      actions: recoveryFixtures.applying(to: Self.fixtureActions),
       profileNames: MockProfiles.all.map(\.name), profileDetails: MockProfiles.all,
       configurationActions: configurationActions,
       selectedSessionEvents: selectedID == "retry-demo" ? Self.events : [],
@@ -76,6 +77,16 @@ public struct DesktopDesignPreview: View {
         HStack {
           Text("Design fixtures · sample data").font(.caption)
           Menu("Fixture options") {
+            Menu("Recovery scenario") {
+              ForEach(DesktopRecoveryFixtures.Scenario.allCases) { scenario in
+                Button(scenario.rawValue) {
+                  recoveryFixtures.scenario = scenario
+                  usePerformanceFleet = false
+                  selectedID = recoveryFixtures.podId
+                }
+              }
+            }
+            Divider()
             Toggle("Use 1,000 pod performance fixture", isOn: $usePerformanceFleet)
               .onChange(of: usePerformanceFleet) { _, _ in performanceSelectedID = "perf-0000" }
             Toggle("Simulate configuration save conflict", isOn: $simulateConfigurationConflict)
@@ -87,6 +98,8 @@ public struct DesktopDesignPreview: View {
       }
       ToolbarItem(placement: .primaryAction) {
         Button("Connect to a daemon…", action: onConnect).font(.caption)
+          .disabled(!connectionManager.allowsLiveConnections)
+          .help(connectionManager.allowsLiveConnections ? "Leave sample data and configure a connection" : "This fixture build has live connections and sign-in disabled")
         }
       }
       .sheet(isPresented: $showSettings) {

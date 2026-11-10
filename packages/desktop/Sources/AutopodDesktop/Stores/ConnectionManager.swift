@@ -31,6 +31,9 @@ public final class ConnectionManager {
 
   /// The token currently in use — read this instead of re-reading Keychain.
   public private(set) var activeToken: String?
+  /// Fixture builds cannot restore, create or authenticate any live connection.
+  public let allowsLiveConnections: Bool
+  private nonisolated static let fixtureConnectionMessage = "This sample-data preview cannot connect to a daemon or sign in. Build without --fixtures for a connected preview."
 
   public var isConnected: Bool { state == .connected }
 
@@ -47,9 +50,9 @@ public final class ConnectionManager {
 
   // MARK: - Init
 
-  public init(restoreConnection: Bool = true) {
-    guard restoreConnection else { return }
-    if DesktopIdentity.usesDesignFixtures { return }
+  public init(restoreConnection: Bool = true, allowLiveConnections: Bool = true) {
+    allowsLiveConnections = allowLiveConnections && !DesktopIdentity.usesDesignFixtures
+    guard restoreConnection, allowsLiveConnections else { return }
     // CLI launches should win over stale saved state. Restoring the previous
     // connection first can touch old Keychain items and block launch behind a
     // system prompt before the fresh `ap desktop` deep link is handled.
@@ -102,6 +105,7 @@ public final class ConnectionManager {
     token: String,
     authKind: DaemonConnectionAuthKind = .manualToken
   ) async throws {
+    try requireLiveConnections()
     let normalizedToken = Self.normalizeToken(token)
     let conn = DaemonConnection(name: name, url: url, authKind: authKind)
 
@@ -131,6 +135,7 @@ public final class ConnectionManager {
     token: String,
     authKind: DaemonConnectionAuthKind = .manualToken
   ) async -> Result<Bool, DaemonError> {
+    guard allowsLiveConnections else { return .failure(.badRequest(Self.fixtureConnectionMessage)) }
     let normalizedToken = Self.normalizeToken(token)
     let testApi = makeAPI(baseURL: url, token: normalizedToken, authKind: authKind)
     do {
@@ -146,6 +151,7 @@ public final class ConnectionManager {
 
   /// Switch to an existing saved connection after proving it is reachable.
   public func connect(to id: UUID) async throws {
+    try requireLiveConnections()
     let connections = ConnectionStore.loadAll()
     guard let conn = connections.first(where: { $0.id == id }) else {
       throw DaemonError.notFound("connection")
@@ -248,6 +254,7 @@ public final class ConnectionManager {
   /// one is added. Token resolution: explicit `token` param wins; otherwise local
   /// connections fall back to the on-disk dev token, and Entra connections sign in.
   public func handleDeepLink(_ deepLink: URL) {
+    guard allowsLiveConnections else { state = .error(Self.fixtureConnectionMessage); return }
     guard deepLink.scheme == DesktopIdentity.deepLinkScheme, deepLink.host == "connect",
       let comps = URLComponents(url: deepLink, resolvingAgainstBaseURL: false),
       let rawURL = comps.queryItems?.first(where: { $0.name == "url" })?.value,
@@ -394,6 +401,7 @@ public final class ConnectionManager {
   }
 
   public func signInWithMicrosoft() async throws -> String {
+    try requireLiveConnections()
     let token = try await entraAuthService.signIn()
     let normalized = Self.normalizeToken(token)
     if let conn = connection {
@@ -405,9 +413,11 @@ public final class ConnectionManager {
   }
 
   public func makeAccessTokenProvider() -> DaemonAccessTokenProvider {
+    let allowsLiveConnections = allowsLiveConnections
     let fallbackToken = activeToken ?? ""
     let entraAuthService = entraAuthService
     return { [weak self] in
+      guard allowsLiveConnections else { throw DaemonError.badRequest(Self.fixtureConnectionMessage) }
       guard let self else {
         if let cliToken = Self.cliEntraAccessToken() { return cliToken }
         return try await entraAuthService.accessToken()
@@ -419,6 +429,10 @@ public final class ConnectionManager {
   /// Repair an expired/revoked daemon auth token using the native Entra session.
   @discardableResult
   public func recoverAuthentication() async -> Bool {
+    guard allowsLiveConnections else {
+      authenticationRecoveryError = Self.fixtureConnectionMessage
+      return false
+    }
     if let task = authenticationRecoveryTask {
       return await task.value
     }
@@ -444,8 +458,12 @@ public final class ConnectionManager {
     return await task.value
   }
 
+  private func requireLiveConnections() throws {
+    guard allowsLiveConnections else { throw DaemonError.badRequest(Self.fixtureConnectionMessage) }
+  }
+
   private func connectToActive() async {
-    guard let api else { return }
+    guard allowsLiveConnections, let api else { return }
     state = .connecting
 
     do {
