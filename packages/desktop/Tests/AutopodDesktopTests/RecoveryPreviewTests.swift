@@ -28,6 +28,17 @@ import Testing
     #expect(try await actions.recoveryFork.create(fixture.podId, request) == result)
     let after = try await actions.sandboxRecovery.load(fixture.podId)
     #expect(before.resources.first?.providerState == after.resources.first?.providerState && fixture.mutationCount == 1)
+    let held = try #require(after.resources.first)
+    #expect(held.startBlocked != nil && held.abandonBlocked != nil)
+    for action in ["start", "abandon"] {
+      let sandboxRequest = SandboxRecoveryRequest(id: UUID().uuidString, action: action, sandboxId: held.sandboxId,
+        expectedGeneration: after.generation, expectedResourceKey: held.resourceKey, reason: "No original release while continuation retains it", acknowledgeDataLoss: true)
+      do { _ = try await actions.sandboxRecovery.submit(fixture.podId, sandboxRequest); Issue.record("Sample fork custody bypassed") } catch {}
+    }
+    #expect(fixture.mutationCount == 1)
+    let preservedFiles = try await actions.fileRecovery.load(fixture.podId, false)
+    #expect(preservedFiles.sources.first(where: { $0.id == "saved-workspace" })?.status == .available)
+    #expect(preservedFiles.sources.first(where: { $0.id == "original" })?.status == .blocked)
     let child = try #require(result.childPodId)
     try await actions.recoveryFork.openPod(child)
     #expect(fixture.openedExample == child && fixture.continuationPod?.id == child)
@@ -35,6 +46,18 @@ import Testing
     try childInspection.validate(podId: child)
     #expect(childInspection.lineage?.parentPodId == fixture.podId && childInspection.source == nil)
     #expect(childInspection.budget?.taskId == inspection.budget?.taskId)
+  }
+  @Test func sampleForkRefusesAnOriginalAlreadyStartedForFileRecovery() async throws {
+    let fixture = DesktopRecoveryFixtures()
+    defer { try? FileManager.default.removeItem(at: fixture.journalDirectory) }
+    let actions = fixture.applying(to: .preview)
+    let state = try await actions.sandboxRecovery.load(fixture.podId)
+    let resource = try #require(state.resources.first)
+    let request = SandboxRecoveryRequest(id: UUID().uuidString, action: "start", sandboxId: resource.sandboxId,
+      expectedGeneration: state.generation, expectedResourceKey: resource.resourceKey, reason: "Read example files from the original")
+    _ = try await actions.sandboxRecovery.submit(fixture.podId, request)
+    #expect(!(try await actions.recoveryFork.inspect(fixture.podId)).available)
+    #expect(fixture.mutationCount == 1 && fixture.continuationPod == nil)
   }
   @Test func previewTruthfullyRefusesUnsupportedSandboxCandidateWithoutMutation() async throws {
     let fixture = DesktopRecoveryFixtures()

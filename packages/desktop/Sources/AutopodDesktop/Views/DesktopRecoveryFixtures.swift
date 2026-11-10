@@ -78,14 +78,15 @@ import Observation
       operations.insert(try wire(receipt(request, completed: false)), at: 0)
     }
     let unknown = scenario == .unknownStart && providerState != "deleted"
-    let startBlocked: String? = scenario == .held ? "Sample source custody blocks machine start. No real environment is being inspected."
+    let startBlocked: String? = forkOperation != nil ? "Sample continuation retains the original. No original start or release is authorized."
+      : scenario == .held ? "Sample source custody blocks machine start. No real environment is being inspected."
       : unknown ? "Sample start outcome is unknown. Another start is not permitted."
       : providerState == "deleted" ? "The sample environment was deleted; no real resource was affected." : nil
     let abandonment = receipts.values.first { $0.action == "abandon" }
     let resource: [String: Any] = ["sandboxId": sandboxId, "resourceKey": key(epoch), "providerState": providerState,
       "observedAt": date, "pendingIntentIds": unknown ? ["fixture-wakeup-\(epoch)"] : [],
       "observationError": NSNull(), "startBlocked": startBlocked.map { $0 as Any } ?? NSNull(),
-      "abandonBlocked": scenario == .held ? "Sample retained source owns this environment. Discard is blocked; no override is provided." : NSNull(),
+      "abandonBlocked": scenario == .held || forkOperation != nil ? "Sample retained source owns this environment. Discard is blocked; no override is provided." : NSNull(),
       "abandonment": try abandonment.map { try wire($0) } ?? NSNull()]
     return try decode(["podId": podId, "generation": epoch, "currentUserId": userId,
       "resources": [resource], "operations": operations, "wakeups": []])
@@ -94,7 +95,7 @@ import Observation
   private func submit(_ id: String, _ request: SandboxRecoveryRequest, epoch: Int) throws -> SandboxRecoveryResult {
     try requireCurrent(epoch)
     guard id == podId, request.expectedGeneration == epoch, request.sandboxId == sandboxId,
-      request.expectedResourceKey == key(epoch), scenario != .held,
+      request.expectedResourceKey == key(epoch), scenario != .held, forkOperation == nil,
       (10...4000).contains(request.reason.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count),
       ["start", "abandon"].contains(request.action), request.action != "abandon" || request.acknowledgeDataLoss else {
       throw unavailable()
@@ -133,8 +134,8 @@ import Observation
     if id == podId {
       for source in ["saved-workspace", "original"] {
         let saved = source == "saved-workspace"
-        let available = saved || (scenario == .retained && providerState == "running")
-        let status = available ? (saved || includeOriginal ? "available" : "ready") : scenario == .retained && providerState == "stopped" ? "stopped" : "blocked"
+        let available = saved || (scenario == .retained && forkOperation == nil && providerState == "running")
+        let status = available ? (saved || includeOriginal ? "available" : "ready") : scenario == .retained && forkOperation == nil && providerState == "stopped" ? "stopped" : "blocked"
         let files: [[String: Any]] = available && (saved || includeOriginal) ? fileData(source).sorted { $0.key < $1.key }.map {
           ["path": $0.key, "size": $0.value.count, "modified": 1794304800000.0, "version": fileHash($0.value)]
         } : []
@@ -176,12 +177,12 @@ import Observation
   }
   private func inspectFork(_ id: String, epoch: Int) throws -> RecoveryForkInspection {
     try requireCurrent(epoch)
-    let available = scenario == .retained && id == podId && forkOperation == nil
+    let available = scenario == .retained && id == podId && forkOperation == nil && providerState == "stopped"
     let lineage: Any
     if let operation = forkOperation, id == operation.childPodId { lineage = ["parentPodId": podId, "operationId": operation.id] }
     else { lineage = NSNull() }
     return try decode(["version": 1, "podId": id, "generation": epoch, "available": available,
-      "blockers": available ? [] : [forkOperation == nil ? "Sample unknown operation or custody hold blocks a new continuation." : "A sample continuation is already recorded. Observe it instead of starting another."],
+      "blockers": available ? [] : [forkOperation == nil ? "Sample original must be stopped with no unknown operation or custody hold before continuation. Reset the sample scenario to inspect a stopped original." : "A sample continuation is already recorded. Observe it instead of starting another."],
       "source": id == forkOperation?.childPodId ? NSNull() : forkSource, "context": forkContext, "budget": forkBudget,
       "profiles": [["id": "@original", "label": "Original sandbox · Node 20 (unsupported candidate)"], ["id": "sample-node-22", "label": "Linux Docker · Node 22"]],
       "operation": id == podId ? (try forkOperation.map { try wire($0) } ?? NSNull()) : NSNull(),

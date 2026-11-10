@@ -68,7 +68,7 @@ new budget, and does not inherit PR-fix lineage, approvals or published PRs.
 1. Review the exact, clean **host Git checkpoint** and its coverage. It is not a
    promise that unsaved sandbox bytes were synchronized. The child uses independent
    Git storage; the private original evidence is never mounted as its workspace.
-   Optional safe additional files are individually selected (100 files / 50 MiB,
+   Optional safe, nonignored additional files are individually selected (100 files / 50 MiB,
    5 MiB per file). Unlisted, excluded and unselected files remain in the original.
    Unsupported tracked credential/control/special paths block instead of silently
    changing the claimed checkpoint.
