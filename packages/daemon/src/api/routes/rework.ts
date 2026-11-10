@@ -2,6 +2,7 @@ import { AutopodError, type OperatorActor, type ReworkEligibility } from '@autop
 import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { assertNoInfrastructureBlocker } from '../../pods/escalation-coordinator.js';
 import type { PodManager } from '../../pods/pod-manager-contracts.js';
 import type { PodRepository } from '../../pods/pod-repository.js';
 import { createReworkRequestRepository } from '../../pods/rework-request-repository.js';
@@ -31,6 +32,7 @@ export function reworkRoutes(
       failureId: repo?.workerRetries?.state(podId).latest?.id ?? null,
     };
     try {
+      if (repo) assertNoInfrastructureBlocker(repo, podId);
       if (!journal || !repo?.workerRetries)
         throw new AutopodError('Rework admission unavailable', 'REWORK_UNAVAILABLE', 503);
       journal.assertIdle(podId);
@@ -91,6 +93,7 @@ export function reworkRoutes(
               ? 'cooldown'
               : 'blocked',
         reason: error.message,
+        code: error.code,
       };
     }
   };

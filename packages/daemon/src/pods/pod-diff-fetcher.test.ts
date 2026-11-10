@@ -125,6 +125,7 @@ describe('computePodDiff', () => {
       'main',
       undefined,
       'start-sha',
+      'preview',
     );
   });
 

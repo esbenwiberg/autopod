@@ -43,8 +43,10 @@ import type { HostBrowserRunner } from '../validation/host-browser-runner.js';
 import {
   getPreSubmitCacheDecision,
   hashDiff,
+  preparePreSubmitReview,
   runPreSubmitReview,
 } from '../validation/pre-submit-review.js';
+import { isolatedReviewDiffLimit } from '../validation/reviewer-input-bounds.js';
 import { runValidationCommand } from '../validation/run-validation-command.js';
 import { isBlockingEscalation, persistEscalation } from './escalation-coordinator.js';
 import type { EscalationRepository } from './escalation-repository.js';
@@ -1249,22 +1251,48 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
         defaultBranch,
         containerManager,
         worktreeManager,
-        maxLength: MAX_DIFF_LENGTH,
+        maxLength: isolatedReviewDiffLimit(pod.launchConfigDigest) ?? MAX_DIFF_LENGTH,
+        purpose: 'review',
         logger,
       });
 
       const scope = summarizeDiff(diff);
       const startedAt = Date.now();
 
-      // Short-circuit identical-diff re-calls. Without this, an agent that
-      // re-runs pre_submit_review with "clarified" inputs (but the same diff
-      // bytes) burns reviewer tokens and risks getting a different verdict
-      // due to LLM nondeterminism — deepening the confusion that motivated
-      // the re-call in the first place.
+      const reviewOpts = {
+        task: pod.task ?? '',
+        diff,
+        reviewerModel,
+        reviewerProvider,
+        reviewerProviderCredentials,
+        podId,
+        containerId: pod.containerId,
+        reviewerExecutor: pod.launchConfigDigest ? podManager.getReviewerExecutor(pod) : undefined,
+        plannedSummary: input.plannedSummary,
+        plannedDeviations: input.plannedDeviations,
+      };
+      let prepared: Awaited<ReturnType<typeof preparePreSubmitReview>>;
+      try {
+        prepared = await preparePreSubmitReview(reviewOpts);
+      } catch (error) {
+        return {
+          status: 'skipped',
+          skipReason: 'incomplete-input',
+          reasoning: `Pre-submit input was not admitted: ${error instanceof Error ? error.message : String(error)}`,
+          issues: [],
+          model: reviewerModel,
+          durationMs: Date.now() - startedAt,
+          ...scope,
+        };
+      }
+
+      // Reuse only a complete, unchanged prepared packet. Source equality alone
+      // cannot certify changed task claims or appended reference context.
       const currentDiffHash = hashDiff(diff);
       const cached = pod.preSubmitReview;
       const currentCacheScope = {
         diffHash: currentDiffHash,
+        inputHash: prepared.inputHash,
         diffSource,
         filesReviewed: scope.filesReviewed,
         linesAdded: scope.linesAdded,
@@ -1275,6 +1303,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
       };
       const cacheDecision = getPreSubmitCacheDecision(cached, currentCacheScope, {
         requireMetadata: [
+          'inputHash',
           'diffSource',
           'filesReviewed',
           'linesAdded',
@@ -1366,19 +1395,8 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
 
       const result = await runPreSubmitReview(
         {
-          task: pod.task ?? '',
-          diff,
-          reviewerModel,
-          reviewerProvider,
-          reviewerProviderCredentials,
-          podId,
-          containerId: pod.containerId,
+          ...prepared.opts,
           containerManager: reviewerContainerManager,
-          reviewerExecutor: pod.launchConfigDigest
-            ? podManager.getReviewerExecutor(pod)
-            : undefined,
-          plannedSummary: input.plannedSummary,
-          plannedDeviations: input.plannedDeviations,
         },
         logger,
       );
@@ -1414,6 +1432,7 @@ export function createSessionBridge(deps: SessionBridgeDependencies): PodBridge 
           preSubmitReview: {
             status: result.status,
             diffHash: result.diffHash,
+            inputHash: prepared.inputHash,
             diffSource,
             filesReviewed: scope.filesReviewed,
             linesAdded: scope.linesAdded,

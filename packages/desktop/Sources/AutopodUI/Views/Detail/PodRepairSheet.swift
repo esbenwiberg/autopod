@@ -35,6 +35,7 @@ internal struct PodRepairSheet: View {
     return (model.observation?.related ?? relatedPods).first { $0.seriesId == observed.seriesId && $0.prUrl != nil }
   }
   private var block: String? {
+    if let reason = model.recoveryBlock { return reason }
     if observed.worktreeCompromised && model.kind != .prFix { return "Recover the compromised worktree before continuing." }
     if model.kind == .rework && goalBlocked { return "The native Goal must be achieved and stopped. Continue through the pod’s Goal controls." }
     if (model.kind == .resume || (model.kind == .rework && observed.isWorkspace)) && !observed.hasWorktree { return "This pod has no worktree to recover." }
@@ -49,7 +50,7 @@ internal struct PodRepairSheet: View {
           Text(title).font(.title.weight(.semibold))
           Text("Review the effect before continuing.").font(.callout).foregroundStyle(.secondary)
         }
-        Spacer(); Button("Close", systemImage: "xmark", action: close).disabled(model.busy || budget.busy).keyboardShortcut(.cancelAction)
+        Spacer(); Button("Close", systemImage: "xmark", action: close).disabled(model.busy || budget.busy).keyboardShortcut(.cancelAction).accessibilityIdentifier("repair-close")
       }.padding(24).background(DesktopTheme.surface)
       Divider(); FollowUpSourceContext(pod: observed, repository: repository); Divider()
       HStack(spacing: 0) {
@@ -64,14 +65,19 @@ internal struct PodRepairSheet: View {
       .task(id: model.kind) {
         if model.kind == .rework && !pod.isWorkspace {
           await model.prepareRework(id: pod.id, actions: actions.repair, draftScope: actions.retryDraftScope)
+        } else if model.ordinaryRecovery {
+          await model.refreshEligibility(id: pod.id, actions: actions.repair)
         }
       }
       .onChange(of: model.receipt != nil) { _, accepted in
         if accepted && model.kind == .resume { isPresented = false }
       }
+      .onChange(of: pod.status) { _, _ in
+        if model.ordinaryRecovery { Task { await model.refreshEligibility(id: pod.id, actions: actions.repair) } }
+      }
       .interactiveDismissDisabled(model.busy || budget.busy || model.uncertain || !model.feedback.isEmpty || !model.guidance.isEmpty)
       .confirmationDialog("Leave this repair handoff?", isPresented: $confirmClose) {
-        Button("Leave handoff", role: .destructive) { isPresented = false }; Button("Keep reviewing", role: .cancel) {}
+        Button("Leave handoff", role: .destructive) { guard !model.busy, !budget.busy else { return }; isPresented = false }.disabled(model.busy || budget.busy); Button("Keep reviewing", role: .cancel) {}
       } message: { Text(model.uncertain ? "The result is unconfirmed. Check the pod and linked work before repeating the action." : "Your unsubmitted feedback will be discarded.") }
       .confirmationDialog("Review another attempt?", isPresented: $confirmRepeat) {
         Button("Review another attempt", role: .destructive) { model.reviewAnotherAttempt(); Task { await model.refreshEligibility(id: pod.id, actions: actions.repair) } }; Button("Keep checking", role: .cancel) {}
@@ -152,6 +158,10 @@ internal struct PodRepairSheet: View {
             .disabled(model.busy || model.eligibilityLoading)
         }
         if let block { Label(block, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+        if model.ordinaryRecovery && model.kind != .rework {
+          Button("Refresh recovery eligibility") { Task { await model.refreshEligibility(id: pod.id, actions: actions.repair) } }
+            .disabled(model.busy || model.eligibilityLoading)
+        }
         if [.rework, .revalidate, .resume].contains(model.kind), !observed.isWorkspace {
           TaskBudgetControls(podId: pod.id, actions: actions.taskBudget, model: budget,
             continuationTitle: block == nil && model.canSubmit ? title : nil,
@@ -221,7 +231,7 @@ internal struct PodRepairSheet: View {
       }
     }
   }
-  private func close() { if model.uncertain || ((!model.feedback.isEmpty || !model.guidance.isEmpty) && model.receipt == nil) { confirmClose = true } else { isPresented = false } }
+  private func close() { guard !model.busy, !budget.busy else { return }; if model.uncertain || ((!model.feedback.isEmpty || !model.guidance.isEmpty) && model.receipt == nil) { confirmClose = true } else { isPresented = false } }
   private func loadSnapshot() async {
     guard let configuration else { snapshotError = "Frozen configuration is unavailable for this connection."; return }
     do {

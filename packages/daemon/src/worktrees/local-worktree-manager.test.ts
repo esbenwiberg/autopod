@@ -721,7 +721,7 @@ describe('LocalWorktreeManager', () => {
       expect(result).toBe('');
     });
 
-    it('passes exclude pathspecs to git diff', async () => {
+    it('only excludes injected runtime caches from review diffs', async () => {
       const capturedArgs: string[][] = [];
       execFileMock.mockImplementation(
         (_file: string, args: string[], arg3: unknown, arg4?: unknown) => {
@@ -745,9 +745,9 @@ describe('LocalWorktreeManager', () => {
         expect(args).toContain(':(exclude).serena/**');
         expect(args).toContain(':(exclude).roslyn-codelens');
         expect(args).toContain(':(exclude).roslyn-codelens/**');
-        expect(args).toContain(':(exclude)pnpm-lock.yaml');
-        expect(args).toContain(':(exclude)go.sum');
-        expect(args).toContain(':(exclude)*.min.js');
+        expect(args).not.toContain(':(exclude)pnpm-lock.yaml');
+        expect(args).not.toContain(':(exclude)go.sum');
+        expect(args).not.toContain(':(exclude)*.min.js');
       }
     });
   });

@@ -278,7 +278,13 @@ describe('recoverable native sandbox Goal processes', () => {
     vi.spyOn(client, 'exec').mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
     const writes = vi.spyOn(client, 'writeFile').mockResolvedValue();
     vi.spyOn(client, 'readFile').mockImplementation(async () =>
-      Buffer.from(JSON.stringify({ execId: saved?.execId, observedExit: true, exitCode: -9 })),
+      Buffer.from(
+        JSON.stringify({
+          execId: saved?.execId,
+          observedExit: writes.mock.calls.some((call) => call[1].endsWith('/stop')),
+          exitCode: -9,
+        }),
+      ),
     );
     const chunks = [];
     for await (const chunk of client.execStream('sbx-goal', ['codex', 'app-server'], {
@@ -292,6 +298,93 @@ describe('recoverable native sandbox Goal processes', () => {
       writes.mock.calls.some((call) => call[1] === saved?.pidPath.replace('/state.json', '/stop')),
     ).toBe(true);
   });
+  it.each([
+    0, 7, -15,
+  ])('reads the same invocation exit %s without stopping it after delivery loss', async (exitCode) => {
+    let saved: import('@autopod/shared').NativeGoalProcessIdentity | undefined;
+    const socket = new MockWebSocket();
+    const { client } = makeClient([], {
+      webSocket: () => {
+        queueMicrotask(() => {
+          socket.onopen?.({});
+          socket.close();
+        });
+        return socket;
+      },
+    });
+    vi.spyOn(client, 'exec').mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    const writes = vi.spyOn(client, 'writeFile').mockResolvedValue();
+    const terminate = vi.spyOn(client, 'terminateRecordedExec');
+    const reads = vi
+      .spyOn(client, 'readFile')
+      .mockImplementation(async () =>
+        Buffer.from(JSON.stringify({ execId: saved?.execId, observedExit: true, exitCode })),
+      );
+    const chunks = [];
+    for await (const chunk of client.execStream('sbx-goal', ['codex', 'app-server'], {
+      onProcessCreated(identity) {
+        saved = identity;
+      },
+    }))
+      chunks.push(chunk);
+    expect(chunks).toEqual([{ exitCode: exitCode < 0 ? 128 - exitCode : exitCode }]);
+    expect(reads).toHaveBeenCalledWith('sbx-goal', saved?.pidPath);
+    expect(writes).toHaveBeenCalledTimes(1); // supervisor staging only
+    expect(terminate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'missing',
+    'unobserved',
+    'rebound',
+    'malformed',
+  ])('keeps %s receipts uncertain if termination cannot be proven', async (receipt) => {
+    let saved: import('@autopod/shared').NativeGoalProcessIdentity | undefined;
+    const socket = new MockWebSocket();
+    const { client } = makeClient([], {
+      webSocket: () => {
+        queueMicrotask(() => {
+          socket.onopen?.({});
+          socket.close();
+        });
+        return socket;
+      },
+    });
+    vi.spyOn(client, 'exec').mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    vi.spyOn(client, 'writeFile').mockResolvedValue();
+    vi.spyOn(client, 'readFile').mockImplementation(async () => {
+      if (receipt === 'missing') throw new Error('not found');
+      return Buffer.from(
+        receipt === 'malformed'
+          ? '{'
+          : JSON.stringify({
+              execId: receipt === 'rebound' ? 'other-invocation' : saved?.execId,
+              observedExit: receipt === 'rebound',
+              exitCode: 0,
+            }),
+      );
+    });
+    vi.spyOn(client, 'terminateRecordedExec').mockRejectedValue(
+      new Error('termination unconfirmed'),
+    );
+    await expect(
+      client
+        .execStream('sbx-goal', ['codex'], {
+          onProcessCreated(identity) {
+            saved = identity;
+          },
+        })
+        .next(),
+    ).rejects.toMatchObject({
+      code: 'AZURE_SANDBOX_EXEC_STREAM',
+      transport: {
+        sandboxId: 'sbx-goal',
+        nativeExecId: expect.stringMatching(/^[a-f0-9-]{36}$/),
+        startSent: true,
+      },
+    });
+  });
+
   it('records identity before any start and requires the supervisor exit receipt', async () => {
     const socket = new MockWebSocket();
     let saved: import('@autopod/shared').NativeGoalProcessIdentity | undefined;
@@ -1468,6 +1561,147 @@ describe('AzureSandboxApiClient', () => {
       })(),
     ).rejects.toThrow(/closed before reporting an exit code/);
     expect(chunks).toEqual([{ stdout: 'partial' }]);
+  });
+
+  it.each([false, true])('retains safe close context after error event=%s', async (errorFirst) => {
+    const { client, requests } = makeStreamingClient((socket) => {
+      socket.onopen?.({});
+      socket.emit({ type: 'stdout', data: Buffer.from('partial').toString('base64') });
+      if (errorFirst) socket.onerror?.({ message: 'Bearer synthetic-secret' });
+      socket.onclose?.({ code: 1011, reason: 'idle timeout' });
+    });
+    const chunks: SandboxExecChunk[] = [];
+    let failure: unknown;
+    try {
+      for await (const chunk of client.execStream('sbx-1', ['private-command'], {
+        env: { TOKEN: 'synthetic-secret' },
+      }))
+        chunks.push(chunk);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({
+      code: 'AZURE_SANDBOX_EXEC_STREAM',
+      transport: {
+        operation: 'execStream',
+        sandboxId: 'sbx-1',
+        operationId: expect.stringMatching(/^[a-f0-9-]{36}$/),
+        startSent: true,
+        closeCode: 1011,
+        closeReason: 'idle timeout',
+      },
+    });
+    expect(chunks).toEqual([{ stdout: 'partial' }]);
+    expect(requests).toHaveLength(2); // staging only; no replay, kill, or deletion
+    expect(String(failure)).not.toMatch(/synthetic-secret|private-command/);
+  });
+
+  it('retains a late close after the caller received the error event', async () => {
+    const { client, sockets } = makeStreamingClient((socket) => {
+      // WHATWG close() is asynchronous; its close event may follow consumer failure.
+      vi.spyOn(socket, 'close').mockImplementation(() => {});
+      socket.onopen?.({});
+      socket.onerror?.({ message: 'synthetic-secret' });
+    });
+    const error = await client
+      .execStream('sbx-1', ['true'])
+      .next()
+      .catch((err: Error) => err);
+    sockets[0]?.onclose?.({ code: 1012, reason: 'service restart' });
+    expect(error).toMatchObject({
+      transport: {
+        errorEvent: true,
+        closeCode: 1012,
+        closeReason: 'service restart',
+        closeSource: 'local',
+      },
+    });
+    expect(String(error)).toContain('1012');
+    expect(String(error)).not.toContain('synthetic-secret');
+  });
+
+  it.each([
+    'Bearer synthetic-secret\nforged log',
+    'wss://host/exec?sig=synthetic-secret',
+    'token=synthetic-secret',
+    'x'.repeat(100_000),
+    '\u001b[31mhostile\u202e',
+  ])('redacts arbitrary close reasons', async (reason) => {
+    const { client } = makeStreamingClient((socket) => {
+      socket.onopen?.({});
+      socket.onclose?.({ code: 1006, reason });
+    });
+    const stream = client.execStream('sbx-1', ['true']);
+    await expect(stream.next()).rejects.toMatchObject({
+      transport: { closeCode: 1006, closeReason: '[redacted]' },
+    });
+  });
+
+  it.each([
+    undefined,
+    -1,
+    1000,
+    1006,
+    1011,
+    65535,
+    Number.NaN,
+  ])('never treats close code %s as an observed process exit', async (code) => {
+    const { client, requests } = makeStreamingClient((socket) => {
+      socket.onclose?.({ code, reason: 'normal closure' });
+    });
+    const error = await client
+      .execStream('sbx-1', ['true'])
+      .next()
+      .catch((err: Error) => err);
+    expect(error).toMatchObject({
+      code: 'AZURE_SANDBOX_EXEC_STREAM',
+      transport: { startSent: false, closeSource: 'remote', closeReason: 'normal closure' },
+    });
+    const diagnostic = (error as Error & { transport: { closeCode?: number } }).transport;
+    expect(diagnostic.closeCode).toBe(
+      code !== undefined && code >= 1000 && code <= 4999 ? code : undefined,
+    );
+    expect(requests).toHaveLength(2);
+  });
+
+  it('keeps transport logs bounded and credential-free', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    try {
+      const { client } = makeStreamingClient((socket) => {
+        socket.onopen?.({});
+        socket.onclose?.({ code: 1011, reason: `Bearer synthetic-secret${'x'.repeat(100_000)}` });
+      });
+      await expect(
+        client
+          .execStream('sbx-1', ['secret-command'], {
+            env: { TOKEN: 'synthetic-secret' },
+          })
+          .next(),
+      ).rejects.toThrow();
+      expect(warn).toHaveBeenCalledOnce();
+      const logged = JSON.stringify(warn.mock.calls[0]);
+      expect(logged).not.toMatch(/synthetic-secret|secret-command|Authorization|wss:/);
+      expect(logged.length).toBeLessThan(1000);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.each([
+    JSON.stringify({ type: 'error', message: `Bearer synthetic-secret${'x'.repeat(100_000)}` }),
+    '{"secret":"synthetic-secret", invalid',
+  ])('does not include untrusted protocol data in errors', async (data) => {
+    const { client } = makeStreamingClient((socket) => {
+      socket.onopen?.({});
+      socket.onmessage?.({ data });
+    });
+    const failure = await client
+      .execStream('sbx-1', ['true'])
+      .next()
+      .catch((error: Error) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(String(failure)).not.toContain('synthetic-secret');
+    expect(String(failure).length).toBeLessThan(1000);
   });
 
   it('fails the exec stream on an error frame', async () => {

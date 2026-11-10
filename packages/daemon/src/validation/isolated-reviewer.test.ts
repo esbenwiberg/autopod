@@ -165,6 +165,29 @@ async function fixture(
 }
 
 describe('isolated reviewer execution', () => {
+  it('bounds appended reference context before inference and binds the frozen packet identity', async () => {
+    let context = 'first reference';
+    const f = await fixture(false, false, true, () => ({ context, images: [] }));
+    const prepare = f.execute.prepare;
+    if (!prepare) throw new Error('Missing packet preparation');
+    const first = await prepare({ prompt: 'Review', timeout: 5000 });
+    const same = await prepare({ prompt: 'Review', timeout: 5000 });
+    expect(first.inputHash).toBe(same.inputHash);
+    context = 'changed reference';
+    expect((await prepare({ prompt: 'Review', timeout: 5000 })).inputHash).not.toBe(
+      first.inputHash,
+    );
+    context = 'é'.repeat(500_000);
+    await expect(prepare({ prompt: 'Review', timeout: 5000 })).rejects.toThrow(/bounds/);
+    expect(f.manager.spawn).not.toHaveBeenCalled();
+    expect(f.runs.list('pod')).toEqual([]);
+    await first.execute();
+    const prompt = vi
+      .mocked(f.manager.writeFile)
+      .mock.calls.find(([, path]) => path.endsWith('.prompt'))?.[2];
+    expect(String(prompt)).toContain('first reference');
+    expect(String(prompt)).not.toContain('changed reference');
+  });
   it('freezes supplied observations and prompt before awaiting asynchronous HTML reference preparation', async () => {
     const ready = deferred<{ context: string; images: ReturnType<typeof referenceImage>[] }>();
     const f = await fixture(false, false, true, () => ready.promise);

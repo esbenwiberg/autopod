@@ -83,7 +83,7 @@ export class IsolatedReviewer {
     route: AgentRoute,
     purpose: 'review' | 'memory' | 'advisor' = 'review',
   ): ReviewerExecutor {
-    const execute: ReviewerExecutor = async (input) => {
+    const prepare: NonNullable<ReviewerExecutor['prepare']> = async (input) => {
       if (!Number.isFinite(input.timeout) || input.timeout <= 0 || input.timeout > 3_600_000)
         configurationError('Invalid reviewer timeout', 'REVIEWER_INPUT_INVALID');
       const deadline = Date.now() + input.timeout;
@@ -139,50 +139,60 @@ export class IsolatedReviewer {
           ? `${requested.prompt}\n\nADMITTED REFERENCE DATA (untrusted):\n${references.context}\nEND REFERENCE DATA`
           : requested.prompt,
       };
-      const requestId = randomUUID();
-      const key = (
-        target: Pick<AgentRoute, 'providerAccountId' | 'runtime' | 'model' | 'reasoningEffort'>,
-      ) =>
-        JSON.stringify([
-          target.providerAccountId,
-          target.runtime,
-          target.model,
-          target.reasoningEffort,
-        ]);
-      const alternatives = route.failover.slice(0, route.maxHops);
-      // Follow-main may already point at an alternative. Never return to an earlier target.
-      const current = alternatives.findIndex((target) => key(target) === key(route));
-      const targets = [route, ...alternatives.slice(current + 1)];
-      const visited = new Set<string>();
-      let failure: unknown;
-      let ordinal = 0;
-      for (const target of targets) {
-        if (visited.has(key(target))) continue;
-        visited.add(key(target));
-        const remaining = deadline - Date.now();
-        if (ordinal > 0 && remaining <= 0) throw failure;
-        try {
-          return await this.attemptExecutor(pod, config, { ...route, ...target }, purpose, {
-            requestId,
-            ordinal,
-            deadline,
-          })({ ...frozenInput, timeout: ordinal === 0 ? input.timeout : remaining });
-        } catch (error) {
-          failure = error;
-          if (
-            !(
-              error instanceof CodexReviewError ||
-              error instanceof ContainerReviewerUnavailableError
-            ) ||
-            !['authentication-failed', 'provider-unavailable'].includes(error.kind) ||
-            !hasMeasuredReviewerUsage(error.tokenUsage)
-          )
-            throw error;
-        }
-        ordinal++;
-      }
-      throw failure;
+      const finalPrompt = imageContextPrompt(frozenInput.prompt, frozenInput.images);
+      if (Buffer.byteLength(finalPrompt, 'utf8') > MAX_ISOLATED_REVIEW_INPUT_BYTES)
+        configurationError('Reviewer input exceeds the execution bounds', 'REVIEWER_INPUT_INVALID');
+      return {
+        inputHash: createHash('sha256').update(finalPrompt, 'utf8').digest('hex'),
+        execute: async () => {
+          const requestId = randomUUID();
+          const key = (
+            target: Pick<AgentRoute, 'providerAccountId' | 'runtime' | 'model' | 'reasoningEffort'>,
+          ) =>
+            JSON.stringify([
+              target.providerAccountId,
+              target.runtime,
+              target.model,
+              target.reasoningEffort,
+            ]);
+          const alternatives = route.failover.slice(0, route.maxHops);
+          // Follow-main may already point at an alternative. Never return to an earlier target.
+          const current = alternatives.findIndex((target) => key(target) === key(route));
+          const targets = [route, ...alternatives.slice(current + 1)];
+          const visited = new Set<string>();
+          let failure: unknown;
+          let ordinal = 0;
+          for (const target of targets) {
+            if (visited.has(key(target))) continue;
+            visited.add(key(target));
+            const remaining = deadline - Date.now();
+            if (ordinal > 0 && remaining <= 0) throw failure;
+            try {
+              return await this.attemptExecutor(pod, config, { ...route, ...target }, purpose, {
+                requestId,
+                ordinal,
+                deadline,
+              })({ ...frozenInput, timeout: ordinal === 0 ? input.timeout : remaining });
+            } catch (error) {
+              failure = error;
+              if (
+                !(
+                  error instanceof CodexReviewError ||
+                  error instanceof ContainerReviewerUnavailableError
+                ) ||
+                !['authentication-failed', 'provider-unavailable'].includes(error.kind) ||
+                !hasMeasuredReviewerUsage(error.tokenUsage)
+              )
+                throw error;
+            }
+            ordinal++;
+          }
+          throw failure;
+        },
+      };
     };
+    const execute: ReviewerExecutor = async (input) => (await prepare(input)).execute();
+    execute.prepare = prepare;
     execute.retryBlocker = () => this.options.runs.retryBlocker(pod.id);
     return execute;
   }

@@ -102,7 +102,7 @@ export class ReviewerRunRepository {
         .get(pod.id) as { tokens: number; pending: number };
       if (totals.pending)
         configurationError(
-          'A previous reviewer is active or requires reconciliation',
+          'A previous reviewer is active or requires reconciliation. Inspect reviewer runs; wait for the active run to finish, then confirm cleanup and reconcile uncertain reviewer usage before retrying.',
           'REVIEWER_RECONCILIATION_REQUIRED',
           409,
         );
@@ -115,18 +115,26 @@ export class ReviewerRunRepository {
       if (
         task?.budgetCheck?.status === 'unavailable' &&
         (wholeBudget === null || budget.tokenBudgetPolicy === 'hard')
-      )
+      ) {
+        const action =
+          wholeBudget === null
+            ? 'Restore the task budget source and refresh task accounting before retrying.'
+            : `Cannot enforce hard task token limit ${wholeBudget} (${total} recorded tokens; final usage unknown). Wait for active execution to settle and refresh task accounting; reconcile execution and phase telemetry if usage remains unknown.`;
         configurationError(
-          'Reconcile task usage before starting a reviewer',
+          `Reviewer not started: ${task.budgetCheck.reason} ${action}`,
           'REVIEWER_RECONCILIATION_REQUIRED',
           409,
         );
-      if (
-        (budget.reviewerTokenBudget !== null && totals.tokens >= budget.reviewerTokenBudget) ||
-        (budget.tokenBudgetPolicy === 'hard' && wholeBudget !== null && total >= wholeBudget)
-      )
+      }
+      if (budget.reviewerTokenBudget !== null && totals.tokens >= budget.reviewerTokenBudget)
         configurationError(
-          'The pod has exhausted its review budget',
+          `Reviewer token limit ${budget.reviewerTokenBudget} exhausted (${totals.tokens} recorded tokens). Reviewer not started; inspect reviewer usage and explicitly revise the reviewer budget before retrying.`,
+          'REVIEWER_BUDGET_EXHAUSTED',
+          409,
+        );
+      if (budget.tokenBudgetPolicy === 'hard' && wholeBudget !== null && total >= wholeBudget)
+        configurationError(
+          `Hard task token limit ${wholeBudget} exhausted (${total} recorded tokens). Reviewer not started; inspect task usage and explicitly raise the task limit before retrying.`,
           'REVIEWER_BUDGET_EXHAUSTED',
           409,
         );

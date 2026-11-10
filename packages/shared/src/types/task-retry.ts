@@ -80,6 +80,8 @@ export interface TaskRetryState {
 
 /** Read-only projection. Final Rework admission always rechecks current facts. */
 export interface ReworkEligibility {
+  /** Stable admission code; clients must not infer lifecycle holds from reason text. */
+  code?: string;
   eligible: boolean;
   status: 'eligible' | 'grant_recorded' | 'authorization_needed' | 'cooldown' | 'blocked';
   reason: string;
