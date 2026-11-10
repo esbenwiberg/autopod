@@ -12,10 +12,11 @@ import Testing
     return try JSONDecoder().decode(ReworkEligibility.self, from: JSONSerialization.data(withJSONObject: object))
   }
 
-  @Test(arguments: [PodRepairKind.rework, .revalidate, .resume])
-  func infrastructureHoldBlocksEveryOrdinaryAction(kind: PodRepairKind) async throws {
+  @Test(arguments: [PodRepairKind.rework, .revalidate, .resume],
+    ["INFRASTRUCTURE_BLOCKED", "DELIVERY_RECONCILIATION_REQUIRED", "CONTINUATION_SOURCE_HELD"])
+  func lifecycleHoldBlocksEveryOrdinaryAction(kind: PodRepairKind, code: String) async throws {
     let model = PodRepairModel(kind: kind, ordinaryRework: true)
-    let held = try projection(code: "INFRASTRUCTURE_BLOCKED", eligible: false)
+    let held = try projection(code: code, eligible: false)
     var actions = PodRepairActions(submit: { _, _, _ in
       Issue.record("Held recovery must not dispatch"); return PodRepairReceipt(message: "unexpected")
     }, inspect: { _ in throw URLError(.unsupportedURL) })
@@ -83,10 +84,11 @@ import Testing
     }
   }
 
-  @Test func nonHeldFailureRefreshAndNetworkFailureRemainHonest() async throws {
+  @Test(arguments: ["INFRASTRUCTURE_BLOCKED", "DELIVERY_RECONCILIATION_REQUIRED", "CONTINUATION_SOURCE_HELD"])
+  func nonHeldFailureRefreshAndNetworkFailureRemainHonest(code: String) async throws {
     let model = PodRepairModel(kind: .resume, ordinaryRework: true)
     let nonHeld = try projection(code: "TASK_RETRY_AUTHORIZATION_REQUIRED", eligible: false)
-    let held = try projection(code: "INFRASTRUCTURE_BLOCKED", eligible: false)
+    let held = try projection(code: code, eligible: false)
     var actions = PodRepairActions(submit: { _, _, _ in
       Issue.record("Changed or unavailable eligibility must stop submission")
       return PodRepairReceipt(message: "unexpected")

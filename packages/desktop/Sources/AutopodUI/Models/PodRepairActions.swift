@@ -97,7 +97,9 @@ public struct PodRepairActions: Sendable {
     guard ordinaryRecovery else { return nil }
     if eligibilityLoading { return "Checking current recovery eligibility…" }
     guard let eligibility else { return "Recovery eligibility unavailable. Refresh before continuing." }
-    if eligibility.code == "INFRASTRUCTURE_BLOCKED" { return eligibility.reason }
+    if eligibility.code == "INFRASTRUCTURE_BLOCKED"
+      || eligibility.code == "DELIVERY_RECONCILIATION_REQUIRED"
+      || eligibility.code == "CONTINUATION_SOURCE_HELD" { return eligibility.reason }
     if eligibility.code == nil && eligibility.status == "blocked" {
       return "The daemon cannot identify this recovery restriction. Refresh using a compatible daemon before continuing."
     }
