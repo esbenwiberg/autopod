@@ -139,6 +139,21 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     },
     acceptFindings: captured.acceptFindings,
     ...captured.validationExecutionRecovery,
+    getRecoveryFiles(podId: string, includeOriginal = false) {
+      return (captured.sandboxRecovery ?? recoveryError('File recovery unavailable')).files.inspect(
+        podId,
+        includeOriginal,
+      );
+    },
+    readRecoveryFile(
+      podId: string,
+      selection: import('../interfaces/recovery-files.js').RecoveryFileSelection,
+    ) {
+      return (captured.sandboxRecovery ?? recoveryError('File recovery unavailable')).files.read(
+        podId,
+        selection,
+      );
+    },
     getSandboxRecovery(podId: string) {
       return (captured.sandboxRecovery ?? recoveryError('Sandbox recovery unavailable')).inspect(
         podId,

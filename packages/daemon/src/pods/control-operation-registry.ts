@@ -42,6 +42,7 @@ export function createControlOperationRegistry(
           key === 'recoverSandbox' ||
           key === 'reconcileValidationExecution' ||
           key === 'readValidationEvidence' ||
+          key === 'readRecoveryFile' ||
           // This operation is permanently disabled and must reject before resource lookup.
           key === 'injectCredential' ||
           key === 'touchHeartbeat' ||

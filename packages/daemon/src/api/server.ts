@@ -63,6 +63,7 @@ import {
   configurationRoutes,
 } from './routes/configuration.js';
 import { diffRoutes } from './routes/diff.js';
+import { fileRecoveryRoutes } from './routes/file-recovery.js';
 import { filesRoutes } from './routes/files.js';
 import { healthRoutes } from './routes/health.js';
 import { historyRoutes } from './routes/history.js';
@@ -329,6 +330,7 @@ export async function createServer(deps: ServerDependencies): Promise<FastifyIns
 
   // Files routes — browse/read files from pod worktree (markdown viewer, etc.)
   filesRoutes(app, deps.podManager, deps.containerManagerFactory);
+  fileRecoveryRoutes(app, deps.podManager);
 
   // Screenshot routes — serve proof-of-work PNG screenshots by pod/source/filename
   if (deps.screenshotStore) {

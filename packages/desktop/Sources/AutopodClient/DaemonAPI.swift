@@ -760,6 +760,19 @@ public actor DaemonAPI {
 
   // MARK: - Files (worktree browser)
 
+  public func getRecoveryFiles(_ id: String, includeOriginal: Bool = false) async throws -> RecoveryFilesSnapshot {
+    let value: RecoveryFilesSnapshot = try await request("GET", "/pods/\(id)/file-recovery", query: includeOriginal ? ["original": "1"] : [:])
+    try value.validate(podId: id)
+    return value
+  }
+
+  public func readRecoveryFile(_ id: String, selection: RecoveryFileSelection) async throws -> RecoveryFileContent {
+    try await request("GET", "/pods/\(id)/file-recovery/content", query: [
+      "sourceId": selection.sourceId, "binding": selection.binding, "generation": String(selection.generation),
+      "path": selection.path, "version": selection.version,
+    ])
+  }
+
   public func listSessionFiles(_ id: String, ext: String = "md") async throws -> [SessionFileEntry] {
     let res: SessionFilesResponse = try await request(
       "GET", "/pods/\(id)/files", query: ["ext": ext]

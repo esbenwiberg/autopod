@@ -435,6 +435,12 @@ export interface PodManager {
    * Updates prUrl on success. Throws if the pod is not complete or already has a PR.
    */
   retryCreatePr(podId: string): Promise<void>;
+  getRecoveryFiles: ReturnType<
+    typeof import('./sandbox-recovery.js').createSandboxRecovery
+  >['files']['inspect'];
+  readRecoveryFile: ReturnType<
+    typeof import('./sandbox-recovery.js').createSandboxRecovery
+  >['files']['read'];
   getSandboxRecovery: ReturnType<
     typeof import('./sandbox-recovery.js').createSandboxRecovery
   >['inspect'];

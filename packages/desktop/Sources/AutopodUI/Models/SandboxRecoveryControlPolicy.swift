@@ -2,10 +2,13 @@ import AutopodClient
 import Foundation
 
 public enum SandboxRecoveryControlPolicy {
-  public static func canStart(_ resource: SandboxRecoveryResource, reason: String, busy: Bool) -> Bool {
+  public static func canReviewStart(_ resource: SandboxRecoveryResource, busy: Bool) -> Bool {
     !busy && resource.startBlocked == nil && resource.abandonment == nil &&
-      resource.providerState == "stopped" && resource.pendingIntentIds.isEmpty &&
-      reason.trimmingCharacters(in: .whitespacesAndNewlines).count >= 10
+      resource.providerState == "stopped" && resource.pendingIntentIds.isEmpty
+  }
+
+  public static func canStart(_ resource: SandboxRecoveryResource, reason: String, busy: Bool) -> Bool {
+    canReviewStart(resource, busy: busy) && reason.trimmingCharacters(in: .whitespacesAndNewlines).count >= 10
   }
 
   public static func canAbandon(_ resource: SandboxRecoveryResource, currentUserId: String?,
