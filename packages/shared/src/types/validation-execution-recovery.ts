@@ -7,8 +7,9 @@ export interface ValidationExecutionBinding {
   cycle: number;
   attempt: number;
   admissionId: string;
-  executionTarget: 'sandbox';
+  executionTarget: 'sandbox' | 'local';
   containerId: string;
+  /** Sandbox provider namespace, or the observed exact Docker engine/container resource key. */
   resourceScope: string;
   worktreePath: string;
   providerBinding: string;

@@ -8,7 +8,7 @@ public final class ValidationRecoveryController {
   public private(set) var isSubmitting = false
   public private(set) var loadError: String?
   public private(set) var requestError: String?
-  public private(set) var message: String?
+  private var acceptedRequest: ValidationRecoveryRequest?
   private let podId: String
   private let actions: PodActions
   private var revision = 0
@@ -19,6 +19,22 @@ public final class ValidationRecoveryController {
   }
 
   public var isPending: Bool { isSubmitting || state?.activeAction != nil }
+
+  public var message: String? {
+    guard loadError == nil, requestError == nil, let acceptedRequest, let state,
+      state.lastError == nil, state.generation == acceptedRequest.expectedGeneration,
+      state.validationTimestamp == acceptedRequest.expectedValidationTimestamp,
+      state.activeAction == acceptedRequest.action else { return nil }
+    return acceptedRequest.action == "fix-validation"
+      ? "Repair request accepted. Follow pod activity to confirm admission and worker progress."
+      : "Check retry request accepted. No coding worker, publication or merge was requested."
+  }
+
+  public var sourceRecoveryCommand: String? {
+    guard state?.fixValidation.code == "DELIVERY_RECONCILIATION_REQUIRED"
+      || state?.retryChecks.code == "DELIVERY_RECONCILIATION_REQUIRED" else { return nil }
+    return "ap source-recovery \(podId) --json"
+  }
 
   public var reconciliationCommand: String? {
     guard state?.fixValidation.code == "VALIDATION_EXECUTION_UNVERIFIED"
@@ -51,14 +67,12 @@ public final class ValidationRecoveryController {
     isSubmitting = true
     revision += 1 // Discard an older poll that was started before this request.
     requestError = nil
-    message = nil
+    acceptedRequest = nil
     defer { isSubmitting = false }
     do {
       let input = try ValidationRecoveryRequest(action: action, state: state)
       try await actions.requestValidationRecovery(podId, input)
-      message = action == "fix-validation"
-        ? "Repair requested. Waiting for daemon admission and worker progress."
-        : "Check retry requested. No coding worker, publication or merge was requested."
+      acceptedRequest = input
     } catch {
       // A lost response is not a reason to repeat the POST. Observe the daemon first.
       requestError = error.localizedDescription
@@ -123,6 +137,12 @@ struct ValidationRecoveryControls: View {
         }
         if let reason = state.retryChecks.reason, reason != state.fixValidation.reason {
           Text("Retry checks: \(reason)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        }
+        if let command = controller.sourceRecoveryCommand {
+          Text("Approval rewrite owns this source. Inspect its recorded candidate and checks before any recovery. Finalize retained work only stops with work retained or verifies an existing merge; it does not repair, push or merge the PR.")
+            .font(.caption).foregroundStyle(.secondary)
+          Text(command).font(.caption.monospaced()).textSelection(.enabled)
+            .accessibilityIdentifier("validation.rewriteInspection")
         }
         if let command = controller.reconciliationCommand {
           Text("Termination proof is required before repair or checks. Inspect the exact validation evidence with the command below, and retain the original resource and reports. Inspection does not delete anything. Missing legacy ownership remains blocked.")

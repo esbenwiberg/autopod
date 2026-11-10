@@ -130,6 +130,88 @@ func validationRecoveryLayoutAndOwnedRendering(width: Double) async throws {
   }
 }
 
+@MainActor @Test func rewriteOwnedValidationOffersReadOnlyInspectionWithoutDispatchingWork() async {
+  let harness = RecoveryHarness()
+  harness.state = .init(generation: 5, validationTimestamp: "rewrite-result",
+    fixValidation: .init(allowed: false, reason: "Approval rewrite owns this source", code: "DELIVERY_RECONCILIATION_REQUIRED"),
+    retryChecks: .init(allowed: false, code: "DELIVERY_RECONCILIATION_REQUIRED"))
+  let controller = ValidationRecoveryController(podId: "rewrite-pod", actions: harness.actions)
+  await controller.refresh()
+  #expect(controller.sourceRecoveryCommand == "ap source-recovery rewrite-pod --json")
+  #expect(controller.reconciliationCommand == nil)
+  await controller.request("fix-validation")
+  await controller.request("retry-checks")
+  #expect(harness.requests.isEmpty)
+  #expect(controller.message == nil)
+}
+
+@MainActor @Test func rewriteRecoveryRendersInspectionInsteadOfAnAvailableRepair() async throws {
+  let harness = RecoveryHarness()
+  harness.state = .init(generation: 5, validationTimestamp: "rewrite-result",
+    fixValidation: .init(allowed: false, reason: "Docker repair requires a maintained exact dispatch and an already-stopped original", code: "DELIVERY_RECONCILIATION_REQUIRED"),
+    retryChecks: .init(allowed: false, code: "DELIVERY_RECONCILIATION_REQUIRED"))
+  let host = LaunchComposerHost(ValidationRecoveryControls(podId: "rewrite-pod", status: "review_required",
+    actions: harness.actions), width: 540)
+  defer { host.close() }
+  try await host.wait { host.has("validation.rewriteInspection") }
+  #expect(!host.enabled("validation.fix"))
+  #expect(!host.enabled("validation.retryChecks"))
+  #expect(host.containsText("ap source-recovery rewrite-pod --json"))
+  #expect(host.containsText("it does not repair, push or merge the PR"))
+  #expect(harness.requests.isEmpty)
+}
+
+@MainActor @Test func acceptedRecoveryDoesNotKeepWaitingAfterAdmissionFailure() async throws {
+  let harness = RecoveryHarness()
+  let controller = ValidationRecoveryController(podId: "pod", actions: harness.actions)
+  await controller.refresh()
+  harness.state = .init(generation: 3, validationTimestamp: harness.state.validationTimestamp,
+    fixValidation: .init(allowed: false), retryChecks: .init(allowed: false), activeAction: "fix-validation")
+  await controller.request("fix-validation")
+  #expect(controller.message != nil)
+  harness.state = .init(generation: 3, validationTimestamp: harness.state.validationTimestamp,
+    fixValidation: .init(allowed: false), retryChecks: .init(allowed: false),
+    lastError: try JSONDecoder().decode(ValidationRecoveryError.self,
+      from: Data(#"{"code":"DELIVERY_RECONCILIATION_REQUIRED","message":"Rewrite owns source"}"#.utf8)))
+  await controller.refresh()
+  #expect(controller.message == nil)
+  #expect(controller.state?.lastError?.message == "Rewrite owns source")
+  #expect(harness.requests.count == 1)
+}
+
+@MainActor @Test func recoveryAcceptanceDoesNotClaimWorkIsPendingAfterTheRequestSettles() async {
+  let harness = RecoveryHarness()
+  let controller = ValidationRecoveryController(podId: "pod", actions: harness.actions)
+  await controller.refresh()
+  harness.state = .init(generation: 3, validationTimestamp: harness.state.validationTimestamp,
+    fixValidation: .init(allowed: false), retryChecks: .init(allowed: false), activeAction: "fix-validation")
+  await controller.request("fix-validation")
+  #expect(controller.message != nil)
+  harness.state = .init(generation: 3, validationTimestamp: harness.state.validationTimestamp,
+    fixValidation: .init(allowed: true), retryChecks: .init(allowed: true))
+  await controller.refresh()
+  #expect(controller.message == nil)
+  #expect(!controller.isPending)
+  #expect(harness.requests.count == 1)
+}
+
+@MainActor @Test(arguments: [true, false])
+func recoveryAcceptanceMessageBelongsOnlyToTheObservedInvocation(newGeneration: Bool) async {
+  let harness = RecoveryHarness()
+  let controller = ValidationRecoveryController(podId: "pod", actions: harness.actions)
+  await controller.refresh()
+  harness.state = .init(generation: 3, validationTimestamp: harness.state.validationTimestamp,
+    fixValidation: .init(allowed: false), retryChecks: .init(allowed: false), activeAction: "retry-checks")
+  await controller.request("retry-checks")
+  #expect(controller.message != nil)
+  harness.state = .init(generation: newGeneration ? 4 : 3,
+    validationTimestamp: newGeneration ? harness.state.validationTimestamp : "new-result",
+    fixValidation: .init(allowed: false), retryChecks: .init(allowed: false), activeAction: "retry-checks")
+  await controller.refresh()
+  #expect(controller.message == nil)
+  #expect(harness.requests.count == 1)
+}
+
 @MainActor @Test func unverifiedValidationOffersReadOnlyReconciliationWithoutDispatchingWork() async {
   let harness = RecoveryHarness()
   harness.state = .init(generation: 1, validationTimestamp: "legacy-result",

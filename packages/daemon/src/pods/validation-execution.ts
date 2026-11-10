@@ -18,6 +18,7 @@ import { waitForRetryBackoff } from './retry-backoff-wait.js';
 import { TaskRetryBlockedError } from './task-retry-ledger.js';
 import type { captureValidationOwnership } from './validation-ownership.js';
 import { requiresValidationSettlement } from './validation-recovery-policy.js';
+import { captureDockerValidationResourceScope } from './validation-resource-scope.js';
 
 interface ValidationExecutionDependencies {
   logger: Logger;
@@ -32,6 +33,7 @@ interface ValidationExecutionDependencies {
     | 'validationExecutions'
     | 'retainedCheckpoints'
     | 'retainedCoding'
+    | 'approvalRewrites'
     | 'atomically'
   >;
   validationEngine: Pick<ValidationEngine, 'validate'>;
@@ -206,12 +208,35 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
           }
         };
         await verifyRepair();
+        const dispatchPod = ownership.assertCurrent();
+        const rewrite = podRepo.approvalRewrites?.latest(dispatchPod);
+        const dockerRewrite =
+          dispatchPod.executionTarget === 'local' && !!rewrite?.activated && !rewrite.checked;
+        const containerId = dispatchPod.containerId;
+        if (
+          dockerRewrite &&
+          (rewrite?.activated?.generation !== dispatchPod.lifecycleGeneration ||
+            rewrite?.prepared?.worktreePath !== dispatchPod.worktreePath ||
+            !containerId)
+        )
+          throw new TaskRetryBlockedError('Docker rewrite checks source selection changed');
+        const resourceScope =
+          dockerRewrite && containerId
+            ? await captureDockerValidationResourceScope(cm, containerId)
+            : undefined;
+        ownership.assertCurrent();
+        if (dockerRewrite && validationController.signal.aborted)
+          throw new TaskRetryBlockedError('Validation cancelled before admission');
         const admission =
           retryLedger && identity
             ? retryLedger.admit(podId, pod.lifecycleGeneration, identity, bindingHash, [
                 ...infrastructureBackoffs,
               ])
             : null;
+        if (dockerRewrite && !admission)
+          throw new TaskRetryBlockedError(
+            'Docker rewrite checks require a durable validation admission',
+          );
         let dispatchId: string | null | undefined = null;
         if (admission && retryLedger) {
           try {
@@ -224,6 +249,19 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
             await verifyRepair();
             if (validationController.signal.aborted)
               throw new TaskRetryBlockedError('Validation admission cancelled before execution');
+            if (
+              dockerRewrite &&
+              containerId &&
+              (await captureDockerValidationResourceScope(cm, containerId)) !== resourceScope
+            )
+              throw new TaskRetryBlockedError(
+                'Docker engine/resource changed before validation dispatch',
+              );
+            ownership.assertCurrent();
+            if (validationController.signal.aborted)
+              throw new TaskRetryBlockedError(
+                'Validation admission cancelled during resource observation',
+              );
             atomicPodChange(podRepo, () => {
               if (
                 recoveryBudget &&
@@ -253,8 +291,12 @@ export function createValidationExecution(deps: ValidationExecutionDependencies)
                 ownership.assertCurrent(),
                 admission.id,
                 attempt,
-                cm.executionResourceScope,
+                dockerRewrite ? resourceScope : cm.executionResourceScope,
               );
+              if (dockerRewrite && !dispatchId)
+                throw new TaskRetryBlockedError(
+                  'Exact Docker rewrite validation dispatch is unavailable',
+                );
               if (recoveryBudget) {
                 if (!dispatchId)
                   throw new TaskRetryBlockedError(

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { cp, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { vi } from 'vitest';
 import { rewriteConfiguration } from '../pods/approval-source-rewrite.js';
 import { checkpointHash } from '../pods/retained-checkpoint-repository.js';
 import { LocalWorktreeManager } from '../worktrees/local-worktree-manager.js';
@@ -21,8 +22,18 @@ export const repairGit = async (cwd: string, ...args: string[]) =>
 
 /** Persist an activated rewrite and a genuine started, settled, published failed
  * checks dispatch. No fabricated settlement receipt or production incident IDs. */
-export async function rewriteRepairFixture() {
+export async function rewriteRepairFixture(
+  target: 'sandbox' | 'local' = 'sandbox',
+  published = true,
+  bound = true,
+) {
   const f = await retainedCheckpointFixture();
+  const containerId = target === 'local' ? 'd'.repeat(64) : f.containerId;
+  if (target === 'local') {
+    f.ctx.podRepo.update(f.podId, { containerId: null });
+    f.ctx.podRepo.update(f.podId, { executionTarget: 'local' });
+  }
+  f.ctx.podRepo.update(f.podId, { containerId });
   const rewriteId = 'fixture-rewrite';
   const root = path.join(f.root, rewriteId);
   await mkdir(root);
@@ -32,6 +43,13 @@ export async function rewriteRepairFixture() {
     baseBranch: 'main',
   });
   await materializeCheckpointFixture(f);
+  if (target === 'local') {
+    f.cm.getResourceKey = vi.fn(async (id) => JSON.stringify(['docker', 'fixture-engine', id]));
+    vi.mocked(f.cm.getStatus).mockImplementation(async (id) =>
+      id === containerId ? 'stopped' : 'running',
+    );
+    vi.mocked(f.cm.spawn).mockResolvedValue('e'.repeat(64));
+  }
   const real = new LocalWorktreeManager({
     cacheDir: path.join(f.root, 'cache'),
     worktreeDir: path.join(f.root, 'unused'),
@@ -84,7 +102,7 @@ export async function rewriteRepairFixture() {
     f.ctx.podRepo.update(f.podId, { containerId: null, skipAgent: true });
     rewrites.append(rewriteId, 'activated', { generation });
   });
-  f.ctx.podRepo.update(f.podId, { containerId: f.containerId, lastValidationResult: null });
+  f.ctx.podRepo.update(f.podId, { containerId, lastValidationResult: null });
   const retries = f.ctx.podRepo.taskRetries!;
   retries.authorize(
     f.podId,
@@ -105,16 +123,31 @@ export async function rewriteRepairFixture() {
     [],
   );
   retries.start(admission.id);
-  const scope = f.cm.executionResourceScope;
+  const scope =
+    target === 'local' ? await f.cm.getResourceKey!(containerId) : f.cm.executionResourceScope;
   const ledger = f.ctx.podRepo.validationExecutions!;
-  const dispatchId = ledger.dispatch(f.pod(), admission.id, f.result.attempt, scope)!;
-  const result = { ...f.result, infrastructureFailure: undefined, executionDispatchId: dispatchId };
+  const dispatchId = bound ? ledger.dispatch(f.pod(), admission.id, f.result.attempt, scope) : null;
+  if (bound && !dispatchId) throw new Error('Missing maintained fixture dispatch');
+  const result = {
+    ...f.result,
+    infrastructureFailure: undefined,
+    ...(dispatchId ? { executionDispatchId: dispatchId } : {}),
+  };
   ledger.recordResult(result);
-  ledger.claimLogicalPublication(result);
+  if (published) ledger.claimLogicalPublication(result);
   retries.finish(admission.id, 'nonretryable', 10);
   f.ctx.podRepo.update(f.podId, { lastValidationResult: result, skipAgent: false });
   f.input.expectedGeneration = f.pod().lifecycleGeneration;
   f.input.expectedResultHash = checkpointHash(result);
-  const request = { ...f.input, rewriteId, failedDispatchId: dispatchId };
-  return { ...f, request, rewriteId, dispatchId, original, source, result };
+  const request = { ...f.input, rewriteId, failedDispatchId: dispatchId ?? 'unbound-dispatch' };
+  return {
+    ...f,
+    containerId,
+    request,
+    rewriteId,
+    dispatchId: request.failedDispatchId,
+    original,
+    source,
+    result,
+  };
 }
