@@ -37,12 +37,13 @@ struct RetainedFinalizationCard: View {
 
 struct RetainedFinalizationSheet: View {
   let actions: RetainedFinalizationActions
+  let embedded: Bool
   @State private var model: RetainedFinalizationModel
   @State private var confirmation: RetainedFinalizationMode?
   @Environment(\.dismiss) private var dismiss
 
-  init(podId: String, actions: RetainedFinalizationActions, model: RetainedFinalizationModel? = nil) {
-    self.actions = actions
+  init(podId: String, actions: RetainedFinalizationActions, model: RetainedFinalizationModel? = nil, embedded: Bool = false) {
+    self.actions = actions; self.embedded = embedded
     _model = State(initialValue: model ?? RetainedFinalizationModel(podId: podId, actions: actions))
   }
 
@@ -53,7 +54,7 @@ struct RetainedFinalizationSheet: View {
         Spacer()
         Button("Check status") { Task { await model.refresh(actions) } }
           .disabled(model.busy).accessibilityIdentifier("retained-finalization-refresh")
-        Button("Done") { dismiss() }.disabled(model.busy).keyboardShortcut(.cancelAction)
+        if !embedded { Button("Done") { dismiss() }.disabled(model.busy).keyboardShortcut(.cancelAction) }
       }
       Text(model.podId).font(.caption.monospaced()).textSelection(.enabled)
       Text("Neither action deletes source, reports, custody evidence or recovery resources. Stopping is not completion. Retained storage may still incur costs.")
@@ -112,7 +113,7 @@ struct RetainedFinalizationSheet: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
       }
     }
-    .padding(20).frame(width: 620, height: 580)
+    .padding(embedded ? 0 : 20).frame(width: embedded ? nil : 620, height: embedded ? nil : 580)
     .background(Color(nsColor: .windowBackgroundColor))
     .interactiveDismissDisabled(model.busy)
     .task { await model.refresh(actions) }

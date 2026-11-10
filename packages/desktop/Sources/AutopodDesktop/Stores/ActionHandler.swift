@@ -217,7 +217,12 @@ public final class ActionHandler {
       }
     )
     result.sandboxRecovery = SandboxRecoveryActions(scope: replyContextID.uuidString,
-      load: { [weak self] id in
+      draftScope: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",
+      journalDirectory: journalRoot?.appendingPathComponent("sandbox-recovery", isDirectory: true),
+      isCurrent: { [weak self] in
+        guard let self else { return false }
+        return self.podStore.isCurrent(self.ownership)
+      }, load: { [weak self] id in
         guard let self else { throw URLError(.notConnectedToInternet) }
         return try await self.perform { try await self.api.getSandboxRecovery(id) }
       },

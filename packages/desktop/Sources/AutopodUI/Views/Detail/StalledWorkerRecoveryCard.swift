@@ -28,23 +28,25 @@ struct StalledWorkerRecoveryCard: View {
 struct StalledWorkerRecoverySheet: View {
   let actions: StalledWorkerRecoveryActions
   let onOpenValidation: () -> Void
+  let embedded: Bool
   @State private var model: StalledWorkerRecoveryModel
   @State private var confirming = false
   @Environment(\.dismiss) private var dismiss
 
-  init(podId: String, actions: StalledWorkerRecoveryActions, onOpenValidation: @escaping () -> Void = {}) {
-    self.actions = actions
+  init(podId: String, actions: StalledWorkerRecoveryActions, embedded: Bool = false,
+       model: StalledWorkerRecoveryModel? = nil, onOpenValidation: @escaping () -> Void = {}) {
+    self.actions = actions; self.embedded = embedded
     self.onOpenValidation = onOpenValidation
-    _model = State(initialValue: StalledWorkerRecoveryModel(podId: podId, actions: actions))
+    _model = State(initialValue: model ?? StalledWorkerRecoveryModel(podId: podId, actions: actions))
   }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack {
-        Text("Recover stalled execution").font(.title2.bold())
+        Text("Stop a stalled run and retain its work").font(.title2.bold())
         Spacer()
         Button("Inspect / refresh") { Task { await model.refresh(actions) } }.disabled(model.busy)
-        Button("Done") { dismiss() }.disabled(model.busy).keyboardShortcut(.cancelAction)
+        if !embedded { Button("Done") { dismiss() }.disabled(model.busy).keyboardShortcut(.cancelAction) }
       }
       Text(model.podId).font(.caption.monospaced()).textSelection(.enabled)
       Text("Inspection does not stop anything. An explicit stop retains the Docker resource and archives its workspace before releasing the old run. It does not pass checks, run a worker, publish or merge.")
@@ -72,7 +74,7 @@ struct StalledWorkerRecoverySheet: View {
           }
           if model.receipt?.state == .settled {
             Button("Open Validation") { onOpenValidation() }
-            Text("Retry checks and code repair are separate decisions. If infrastructure remains blocked, use Inspect repair & continuation in pod detail to select a qualified environment. Pending guidance, retry limits, budgets, source ownership and native-check requirements still apply.")
+            Text("Retry checks and code repair are separate decisions. If the environment remains blocked, return to Recovery → Continue work to review a replacement. Pending guidance, retry limits, budgets, source ownership and native-check requirements still apply.")
               .font(.caption).foregroundStyle(.secondary)
           } else if let pending = model.pending {
             Text("Saved request: \(pending.requestKey)\nReason: \(pending.reason)").font(.caption.monospaced()).textSelection(.enabled)
@@ -95,7 +97,7 @@ struct StalledWorkerRecoverySheet: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
       }
     }
-    .padding(20).frame(width: 720, height: 600)
+    .padding(embedded ? 0 : 20).frame(width: embedded ? nil : 720, height: embedded ? nil : 600)
     .interactiveDismissDisabled(model.busy)
     .task { await model.refresh(actions) }
     .confirmationDialog("Stop this exact execution and retain its work?", isPresented: $confirming, titleVisibility: .visible) {

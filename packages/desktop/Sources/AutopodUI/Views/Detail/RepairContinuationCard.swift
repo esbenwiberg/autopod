@@ -19,72 +19,83 @@ struct RepairContinuationCard: View {
 
 struct RepairContinuationSheet: View {
   let actions: RepairContinuationActions
+  let embedded: Bool
   @State private var model: RepairContinuationModel
   @State private var confirmation = false
   @Environment(\.dismiss) private var dismiss
 
-  init(podId: String, actions: RepairContinuationActions, model: RepairContinuationModel? = nil) {
-    self.actions = actions
+  init(podId: String, actions: RepairContinuationActions, model: RepairContinuationModel? = nil, embedded: Bool = false) {
+    self.actions = actions; self.embedded = embedded
     _model = State(initialValue: model ?? RepairContinuationModel(podId: podId, actions: actions))
   }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack {
-        Text("Repair environment & continue coding").font(.title2.bold())
+        Text("Use a replacement environment").font(.title2.bold())
         Spacer()
         Button("Inspect / refresh") { Task { await model.refresh(actions) } }
           .disabled(model.busy).accessibilityIdentifier("repair-continuation-refresh")
-        Button("Done") { dismiss() }.disabled(model.busy).keyboardShortcut(.cancelAction)
+        if !embedded { Button("Done") { dismiss() }.disabled(model.busy).keyboardShortcut(.cancelAction) }
       }
-      Text(model.podId).font(.caption.monospaced()).textSelection(.enabled)
-      Text("One conditional attempt: provision the reviewed replacement, qualify its actual resource, then start ONE fresh coding segment only IF it qualifies. Configuration preview is not proof and cannot skip probes.")
+      Text("Review the saved source and replacement settings. The daemon will prepare and test the actual replacement before allowing one coding continuation. If it does not qualify, coding will not start.")
         .font(.callout).accessibilityIdentifier("repair-continuation-conditional")
       if model.busy { ProgressView().controlSize(.small) }
       if let error = model.error { Text(error).foregroundStyle(.orange).textSelection(.enabled).accessibilityIdentifier("repair-continuation-error") }
       ScrollView {
         VStack(alignment: .leading, spacing: 12) {
           if let snapshot = model.snapshot {
-            Text("Generation \(snapshot.generation) · \(snapshot.available ? "inspect supported static selection" : "unsupported or refused")")
-            Text("Result hash: \(snapshot.expectedResultHash ?? "unavailable")\nComplete report-set hash: \(snapshot.expectedReportSetHash ?? "unavailable")")
-              .font(.caption.monospaced()).textSelection(.enabled)
+            Text(snapshot.available ? "Review a replacement before authorizing any coding." : "A replacement cannot be authorized yet.")
+              .font(.headline)
             refusals(snapshot.refusals)
+            DisclosureGroup("Technical selection details") {
+              Text("Pod: \(model.podId) · generation \(snapshot.generation)\nResult: \(snapshot.expectedResultHash ?? "unavailable")\nReport set: \(snapshot.expectedReportSetHash ?? "unavailable")")
+                .font(.caption.monospaced()).textSelection(.enabled)
+            }
           } else {
             Text("A compatible repair-continuation-v1 observation is required. Missing/old responses do not enable authorization.")
           }
           if let pending = model.pending {
-            Text("Saved request: \(pending.id)\nHOST HEAD: \(pending.sourceHead)\nProfile: \(pending.executionProfileId)\nReason: \(pending.reason)")
-              .font(.caption).textSelection(.enabled).accessibilityIdentifier("repair-continuation-saved")
-            Text("The exact request survives closing/reopening. Observe is GET only. A missing receipt, timeout or quiet sandbox does not prove failed dispatch; do not create a new key.")
+            Text("A repair decision is already saved").font(.headline)
+            Text("Environment profile: \(pending.executionProfileId) · source \(pending.sourceHead.prefix(12))\nReason: \(pending.reason)")
+              .font(.callout).textSelection(.enabled).accessibilityIdentifier("repair-continuation-saved")
+            Text("Check its outcome rather than starting another repair. Closing this window keeps the exact saved decision; a lost response does not prove that nothing happened.")
               .font(.callout)
-            Button("Observe saved request") { Task { await model.observe(actions) } }
+            Button("Check the saved repair outcome") { Task { await model.observe(actions) } }
               .disabled(model.busy).accessibilityIdentifier("repair-continuation-observe")
           } else {
-            TextField("Exact retained HOST HEAD", text: $model.hostHead)
+            Text("1. Choose the saved source").font(.headline)
+            Text("Enter the full saved host commit you intend to repair. This connection does not automatically discover a safe source; an older checkpoint can omit newer work.")
+              .font(.callout).foregroundStyle(.secondary)
+            TextField("Saved source commit (full SHA)", text: $model.hostHead)
               .textFieldStyle(.roundedBorder).font(.caption.monospaced()).disabled(model.busy)
               .accessibilityIdentifier("repair-continuation-head")
             Text("Selected host Git source is not a claim to contain original final sandbox bytes. Original files, ignored/unsynced data, reports and resources remain retained; no deletion is authorized.")
               .font(.callout).foregroundStyle(.secondary).accessibilityIdentifier("repair-continuation-source-warning")
-            TextField("Reviewed replacement profile ID", text: $model.profileId)
+            Text("2. Choose the replacement").font(.headline)
+            TextField("Reviewed environment profile ID", text: $model.profileId)
               .textFieldStyle(.roundedBorder).disabled(model.busy).accessibilityIdentifier("repair-continuation-profile")
             if let preview = model.preview {
-              Text("Configuration only · actual qualification: \(preview.actualQualification)\nConditional attempt: \(preview.conditionalAttemptEligible ? "supported — not qualified" : "refused")")
+              Text(preview.conditionalAttemptEligible ? "Settings preview ready — actual environment not yet tested" : "These settings cannot be used yet")
                 .font(.headline).accessibilityIdentifier("repair-continuation-preview-state")
               if let diff = preview.configurationDiff {
                 execution("Before", diff.before)
                 execution("After", diff.after)
               }
               if let selected = preview.selection {
-                Text("Preview digest: \(selected.expectedExecutionDigest)\nBinding: \(selected.expectedBindingDigest)")
-                  .font(.caption.monospaced()).textSelection(.enabled)
+                DisclosureGroup("Exact preview identity") {
+                  Text("Preview digest: \(selected.expectedExecutionDigest)\nBinding: \(selected.expectedBindingDigest)")
+                    .font(.caption.monospaced()).textSelection(.enabled)
+                }
               }
               refusals(preview.refusals)
             }
-            TextField("Reason for this conditional repair (10–4000 characters)", text: $model.reason, axis: .vertical)
+            Text("3. Review and authorize").font(.headline)
+            TextField("Why use this replacement? (10–4000 characters)", text: $model.reason, axis: .vertical)
               .textFieldStyle(.roundedBorder).lineLimit(2...4).disabled(model.busy).accessibilityIdentifier("repair-continuation-reason")
           }
           if let operation = model.operation {
-            Text("Observed operation: \(operation.state.rawValue)").font(.headline).accessibilityIdentifier("repair-continuation-stage")
+            Text(repairProgressDescription(operation.state)).font(.headline).accessibilityIdentifier("repair-continuation-stage")
             Text("Retained operation/custody: \(operation.operationId)").font(.caption.monospaced()).textSelection(.enabled)
             Text("Qualification: \(operation.qualification?.outcome.rawValue ?? "not run")\nCoding admission: \(operation.codingAdmission.rawValue)\nChecks: \(operation.checks.rawValue)")
               .textSelection(.enabled)
@@ -99,28 +110,30 @@ struct RepairContinuationSheet: View {
             Text("Accepted is not qualified, admitted is not completed, and passed checks are not delivery approval. Fresh human approval remains required; publication is not authorized.")
               .font(.callout).foregroundStyle(.secondary)
           }
-          context
-          Text("Frozen: repository, task, AI/account/runtime/model, workflow, network, credentials/PIM, actions, tool packs and permissions. Cumulative budgets/history are not reset. Retry grants or budget increases require their separate owning controls; this sheet issues neither.")
-            .font(.caption).foregroundStyle(.secondary)
-          Text("Other operations stay separate: Start sandbox for file recovery is machine-only; retained continuation runs checks only; Resume delivery may publish previously checked work. None is a fallback for unavailable repair support.")
-            .font(.caption).foregroundStyle(.secondary)
+          Text("Original files and resources stay retained. Existing retry permissions and budgets still apply. This does not publish or merge; passing checks still requires human approval.")
+            .font(.callout).foregroundStyle(.secondary)
+          DisclosureGroup("Original reports, limits and unchanged permissions") {
+            context
+            Text("Repository, task, AI/account/runtime/model, workflow, network, credentials/PIM, actions, tool packs and permissions remain frozen. This action grants no extra retries or budget.")
+              .font(.caption).foregroundStyle(.secondary)
+          }
         }.frame(maxWidth: .infinity, alignment: .leading)
       }
       if model.pending == nil {
         HStack {
-          Button("Preview configuration") { Task { await model.loadPreview(actions) } }
+          Button("Preview replacement settings") { Task { await model.loadPreview(actions) } }
             .disabled(!model.canPreview).accessibilityIdentifier("repair-continuation-preview")
           Spacer()
-          Button("Authorize repair and one coding continuation…") { confirmation = true }
+          Button("Prepare replacement and continue if qualified…") { confirmation = true }
             .disabled(!model.canAuthorize).buttonStyle(.borderedProminent).accessibilityIdentifier("repair-continuation-authorize")
         }
       }
-    }.padding(20).frame(width: 780, height: 710)
+    }.padding(embedded ? 0 : 20).frame(width: embedded ? nil : 780, height: embedded ? nil : 710)
       .background(Color(nsColor: .windowBackgroundColor))
       .interactiveDismissDisabled(model.busy)
       .task { await model.refresh(actions) }
       .confirmationDialog("Authorize this exact conditional attempt?", isPresented: $confirmation, titleVisibility: .visible) {
-        Button("Authorize provision + qualification + one coding segment IF qualified") { Task { await model.authorize(actions) } }
+        Button("Prepare, verify and continue once if qualified") { Task { await model.authorize(actions) } }
         Button("Cancel", role: .cancel) {}
       } message: {
         Text("Original work/resources remain retained. The daemon must qualify the actual replacement resource before coding. This is not a retry grant, a budget reset, a waiver, or publication/merge approval. Configured checks and independent review still run.")
@@ -135,7 +148,8 @@ struct RepairContinuationSheet: View {
   }
   @ViewBuilder private func refusals(_ values: [RepairContinuationRefusal]) -> some View {
     ForEach(Array(values.enumerated()), id: \.offset) { _, value in
-      Text("Refused [\(value.code)]: \(value.message)").foregroundStyle(.orange).textSelection(.enabled)
+      Text("Cannot proceed yet: \(value.message)").foregroundStyle(.orange).textSelection(.enabled)
+      DisclosureGroup("Blocker code") { Text(value.code).font(.caption.monospaced()).textSelection(.enabled) }
     }
   }
   @ViewBuilder private var context: some View {

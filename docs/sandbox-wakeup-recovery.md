@@ -65,17 +65,19 @@ intents exist, and do not manually clear journal rows to make recovery proceed.
 
 ## Desktop recovery controls
 
-The pod detail header shows **Sandbox recovery…** for retained sandboxes in idle
-failed/review/validated/complete/killed pods. It shows the recovery hold instead of
-requiring users to discover it through a failed Delete. Status inspection starts
-on the card's first appearance, including when no recovery state has loaded yet;
-an inspection failure exposes a retry control rather than silently hiding recovery.
-The sheet provides:
+Pod detail now has one **Review recovery…** entry for the different recovery
+flows. Choose **Recover files** for machine-only start, or **Free storage** to
+review loss-accepting deletion; they no longer share a destructive checkbox.
+Status inspection starts on appearance for idle supported pods, and failures
+remain visible rather than hiding recovery. Saved sandbox start/deletion decisions
+survive navigation and restart as separate exact requests. See
+[Desktop recovery](desktop/recovery.md) for navigation and the distinction between
+preservation, stopped execution and retained storage. The owning controls provide:
 
 - **Check status**: fresh provider GETs and the original wakeup evidence. An exact
   Running observation can settle a wakeup. Inspection never sends a resume,
   launches an agent, runs checks or grants delivery authority.
-- **Start sandbox for recovery**: explicit human reason and exact resource /
+- **Start environment for file recovery**: explicit human reason and exact resource /
   lifecycle binding. This only wakes the existing machine. It does not change pod
   status, inject coding credentials, continue an agent, validate, push or reopen a
   PR. Worker/validation/source/delivery/Goal custody remains independently gated.
@@ -83,7 +85,7 @@ The sheet provides:
   does **not** become safe merely because a human clicked Start. No force-start
   or provider-idempotency guarantee is invented. A dispatched start request ID
   never dispatches another start on replay, including after daemon restart.
-- **Abandon and delete**: explicit reason, data-loss acknowledgement and a second
+- **Discard unsaved data and delete…** (abandonment): explicit reason, data-loss acknowledgement and a second
   destructive confirmation. The authenticated actor, original intent IDs, exact
   provider namespace and pod selection are durably retained before DELETE. This
   authorizes loss of unpreserved files/reports, not a fabricated rejection or
@@ -100,7 +102,7 @@ The sheet provides:
   must be confirmed by GET 404 before this wakeup hold releases. Ordinary Kill,
   reapers and Delete do not inherit a pending abandonment's authority.
 
-If a response is lost, use Check status and **Continue abandonment…** on the
+If a response is lost, use Check status and **Continue the recorded deletion…** on the
 same request. DELETE continuation targets the same exact resource; no replacement
 sandbox or new execution is created. If the selected pod changed, a fresh explicit
 confirmation is required. A different human records their own decision rather
