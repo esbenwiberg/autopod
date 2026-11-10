@@ -1,14 +1,20 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { AutopodError, type RecoveryForkInput, type RecoveryForkRequest } from '@autopod/shared';
 import Database from 'better-sqlite3';
+import Dockerode from 'dockerode';
+import pino from 'pino';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { configurationDigest } from '../configuration/configuration-digest.js';
 import { createConfigurationStore } from '../configuration/configuration-store.js';
 import { deriveLaunch } from '../configuration/derive-launch.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
+import { DockerContainerManager } from '../containers/docker-container-manager.js';
+import type { ContainerManager } from '../interfaces/container-manager.js';
 import { createPassingValidationResult } from '../test-utils/mock-helpers.js';
 import {
   materializeCheckpointFixture,
@@ -44,7 +50,11 @@ const git = async (cwd: string, ...args: string[]) =>
       env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
     })
   ).stdout.trim();
-async function fixture(noRequirements = false, originalHandoff?: string) {
+async function fixture(
+  noRequirements = false,
+  originalHandoff?: string,
+  dockerFixture?: { containerId: string; containerManager: ContainerManager },
+) {
   const f = await retainedCheckpointFixture(
     'prevalidation',
     true,
@@ -63,11 +73,45 @@ async function fixture(noRequirements = false, originalHandoff?: string) {
   );
   fixtures.push(f);
   await materializeCheckpointFixture(f);
+  if (dockerFixture) {
+    const source = f.pod().worktreePath!;
+    await writeFile(
+      path.join(source, 'package.json'),
+      JSON.stringify({
+        private: true,
+        type: 'module',
+        scripts: { build: 'node --check source.ts', test: 'node --test continuation.test.mjs' },
+      }),
+    );
+    await writeFile(
+      path.join(source, 'continuation.test.mjs'),
+      "import assert from 'node:assert/strict';\nimport * as source from './source.ts';\nassert.equal(source.preserved, true);\nassert.equal(source.continued, 'fresh pod');\n",
+    );
+    await git(source, 'add', 'package.json', 'continuation.test.mjs');
+    await git(
+      source,
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      '-c',
+      'core.hooksPath=/dev/null',
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '-m',
+      'Synthetic failing continuation check',
+    );
+    f.input.checkpointHead = await git(source, 'rev-parse', 'HEAD');
+  }
   f.worktrees.inspectSourceAdoption.mockImplementation(async (cwd, branch) => {
     const source = await inspectSupplementalAdoptionGit(recoveryGit(cwd), branch);
     return { branch, commitSha: source.head, treeSha: source.tree, worktreeClean: true };
   });
-  const containerId = '1'.repeat(64);
+  const containerId = dockerFixture?.containerId ?? '1'.repeat(64);
+  if (dockerFixture) {
+    f.ctx.deps.containerManagerFactory.get = vi.fn(() => dockerFixture.containerManager);
+  }
   f.ctx.podRepo.update(f.podId, {
     containerId,
     startCommitSha: f.input.checkpointHead,
@@ -105,6 +149,8 @@ async function fixture(noRequirements = false, originalHandoff?: string) {
   launch.assertRecoveryAdmissionReady = () => {};
   launch.availableRecoveryProfiles = () => [{ id: 'profile', label: 'Development' }];
   vi.stubEnv('DATA_DIR', f.root);
+  vi.stubEnv('AUTOPOD_CLAUDE_STATE_DIR', path.join(f.root, 'claude-state'));
+  vi.stubEnv('AUTOPOD_CODEX_STATE_DIR', path.join(f.root, 'codex-state'));
   const manager = createPodManager(f.ctx.deps);
   const input: RecoveryForkInput = {
     version: 1,
@@ -1339,3 +1385,395 @@ describe('final pre-claim source check', () => {
     expect(f.cm.spawn).not.toHaveBeenCalled();
   });
 });
+
+/** Real Docker transport/source/qualification, synthetic model/reviewer only.
+ * Cached image must provide UID1000 `autopod`, Node24, Git and a clearly synthetic
+ * version-only `claude` fixture. Never pulls, uses live credentials or publishes.
+ */
+it.skipIf(!process.env.AUTOPOD_RECOVERY_FORK_DOCKER_IMAGE)(
+  'runs isolated real Docker recovery through coding, fresh checks and human approval',
+  async () => {
+    const image = process.env.AUTOPOD_RECOVERY_FORK_DOCKER_IMAGE;
+    const socketPath = process.env.AUTOPOD_RECOVERY_FORK_DOCKER_SOCKET;
+    const receipts = process.env.AUTOPOD_RECOVERY_FORK_DOCKER_RECEIPTS;
+    if (
+      !image ||
+      !/^sha256:[a-f0-9]{64}$/.test(image) ||
+      !socketPath ||
+      !path.isAbsolute(socketPath) ||
+      !receipts ||
+      !path.isAbsolute(receipts)
+    )
+      throw new Error(
+        'Explicit immutable cached image, LOCAL socket and retained receipts required',
+      );
+    if (!statSync(socketPath).isSocket())
+      throw new Error('An explicit local Unix socket is required');
+    const run = randomUUID();
+    mkdirSync(receipts, { recursive: true, mode: 0o700 });
+    const logPath = path.join(receipts, `${run}.json`);
+    const record: Record<string, unknown> = {
+      run,
+      image,
+      syntheticOnly: true,
+      boundaries:
+        'Real Docker/Git/qualification; deterministic coding/reviewer; no model, HTTP auth, external delivery or live daemon qualification',
+      created: [],
+      commands: [],
+      stages: [],
+      cleanup: [],
+    };
+    const save = () =>
+      writeFileSync(logPath, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+    const created = record.created as string[];
+    const commands = record.commands as unknown[];
+    const stages = record.stages as unknown[];
+    const cleanup = record.cleanup as unknown[];
+    const docker = new Dockerode({ socketPath, timeout: 15_000 });
+    const info = await docker.getImage(image).inspect();
+    expect(info.Id).toBe(image);
+    expect(info.Os).toBe('linux');
+    expect(info.Architecture).toBe('amd64');
+    expect(info.Config?.Labels?.['autopod.fixture']).toBe('recovery-fork-deterministic-runtime');
+    const baseline = (await docker.listContainers()).map(({ Id }) => Id).sort();
+    record.preexistingRunningIds = baseline;
+    save();
+    let root: string | undefined;
+    const allocate = docker.createContainer.bind(docker);
+    // Safety-only creation wrapper: never forge an exec/metadata/qualification response.
+    docker.createContainer = async (options) => {
+      expect(options.Image).toBe(image);
+      for (const bind of options.HostConfig?.Binds ?? []) {
+        const host = bind.split(':')[0]!;
+        if (!root || !host.startsWith(`${root}/`))
+          throw new Error('Refusing fixture mount outside its synthetic root');
+      }
+      const env = new Map((info.Config?.Env ?? []).map((value) => [value.split('=')[0]!, '']));
+      for (const value of options.Env ?? []) {
+        const at = value.indexOf('=');
+        env.set(value.slice(0, at), value.slice(at + 1));
+      }
+      env.set('HOME', '/home/autopod');
+      env.set('PATH', '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin');
+      const memory = options.HostConfig?.Memory ?? 2 * 1024 ** 3;
+      if (memory > 2 * 1024 ** 3) throw new Error('Fixture memory exceeds 2GiB ceiling');
+      const container = await allocate({
+        ...options,
+        Labels: {
+          ...options.Labels,
+          'autopod.fixture': 'recovery-fork-lifecycle',
+          'autopod.fixture.run': run,
+        },
+        Env: [...env].filter(([key]) => key).map(([key, value]) => `${key}=${value}`),
+        Entrypoint: [],
+        Cmd: ['sleep', '600'],
+        User: 'autopod',
+        ExposedPorts: {},
+        HostConfig: {
+          ...options.HostConfig,
+          NetworkMode: 'none',
+          PortBindings: {},
+          ExtraHosts: [],
+          Memory: memory,
+          MemorySwap: memory,
+          NanoCpus: 1e9,
+          PidsLimit: 128,
+          CapDrop: ['ALL'],
+          CapAdd: [],
+          SecurityOpt: ['no-new-privileges:true'],
+        },
+      });
+      created.push(container.id);
+      save(); // Exact owned ID durable BEFORE production spawn can start it.
+      return container;
+    };
+    const removeOwned = async (id: string) => {
+      const container = docker.getContainer(id);
+      try {
+        const inspection = await container.inspect();
+        if (inspection.Config.Labels?.['autopod.fixture.run'] !== run)
+          throw new Error('Refusing cleanup of container without exact fixture ownership');
+        await container.remove({ force: true, v: true });
+        await expect(container.inspect()).rejects.toMatchObject({ statusCode: 404 });
+        cleanup.push({ removedOwnedId: id, observed404: true });
+      } catch (error) {
+        if ((error as { statusCode?: number }).statusCode === 404)
+          cleanup.push({ alreadyAbsentOwnedId: id, observed404: true });
+        else {
+          cleanup.push({
+            retainedId: id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        }
+      } finally {
+        save();
+      }
+    };
+    const cleanupAllOwned = async () => {
+      const errors: unknown[] = [];
+      for (const id of [...created].reverse()) {
+        try {
+          await removeOwned(id);
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      record.preexistingStillRunning = (await docker.listContainers())
+        .map(({ Id }) => Id)
+        .filter((id) => baseline.includes(id))
+        .sort();
+      record.cleanupResult = errors.length
+        ? 'failed-resources-retained'
+        : 'all-owned-resources-absent';
+      if (errors.length) record.result = 'failed';
+      save();
+      if (errors.length)
+        throw new AggregateError(errors, 'Fixture cleanup incomplete; see retained receipt', {
+          cause: typeof record.error === 'string' ? new Error(record.error) : undefined,
+        });
+      expect(record.preexistingStillRunning).toEqual(baseline);
+    };
+    try {
+      const original = await docker.createContainer({
+        Image: image,
+        name: `autopod-recovery-original-${run}`,
+      }); // Kept stopped; synthetic historical settlement, not a live incident.
+      const originalState = (await original.inspect()).State;
+      const cm = new DockerContainerManager({ docker, logger: pino({ level: 'silent' }) });
+      const execute = cm.execInContainer.bind(cm);
+      cm.execInContainer = async (id, command, options) => {
+        if (!created.includes(id) || id === original.id)
+          throw new Error('Refusing exec outside the exact owned candidate');
+        const result = await execute(id, command, options);
+        commands.push({
+          id,
+          command,
+          exitCode: result.exitCode,
+          stdout: result.stdout.slice(0, 8192),
+          stderr: result.stderr.slice(0, 8192),
+        });
+        save();
+        return result;
+      };
+      const start = cm.start.bind(cm);
+      const stop = cm.stop.bind(cm);
+      const kill = cm.kill.bind(cm);
+      cm.start = async (id, options) => {
+        if (!created.includes(id) || id === original.id)
+          throw new Error('Refusing original/unowned start');
+        return start(id, options);
+      };
+      cm.stop = async (id) => {
+        if (!created.includes(id) || id === original.id)
+          throw new Error('Refusing original/unowned stop');
+        return stop(id);
+      };
+      cm.kill = async (id) => {
+        if (!created.includes(id) || id === original.id)
+          throw new Error('Refusing original/unowned removal');
+        return kill(id);
+      };
+      const constraints = 'Keep preserved=true; retain original source; no external publication.';
+      const f = await fixture(false, constraints, {
+        containerId: original.id,
+        containerManager: cm,
+      });
+      root = f.root;
+      record.root = root;
+      const originalRowHash = configurationDigest(
+        f.ctx.db.prepare('SELECT * FROM pods WHERE id=?').get(f.podId),
+      );
+      const source = f.pod().worktreePath!;
+      const sourceHead = await git(source, 'rev-parse', 'HEAD');
+      const sourceTree = await git(source, 'rev-parse', 'HEAD^{tree}');
+      const note = 'notes[1]!.txt';
+      await writeFile(path.join(source, note), 'Selected synthetic context\n');
+      const originalStatus = await git(source, 'status', '--porcelain');
+      const tracked = (await git(source, 'ls-files', '-z')).split('\0').filter(Boolean);
+      const originalFiles = await Promise.all(
+        [...tracked, note, 'ignored-report.txt'].map(async (relative) => ({
+          relative,
+          bytes: await readFile(path.join(source, relative)),
+          mode: statSync(path.join(source, relative)).mode & 0o777,
+        })),
+      );
+      const view = await f.manager.inspectRecoveryFork(f.podId);
+      f.input.files = view.source!.files.map(({ path, version }) => ({ path, version }));
+      expect(f.input.files).toHaveLength(1);
+      f.launch.prepareEnvironment = vi.fn(async () => image);
+      f.worktrees.inspectSource = f.worktrees.inspectSourceAdoption;
+      const checked = async (id: string, command: string[]) => {
+        const result = await cm.execInContainer(id, command, {
+          user: 'autopod',
+          cwd: '/workspace',
+          timeout: 30_000,
+          maxOutputBytes: 65536,
+        });
+        expect(result.exitCode, result.stderr).toBe(0);
+        return result;
+      };
+      let workerDispatches = 0;
+      f.ctx.runtime.spawn = vi.fn(async function* (config) {
+        workerDispatches++;
+        const operation = f.ctx.podRepo.recoveryForks!.parent(f.podId)!;
+        expect(operation.facts.qualified?.evidence.outcome).toBe('qualified');
+        expect(operation.facts.worker).toBeDefined();
+        const script = [
+          "const fs=require('node:fs'), assert=require('node:assert/strict'), cp=require('node:child_process');",
+          "const packet=JSON.parse(fs.readFileSync('/autopod/recovery/handoff.json','utf8'));",
+          `assert.equal(packet.originalFrozenHandoffInstructions,${JSON.stringify(constraints)});`,
+          `assert.equal(packet.humanContinuationInstructions,${JSON.stringify(f.input.instructions)});`,
+          `assert.equal(fs.readFileSync(${JSON.stringify(note)},'utf8'),'Selected synthetic context\\n');`,
+          "fs.writeFileSync('source.ts',\"export const preserved = true;\\nexport const continued = 'fresh pod';\\n\");",
+          "cp.execFileSync('git',['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','-c','core.hooksPath=/dev/null','-c','commit.gpgsign=false','commit','-am','Continue synthetic task'],{stdio:'inherit'});",
+        ].join('\n');
+        const stream = await cm.execStreaming(
+          config.containerId,
+          ['/usr/local/bin/node', '-e', script],
+          {
+            user: 'autopod',
+            cwd: '/workspace',
+            onProcessCreated: (identity) => {
+              record.driverProcess = identity;
+              save();
+            },
+          },
+        );
+        const output: string[] = [];
+        stream.stdout.on('data', (bytes) => output.push(String(bytes)));
+        stream.stderr.on('data', (bytes) => output.push(String(bytes)));
+        const exitCode = await stream.exitCode;
+        stages.push({ stage: 'deterministic-coding-stream', exitCode, output });
+        save();
+        expect(exitCode, output.join('')).toBe(0);
+        yield {
+          type: 'complete' as const,
+          timestamp: new Date().toISOString(),
+          result: 'Synthetic implementation committed in actual Docker workspace',
+        };
+      });
+      f.ctx.validationEngine.validate = vi.fn(async (config) => {
+        expect(config.buildCommand).toBe('npm run build');
+        expect(config.testCommand).toBe('npm test');
+        const build = await checked(config.containerId, ['/bin/sh', '-c', config.buildCommand]);
+        const test = await checked(config.containerId, ['/bin/sh', '-c', config.testCommand!]);
+        // Separate deterministic review process, explicitly NOT semantic AI review.
+        const review = await checked(config.containerId, [
+          '/usr/local/bin/node',
+          '-e',
+          "const fs=require('node:fs'),a=require('node:assert/strict');const s=fs.readFileSync('source.ts','utf8');a.match(s,/preserved = true/);a.match(s,/continued = 'fresh pod'/);console.log('synthetic review only')",
+        ]);
+        stages.push({ stage: 'fresh-configured-checks', build, test, review });
+        save();
+        return {
+          ...createPassingValidationResult(config.podId, config.attempt),
+          taskReview: {
+            status: 'pass' as const,
+            reasoning: 'Deterministic synthetic review, not AI/provider qualification',
+            issues: [],
+            model: 'synthetic-fixture-review',
+            screenshots: [],
+            diff: config.diff,
+          },
+        };
+      });
+      const request = { ...(await f.request()), id: run };
+      const admitted = await f.manager.createRecoveryFork(f.podId, request, f.actor);
+      expect(admitted.childPodId).toBeTruthy();
+      const child = () => f.ctx.podRepo.getOrThrow(admitted.childPodId!);
+      expect((await f.manager.createRecoveryFork(f.podId, request, f.actor)).childPodId).toBe(
+        child().id,
+      );
+      expect(f.ctx.podRepo.taskExecutions!.snapshot(child().id).taskId).toBe(
+        f.ctx.podRepo.taskExecutions!.snapshot(f.podId).taskId,
+      );
+      await f.manager.processPod(child().id);
+      record.operation = f.ctx.podRepo.recoveryForks!.parent(f.podId);
+      record.child = {
+        id: child().id,
+        status: child().status,
+        failureReason: child().failureReason,
+      };
+      save();
+      expect({ status: child().status, reason: child().failureReason }).toEqual({
+        status: 'validated',
+        reason: null,
+      });
+      expect(workerDispatches).toBe(1);
+      expect(created).toHaveLength(2);
+      expect(() => assertSourceDeliveryAllowed(f.ctx.db, child().id)).toThrow('human approval');
+      await expect(
+        f.manager.approveSession(child().id, { actor: { type: 'automation', id: 'fixture-auto' } }),
+      ).rejects.toThrow('human approval');
+      // Stop at the real delivery boundary AFTER durable human approval. No fake remote receipt.
+      f.worktrees.pushBranch = vi.fn(async () => {
+        throw new Error('SYNTHETIC_EXTERNAL_DELIVERY_BOUNDARY');
+      });
+      f.worktrees.mergeBranch = vi.fn(async () => {
+        throw new Error('SYNTHETIC_EXTERNAL_DELIVERY_BOUNDARY');
+      });
+      await expect(f.manager.approveSession(child().id, { actor: f.actor })).rejects.toThrow(
+        'Approval delivery failed. Branch push did not complete.',
+      );
+      expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
+      expect(f.worktrees.mergeBranch).toHaveBeenCalledOnce();
+      record.deliveryBoundary =
+        'Human decision durably accepted; external publication intentionally blocked';
+      expect(
+        f.ctx.db
+          .prepare("SELECT COUNT(*) AS n FROM recovery_fork_delivery_evidence WHERE kind='checks'")
+          .get(),
+      ).toEqual({ n: 1 });
+      expect(
+        f.ctx.db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM recovery_fork_delivery_evidence WHERE kind='approval'",
+          )
+          .get(),
+      ).toEqual({ n: 1 });
+      expect(child().readinessReview?.approval?.actor).toEqual(f.actor);
+      expect(
+        configurationDigest(f.ctx.db.prepare('SELECT * FROM pods WHERE id=?').get(f.podId)),
+      ).toBe(originalRowHash);
+      expect(await git(source, 'rev-parse', 'HEAD')).toBe(sourceHead);
+      expect(await git(source, 'rev-parse', 'HEAD^{tree}')).toBe(sourceTree);
+      expect(await git(source, 'status', '--porcelain')).toBe(originalStatus);
+      for (const file of originalFiles) {
+        expect(await readFile(path.join(source, file.relative)), file.relative).toEqual(file.bytes);
+        expect(statSync(path.join(source, file.relative)).mode & 0o777, file.relative).toBe(
+          file.mode,
+        );
+      }
+      expect((await original.inspect()).State).toEqual(originalState);
+      expect(workerDispatches).toBe(1);
+      record.deliveryEvidence = f.ctx.db
+        .prepare('SELECT * FROM recovery_fork_delivery_evidence')
+        .all();
+      record.finalTaskLedger = f.ctx.podRepo.taskExecutions!.snapshot(child().id);
+      expect(record.finalTaskLedger).toMatchObject({
+        tokenBudget: 1000,
+        recordedInputTokens: 40,
+        podCount: 2,
+        agentRunCount: 2,
+        // The synthetic driver does not fabricate provider token telemetry.
+        // Unknown new usage holds subsequent budgeted work rather than resetting the task.
+        budgetCheck: { status: 'unavailable' },
+      });
+      // Exercise an actual already-removed candidate, as production startup cleanup may do.
+      // The final sweep must observe its 404 AND still remove the owned synthetic original.
+      await removeOwned(child().containerId!);
+      record.result = 'passed-with-explicit-synthetic-boundaries';
+      save();
+    } catch (error) {
+      record.result = 'failed';
+      record.error = error instanceof Error ? error.stack : String(error);
+      save();
+      throw error;
+    } finally {
+      await cleanupAllOwned();
+      console.info(`Recovery-fork real Docker fixture receipts: ${logPath}`);
+    }
+  },
+  120_000,
+);

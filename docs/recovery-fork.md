@@ -60,3 +60,58 @@ established non-ancestry, even when a later GET
 finds no operation. All responses use `Cache-Control: no-store`. Native reconsideration
 still requires another authoritative exact-ID GET absence and explicit user discard;
 this error never authorizes automatic resubmission or abandonment.
+
+## Isolated local-Docker lifecycle fixture
+
+The opt-in case in `packages/daemon/src/pods/recovery-fork.test.ts` exercises real Docker
+allocation, identity/image/resource probes, production workspace reconstruction,
+qualification, streaming process exit, Git commit/sync-back, the frozen build/test
+commands, source-bound check receipts and separate human-actor approval. It also
+checks exact request replay, shared logical-task identity, selected supplemental
+bytes, original frozen instructions, automation refusal and unchanged original
+row/source/resource state.
+
+**This is synthetic integration proof, not live-provider qualification.** The
+fixture launcher reports `0.0.0` and refuses model execution. Coding and review
+are deterministic test adapters; the approval actor is supplied by the fixture,
+not an HTTP authentication ceremony. Production image/tool installation, model
+semantics, real human authentication and external publication are not certified.
+Publication is deliberately refused at the worktree delivery boundary *after*
+the immutable human decision is recorded; no remote receipt is fabricated.
+
+The test only accepts an explicit cached immutable image ID and local Unix
+socket. Creation is additionally constrained to synthetic-root mounts, no
+network/ports/capabilities, no privilege escalation, one CPU, at most 2GiB RAM
+with no extra swap, and 128 PIDs. It clears inherited image environment values,
+uses only fixture account values, isolates runtime state under its temporary
+root, journals exact UUID-labelled resources before start, refuses original
+Start/exec/stop/removal, and verifies labels before fixture-only teardown.
+The synthetic original is retained throughout the workflow; deleting that test
+resource during teardown is not product release authority. Private JSON receipts
+are retained separately, including failing stages and cleanup observations.
+
+Build the synthetic image deliberately from a **previously cached linux/amd64
+Node24+Git base**; inspect the base ID first. The test never builds or pulls.
+The Dockerfile also supports a caller-selected cached base via `BASE_IMAGE`:
+
+```sh
+BASE_IMAGE=node:24-bookworm # must already exist locally; no registry login
+# Verify the expected immutable ID/platform before building.
+docker image inspect "$BASE_IMAGE" --format '{{.Id}} {{.Os}}/{{.Architecture}}'
+docker build --pull=false --network=none --build-arg BASE_IMAGE="$BASE_IMAGE" \
+  -t autopod-recovery-fork-fixture:local \
+  packages/daemon/src/test-utils/fixtures/recovery-fork-docker
+IMAGE=$(docker image inspect autopod-recovery-fork-fixture:local --format '{{.Id}}')
+cd packages/daemon
+AUTOPOD_RECOVERY_FORK_DOCKER_IMAGE="$IMAGE" \
+AUTOPOD_RECOVERY_FORK_DOCKER_SOCKET=/absolute/path/to/local/docker.sock \
+AUTOPOD_RECOVERY_FORK_DOCKER_RECEIPTS=/absolute/path/to/private/receipts \
+  pnpm exec vitest run src/pods/recovery-fork.test.ts --maxWorkers=1
+```
+
+The same image can run `environment-qualification.docker.test.ts` using its
+`AUTOPOD_QUALIFICATION_DOCKER_IMAGE`, `AUTOPOD_QUALIFICATION_DOCKER_SOCKET` and
+`AUTOPOD_QUALIFICATION_DOCKER_RECEIPTS` variables. That separate real-Docker
+fixture includes missing-launcher, image/resource mismatch, hidden source-change
+and hostile Git-filter negative cases. Both fixtures skip by
+default; ordinary green unit CI is not proof that either Docker fixture ran.
