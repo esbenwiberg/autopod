@@ -37,7 +37,13 @@ export async function observeRecoveryCheckSource(
       QUALIFICATION_SOURCE_PROBE,
       pod.startCommitSha!,
       ...(prepared
-        ? [JSON.stringify({ files: prepared.files, packetHash: prepared.packetHash })]
+        ? [
+            JSON.stringify({
+              files: prepared.files,
+              packetHash: prepared.packetHash,
+              allowCommittedSupplementChanges: true,
+            }),
+          ]
         : []),
     ],
     { cwd: '/workspace', timeout: 10_000, maxOutputBytes: 65536, user: 'autopod' },

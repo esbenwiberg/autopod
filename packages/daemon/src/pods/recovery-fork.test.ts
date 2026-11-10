@@ -19,6 +19,7 @@ import { inspectSupplementalAdoptionGit } from '../worktrees/source-adoption-git
 import { QUALIFICATION_SOURCE_PROBE } from './environment-qualification.js';
 import { createEventRepository } from './event-repository.js';
 import { createPodManager } from './pod-manager.js';
+import { observeRecoveryCheckSource } from './recovery-fork-checks.js';
 import {
   RecoveryForkRejectedBeforeClaim,
   RecoveryForkSelectionError,
@@ -720,6 +721,31 @@ describe('reviewed recovery boundaries', () => {
     await expect(f.manager.createRecoveryFork(f.podId, request, f.actor)).rejects.toBe(error);
     expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
   });
+  it('keeps an explicitly unknown resource observation unproved', async () => {
+    const f = await fixture();
+    const request = await f.request();
+    f.cm.getStatus = vi.fn(async () => 'unknown' as const);
+    await expect(f.manager.createRecoveryFork(f.podId, request, f.actor)).rejects.toMatchObject({
+      code: 'RECOVERY_FORK_RESOURCE_UNKNOWN',
+      statusCode: 503,
+    });
+    expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+  });
+  it('keeps a missing Git ancestry object unproved instead of calling every Git failure non-ancestry', async () => {
+    const f = await fixture();
+    const request = await f.request();
+    f.ctx.podRepo.update(f.podId, { startCommitSha: 'f'.repeat(40) });
+    try {
+      await f.manager.createRecoveryFork(f.podId, request, f.actor);
+      throw new Error('Missing ancestry must reject');
+    } catch (error) {
+      expect(error).not.toBeInstanceOf(RecoveryForkRejectedBeforeClaim);
+      expect(error).toMatchObject({ code: 128 });
+    }
+    expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+  });
   it('never proves a claim-attempt exception, even when rollback leaves no row', async () => {
     const f = await fixture();
     const request = await f.request();
@@ -982,6 +1008,81 @@ async function checkedChildFixture() {
 }
 
 describe('actual recovery candidate bytes', () => {
+  it('keeps exact daemon evidence outputs clean through actual reconstruction and passing validation', async () => {
+    const f = await fixture();
+    const { candidate } = await filesystemCodingTransport(f);
+    f.ctx.runtime.spawn = vi.fn(async function* () {
+      yield { type: 'complete' as const, timestamp: new Date().toISOString(), result: 'Done' };
+    });
+    f.ctx.validationEngine.validate = vi.fn(async (config) => {
+      for (const file of ['.autopod/evidence/facts.json', '.autopod/screenshots/page.png']) {
+        await mkdir(path.dirname(path.join(candidate, file)), { recursive: true });
+        await writeFile(path.join(candidate, file), 'Daemon-generated validation evidence');
+      }
+      return {
+        ...createPassingValidationResult(config.podId, config.attempt),
+        taskReview: {
+          status: 'pass' as const,
+          reasoning: 'Independent review',
+          issues: [],
+          model: 'claude-opus-4-6',
+          screenshots: [],
+          diff: 'fixture',
+        },
+      };
+    });
+    const operation = await f.manager.createRecoveryFork(f.podId, await f.request(), f.actor);
+    await f.manager.processPod(operation.childPodId!);
+    const child = f.ctx.podRepo.getOrThrow(operation.childPodId!);
+    expect({ status: child.status, reason: child.failureReason }).toEqual({
+      status: 'validated',
+      reason: null,
+    });
+    expect(await git(candidate, 'status', '--porcelain')).toBe('');
+    expect(await readFile(path.join(candidate, '.autopod/evidence/facts.json'), 'utf8')).toContain(
+      'Daemon-generated',
+    );
+    expect(
+      f.ctx.db
+        .prepare("SELECT COUNT(*) AS n FROM recovery_fork_delivery_evidence WHERE kind='checks'")
+        .get(),
+    ).toEqual({ n: 1 });
+  });
+  it('allows committed supplemental edits after coding, while uncommitted edits and initial tampering remain fenced', async () => {
+    const f = await fixture();
+    await writeFile(path.join(f.pod().worktreePath!, 'new-code.ts'), 'export const value = 1;\n');
+    const view = await f.manager.inspectRecoveryFork(f.podId);
+    f.input.files = view.source!.files.map(({ path, version }) => ({ path, version }));
+    const { candidate } = await filesystemCodingTransport(f);
+    const operation = await f.manager.createRecoveryFork(f.podId, await f.request(), f.actor);
+    await f.manager.processPod(operation.childPodId!);
+    const prepared = f.ctx.podRepo.recoveryForks!.parent(f.podId)!.facts.prepared!;
+    const child = f.ctx.podRepo.getOrThrow(operation.childPodId!);
+    await writeFile(path.join(candidate, 'new-code.ts'), 'export const value = 2;\n');
+    await expect(observeRecoveryCheckSource(f.cm, child, prepared)).rejects.toThrow(
+      'verified clean actual source',
+    );
+    await git(candidate, '--literal-pathspecs', 'add', '-f', '--', 'new-code.ts');
+    await git(
+      candidate,
+      '-c',
+      'user.name=Recovery test',
+      '-c',
+      'user.email=recovery@example.test',
+      '-c',
+      'core.hooksPath=/dev/null',
+      '-c',
+      'commit.gpgSign=false',
+      'commit',
+      '-m',
+      'Continue imported code',
+    );
+    const evolved = await observeRecoveryCheckSource(f.cm, child, prepared);
+    expect(evolved.head).toBe(await git(candidate, 'rev-parse', 'HEAD'));
+    expect(evolved.head).not.toBe(prepared.head);
+    expect(evolved.tree).toBe(await git(candidate, 'rev-parse', 'HEAD^{tree}'));
+    expect(f.ctx.runtime.spawn).toHaveBeenCalledOnce();
+  });
   it.each([
     false,
     'changed',

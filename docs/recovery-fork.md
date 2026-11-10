@@ -12,7 +12,11 @@ assume-unchanged and skip-worktree entries are refused. Source inspection does
 not change the original graph or metadata. No original configuration is copied
 into the candidate Git directory. Selected supplemental files get exact literal
 server-owned exclusions before normal cleanup, followed by actual candidate
-byte/hash verification before coding.
+byte/hash verification before coding. Daemon-generated evidence/screenshots keep
+only their exact standard exclusions. After coding, an edited supplemental file
+must be committed as regular source: its new bytes are then bound by the verified
+HEAD/tree. Uncommitted or missing imported reference files remain blocked. This
+after-coding allowance never changes initial-copy or pre-worker verification.
 
 The immutable handoff packet keeps the original frozen handoff instructions in
 `originalFrozenHandoffInstructions` and the new human instructions in
@@ -50,7 +54,9 @@ attempt can return HTTP 409 with:
 
 The coordinator must synchronously reconfirm that no existing/replayed/conflicting
 source owner exists. Generic errors (including 404), unknown infrastructure errors,
-claim attempts and every later failure carry no such proof, even when a later GET
+claim attempts and every later failure carry no such proof. Unknown provider
+status and unexpected Git ancestry errors remain unproved; only Git exit 1 is
+established non-ancestry, even when a later GET
 finds no operation. All responses use `Cache-Control: no-store`. Native reconsideration
 still requires another authoritative exact-ID GET absence and explicit user discard;
 this error never authorizes automatic resubmission or abandonment.

@@ -88,7 +88,16 @@ if(recovery) {
     } finally {fs.closeSync(fd);}
   };
   if(!Array.isArray(recovery.files)||recovery.files.length>100) process.exit(2);
-  for(const file of recovery.files) verify(root,file.path,file.sha256,file.size);
+  for(const file of recovery.files) {
+    // Initial qualification/consumption always verifies the exact imported bytes.
+    // After coding, a changed supplement must be committed as a regular tracked
+    // file: its current bytes are then covered by the fully verified HEAD/tree.
+    const committed = recovery.allowCommittedSupplementChanges === true && entries.some(entry => {
+      const tab=entry.indexOf(String.fromCharCode(9));
+      return ['100644','100755'].includes(entry.slice(0,6)) && entry.slice(tab+1)===file.path;
+    });
+    if(!committed) verify(root,file.path,file.sha256,file.size);
+  }
   verify('/autopod/recovery','handoff.json',recovery.packetHash);
 }
 git(['merge-base','--is-ancestor',base,'HEAD']);

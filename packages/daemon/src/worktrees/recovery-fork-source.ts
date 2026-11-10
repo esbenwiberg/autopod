@@ -71,13 +71,15 @@ export function recoveryFileExclusions(files: ReadonlyArray<{ path: string }>) {
   // Anchored literal paths. Escape whitespace (including trailing spaces), wildcard
   // syntax and leading comment/negation characters; never import source config.
   return (
+    '/.autopod/evidence/\n/.autopod/screenshots/\n' +
     files
       .map(({ path }) => {
         if (!safeForkFile(path) || /[\r\n\0]/.test(path))
           recoveryForkError('Unsafe supplemental path');
         return `/${path.replace(/[\\*?[\]#!\s]/g, '\\$&')}`;
       })
-      .join('\n') + '\n'
+      .join('\n') +
+    '\n'
   );
 }
 export async function inspectRecoveryForkFiles(source: string) {
