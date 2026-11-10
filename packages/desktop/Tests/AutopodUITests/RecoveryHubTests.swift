@@ -295,8 +295,8 @@ import Testing
     #expect(hub.sandbox.snapshot == nil && f.requests.isEmpty)
   }
 
-  @Test(arguments: ["dark-wide", "light-wide", "dark-narrow", "light-narrow", "pending", "high-contrast"])
-  func modernRecoveryReflowsWithoutHidingConsequencesOrChangingActions(scenario: String) async throws {
+  @Test(arguments: ["dark-wide", "light-wide", "dark-narrow", "light-narrow", "pending", "high-contrast"], [640.0, 820.0])
+  func modernRecoveryReflowsWithoutHidingConsequencesOrChangingActions(scenario: String, height: Double) async throws {
     let f = RecoverySandboxFixture(); defer { f.clean() }
     let model = RecoveryHubModel(podId: "pod", actions: f.podActions)
     await model.refresh(pod: f.pod, actions: f.podActions)
@@ -316,7 +316,7 @@ import Testing
     let view = NSHostingView(rootView: RecoveryHubSheet(pod: f.pod, actions: f.podActions, model: model)
       .preferredColorScheme(light ? .light : .dark))
     view.sizingOptions = []
-    let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: width, height: 820),
+    let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: width, height: height),
       styleMask: [.titled, .resizable], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false; window.contentView = view
     let appearance = NSAppearance(named: scenario == "high-contrast" ? .accessibilityHighContrastDarkAqua : light ? .aqua : .darkAqua)
@@ -340,7 +340,6 @@ import Testing
       #expect(abs(frames[0].midY - frames[1].midY) > 30) // One readable column, not squeezed tiles.
     } else {
       #expect(abs(frames[0].midY - frames[1].midY) < 2)
-      if scenario != "pending" { #expect(frames.allSatisfy { $0.minY >= bounds.minY + 35 }) }
     }
     let copy = nodes.flatMap { node in
       [hubValue(node, "accessibilityLabel") as? String, hubValue(node, "accessibilityValue") as? String].compactMap { $0 }
@@ -353,10 +352,34 @@ import Testing
       let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
       view.cacheDisplay(in: view.bounds, to: bitmap)
       try #require(bitmap.representation(using: .png, properties: [:]))
-        .write(to: URL(fileURLWithPath: directory).appendingPathComponent("modern-\(scenario).png"))
+        .write(to: URL(fileURLWithPath: directory).appendingPathComponent("modern-\(scenario)-\(Int(height)).png"))
     }
-    // The narrow layout must remain actionable, including an option below the fold.
-    let storage = try #require(nodes.first {
+    // Font metrics and the runner's display can leave even wide cards below the
+    // fold. Measure the real clip view, not a fixed clearance from the window.
+    let scroll = try #require(hubScrollViews(view).first { $0.documentView != nil })
+    let document = try #require(scroll.documentView)
+    let viewport = window.convertToScreen(scroll.contentView.convert(scroll.contentView.bounds, to: nil))
+    #expect(viewport.width > 0 && viewport.height > 0)
+    #expect(viewport.minY > bounds.minY && viewport.maxY < bounds.maxY)
+    for route in ["continueWork", "recoverFiles", "freeStorage"] {
+      let button = try #require(hubGoal(route, in: view))
+      let initialFrame = try #require(hubValue(button, "accessibilityFrame") as? NSValue).rectValue
+      document.scrollToVisible(document.convert(window.convertFromScreen(initialFrame), from: nil))
+      scroll.reflectScrolledClipView(scroll.contentView)
+      for _ in 0..<50 {
+        view.layoutSubtreeIfNeeded()
+        if let current = hubGoal(route, in: view),
+          let frame = (hubValue(current, "accessibilityFrame") as? NSValue)?.rectValue,
+          viewport.insetBy(dx: -2, dy: -2).contains(frame) { break }
+        try await Task.sleep(for: .milliseconds(20))
+      }
+      let visible = try #require(hubGoal(route, in: view))
+      let frame = try #require(hubValue(visible, "accessibilityFrame") as? NSValue).rectValue
+      #expect(viewport.insetBy(dx: -2, dy: -2).contains(frame),
+        "Goal must scroll fully above footer/below toolbar: \(scenario), height=\(height), viewport=\(viewport), goal=\(frame), window=\(window.frame)")
+    }
+    // Navigation must remain actionable after real scrolling, with no dispatch.
+    let storage = try #require(hubNodes(view).first {
       hubValue($0, "accessibilityIdentifier") as? String == "recovery-route-freeStorage"
         && $0.responds(to: NSSelectorFromString("accessibilityPerformPress"))
     })
@@ -419,6 +442,13 @@ import Testing
   }
 }
 
+@MainActor private func hubScrollViews(_ view: NSView) -> [NSScrollView] {
+  ((view as? NSScrollView).map { [$0] } ?? []) + view.subviews.flatMap(hubScrollViews)
+}
+@MainActor private func hubGoal(_ route: String, in view: NSView) -> NSObject? {
+  hubNodes(view).first { hubValue($0, "accessibilityIdentifier") as? String == "recovery-route-\(route)"
+    && $0.responds(to: NSSelectorFromString("accessibilityPerformPress")) }
+}
 @MainActor private func hubValue(_ node: NSObject, _ key: String) -> Any? {
   let getter = key == "accessibilityEnabled" ? "isAccessibilityEnabled" : key
   guard node.responds(to: NSSelectorFromString(getter)) || node.responds(to: NSSelectorFromString(key)) else { return nil }
