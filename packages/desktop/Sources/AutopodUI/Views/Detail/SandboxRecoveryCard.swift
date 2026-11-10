@@ -21,7 +21,7 @@ struct SandboxRecoveryCard: View {
         }.padding(10).background(.orange.opacity(0.08))
       } else if let error {
         HStack {
-          Text(error).font(.caption).foregroundStyle(.secondary)
+          Text(error).font(.caption).foregroundStyle(RecoveryPalette.secondary)
           Spacer()
           Button("Check recovery status") { Task { await load() } }.disabled(loading)
         }.padding(8)
@@ -72,49 +72,55 @@ struct SandboxRecoverySheet: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack {
-        Text(title).font(.title2.bold())
+        Text(title).font(.title3.weight(.semibold))
         Spacer()
         Button("Check status") { Task { await model.refresh(actions) } }.disabled(model.busy)
         if !embedded { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.busy) }
-      }
+      }.controlSize(.small)
       Text(purpose == .storage
         ? "Deleting the original environment may lose files and reports that were never saved. This also attempts to remove the pod; cleanup can remain blocked."
         : "Starting the selected retained environment lets you recover files. It does not resume coding, run checks or publish changes.")
-        .font(.callout).foregroundStyle(.secondary)
+        .font(.callout).foregroundStyle(RecoveryPalette.secondary)
       if model.busy { ProgressView("Checking the recorded outcome…").controlSize(.small) }
-      if let error = model.error { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
-      if let notice = model.notice { Text(notice).foregroundStyle(.secondary).textSelection(.enabled) }
+      if let error = model.error { RecoveryNotice(title: "Outcome needs a status check", message: error) }
+      if let notice = model.notice { RecoveryNotice(title: "Recorded outcome", message: notice, tone: .standard, symbol: "info.circle") }
       ScrollView {
         VStack(alignment: .leading, spacing: 14) {
           if let pending = selectedDecision {
-            Label("A decision is saved — check its outcome before taking another action", systemImage: "clock")
-              .font(.headline)
-            Text(pending.action == "start"
+            RecoveryNotice(title: "A decision is already saved", message: pending.action == "start"
               ? "The start response may have been lost. Check status; another start will not be sent."
-              : "Continue this same deletion decision if needed. It will never target a replacement environment.")
+              : "Continue this same deletion decision if needed. It will never target a replacement environment.", symbol: "clock")
             if model.canDiscardRejected {
               Button("Review a new decision after confirmed rejection") { Task { await model.discardRejected(actions) } }
             }
           }
           if selectedDecision == nil || purpose == .storage {
-            TextField(purpose == .storage && model.pendingAbandon != nil
-              ? "Reason for a new deletion decision (saved decisions are unchanged)"
-              : "Why is this recovery needed? (10–4000 characters)", text: $model.reason, axis: .vertical)
-              .textFieldStyle(.roundedBorder).lineLimit(2...4).disabled(model.busy)
+            VStack(alignment: .leading, spacing: 10) {
+              RecoverySectionTitle(title: purpose == .storage ? "Deletion reason" : "Recovery reason",
+                subtitle: purpose == .storage && model.pendingAbandon != nil
+                  ? "This reason is for a new decision. Saved decisions are unchanged."
+                  : "10–4000 characters. Recorded only when you confirm an action.")
+              TextField("Describe why this action is needed", text: $model.reason, axis: .vertical)
+                .textFieldStyle(.roundedBorder).lineLimit(2...4).disabled(model.busy)
+                .accessibilityIdentifier("sandbox-recovery-reason")
+            }.recoverySurface()
           }
           if purpose != .files {
-            VStack(alignment: .leading, spacing: 6) {
-              Text("Deletion is permanent").font(.headline)
-              Toggle("I accept losing files and reports that have not been saved.", isOn: $model.acknowledgeLoss)
-                .disabled(model.busy)
+            VStack(alignment: .leading, spacing: 12) {
+              Label("Deletion is permanent", systemImage: "exclamationmark.triangle")
+                .font(.callout.weight(.semibold)).foregroundStyle(RecoveryTone.destructive.color)
               Text("This is a discard action, not verified archive-and-release. Recover anything you need first.")
-                .font(.caption).foregroundStyle(.secondary)
-            }
+                .font(.callout).foregroundStyle(RecoveryPalette.secondary)
+              Toggle("I accept losing files and reports that have not been saved.", isOn: $model.acknowledgeLoss)
+                .disabled(model.busy).accessibilityIdentifier("sandbox-recovery-accept-loss")
+            }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+              .background(RecoveryTone.destructive.color.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+              .overlay(RoundedRectangle(cornerRadius: 12).stroke(RecoveryTone.destructive.color.opacity(0.24)))
           }
           if let snapshot = model.snapshot {
             if purpose == .storage && snapshot.operations.contains(where: { $0.action == "abandon" && $0.generation != snapshot.generation }) {
               Text("Earlier deletion decisions belong to an older task state. Their evidence is retained. Deleting a current selection requires a new reason, loss acknowledgement and confirmation.")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(RecoveryPalette.secondary)
             }
             if snapshot.resources.isEmpty { Text("No retained sandbox environments were found.") }
             ForEach(snapshot.resources) { resource in resourceCard(resource, snapshot: snapshot) }
@@ -140,11 +146,12 @@ struct SandboxRecoverySheet: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
       }
       Text("Stopped environments may still incur storage charges. Deleting this sandbox does not remove independent snapshots, images or volumes.")
-        .font(.caption).foregroundStyle(.secondary)
+        .font(.caption).foregroundStyle(RecoveryPalette.secondary).fixedSize(horizontal: false, vertical: true)
+        .padding(.top, 10).overlay(alignment: .top) { DesktopTheme.line.frame(height: 1) }
     }
     .padding(embedded ? 0 : 20)
     .frame(width: embedded ? nil : 680, height: embedded ? nil : 650)
-    .background(Color(nsColor: .windowBackgroundColor))
+    .background(DesktopTheme.canvas).tint(DesktopTheme.accent)
     .interactiveDismissDisabled(model.busy)
     .task { await model.refresh(actions) }
     .onChange(of: model.podDeleted) { _, deleted in if deleted { dismiss() } }
@@ -168,35 +175,39 @@ struct SandboxRecoverySheet: View {
         Text("Retained environment").font(.headline)
         Spacer()
         Text(String(resource.sandboxId.prefix(8))).font(.caption.monospaced()).textSelection(.enabled)
+          .padding(.horizontal, 7).padding(.vertical, 4)
+          .background(DesktopTheme.canvas, in: RoundedRectangle(cornerRadius: 5))
       }
       Text(resource.providerState == "unknown" ? "Environment state could not be verified" : "Provider reports: \(resource.providerState)")
-        .font(.callout).foregroundStyle(.secondary)
+        .font(.callout).foregroundStyle(RecoveryPalette.secondary)
       if !resource.pendingIntentIds.isEmpty && resource.abandonment?.completedAt == nil {
         Text("An earlier start has an unknown outcome. Stopped does not mean that request failed; another start is blocked.")
           .foregroundStyle(.orange)
       }
       if let error = resource.observationError { Text("Status check: \(error)").font(.callout).foregroundStyle(.orange) }
       if purpose != .storage {
-        if let blocked = resource.startBlocked { Text("Cannot start yet: \(blocked)").font(.callout).foregroundStyle(.secondary) }
+        if let blocked = resource.startBlocked { Text("Cannot start yet: \(blocked)").font(.callout).foregroundStyle(RecoveryPalette.secondary) }
         Button("Start environment for file recovery") {
           Task { await model.submit(resource, action: "start", actions: actions) }
-        }.disabled(!model.canStart(resource)).accessibilityIdentifier("sandbox-recovery-start")
+        }.buttonStyle(.borderedProminent).controlSize(.small)
+          .disabled(!model.canStart(resource)).accessibilityIdentifier("sandbox-recovery-start")
         if let onOpenFiles { Button("View files and saved evidence", action: onOpenFiles).disabled(model.busy) }
       }
       if purpose != .files {
         if let saved = model.pendingAbandons[resource.resourceKey] {
           Text("Saved deletion reason: \(saved.reason). Continuing uses this exact decision, not edited fields.")
-            .font(.callout).foregroundStyle(.secondary)
+            .font(.callout).foregroundStyle(RecoveryPalette.secondary)
         }
-        if let blocked = resource.abandonBlocked { Text("Cannot delete yet: \(blocked)").font(.callout).foregroundStyle(.secondary) }
+        if let blocked = resource.abandonBlocked { Text("Cannot delete yet: \(blocked)").font(.callout).foregroundStyle(RecoveryPalette.secondary) }
         Button(resource.abandonment == nil ? "Discard unsaved data and delete…" : "Continue the recorded deletion…", role: .destructive) {
           confirmation = resource
-        }.disabled(!model.canAbandon(resource)).accessibilityIdentifier("sandbox-recovery-abandon")
+        }.buttonStyle(.bordered).tint(RecoveryTone.destructive.color).controlSize(.small)
+          .disabled(!model.canAbandon(resource)).accessibilityIdentifier("sandbox-recovery-abandon")
       }
       DisclosureGroup("Environment identity") {
         Text("\(resource.sandboxId)\n\(resource.resourceKey)\nObserved: \(resource.observedAt)")
           .font(.caption.monospaced()).textSelection(.enabled)
       }
-    }.padding(12).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+    }.recoverySurface(inset: 16)
   }
 }

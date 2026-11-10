@@ -19,7 +19,7 @@ struct RetainedFinalizationCard: View {
             .accessibilityIdentifier("retained-finalization-open")
         }.font(.callout).padding(10).background(.orange.opacity(0.08))
       } else if let error {
-        Text(error).font(.caption).foregroundStyle(.secondary).padding(8)
+        Text(error).font(.caption).foregroundStyle(RecoveryPalette.secondary).padding(8)
       }
     }
     .task { await load() }
@@ -50,19 +50,19 @@ struct RetainedFinalizationSheet: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack {
-        Text("Finalize retained work").font(.title2.bold())
+        Text("Finalize retained work").font(.title3.weight(.semibold))
         Spacer()
         Button("Check status") { Task { await model.refresh(actions) } }
           .disabled(model.busy).accessibilityIdentifier("retained-finalization-refresh")
         if !embedded { Button("Done") { dismiss() }.disabled(model.busy).keyboardShortcut(.cancelAction) }
-      }
-      Text(model.podId).font(.caption.monospaced()).textSelection(.enabled)
+      }.controlSize(.small)
+      Text(model.podId).font(.caption.monospaced()).foregroundStyle(RecoveryPalette.secondary).textSelection(.enabled)
       Text("Neither action deletes source, reports, custody evidence or recovery resources. Stopping is not completion. Retained storage may still incur costs.")
-        .font(.callout).foregroundStyle(.secondary)
+        .font(.callout).foregroundStyle(RecoveryPalette.secondary)
       if model.busy { ProgressView().controlSize(.small) }
       ScrollView {
         VStack(alignment: .leading, spacing: 12) {
-          if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+          if let error = model.error { RecoveryNotice(title: "Finalization needs attention", message: error) }
           if let receipt = model.receipt {
             Text(receipt.state == .pending ? "Not finalized — reconciliation pending" :
               receipt.request.mode == .stopRetain ? "Stopped with work retained — not completed" : "External merged delivery verified")
@@ -86,26 +86,29 @@ struct RetainedFinalizationSheet: View {
               .font(.caption).textSelection(.enabled)
             if model.receipt?.state != .finalized {
               Text("Check status is read-only. Reconcile sends this exact saved request, never a new stop or merge decision.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(RecoveryPalette.secondary)
               Button("Reconcile saved request") { Task { await model.reconcile(actions) } }
                 .disabled(!model.canReconcile).accessibilityIdentifier("retained-finalization-reconcile")
               if model.canDiscardRejected {
                 Button("Review a new decision") { Task { await model.discardRejected(actions) } }
                 Text("The saved request was rejected and does not own the observed server intent. Only this local rejected draft will be discarded.")
-                  .font(.caption).foregroundStyle(.secondary)
+                  .font(.caption).foregroundStyle(RecoveryPalette.secondary)
               }
             }
           } else {
-            TextField("Reason (10–4000 characters)", text: $model.reason, axis: .vertical)
-              .textFieldStyle(.roundedBorder).lineLimit(2...5).disabled(model.busy)
-              .accessibilityIdentifier("retained-finalization-reason")
+            VStack(alignment: .leading, spacing: 10) {
+              RecoverySectionTitle(title: "Decision reason", subtitle: "10–4000 characters. Stopping and delivery verification remain separate decisions.")
+              TextField("Reason (10–4000 characters)", text: $model.reason, axis: .vertical)
+                .textFieldStyle(.roundedBorder).lineLimit(2...5).disabled(model.busy)
+                .accessibilityIdentifier("retained-finalization-reason")
+            }.recoverySurface()
             Text("Verify merged delivery checks the recorded PR and proves it includes the retained source. An open PR cannot complete this pod.")
-              .font(.callout).foregroundStyle(.secondary)
+              .font(.callout).foregroundStyle(RecoveryPalette.secondary)
             Button("Verify merged delivery…") { confirmation = .completeMerged }
               .disabled(!model.canSubmit(.completeMerged))
               .accessibilityIdentifier("retained-finalization-complete")
             Text("Stop and retain ends the pod only after execution is confirmed stopped. It does not merge the PR or claim the task succeeded.")
-              .font(.callout).foregroundStyle(.secondary)
+              .font(.callout).foregroundStyle(RecoveryPalette.secondary)
             Button("Stop and retain work…") { confirmation = .stopRetain }
               .disabled(!model.canSubmit(.stopRetain))
               .accessibilityIdentifier("retained-finalization-stop")
@@ -114,7 +117,7 @@ struct RetainedFinalizationSheet: View {
       }
     }
     .padding(embedded ? 0 : 20).frame(width: embedded ? nil : 620, height: embedded ? nil : 580)
-    .background(Color(nsColor: .windowBackgroundColor))
+    .background(DesktopTheme.canvas).tint(DesktopTheme.accent)
     .interactiveDismissDisabled(model.busy)
     .task { await model.refresh(actions) }
     .confirmationDialog("Finalize this exact retained source?", isPresented: Binding(

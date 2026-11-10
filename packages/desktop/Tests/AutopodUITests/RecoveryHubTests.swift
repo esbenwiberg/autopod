@@ -292,6 +292,83 @@ import Testing
     #expect(hub.sandbox.snapshot == nil && f.requests.isEmpty)
   }
 
+  @Test(arguments: ["dark-wide", "light-wide", "dark-narrow", "light-narrow", "pending", "high-contrast"])
+  func modernRecoveryReflowsWithoutHidingConsequencesOrChangingActions(scenario: String) async throws {
+    let f = RecoverySandboxFixture(); defer { f.clean() }
+    let model = RecoveryHubModel(podId: "pod", actions: f.podActions)
+    await model.refresh(pod: f.pod, actions: f.podActions)
+    if scenario == "pending" {
+      model.sandbox.reason = "Recover source from the original environment"
+      await model.sandbox.submit(try #require(model.sandbox.snapshot?.resources.first), action: "start", actions: f.actions)
+      await model.sandbox.refresh(f.actions)
+    }
+    let requestsBeforeRendering = f.requests.count
+    let light = scenario.hasPrefix("light")
+    let width: CGFloat = scenario.hasSuffix("narrow") ? 680 : 820
+    NSApplication.shared.finishLaunching()
+    let attribute = NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface")
+    let prior = NSApplication.shared.accessibilityAttributeValue(attribute)
+    NSApplication.shared.accessibilitySetValue(true, forAttribute: attribute)
+    defer { NSApplication.shared.accessibilitySetValue(prior, forAttribute: attribute) }
+    let view = NSHostingView(rootView: RecoveryHubSheet(pod: f.pod, actions: f.podActions, model: model)
+      .preferredColorScheme(light ? .light : .dark))
+    view.sizingOptions = []
+    let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: width, height: 820),
+      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false; window.contentView = view
+    let appearance = NSAppearance(named: scenario == "high-contrast" ? .accessibilityHighContrastDarkAqua : light ? .aqua : .darkAqua)
+    window.appearance = appearance; view.appearance = appearance; window.orderBack(nil)
+    defer { window.close() }
+    try await Task.sleep(for: .milliseconds(180)); view.layoutSubtreeIfNeeded()
+    let nodes = hubNodes(view)
+    let bounds = window.convertToScreen(view.convert(view.bounds, to: nil))
+    var frames: [NSRect] = []
+    for route in ["continueWork", "recoverFiles", "freeStorage"] {
+      let buttons = nodes.filter { hubValue($0, "accessibilityIdentifier") as? String == "recovery-route-\(route)"
+        && $0.responds(to: NSSelectorFromString("accessibilityPerformPress")) }
+      #expect(buttons.count == 1, "Exactly one native button per goal: \(scenario) / \(route)")
+      let button = try #require(buttons.first)
+      let frame = try #require(hubValue(button, "accessibilityFrame") as? NSValue).rectValue
+      #expect(frame.width > 0 && frame.minX >= bounds.minX - 2 && frame.maxX <= bounds.maxX + 2)
+      frames.append(frame)
+      #expect(hubValue(button, "accessibilityEnabled") as? Bool == (scenario != "pending" || route != "continueWork"))
+    }
+    if scenario.hasSuffix("narrow") {
+      #expect(abs(frames[0].midY - frames[1].midY) > 30) // One readable column, not squeezed tiles.
+    } else {
+      #expect(abs(frames[0].midY - frames[1].midY) < 2)
+      if scenario != "pending" { #expect(frames.allSatisfy { $0.minY >= bounds.minY + 35 }) }
+    }
+    let copy = nodes.flatMap { node in
+      [hubValue(node, "accessibilityLabel") as? String, hubValue(node, "accessibilityValue") as? String].compactMap { $0 }
+    }.joined(separator: "\n")
+    for fact in [model.savedWork, model.execution, model.storage] { #expect(copy.contains(fact)) }
+    #expect(copy.contains("archive-and-release is not yet available"))
+    if scenario == "pending" { #expect(copy.contains("A missing response does not prove failure")) }
+    #expect(f.requests.count == requestsBeforeRendering)
+    if let directory = ProcessInfo.processInfo.environment["AUTOPOD_HUB_SCREENSHOTS"] {
+      let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      try #require(bitmap.representation(using: .png, properties: [:]))
+        .write(to: URL(fileURLWithPath: directory).appendingPathComponent("modern-\(scenario).png"))
+    }
+    // The narrow layout must remain actionable, including an option below the fold.
+    let storage = try #require(nodes.first {
+      hubValue($0, "accessibilityIdentifier") as? String == "recovery-route-freeStorage"
+        && $0.responds(to: NSSelectorFromString("accessibilityPerformPress"))
+    })
+    _ = hubValue(storage, "accessibilityPerformPress")
+    for _ in 0..<50 {
+      view.layoutSubtreeIfNeeded()
+      if hubNodes(view).contains(where: { hubValue($0, "accessibilityIdentifier") as? String == "sandbox-recovery-abandon" }) { break }
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    let destinationNodes = hubNodes(view)
+    #expect(destinationNodes.contains { hubValue($0, "accessibilityIdentifier") as? String == "sandbox-recovery-abandon" })
+    #expect(!destinationNodes.contains { hubValue($0, "accessibilityIdentifier") as? String == "sandbox-recovery-start" })
+    #expect(f.requests.count == requestsBeforeRendering)
+  }
+
   @Test(arguments: ["card", "overview", "files", "storage"])
   func nativeSurfaceSeparatesGoalsWithoutAutomaticActions(screen: String) async throws {
     let f = RecoverySandboxFixture(); defer { f.clean() }

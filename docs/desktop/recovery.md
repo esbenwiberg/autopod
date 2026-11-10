@@ -26,6 +26,20 @@ only when their own checkpoint-context generation matches the repair inspection;
 missing identity stays unverified. Status changes keep the recovery window and
 its recorded outcome visible rather than creating a new controller.
 
+## Presentation and navigation
+
+Recovery uses the active desktop palette in light and dark appearances, with a
+quiet task-context header, separate saved-work/execution/storage cards and
+outcome-oriented action cards. Narrow windows reflow into a readable single
+column; content scrolls rather than being clipped. Hover is optional feedback,
+not a way to reveal essential information. Navigation remains native Buttons.
+
+Forms keep visible field labels, and destructive review has a separate warning
+surface and loss-acceptance control. Color is accompanied by text and symbols;
+request state, eligibility and confirmation requirements are unchanged by the
+presentation. Technical identifiers stay available without dominating the first
+screen.
+
 ## Choose an outcome
 
 ### Continue work

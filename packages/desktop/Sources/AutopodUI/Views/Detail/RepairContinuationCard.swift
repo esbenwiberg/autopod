@@ -32,16 +32,19 @@ struct RepairContinuationSheet: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack {
-        Text("Use a replacement environment").font(.title2.bold())
+        Text("Use a replacement environment").font(.title3.weight(.semibold))
         Spacer()
         Button("Inspect / refresh") { Task { await model.refresh(actions) } }
           .disabled(model.busy).accessibilityIdentifier("repair-continuation-refresh")
         if !embedded { Button("Done") { dismiss() }.disabled(model.busy).keyboardShortcut(.cancelAction) }
-      }
+      }.controlSize(.small)
       Text("Review the saved source and replacement settings. The daemon will prepare and test the actual replacement before allowing one coding continuation. If it does not qualify, coding will not start.")
-        .font(.callout).accessibilityIdentifier("repair-continuation-conditional")
+        .font(.callout).foregroundStyle(RecoveryPalette.secondary).accessibilityIdentifier("repair-continuation-conditional")
       if model.busy { ProgressView().controlSize(.small) }
-      if let error = model.error { Text(error).foregroundStyle(.orange).textSelection(.enabled).accessibilityIdentifier("repair-continuation-error") }
+      if let error = model.error {
+        RecoveryNotice(title: "Repair needs attention", message: error)
+          .accessibilityIdentifier("repair-continuation-error")
+      }
       ScrollView {
         VStack(alignment: .leading, spacing: 12) {
           if let snapshot = model.snapshot {
@@ -64,23 +67,28 @@ struct RepairContinuationSheet: View {
             Button("Check the saved repair outcome") { Task { await model.observe(actions) } }
               .disabled(model.busy).accessibilityIdentifier("repair-continuation-observe")
           } else {
-            Text("1. Choose the saved source").font(.headline)
-            Text("Enter the full saved host commit you intend to repair. This connection does not automatically discover a safe source; an older checkpoint can omit newer work.")
-              .font(.callout).foregroundStyle(.secondary)
-            TextField("Saved source commit (full SHA)", text: $model.hostHead)
-              .textFieldStyle(.roundedBorder).font(.caption.monospaced()).disabled(model.busy)
-              .accessibilityIdentifier("repair-continuation-head")
-            Text("Selected host Git source is not a claim to contain original final sandbox bytes. Original files, ignored/unsynced data, reports and resources remain retained; no deletion is authorized.")
-              .font(.callout).foregroundStyle(.secondary).accessibilityIdentifier("repair-continuation-source-warning")
-            Text("2. Choose the replacement").font(.headline)
-            TextField("Reviewed environment profile ID", text: $model.profileId)
-              .textFieldStyle(.roundedBorder).disabled(model.busy).accessibilityIdentifier("repair-continuation-profile")
+            VStack(alignment: .leading, spacing: 10) {
+              RecoverySectionTitle(title: "1. Choose the saved source",
+                subtitle: "Use the full host commit you independently inspected. Safe source discovery is not automatic; an older checkpoint can omit newer work.")
+              TextField("Saved source commit (full SHA)", text: $model.hostHead)
+                .textFieldStyle(.roundedBorder).font(.caption.monospaced()).disabled(model.busy)
+                .accessibilityIdentifier("repair-continuation-head")
+              Text("Selected host Git source is not a claim to contain original final sandbox bytes. Original files, ignored/unsynced data, reports and resources remain retained; no deletion is authorized.")
+                .font(.caption).foregroundStyle(RecoveryPalette.secondary).accessibilityIdentifier("repair-continuation-source-warning")
+            }.recoverySurface()
+            VStack(alignment: .leading, spacing: 10) {
+              RecoverySectionTitle(title: "2. Choose the replacement", subtitle: "Preview software and resource changes before authorizing coding.")
+              TextField("Reviewed environment profile ID", text: $model.profileId)
+                .textFieldStyle(.roundedBorder).disabled(model.busy).accessibilityIdentifier("repair-continuation-profile")
+            }.recoverySurface()
             if let preview = model.preview {
               Text(preview.conditionalAttemptEligible ? "Settings preview ready — actual environment not yet tested" : "These settings cannot be used yet")
                 .font(.headline).accessibilityIdentifier("repair-continuation-preview-state")
               if let diff = preview.configurationDiff {
-                execution("Before", diff.before)
-                execution("After", diff.after)
+                HStack(alignment: .top, spacing: 12) {
+                  execution("Before", diff.before)
+                  execution("After", diff.after)
+                }.fixedSize(horizontal: false, vertical: true)
               }
               if let selected = preview.selection {
                 DisclosureGroup("Exact preview identity") {
@@ -90,9 +98,11 @@ struct RepairContinuationSheet: View {
               }
               refusals(preview.refusals)
             }
-            Text("3. Review and authorize").font(.headline)
-            TextField("Why use this replacement? (10–4000 characters)", text: $model.reason, axis: .vertical)
-              .textFieldStyle(.roundedBorder).lineLimit(2...4).disabled(model.busy).accessibilityIdentifier("repair-continuation-reason")
+            VStack(alignment: .leading, spacing: 10) {
+              RecoverySectionTitle(title: "3. Review and authorize", subtitle: "Why use this replacement? 10–4000 characters.")
+              TextField("Describe the reason for this replacement", text: $model.reason, axis: .vertical)
+                .textFieldStyle(.roundedBorder).lineLimit(2...4).disabled(model.busy).accessibilityIdentifier("repair-continuation-reason")
+            }.recoverySurface()
           }
           if let operation = model.operation {
             Text(repairProgressDescription(operation.state)).font(.headline).accessibilityIdentifier("repair-continuation-stage")
@@ -108,14 +118,14 @@ struct RepairContinuationSheet: View {
             }
             refusals(operation.refusals)
             Text("Accepted is not qualified, admitted is not completed, and passed checks are not delivery approval. Fresh human approval remains required; publication is not authorized.")
-              .font(.callout).foregroundStyle(.secondary)
+              .font(.callout).foregroundStyle(RecoveryPalette.secondary)
           }
           Text("Original files and resources stay retained. Existing retry permissions and budgets still apply. This does not publish or merge; passing checks still requires human approval.")
-            .font(.callout).foregroundStyle(.secondary)
+            .font(.callout).foregroundStyle(RecoveryPalette.secondary)
           DisclosureGroup("Original reports, limits and unchanged permissions") {
             context
             Text("Repository, task, AI/account/runtime/model, workflow, network, credentials/PIM, actions, tool packs and permissions remain frozen. This action grants no extra retries or budget.")
-              .font(.caption).foregroundStyle(.secondary)
+              .font(.caption).foregroundStyle(RecoveryPalette.secondary)
           }
         }.frame(maxWidth: .infinity, alignment: .leading)
       }
@@ -126,10 +136,11 @@ struct RepairContinuationSheet: View {
           Spacer()
           Button("Prepare replacement and continue if qualified…") { confirmation = true }
             .disabled(!model.canAuthorize).buttonStyle(.borderedProminent).accessibilityIdentifier("repair-continuation-authorize")
-        }
+        }.controlSize(.small).padding(.top, 14)
+          .overlay(alignment: .top) { DesktopTheme.line.frame(height: 1) }
       }
     }.padding(embedded ? 0 : 20).frame(width: embedded ? nil : 780, height: embedded ? nil : 710)
-      .background(Color(nsColor: .windowBackgroundColor))
+      .background(DesktopTheme.canvas).tint(DesktopTheme.accent)
       .interactiveDismissDisabled(model.busy)
       .task { await model.refresh(actions) }
       .confirmationDialog("Authorize this exact conditional attempt?", isPresented: $confirmation, titleVisibility: .visible) {
@@ -141,10 +152,16 @@ struct RepairContinuationSheet: View {
   }
 
   private func execution(_ title: String, _ value: RepairExecutionDisplayV1) -> some View {
-    VStack(alignment: .leading, spacing: 3) {
-      Text("\(title): \(value.target) / \(value.template) / \(value.platform)").font(.headline)
-      Text("Memory: \(value.memoryGb.formatted()) GiB · CPUs: \(value.cpus.map { String($0) } ?? "unknown")\nImage key: \(value.imageKey)").font(.caption.monospaced()).textSelection(.enabled)
-    }.accessibilityIdentifier("repair-continuation-diff-\(title.lowercased())")
+    VStack(alignment: .leading, spacing: 10) {
+      Text(title.uppercased()).font(.caption2.weight(.semibold)).tracking(1).foregroundStyle(RecoveryPalette.secondary)
+      Text(value.template).font(.callout.weight(.semibold))
+      Text("\(value.target) · \(value.platform)").font(.callout).foregroundStyle(RecoveryPalette.secondary)
+      Text("\(value.memoryGb.formatted()) GiB memory · \(value.cpus.map { String($0) } ?? "unknown") CPUs")
+        .font(.caption).foregroundStyle(RecoveryPalette.secondary)
+      DisclosureGroup("Image identity") { Text(value.imageKey).font(.caption.monospaced()).textSelection(.enabled) }
+        .font(.caption).foregroundStyle(RecoveryPalette.secondary)
+    }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).recoverySurface(inset: 16)
+      .accessibilityIdentifier("repair-continuation-diff-\(title.lowercased())")
   }
   @ViewBuilder private func refusals(_ values: [RepairContinuationRefusal]) -> some View {
     ForEach(Array(values.enumerated()), id: \.offset) { _, value in
