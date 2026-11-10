@@ -103,6 +103,7 @@ it.each([
   'TASK_RETRY_BACKOFF_PENDING',
   'CONTINUATION_SOURCE_HELD',
   'GOAL_NATIVE_RESUME_REQUIRED',
+  'INFRASTRUCTURE_BLOCKED',
 ])('projects %s and still rechecks admission on POST', async (code) => {
   const f = await fixture();
   try {
@@ -115,6 +116,9 @@ it.each([
       await f.app.inject({ url: '/pods/rework-fixture/rework-v1/eligibility' })
     ).json();
     expect(result.eligible).toBe(false);
+    expect(result.code).toBe(
+      code === 'TASK_RETRY_AUTHORIZATION_REQUIRED' ? 'TASK_RETRY_RECONCILIATION_REQUIRED' : code,
+    );
     expect(result.status).toBe(
       code === 'TASK_RETRY_AUTHORIZATION_REQUIRED'
         ? 'authorization_needed'
@@ -134,6 +138,29 @@ it.each([
     await f.close();
   }
 });
+it('projects a current lifecycle infrastructure hold before unrelated Rework restrictions', async () => {
+  const f = await fixture();
+  try {
+    const held = vi.spyOn(f.repo, 'hasInfrastructureBlocker').mockReturnValue(true);
+    const result = (
+      await f.app.inject({ url: '/pods/rework-fixture/rework-v1/eligibility' })
+    ).json();
+    expect(result).toMatchObject({
+      eligible: false,
+      code: 'INFRASTRUCTURE_BLOCKED',
+      generation: 1,
+    });
+    expect(result.reason).toContain('this lifecycle');
+    expect(f.manager.assertCanRework).not.toHaveBeenCalled();
+    held.mockReturnValue(false);
+    expect(
+      (await f.app.inject({ url: '/pods/rework-fixture/rework-v1/eligibility' })).json().eligible,
+    ).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
 it('shows recorded grants and bounded cooldowns without consuming or dispatching', async () => {
   const f = await fixture();
   try {

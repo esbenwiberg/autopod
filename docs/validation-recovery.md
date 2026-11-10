@@ -112,6 +112,24 @@ available through the existing log expansion.
 
 This change does not deploy a daemon or mutate/recover any live pod.
 
+## Ordinary repair handoff and infrastructure holds
+
+The desktop repair handoff loads current-lifecycle eligibility from
+`GET /pods/:podId/rework-v1/eligibility` for ordinary Rework, Revalidate and Resume.
+The daemon projects `code: INFRASTRUCTURE_BLOCKED` before Rework-specific checks;
+the desktop shows its reason and disables all three ordinary submissions. It does
+not infer holds from failure text or disable every failed pod. Rework-only retry
+authorization/cooldown restrictions do not prohibit the other two controls.
+
+Loading or failed refreshes invalidate the previous eligibility. A legacy blocked
+response without a stable code cannot identify a safe ordinary recovery path;
+use a compatible daemon and refresh. Submission refreshes eligibility again, and
+the backend's current admission and HTTP 409 remain final authority. A network
+failure after POST retains an uncertain result and never automatically resubmits.
+These source/UI changes do not deploy the daemon, clear any infrastructure hold,
+or recover a live task. Qualified infrastructure recovery remains a separate,
+explicit operator workflow.
+
 ## Unverified execution settlement and recovery budgets
 
 Use [validation execution recovery](validation-execution-recovery.md) when an unverified

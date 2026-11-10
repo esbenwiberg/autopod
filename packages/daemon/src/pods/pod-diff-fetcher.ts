@@ -7,6 +7,7 @@ import type { ContainerManager } from '../interfaces/container-manager.js';
 import type { WorktreeManager } from '../interfaces/worktree-manager.js';
 import {
   DIFF_EXCLUDE_PATHSPECS,
+  REVIEW_DIFF_EXCLUDE_PATHSPECS,
   stripModeOnlyChanges,
   truncateDiffAtFileBoundary,
 } from '../worktrees/diff-utils.js';
@@ -35,6 +36,8 @@ export interface ComputePodDiffOpts {
   containerManager?: ContainerManager;
   worktreeManager?: WorktreeManager;
   maxLength?: number;
+  /** Review includes changed lockfile/asset hunks; display previews may filter them. */
+  purpose?: 'review' | 'preview';
   logger?: Logger;
   /** Preserve typed sandbox transport failures for callers that implement a circuit breaker. */
   propagateSandboxInfrastructureErrors?: boolean;
@@ -100,6 +103,7 @@ export async function computePodDiff(opts: ComputePodDiffOpts): Promise<PodDiffR
     containerManager,
     worktreeManager,
     maxLength,
+    purpose = 'preview',
     logger,
     propagateSandboxInfrastructureErrors,
   } = opts;
@@ -112,6 +116,7 @@ export async function computePodDiff(opts: ComputePodDiffOpts): Promise<PodDiffR
       defaultBranch,
       logger,
       propagateSandboxInfrastructureErrors,
+      purpose,
     );
     if (containerDiff !== null) {
       return {
@@ -123,7 +128,7 @@ export async function computePodDiff(opts: ComputePodDiffOpts): Promise<PodDiffR
 
   if (pod.worktreePath && worktreeManager) {
     const worktreeDiff = await worktreeManager
-      .getDiff(pod.worktreePath, defaultBranch, maxLength, pod.startCommitSha ?? undefined)
+      .getDiff(pod.worktreePath, defaultBranch, maxLength, pod.startCommitSha ?? undefined, purpose)
       .catch((err) => {
         logger?.warn({ err }, 'computePodDiff: host worktree fallback failed');
         return '';
@@ -244,6 +249,7 @@ async function tryContainerDiff(
   defaultBranch: string,
   logger?: Logger,
   propagateSandboxInfrastructureErrors = false,
+  purpose: 'review' | 'preview' = 'preview',
 ): Promise<string | null> {
   try {
     const base = await resolveContainerBase(
@@ -261,7 +267,13 @@ async function tryContainerDiff(
     // files committed-then-modified.
     const result = await cm.execInContainer(
       containerId,
-      ['git', 'diff', '--no-color', base, ...DIFF_EXCLUDE_PATHSPECS],
+      [
+        'git',
+        'diff',
+        '--no-color',
+        base,
+        ...(purpose === 'review' ? REVIEW_DIFF_EXCLUDE_PATHSPECS : DIFF_EXCLUDE_PATHSPECS),
+      ],
       { cwd: WORKSPACE_DIR, timeout: 30_000 },
     );
     if (result.exitCode !== 0) {

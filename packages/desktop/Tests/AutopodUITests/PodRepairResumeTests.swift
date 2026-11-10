@@ -8,7 +8,7 @@ import Testing
   @Test(arguments: ["accepted", "rejected", "uncertain"])
   func resumeDismissesOnlyAfterAnAcceptedReceipt(outcome: String) async throws {
     let fixture = ResumeHandoffFixture()
-    let model = PodRepairModel(kind: .resume, scope: "resume-fixture")
+    let model = PodRepairModel(kind: .resume, scope: "resume-fixture", ordinaryRework: true)
     var actions = PodActions()
     actions.repair = PodRepairActions(scope: "resume-fixture", submit: { _, kind, _ in
       #expect(kind == .resume)
@@ -18,6 +18,9 @@ import Testing
       if outcome == "uncertain" { throw DaemonError.networkError("The request timed out.") }
       return PodRepairReceipt(message: "Recovery accepted; validation is still running.")
     }, inspect: { _ in PodRepairObservation(source: fixture.pod, related: []) })
+    let eligibility = try JSONDecoder().decode(ReworkEligibility.self,
+      from: Data(#"{"eligible":true,"status":"eligible","reason":"Current lifecycle eligible","generation":1}"#.utf8))
+    actions.repair.loadReworkEligibility = { _ in eligibility }
     let host = LaunchComposerHost(PodRepairSheet(
       isPresented: Binding(get: { fixture.presented }, set: { fixture.presented = $0 }),
       pod: fixture.pod, kind: .resume, relatedPods: [], actions: actions, model: model), width: 1120)

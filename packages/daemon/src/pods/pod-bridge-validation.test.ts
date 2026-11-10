@@ -22,8 +22,9 @@ vi.mock('../providers/llm-client.js', () => ({
   createProfileAnthropicClient: vi.fn(),
 }));
 
+import type { ReviewerExecutor } from '../interfaces/reviewer-executor.js';
 import { createProfileAnthropicClient } from '../providers/llm-client.js';
-import { runPreSubmitReview } from '../validation/pre-submit-review.js';
+import { buildPrompt, hashDiff, runPreSubmitReview } from '../validation/pre-submit-review.js';
 import { runCodexReview } from '../validation/review-codex-runner.js';
 import { resolveEffectiveReviewerProfile } from './runtime-resolver.js';
 
@@ -902,6 +903,7 @@ describe('PodBridge.runPreSubmitReview', () => {
     '+added\n';
 
   interface BuildOpts {
+    executor?: ReviewerExecutor;
     /** Diff returned by the in-container `git diff`. Used when containerId is set. */
     containerDiff?: string;
     /** Diff returned by the host worktree fallback. */
@@ -910,6 +912,7 @@ describe('PodBridge.runPreSubmitReview', () => {
     cachedVerdict?: {
       status: 'pass' | 'fail' | 'uncertain' | 'skipped';
       diffHash: string;
+      inputHash?: string;
       diffSource?: 'container' | 'worktree' | 'none';
       filesReviewed?: number;
       linesAdded?: number;
@@ -964,7 +967,23 @@ describe('PodBridge.runPreSubmitReview', () => {
         startCommitSha: 'start-sha',
         containerId,
         executionTarget: 'local',
-        preSubmitReview: opts.cachedVerdict ?? null,
+        preSubmitReview: opts.cachedVerdict
+          ? {
+              ...(!opts.executor
+                ? {
+                    inputHash: hashDiff(
+                      buildPrompt({
+                        task: 'Add a feature',
+                        diff: opts.containerDiff ?? opts.worktreeDiff ?? '',
+                        reviewerModel: 'sonnet',
+                      }),
+                    ),
+                  }
+                : {}),
+              ...opts.cachedVerdict,
+            }
+          : null,
+        launchConfigDigest: opts.executor ? 'bound-launch' : undefined,
       })),
       touchHeartbeat: vi.fn(),
       getReviewerConfig: vi.fn().mockReturnValue(
@@ -979,6 +998,8 @@ describe('PodBridge.runPreSubmitReview', () => {
         },
       ),
       getReviewerExecEnv: vi.fn().mockResolvedValue(opts.reviewerExecEnv),
+      getReviewerExecutor: vi.fn(() => opts.executor),
+      getLaunchConfiguration: vi.fn(() => (opts.executor ? { digest: 'bound-launch' } : null)),
     } as unknown as Deps['podManager'];
 
     const profileStore = {
@@ -1061,6 +1082,126 @@ describe('PodBridge.runPreSubmitReview', () => {
       worktreeGetDiffMock,
     };
   }
+
+  it('reviews every section above the UI cap through the actual runner and invalidates packet scope', async () => {
+    const actual = await vi.importActual<typeof import('../validation/pre-submit-review.js')>(
+      '../validation/pre-submit-review.js',
+    );
+    const section = (name: string, body: string) =>
+      `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n@@ -0,0 +1 @@\n+${body}\n`;
+    const diff =
+      section('early.ts', 'x'.repeat(55_000)) +
+      section('controller.ts', 'y'.repeat(55_000)) +
+      section('late-custody.ts', 'late validation');
+    const executor = vi
+      .fn<ReviewerExecutor>()
+      .mockResolvedValue({ stdout: '{"status":"pass","reasoning":"Complete","issues":[]}' });
+    const f = buildBridgeWithWorktree({ containerDiff: diff, executor, runResult: {} as never });
+    mockRunPreSubmitReview.mockImplementation(actual.runPreSubmitReview);
+    const result = await f.bridge.runPreSubmitReview(f.podId, {});
+    expect(result).toMatchObject({
+      status: 'pass',
+      filesReviewed: 3,
+      linesAdded: 3,
+      linesRemoved: 0,
+    });
+    const diffCommand = f.containerExecMock.mock.calls.find(
+      ([, command]) => command[1] === 'diff',
+    )?.[1];
+    expect(diffCommand).toContain(':(exclude).serena');
+    expect(diffCommand).not.toContain(':(exclude)package-lock.json');
+    expect(diffCommand).not.toContain(':(exclude)*.lock');
+    expect(diffCommand).not.toContain(':(exclude)*.min.js');
+    expect(executor.mock.calls[0]?.[0].prompt).toContain('+late validation');
+    expect(executor.mock.calls[0]?.[0].prompt).toContain('y'.repeat(55_000));
+    const snapshot = vi
+      .mocked((f.podRepo as unknown as Deps['podRepo']).update)
+      .mock.calls.at(-1)?.[1].preSubmitReview;
+    expect(snapshot?.inputHash).toBeTruthy();
+    if (!snapshot) throw new Error('Missing review receipt');
+    const reserve = vi.fn(() => true);
+    const repeated = buildBridgeWithWorktree({
+      containerDiff: diff,
+      executor,
+      cachedVerdict: snapshot,
+      reservePreSubmitReview: reserve,
+      runResult: {} as never,
+    });
+    mockRunPreSubmitReview.mockImplementation(actual.runPreSubmitReview);
+    expect((await repeated.bridge.runPreSubmitReview(repeated.podId, {})).reusedCache).toBe(true);
+    expect(reserve).not.toHaveBeenCalled();
+    expect(
+      (
+        await repeated.bridge.runPreSubmitReview(repeated.podId, {
+          plannedSummary: 'Changed review claim',
+        })
+      ).reusedCache,
+    ).not.toBe(true);
+    expect(reserve).toHaveBeenCalledTimes(1);
+    const changed = buildBridgeWithWorktree({
+      containerDiff: diff + section('new-controller.ts', 'changed'),
+      executor,
+      cachedVerdict: snapshot,
+      runResult: {} as never,
+    });
+    mockRunPreSubmitReview.mockImplementation(actual.runPreSubmitReview);
+    expect((await changed.bridge.runPreSubmitReview(changed.podId, {})).filesReviewed).toBe(4);
+    expect(executor).toHaveBeenCalledTimes(3);
+    const oldReceipt = buildBridgeWithWorktree({
+      containerDiff: diff,
+      executor,
+      cachedVerdict: { ...snapshot, inputHash: undefined },
+      runResult: {} as never,
+    });
+    mockRunPreSubmitReview.mockImplementation(actual.runPreSubmitReview);
+    expect((await oldReceipt.bridge.runPreSubmitReview(oldReceipt.podId, {})).reusedCache).not.toBe(
+      true,
+    );
+    expect(executor).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([
+    'truncated',
+    'utf8',
+    'overhead',
+    'reference',
+  ])('rejects %s input before cached pass or paid admission', async (kind) => {
+    const diff =
+      kind === 'truncated'
+        ? `${SAMPLE_DIFF}\n⚠ DIFF TRUNCATED: omitted controller`
+        : kind === 'utf8'
+          ? `${SAMPLE_DIFF}+${'é'.repeat(500_000)}`
+          : SAMPLE_DIFF;
+    const executor = vi.fn<ReviewerExecutor>();
+    if (kind === 'reference')
+      executor.prepare = async () => {
+        throw new Error('Reviewer input exceeds the execution bounds');
+      };
+    const reserve = vi.fn(() => true);
+    const f = buildBridgeWithWorktree({
+      containerDiff: diff,
+      executor,
+      reservePreSubmitReview: reserve,
+      cachedVerdict: {
+        status: 'pass',
+        diffHash: hashDiff(diff),
+        reasoning: 'Old partial pass',
+        issues: [],
+        model: 'sonnet',
+        checkedAt: 'old',
+      },
+      runResult: {} as never,
+    });
+    const result = await f.bridge.runPreSubmitReview(
+      f.podId,
+      kind === 'overhead' ? { plannedSummary: 'x'.repeat(1_000_000) } : {},
+    );
+    expect(result).toMatchObject({ status: 'skipped', skipReason: 'incomplete-input' });
+    expect(result.reusedCache).not.toBe(true);
+    expect(executor).not.toHaveBeenCalled();
+    expect(reserve).not.toHaveBeenCalled();
+    expect(mockRunPreSubmitReview).not.toHaveBeenCalled();
+  });
 
   it('uses fallback provider for post-failover pre-submit review', async () => {
     const fallbackCredentials = {
@@ -1178,6 +1319,7 @@ describe('PodBridge.runPreSubmitReview', () => {
       'main',
       expect.any(Number),
       'start-sha',
+      'review',
     );
     expect(mockRunPreSubmitReview).toHaveBeenCalledWith(
       expect.objectContaining({ diff: expect.stringContaining('+added') }),

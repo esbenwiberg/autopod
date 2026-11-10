@@ -1229,6 +1229,10 @@ describe('typed retained worker active-question replies', () => {
     const proceed = new Promise<void>((resolve) => {
       release = resolve;
     });
+    let questionConsumed = () => {};
+    const questionReady = new Promise<void>((resolve) => {
+      questionConsumed = resolve;
+    });
     const question = {
       id: 'typed-worker-question',
       podId: f.podId,
@@ -1246,6 +1250,9 @@ describe('typed retained worker active-question replies', () => {
         escalationType: 'ask_human',
         payload: question,
       } as const;
+      // Resuming the iterator proves the consumer handled the question. Real
+      // Git preparation under suite load need not fit vi.waitFor's 1s default.
+      questionConsumed();
       await proceed;
       const guidance = f.ctx.nudgeRepo.readPending(f.podId);
       if (acknowledge && guidance)
@@ -1260,7 +1267,13 @@ describe('typed retained worker active-question replies', () => {
       (error: unknown) => error,
     );
     try {
-      await vi.waitFor(() => expect(f.pod().status).toBe('awaiting_input'));
+      await Promise.race([
+        questionReady,
+        result.then((error) => {
+          throw error ?? new Error('Worker settled before consuming its question');
+        }),
+      ]);
+      expect(f.pod().status).toBe('awaiting_input');
     } catch (error) {
       release();
       await result;

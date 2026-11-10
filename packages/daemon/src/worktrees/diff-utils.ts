@@ -45,12 +45,17 @@ export function stripModeOnlyChanges(diff: string): string {
   return sections.filter((section) => !isModeOnlySection(section)).join('');
 }
 
-export const DIFF_EXCLUDE_PATHSPECS: readonly string[] = [
-  // Daemon-injected code-intel caches. These are runtime state, not user changes.
+/** Only injected runtime caches may be omitted from acceptance evidence. */
+export const REVIEW_DIFF_EXCLUDE_PATHSPECS: readonly string[] = [
   ':(exclude).serena',
   ':(exclude).serena/**',
   ':(exclude).roslyn-codelens',
   ':(exclude).roslyn-codelens/**',
+];
+
+/** Display-only noise filtering. Never use this policy for acceptance or change detection. */
+export const DIFF_EXCLUDE_PATHSPECS: readonly string[] = [
+  ...REVIEW_DIFF_EXCLUDE_PATHSPECS,
   ':(exclude)pnpm-lock.yaml',
   ':(exclude)package-lock.json',
   ':(exclude)yarn.lock',

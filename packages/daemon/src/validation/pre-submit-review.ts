@@ -11,8 +11,17 @@ import {
   runCodexReview,
 } from './review-codex-runner.js';
 import { REVIEW_STAGE_INSTRUCTIONS } from './review-stage-instructions.js';
+import {
+  hasTruncatedReviewDiff,
+  MAX_ISOLATED_REVIEW_INPUT_BYTES,
+} from './reviewer-input-bounds.js';
 
-export type PreSubmitSkipReason = 'no-diff' | 'no-task' | 'parse-failure' | 'cli-error';
+export type PreSubmitSkipReason =
+  | 'no-diff'
+  | 'no-task'
+  | 'parse-failure'
+  | 'cli-error'
+  | 'incomplete-input';
 
 export interface PreSubmitReviewOpts {
   reviewerExecutor?: import('../interfaces/reviewer-executor.js').ReviewerExecutor;
@@ -30,6 +39,25 @@ export interface PreSubmitReviewOpts {
   plannedSummary?: string;
   /** Optional preview of deviations the agent intends to disclose. */
   plannedDeviations?: Array<{ step: string; planned: string; actual: string; reason: string }>;
+}
+
+/** Admission shared by the bridge (before cache/budget) and direct runner callers. */
+export async function preparePreSubmitReview(opts: PreSubmitReviewOpts) {
+  if (hasTruncatedReviewDiff(opts.diff))
+    throw new Error(
+      'Incomplete pre-submit review: diff was truncated; omitted source cannot be certified.',
+    );
+  const prompt = buildPrompt(opts);
+  if (opts.reviewerExecutor && Buffer.byteLength(prompt, 'utf8') > MAX_ISOLATED_REVIEW_INPUT_BYTES)
+    throw new Error(
+      'Incomplete pre-submit review: full UTF-8 prompt exceeds the isolated input bound.',
+    );
+  const timeout = opts.timeoutMs ?? (resolvePreSubmitRunner(opts) === 'codex' ? 300_000 : 90_000);
+  const prepared = await opts.reviewerExecutor?.prepare?.({ prompt, timeout });
+  return {
+    inputHash: prepared?.inputHash ?? hashDiff(prompt),
+    opts: prepared ? { ...opts, reviewerExecutor: async () => prepared.execute() } : opts,
+  };
 }
 
 export interface PreSubmitReviewResult {
@@ -96,6 +124,11 @@ export async function runPreSubmitReview(
     return skipped('no-task', 'No task description available for context.');
   }
 
+  try {
+    opts = (await preparePreSubmitReview(opts)).opts;
+  } catch (error) {
+    return skipped('incomplete-input', error instanceof Error ? error.message : String(error));
+  }
   const prompt = buildPrompt(opts);
   const reviewerRunner = resolvePreSubmitRunner(opts);
   const timeoutMs = opts.timeoutMs ?? (reviewerRunner === 'codex' ? 300_000 : 90_000);
@@ -105,7 +138,11 @@ export async function runPreSubmitReview(
       `Pre-submit reviewer provider ${opts.reviewerProvider} is not supported.`,
     );
   }
-  if (reviewerRunner === 'codex' && (!opts.containerId || !opts.containerManager)) {
+  if (
+    reviewerRunner === 'codex' &&
+    !opts.reviewerExecutor &&
+    (!opts.containerId || !opts.containerManager)
+  ) {
     return skipped('cli-error', 'Codex pre-submit reviewer requires a live pod container.');
   }
 
@@ -193,7 +230,7 @@ function resolvePreSubmitRunner(opts: PreSubmitReviewOpts): 'claude' | 'codex' |
   return 'claude';
 }
 
-function buildPrompt(opts: PreSubmitReviewOpts): string {
+export function buildPrompt(opts: PreSubmitReviewOpts): string {
   const sections: string[] = [PRE_SUBMIT_PROMPT_HEADER, '', REVIEW_STAGE_INSTRUCTIONS, ''];
   sections.push('## TASK');
   sections.push(opts.task.trim());
@@ -228,6 +265,7 @@ export function hashDiff(diff: string): string {
 
 export interface PreSubmitReviewCacheScope {
   diffHash: string;
+  inputHash?: string;
   diffSource?: PreSubmitReviewSnapshot['diffSource'];
   filesReviewed?: number;
   linesAdded?: number;
@@ -264,6 +302,7 @@ export function getPreSubmitCacheDecision(
 
   const required = new Set(opts?.requireMetadata ?? []);
   const keys: PreSubmitReviewCacheMetadataKey[] = [
+    'inputHash',
     'diffSource',
     'filesReviewed',
     'linesAdded',

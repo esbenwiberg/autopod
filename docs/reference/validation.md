@@ -110,6 +110,49 @@ that a PR exists or that a freshness incident is resolved. Prompt changes do not
 rewrite frozen submissions, repair stale stored summaries or reconcile existing
 pods; those require their own supported recovery paths.
 
+Packet-only pre-submit review collects the complete cumulative diff up to the
+existing isolated input ceiling, separately from the 50,000-character desktop
+and legacy preview limit. The final prompt must fit **1,000,000 UTF-8 bytes**,
+including instructions, task, planned summary/deviations and appended admitted
+reference context (including image evidence metadata). Nothing is silently trimmed
+to fit. Truncation or an oversized packet produces an explicit incomplete-input
+skip before paid inference, fresh-review budget reservation or passing-cache reuse.
+Reported file/line counts describe the collected diff; a skipped partial packet
+does not certify omitted files. Isolated reviewers still receive no worker
+workspace, source credentials or coding authority.
+
+Acceptance diffs include changed **lockfile hunks**, not entire lockfiles. This
+also applies to minified source assets: the display preview's noise filter is not
+review authority. Only daemon-injected code-intelligence caches are omitted by
+this review policy. Host validation, revalidation and live-container pre-submit
+review use the same policy, including the host fallback; lockfile-only changes
+remain real changes for safety admission. Display previews retain their own
+filters and size limits. A large rewrite still counts toward the existing input
+ceiling and cannot earn a passing review when truncated.
+
+Pre-submit receipts bind both diff scope/source identity and the final prepared
+packet hash. Changed source, task context, summary/deviations or references require
+fresh review; unchanged complete packets can reuse a passing receipt. Older
+receipts without packet identity cannot bypass this admission. Legacy tool runners
+and preview caps remain available; a truncated pre-submit packet cannot earn a pass.
+Source changes only affect a daemon running the new collector. They do not patch
+the deployed review service, rewrite earlier partial receipts, or waive configured
+independent review. Preserve an incomplete deployed review result honestly until
+the deployment owner installs and verifies the new collector.
+
+### Full repository validation capacity
+
+The repository's root `npx pnpm test` keeps package jobs serial. Declaration builds
+and real-process CLI fixtures must not contend across Turbo packages while each
+package's own bounded test workers run. The CLI suite, like the daemon suite,
+uses two workers. This changes scheduling, not test inventories, assertions or
+individual deadlines. Preserve the full command's measured outer runtime when
+qualifying a worker: a frozen fifteen-minute limit is not adequate merely because
+focused checks passed. For an existing eligible Docker retained continuation,
+the separately authorized finite outer-test allowance is documented in
+[retained continuation](../retained-pod-continuation.md#one-finite-docker-outer-test-allowance).
+Changing source/defaults never rewrites a frozen launch or grants retry permission.
+
 Every validation attempt is stored with full results and **proof-of-work screenshots** — one per smoke page, AC browser check, and review screenshot. Screenshots are served from authenticated URLs like `GET /pods/:id/screenshots/:source/:filename`. Contract fact evidence is also exportable as `GET /pods/:id/validations/:attempt/evidence.yaml`.
 
 After validation, the container is **stopped** (not removed). Launch an on-demand **preview** to interact with the agent's work in a real browser before approving.

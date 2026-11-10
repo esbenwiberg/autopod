@@ -4,6 +4,7 @@ public struct ReworkEligibility: Codable, Sendable {
   public let eligible: Bool
   public let status: String
   public let reason: String
+  public let code: String?
   public let generation: Int
   public let failureId: String?
   public let notBefore: String?
