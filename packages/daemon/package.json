@@ -59,7 +59,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/dockerode": "^3.3.34",
-    "@types/node": "^22.10.0",
+    "@types/node": "^26.6.6",
     "@types/tar-stream": "^3.1.5",
     "@types/ws": "^8.18.2",
     "pino-pretty": "^13.2.0",
