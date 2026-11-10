@@ -80,10 +80,11 @@ export function assertSourceAvailable(
     );
 }
 /** Delivery/release is NEVER implied by the private mutation capability or passing checks. */
-export function assertSourceDeliveryAllowed(
+function assertSourceDeliveryEligibility(
   db: Database.Database,
   podId: string,
   initialInsert = false,
+  approvalEntry = false,
 ): void {
   createRecoveryForkRepository(db).assertOriginalAvailable(podId);
   if (!initialInsert) createRecoveryForkRepository(db).assertTaskExecutionAllowed(podId);
@@ -103,7 +104,7 @@ export function assertSourceDeliveryAllowed(
         }
       | undefined;
     const result = row?.last_validation_result ? JSON.parse(row.last_validation_result) : null;
-    const approval = row?.readiness_review ? JSON.parse(row.readiness_review).approval : null;
+    createRecoveryForkRepository(db).checked(podId, !approvalEntry);
     const settled =
       fork.facts.worker &&
       db
@@ -117,7 +118,6 @@ export function assertSourceDeliveryAllowed(
       row?.validation_waiver ||
       (row?.validation_overrides && JSON.parse(row.validation_overrides).length) ||
       result?.overall !== 'pass' ||
-      approval?.actor?.type !== 'human' ||
       result?.taskReview?.status !== 'pass'
     )
       sourceAdoptionError(
@@ -179,4 +179,17 @@ export function assertSourceDeliveryAllowed(
       'Source adoption authorizes checks only; original delivery constraints and source/report custody remain held.',
       'SOURCE_ADOPTION_DELIVERY_HELD',
     );
+}
+
+/** Entry permits recording a first human decision; it grants no publication capability. */
+export function assertSourceApprovalEntryAllowed(db: Database.Database, podId: string): void {
+  assertSourceDeliveryEligibility(db, podId, false, true);
+}
+/** Publication always requires the durable source/check-bound human decision. */
+export function assertSourceDeliveryAllowed(
+  db: Database.Database,
+  podId: string,
+  initialInsert = false,
+): void {
+  assertSourceDeliveryEligibility(db, podId, initialInsert, false);
 }

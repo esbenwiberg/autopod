@@ -1,14 +1,15 @@
 import { execFile } from 'node:child_process';
-import { readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { RecoveryForkInput, RecoveryForkRequest } from '@autopod/shared';
+import { AutopodError, type RecoveryForkInput, type RecoveryForkRequest } from '@autopod/shared';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { configurationDigest } from '../configuration/configuration-digest.js';
 import { createConfigurationStore } from '../configuration/configuration-store.js';
 import { deriveLaunch } from '../configuration/derive-launch.js';
 import { createLaunchSnapshotRepository } from '../configuration/launch-snapshot.js';
+import { createPassingValidationResult } from '../test-utils/mock-helpers.js';
 import {
   materializeCheckpointFixture,
   retainedCheckpointFixture,
@@ -18,6 +19,10 @@ import { inspectSupplementalAdoptionGit } from '../worktrees/source-adoption-git
 import { QUALIFICATION_SOURCE_PROBE } from './environment-qualification.js';
 import { createEventRepository } from './event-repository.js';
 import { createPodManager } from './pod-manager.js';
+import {
+  RecoveryForkRejectedBeforeClaim,
+  RecoveryForkSelectionError,
+} from './recovery-fork-rejection.js';
 import { recoveryForkProcessEpoch } from './recovery-fork-repository.js';
 import {
   assertFinalizationPathAvailable,
@@ -38,7 +43,7 @@ const git = async (cwd: string, ...args: string[]) =>
       env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
     })
   ).stdout.trim();
-async function fixture(noRequirements = false) {
+async function fixture(noRequirements = false, originalHandoff?: string) {
   const f = await retainedCheckpointFixture(
     'prevalidation',
     true,
@@ -52,6 +57,8 @@ async function fixture(noRequirements = false) {
           executables: ['node'],
           platform: 'linux/amd64',
         },
+    undefined,
+    originalHandoff,
   );
   fixtures.push(f);
   await materializeCheckpointFixture(f);
@@ -90,7 +97,11 @@ async function fixture(noRequirements = false) {
   const launch = f.ctx.deps.launchConfiguration!;
   const snapshots = createLaunchSnapshotRepository(f.ctx.db, createConfigurationStore(f.ctx.db));
   launch.admitRecoveryFork = async (id, createPod, initializePod) =>
-    f.ctx.podRepo.atomically!(() => snapshots.admitRecoveryFork(id, createPod, initializePod));
+    f.ctx.podRepo.atomically!(() => {
+      launch.assertRecoveryAdmissionReady!();
+      return snapshots.admitRecoveryFork(id, createPod, initializePod);
+    });
+  launch.assertRecoveryAdmissionReady = () => {};
   launch.availableRecoveryProfiles = () => [{ id: 'profile', label: 'Development' }];
   vi.stubEnv('DATA_DIR', f.root);
   const manager = createPodManager(f.ctx.deps);
@@ -473,7 +484,9 @@ describe('durable real recovery fork', () => {
     expect(() => f.ctx.podRepo.recoveryForks!.assertWorkerAllowed(child.id)).toThrow(
       'qualification',
     );
-    expect(() => assertSourceDeliveryAllowed(f.ctx.db, child.id)).toThrow('fresh enabled checks');
+    expect(() => assertSourceDeliveryAllowed(f.ctx.db, child.id)).toThrow(
+      'source-bound fresh checks',
+    );
     expect(JSON.stringify(result)).not.toContain(record.facts.prepared!.snapshot);
   });
   it('copies only chosen safe supplements and preserves private/original host evidence independently', async () => {
@@ -668,5 +681,560 @@ describe('durable real recovery fork', () => {
     for (const secret of ['private reasoning', 'private tool', 'do-not-carry'])
       expect(context).not.toContain(secret);
     expect(context).toContain('not guaranteed secret-free');
+  });
+});
+
+describe('reviewed recovery boundaries', () => {
+  it('produces exact rejection proof for stale preview before claim, never from a missing operation GET', async () => {
+    const f = await fixture();
+    const request = { ...(await f.request()), expectedBinding: '0'.repeat(64) };
+    await expect(f.manager.createRecoveryFork(f.podId, request, f.actor)).rejects.toMatchObject({
+      code: 'RECOVERY_FORK_REJECTED_BEFORE_CLAIM',
+      parentPodId: f.podId,
+      requestId: request.id,
+      expectedBinding: request.expectedBinding,
+      noOperationCreated: true,
+      reasonCode: 'RECOVERY_FORK_SELECTION_STALE',
+      statusCode: 409,
+    });
+    expect(() => f.manager.getRecoveryFork(f.podId, request.id)).toThrow('not found');
+    expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+  });
+  it.each([
+    'unknown',
+    '404',
+    'generic-policy-code',
+  ] as const)('keeps %s read-only infrastructure errors unproved', async (kind) => {
+    const f = await fixture();
+    const request = await f.request();
+    const error =
+      kind === '404'
+        ? new AutopodError('Not found', 'NOT_FOUND', 404)
+        : kind === 'generic-policy-code'
+          ? new AutopodError('Unknown policy transport', 'RECOVERY_FORK_BLOCKED', 409)
+          : new Error('unknown read outcome');
+    f.cm.getResourceKey = vi.fn(async () => {
+      throw error;
+    });
+    await expect(f.manager.createRecoveryFork(f.podId, request, f.actor)).rejects.toBe(error);
+    expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
+  });
+  it('never proves a claim-attempt exception, even when rollback leaves no row', async () => {
+    const f = await fixture();
+    const request = await f.request();
+    const error = new AutopodError('Claim uncertain', 'RECOVERY_FORK_BLOCKED', 409);
+    vi.spyOn(f.ctx.podRepo.recoveryForks!, 'claim').mockImplementation(() => {
+      throw error;
+    });
+    await expect(f.manager.createRecoveryFork(f.podId, request, f.actor)).rejects.toBe(error);
+    expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
+  });
+  it('never grants discard proof for an existing replay, actor conflict or post-claim failure', async () => {
+    const f = await fixture();
+    const request = await f.request();
+    const error = new AutopodError('Admission failed', 'RECOVERY_FORK_BLOCKED', 409);
+    f.launch.admitRecoveryFork = vi.fn(async () => {
+      throw error;
+    });
+    await expect(f.manager.createRecoveryFork(f.podId, request, f.actor)).rejects.toBe(error);
+    expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeTruthy();
+    f.launch.assertRecoveryAdmissionReady = () => {
+      throw new Error('closed');
+    };
+    const replay = await f.manager.createRecoveryFork(f.podId, request, f.actor);
+    expect(replay).toMatchObject({ state: 'failed', childPodId: null });
+    expect(replay).not.toHaveProperty('noOperationCreated');
+    try {
+      await f.manager.createRecoveryFork(f.podId, request, { type: 'human', userId: 'other' });
+      throw new Error('Conflict must reject');
+    } catch (conflict) {
+      expect(conflict).toMatchObject({ code: 'RECOVERY_FORK_REQUEST_CONFLICT' });
+      expect(conflict).not.toBeInstanceOf(RecoveryForkRejectedBeforeClaim);
+    }
+  });
+  it('checks cutover at eligibility and retains exact replay with the gate closed', async () => {
+    const f = await fixture();
+    const request = await f.request();
+    const gate = () => {
+      throw new RecoveryForkSelectionError('Cutover closed', 'CONFIG_CUTOVER_REQUIRED');
+    };
+    f.launch.assertRecoveryAdmissionReady = gate;
+    expect((await f.manager.inspectRecoveryFork(f.podId)).available).toBe(false);
+    await expect(f.manager.createRecoveryFork(f.podId, request, f.actor)).rejects.toMatchObject({
+      code: 'RECOVERY_FORK_REJECTED_BEFORE_CLAIM',
+      reasonCode: 'CONFIG_CUTOVER_REQUIRED',
+    });
+    f.launch.assertRecoveryAdmissionReady = () => {};
+    const operation = await f.manager.createRecoveryFork(f.podId, request, f.actor);
+    f.launch.assertRecoveryAdmissionReady = gate;
+    expect(await f.manager.createRecoveryFork(f.podId, request, f.actor)).toEqual(operation);
+    expect(f.manager.getRecoveryFork(f.podId, request.id)).toEqual(operation);
+    expect((await f.manager.inspectRecoveryFork(f.podId)).operation).toEqual(operation);
+  });
+  it('does not admit or enqueue a child if cutover closes after source preparation', async () => {
+    const f = await fixture();
+    const request = await f.request();
+    const admit = f.launch.admitRecoveryFork!;
+    f.launch.admitRecoveryFork = async (...args) => {
+      f.launch.assertRecoveryAdmissionReady = () => {
+        throw new RecoveryForkSelectionError('Cutover closed', 'CONFIG_CUTOVER_REQUIRED');
+      };
+      return admit(...args);
+    };
+    const before = f.ctx.enqueuedSessions.length;
+    await expect(f.manager.createRecoveryFork(f.podId, request, f.actor)).rejects.toMatchObject({
+      code: 'CONFIG_CUTOVER_REQUIRED',
+    });
+    expect(f.manager.getRecoveryFork(f.podId, request.id).childPodId).toBeNull();
+    expect(f.ctx.enqueuedSessions.length).toBe(before);
+    expect(f.ctx.db.prepare('SELECT COUNT(*) AS n FROM pods').get()).toEqual({ n: 1 });
+    expect(f.cm.spawn).not.toHaveBeenCalled();
+  });
+  it('refuses a forged replacement graph before claim without modifying original metadata', async () => {
+    const f = await fixture();
+    const request = await f.request();
+    const source = f.pod().worktreePath!;
+    const original = request.sourceHead;
+    await writeFile(path.join(source, 'source.ts'), 'export const forged = true;\n');
+    await git(source, 'add', 'source.ts');
+    await git(
+      source,
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      'commit',
+      '-m',
+      'forged graph',
+    );
+    const replacement = await git(source, 'rev-parse', 'HEAD');
+    await git(source, 'reset', '--hard', original);
+    await git(source, 'replace', original, replacement);
+    expect(await git(source, 'show', 'HEAD:source.ts')).toContain('forged');
+    const config = await readFile(path.join(source, '.git/config'), 'utf8');
+    const view = await f.manager.inspectRecoveryFork(f.podId);
+    expect(view.available).toBe(false);
+    expect(view.blockers.join(' ')).toContain('Replacement refs');
+    await expect(f.manager.createRecoveryFork(f.podId, request, f.actor)).rejects.toMatchObject({
+      code: 'RECOVERY_FORK_REJECTED_BEFORE_CLAIM',
+    });
+    expect(await git(source, 'show', 'HEAD:source.ts')).toContain('forged');
+    expect(await readFile(path.join(source, '.git/config'), 'utf8')).toBe(config);
+    expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
+  });
+  it.each([
+    '--assume-unchanged',
+    '--skip-worktree',
+    'sparse-index',
+  ] as const)('refuses hidden tracked changes: %s', async (flag) => {
+    const f = await fixture();
+    const request = await f.request();
+    const source = f.pod().worktreePath!;
+    if (flag === 'sparse-index') await git(source, 'config', 'index.sparse', 'true');
+    else {
+      await git(source, 'update-index', flag, 'source.ts');
+      await writeFile(path.join(source, 'source.ts'), 'hidden edit');
+      expect(await git(source, 'status', '--porcelain', '--untracked-files=no')).toBe('');
+    }
+    expect((await f.manager.inspectRecoveryFork(f.podId)).available).toBe(false);
+    await expect(f.manager.createRecoveryFork(f.podId, request, f.actor)).rejects.toThrow();
+    expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+  });
+  it('preserves original frozen handoff separately from the new human continuation', async () => {
+    const original = 'Do not edit the database schema. Keep all historical API constraints.';
+    const f = await fixture(false, original);
+    await f.manager.createRecoveryFork(f.podId, await f.request(), f.actor);
+    const record = f.ctx.podRepo.recoveryForks!.parent(f.podId)!;
+    const packet = JSON.parse(await readFile(record.facts.prepared!.packet, 'utf8'));
+    expect(packet.originalFrozenHandoffInstructions).toBe(original);
+    expect(packet.humanContinuationInstructions).toBe(f.input.instructions);
+    expect(record.binding.originalLaunch.work.handoffInstructions).toBe(original);
+    expect(f.launch.read(record.facts.admitted!.childPodId)!.work.handoffInstructions).toContain(
+      '/autopod/recovery/handoff.json',
+    );
+  });
+  it('explicitly refuses pointer-only handoff chains without reading a same-path packet', async () => {
+    const f = await fixture(
+      false,
+      'Read /autopod/recovery/handoff.json from the earlier recovery.',
+    );
+    const view = await f.manager.inspectRecoveryFork(f.podId);
+    expect(view.blockers.join(' ')).toContain('Chained recovery');
+    expect(view.available).toBe(false);
+    expect(f.cm.readFile).not.toHaveBeenCalled();
+    expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
+  });
+  it('preserves PR-fix counters and limits without importing delivery links', async () => {
+    const f = await fixture();
+    f.ctx.podRepo.update(f.podId, { prFixAttempts: 2, maxPrFixAttempts: 2 });
+    const result = await f.manager.createRecoveryFork(f.podId, await f.request(), f.actor);
+    expect(f.ctx.podRepo.getOrThrow(result.childPodId!)).toMatchObject({
+      prFixAttempts: 2,
+      maxPrFixAttempts: 2,
+      linkedPodId: null,
+      fixPodId: null,
+      prUrl: null,
+    });
+  });
+});
+
+/** Execute the actual population/reconstruction/clean and qualification scripts in
+ * an isolated temp Git candidate. Only container transport/OS identity is mocked. */
+async function filesystemCodingTransport(
+  f: Awaited<ReturnType<typeof fixture>>,
+  corrupt: false | 'changed' | 'missing' = false,
+) {
+  codingTransport(f);
+  const candidate = path.join(f.root, 'actual-candidate');
+  await mkdir(candidate);
+  const previous = f.cm.execInContainer.bind(f.cm);
+  const write = f.cm.writeFile.bind(f.cm);
+  let cleaned = false;
+  f.cm.writeFile = vi.fn(async (id, file, bytes) => {
+    if (file === '/workspace/.git/info/exclude')
+      await writeFile(path.join(candidate, '.git/info/exclude'), bytes);
+    else await write(id, file, bytes);
+  });
+  f.cm.execInContainer = vi.fn(async (id, command, options) => {
+    const prepared = f.ctx.podRepo.recoveryForks!.parent(f.podId)?.facts.prepared;
+    if (command[2] === QUALIFICATION_SOURCE_PROBE && prepared) {
+      const script = QUALIFICATION_SOURCE_PROBE.replace(
+        "const root='/workspace'",
+        `const root=${JSON.stringify(candidate)}`,
+      ).replace(
+        "verify('/autopod/recovery','handoff.json',recovery.packetHash)",
+        `verify(${JSON.stringify(path.dirname(prepared.packet))},'handoff.json',recovery.packetHash)`,
+      );
+      try {
+        const result = await exec('node', ['-e', script, ...command.slice(3)], { cwd: candidate });
+        const observed = JSON.parse(result.stdout);
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            ...observed,
+            platform: 'linux/amd64',
+            uid: 1000,
+            cwd: '/workspace',
+          }),
+          stderr: '',
+        };
+      } catch {
+        return { exitCode: 1, stdout: '', stderr: 'Candidate bytes failed actual probe' };
+      }
+    }
+    if (prepared && !cleaned && command.some((arg) => arg.includes('/workspace'))) {
+      const [program, ...args] = command.map((arg) =>
+        arg.replaceAll('/mnt/worktree', prepared.worktree).replaceAll('/workspace', candidate),
+      );
+      try {
+        const result = await exec(program!, args, {
+          env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
+        });
+        if (command.includes('clean')) {
+          cleaned = true;
+          if (corrupt === 'changed')
+            await writeFile(path.join(candidate, prepared.files[0]!.path), 'tampered');
+          if (corrupt === 'missing') await rm(path.join(candidate, prepared.files[0]!.path));
+        }
+        return { exitCode: 0, stdout: result.stdout, stderr: result.stderr };
+      } catch (error) {
+        const e = error as { code?: number; stdout?: string; stderr?: string };
+        return {
+          exitCode: typeof e.code === 'number' ? e.code : 1,
+          stdout: e.stdout ?? '',
+          stderr: e.stderr ?? 'Temp Git command failed',
+        };
+      }
+    }
+    return previous(id, command, options);
+  });
+  return { candidate, wasCleaned: () => cleaned };
+}
+
+async function checkedChildFixture() {
+  const f = await fixture();
+  codingTransport(f);
+  f.ctx.runtime.spawn = vi.fn(async function* () {
+    yield {
+      type: 'complete' as const,
+      timestamp: new Date().toISOString(),
+      result: 'Implementation complete',
+    };
+  });
+  f.ctx.validationEngine.validate = vi.fn(async (config) => ({
+    ...createPassingValidationResult(config.podId, config.attempt),
+    taskReview: {
+      status: 'pass' as const,
+      reasoning: 'Independent review passed',
+      issues: [],
+      model: 'claude-opus-4-6',
+      screenshots: [],
+      diff: 'fixture',
+    },
+  }));
+  const operation = await f.manager.createRecoveryFork(f.podId, await f.request(), f.actor);
+  await f.manager.processPod(operation.childPodId!);
+  const child = () => f.ctx.podRepo.getOrThrow(operation.childPodId!);
+  expect(child().status).toBe('validated');
+  return { ...f, child };
+}
+
+describe('actual recovery candidate bytes', () => {
+  it.each([
+    false,
+    'changed',
+    'missing',
+  ] as const)('reconstructs Git, protects exact extras, cleans ordinary debris and fences corrupt=%s before coding', async (corrupt) => {
+    const f = await fixture();
+    const names = [
+      'notes.txt',
+      '#literal!.txt',
+      '!negated.txt',
+      'brackets[ab]*?.txt',
+      ' leading and trailing ',
+      'nested/a[b]!.txt',
+    ];
+    for (const name of names) {
+      await mkdir(path.dirname(path.join(f.pod().worktreePath!, name)), { recursive: true });
+      await writeFile(path.join(f.pod().worktreePath!, name), `Selected ${name}`);
+    }
+    const view = await f.manager.inspectRecoveryFork(f.podId);
+    f.input.files = view.source!.files.map(({ path, version }) => ({ path, version }));
+    expect(f.input.files).toHaveLength(names.length);
+    const { candidate, wasCleaned } = await filesystemCodingTransport(f, corrupt);
+    await writeFile(path.join(candidate, 'old-image-file.txt'), 'Remove old image debris');
+    await writeFile(
+      path.join(candidate, 'bracketsaX.txt'),
+      'Literal exclusion must not protect a wildcard match',
+    );
+    const operation = await f.manager.createRecoveryFork(f.podId, await f.request(), f.actor);
+    await f.manager.processPod(operation.childPodId!);
+    expect(wasCleaned()).toBe(true);
+    await expect(readFile(path.join(candidate, 'old-image-file.txt'))).rejects.toThrow();
+    await expect(readFile(path.join(candidate, 'bracketsaX.txt'))).rejects.toThrow();
+    if (corrupt) {
+      expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+      const record = f.ctx.podRepo.recoveryForks!.parent(f.podId)!;
+      expect(record.facts.qualified?.evidence.outcome).not.toBe('qualified');
+      expect(record.facts.worker).toBeUndefined();
+    } else {
+      for (const name of names)
+        expect(await readFile(path.join(candidate, name), 'utf8')).toBe(`Selected ${name}`);
+      expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)!.facts.qualified?.evidence.outcome).toBe(
+        'qualified',
+      );
+      expect(f.ctx.runtime.spawn).toHaveBeenCalledOnce();
+      expect(await git(candidate, 'status', '--porcelain')).toBe('');
+    }
+  });
+  it('lets the first authenticated human approval enter the actual workflow after fresh source-bound checks', async () => {
+    const f = await fixture();
+    codingTransport(f);
+    f.ctx.runtime.spawn = vi.fn(async function* () {
+      yield {
+        type: 'complete' as const,
+        timestamp: new Date().toISOString(),
+        result: 'Implementation complete',
+      };
+    });
+    f.ctx.validationEngine.validate = vi.fn(async (config) => ({
+      ...createPassingValidationResult(config.podId, config.attempt),
+      taskReview: {
+        status: 'pass' as const,
+        reasoning: 'Independent fixture review passed',
+        issues: [],
+        model: 'claude-opus-4-6',
+        screenshots: [],
+        diff: 'fixture',
+      },
+    }));
+    const operation = await f.manager.createRecoveryFork(f.podId, await f.request(), f.actor);
+    await f.manager.processPod(operation.childPodId!);
+    const child = () => f.ctx.podRepo.getOrThrow(operation.childPodId!);
+    expect({ status: child().status, reason: child().failureReason }).toEqual({
+      status: 'validated',
+      reason: null,
+    });
+    expect(child().readinessReview?.approval).toBeFalsy();
+    expect(() => assertSourceDeliveryAllowed(f.ctx.db, child().id)).toThrow('human approval');
+    await expect(
+      f.manager.approveSession(child().id, { actor: { type: 'automation', id: 'auto' } }),
+    ).rejects.toThrow('human approval');
+    const publication = async (
+      cwd: string,
+      branch: string,
+      options?: import('../interfaces/worktree-manager.js').BranchPublicationOptions,
+    ) => {
+      const commitSha = await git(cwd, 'rev-parse', 'HEAD');
+      const treeSha = await git(cwd, 'rev-parse', 'HEAD^{tree}');
+      const receipt = {
+        branch,
+        repository: options?.expectedRepository ?? 'https://github.com/org/repo-a',
+        commitSha,
+        treeSha,
+        remoteRef: `refs/heads/${branch}`,
+        observedRemoteCommitSha: commitSha,
+        worktreeClean: true as const,
+        observedAt: new Date().toISOString(),
+      };
+      options?.onPrepared?.(receipt);
+      return receipt;
+    };
+    f.worktrees.pushBranch = vi.fn(publication);
+    f.worktrees.mergeBranch = vi.fn(async (config) =>
+      publication(config.worktreePath, config.targetBranch, config),
+    );
+    await f.manager.approveSession(child().id, { actor: f.actor });
+    expect(child().readinessReview?.approval?.actor).toEqual(f.actor);
+    expect(
+      f.ctx.db
+        .prepare("SELECT COUNT(*) AS n FROM recovery_fork_delivery_evidence WHERE kind='approval'")
+        .get(),
+    ).toEqual({ n: 1 });
+  });
+});
+
+describe('recovery approval custody', () => {
+  it.each([
+    'dirty-bytes',
+    'new-commit',
+    'checks',
+    'generation',
+    'readiness-only',
+  ] as const)('refuses %s without recording human authority or publishing', async (change) => {
+    const f = await checkedChildFixture();
+    const child = f.child();
+    if (change === 'dirty-bytes' || change === 'new-commit') {
+      await writeFile(path.join(child.worktreePath!, 'source.ts'), 'Changed after fresh checks');
+      if (change === 'new-commit') {
+        await git(child.worktreePath!, 'add', 'source.ts');
+        await git(
+          child.worktreePath!,
+          '-c',
+          'user.name=Fixture',
+          '-c',
+          'user.email=fixture@example.invalid',
+          'commit',
+          '-m',
+          'unchecked source',
+        );
+      }
+    }
+    if (change === 'checks')
+      f.ctx.podRepo.update(child.id, {
+        lastValidationResult: { ...child.lastValidationResult!, timestamp: 'changed-result' },
+      });
+    if (change === 'generation') f.ctx.podRepo.incrementLifecycleGeneration(child.id);
+    if (change === 'readiness-only') {
+      f.ctx.podRepo.update(child.id, {
+        readinessReview: {
+          ...child.readinessReview!,
+          approval: {
+            actor: f.actor,
+            approvedAt: 'old',
+            approvedBy: 'old',
+            scope: 'pod',
+            statusAtApproval: 'ready',
+          },
+        },
+      });
+      expect(() => assertSourceDeliveryAllowed(f.ctx.db, child.id)).toThrow('human approval');
+      // A mutable/inherited readiness projection is not publication authority.
+      const record = f.ctx.podRepo.recoveryForks!.child(child.id)!;
+      expect(() =>
+        f.ctx.podRepo.sourcePublications!.admit(child, {
+          repository: record.binding.source.repository,
+          branch: child.branch,
+          remoteRef: `refs/heads/${child.branch}`,
+          commitSha: record.facts.prepared!.head,
+          treeSha: record.facts.prepared!.tree,
+          worktreeClean: true,
+        }),
+      ).toThrow('human approval');
+      return;
+    }
+    await expect(f.manager.approveSession(child.id, { actor: f.actor })).rejects.toThrow();
+    expect(
+      f.ctx.db
+        .prepare("SELECT COUNT(*) AS n FROM recovery_fork_delivery_evidence WHERE kind='approval'")
+        .get(),
+    ).toEqual({ n: 0 });
+    expect(f.worktrees.pushBranch).not.toHaveBeenCalled();
+    expect(f.worktrees.mergeBranch).not.toHaveBeenCalled();
+  });
+  it('settles actual checks accounting and refuses changed source after the engine returns', async () => {
+    const f = await fixture();
+    codingTransport(f);
+    f.ctx.runtime.spawn = vi.fn(async function* () {
+      yield { type: 'complete' as const, timestamp: new Date().toISOString(), result: 'Complete' };
+    });
+    f.ctx.validationEngine.validate = vi.fn(async (config) => {
+      const child = f.ctx.podRepo.getOrThrow(config.podId);
+      await writeFile(path.join(child.worktreePath!, 'source.ts'), 'Changed inside checks');
+      return {
+        ...createPassingValidationResult(config.podId, config.attempt),
+        taskReview: {
+          status: 'pass' as const,
+          reasoning: 'Fixture review',
+          issues: [],
+          model: 'reviewer',
+          screenshots: [],
+          diff: 'fixture',
+        },
+      };
+    });
+    const result = await f.manager.createRecoveryFork(f.podId, await f.request(), f.actor);
+    await f.manager.processPod(result.childPodId!);
+    expect(f.ctx.podRepo.getOrThrow(result.childPodId!).lastValidationResult?.overall).toBe('fail');
+    expect(
+      f.ctx.db
+        .prepare("SELECT COUNT(*) AS n FROM recovery_fork_delivery_evidence WHERE kind='checks'")
+        .get(),
+    ).toEqual({ n: 0 });
+    expect(
+      f.ctx.db
+        .prepare("SELECT outcome FROM task_retry_attempts WHERE pod_id=? AND stage='validation'")
+        .get(result.childPodId),
+    ).toEqual({ outcome: 'nonretryable' });
+  });
+});
+
+describe('rejection proof source ownership', () => {
+  it('does not prove absence when another delivery ledger owns the selected task source', async () => {
+    const f = await fixture();
+    const request = await f.request();
+    const task = f.ctx.podRepo.taskExecutions!.snapshot(f.podId);
+    f.ctx.db
+      .prepare('INSERT INTO source_publication_intents VALUES(?,?,?,?,?,?,?)')
+      .run('publication-after-preview', 'identity', f.podId, task.taskId, 1, 'source', 'now');
+    try {
+      await f.manager.createRecoveryFork(f.podId, request, f.actor);
+      throw new Error('Source owner must block');
+    } catch (error) {
+      expect(error).not.toBeInstanceOf(RecoveryForkRejectedBeforeClaim);
+      expect(error).not.toHaveProperty('noOperationCreated');
+    }
+    expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
+  });
+});
+
+describe('final pre-claim source check', () => {
+  it('refuses replacement metadata introduced while read-only capability resolution was awaited', async () => {
+    const f = await fixture();
+    const request = await f.request();
+    const source = f.pod().worktreePath!;
+    f.launch.assertCurrentCapabilities = vi.fn(async () => {
+      await git(source, 'update-ref', `refs/replace/${request.sourceHead}`, request.sourceHead);
+    });
+    await expect(f.manager.createRecoveryFork(f.podId, request, f.actor)).rejects.toMatchObject({
+      code: 'RECOVERY_FORK_REJECTED_BEFORE_CLAIM',
+    });
+    expect(f.ctx.podRepo.recoveryForks!.parent(f.podId)).toBeNull();
+    expect(await git(source, 'for-each-ref', '--format=%(refname)', 'refs/replace/')).toContain(
+      request.sourceHead,
+    );
+    expect(f.cm.spawn).not.toHaveBeenCalled();
   });
 });

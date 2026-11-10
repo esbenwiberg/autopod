@@ -3,8 +3,10 @@ import type {
   RecoveryForkOperation,
   RecoveryForkPreview,
 } from '@autopod/shared';
+import { AutopodError } from '@autopod/shared';
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { RecoveryForkRejectedBeforeClaim } from '../../pods/recovery-fork-rejection.js';
 import { terminationAuth } from '../../test-utils/termination-reconciliation-helpers.js';
 import { errorHandler } from '../error-handler.js';
 import { authPlugin } from '../plugins/auth.js';
@@ -153,5 +155,58 @@ describe('recovery-fork human API', () => {
     const result = await f.app.inject({ method: 'POST', url: base, headers, payload });
     expect(result.statusCode).toBe(400);
     expect(f.manager.createRecoveryFork).not.toHaveBeenCalled();
+  });
+});
+
+describe('explicit pre-claim rejection proof route', () => {
+  it('serializes only exact coordinator proof with no-store', async () => {
+    const f = await fixture();
+    f.manager.createRecoveryFork.mockRejectedValue(
+      new RecoveryForkRejectedBeforeClaim('pod', request, 'RECOVERY_FORK_SELECTION_STALE'),
+    );
+    const result = await f.app.inject({ method: 'POST', url: base, headers, payload: request });
+    expect(result.statusCode).toBe(409);
+    expect(result.headers['cache-control']).toBe('no-store');
+    expect(result.json()).toEqual({
+      code: 'RECOVERY_FORK_REJECTED_BEFORE_CLAIM',
+      parentPodId: 'pod',
+      requestId: request.id,
+      expectedBinding: request.expectedBinding,
+      noOperationCreated: true,
+      error: expect.any(String),
+      reasonCode: 'RECOVERY_FORK_SELECTION_STALE',
+    });
+  });
+  it.each([
+    '404',
+    'unknown',
+    'generic',
+    'parent',
+    'request',
+    'binding',
+  ] as const)('never infers rejection proof for %s errors', async (kind) => {
+    const f = await fixture();
+    const error =
+      kind === '404'
+        ? new AutopodError('Missing', 'NOT_FOUND', 404)
+        : kind === 'unknown'
+          ? new Error('uncertain outcome')
+          : kind === 'generic'
+            ? new AutopodError('Rejected', 'RECOVERY_FORK_BLOCKED', 409)
+            : new RecoveryForkRejectedBeforeClaim(
+                kind === 'parent' ? 'other' : 'pod',
+                {
+                  ...request,
+                  id: kind === 'request' ? 'other' : request.id,
+                  expectedBinding: kind === 'binding' ? 'f'.repeat(64) : request.expectedBinding,
+                },
+                'RECOVERY_FORK_SELECTION_STALE',
+              );
+    f.manager.createRecoveryFork.mockRejectedValue(error);
+    const result = await f.app.inject({ method: 'POST', url: base, headers, payload: request });
+    expect(result.statusCode).toBeGreaterThanOrEqual(400);
+    expect(result.json()).not.toHaveProperty('noOperationCreated');
+    expect(result.json()).not.toHaveProperty('parentPodId');
+    expect(result.headers['cache-control']).toBe('no-store');
   });
 });

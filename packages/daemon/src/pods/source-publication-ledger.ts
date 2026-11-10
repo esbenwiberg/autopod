@@ -3,6 +3,7 @@ import { AutopodError, type Pod } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import type { BranchPublicationReceipt } from '../interfaces/worktree-manager.js';
 import { hasUnansweredDecision } from './decision-admission.js';
+import { createRecoveryForkRepository } from './recovery-fork-repository.js';
 import { assertSourceDeliveryAllowed } from './source-custody-guards.js';
 
 export type PublicationSource = Omit<
@@ -122,6 +123,7 @@ export function createSourcePublicationLedger(db: Database.Database): SourcePubl
     );
   }
   function identity(pod: Pod, source: PublicationSource): string {
+    createRecoveryForkRepository(db).assertPublicationSource(pod.id, source);
     requireEvidence(source.branch === pod.branch && Boolean(pod.worktreePath));
     return createHash('sha256')
       .update(

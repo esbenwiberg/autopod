@@ -39,6 +39,7 @@ import {
   recoveryGit,
 } from '../worktrees/recovery-fork-source.js';
 import { assertCheckpointRepository } from '../worktrees/retained-checkpoint-workspace.js';
+import { inspectSupplementalAdoptionGit } from '../worktrees/source-adoption-git.js';
 import {
   assertQualificationExecutionContextSupported,
   QUALIFICATION_SOURCE_PROBE,
@@ -51,6 +52,10 @@ import type { PodRepository } from './pod-repository.js';
 import { assertRepairableExecutionRequirements } from './prerequisite-blocker.js';
 import type { PreparedExecution } from './provisioning-ports.js';
 import { recoveryForkContext } from './recovery-fork-context.js';
+import {
+  RecoveryForkRejectedBeforeClaim,
+  RecoveryForkSelectionError,
+} from './recovery-fork-rejection.js';
 import {
   recoveryForkError as fail,
   type RecoveryForkBinding,
@@ -65,6 +70,13 @@ import {
   WORKER_RETRY_BACKOFFS_MS,
   workerBindingHash,
 } from './worker-retry-history.js';
+
+function configHasRecoveryPointer(config: EffectiveLaunchConfig | null) {
+  return (
+    config?.derivation?.kind === 'recovery-fork' ||
+    !!config?.work.handoffInstructions?.includes(RECOVERY_FORK_HANDOFF_PATH)
+  );
+}
 
 type Launch = NonNullable<PodManagerDependencies['launchConfiguration']>;
 export function createRecoveryFork(deps: {
@@ -130,6 +142,15 @@ export function createRecoveryFork(deps: {
   }
   function policy(podId: string, owned = false) {
     const pod = pods.getOrThrow(podId);
+    (
+      launch().assertRecoveryAdmissionReady ??
+      fail('Recovery admission readiness evidence unavailable')
+    )();
+    if (store.child(podId) || configHasRecoveryPointer(launch().read(podId)))
+      fail(
+        'Chained recovery handoffs are unsupported; retain the server-owned prior packet',
+        'RECOVERY_FORK_CHAIN_UNSUPPORTED',
+      );
     if (!pods.hasUnansweredDecision) fail('Durable human-decision evidence unavailable');
     if (!owned) store.assertOriginalAvailable(podId);
     const config = launch().read(podId) ?? fail('Original frozen task launch required');
@@ -167,6 +188,15 @@ export function createRecoveryFork(deps: {
       fail(
         'Only settled ordinary automatic tasks with frozen source, enabled checks and no decisions, waivers, sidecars, PIM or delivery are supported',
       );
+    if (
+      ![
+        pod.prFixAttempts,
+        pod.maxPrFixAttempts,
+        pod.validationAttempts,
+        pod.maxValidationAttempts,
+      ].every((value) => Number.isSafeInteger(value) && value >= 0)
+    )
+      fail('Unsupported original retry allowance; recovery cannot infer or reset counters');
     // The normal independent reviewer is frozen, not an inherited historical pass.
     if (
       config.ai.reviewer.mode !== 'independent' ||
@@ -301,7 +331,7 @@ export function createRecoveryFork(deps: {
       createdAt: record.createdAt,
     };
   }
-  async function inspect(podId: string): Promise<RecoveryForkInspection> {
+  async function inspect(podId: string, strict = false): Promise<RecoveryForkInspection> {
     const pod = (pods.getForHistory ?? pods.getOrThrow)(podId);
     const prior = store.parent(podId);
     const lineage = store.child(podId);
@@ -356,7 +386,7 @@ export function createRecoveryFork(deps: {
         ],
       };
     } catch (error) {
-      if (!(error instanceof AutopodError) || error.statusCode >= 500) throw error;
+      if (strict || !(error instanceof AutopodError) || error.statusCode >= 500) throw error;
       blockers.push(error.message);
     }
     return {
@@ -379,7 +409,7 @@ export function createRecoveryFork(deps: {
     };
   }
   async function resolve(podId: string, input: RecoveryForkInput) {
-    const view = await inspect(podId);
+    const view = await inspect(podId, true);
     if (!view.available || !view.source) fail(view.blockers[0] ?? 'Recovery unavailable');
     const selected = policy(podId);
     if (input.expectedGeneration !== view.generation || input.sourceHead !== view.source.head)
@@ -544,11 +574,82 @@ export function createRecoveryFork(deps: {
     const previous = replay();
     if (previous) return previous;
     const { id: _, expectedBinding: __, ...input } = request;
-    const { binding } = await resolve(podId, input);
-    const raced = replay();
-    if (raced) return raced;
-    if (request.expectedBinding !== configurationDigest({ binding, input }))
-      fail('Preview binding is stale; preview again', 'RECOVERY_FORK_SELECTION_STALE');
+    let binding: RecoveryForkBinding;
+    try {
+      ({ binding } = await resolve(podId, input));
+      // Resolve awaits policy/resource/profile reads. Recheck raw source and
+      // forbidden metadata after those waits, before the first claim attempt.
+      const finalFiles = await inspectRecoveryForkFiles(binding.worktreePath);
+      const finalSource = await inspectSupplementalAdoptionGit(
+        recoveryGit(binding.worktreePath),
+        binding.source.branch,
+      );
+      if (
+        finalSource.head !== binding.source.head ||
+        finalSource.tree !== binding.source.tree ||
+        input.files.some(
+          (file) =>
+            !finalFiles.files.some(
+              (current) => current.path === file.path && current.version === file.version,
+            ),
+        )
+      )
+        fail('Host source changed before claim', 'RECOVERY_FORK_SELECTION_STALE');
+      const raced = replay();
+      if (raced) return raced;
+      if (request.expectedBinding !== configurationDigest({ binding, input }))
+        fail('Preview binding is stale; preview again', 'RECOVERY_FORK_SELECTION_STALE');
+    } catch (error) {
+      // No claim has been attempted. Confirm custody again in the same synchronous
+      // turn; a racing owner, replay or conflicting request must remain retained.
+      const raced = replay();
+      if (raced) return raced;
+      store.assertOriginalAvailable(podId);
+      const pod = pods.getOrThrow(podId);
+      store.assertUnsharedSource(podId, pod.worktreePath ?? '');
+      store.assertTaskExecutionAllowed(podId);
+      if (
+        !pods.sourceAdoptions ||
+        !pods.retainedCheckpoints ||
+        !pods.retainedFinalizations ||
+        !pods.stalledRecoveries ||
+        !pods.deletionOwnership ||
+        !pods.approvalRewrites ||
+        store.child(podId)
+      )
+        throw error;
+      pods.sourceAdoptions.assertAvailable(podId);
+      pods.retainedCheckpoints.assertAvailable(podId);
+      pods.retainedFinalizations.assertAvailable(podId);
+      pods.stalledRecoveries.assertAvailable(podId);
+      pods.deletionOwnership.assertTaskAvailable(podId);
+      if (
+        pods.approvalRewrites.latest(pod) ||
+        pods.retainedCheckpoints.latest(podId) ||
+        pods.sourceAdoptions.hasCustody(podId)
+      )
+        throw error;
+      const task = pods.taskExecutions?.snapshot(podId);
+      if (!task) throw error;
+      store.assertNoDeliveryCustody(task.taskId);
+      // Only named, known policy/selection errors qualify. Unknown infrastructure,
+      // missing pods (404), auth and arbitrary AutopodErrors carry no proof.
+      if (
+        error instanceof RecoveryForkSelectionError &&
+        error.statusCode === 409 &&
+        [
+          'RECOVERY_FORK_BLOCKED',
+          'RECOVERY_FORK_SELECTION_STALE',
+          'RECOVERY_FORK_BUDGET_BLOCKED',
+          'RECOVERY_FORK_RETRY_BLOCKED',
+          'RECOVERY_FORK_CHAIN_UNSUPPORTED',
+          'CONFIG_CUTOVER_REQUIRED',
+          'SOURCE_ADOPTION_BLOCKED',
+        ].includes(error.code)
+      )
+        throw new RecoveryForkRejectedBeforeClaim(podId, request, error.code);
+      throw error;
+    }
     const atomically = pods.atomically ?? fail('Atomic recovery admission unavailable');
     const claim = atomically(() => {
       policy(podId);
@@ -565,6 +666,7 @@ export function createRecoveryFork(deps: {
         parentPodId: podId,
         history: `/pods/${podId}`,
         source: binding.source,
+        originalFrozenHandoffInstructions: binding.originalLaunch.work.handoffInstructions ?? null,
         quotedHistoricalContext: binding.context,
         humanContinuationInstructions: request.instructions,
         authority:
@@ -635,6 +737,8 @@ export function createRecoveryFork(deps: {
             recoveryWorktreePath: prepared.worktree,
             startCommitSha: binding.source.baseCommitSha,
             handoffContext: config.work.handoffInstructions ?? null,
+            prFixAttempts: original.prFixAttempts,
+            maxPrFixAttempts: original.maxPrFixAttempts,
             validationAttempts: original.validationAttempts,
             maxValidationAttempts: Math.min(
               original.maxValidationAttempts,

@@ -224,6 +224,7 @@ export async function retainedCheckpointFixture(
   repositoryContext?: Partial<
     Pick<import('@autopod/shared').RepositorySetup, 'buildEnv' | 'buildWorkDir'>
   >,
+  originalHandoff?: string,
 ) {
   const ctx = createTestContext();
   vi.mocked(ctx.profileStore.get).mockReturnValue({
@@ -337,18 +338,23 @@ export async function retainedCheckpointFixture(
             repositoryId: 'repo-a',
             profileId: 'profile',
             task,
-            ...(executionRequirements
+            ...(executionRequirements || originalHandoff
               ? {
                   work: {
-                    contract: {
-                      contractVersion: 1 as const,
-                      title: 'Retained typed launcher task',
-                      dependsOn: [],
-                      scenarios: [],
-                      requiredFacts: [],
-                      humanReview: [],
-                      executionRequirements,
-                    },
+                    ...(originalHandoff ? { handoffInstructions: originalHandoff } : {}),
+                    ...(executionRequirements
+                      ? {
+                          contract: {
+                            contractVersion: 1 as const,
+                            title: 'Retained typed launcher task',
+                            dependsOn: [],
+                            scenarios: [],
+                            requiredFacts: [],
+                            humanReview: [],
+                            executionRequirements,
+                          },
+                        }
+                      : {}),
                   },
                 }
               : {}),

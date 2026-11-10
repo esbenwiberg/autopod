@@ -1,22 +1,25 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import {
-  AutopodError,
-  type EffectiveLaunchConfig,
-  type EnvironmentQualificationEvidenceV1,
-  type RecoveryForkContext,
-  type RecoveryForkRequest,
-  type RecoveryForkSource,
+import type {
+  EffectiveLaunchConfig,
+  EnvironmentQualificationEvidenceV1,
+  OperatorActor,
+  RecoveryForkContext,
+  RecoveryForkRequest,
+  RecoveryForkSource,
+  ValidationResult,
 } from '@autopod/shared';
 import type Database from 'better-sqlite3';
 import { configurationDigest } from '../configuration/configuration-digest.js';
 import type { RetainedExecutionSelection } from '../configuration/retained-continuation-launch.js';
+import { type RecoveryCheckedSource, recoveryCheckHash } from './recovery-fork-checks.js';
+import { recoveryForkError } from './recovery-fork-rejection.js';
+
+export { recoveryForkError } from './recovery-fork-rejection.js';
+
 import { retainedPathIdentity } from './retained-path-identity.js';
 
 export const recoveryForkProcessEpoch = randomUUID();
-export function recoveryForkError(message: string, code = 'RECOVERY_FORK_BLOCKED'): never {
-  throw new AutopodError(message, code, 409);
-}
 export interface RecoveryForkBinding {
   version: 1;
   parentPodId: string;
@@ -206,11 +209,129 @@ export function createRecoveryForkRepository(db: Database.Database) {
       );
     return record;
   }
+  function checkIdentity(podId: string) {
+    const row = db
+      .prepare(`SELECT lifecycle_generation AS generation, container_id AS containerId,
+      worktree_path AS worktreePath, launch_config_digest AS launchDigest,
+      last_validation_result AS result FROM pods WHERE id=?`)
+      .get(podId) as
+      | (Omit<RecoveryCheckedSource, 'head' | 'tree'> & { result: string | null })
+      | undefined;
+    if (!row) recoveryForkError('Recovery candidate unavailable');
+    return { ...row!, result: row!.result ? (JSON.parse(row!.result) as ValidationResult) : null };
+  }
+  function checked(podId: string, requireApproval = false) {
+    const record = child(podId);
+    if (!record) return null;
+    const pod = checkIdentity(podId);
+    const hash = recoveryCheckHash(pod.result);
+    const row = db
+      .prepare(
+        "SELECT evidence FROM recovery_fork_delivery_evidence WHERE operation_id=? AND kind='checks' AND identity=?",
+      )
+      .get(record.id, hash) as { evidence: string } | undefined;
+    const proof = row ? (JSON.parse(row.evidence) as RecoveryCheckedSource) : null;
+    if (
+      !proof ||
+      !evidenceBound(record, podId) ||
+      record.facts.qualified?.evidence.outcome !== 'qualified' ||
+      record.facts.failed ||
+      record.facts.unknown ||
+      proof.generation !== pod.generation ||
+      proof.containerId !== pod.containerId ||
+      proof.worktreePath !== pod.worktreePath ||
+      proof.launchDigest !== pod.launchDigest ||
+      pod.result?.overall !== 'pass' ||
+      pod.result?.taskReview?.status !== 'pass'
+    )
+      recoveryForkError(
+        'Recovery requires exact qualified child and current source-bound fresh checks',
+        'RECOVERY_FORK_DELIVERY_HELD',
+      );
+    if (requireApproval) {
+      const approval = db
+        .prepare(
+          "SELECT evidence FROM recovery_fork_delivery_evidence WHERE operation_id=? AND kind='approval' AND identity=?",
+        )
+        .get(record.id, configurationDigest({ proof, hash })) as { evidence: string } | undefined;
+      const actor = approval ? JSON.parse(approval.evidence).actor : null;
+      if (actor?.type !== 'human' || !actor.userId?.trim())
+        recoveryForkError(
+          'Recovery requires separate source/check-bound human approval',
+          'RECOVERY_FORK_DELIVERY_HELD',
+        );
+    }
+    return proof!;
+  }
   return {
     get,
     parent,
     child,
     append,
+    checked,
+    recordChecks(
+      podId: string,
+      source: RecoveryCheckedSource,
+      result: ValidationResult,
+      admissionId: string,
+    ) {
+      const record = child(podId) ?? recoveryForkError('Recovery child unavailable');
+      const current = checkIdentity(podId);
+      const admission = db
+        .prepare(`SELECT 1 FROM task_retry_attempts WHERE id=? AND pod_id=?
+        AND generation=? AND stage='validation' AND started_at IS NOT NULL AND ended_at IS NOT NULL AND outcome='pass'`)
+        .get(admissionId, podId, current.generation);
+      if (
+        !db.inTransaction ||
+        !admission ||
+        !evidenceBound(record, podId) ||
+        !record.facts.worker ||
+        result.podId !== podId ||
+        result.overall !== 'pass' ||
+        result.taskReview?.status !== 'pass' ||
+        source.generation !== current.generation ||
+        source.containerId !== current.containerId ||
+        source.worktreePath !== current.worktreePath ||
+        source.launchDigest !== current.launchDigest
+      )
+        recoveryForkError('Recovery checks do not match qualified execution');
+      db.prepare(
+        "INSERT INTO recovery_fork_delivery_evidence VALUES(?,'checks',?,?,?) ON CONFLICT DO NOTHING",
+      ).run(
+        record.id,
+        recoveryCheckHash(result),
+        JSON.stringify({ ...source, admissionId }),
+        new Date().toISOString(),
+      );
+    },
+    approve(podId: string, actor: OperatorActor, source: { head: string; tree: string }) {
+      const record = child(podId) ?? recoveryForkError('Recovery child unavailable');
+      const proof = checked(podId)!;
+      if (
+        actor.type !== 'human' ||
+        !actor.userId.trim() ||
+        source.head !== proof.head ||
+        source.tree !== proof.tree
+      )
+        recoveryForkError('Recovery requires authenticated human approval of exact checked source');
+      const hash = recoveryCheckHash(checkIdentity(podId).result);
+      db.prepare(
+        "INSERT INTO recovery_fork_delivery_evidence VALUES(?,'approval',?,?,?) ON CONFLICT DO NOTHING",
+      ).run(
+        record.id,
+        configurationDigest({ proof, hash }),
+        JSON.stringify({ actor, proof, hash }),
+        new Date().toISOString(),
+      );
+    },
+    assertPublicationSource(podId: string, source: { commitSha: string; treeSha: string }) {
+      const proof = checked(podId, true);
+      if (proof && (proof.head !== source.commitSha || proof.tree !== source.treeSha))
+        recoveryForkError(
+          'Recovery publication differs from human-approved checked source',
+          'RECOVERY_FORK_DELIVERY_HELD',
+        );
+    },
     assertOriginalAvailable,
     assertWorkerAllowed,
     assertUnsharedSource(podId: string, location: string) {

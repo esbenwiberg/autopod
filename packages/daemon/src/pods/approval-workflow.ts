@@ -1,9 +1,13 @@
 import type { Pod } from '@autopod/shared';
 import { AutopodError } from '@autopod/shared';
-
+import {
+  inspectRecoveryForkFiles,
+  recoveryGit,
+  verifyRecoveryForkFiles,
+} from '../worktrees/recovery-fork-source.js';
+import { inspectSupplementalAdoptionGit } from '../worktrees/source-adoption-git.js';
 import type { ApprovalEntryCaptured, ApproveSessionOptions } from './approval-contracts.js';
 import { assertApprovalAllowed } from './approval-policy.js';
-
 import { validateTransition } from './state-machine.js';
 
 export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
@@ -82,8 +86,35 @@ export function createApprovalWorkflow(captured: ApprovalEntryCaptured) {
     validateTransition(pod.id, pod.status, 'approved');
     emitActivityStatus(podId, 'Preparing approval…');
     const readiness = await resolveApprovalReadiness(pod, { waitForAdvisory: true });
-    assertApprovalCurrent(pod);
+    const recovery = podRepo.recoveryForks?.child(podId);
+    assertApprovalCurrent(pod, { approvalEntry: !!recovery });
     const approvalReason = assertApprovalAllowed(podId, readiness, options);
+    if (recovery) {
+      if (actor.type !== 'human' || !actor.userId.trim() || options.automation)
+        throw new AutopodError(
+          'Recovery requires separate authenticated human approval',
+          'RECOVERY_FORK_DELIVERY_HELD',
+          409,
+        );
+      if (!pod.worktreePath)
+        throw new AutopodError('Recovery source unavailable', 'RECOVERY_FORK_DELIVERY_HELD', 409);
+      if (!recovery.facts.prepared)
+        throw new AutopodError(
+          'Recovery source inventory unavailable',
+          'RECOVERY_FORK_DELIVERY_HELD',
+          409,
+        );
+      await inspectRecoveryForkFiles(pod.worktreePath);
+      await verifyRecoveryForkFiles(pod.worktreePath, recovery.facts.prepared.files);
+      const source = await inspectSupplementalAdoptionGit(
+        recoveryGit(pod.worktreePath),
+        pod.branch,
+      );
+      assertApprovalCurrent(pod, { approvalEntry: true });
+      // Preparation may publish. Bind this human decision durably BEFORE entering it.
+      podRepo.recoveryForks!.approve(podId, actor, source);
+      persistReadinessApproval(podId, readiness, actor, approvalReason);
+    }
     const prepared = await prepareApprovalDelivery({
       podId,
       options,

@@ -67,8 +67,36 @@ export function safeForkFile(value: string) {
       )
   );
 }
+export function recoveryFileExclusions(files: ReadonlyArray<{ path: string }>) {
+  // Anchored literal paths. Escape whitespace (including trailing spaces), wildcard
+  // syntax and leading comment/negation characters; never import source config.
+  return (
+    files
+      .map(({ path }) => {
+        if (!safeForkFile(path) || /[\r\n\0]/.test(path))
+          recoveryForkError('Unsafe supplemental path');
+        return `/${path.replace(/[\\*?[\]#!\s]/g, '\\$&')}`;
+      })
+      .join('\n') + '\n'
+  );
+}
 export async function inspectRecoveryForkFiles(source: string) {
   const git = recoveryGit(source);
+  if ((await git(['for-each-ref', '--format=%(refname)', 'refs/replace/'])).stdout.trim())
+    recoveryForkError(
+      'Replacement refs are unsupported; original Git graph and metadata are retained',
+    );
+  const flags = (await git(['ls-files', '-v', '-z'])).stdout.split('\0');
+  const config = (await git(['config', '--null', '--list'])).stdout.split('\0');
+  if (
+    flags.some((entry) => /^[a-zS] /.test(entry)) ||
+    config.some((entry) =>
+      /^(?:core\.sparsecheckout|index\.sparse)\n(?:true|1|yes|on)$/i.test(entry),
+    )
+  )
+    recoveryForkError(
+      'Sparse/assume-unchanged/skip-worktree source cannot establish clean tracked bytes',
+    );
   const entries = (await git(['ls-tree', '-r', '-z', 'HEAD'])).stdout.split('\0').filter(Boolean);
   if (entries.length > 30000)
     recoveryForkError('Tracked source inventory exceeds supported bounds');
@@ -108,6 +136,27 @@ export async function inspectRecoveryForkFiles(source: string) {
       files.length -
       listing.files.filter((f) => tracked.has(f.path)).length,
   };
+}
+
+/** Read back exact selected context without following source links. */
+export async function verifyRecoveryForkFiles(
+  source: string,
+  files: ReadonlyArray<{ path: string; sha256: string; size: number }>,
+) {
+  const listing = parseRecoveryListing(
+    await runHostRecoveryReader(recoveryReaderArgs('list', source)),
+  );
+  for (const file of files) {
+    const current = listing.files.find((entry) => entry.path === file.path);
+    if (!current || current.size !== file.size)
+      recoveryForkError('Selected recovery context is missing or changed');
+    const content = parseRecoveryContent(
+      await runHostRecoveryReader(recoveryReaderArgs('read', source, file.path, current.version)),
+      file.path,
+    );
+    if (content.sha256 !== file.sha256 || content.size !== file.size)
+      recoveryForkError('Selected recovery context bytes changed');
+  }
 }
 
 /** Private host archive is retained separately; ONLY clone + explicitly chosen files enter child. */
@@ -161,7 +210,7 @@ export async function prepareRecoveryForkSource(
     // The selected untracked supplement is independently hashed, never misrepresented as Git code.
     await appendFile(
       path.join(prepared.bare, 'info', 'exclude'),
-      `\n/${file.path.replace(/[\\*?[\]!# ]/g, '\\$&')}\n`,
+      `\n${recoveryFileExclusions([file])}`,
     );
   }
   const packet = path.join(options.root, 'handoff.json');

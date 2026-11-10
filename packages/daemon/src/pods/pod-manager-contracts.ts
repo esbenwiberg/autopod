@@ -75,6 +75,7 @@ export interface PodManagerDependencies {
     executionSettings(config: EffectiveLaunchConfig): PodExecutionSettings;
     assertCurrentCapabilities(config: EffectiveLaunchConfig): Promise<void>;
     prepareEnvironment(config: EffectiveLaunchConfig): Promise<string>;
+    assertRecoveryAdmissionReady?(): void;
     availableRecoveryProfiles?(): Array<{ id: string; label: string }>;
     admitRecoveryFork?(
       operationId: string,

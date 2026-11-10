@@ -126,6 +126,29 @@ describe('composable daemon services', () => {
       const saved = components.snapshots.get(pod.id);
       if (!saved) throw new Error('Missing admitted snapshot');
       expect(saved.work).toEqual(work);
+      // Recovery admissions share the real components cutover gate, including a
+      // closure while current-capability policy is awaited.
+      ready = false;
+      expect(() => components.launchConfiguration.assertRecoveryAdmissionReady?.()).toThrow(
+        'cutover',
+      );
+      ready = true;
+      const recoveryGet = vi.spyOn(ctx.podRepo.recoveryForks!, 'get');
+      recoveryGet.mockReturnValue({ binding: { execution: saved } } as NonNullable<
+        ReturnType<typeof ctx.podRepo.recoveryForks.get>
+      >);
+      const createChild = vi.fn(() => 'must-not-create');
+      vi.mocked(fixture.services.assertCapabilities).mockImplementationOnce(async () => {
+        ready = false;
+      });
+      await expect(
+        components.launchConfiguration.admitRecoveryFork?.('test-operation', createChild, vi.fn()),
+      ).rejects.toMatchObject({ code: 'CONFIG_CUTOVER_REQUIRED' });
+      expect(createChild).not.toHaveBeenCalled();
+      expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM pods').get()).toEqual({ n: 1 });
+      recoveryGet.mockRestore();
+      ready = true;
+
       // Final derived work can arrive without resolveLaunch(). The composed current-capability
       // boundary must check it before external capability hooks or any worker preparation.
       for (const [executionRequirements, code] of [

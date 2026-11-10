@@ -4,6 +4,7 @@ import { sourceAdoptionError, sourceHash } from './source-adoption-identity.js';
 import type { SourceAdoptionStage, SourceAdoptionState } from './source-adoption-types.js';
 import { createSourceCommandJournal, type SourceCommandJournal } from './source-command-journal.js';
 import {
+  assertSourceApprovalEntryAllowed,
   assertSourceAvailable,
   assertSourceDeliveryAllowed,
   sourceOwnerScope,
@@ -121,6 +122,7 @@ export interface SourceAdoptionRepository {
   assertDeletable(podId: string): void;
   assertReleasable(containerId: string): void;
   assertDeliveryAllowed(podId: string): void;
+  assertApprovalEntryAllowed(podId: string): void;
 }
 export function createSourceAdoptionRepository(db: Database.Database): SourceAdoptionRepository {
   const commands = createSourceCommandJournal(db);
@@ -406,6 +408,9 @@ export function createSourceAdoptionRepository(db: Database.Database): SourceAdo
     },
     assertDeliveryAllowed(podId: string) {
       assertSourceDeliveryAllowed(db, podId);
+    },
+    assertApprovalEntryAllowed(podId: string) {
+      assertSourceApprovalEntryAllowed(db, podId);
     },
   };
 }

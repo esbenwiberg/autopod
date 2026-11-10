@@ -21,7 +21,7 @@ it('upgrades v245 and retains immutable recovery request, actor, child lineage a
     runMigrations(db, old, logger);
     expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 245 });
     runMigrations(db, migrations, logger);
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 246 });
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 247 });
     // No FK to deletable pods/history: the source parent and admitted child remain auditable.
     db.prepare('INSERT INTO recovery_forks VALUES(?,?,?,?,?,?,?,?,?)').run(
       'operation',
@@ -40,6 +40,20 @@ it('upgrades v245 and retains immutable recovery request, actor, child lineage a
       '{"childPodId":"retained-child"}',
       '2026-11-10',
     );
+    db.prepare('INSERT INTO recovery_fork_delivery_evidence VALUES(?,?,?,?,?)').run(
+      'operation',
+      'checks',
+      'result-hash',
+      '{"head":"checked-source"}',
+      'now',
+    );
+    db.prepare('INSERT INTO recovery_fork_delivery_evidence VALUES(?,?,?,?,?)').run(
+      'operation',
+      'approval',
+      'approval-hash',
+      '{"actor":{"type":"human","userId":"operator"}}',
+      'now',
+    );
     db.close();
     db = new Database(filename);
     runMigrations(db, migrations, logger);
@@ -49,10 +63,15 @@ it('upgrades v245 and retains immutable recovery request, actor, child lineage a
     expect(db.prepare('SELECT evidence FROM recovery_fork_facts').get()).toEqual({
       evidence: '{"childPodId":"retained-child"}',
     });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM recovery_fork_delivery_evidence').get()).toEqual({
+      n: 2,
+    });
     for (const sql of [
       'DELETE FROM recovery_forks',
       "UPDATE recovery_forks SET actor_id='other'",
       'DELETE FROM recovery_fork_facts',
+      'DELETE FROM recovery_fork_delivery_evidence',
+      "UPDATE recovery_fork_delivery_evidence SET evidence='{}'",
       "UPDATE recovery_fork_facts SET evidence='{}'",
     ])
       expect(() => db.exec(sql)).toThrow(/immutable|permanent|append-only/);
