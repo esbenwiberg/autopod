@@ -20,13 +20,13 @@
     "clean": "turbo run clean"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.3",
+    "@biomejs/biome": "2.6.6",
     "dependency-cruiser": "^17.0.0",
-    "esbuild": "0.28.1",
+    "esbuild": "0.28.2",
     "knip": "^6.39.0",
     "turbo": "^2.11.7",
     "typescript": "^5.7.3",
-    "vite": "^8.3.5",
+    "vite": "^8.3.6",
     "vitest": "^4.1.12"
   },
   "pnpm": {

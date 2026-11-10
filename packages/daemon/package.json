@@ -32,13 +32,13 @@
     "@autopod/shared": "workspace:*",
     "@autopod/validator": "workspace:*",
     "@azure/container-registry": "^1.1.0",
-    "@azure/identity": "^4.14.0",
-    "@fastify/cors": "^11.3.0",
+    "@azure/identity": "^4.14.1",
+    "@fastify/cors": "^11.4.1",
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/static": "^10.1.5",
     "@fastify/websocket": "^11.3.3",
     "@huggingface/transformers": "^4.3.0",
-    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@secretlint/core": "^12.2.0",
     "@secretlint/profiler": "12.2.0",
     "@secretlint/secretlint-rule-preset-recommend": "^12.2.0",
@@ -46,15 +46,15 @@
     "cron-parser": "^4.9.0",
     "dockerode": "^5.0.1",
     "dotenv": "^17.4.2",
-    "fastify": "^5.12.7",
-    "jose": "^6.2.3",
+    "fastify": "^5.12.8",
+    "jose": "^6.2.15",
     "pino": "^10.4.0",
     "slugify": "^1.6.9",
     "tar-stream": "^3.2.2",
     "zod": "^4.6.7"
   },
   "optionalDependencies": {
-    "playwright": "^1.61.1"
+    "playwright": "^1.65.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
