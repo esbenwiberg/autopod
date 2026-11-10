@@ -156,8 +156,8 @@ importers:
         specifier: 12.2.0
         version: 12.2.0
       '@secretlint/secretlint-rule-preset-recommend':
-        specifier: ^12.2.0
-        version: 12.3.1
+        specifier: ^13.1.0
+        version: 13.1.0
       better-sqlite3:
         specifier: ^11.7.0
         version: 11.10.0
@@ -1418,8 +1418,8 @@ packages:
   '@secretlint/profiler@12.3.1':
     resolution: {integrity: sha512-lztyqJPTfkY0Ze9P7vNs3zm7p2Wq1+4ilFXVrxin0sDyFVXpkt+0+vsKsmdx9yBHabxrLDZgxa7fIsfV721cLw==}
 
-  '@secretlint/secretlint-rule-preset-recommend@12.3.1':
-    resolution: {integrity: sha512-w9x9rIP1+qhV0k9k15aSIBo+6NrM4npAYIoNs7UmKIxuQSA6b91rhWpdMxgCv2/EQtym+gpuyN7rTSvG5wlYlw==}
+  '@secretlint/secretlint-rule-preset-recommend@13.1.0':
+    resolution: {integrity: sha512-dPnplMyjJYpVCJDNTjpUA8c/AfoHbWANJJJWKroK50DGGhAB4Oumzk+XinBMyMMAwgOsjU9CB9lUHXDvObMVCg==}
     engines: {node: '>=22.0.0'}
 
   '@secretlint/types@12.3.1':
@@ -4349,7 +4349,7 @@ snapshots:
 
   '@secretlint/profiler@12.3.1': {}
 
-  '@secretlint/secretlint-rule-preset-recommend@12.3.1': {}
+  '@secretlint/secretlint-rule-preset-recommend@13.1.0': {}
 
   '@secretlint/types@12.3.1': {}
 
