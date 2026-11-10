@@ -76,6 +76,35 @@ export interface WebSocketLike {
   onclose: ((event: { code?: number; reason?: string }) => void) | null;
 }
 
+/** Only fixed protocol vocabulary may cross the diagnostic boundary. Arbitrary
+ * reasons can contain credentials, URLs or terminal controls, even when short. */
+function safeExecCloseReason(reason: unknown): string {
+  if (typeof reason !== 'string' || reason.length > 64) return '[redacted]';
+  const normalized = reason.toLowerCase();
+  return [
+    '',
+    'normal closure',
+    'going away',
+    'idle timeout',
+    'service restart',
+    'internal error',
+  ].includes(normalized)
+    ? normalized
+    : '[redacted]';
+}
+
+interface ExecStreamTransport {
+  operation: 'execStream';
+  operationId: string;
+  sandboxId: string;
+  nativeExecId?: string;
+  startSent: boolean;
+  errorEvent: boolean;
+  closeCode?: number;
+  closeReason?: string;
+  closeSource?: 'local' | 'remote';
+}
+
 export type WebSocketFactory = (url: string, headers: Record<string, string>) => WebSocketLike;
 
 export interface AzureSandboxApiClientConfig {
@@ -583,6 +612,25 @@ export class AzureSandboxApiClient implements SandboxApiClient {
       );
     }
     const pidPath = `${scriptPath}.pid`;
+    const transport: ExecStreamTransport = {
+      operation: 'execStream',
+      operationId: randomUUID(),
+      sandboxId: /^[a-zA-Z0-9-]{1,80}$/.test(sandboxId) ? sandboxId : '[redacted]',
+      ...(identity ? { nativeExecId: identity.execId } : {}),
+      startSent: false,
+      errorEvent: false,
+    };
+    let transportFailure: AutopodError | null = null;
+    let localClose = false;
+    const transportError = (message: string) =>
+      Object.assign(
+        new AutopodError(
+          `Sandbox streaming exec ${message}; ${JSON.stringify(transport)}`,
+          'AZURE_SANDBOX_EXEC_STREAM',
+          502,
+        ),
+        { transport },
+      );
 
     const token = await this.getAzureToken(DATA_SCOPE, 'data access token', 'AZURE_AUTH');
     const wsUrl = `${this.dataEndpoint.replace(/^https:/, 'wss:')}${this.sandboxPath(
@@ -667,6 +715,7 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         return;
       }
       startSent = true;
+      transport.startSent = true;
       socket.send(
         JSON.stringify({
           type: 'start',
@@ -733,36 +782,38 @@ export class AzureSandboxApiClient implements SandboxApiClient {
           queue.push({ exitCode: frame.exitCode });
           socket.close();
         } else if (frame.type === 'error') {
-          fail(
-            new AutopodError(
-              `Sandbox streaming exec on ${sandboxId} reported an error: ${String(event.data)}`,
-              'AZURE_SANDBOX_EXEC_STREAM',
-              502,
-            ),
-          );
+          // Provider frames are untrusted: never interpolate their payload into errors/logs.
+          fail(transportError('reported an error'));
         }
-      } catch (err) {
-        fail(err instanceof Error ? err : new Error(String(err)));
+      } catch {
+        fail(transportError('received an invalid protocol frame'));
       }
       wake();
     };
     socket.onerror = () => {
-      fail(
-        new AutopodError(
-          `Sandbox streaming exec WebSocket failed for ${sandboxId}`,
-          'AZURE_SANDBOX_EXEC_STREAM',
-          502,
-        ),
-      );
+      transport.errorEvent = true;
+      transportFailure ??= transportError('WebSocket failed');
+      fail(transportFailure);
     };
-    socket.onclose = () => {
+    socket.onclose = (event) => {
+      if (closed) return;
+      if (
+        typeof event.code === 'number' &&
+        Number.isInteger(event.code) &&
+        event.code >= 1000 &&
+        event.code <= 4999
+      )
+        transport.closeCode = event.code;
+      transport.closeReason = safeExecCloseReason(event.reason);
+      transport.closeSource = localClose ? 'local' : 'remote';
       if (!exitReceived) {
-        fail(
-          new AutopodError(
-            `Sandbox streaming exec on ${sandboxId} closed before reporting an exit code`,
-            'AZURE_SANDBOX_EXEC_STREAM',
-            502,
-          ),
+        transportFailure ??= transportError('closed before reporting an exit code');
+        // onerror commonly precedes onclose. Retain close details on the first error too.
+        transportFailure.message = transportError('closed before reporting an exit code').message;
+        fail(transportFailure);
+        this.logger.warn(
+          { transport: { ...transport } },
+          'Sandbox exec stream closed without exit evidence',
         );
       }
       closed = true;
@@ -826,12 +877,36 @@ export class AzureSandboxApiClient implements SandboxApiClient {
         throw timeoutFailure;
       }
       if (!startSent || !identity || !failure || exitReceived) throw error;
+      if (transportFailure) {
+        // This root-owned receipt names the exact exec ID. Read it before the
+        // existing stop path: a lost delivery may follow an already observed exit.
+        // Ordinary wrappers have only PID/start identity, never exit evidence.
+        let observedExit: number | null = null;
+        try {
+          observedExit = sandboxGoalExit(
+            identity,
+            (await this.readFile(sandboxId, identity.pidPath)).toString('utf8'),
+          );
+        } catch {
+          // Missing, malformed and rebound receipts cannot establish termination.
+        }
+        if (observedExit !== null) {
+          yield { exitCode: observedExit };
+          return;
+        }
+      }
       // Losing the RPC transport must stop this owned process. Only its private
       // supervisor receipt can turn transport uncertainty into an observed exit.
-      const exitCode = await this.terminateRecordedExec(identity);
-      yield { exitCode };
+      try {
+        const exitCode = await this.terminateRecordedExec(identity);
+        yield { exitCode };
+      } catch (terminationError) {
+        if (transportFailure) throw transportFailure;
+        throw terminationError;
+      }
     } finally {
       if (timeoutTimer) clearTimeout(timeoutTimer);
+      localClose = true;
       socket.close();
     }
   }
