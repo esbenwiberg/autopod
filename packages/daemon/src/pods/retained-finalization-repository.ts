@@ -4,6 +4,10 @@ import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { AutopodError, type Pod, type RetainedFinalizationReceipt } from '@autopod/shared';
 import type Database from 'better-sqlite3';
+import {
+  assertRecoveryForkPathAvailable,
+  assertRecoveryForkResourceAvailable,
+} from './recovery-fork-repository.js';
 import { retainedPathIdentity } from './retained-path-identity.js';
 import { assertStalledRecoveryPathAvailable } from './stalled-worker-recovery-repository.js';
 
@@ -66,6 +70,7 @@ export function ownsRetainedFinalizationStop(
   );
 }
 export function assertFinalizationResourceAvailable(db: Database.Database, id: string) {
+  assertRecoveryForkResourceAvailable(db, id);
   if (db.prepare('SELECT 1 FROM retained_finalization_resources WHERE container_id=?').get(id))
     finalizationError(
       'Finalization retains this exact resource; no mutation or release is authorized.',
@@ -103,6 +108,7 @@ export function finalizationSourceLocations(locations: string[]): string[] {
   return [...held].sort();
 }
 export function assertFinalizationPathAvailable(db: Database.Database, location: string): void {
+  assertRecoveryForkPathAvailable(db, location);
   assertStalledRecoveryPathAvailable(db, location);
   const identities = (value: string) => [path.resolve(value), retainedPathIdentity(value)];
   const retained = db

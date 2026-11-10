@@ -29,6 +29,7 @@ const cp = require('node:child_process');
 const fs = require('node:fs'); const path = require('node:path'); const crypto = require('node:crypto');
 const root='/workspace'; const rootReal=fs.realpathSync(root);
 const base = process.argv[1];
+const recovery = process.argv[2] ? JSON.parse(process.argv[2]) : null;
 if(!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(base)) process.exit(2);
 const env = {...process.env};
 for(const key of Object.keys(env)) if(key.startsWith('GIT_')) delete env[key];
@@ -76,6 +77,20 @@ for(const entry of entries) {
   if(digest!==oid) { trackedMatch=false; break; }
 }
 const clean=trackedMatch&&git(['status','--porcelain=v1','--untracked-files=all']).trim()==='';
+if(recovery) {
+  const verify = (root, relative, expected, size) => {
+    if(typeof relative!=='string'||relative.startsWith('/')||relative.split('/').some(p=>!p||p==='.'||p==='..')) process.exit(2);
+    let parent=root;
+    for(const part of relative.split('/').slice(0,-1)) { parent=path.join(parent,part); const s=fs.lstatSync(parent); if(!s.isDirectory()||s.isSymbolicLink()) process.exit(2); }
+    const name=path.join(root,relative); const fd=fs.openSync(name,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
+    try { const s=fs.fstatSync(fd); if(!s.isFile()||s.nlink!==1||s.size>5*1024*1024||(size!==undefined&&s.size!==size)) process.exit(2);
+      const bytes=fs.readFileSync(fd); if(crypto.createHash('sha256').update(bytes).digest('hex')!==expected) process.exit(2);
+    } finally {fs.closeSync(fd);}
+  };
+  if(!Array.isArray(recovery.files)||recovery.files.length>100) process.exit(2);
+  for(const file of recovery.files) verify(root,file.path,file.sha256,file.size);
+  verify('/autopod/recovery','handoff.json',recovery.packetHash);
+}
 git(['merge-base','--is-ancestor',base,'HEAD']);
 process.stdout.write(JSON.stringify({platform:process.platform+'/'+({x64:'amd64',arm64:'arm64'}[process.arch]||process.arch),
   uid:process.getuid(),cwd:process.cwd(),head,tree,clean,baseAncestor:true}));
@@ -133,6 +148,11 @@ export function qualificationExecutionContextHash(
 }
 
 export interface EnvironmentQualificationInput {
+  /** Server-owned fork evidence, validated against its durable operation by assertCurrent. */
+  recoveryFork?: {
+    files: Array<{ path: string; sha256: string; size: number }>;
+    packetHash: string;
+  };
   binding: EnvironmentQualificationBindingV1;
   pod: Pod;
   profile: PodExecutionSettings;
@@ -209,8 +229,12 @@ export async function qualifyExecutionEnvironment(
   // Every awaited operation observes the SAME total deadline; timeout cannot dispatch later probes.
   const bounded = <T>(operation: () => Promise<T>) => Promise.race([checked(operation), deadline]);
   try {
-    const requirements = pod.contract?.executionRequirements;
-    assertRepairableExecutionRequirements(requirements);
+    const declaredRequirements = pod.contract?.executionRequirements;
+    // Ordinary recovery tasks still qualify runtime/image/resources/source/context.
+    // Missing custom launcher declarations grant no extra operation capability.
+    if (!input.recoveryFork || declaredRequirements !== undefined)
+      assertRepairableExecutionRequirements(declaredRequirements);
+    const requirements = declaredRequirements ?? { version: 2 as const, executables: [] };
     assertLaunchRequirements(launchConfig);
     assertQualificationExecutionContextSupported(profile, probeNodePath);
     const execution = context(profile, probeNodePath);
@@ -223,13 +247,20 @@ export async function qualifyExecutionEnvironment(
       configurationDigest(launchConfig.work.contract?.executionRequirements ?? null) !==
         binding.requirementsHash ||
       profile.containerMemoryGb !== launchConfig.resolvedExecution.main.memoryGb ||
-      binding.candidateGeneration !== binding.originalGeneration + 1 ||
+      (binding.recoveryFork
+        ? !input.recoveryFork ||
+          launchConfig.derivation?.kind !== 'recovery-fork' ||
+          launchConfig.derivation.podId !== binding.recoveryFork.parentPodId ||
+          binding.recoveryFork.filesHash !== configurationDigest(input.recoveryFork.files) ||
+          binding.recoveryFork.packetHash !== input.recoveryFork.packetHash
+        : input.recoveryFork !== undefined ||
+          binding.candidateGeneration !== binding.originalGeneration + 1) ||
       pod.lifecycleGeneration !== binding.candidateGeneration ||
       pod.id !== binding.podId ||
       pod.containerId !== binding.containerId ||
       pod.executionTarget !== 'local' ||
       pod.launchConfigDigest !== binding.replacementLaunchDigest ||
-      configurationDigest(requirements) !== binding.requirementsHash ||
+      configurationDigest(declaredRequirements ?? null) !== binding.requirementsHash ||
       qualificationExecutionContextHash(profile, probeNodePath) !== binding.executionContextHash ||
       (requirements.platform && requirements.platform !== binding.platform)
     ) {
@@ -362,7 +393,13 @@ export async function qualifyExecutionEnvironment(
           const result = await bounded(() =>
             cm.execInContainer(
               binding.containerId,
-              [probeNodePath, '-e', QUALIFICATION_SOURCE_PROBE, binding.source.baseCommitSha],
+              [
+                probeNodePath,
+                '-e',
+                QUALIFICATION_SOURCE_PROBE,
+                binding.source.baseCommitSha,
+                ...(input.recoveryFork ? [JSON.stringify(input.recoveryFork)] : []),
+              ],
               {
                 cwd: execution.cwd,
                 env: execution.env,

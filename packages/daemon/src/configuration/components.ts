@@ -301,12 +301,23 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
     },
   });
   const launchConfiguration: NonNullable<PodManagerDependencies['launchConfiguration']> = {
+    availableRecoveryProfiles: () =>
+      store.list('profile').map((p) => ({ id: p.id, label: p.name })),
+    async admitRecoveryFork(operationId, createPod, initializePod) {
+      const operation = options.pods.recoveryForks?.get(operationId);
+      if (!operation)
+        configurationError('Recovery operation unavailable', 'CONFIG_SOURCE_MISSING', 409);
+      await assertCurrent(operation.binding.execution);
+      return atomicPodChange(options.pods, () =>
+        snapshots.admitRecoveryFork(operationId, createPod, initializePod),
+      );
+    },
     goals,
     read: snapshots.get,
     executionSettings: (config) =>
       resolveLaunchExecutionSettings(config, { image: config.resolvedEnvironment.pinnedBase }),
     assertCurrentCapabilities: assertCurrent,
-    async previewRetainedExecution(podId, profileId) {
+    async previewRetainedExecution(podId, profileId, previewOptions) {
       const parent = snapshots.get(podId);
       if (!parent?.repository)
         configurationError('Original task launch unavailable', 'CONFIG_SOURCE_MISSING', 409);
@@ -317,7 +328,13 @@ export function createConfigurationComponents(options: ConfigurationComponentsOp
           profileId,
           task: parent.task,
         },
-        resolution,
+        previewOptions?.readOnly
+          ? {
+              ...resolution,
+              resolveEnvironment: (environment, target, clis) =>
+                options.images.resolveEnvironment(environment, target, clis, { allowPull: false }),
+            }
+          : resolution,
       );
       if (
         template.requiredSidecarIds.length ||

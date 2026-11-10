@@ -201,6 +201,25 @@ describe('ImageBuilder', () => {
     expect(deps.mockDocker.buildImage).not.toHaveBeenCalled();
     expect(deps.mockAcr.push).not.toHaveBeenCalled();
   });
+  it('never pulls a missing base during a recovery read-only environment preview', async () => {
+    const deps = createMockDeps();
+    vi.mocked(deps.mockDocker.getImage('base').inspect).mockRejectedValue({ statusCode: 404 });
+    const builder = new ImageBuilder({
+      docker: deps.mockDocker,
+      acr: deps.mockAcr,
+      profileStore: deps.mockProfileStore,
+    });
+    await expect(
+      builder.resolveEnvironment(
+        environmentPresetSchema.parse({ template: 'node22' }),
+        'local',
+        [],
+        { allowPull: false },
+      ),
+    ).rejects.toThrow('not present locally');
+    expect(deps.mockAcr.pullPinned).not.toHaveBeenCalled();
+    expect(deps.mockDocker.buildImage).not.toHaveBeenCalled();
+  });
 
   it.each([
     ['no registry is configured', false],

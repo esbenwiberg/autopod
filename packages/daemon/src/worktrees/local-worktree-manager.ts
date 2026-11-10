@@ -50,6 +50,7 @@ import {
   applyPinnedAdoption,
   inspectAdoptionGit,
   inspectPreservationGit,
+  inspectSupplementalAdoptionGit,
   preparePinnedAdoption,
 } from './source-adoption-git.js';
 
@@ -127,6 +128,7 @@ const SOURCE_GIT_ENV: Record<string, string> = {
   GIT_NO_REPLACE_OBJECTS: '1',
   GIT_GRAFT_FILE: '/dev/null',
   GIT_OPTIONAL_LOCKS: '0',
+  GIT_NO_LAZY_FETCH: '1',
 };
 
 const GIT_NO_AMBIENT_CREDS_ENV: Record<string, string> = {
@@ -599,8 +601,15 @@ export class LocalWorktreeManager implements WorktreeManager {
     };
   }
 
-  async inspectSourceAdoption(worktreePath: string, branch: string) {
-    const source = await inspectAdoptionGit(
+  async inspectSourceAdoption(
+    worktreePath: string,
+    branch: string,
+    options?: { allowSupplementalFiles: true },
+  ) {
+    const inspect = options?.allowSupplementalFiles
+      ? inspectSupplementalAdoptionGit
+      : inspectAdoptionGit;
+    const source = await inspect(
       (args) => git(args, { cwd: worktreePath, timeout: 30_000, env: SOURCE_GIT_ENV }),
       branch,
     );

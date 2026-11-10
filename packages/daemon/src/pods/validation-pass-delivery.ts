@@ -105,7 +105,8 @@ export function createValidationPassDelivery(captured: ValidationPassCaptured) {
       rewriteError(
         'Candidate checks are already settled or not selected; validation cannot publish source or consume a prior approval.',
       );
-    const deliveryHeld = checksOnly || Boolean(rewrite);
+    const deliveryHeld =
+      checksOnly || Boolean(rewrite) || Boolean(podRepo.recoveryForks?.child(podId));
     const passDefaultBranch = profile.defaultBranch ?? 'main';
     let prUrl: string | null = s2.prUrl ?? null;
     const prManager = !deliveryHeld && prManagerFactory ? prManagerFactory(profile) : null;

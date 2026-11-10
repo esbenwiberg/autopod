@@ -213,6 +213,10 @@ export const environmentQualificationBindingV1Schema = z
     expectedImage: repairImageIdentityV1Schema,
     platform: z.enum(['linux/amd64', 'linux/arm64']),
     executionContextHash: hash,
+    recoveryFork: z
+      .object({ parentPodId: id, contextHash: hash, packetHash: hash, filesHash: hash })
+      .strict()
+      .optional(),
   })
   .strict();
 export const environmentQualificationOutcomeSchema = z.enum([

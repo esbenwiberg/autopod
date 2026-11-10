@@ -46,6 +46,10 @@ export function retainedCheckpointNetworkIdentities(db: Database.Database): Set<
       (row) => row.pod_id,
     ),
   );
+  for (const row of db.prepare('SELECT parent_pod_id AS podId FROM recovery_forks').all() as {
+    podId: string;
+  }[])
+    identities.add(row.podId);
   for (const row of rows) {
     identities.add(row.podId);
     if (row.evidence)

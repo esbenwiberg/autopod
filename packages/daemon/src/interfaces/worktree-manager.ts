@@ -258,6 +258,7 @@ export interface WorktreeManager {
   inspectSourceAdoption?(
     worktreePath: string,
     branch: string,
+    options?: { allowSupplementalFiles: true },
   ): Promise<{ branch: string; commitSha: string; treeSha: string; worktreeClean: boolean }>;
   prepareSourceAdoption?(
     config: PrepareSourceAdoption,

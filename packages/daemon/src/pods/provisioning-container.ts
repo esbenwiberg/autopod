@@ -423,7 +423,11 @@ export function createProvisioningContainer(
     );
     const seriesArtifactsHostPath = await ensureSeriesArtifactsDir(pod, logger);
 
-    if (podRepo.retainedCoding?.isOwner(podId) && !/^sha256:[a-f0-9]{64}$/.test(spawnImage))
+    const recoveryFork = podRepo.recoveryForks?.child(podId);
+    if (
+      (recoveryFork || podRepo.retainedCoding?.isOwner(podId)) &&
+      !/^sha256:[a-f0-9]{64}$/.test(spawnImage)
+    )
       throw new AutopodError(
         'Repair requires a prepared immutable Docker image ID',
         'REPAIR_IMAGE_UNVERIFIED',
@@ -439,6 +443,15 @@ export function createProvisioningContainer(
         env: containerEnv,
         ports: [{ container: CONTAINER_APP_PORT, host: hostPort }],
         volumes: [
+          ...(recoveryFork?.facts.prepared
+            ? [
+                {
+                  host: recoveryFork.facts.prepared.packet,
+                  container: '/autopod/recovery/handoff.json',
+                  readOnly: true,
+                },
+              ]
+            : []),
           ...(worktreePath ? [{ host: worktreePath, container: '/mnt/worktree' }] : []),
           ...(bareRepoPath ? [{ host: bareRepoPath, container: bareRepoPath }] : []),
           ...(specContextHostPath
@@ -477,6 +490,14 @@ export function createProvisioningContainer(
         onProgress: emitStatus,
       });
       const coding = podRepo.retainedCoding?.latest(podId);
+      if (recoveryFork) {
+        podRepo.recoveryForks!.append(recoveryFork.id, 'candidate', {
+          containerId,
+          generation: pod.lifecycleGeneration,
+          expectedImage: spawnImage,
+        });
+        podRepo.update(podId, { containerId });
+      }
       if (coding && podRepo.retainedCoding?.isOwner(podId)) {
         // Retain the returned identity before any further awaited preparation.
         podRepo.retainedCoding.append(coding.id, 'candidate', {

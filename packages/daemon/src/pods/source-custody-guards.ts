@@ -2,6 +2,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type Database from 'better-sqlite3';
 import { createApprovalSourceRewriteRepository } from './approval-source-rewrite-repository.js';
 import {
+  assertRecoveryForkResourceAvailable,
+  createRecoveryForkRepository,
+} from './recovery-fork-repository.js';
+import {
   checkpointHash,
   createRetainedCheckpointRepository,
 } from './retained-checkpoint-repository.js';
@@ -10,6 +14,7 @@ import { assertStalledRecoveryAvailable } from './stalled-worker-recovery-reposi
 import { assertValidationResourceReleasable } from './validation-execution-evidence.js';
 
 export function assertSourceResourceReleasable(db: Database.Database, containerId: string): void {
+  assertRecoveryForkResourceAvailable(db, containerId);
   assertValidationResourceReleasable(db, containerId);
   if (
     db
@@ -37,7 +42,10 @@ export function assertSourceAvailable(
   db: Database.Database,
   podId: string,
   owner = sourceOwnerScope(db).getStore(),
+  initialInsert = false,
 ): void {
+  createRecoveryForkRepository(db).assertOriginalAvailable(podId);
+  if (!initialInsert) createRecoveryForkRepository(db).assertTaskExecutionAllowed(podId);
   assertStalledRecoveryAvailable(db, podId, true);
   createRetainedCheckpointRepository(db).assertAvailable(podId);
   const blocked = db
@@ -72,7 +80,51 @@ export function assertSourceAvailable(
     );
 }
 /** Delivery/release is NEVER implied by the private mutation capability or passing checks. */
-export function assertSourceDeliveryAllowed(db: Database.Database, podId: string): void {
+export function assertSourceDeliveryAllowed(
+  db: Database.Database,
+  podId: string,
+  initialInsert = false,
+): void {
+  createRecoveryForkRepository(db).assertOriginalAvailable(podId);
+  if (!initialInsert) createRecoveryForkRepository(db).assertTaskExecutionAllowed(podId);
+  const fork = createRecoveryForkRepository(db).child(podId);
+  if (fork) {
+    const row = db
+      .prepare(
+        'SELECT skip_validation,validation_waiver,validation_overrides,last_validation_result,readiness_review FROM pods WHERE id=?',
+      )
+      .get(podId) as
+      | {
+          skip_validation: number;
+          validation_waiver: string | null;
+          validation_overrides: string | null;
+          last_validation_result: string | null;
+          readiness_review: string | null;
+        }
+      | undefined;
+    const result = row?.last_validation_result ? JSON.parse(row.last_validation_result) : null;
+    const approval = row?.readiness_review ? JSON.parse(row.readiness_review).approval : null;
+    const settled =
+      fork.facts.worker &&
+      db
+        .prepare(
+          "SELECT 1 FROM retained_task_agent_runs WHERE id=? AND ended_at IS NOT NULL AND outcome='completed' AND failure_category IS NOT 'execution_termination_unverified'",
+        )
+        .get(fork.facts.worker.runId);
+    if (
+      !settled ||
+      row?.skip_validation ||
+      row?.validation_waiver ||
+      (row?.validation_overrides && JSON.parse(row.validation_overrides).length) ||
+      result?.overall !== 'pass' ||
+      approval?.actor?.type !== 'human' ||
+      result?.taskReview?.status !== 'pass'
+    )
+      sourceAdoptionError(
+        'Recovery fork requires settled coding, fresh enabled checks, independent review and separate human approval; waivers or inherited passes cannot authorize delivery.',
+        'RECOVERY_FORK_DELIVERY_HELD',
+      );
+  }
   const recovery = createRetainedCheckpointRepository(db).latest(podId);
   if (recovery?.binding.continuation) {
     const current = db

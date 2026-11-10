@@ -81,6 +81,32 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     terminationReconciliation,
   } = captured;
   return {
+    inspectRecoveryFork(podId: string) {
+      return (captured.recoveryFork ?? checkpointError('Recovery fork unavailable')).inspect(podId);
+    },
+    previewRecoveryFork(podId: string, input: import('@autopod/shared').RecoveryForkInput) {
+      return (captured.recoveryFork ?? checkpointError('Recovery fork unavailable')).preview(
+        podId,
+        input,
+      );
+    },
+    createRecoveryFork(
+      podId: string,
+      input: import('@autopod/shared').RecoveryForkRequest,
+      actor: OperatorActor,
+    ) {
+      return (captured.recoveryFork ?? checkpointError('Recovery fork unavailable')).create(
+        podId,
+        input,
+        actor,
+      );
+    },
+    getRecoveryFork(podId: string, requestId: string) {
+      return (captured.recoveryFork ?? checkpointError('Recovery fork unavailable')).get(
+        podId,
+        requestId,
+      );
+    },
     inspectStalledWorkerRecovery(podId: string) {
       return (
         captured.stalledWorkerRecovery ?? checkpointError('Stalled recovery unavailable')
@@ -379,7 +405,11 @@ export function createPodManagerFacade(captured: PodFacadeOwners) {
     },
     async processPod(podId: string): Promise<void> {
       const run = () => processWorkflow.processPod.call(this, podId);
-      return captured.checkpointRecovery ? captured.checkpointRecovery.process(podId, run) : run();
+      const checkpointRun = () =>
+        captured.checkpointRecovery ? captured.checkpointRecovery.process(podId, run) : run();
+      return captured.recoveryFork
+        ? captured.recoveryFork.process(podId, checkpointRun)
+        : checkpointRun();
     },
 
     async consumeAgentEvents(
