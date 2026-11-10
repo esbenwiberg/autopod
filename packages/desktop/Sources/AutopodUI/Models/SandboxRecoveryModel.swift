@@ -41,6 +41,11 @@ import Observation
     (10...4000).contains(reason.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count)
   }
 
+  func canReviewStart(_ resource: SandboxRecoveryResource) -> Bool {
+    pending == nil && recordedPending == nil && !invalidJournal && error == nil
+      && SandboxRecoveryControlPolicy.canReviewStart(resource, busy: busy)
+  }
+
   func canStart(_ resource: SandboxRecoveryResource) -> Bool {
     pending == nil && recordedPending == nil && !invalidJournal && error == nil && validReason
       && SandboxRecoveryControlPolicy.canStart(resource, reason: reason, busy: busy)
@@ -59,6 +64,8 @@ import Observation
     return SandboxRecoveryControlPolicy.canAbandon(resource, currentUserId: snapshot.currentUserId,
       reason: pendingAbandons[resource.resourceKey]?.reason ?? reason, acceptsLoss: acknowledgeLoss, busy: busy)
   }
+
+  var canDiscardRejectedStart: Bool { canDiscardRejected && rejectedRequest?.action == "start" }
 
   var canDiscardRejected: Bool {
     guard !busy, !invalidJournal, let rejectedRequest, let snapshot else { return false }

@@ -1,4 +1,5 @@
 import AutopodClient
+import CryptoKit
 import AutopodUI
 import Foundation
 import Observation
@@ -107,11 +108,57 @@ import Observation
         ? "Sample task history remains visible. No real pod, files or cloud resource was deleted." : NSNull()])
   }
 
+  private func fileData(_ source: String) -> [String: Data] {
+    if source == "saved-workspace" {
+      return ["RECOVERY.md": Data("# Sample saved copy\nThis is example data, not an actual task checkpoint. Other files may remain in the original environment.\n".utf8),
+        "reports/test-results.txt": Data("Sample report: validation did not pass. No actual checks were run by this preview.\n".utf8)]
+    }
+    return ["src/container-cleanup.ts": Data("// Sample original file, not actual task code.\nexport const sample = 'retained environment';\n".utf8),
+      "notes.bin": Data([0, 255, 128, 10, 3]),
+      "unsaved-notes.txt": Data("Sample notes present only in the original fixture. Saving a copy does not release custody or delete anything.\n".utf8)]
+  }
+  private func fileHash(_ bytes: Data) -> String { SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined() }
+  private func fileBinding(_ id: String, epoch: Int) -> String { fileHash(Data("\(session):\(epoch):\(id)".utf8)) }
+  private func inspectFiles(_ id: String, epoch: Int, includeOriginal: Bool = false) throws -> RecoveryFilesSnapshot {
+    try requireCurrent(epoch)
+    var sources: [[String: Any]] = []
+    if id == podId {
+      for source in ["saved-workspace", "original"] {
+        let saved = source == "saved-workspace"
+        let available = saved || (scenario == .retained && providerState == "running")
+        let status = available ? (saved || includeOriginal ? "available" : "ready") : scenario == .retained && providerState == "stopped" ? "stopped" : "blocked"
+        let files: [[String: Any]] = available && (saved || includeOriginal) ? fileData(source).sorted { $0.key < $1.key }.map {
+          ["path": $0.key, "size": $0.value.count, "modified": 1794304800000.0, "version": fileHash($0.value)]
+        } : []
+        sources.append(["id": source, "kind": saved ? "saved" : "original", "label": saved ? "Sample saved host copy" : "Sample original environment",
+          "binding": fileBinding(source, epoch: epoch), "sandboxId": saved ? NSNull() : sandboxId,
+          "status": status, "detail": saved ? "Example host copy, not your actual files. The original fixture has additional files."
+            : available ? "Sample original is running. Browse and save these example files; no cloud environment was started."
+            : status == "stopped" ? "Start the sample environment explicitly to reveal its example files."
+            : "Sample original is unavailable: unknown start, custody hold or deletion. No automatic start or source fallback.",
+          "files": files, "truncated": false, "skippedEntries": 0])
+      }
+    }
+    return try decode(["version": 1, "podId": id, "generation": epoch, "sources": sources,
+      "limits": ["maxFileBytes": 5 * 1024 * 1024, "maxSelectionBytes": 50 * 1024 * 1024, "maxFiles": 2000],
+      "excludes": [".git", ".env*", "credential locations", "caches", "symlinks and special files"]])
+  }
+
   /// Capture one scenario epoch so a menu change cannot retarget an open decision.
   public func applying(to base: PodActions) -> PodActions {
     let epoch = generation
     let scope = "recovery-preview:\(session):\(epoch)"
     var actions = base
+    actions.fileRecovery = FileRecoveryActions(scope: scope, isFixture: true,
+      isCurrent: { self.generation == epoch }, load: { id, includeOriginal in try self.inspectFiles(id, epoch: epoch, includeOriginal: includeOriginal) },
+      read: { id, selection in
+        let snapshot = try self.inspectFiles(id, epoch: epoch, includeOriginal: true)
+        guard selection.generation == epoch,
+          let source = snapshot.sources.first(where: { $0.id == selection.sourceId && $0.binding == selection.binding && $0.status == .available }),
+          source.files.contains(where: { $0.path == selection.path && $0.version == selection.version }),
+          let data = self.fileData(source.id)[selection.path] else { throw self.unavailable() }
+        return try self.decode(["path": selection.path, "size": data.count, "encoding": "base64", "content": data.base64EncodedString(), "sha256": self.fileHash(data)])
+      })
     actions.sandboxRecovery = SandboxRecoveryActions(scope: scope, draftScope: scope,
       journalDirectory: journalDirectory.appendingPathComponent("sandbox", isDirectory: true),
       isCurrent: { self.generation == epoch },

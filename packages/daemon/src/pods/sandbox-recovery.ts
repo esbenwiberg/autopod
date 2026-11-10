@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { type OperatorActor, type Pod, PodNotFoundError } from '@autopod/shared';
 import {
   recoveryError,
@@ -6,6 +7,13 @@ import {
   type SandboxRecoveryRequest,
 } from '../containers/sandbox-recovery-journal.js';
 import type { ContainerManager } from '../interfaces/container-manager.js';
+import {
+  type RecoveryFileContent,
+  type RecoveryFileSelection,
+  type RecoveryFileSource,
+  recoveryFileError,
+} from '../interfaces/recovery-files.js';
+import { createFileRecovery, fileRecoveryHash } from './file-recovery.js';
 import type { PodRepository } from './pod-repository.js';
 import { assertValidationMutationSettled } from './validation-recovery-policy.js';
 
@@ -390,5 +398,117 @@ export function createSandboxRecovery(deps: {
         'SANDBOX_ABANDONED',
       );
   }
-  return { inspect, submit, assertAvailable };
+  async function originalFiles(
+    podId: string,
+    selection?: RecoveryFileSelection,
+    includeFiles = false,
+  ): Promise<{ source: RecoveryFileSource; content?: RecoveryFileContent }> {
+    const pod = deps.podRepo.getOrThrow(podId);
+    const original = binding(pod);
+    const source: RecoveryFileSource = {
+      id: 'original',
+      kind: 'original',
+      label: 'Current retained environment',
+      binding: '',
+      status: 'unavailable',
+      detail: 'Original sandbox file browsing is unavailable for this task.',
+      files: [],
+      truncated: false,
+      skippedEntries: 0,
+      ...(pod.executionTarget === 'sandbox' && pod.containerId
+        ? { sandboxId: pod.containerId }
+        : {}),
+    };
+    if (!source.sandboxId) {
+      if (selection) recoveryFileError();
+      return { source };
+    }
+    const owner = `files:${randomUUID()}`;
+    if (active.has(podId)) {
+      if (selection) recoveryFileError('Another recovery operation is in progress.');
+      return {
+        source: {
+          ...source,
+          status: 'blocked',
+          detail: 'Another recovery operation is in progress.',
+        },
+      };
+    }
+    active.set(podId, owner);
+    let key: string | undefined;
+    const assertCurrent = () => {
+      const current = policy(podId, 'start', owner);
+      if (binding(current) !== original) recoveryFileError();
+      if (ledger?.list(podId).some((op) => op.action === 'abandon'))
+        recoveryFileError('An abandonment decision owns this original.');
+      if (key && ledger?.pendingIntents(key).length)
+        recoveryFileError(
+          'An earlier start has an unknown outcome. Check its status; no new start or file read was attempted.',
+        );
+    };
+    try {
+      assertCurrent();
+      const cm = deps.getContainerManager();
+      if (!cm.getResourceKey) recoveryFileError('Exact resource identity is unavailable.');
+      key = await cm.getResourceKey(source.sandboxId);
+      source.binding = fileRecoveryHash([original, 'file-recovery', key]);
+      if (
+        selection &&
+        (selection.sourceId !== 'original' ||
+          selection.generation !== pod.lifecycleGeneration ||
+          selection.binding !== source.binding)
+      )
+        recoveryFileError();
+      assertCurrent();
+      const state = await cm.getStatus(source.sandboxId);
+      assertCurrent();
+      if (state !== 'running') {
+        if (selection)
+          recoveryFileError(
+            'Original environment is not running; no automatic start was attempted.',
+          );
+        source.status = state === 'stopped' ? 'stopped' : 'unavailable';
+        source.detail =
+          state === 'stopped'
+            ? 'The original environment is off. Start it explicitly to browse files that were not saved on the host.'
+            : 'Original environment readiness is unknown or it has been deleted. No automatic start or fallback was attempted.';
+        return { source };
+      }
+      if (!cm.listRecoveryFiles || !cm.readRecoveryFile)
+        recoveryFileError('This backend does not support safe original-file browsing.');
+      if (!selection && !includeFiles) {
+        source.status = 'ready';
+        source.detail =
+          'The original is running. Choose Browse files to inspect it; no guest file probe has run yet.';
+        return { source };
+      }
+      const result = selection
+        ? await cm.readRecoveryFile(source.sandboxId, selection.path, selection.version, {
+            assertCurrent,
+          })
+        : await cm.listRecoveryFiles(source.sandboxId, { assertCurrent });
+      assertCurrent();
+      if ((await cm.getResourceKey(source.sandboxId)) !== key) recoveryFileError();
+      assertCurrent();
+      source.status = 'available';
+      source.detail =
+        'Read directly from the exact current retained sandbox, not historical resources. Files may change; this is not a final archive or proof that all work is preserved.';
+      return selection
+        ? { source, content: result as RecoveryFileContent }
+        : { source: { ...source, ...result } };
+    } catch (error) {
+      if (selection) throw error;
+      source.status = 'blocked';
+      source.detail =
+        error instanceof Error ? error.message : 'Original files could not be inspected.';
+      return { source };
+    } finally {
+      active.delete(podId);
+    }
+  }
+  const files = createFileRecovery({
+    getPod: (id) => deps.podRepo.getOrThrow(id),
+    original: originalFiles,
+  });
+  return { inspect, submit, assertAvailable, files };
 }

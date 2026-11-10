@@ -29,6 +29,7 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
   let stalled: StalledWorkerRecoveryModel
   let finalization: RetainedFinalizationModel
   let sandbox: SandboxRecoveryModel
+  let files: FileRecoveryModel
   private(set) var refreshing = false
   private(set) var inspected = false
   private(set) var checkedAt: Date?
@@ -42,16 +43,17 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
     stalled = StalledWorkerRecoveryModel(podId: podId, actions: actions.stalledWorkerRecovery)
     finalization = RetainedFinalizationModel(podId: podId, actions: actions.retainedFinalization)
     sandbox = SandboxRecoveryModel(podId: podId, actions: actions.sandboxRecovery)
+    files = FileRecoveryModel(podId: podId, actions: actions.fileRecovery)
   }
 
   static func scope(_ actions: PodActions) -> String {
     [actions.sandboxRecovery.scope, actions.repairContinuation.scope,
-     actions.retainedFinalization.scope, actions.stalledWorkerRecovery.scope]
+     actions.retainedFinalization.scope, actions.stalledWorkerRecovery.scope, actions.fileRecovery.scope]
       .map { "\($0.utf8.count):\($0)" }.joined()
   }
 
   static func available(_ actions: PodActions, workspace: Bool) -> Bool {
-    actions.sandboxRecovery.available || (!workspace && (actions.repairContinuation.available
+    actions.fileRecovery.available || actions.sandboxRecovery.available || (!workspace && (actions.repairContinuation.available
       || actions.retainedFinalization.available || actions.stalledWorkerRecovery.available))
   }
 
@@ -59,7 +61,7 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
     [.failed, .reviewRequired, .validated, .complete, .killed].contains(pod.status)
   }
 
-  var busy: Bool { refreshing || repair.busy || stalled.busy || finalization.busy || sandbox.busy }
+  var busy: Bool { refreshing || repair.busy || stalled.busy || finalization.busy || sandbox.busy || files.busy }
 
   var pendingRoute: RecoveryRoute? {
     if repair.pending != nil && ![.validated, .failed].contains(repair.operation?.state) { return .repair }
@@ -194,6 +196,7 @@ func repairProgressDescription(_ state: RepairContinuationStateV1) -> String {
       }
     }
     guard !Task.isCancelled else { return }
+    if let generation = files.snapshot?.generation, let current = sandbox.snapshot?.generation, generation != current { files.invalidateObservation() }
     inspected = true; checkedAt = Date()
   }
 }

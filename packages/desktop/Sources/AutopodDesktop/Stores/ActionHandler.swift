@@ -216,6 +216,16 @@ public final class ActionHandler {
         await self?.updateFromBase(id) ?? nil
       }
     )
+    result.fileRecovery = FileRecoveryActions(scope: replyContextID.uuidString,
+      isCurrent: { [weak self] in
+        guard let self else { return false }; return self.podStore.isCurrent(self.ownership)
+      }, load: { [weak self] id, includeOriginal in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.getRecoveryFiles(id, includeOriginal: includeOriginal) }
+      }, read: { [weak self] id, selection in
+        guard let self else { throw URLError(.notConnectedToInternet) }
+        return try await self.perform { try await self.api.readRecoveryFile(id, selection: selection) }
+      })
     result.sandboxRecovery = SandboxRecoveryActions(scope: replyContextID.uuidString,
       draftScope: "\(replySource?.connectionID?.uuidString ?? "direct"):\(api.baseURL.absoluteString)",
       journalDirectory: journalRoot?.appendingPathComponent("sandbox-recovery", isDirectory: true),

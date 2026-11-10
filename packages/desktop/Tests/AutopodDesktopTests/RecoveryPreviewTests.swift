@@ -19,6 +19,9 @@ import Testing
       try repair.validate(podId: fixture.podId)
       let context = try await actions.repairContinuation.context(fixture.podId)
       let checks = try await actions.loadValidationRecovery(fixture.podId)
+      let files = try await actions.fileRecovery.load(fixture.podId, false)
+      try files.validate(podId: fixture.podId)
+      #expect(files.generation == fixture.generation && actions.fileRecovery.isFixture)
       #expect([sandbox.generation, stalled.generation, finalization.generation, repair.generation, checks.generation]
         .allSatisfy { $0 == fixture.generation })
       #expect(context.retained?.inspection?.generation == fixture.generation)
@@ -27,6 +30,29 @@ import Testing
       #expect(actions.sandboxRecovery.journalDirectory?.path.hasPrefix(directory.path) == true)
       #expect(fixture.mutationCount == 0)
     }
+  }
+
+  @Test func previewOriginalFilesRequireExplicitStartAndListingAndRemainSampleData() async throws {
+    let fixture = DesktopRecoveryFixtures()
+    let actions = fixture.applying(to: .preview)
+    let before = try await actions.fileRecovery.load(fixture.podId, false)
+    #expect(before.sources.first { $0.kind == .original }?.status == .stopped)
+    let state = try await actions.sandboxRecovery.load(fixture.podId)
+    let resource = try #require(state.resources.first)
+    _ = try await actions.sandboxRecovery.submit(fixture.podId, SandboxRecoveryRequest(action: "start",
+      sandboxId: resource.sandboxId, expectedGeneration: state.generation, expectedResourceKey: resource.resourceKey,
+      reason: "Inspect the example original files"))
+    let metadata = try await actions.fileRecovery.load(fixture.podId, false)
+    #expect(metadata.sources.first { $0.kind == .original }?.status == .ready)
+    #expect(metadata.sources.first { $0.kind == .original }?.files.isEmpty == true)
+    let listed = try await actions.fileRecovery.load(fixture.podId, true)
+    let source = try #require(listed.sources.first { $0.kind == .original })
+    let file = try #require(source.files.first { $0.path == "notes.bin" })
+    let bytes = try await actions.fileRecovery.read(fixture.podId, RecoveryFileSelection(source: source, generation: listed.generation, file: file))
+    #expect(Data(base64Encoded: bytes.content) == Data([0, 255, 128, 10, 3]))
+    fixture.scenario = .held
+    #expect(!actions.fileRecovery.isCurrent())
+    await #expect(throws: DaemonError.self) { try await actions.fileRecovery.load(fixture.podId, true) }
   }
 
   @Test func simulatedStartAndExactReplayCannotRunASecondOperation() async throws {

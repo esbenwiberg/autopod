@@ -39,6 +39,7 @@ import type {
   TerminalSession,
   TerminalSessionOptions,
 } from '../interfaces/container-manager.js';
+import { recoveryFileError } from '../interfaces/recovery-files.js';
 import {
   extractManagedSandboxOutput,
   SANDBOX_OUTPUT_INVENTORY,
@@ -56,6 +57,11 @@ import {
 } from './cgroup-execution-metadata.js';
 import { assertDirectoryExtractionCurrent } from './directory-extraction-ownership.js';
 import { isObservedExitCode, unverifiedExecExit } from './exec-exit-evidence.js';
+import {
+  parseRecoveryContent,
+  parseRecoveryListing,
+  recoveryReaderArgs,
+} from './recovery-file-reader.js';
 import type { SandboxPortAuth } from './sandbox-api-client.js';
 import {
   egressPolicyForMode,
@@ -543,6 +549,55 @@ for root in sys.argv[1:]:
     } catch (error) {
       throw managedControlFileError('ready', error);
     }
+  }
+
+  private async runRecoveryReader(
+    containerId: string,
+    command: string[],
+    options: ContainerStartOptions,
+  ) {
+    options.assertCurrent?.();
+    if (this.managedDatabase)
+      assertFinalizationResourceAvailable(this.managedDatabase, containerId);
+    if ((await this.client.getStatus(containerId)) !== 'running')
+      recoveryFileError(
+        'The original environment is not running. No automatic start was attempted.',
+      );
+    options.assertCurrent?.();
+    const result = await this.client.exec(containerId, command, {
+      timeoutMs: 15_000,
+      singleAttempt: true,
+      beforeSend: options.assertCurrent,
+      env: { PATH: '/usr/local/bin:/usr/bin:/bin' },
+    });
+    options.assertCurrent?.();
+    if (result.exitCode !== 0)
+      recoveryFileError(
+        'Original files could not be read. Python 3 and a regular /workspace directory are required. No saved-source fallback was used.',
+      );
+    return result.stdout;
+  }
+
+  async listRecoveryFiles(containerId: string, options: ContainerStartOptions) {
+    return parseRecoveryListing(
+      await this.runRecoveryReader(containerId, recoveryReaderArgs('list', '/workspace'), options),
+    );
+  }
+
+  async readRecoveryFile(
+    containerId: string,
+    path: string,
+    version: string,
+    options: ContainerStartOptions,
+  ) {
+    return parseRecoveryContent(
+      await this.runRecoveryReader(
+        containerId,
+        recoveryReaderArgs('read', '/workspace', path, version),
+        options,
+      ),
+      path,
+    );
   }
 
   async readFile(containerId: string, path: string): Promise<string> {

@@ -114,17 +114,7 @@ struct RecoveryHubSheet: View {
     case .overview: overview
     case .continueWork: continueWork
     case .recoverFiles:
-      if actions.sandboxRecovery.available && RecoveryHubModel.canInspectSandbox(pod) {
-        SandboxRecoverySheet(podId: pod.id, actions: actions.sandboxRecovery, purpose: .files,
-          embedded: true, model: model.sandbox, onOpenFiles: evidenceAction)
-      } else {
-        VStack(alignment: .leading, spacing: 18) {
-          RecoverySectionTitle(title: "Recover files", subtitle: "Inspect saved evidence without resuming coding.")
-          RecoveryNotice(title: "Machine recovery unavailable", message: "Machine-only file recovery is not supported for this task on this connection. Saved evidence may still be available; it is not proof of the original environment's final contents.")
-          Text(model.savedWork).font(.callout).foregroundStyle(RecoveryPalette.secondary)
-          evidenceButton
-        }
-      }
+      FileRecoveryView(actions: actions, model: model.files, sandbox: model.sandbox, onOpenEvidence: evidenceAction)
     case .freeStorage:
       if actions.sandboxRecovery.available && RecoveryHubModel.canInspectSandbox(pod) {
         SandboxRecoverySheet(podId: pod.id, actions: actions.sandboxRecovery, purpose: .storage,
@@ -219,7 +209,7 @@ struct RecoveryHubSheet: View {
             HStack(alignment: .top, spacing: 12) {
               goalCard("Continue work", detail: "Retry checks, repair code, or inspect a stalled run. No implicit publish or merge.",
                 icon: "arrow.right.circle", destination: .continueWork)
-              goalCard("Recover files", detail: "Inspect saved files or start the machine for recovery only. No coding resume.",
+              goalCard("Recover files", detail: "Browse saved copies, inspect the original if needed, and save selected files to this Mac.",
                 icon: "doc.on.doc", destination: .recoverFiles)
               goalCard("Free storage", detail: "Review data loss before deleting. Safe archive-and-release is not yet available.",
                 icon: "externaldrive.badge.minus", destination: .freeStorage)
@@ -227,7 +217,7 @@ struct RecoveryHubSheet: View {
           } else {
             VStack(spacing: 10) {
               option("Continue work", detail: "Retry checks, repair code, or inspect a stalled run. No implicit publish or merge.", icon: "arrow.right.circle", destination: .continueWork)
-              option("Recover files", detail: "Inspect saved files or start the machine for recovery only. No coding resume.", icon: "doc.on.doc", destination: .recoverFiles)
+              option("Recover files", detail: "Browse saved copies, inspect the original if needed, and save selected files to this Mac.", icon: "doc.on.doc", destination: .recoverFiles)
               option("Free storage", detail: "Review data loss before deleting. Safe archive-and-release is not yet available.", icon: "externaldrive.badge.minus", destination: .freeStorage)
             }
           }

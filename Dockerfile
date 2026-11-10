@@ -52,7 +52,8 @@ RUN pnpm run build
 # ─── Production stage ──────────────────────────────────────
 FROM node:22.23.4-alpine
 
-RUN apk add --no-cache tini git docker-cli github-cli
+# Descriptor-relative recovery file reads use isolated Python standard library.
+RUN apk add --no-cache tini git docker-cli github-cli python3
 
 WORKDIR /app
 

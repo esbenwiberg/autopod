@@ -131,14 +131,17 @@ import Testing
 
   @Test func nativeGoalNavigationSeparatesFileRecoveryFromDeletion() async throws {
     let f = RecoverySandboxFixture(); defer { f.clean() }
-    let model = RecoveryHubModel(podId: "pod", actions: f.podActions)
-    await model.refresh(pod: f.pod, actions: f.podActions)
-    let host = LaunchComposerHost(RecoveryHubSheet(pod: f.pod, actions: f.podActions, model: model), width: 800)
+    let files = RecoveryFilesTestFixture(); defer { files.clean() }; files.includeOriginal = true
+    var actions = f.podActions; actions.fileRecovery = files.actions
+    let model = RecoveryHubModel(podId: "pod", actions: actions)
+    await model.refresh(pod: f.pod, actions: actions)
+    let host = LaunchComposerHost(RecoveryHubSheet(pod: f.pod, actions: actions, model: model), width: 800)
     host.window.orderBack(nil)
     defer { host.close() }
     try await host.wait { host.has("recovery-route-recoverFiles") }
     try host.press("recovery-route-recoverFiles")
-    try await host.wait { host.has("sandbox-recovery-start") }
+    try await host.wait { host.has("file-recovery-review-start") }
+    #expect(host.enabled("file-recovery-review-start") && !host.containsText("Recovery reason"))
     #expect(!host.has("sandbox-recovery-abandon") && !host.containsText("I accept losing"))
     try host.press("recovery-hub-back")
     try await host.wait { host.has("recovery-route-freeStorage") }

@@ -60,11 +60,48 @@ contract, not a client-invented default.
 
 ### Recover files
 
-See saved files/evidence where available, or explicitly start the original
-sandbox for file recovery if its policy permits it. This does not continue the
-coding agent, run checks, inject new coding authority or publish changes.
-A saved evidence view is not proof of the original environment's final contents.
-No destructive checkbox or delete button appears in this path.
+The page now provides **Save a copy of your files**:
+
+1. **Files already saved** lists separate saved host-workspace and artifact
+   locations. These can be older than the environment; no complete preservation
+   is inferred. Choose a source, not a silently substituted fallback.
+2. **Other files in the original environment** checks provider metadata only.
+   Choose Browse files explicitly to run the bounded read-only inventory of an
+   already-running original. A stopped machine requires a separate **Start old
+   environment** review. The 10–4000-character reason is an audit note, not an
+   agent instruction. Starting may incur compute charges and does not itself
+   retrieve files or guarantee file access. Lost starts are observed, not replayed.
+3. **Select files to save** shows full relative paths and sizes from that source.
+   Save selected files to this Mac opens a destination-folder chooser. Each copy
+   creates a new private subfolder, never overwrites existing files, and never
+   opens or executes downloaded content.
+4. **Last copy** reports saved/verified, failed and not-copied files separately,
+   including the exact destination. Binary bytes use base64 and SHA-256 transport
+   checks plus local readback. Cancelling or changing connections stops remaining
+   copies; previously saved files are kept. A cancelled picker creates nothing.
+
+This is a selected-file convenience browser, **not a complete backup**. Up to
+2,000 files / 10,000 visited entries / depth 16 are inventoried per source; files
+are capped at 5 MiB. The desktop selects up to 100 files / 50 MiB per copy.
+Truncation and skipped entries remain visible. Symlinks, hardlinks, special files,
+common credential locations (`.env*`, `.git`, `.ssh`, `.aws`, `.azure`,
+`.config`, `.npmrc`, `.netrc`, `.pypirc`, agent/control directories) and
+dependency/cache locations are excluded. File content is **not** secret-scanned.
+
+The separate authenticated `GET /pods/:id/file-recovery` API lists explicit
+sources; `?original=1` opts into guest inventory. Content reads require source,
+generation, opaque root/resource binding, relative path and file metadata version.
+Changed files fail rather than silently copying a newer or older source.
+Host reads and sandbox probes require **Python 3** (isolated standard library);
+missing support fails closed, with no installation, wakeup or alternate-source
+fallback. Original browsing currently supports only the exact **current retained
+sandbox** and reuses its existing idle/custody/unknown-start fences. Historical
+resources, Docker originals and held originals are not newly authorized by this
+browser. Saved host copies can still be available independently.
+
+Copied selected bytes do not prove final files/reports are all saved, mark an
+execution stopped, release custody or grant deletion authority. No destructive
+checkbox or delete button appears in this path; Free storage remains separate.
 
 ### Free storage
 
@@ -117,8 +154,10 @@ Build without `--fixtures` separately if a connected preview is deliberately wan
 Choose **Fixture options → Recovery scenario** for a retained environment, an
 unknown start outcome, or cleanup blocked by source custody. Start/discard receipts
 are in-memory simulations; journals use a new temporary session directory.
-Changing scenarios invalidates open actions rather than retargeting them. The
-sample never starts coding/checks, provisions, publishes, merges or deletes real
+Changing scenarios invalidates open actions rather than retargeting them. Saving
+sample files creates a real new folder containing only example data at your chosen
+Mac destination. The sample never starts coding/checks, provisions, publishes,
+merges or deletes real
 resources; simulated deletion keeps the sample task history visible. These
 observations are not actual pod diagnostics or live recovery qualification.
 
