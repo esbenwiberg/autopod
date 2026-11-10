@@ -144,6 +144,12 @@ human approval. Publication uses the exact recorded predecessor lease rather
 than `origin/<branch>` or an in-memory force allowance. Read-only status is
 included in `ap source-recovery`. Missing/uncertain preparation evidence fails
 closed; historical incidents do not acquire retroactive rewrite permission.
+New Docker rewrite validations record the observed exact engine/full-container
+key in the immutable dispatch before checks. Rewrite repair can use that settled,
+logically published failed result only while the same original resource is known
+stopped; it never stops, wakes or deletes it. Historical Docker failures without
+maintained dispatch evidence remain blocked. See `docs/approval-rewrite-repair.md`
+for independent checkout selection, targeted retry permission and fresh approval.
 
 ### Retention-safe task continuation
 

@@ -53,6 +53,7 @@ import {
   assertValidationExecutionSettled,
   requiresValidationSettlement,
 } from './validation-recovery-policy.js';
+import { isDockerValidationResourceKey } from './validation-resource-scope.js';
 import {
   getPodValidationSkipPhases,
   isPodValidationDisabled,
@@ -285,7 +286,7 @@ export function createRetainedCheckpointRecovery(deps: {
       const selected = deps.podRepo.approvalRewrites?.latest(pod);
       const dispatch = deps.podRepo.validationExecutions.find(pod);
       if (
-        pod.executionTarget !== 'sandbox' ||
+        !['sandbox', 'local'].includes(pod.executionTarget) ||
         !deps.podRepo.sandboxWakeups ||
         !deps.podRepo.deletionOwnership ||
         deps.podRepo.validationExecutions.hasGoal(pod.id) ||
@@ -310,16 +311,24 @@ export function createRetainedCheckpointRecovery(deps: {
         pod.lastValidationResult?.overall !== 'fail' ||
         !dispatch ||
         dispatch.id !== repair.dispatchId ||
+        dispatch.binding.executionTarget !== pod.executionTarget ||
         dispatch.binding.containerId !== pod.containerId ||
         dispatch.binding.worktreePath !== pod.worktreePath ||
         dispatch.binding.generation !== rewrite.activated.generation ||
         deps.podRepo.taskRetries?.state(pod.id).latest?.id !== dispatch.binding.admissionId ||
         !dispatch.binding.resourceScope ||
-        deps.getContainerManager('sandbox').executionResourceScope !==
-          dispatch.binding.resourceScope ||
+        (pod.executionTarget === 'sandbox'
+          ? deps.getContainerManager('sandbox').executionResourceScope !==
+            dispatch.binding.resourceScope
+          : !isDockerValidationResourceKey(
+              dispatch.binding.resourceScope,
+              pod.containerId ?? '',
+            )) ||
         dispatch.intent
       )
-        checkpointError('Exact failed sandbox rewrite dispatch/source/configuration required');
+        checkpointError(
+          'Exact failed rewrite dispatch/source/configuration and provider identity required',
+        );
       const repository =
         deps.executionForPod(pod).repoUrl ?? checkpointError('Frozen repository unavailable');
       assertCheckpointRepository(repository);
@@ -954,7 +963,9 @@ export function createRetainedCheckpointRecovery(deps: {
       const dispatch = deps.podRepo.validationExecutions?.find(pod);
       if (
         !dispatch?.binding.resourceScope ||
-        containerManager.executionResourceScope !== dispatch.binding.resourceScope
+        (pod.executionTarget === 'local'
+          ? resourceKey
+          : containerManager.executionResourceScope) !== dispatch.binding.resourceScope
       )
         checkpointError('Validation provider namespace changed');
       if (
@@ -1482,7 +1493,7 @@ export function createRetainedCheckpointRecovery(deps: {
       };
       assertCurrent();
       if (record.binding.approvalRewrite) {
-        const cm = deps.getContainerManager('sandbox');
+        const cm = deps.getContainerManager(original(record).executionTarget);
         if (
           (await cm.getResourceKey?.(record.containerId)) !== record.resourceKey ||
           (await cm.getStatus(record.containerId)) !== 'stopped'
@@ -1554,7 +1565,7 @@ export function createRetainedCheckpointRecovery(deps: {
           { generation: record.generation, cycle: record.binding.cycle },
         );
       if (record.binding.approvalRewrite) {
-        const cm = deps.getContainerManager('sandbox');
+        const cm = deps.getContainerManager(original(record).executionTarget);
         if (
           (await cm.getStatus(record.containerId)) !== 'stopped' ||
           (await cm.getResourceKey?.(record.containerId)) !== record.resourceKey

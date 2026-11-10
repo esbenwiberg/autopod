@@ -25,6 +25,7 @@ import {
   assertValidationFinalContentSupported,
   requiresValidationSettlement,
 } from './validation-recovery-policy.js';
+import { isDockerValidationResourceKey } from './validation-resource-scope.js';
 
 export {
   listValidationExecutionResourceIds,
@@ -379,10 +380,12 @@ export function createValidationExecutionLedger(db: Database.Database): Validati
     dispatch(pod: Pod, admissionId: string, attempt: number, resourceScope?: string) {
       if (
         !resourceScope ||
-        pod.executionTarget !== 'sandbox' ||
         !pod.containerId ||
         !pod.worktreePath ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pod.containerId)
+        !(pod.executionTarget === 'sandbox'
+          ? /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pod.containerId)
+          : pod.executionTarget === 'local' &&
+            isDockerValidationResourceKey(resourceScope, pod.containerId))
       )
         return null;
       const admission = db
@@ -405,7 +408,7 @@ export function createValidationExecutionLedger(db: Database.Database): Validati
         cycle: finalization?.cycle ?? 0,
         attempt,
         admissionId,
-        executionTarget: 'sandbox',
+        executionTarget: pod.executionTarget,
         containerId: pod.containerId,
         resourceScope,
         worktreePath: pod.worktreePath,

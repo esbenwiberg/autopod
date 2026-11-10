@@ -14,8 +14,8 @@ import {
 import { assertSourceDeliveryAllowed } from './source-custody-guards.js';
 
 const fixtures: Awaited<ReturnType<typeof rewriteRepairFixture>>[] = [];
-async function fixture() {
-  const f = await rewriteRepairFixture();
+async function fixture(target: 'sandbox' | 'local' = 'sandbox', published = true, bound = true) {
+  const f = await rewriteRepairFixture(target, published, bound);
   fixtures.push(f);
   return f;
 }
@@ -44,8 +44,12 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-it('prepares failed rewrite independently, selects an operator commit once and preserves both sources and lease', async () => {
-  const f = await fixture();
+it.each([
+  'sandbox',
+  'local',
+] as const)('prepares %s rewrite independently, selects an operator commit once and preserves both sources and lease', async (target) => {
+  const f = await fixture(target);
+  expect(f.dispatchId).toEqual(expect.any(String));
   const before = f.pod();
   const originalRewrite = f.ctx.podRepo.approvalRewrites!.get(f.rewriteId);
   const retries = f.ctx.podRepo.taskRetries!.state(f.podId);
@@ -314,85 +318,176 @@ it.each([
 });
 
 it.each([
-  true,
-  false,
-])('runs fresh checks/review only with a separate retry grant=%s, without publication or workers', async (grant) => {
-  const f = await fixture();
-  vi.stubEnv('DATA_DIR', f.root);
-  f.ctx.podRepo.update(f.podId, { maxValidationAttempts: f.pod().validationAttempts });
+  'engine',
+  'container',
+  'missing-identity',
+  'changed-observation',
+  'running',
+  'unknown',
+  'unpublished',
+  'legacy-result',
+] as const)('refuses Docker repair with %s evidence without claiming custody', async (kind) => {
+  const f = await fixture('local', kind !== 'unpublished', kind !== 'legacy-result');
   const before = f.pod();
-  const previous = f.ctx.podRepo.taskRetries!.state(f.podId);
+  if (kind === 'engine')
+    vi.mocked(f.cm.getResourceKey!).mockResolvedValue(
+      JSON.stringify(['docker', 'another-engine', f.containerId]),
+    );
+  if (kind === 'container')
+    vi.mocked(f.cm.getResourceKey!).mockResolvedValue(
+      JSON.stringify(['docker', 'fixture-engine', 'f'.repeat(64)]),
+    );
+  if (kind === 'missing-identity') vi.mocked(f.cm.getResourceKey!).mockResolvedValue('');
+  if (kind === 'running' || kind === 'unknown') vi.mocked(f.cm.getStatus).mockResolvedValue(kind);
+  if (kind === 'changed-observation')
+    vi.mocked(f.cm.getResourceKey!)
+      .mockResolvedValueOnce(JSON.stringify(['docker', 'fixture-engine', f.containerId]))
+      .mockResolvedValue(JSON.stringify(['docker', 'another-engine', f.containerId]));
+  if (kind === 'legacy-result')
+    expect(f.ctx.db.prepare('SELECT count(*) AS n FROM validation_dispatches').get()).toEqual({
+      n: 0,
+    });
+  const observed = f.pod();
+  await expect(f.recovery.prepareRewriteRepair(f.podId, f.request, f.actor)).rejects.toThrow();
+  expect(f.recovery.list(f.podId)).toEqual([]);
+  expect(f.pod()).toEqual(observed);
+  expect(f.pod().lifecycleGeneration).toBe(before.lifecycleGeneration);
+  expect(f.deps.enqueue).not.toHaveBeenCalled();
+  expect(f.cm.stop).not.toHaveBeenCalled();
+  expect(f.cm.start).not.toHaveBeenCalled();
+  expect(f.cm.kill).not.toHaveBeenCalled();
+}, 15_000);
+
+it('does not consume a Docker repair check grant or start checks without fresh engine identity', async () => {
+  const f = await fixture('local');
+  vi.stubEnv('DATA_DIR', f.root);
   await f.recovery.prepareRewriteRepair(f.podId, f.request, f.actor);
   await f.recovery.wait(f.request.id);
   const op = f.recovery.list(f.podId)[0]!;
-  const input = {
-    rewriteId: f.rewriteId,
-    failedDispatchId: f.dispatchId,
-    expectedGeneration: before.lifecycleGeneration,
-    expectedResultHash: f.request.expectedResultHash,
-    candidateHead: op.prepared!.head,
-    reason: 'Check exactly the independently prepared source with frozen authority',
-  };
-  const permission = grant ? authorizeRepairCheck(f, op, 'separate-repair-retry') : null;
-  await f.recovery.checkRewriteRepair(f.podId, op.id, input, f.actor);
-  const validate = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
-  vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => ({
-    ...(await validate(config)),
-    taskReview: {
-      status: 'pass',
-      reasoning: 'Independent review fixture',
-      issues: [],
-      model: 'fixture',
-      screenshots: [],
+  const grant = authorizeRepairCheck(f, op, 'exact-docker-repair');
+  await f.recovery.checkRewriteRepair(
+    f.podId,
+    op.id,
+    {
+      rewriteId: f.rewriteId,
+      failedDispatchId: f.dispatchId,
+      expectedGeneration: f.pod().lifecycleGeneration,
+      expectedResultHash: f.request.expectedResultHash,
+      candidateHead: op.prepared!.head,
+      reason: 'Select the prepared Docker source for fresh independent checks',
     },
-  }));
-  if (grant) await f.manager.processPod(f.podId);
-  else await expect(f.manager.processPod(f.podId)).rejects.toThrow('did not produce a result');
-  const current = f.pod();
-  const completed = f.recovery.list(f.podId)[0]!;
-  if (grant) {
-    expect(current.status, current.failureReason ?? JSON.stringify(completed)).toBe('validated');
-    expect(completed.checked?.result.overall, JSON.stringify(completed.blocked)).toBe('pass');
-    expect(completed.checked?.result.taskReview?.status).toBe('pass');
-    expect(completed.checked?.snapshot?.path).toBe(current.artifactsPath);
-    expect(f.ctx.podRepo.approvalRewrites!.assertDelivery(current)?.checked?.validationHash).toBe(
-      checkpointHash(current.lastValidationResult),
-    );
-    expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
-    const used = f.ctx.podRepo
-      .taskRetries!.state(f.podId)
-      .authorizations.find((item) => item.id === permission!.id)!;
-    expect(used.usedByAttemptId).toBeTruthy();
-    expect(used.rewriteRepair).toMatchObject({
-      recoveryId: op.id,
-      generation: current.lifecycleGeneration,
-      candidateHead: completed.selected!.head,
-      candidateTree: completed.selected!.tree,
-    });
-    expect(current.lastValidationResult!.executionDispatchId).not.toBe(f.dispatchId);
-    expect(() =>
-      f.ctx.db
-        .prepare('DELETE FROM task_retry_authorization_uses WHERE authorization_id=?')
-        .run(used.id),
-    ).toThrow('retained');
-    expect(f.ctx.podRepo.taskRetries!.state(f.podId).executedCount).toBe(
-      previous.executedCount + 1,
-    );
-  } else {
-    expect(current.status).toBe('review_required');
-    expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
-    expect(f.ctx.podRepo.taskRetries!.state(f.podId).executedCount).toBe(previous.executedCount);
-    expect(() => f.ctx.podRepo.approvalRewrites!.assertDelivery(current)).toThrow();
-  }
+    f.actor,
+  );
+  const previous = f.ctx.podRepo.taskRetries!.state(f.podId);
+  vi.mocked(f.cm.getResourceKey!).mockImplementation(async (id) => {
+    if (id !== f.containerId) throw new Error('Docker engine identity observation unavailable');
+    return JSON.stringify(['docker', 'fixture-engine', id]);
+  });
+  await expect(f.manager.processPod(f.podId)).rejects.toThrow();
+  expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+  const state = f.ctx.podRepo.taskRetries!.state(f.podId);
+  expect(state.executedCount).toBe(previous.executedCount);
+  expect(state.authorizations.find((item) => item.id === grant.id)?.usedByAttemptId).toBeNull();
+  expect(f.ctx.db.prepare('SELECT count(*) AS n FROM validation_dispatches').get()).toEqual({
+    n: 1,
+  });
   expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
-  expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
-  expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
   expect(f.cm.kill).not.toHaveBeenCalled();
-  await expect(f.manager.triggerValidation(f.podId, { force: true })).rejects.toThrow();
-  if (grant) await f.manager.processPod(f.podId);
-  else await expect(f.manager.processPod(f.podId)).rejects.toThrow();
-  expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(grant ? 1 : 0);
 }, 15_000);
+
+it.each([
+  ['sandbox', true],
+  ['sandbox', false],
+  ['local', true],
+  ['local', false],
+] as const)(
+  'runs %s fresh checks/review only with a separate retry grant=%s, without publication or workers',
+  async (target, grant) => {
+    const f = await fixture(target);
+    vi.stubEnv('DATA_DIR', f.root);
+    f.ctx.podRepo.update(f.podId, { maxValidationAttempts: f.pod().validationAttempts });
+    const before = f.pod();
+    const previous = f.ctx.podRepo.taskRetries!.state(f.podId);
+    await f.recovery.prepareRewriteRepair(f.podId, f.request, f.actor);
+    await f.recovery.wait(f.request.id);
+    const op = f.recovery.list(f.podId)[0]!;
+    const input = {
+      rewriteId: f.rewriteId,
+      failedDispatchId: f.dispatchId,
+      expectedGeneration: before.lifecycleGeneration,
+      expectedResultHash: f.request.expectedResultHash,
+      candidateHead: op.prepared!.head,
+      reason: 'Check exactly the independently prepared source with frozen authority',
+    };
+    const permission = grant ? authorizeRepairCheck(f, op, 'separate-repair-retry') : null;
+    await f.recovery.checkRewriteRepair(f.podId, op.id, input, f.actor);
+    const validate = vi.mocked(f.ctx.validationEngine.validate).getMockImplementation()!;
+    vi.mocked(f.ctx.validationEngine.validate).mockImplementation(async (config) => ({
+      ...(await validate(config)),
+      taskReview: {
+        status: 'pass',
+        reasoning: 'Independent review fixture',
+        issues: [],
+        model: 'fixture',
+        screenshots: [],
+      },
+    }));
+    if (grant) await f.manager.processPod(f.podId);
+    else await expect(f.manager.processPod(f.podId)).rejects.toThrow('did not produce a result');
+    const current = f.pod();
+    const completed = f.recovery.list(f.podId)[0]!;
+    if (grant) {
+      expect(current.status, current.failureReason ?? JSON.stringify(completed)).toBe('validated');
+      expect(completed.checked?.result.overall, JSON.stringify(completed.blocked)).toBe('pass');
+      expect(completed.checked?.result.taskReview?.status).toBe('pass');
+      expect(completed.checked?.snapshot?.path).toBe(current.artifactsPath);
+      expect(f.ctx.podRepo.approvalRewrites!.assertDelivery(current)?.checked?.validationHash).toBe(
+        checkpointHash(current.lastValidationResult),
+      );
+      expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(1);
+      const used = f.ctx.podRepo
+        .taskRetries!.state(f.podId)
+        .authorizations.find((item) => item.id === permission!.id)!;
+      expect(used.usedByAttemptId).toBeTruthy();
+      expect(used.rewriteRepair).toMatchObject({
+        recoveryId: op.id,
+        generation: current.lifecycleGeneration,
+        candidateHead: completed.selected!.head,
+        candidateTree: completed.selected!.tree,
+      });
+      expect(current.lastValidationResult!.executionDispatchId).toEqual(expect.any(String));
+      expect(current.lastValidationResult!.executionDispatchId).not.toBe(f.dispatchId);
+      const dispatch = f.ctx.podRepo.validationExecutions!.find(current);
+      expect(dispatch?.binding.executionTarget).toBe(target);
+      if (target === 'local')
+        expect(dispatch?.binding.resourceScope).toBe(
+          await f.cm.getResourceKey!(current.containerId!),
+        );
+      expect(() =>
+        f.ctx.db
+          .prepare('DELETE FROM task_retry_authorization_uses WHERE authorization_id=?')
+          .run(used.id),
+      ).toThrow('retained');
+      expect(f.ctx.podRepo.taskRetries!.state(f.podId).executedCount).toBe(
+        previous.executedCount + 1,
+      );
+    } else {
+      expect(current.status).toBe('review_required');
+      expect(f.ctx.validationEngine.validate).not.toHaveBeenCalled();
+      expect(f.ctx.podRepo.taskRetries!.state(f.podId).executedCount).toBe(previous.executedCount);
+      expect(() => f.ctx.podRepo.approvalRewrites!.assertDelivery(current)).toThrow();
+    }
+    expect(f.ctx.runtime.spawn).not.toHaveBeenCalled();
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    expect(f.ctx.worktreeManager.mergeBranch).not.toHaveBeenCalled();
+    expect(f.cm.kill).not.toHaveBeenCalled();
+    await expect(f.manager.triggerValidation(f.podId, { force: true })).rejects.toThrow();
+    if (grant) await f.manager.processPod(f.podId);
+    else await expect(f.manager.processPod(f.podId)).rejects.toThrow();
+    expect(f.ctx.validationEngine.validate).toHaveBeenCalledTimes(grant ? 1 : 0);
+  },
+  15_000,
+);
 
 it('rejects each tampered prepared candidate without changing retained custody', async () => {
   const f = await fixture();

@@ -157,6 +157,22 @@ describe('generateSystemInstructions', () => {
     expect(md).toContain('<!-- BEGIN USER TASK -->');
   });
 
+  it('requires dependency preparation to survive fresh checks-only containers', () => {
+    const md = generateSystemInstructions(
+      makeProfile(),
+      makeSession(),
+      'http://localhost:8080/mcp/abc12345',
+    );
+    expect(md).toContain('Reproducible validation setup');
+    expect(md).toContain('fresh container without a coding agent');
+    expect(md).toContain('including `/tmp`');
+    expect(md).toContain('frozen project setup/build commands and declared environment');
+    expect(md).toContain('call `report_blocker` with the missing prerequisite');
+    expect(md).toContain(
+      'do not claim fresh validation readiness, change frozen configuration or weaken the check',
+    );
+  });
+
   it('defers macOS desktop validation instead of attempting it in Linux pods', () => {
     const md = generateSystemInstructions(
       makeProfile({ testCommand: 'npm test' }),
