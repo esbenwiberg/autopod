@@ -32,6 +32,7 @@ import { createRetainedCheckpointRecovery } from './retained-checkpoint-recovery
 import {
   assertCheckpointResourceNotRetained,
   checkpointHash,
+  checkpointResourceIdentity,
   createRetainedCheckpointRepository,
 } from './retained-checkpoint-repository.js';
 import { assertSourceDeliveryAllowed } from './source-custody-guards.js';
@@ -366,6 +367,292 @@ describe('qualified infrastructure recovery from real incident shapes', () => {
     await expect(lateReport).rejects.toThrow('No current infrastructure repair worker');
     expect(f.cm.kill).not.toHaveBeenCalledWith(f.containerId);
     requestScope.emitDestroy();
+  });
+
+  async function blockedRepairFixture() {
+    const f = await fixture('rework');
+    f.cm.getResourceKey = vi.fn(async (id) => JSON.stringify(['docker', 'fixture-engine', id]));
+    vi.mocked(f.cm.spawn).mockResolvedValueOnce('a'.repeat(64));
+    qualifiedExecution(f);
+    delivery(f);
+    const bridge = bridgeFor(f);
+    vi.mocked(f.ctx.runtime.spawn).mockImplementation(async function* () {
+      const cwd = f.pod().worktreePath!;
+      await writeFile(path.join(cwd, 'source.ts'), 'Preserved completed repair\n');
+      await exec('git', ['add', 'source.ts'], { cwd });
+      await exec(
+        'git',
+        [
+          '-c',
+          'user.name=Fixture',
+          '-c',
+          'user.email=fixture@example.invalid',
+          'commit',
+          '-m',
+          'Preserve repair before reviewer infrastructure failure',
+        ],
+        { cwd },
+      );
+      f.ctx.podRepo.retainedCheckpoints!.withWorkerScope(f.podId, () => {
+        bridge.createEscalation({
+          id: 'repair-reviewer-timeout',
+          podId: f.podId,
+          type: 'report_blocker',
+          timestamp: new Date().toISOString(),
+          response: null,
+          payload: {
+            kind: 'infrastructure',
+            owner: 'autopod',
+            phase: 'Review',
+            requiresResponse: false,
+            description: 'Reviewer timed out; no review pass',
+            attempted: ['One isolated reviewer'],
+            needs: 'Repair reviewer and run fresh checks',
+          },
+        });
+        bridge.reportTaskSummary(
+          f.podId,
+          'Source complete; fresh independent checks still needed',
+          [],
+        );
+      });
+      yield {
+        type: 'complete' as const,
+        timestamp: new Date().toISOString(),
+        result: 'Retained repair',
+      };
+    });
+    await f.recovery.recoverInfrastructure(f.podId, f.request, f.actor);
+    await f.recovery.wait(f.input.id);
+    await expect(f.manager.processPod(f.podId)).rejects.toMatchObject({
+      code: 'CHECKPOINT_CHECKS_UNVERIFIED',
+    });
+    const first = f.recovery.list(f.podId)[0]!;
+    const resource = f.pod().containerId!;
+    const stopped = new Set([f.containerId]);
+    vi.mocked(f.cm.getStatus).mockImplementation(async (id) =>
+      stopped.has(id) ? 'stopped' : 'running',
+    );
+    vi.mocked(f.cm.stop).mockImplementation(async (id) => {
+      expect(() => assertCheckpointResourceNotRetained(f.ctx.db, id)).toThrow();
+      stopped.add(id);
+    });
+    f.cm.getExecutionMetadata = vi.fn(async () => ({
+      podId: f.podId,
+      resourceIdentity: checkpointResourceIdentity(f.podId, first.id, f.pod().lifecycleGeneration),
+      imageDigest: null,
+      memoryLimitBytes: null,
+      cpuLimit: null,
+      networkMode: null,
+    }));
+    const selection = f.ctx.podRepo.retainedCheckpoints!.selectionEvidence(f.pod())!;
+    const source = await f.worktrees.inspectSourceAdoption(f.pod().worktreePath!, f.pod().branch);
+    const request: InfrastructureRecoveryRequest = {
+      id: 'blocked-repair-checks',
+      expectedGeneration: selection.expectedGeneration,
+      expectedResultHash: selection.expectedResultHash,
+      checkpointHead: source.commitSha,
+      mode: 'checks',
+      reason: 'Select the exact settled preserved repair for fresh checks only',
+      qualification:
+        'Reviewer execution repaired; retain original failure and require new independent checks',
+    };
+    return { f, first, request, source, resource };
+  }
+
+  it('hands off a settled blocked repair to explicit fresh checks without another worker', async () => {
+    const { f, first, request, source, resource } = await blockedRepairFixture();
+    const before = f.ctx.podRepo.taskExecutions!.snapshot(f.podId);
+    expect(first.blocked?.code).toBe('CHECKPOINT_CHECKS_UNVERIFIED');
+    expect(first.infrastructure?.candidate).toBeNull();
+    expect(first.checked).toBeNull();
+    passingReview(f);
+    const reopened = createRetainedCheckpointRecovery(f.deps);
+    await Promise.all([
+      reopened.recoverInfrastructure(f.podId, request, f.actor),
+      reopened.recoverInfrastructure(f.podId, request, f.actor),
+    ]);
+    await reopened.wait(request.id);
+    const next = reopened.list(f.podId)[0]!;
+    expect(next.blocked).toBeNull();
+    expect(next.binding.continuation?.infrastructure).toMatchObject({
+      predecessorBlockedRepairId: first.id,
+      predecessorBlockedRepairHash: checkpointHash(first),
+    });
+    expect(next.prepared?.head).toBe(source.commitSha);
+    expect(next.activated?.generation).toBe(3);
+    await createRetainedCheckpointRecovery(f.deps).recoverInfrastructure(f.podId, request, f.actor);
+    expect(vi.mocked(f.cm.stop).mock.calls.filter(([id]) => id === resource)).toHaveLength(1);
+    vi.mocked(f.cm.spawn).mockResolvedValueOnce('c'.repeat(64));
+    await f.manager.processPod(f.podId);
+    expect(f.pod().status).toBe('validated');
+    expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
+    expect(f.ctx.runtime.resume).not.toHaveBeenCalled();
+    expect(f.ctx.podRepo.taskExecutions!.snapshot(f.podId).agentRunCount).toBe(
+      before.agentRunCount,
+    );
+    expect(f.ctx.podRepo.taskExecutions!.snapshot(f.podId).taskId).toBe(before.taskId);
+    expect(reopened.list(f.podId).find((item) => item.id === first.id)).toEqual(first);
+    expect(() => assertCheckpointResourceNotRetained(f.ctx.db, resource)).toThrow();
+    expect(f.cm.kill).not.toHaveBeenCalledWith(resource);
+    expect(f.pod().autoApprove).toBe(false);
+    expect(reopened.list(f.podId)[0]!.checked?.result.taskReview?.status).toBe('pass');
+    await expect(
+      reopened.recoverInfrastructure(f.podId, { ...request, id: 'different-successor' }, f.actor),
+    ).rejects.toThrow();
+    const receipt = f.ctx.db.prepare('SELECT * FROM retained_blocked_repair_handoffs').all();
+    expect(receipt).toHaveLength(1);
+    expect(() => f.ctx.db.prepare('DELETE FROM retained_blocked_repair_handoffs').run()).toThrow();
+    expect(() =>
+      f.ctx.db
+        .prepare("UPDATE retained_blocked_repair_handoffs SET predecessor_hash='changed'")
+        .run(),
+    ).toThrow();
+  });
+
+  it('rolls back the whole custody claim if the immutable handoff cannot be recorded', async () => {
+    const { f, first, request } = await blockedRepairFixture();
+    f.ctx.db.exec(`CREATE TRIGGER fail_handoff_insert BEFORE INSERT ON retained_blocked_repair_handoffs
+      BEGIN SELECT RAISE(ABORT, 'fixture handoff storage unavailable'); END;`);
+    const stops = vi.mocked(f.cm.stop).mock.calls.length;
+    await expect(f.recovery.recoverInfrastructure(f.podId, request, f.actor)).rejects.toThrow(
+      'fixture handoff storage unavailable',
+    );
+    expect(f.recovery.list(f.podId)).toEqual([first]);
+    expect(f.ctx.db.prepare('SELECT * FROM retained_blocked_repair_handoffs').all()).toHaveLength(
+      0,
+    );
+    expect(f.cm.stop).toHaveBeenCalledTimes(stops);
+    expect(() => f.ctx.podRepo.retainedCheckpoints!.assertAvailable(f.podId)).toThrow();
+  });
+
+  it.each([
+    'rework',
+    'active-worker',
+    'failed-worker',
+    'unknown-worker',
+    'unpreserved',
+    'dirty-source',
+    'unrelated-source',
+    'source-during-ancestry',
+    'configuration',
+    'generation',
+    'resource',
+    'report',
+    'labels',
+    'pending-reviewer',
+    'guidance',
+  ] as const)('refuses a blocked-repair checks handoff on %s', async (fault) => {
+    const { f, first, request } = await blockedRepairFixture();
+    if (fault === 'rework')
+      Object.assign(request, { mode: 'rework', instructions: f.request.instructions });
+    if (['active-worker', 'failed-worker', 'unknown-worker'].includes(fault)) {
+      // Ordinary worker starts are still refused. Construct adversarial retained history
+      // directly in this disposable DB without changing a settled run or dropping its guards.
+      expect(() =>
+        f.ctx.podRepo.taskExecutions!.beginRun(
+          f.podId,
+          f.pod().lifecycleGeneration,
+          first.infrastructure!.worker!.cycle + 1,
+          { runtime: f.pod().runtime, model: f.pod().model, providerAccountId: null },
+        ),
+      ).toThrow();
+      f.ctx.db
+        .prepare(`INSERT INTO task_agent_runs
+        (id,pod_id,generation,cycle,binding,started_at,ended_at,outcome,failure_category)
+        VALUES('competing-run',?,?,?,?,?,?,?,?)`)
+        .run(
+          f.podId,
+          f.pod().lifecycleGeneration,
+          first.infrastructure!.worker!.cycle + 1,
+          JSON.stringify({
+            version: 2,
+            resource: {
+              containerId: f.pod().containerId,
+              executionTarget: 'local',
+            },
+          }),
+          'started',
+          fault === 'failed-worker' ? 'ended' : null,
+          fault === 'failed-worker' ? 'failed' : null,
+          fault === 'unknown-worker' ? 'execution_termination_unverified' : null,
+        );
+    }
+    if (fault === 'unpreserved')
+      f.ctx.db
+        .prepare(
+          'UPDATE pod_finalizations SET source_preserved_at=NULL WHERE pod_id=? AND generation=?',
+        )
+        .run(f.podId, f.pod().lifecycleGeneration);
+    if (fault === 'dirty-source')
+      await writeFile(path.join(f.pod().worktreePath!, 'source.ts'), 'dirty');
+    if (fault === 'unrelated-source') {
+      const cwd = f.pod().worktreePath!;
+      const { stdout } = await exec(
+        'git',
+        [
+          '-c',
+          'user.name=Fixture',
+          '-c',
+          'user.email=fixture@example.invalid',
+          'commit-tree',
+          (await f.worktrees.inspectSourceAdoption(cwd, f.pod().branch)).treeSha,
+          '-m',
+          'Unrelated root',
+        ],
+        { cwd },
+      );
+      const root = stdout.trim();
+      await exec(
+        'git',
+        ['update-ref', `refs/heads/${f.pod().branch}`, root, request.checkpointHead],
+        { cwd },
+      );
+      request.checkpointHead = root;
+    }
+    if (fault === 'source-during-ancestry') {
+      const prove = f.worktrees.assertSourceDescendsFrom!;
+      f.worktrees.assertSourceDescendsFrom = async (...args) => {
+        await prove.apply(f.worktrees, args);
+        await writeFile(
+          path.join(f.pod().worktreePath!, 'source.ts'),
+          'Changed during source proof',
+        );
+      };
+    }
+    if (fault === 'configuration') {
+      const settings = f.deps.executionForPod(f.pod());
+      f.deps.executionForPod = () => ({ ...settings, defaultBranch: 'unselected-base' });
+    }
+    if (fault === 'generation') request.expectedGeneration += 1;
+    if (fault === 'resource') f.cm.getResourceKey = vi.fn(async () => 'foreign-resource-namespace');
+    if (fault === 'report') request.expectedResultHash = 'f'.repeat(64);
+    if (fault === 'labels')
+      f.cm.getExecutionMetadata = vi.fn(async () => ({
+        podId: f.podId,
+        resourceIdentity: 'foreign',
+        imageDigest: null,
+        memoryLimitBytes: null,
+        cpuLimit: null,
+        networkMode: null,
+      }));
+    if (fault === 'pending-reviewer')
+      f.ctx.db
+        .prepare(`INSERT INTO isolated_reviewer_runs
+      (id,pod_id,lifecycle_generation,configuration_digest,account_id,runtime,model,execution_target,state,cleanup,created_at,updated_at)
+      VALUES('pending',?,?,'config','account','codex','review','local','uncertain','clean','now','now')`)
+        .run(f.podId, f.pod().lifecycleGeneration);
+    if (fault === 'guidance')
+      f.deps.assertGuidanceCollected = () => {
+        throw new Error('Unread guidance');
+      };
+    const stops = vi.mocked(f.cm.stop).mock.calls.length;
+    await expect(
+      createRetainedCheckpointRecovery(f.deps).recoverInfrastructure(f.podId, request, f.actor),
+    ).rejects.toThrow();
+    expect(f.recovery.list(f.podId)).toHaveLength(1);
+    expect(f.cm.stop).toHaveBeenCalledTimes(stops);
+    expect(f.ctx.runtime.spawn).toHaveBeenCalledTimes(1);
   });
 
   it('preserves a reported blocked integration without sealing a candidate or running validation', async () => {

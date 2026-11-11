@@ -20,6 +20,28 @@ Old/free-text failures without this sealed, completed repair proof do not acquir
 this permission. No second worker starts automatically, no failed check becomes a
 pass, and unknown/active executions remain ineligible.
 
+A checks-only successor can also select a **settled infrastructure-blocked repair**
+that stopped before candidate sealing or daemon validation. This does not invent a sealed
+candidate, erase the infrastructure reports or start another coding worker. It requires the
+exact completed worker/run/resource and original Docker engine/creation namespace, current
+settled/source-preserved finalization and bounded report-set hash, unchanged task/generation/
+configuration/worktree, no competing or uncertain worker/reviewer/validation, and an explicitly
+selected clean committed descendant of the prepared repair source. `rework` is refused for
+this predecessor shape. All ordinary guidance, budget and independent-review gates remain.
+
+Ordinary retained continuation still reports custody blocked. Select this separate explicit
+`mode: checks` request through the owning `recover-infrastructure` control, using the current
+inspected generation/report hash and exact final host HEAD; do not reuse the original repair
+request or select another coding attempt.
+
+The controller binds the predecessor's immutable hash and atomically inserts a unique,
+immutable predecessor-to-successor custody receipt when claiming the checks-only selection.
+The old blocked record, source, container and reports remain retained; only the new exact
+operation owns task execution. A partial preparation, uncertain stop or failed fresh check
+holds the successor instead of clearing custody or replaying it. Inspect the saved request;
+do not choose a new request ID to evade an uncertain result. Passing fresh configured checks,
+Facts and independent review still stops at validated, without delivery or automatic approval.
+
 A separate narrow successor also supports a completed **checks-only retained
 continuation** that genuinely failed, without inventing an infrastructure report.
 It requires the same logical task/current generation, exact immutable checked

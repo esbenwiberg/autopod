@@ -207,6 +207,22 @@ export function createRetainedCheckpointRecovery(deps: {
       checkpointError(
         'Sealed pre-validation source requires native checks-only continuation with independent review',
       );
+    const blockedPredecessor =
+      infrastructure?.mode === 'checks'
+        ? repo.blockedRepairPredecessor(pod, infrastructure.predecessorBlockedRepairId)
+        : null;
+    if (
+      infrastructure?.predecessorBlockedRepairId &&
+      (!blockedPredecessor ||
+        infrastructure.predecessorBlockedRepairHash !== checkpointHash(blockedPredecessor) ||
+        configuration(pod) !==
+          (blockedPredecessor.binding.continuation?.execution?.configurationHash ??
+            blockedPredecessor.binding.configurationHash))
+    )
+      checkpointError(
+        'Selected blocked repair evidence/configuration changed',
+        'STALE_CHECKPOINT_RECOVERY',
+      );
     const predecessor = infrastructure
       ? infrastructure.predecessorChecksId
         ? infrastructure.mode === 'checks' && !infrastructure.predecessorRepairId
@@ -840,6 +856,8 @@ export function createRetainedCheckpointRecovery(deps: {
       checkpointError(
         'Sealed pre-validation source supports exact checks only, not coding or source replacement',
       );
+    const blockedPredecessor =
+      infrastructureRequest?.mode === 'checks' ? repo.blockedRepairPredecessor(pod) : null;
     const predecessor = infrastructureRequest
       ? (failedRepairPredecessor(pod) ??
         (infrastructureRequest.mode === 'checks' ? failedChecksPredecessor(pod) : null))
@@ -852,6 +870,12 @@ export function createRetainedCheckpointRecovery(deps: {
             qualification: infrastructureRequest.qualification,
             instructions: infrastructureRequest.instructions,
             originalTree: '',
+            ...(blockedPredecessor
+              ? {
+                  predecessorBlockedRepairId: blockedPredecessor.id,
+                  predecessorBlockedRepairHash: checkpointHash(blockedPredecessor),
+                }
+              : {}),
             ...(predecessor
               ? predecessor.binding.continuation?.infrastructure?.mode === 'rework'
                 ? { predecessorRepairId: predecessor.id }
@@ -898,6 +922,24 @@ export function createRetainedCheckpointRecovery(deps: {
       checkpointError(
         'Only a retained stopped original is eligible; no original wake, stop, clone or deletion is performed',
       );
+    if (blockedPredecessor) {
+      let namespace: unknown;
+      try {
+        namespace = JSON.parse(blockedPredecessor.resourceKey);
+      } catch {
+        /* Fail closed below. */
+      }
+      if (
+        !Array.isArray(namespace) ||
+        namespace.length !== 3 ||
+        namespace[0] !== 'docker' ||
+        namespace[2] !== blockedPredecessor.containerId ||
+        JSON.stringify(namespace) !== blockedPredecessor.resourceKey ||
+        !isDockerValidationResourceKey(resourceKey, containerId) ||
+        resourceKey !== JSON.stringify([namespace[0], namespace[1], containerId])
+      )
+        checkpointError('Exact original Docker engine and repair resource namespace required');
+    }
     const source = await deps.worktreeManager.inspectSourceAdoption(worktreePath, pod.branch);
     const afterSource = replay();
     if (afterSource) return afterSource;
@@ -917,9 +959,26 @@ export function createRetainedCheckpointRecovery(deps: {
       checkpointError('Selected source/resource differs from sealed pre-validation evidence');
     if (prevalidation)
       deps.podRepo.validationExecutions?.assertResourceUnshared(pod.id, containerId);
+    if (blockedPredecessor) {
+      const ancestry =
+        deps.worktreeManager.assertSourceDescendsFrom ??
+        checkpointError('Repair ancestry proof required');
+      await ancestry.call(deps.worktreeManager, worktreePath, blockedPredecessor.prepared!.head);
+      const afterAncestry = replay();
+      if (afterAncestry) return afterAncestry;
+      assertCurrent();
+      const after = await deps.worktreeManager.inspectSourceAdoption(worktreePath, pod.branch);
+      const afterInspection = replay();
+      if (afterInspection) return afterInspection;
+      assertCurrent();
+      if (checkpointHash(after) !== checkpointHash(source))
+        checkpointError('Selected blocked repair source changed during ancestry proof');
+    }
     if (predecessor && source.treeSha !== predecessorSource(predecessor)?.tree)
       checkpointError('Selected source tree differs from completed failed repair');
-    if (infrastructure?.predecessorChecksId) {
+    const namespacePredecessor =
+      infrastructure?.predecessorChecksId ?? infrastructure?.predecessorBlockedRepairId;
+    if (namespacePredecessor) {
       const metadata =
         containerManager.getExecutionMetadata &&
         (await boundedDockerCall(containerManager.getExecutionMetadata(containerId), {
@@ -932,11 +991,7 @@ export function createRetainedCheckpointRecovery(deps: {
         !metadata ||
         metadata.podId !== pod.id ||
         metadata.resourceIdentity !==
-          checkpointResourceIdentity(
-            pod.id,
-            infrastructure.predecessorChecksId,
-            pod.lifecycleGeneration,
-          )
+          checkpointResourceIdentity(pod.id, namespacePredecessor, pod.lifecycleGeneration)
       )
         checkpointError('Exact failed-check Docker creation identity is unavailable');
     }
