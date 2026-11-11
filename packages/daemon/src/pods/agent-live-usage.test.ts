@@ -181,6 +181,34 @@ describe('live runtime accounting and hard-stop ownership', () => {
     expect(f.deps.runtimeRegistry.get('claude').suspendForUsage).toHaveBeenCalledOnce();
   });
 
+  it('keeps an extensible soft budget running until terminal accounting, then permits a normal budget extension', async () => {
+    const f = fixture();
+    f.profiles.update('test-profile', { tokenBudgetPolicy: 'soft', maxBudgetExtensions: 1 });
+    const outcome = await f.consumer.consumeAgentEvents(
+      'prepare',
+      (async function* () {
+        yield checkpoint(1000, 1);
+        expect(f.pod().status).toBe('running');
+        expect(f.pod().inputTokens).toBe(1000);
+        expect(f.deps.runtimeRegistry.get('claude').suspendForUsage).not.toHaveBeenCalled();
+        yield complete(1000, 20);
+      })(),
+    );
+    expect(outcome).toBe('paused');
+    expect(f.pod()).toMatchObject({
+      status: 'paused',
+      pauseReason: 'budget',
+      inputTokens: 1000,
+      outputTokens: 20,
+      tokenTelemetryAccuracy: 'complete',
+    });
+    expect(f.deps.runtimeRegistry.get('claude').suspendForUsage).not.toHaveBeenCalled();
+    f.podRepo.taskExecutions?.raiseBudget('prepare', 2000, 1000, 'operator');
+    expect(f.podRepo.taskExecutions?.snapshot('prepare').budgetCheck?.status).toBe(
+      'below_recorded_limit',
+    );
+  });
+
   it('refuses foreign session counters before they can alter spend', async () => {
     const f = fixture();
     await expect(

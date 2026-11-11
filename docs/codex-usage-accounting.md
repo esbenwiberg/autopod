@@ -36,6 +36,9 @@ active, rather than waiting for `turn.completed` or `task_complete`.
 A hard token cap is checked against measured task-wide usage after each accepted
 checkpoint. It does not reserve future provider spending: a model request or
 transport delay can overshoot the remaining allowance before usage is observed.
+Extensible soft limits retain their existing terminal-check behavior: live counters
+are persisted, but the current invocation is allowed to settle before pausing for
+a user extension. Hard and non-extendable limits stop at live checkpoints.
 
 The current run must still own the execution before it requests a usage stop.
 The Codex usage-stop path requires a tracked native exec and verified process-group
