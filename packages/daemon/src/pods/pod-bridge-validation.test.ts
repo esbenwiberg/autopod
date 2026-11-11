@@ -859,7 +859,7 @@ describe('PodBridge.generateBrowserValidationScript', () => {
         containerId: 'container-abc',
         model: 'gpt-5',
         prompt: 'Generate a script',
-        timeout: 60_000,
+        timeout: 300_000,
       }),
     );
     expect(mockCreateProfileAnthropicClient).not.toHaveBeenCalled();
