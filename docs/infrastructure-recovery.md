@@ -133,9 +133,10 @@ before admission; a budget-paused/unknown repair remains held, not reset.
 
 The exact live infrastructure repair worker can report plans, progress, summaries
 and blockers through its current pod-scoped MCP credential. This borrows only its
-recorded run/generation/cycle/resource/worktree scope, rechecked on mutation; it
-does not authorize another worker, original-resource access or ordinary controls.
-Stale, settled, foreign or uncertain workers remain refused. A current-generation
+recorded run/generation/cycle/resource/worktree scope and originating daemon
+process, rechecked on mutation; it does not authorize another worker,
+original-resource access or ordinary controls. Historical runs without the
+process binding and stale, settled, foreign or uncertain workers remain refused. A current-generation
 infrastructure blocker parks completion before candidate sealing or validation;
 a clean unchanged checkout is not evidence that blocked integration succeeded.
 

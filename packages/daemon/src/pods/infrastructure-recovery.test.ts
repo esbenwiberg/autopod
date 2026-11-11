@@ -292,7 +292,17 @@ describe('qualified infrastructure recovery from real incident shapes', () => {
       });
       expect(f.pod().plan?.summary).toBe('Integrate preserved source');
       expect(f.pod().progress?.description).toBe('Current worker can report');
-      const worker = repo.latest(f.podId)!.infrastructure!.worker!;
+      const record = repo.latest(f.podId)!;
+      const worker = record.infrastructure!.worker!;
+      // Reload the repository module to model a new daemon process without
+      // changing immutable worker evidence or granting the new process a scope.
+      vi.resetModules();
+      const restarted = (
+        await import('./retained-checkpoint-repository.js')
+      ).createRetainedCheckpointRepository(f.ctx.db);
+      expect(() => restarted.withWorkerScope(f.podId, () => {})).toThrow(
+        'No current infrastructure repair worker',
+      );
       for (const column of ['container_id', 'worktree_path', 'lifecycle_generation'] as const) {
         const prior = f.ctx.db
           .prepare(`SELECT ${column} AS value FROM pods WHERE id=?`)

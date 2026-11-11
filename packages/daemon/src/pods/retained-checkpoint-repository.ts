@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   AutopodError,
   type CheckpointRecoveryRequest,
@@ -160,7 +160,14 @@ export interface CheckpointRecoveryRecord {
   infrastructure?: {
     stopDispatched: boolean;
     stopped: boolean;
-    worker: { runId: string; generation: number; containerId: string; cycle: number } | null;
+    worker: {
+      runId: string;
+      generation: number;
+      containerId: string;
+      cycle: number;
+      /** Absent on historical runs; never lend a restarted daemon their live MCP scope. */
+      processEpoch?: string;
+    } | null;
     candidate: {
       head: string;
       tree: string;
@@ -209,6 +216,7 @@ export function ownsInfrastructureRecoveryStop(
       !record.blocked,
   );
 }
+const infrastructureWorkerProcessEpoch = randomUUID();
 const scopes = new WeakMap<Database.Database, AsyncLocalStorage<string>>();
 const workerScopes = new WeakMap<Database.Database, AsyncLocalStorage<string>>();
 function workerScope(db: Database.Database) {
@@ -520,6 +528,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       record.binding.continuation?.infrastructure?.mode !== 'rework' ||
       !record.infrastructure?.stopped ||
       !worker ||
+      worker.processEpoch !== infrastructureWorkerProcessEpoch ||
       record.checked ||
       record.blocked ||
       record.infrastructure.candidate ||
@@ -1068,7 +1077,13 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       if (record?.binding.continuation?.infrastructure?.mode !== 'rework') return;
       if (!containerId || !db.inTransaction)
         checkpointError('Atomic resource-bound repair worker required');
-      infrastructureEvent(record.id, 'worker', { runId, generation, cycle, containerId });
+      infrastructureEvent(record.id, 'worker', {
+        runId,
+        generation,
+        cycle,
+        containerId,
+        processEpoch: infrastructureWorkerProcessEpoch,
+      });
     },
     assertWorkerAllowed(podId: string): boolean {
       const current = latest(podId);
