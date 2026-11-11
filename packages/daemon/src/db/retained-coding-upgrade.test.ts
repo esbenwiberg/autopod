@@ -54,7 +54,8 @@ it('upgrades an existing infrastructure-recovery v242 database without losing it
     db.close();
     db = new Database(filename);
     runMigrations(db, migrations, logger);
-    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 248 });
+    expect(db.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 249 });
+    expect(db.prepare('SELECT * FROM retained_blocked_repair_handoffs').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM artifact_checks_recoveries').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM artifact_checks_recovery_events').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM recovery_forks').all()).toEqual([]);
@@ -115,7 +116,20 @@ it('upgrades an existing infrastructure-recovery v242 database without losing it
     expect(() => db.exec('DELETE FROM retained_infrastructure_events')).toThrow(
       'cannot be deleted',
     );
+    db.prepare('INSERT INTO retained_blocked_repair_handoffs VALUES(?,?,?,?)').run(
+      'infrastructure-original',
+      'companion-fixture',
+      'a'.repeat(64),
+      'now',
+    );
+    expect(() =>
+      db.exec("UPDATE retained_blocked_repair_handoffs SET predecessor_hash='changed'"),
+    ).toThrow('immutable');
+    expect(() => db.exec('DELETE FROM retained_blocked_repair_handoffs')).toThrow('retained');
     runMigrations(db, migrations, logger);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM retained_blocked_repair_handoffs').get()).toEqual({
+      n: 1,
+    });
     expect(db.prepare('SELECT * FROM retained_infrastructure_events ORDER BY kind').all()).toEqual(
       priorEvents,
     );

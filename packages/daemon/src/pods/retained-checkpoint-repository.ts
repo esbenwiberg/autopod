@@ -30,6 +30,7 @@ export type { CheckpointRecoveryRequest } from '@autopod/shared';
 
 import type Database from 'better-sqlite3';
 import type { RetainedExecutionSelection } from '../configuration/retained-continuation-launch.js';
+import { UNRECONCILED_REVIEWER_RUN } from '../validation/reviewer-run-repository.js';
 import type { prepareRetainedCheckpointWorkspace } from '../worktrees/retained-checkpoint-workspace.js';
 
 export const checkpointHash = (value: unknown) =>
@@ -109,6 +110,9 @@ export interface CheckpointRecoveryBinding {
       predecessorRepairId?: string;
       /** Exact completed checks-only failure; no original worker outcome is inferred. */
       predecessorChecksId?: string;
+      /** Exact blocked, completed repair selected for checks only; no sealed candidate is invented. */
+      predecessorBlockedRepairId?: string;
+      predecessorBlockedRepairHash?: string;
     };
   };
 }
@@ -569,7 +573,66 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       checkpointError('No current infrastructure repair worker owns this MCP request');
     return record;
   }
+  /** Positive exact-worker proof, not inference from failed status or a free-text report. */
+  function blockedRepairPredecessor(pod: Pod, id = latest(pod.id)?.id) {
+    const prior = id ? get(id) : null;
+    const worker = prior?.infrastructure?.worker;
+    if (
+      !prior ||
+      !worker ||
+      prior.podId !== pod.id ||
+      prior.taskId !==
+        (
+          db.prepare('SELECT task_id AS id FROM task_executions WHERE pod_id=?').get(pod.id) as
+            | { id: string }
+            | undefined
+        )?.id ||
+      prior.binding.continuation?.infrastructure?.mode !== 'rework' ||
+      prior.blocked?.code !== 'CHECKPOINT_CHECKS_UNVERIFIED' ||
+      prior.checked ||
+      prior.infrastructure?.candidate ||
+      !prior.infrastructure?.stopped ||
+      prior.activated?.generation !== pod.lifecycleGeneration ||
+      prior.checking?.generation !== pod.lifecycleGeneration ||
+      worker.generation !== pod.lifecycleGeneration ||
+      worker.containerId !== pod.containerId ||
+      prior.prepared?.worktree !== pod.worktreePath ||
+      pod.status !== 'failed' ||
+      pod.lastValidationResult ||
+      pod.finalization?.cycle !== worker.cycle ||
+      !originalEvidence(pod)?.infrastructureReports?.length
+    )
+      return null;
+    const completed = db
+      .prepare(`SELECT 1 FROM task_agent_runs WHERE id=? AND pod_id=?
+      AND generation=? AND cycle=? AND ended_at IS NOT NULL AND outcome='completed'
+      AND failure_category IS NULL AND json_extract(binding,'$.resource.containerId')=?
+      AND json_extract(binding,'$.resource.executionTarget')='local'
+      AND NOT EXISTS(SELECT 1 FROM task_agent_runs other WHERE other.pod_id=? AND other.generation=? AND other.id!=?)`)
+      .get(
+        worker.runId,
+        pod.id,
+        worker.generation,
+        worker.cycle,
+        worker.containerId,
+        pod.id,
+        worker.generation,
+        worker.runId,
+      );
+    if (
+      db
+        .prepare(`SELECT 1 FROM isolated_reviewer_runs
+      WHERE pod_id IN (SELECT pod_id FROM task_executions WHERE task_id=?) AND ${UNRECONCILED_REVIEWER_RUN}`)
+        .get(prior.taskId)
+    )
+      return null;
+    return completed ? prior : null;
+  }
   function assertAvailable(podId: string) {
+    return assertAvailableForClaim(podId);
+  }
+  // The exception is private to atomic claim; ordinary controls cannot borrow it.
+  function assertAvailableForClaim(podId: string, selected?: { id: string; hash: string }) {
     assertArtifactChecksAvailable(db, podId);
     const workerId = workerScope(db).getStore();
     if (workerId) assertRepairWorker(workerId, podId);
@@ -583,6 +646,36 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
       .all(podId, podId) as { id: string; podId: string }[];
     for (const row of rows) {
       const record = get(row.id) ?? checkpointError('Recovery custody record unavailable');
+      const handoff = db
+        .prepare(`SELECT successor_id AS successorId,predecessor_hash AS predecessorHash
+        FROM retained_blocked_repair_handoffs WHERE predecessor_id=?`)
+        .get(row.id) as { successorId: string; predecessorHash: string } | undefined;
+      if (handoff) {
+        const next = get(handoff.successorId);
+        const link = next?.binding.continuation?.infrastructure;
+        if (
+          !next ||
+          row.podId !== podId ||
+          next.podId !== record.podId ||
+          next.taskId !== record.taskId ||
+          next.generation !== record.infrastructure?.worker?.generation ||
+          next.containerId !== record.infrastructure?.worker?.containerId ||
+          next.worktreePath !== record.prepared?.worktree ||
+          link?.mode !== 'checks' ||
+          link.predecessorBlockedRepairId !== record.id ||
+          link.predecessorBlockedRepairHash !== handoff.predecessorHash ||
+          next.binding.continuation?.reviewPolicy !== 'independent-v1' ||
+          checkpointHash(record) !== handoff.predecessorHash
+        )
+          checkpointError('Blocked repair custody handoff no longer matches retained evidence');
+        continue; // Successor remains independently fenced by this same loop; originals stay resource-held.
+      }
+      if (
+        selected?.id === record.id &&
+        row.podId === podId &&
+        checkpointHash(record) === selected.hash
+      )
+        continue;
       const pod = db
         .prepare(
           'SELECT lifecycle_generation AS generation,worktree_path AS worktreePath,container_id AS containerId FROM pods WHERE id=?',
@@ -630,6 +723,7 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
   return {
     get,
     latest,
+    blockedRepairPredecessor,
     infrastructureEvent,
     async stopOriginal(id: string, stop: () => Promise<void>, assertCurrent: () => void) {
       const record = get(id) ?? checkpointError('Recovery unavailable');
@@ -936,7 +1030,33 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
           return { record: prior, acquired: false };
         }
         input.assertCurrent();
-        assertAvailable(pod.id);
+        const link = input.binding.continuation?.infrastructure;
+        const blockedId = link?.predecessorBlockedRepairId;
+        const blocked = blockedId ? blockedRepairPredecessor(pod, blockedId) : null;
+        if (
+          blockedId &&
+          (!blocked ||
+            link?.mode !== 'checks' ||
+            input.binding.continuation?.reviewPolicy !== 'independent-v1' ||
+            checkpointHash(blocked) !== link.predecessorBlockedRepairHash ||
+            link.predecessorChecksId ||
+            link.predecessorRepairId)
+        )
+          checkpointError('Exact settled blocked repair required for checks-only handoff');
+        if (
+          blocked &&
+          db
+            .prepare(`SELECT 1 FROM isolated_reviewer_runs
+          WHERE pod_id IN (SELECT pod_id FROM task_executions WHERE task_id=?) AND ${UNRECONCILED_REVIEWER_RUN}`)
+            .get(blocked.taskId)
+        )
+          checkpointError(
+            'Reviewer settlement/reconciliation is required before checks-only handoff',
+          );
+        assertAvailableForClaim(
+          pod.id,
+          blocked ? { id: blocked.id, hash: checkpointHash(blocked) } : undefined,
+        );
         const evidence = originalEvidence(pod);
         if (!evidence || (!evidence.result && !input.binding.continuation))
           checkpointError(
@@ -989,6 +1109,13 @@ export function createRetainedCheckpointRepository(db: Database.Database) {
           JSON.stringify(evidence),
           new Date().toISOString(),
         );
+        if (blocked)
+          db.prepare('INSERT INTO retained_blocked_repair_handoffs VALUES(?,?,?,?)').run(
+            blocked.id,
+            request.id,
+            checkpointHash(blocked),
+            new Date().toISOString(),
+          );
         input.onClaim?.();
         return {
           record: get(request.id) ?? checkpointError('Recovery claim was not retained'),
