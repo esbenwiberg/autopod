@@ -151,6 +151,12 @@ async function reconstructLegacyCodexPod(
       } catch {
         continue;
       }
+      if (envelope.type === 'token_usage_record')
+        return {
+          status: 'partial',
+          reason:
+            'Native per-response Codex evidence is present; legacy token_count repair cannot certify it. Preserve the native lower bound and use authorized exact-session reconciliation.',
+        };
       const payload = record(envelope.payload) ?? record(envelope.msg) ?? envelope;
       if (payload.type !== 'token_count') continue;
       const last = usageRecord(record(payload.info)?.last_token_usage);
@@ -224,6 +230,12 @@ async function reconstructPod(
       } catch {
         continue;
       }
+      if (envelope.type === 'token_usage_record')
+        return {
+          status: 'partial',
+          reason:
+            'Native per-response Codex evidence is present; legacy token_count repair cannot certify it. Preserve the native lower bound and use authorized exact-session reconciliation.',
+        };
       const payload = record(envelope.payload) ?? record(envelope.msg) ?? envelope;
       if (payload.type !== 'token_count') continue;
       const info = record(payload.info);

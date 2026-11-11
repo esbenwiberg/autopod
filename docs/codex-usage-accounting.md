@@ -56,7 +56,9 @@ not covered by downstream configuration remain pending; no acceptance Fact is wa
 
 This fix is prospective. It does not rewrite old counters, reconcile aborted runs,
 change budgets, authorize a continuation, or grant access to telemetry-repair APIs.
-A native prefix is only a lower bound when terminal evidence is absent. Respect
+A native prefix is only a lower bound when terminal evidence is absent. Legacy
+`token_count` repair refuses native-response rollouts, rather than replacing their
+newer measured spend with incomplete compatibility-only totals. Respect
 operator/admin authorization and supported source-custody/recovery controls; never
 replace unknown history with zero or start another task to escape a cap.
 
