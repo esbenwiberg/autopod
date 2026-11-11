@@ -96,6 +96,7 @@ export interface AdmissionDependentsCaptured {
 }
 
 export interface AdmissionResolvedCaptured {
+  isRerunSourceIdle?(podId: string): boolean;
   providerAccountStore: ProviderAccountStore | undefined;
   providerCatalog: PublicProviderCatalog | undefined;
   containerManagerFactory: { get(target: ExecutionTarget): ContainerManager };

@@ -20,6 +20,8 @@ export function admitComposablePod(input: {
   userId: string;
   creator?: { email?: string | null; name?: string | null };
   actor?: OperatorActor;
+  /** Server-owned exact stopped-resource observation, rechecked inside snapshot admission. */
+  assertRerunSourceQuiescent?: () => string;
   pods: PodRepository;
   read(podId: string): EffectiveLaunchConfig | null;
   events: EventBus;
@@ -80,6 +82,7 @@ export function admitComposablePod(input: {
   const baseBranch =
     work.baseBranch ?? seriesParent?.baseBranch ?? config.repository?.setup.defaultBranch ?? 'main';
   const startBranch = work.startBranch ?? seriesParent?.startBranch ?? baseBranch;
+  const quiescentSource = work.intentionalRerun ? input.assertRerunSourceQuiescent?.() : undefined;
   const conflicts = work.touches?.length
     ? findPreflightConflicts(
         {
@@ -99,7 +102,12 @@ export function admitComposablePod(input: {
         }),
       )
     : [];
-  if (conflicts.length && config.workflow.preflightConflictPolicy === 'block')
+  const blockingConflicts = conflicts.filter(
+    (conflict) =>
+      conflict.conflictingPodId !== quiescentSource ||
+      quiescentSource !== work.intentionalRerun?.ofPodId,
+  );
+  if (blockingConflicts.length && config.workflow.preflightConflictPolicy === 'block')
     throw new AutopodError(
       'Pod creation blocked: touches overlap in-flight pods',
       'PREFLIGHT_CONFLICT',

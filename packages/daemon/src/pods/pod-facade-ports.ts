@@ -70,7 +70,10 @@ export interface PodFacadeOwners {
     | 'getSeriesPods'
     | 'getValidationHistory'
   >;
-  admissionResolved: Pick<ReturnType<typeof createAdmissionResolved>, 'createResolvedSession'>;
+  admissionResolved: Pick<
+    ReturnType<typeof createAdmissionResolved>,
+    'createResolvedSession' | 'prepareResolvedSession'
+  >;
   admissionLegacy: Pick<ReturnType<typeof createAdmissionLegacy>, 'createSession'>;
   admissionAnalysis: Pick<
     ReturnType<typeof createAdmissionAnalysisWorkspaces>,

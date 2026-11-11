@@ -377,6 +377,8 @@ export interface PodRepository extends Partial<UnitOfWork> {
   getProviderUsage?(podId: string): ProviderUsageProjection;
   /** All pods whose status is not terminal (`complete` / `killed`). */
   listNonTerminal(): Pod[];
+  /** Read-only custody/settlement checks for an explicitly distinct human rerun. */
+  assertRerunSourceAvailable(podId: string): void;
   countByStatusAndProfile(status: PodStatus, profileName: string): number;
   getStats(filters?: { profileName?: string }): PodStats;
   getPodsDependingOn(podId: string): Pod[];
@@ -1699,6 +1701,14 @@ export function createPodRepository(db: Database.Database): PodRepository {
         .prepare("SELECT id FROM pods WHERE status NOT IN ('complete', 'killed')")
         .all() as { id: string }[];
       return rows.map((r) => r.id);
+    },
+
+    assertRerunSourceAvailable(podId: string): void {
+      assertSourceAvailable(db, podId, '');
+      createRetainedFinalizationRepository(db).assertAvailable(podId);
+      deletionOwnership.assertTaskAvailable(podId);
+      createValidationExecutionLedger(db).assertTaskSettled(podId);
+      createTaskExecutionLedger(db).assertCanDelete(podId);
     },
 
     listNonTerminal(): Pod[] {
